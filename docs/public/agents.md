@@ -89,7 +89,10 @@ MCP: `create_agent(handover_contacts=[{"contact_id": "...", "note": "..."}])` se
   `handover_max_duration_seconds` (60..3600, default 1800 = 30 minutes;
   CLI `--handover-max-minutes`) counts from the answer. When it is reached
   the agent says goodbye and the call ends for both people. Either person
-  can hang up sooner.
+  can hang up sooner. On Hail's cloud the limit is also cut to the minutes
+  your credits pay for. A handover is refused when your credits leave less
+  than one minute of talk, after about 30 seconds for the pickup check and
+  10 seconds for the goodbye.
 - Billed as one call at the normal voice rate. The text and the email to the
   contact are billed as a normal SMS and email.
 - Sends a [`call.transferred`](webhooks.md) webhook once someone on the

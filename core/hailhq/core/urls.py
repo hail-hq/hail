@@ -1,7 +1,7 @@
 """URL canonicalization across language boundaries.
 
 Trailing slashes are the most common URL-handling foot-gun in the Hail
-stack. Pydantic ``AnyHttpUrl`` (this side — used by FastMCP and FastAPI)
+stack. Pydantic ``AnyHttpUrl`` (this side — used by MCPServer and FastAPI)
 adds a trailing slash to root URLs; the WHATWG URL spec (Node, browser TS)
 does not. A URL minted on one side and compared on the other fails
 exact-string equality — Better Auth's oauth-provider does ``Set.has()``

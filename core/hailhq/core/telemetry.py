@@ -84,6 +84,8 @@ _MCP_NOISE_METHODS = frozenset(
         "prompts/list",
         "resources/list",
         "resources/templates/list",
+        "notifications/initialized",
+        "server/discover",
     }
 )
 _EMAIL = re.compile(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}")
@@ -211,19 +213,24 @@ def _is_noise(span: ReadableSpan, *, mcp: bool) -> bool:
         return True
     if not mcp:
         return False
-    if span.name.startswith("MCP server handle request: "):
-        return span.name.rsplit(": ", 1)[1] in _MCP_NOISE_METHODS
+    # mcp 2 names its own request spans after the method and sets this.
+    method = attributes.get("mcp.method.name")
+    if isinstance(method, str):
+        return method in _MCP_NOISE_METHODS
     if isinstance(route, str) and route.startswith("/.well-known/"):
         return True
     status = attributes.get(
         "http.response.status_code", attributes.get("http.status_code")
     )
     if route == "/":
-        # GET / is the open SSE stream. A POST / is one JSON-RPC message (the
-        # tool call runs in its own trace) and DELETE / closes a session, so
-        # only their failures are kept.
+        # GET / is the open SSE stream. A POST / is one JSON-RPC message and
+        # DELETE / closes a session, so only their failures are kept. A POST
+        # that ran a tool is its trace's root (mcp 2 runs the tool in the
+        # request's context), so it stays.
         if span.name == "GET /":
             return True
+        if span.name == "POST /" and "mcp.tool.name" in attributes:
+            return False
         if span.name in {"POST /", "DELETE /"}:
             return isinstance(status, int) and status < 400
     # A 404 with no matched route: a scanner probing paths like /.env.

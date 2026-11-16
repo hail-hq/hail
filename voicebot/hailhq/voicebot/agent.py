@@ -40,6 +40,7 @@ from hailhq.core.agent_tools import transfer_call
 from hailhq.core.agent_tools.client import AgentApiClient
 from hailhq.core.agent_tools.send_dtmf import DTMF_CODES
 from hailhq.core.agent_tools.spec import BridgeOutcome, BridgeRoute
+from hailhq.core.billing import RECORDING_USAGE_REF_SUFFIX
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.call_failures import DESTINATION_NOT_ALLOWED, call_failure_message
 from hailhq.core.call_legs import record_call_legs
@@ -736,20 +737,25 @@ def make_agent_bridge(
         # handover limit counts from now. A cap that already fired
         # (announcing now) is left to finish.
         soft_cap = bridge_state.pop("soft_cap_task", None)
-        if (
-            soft_cap is not None
-            and not soft_cap.done()
-            and not bridge_state.get("soft_cap_fired")
-        ):
-            soft_cap.cancel()
-            await asyncio.gather(soft_cap, return_exceptions=True)
-            if handover_seconds > 0:
+        if not bridge_state.get("soft_cap_fired"):
+            if soft_cap is not None and not soft_cap.done():
+                soft_cap.cancel()
+                await asyncio.gather(soft_cap, return_exceptions=True)
+            # Armed even when the call had no cap of its own: the balance
+            # cap (route.max_seconds) must always apply.
+            limit = handover_seconds
+            if route.max_seconds:
+                # The balance pays for no more than this.
+                limit = (
+                    min(limit, route.max_seconds) if limit > 0 else route.max_seconds
+                )
+            if limit > 0:
                 bridge_state["soft_cap_task"] = asyncio.create_task(
                     soft_cap_announce_and_hangup(
                         ctx,
                         session,
                         call_id,
-                        handover_seconds,
+                        limit,
                         on_fire=on_cap_fired,
                         bridge_state=bridge_state,
                         language=language,
@@ -2039,7 +2045,7 @@ async def on_call_end(
                 channel="voice",
                 units=duration_ms,
                 ref=(
-                    f"{call_id}:recording-v1"
+                    f"{call_id}{RECORDING_USAGE_REF_SUFFIX}"
                     if (call_metadata or {}).get("recording_enabled")
                     else str(call_id)
                 ),

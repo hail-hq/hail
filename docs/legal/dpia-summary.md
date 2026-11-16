@@ -26,8 +26,8 @@ this as required rather than optional.
   → text-to-speech → stored transcript. See our
   [Privacy Policy](https://hail.so/legal/privacy) for the full data-flow
   description and [sub-processor list](https://hail.so/legal/subprocessors).
-- **Data minimization** — call audio is off until a workspace explicitly enables best-effort recording.
-  Recordings use private storage, authenticated playback and workspace-selected 7-, 30-, or 365-day expiry. Voice output is limited to a fixed set of
+- **Call recording**: on the hosted Service, best-effort recording is on by default, so it collects call audio unless recording is off. A workspace owner or admin sets the workspace default. A per-call setting, then the agent setting, applies before it in either direction, so an API caller can record a call when the workspace default is off. Inbound calls follow the agent setting, then the workspace default.
+- **Data minimization** — recordings use private storage, authenticated playback and workspace-selected 7-, 30-, or 365-day expiry. Voice output is limited to a fixed set of
   platform-provided voices — Developers cannot supply or select a custom
   or cloned voice, which closes off voice-cloning misuse as a platform
   capability rather than relying solely on policy to prohibit it.
@@ -64,6 +64,13 @@ this as required rather than optional.
 
 Based on this assessment, we consider the residual risk of the outbound
 voice-calling activity acceptable to proceed at Hail's current scale.
+Call recording is on by default, so this assessment no longer relies on
+recording being off. For call audio, it relies on these measures: private
+storage, authenticated playback, a 30-day default recording period, and
+controls to turn recording off for a workspace, an agent, or a call.
+Hail does not give callers a recording notice. Developers must give the
+recording notices and get the recording consent that their callers' laws
+require, as the Terms and the DPA state.
 This is reviewed and re-assessed before general availability, before any
 new communication channel launches, whenever a new sub-processor is
 added, on any material change to the voice pipeline, and periodically as

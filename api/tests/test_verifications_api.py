@@ -15,7 +15,7 @@ from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
-from hailhq.api import sms_registration, verification_decisions
+from hailhq.api import sms_registration, verification_decisions, verification_files
 from hailhq.api.funds import BILLING_URL
 from hailhq.api.main import app
 from hailhq.api.routes import verifications as verifications_routes
@@ -784,8 +784,8 @@ async def test_a_duplicate_is_refused_before_files_are_read_or_filed(
         reads += 1
         raise AssertionError("uploads must not be read before the 409")
 
-    read_file = verifications_routes._read_file
-    monkeypatch.setattr(verifications_routes, "_read_file", counting_read)
+    read_file = verification_files.read_file
+    monkeypatch.setattr(verification_files, "read_file", counting_read)
     resp = await _create(client, key)
     assert resp.status_code == 409, resp.text
     assert reads == 0
@@ -793,9 +793,9 @@ async def test_a_duplicate_is_refused_before_files_are_read_or_filed(
     assert carrier.discarded == []
     # Nameless duplicate: the same. (Not monkeypatch.undo(): that would also
     # undo the fixtures' patches, such as the fake carrier.)
-    monkeypatch.setattr(verifications_routes, "_read_file", read_file)
+    monkeypatch.setattr(verification_files, "read_file", read_file)
     assert (await _create(client, key, **_named("", ""))).status_code == 201
-    monkeypatch.setattr(verifications_routes, "_read_file", counting_read)
+    monkeypatch.setattr(verification_files, "read_file", counting_read)
     resp = await _create(client, key, **_named("", ""))
     assert resp.status_code == 409, resp.text
     assert reads == 0

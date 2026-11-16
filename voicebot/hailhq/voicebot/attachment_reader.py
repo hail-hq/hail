@@ -9,8 +9,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
-import sys
 import time
 
 from hailhq.core.email_attachment_limits import (
@@ -18,6 +16,7 @@ from hailhq.core.email_attachment_limits import (
     AGENT_ATTACHMENT_TEXT_BYTES,
     text_chunk,
 )
+from hailhq.core.isolated_process import run_isolated
 from hailhq.core.telemetry import operation
 from livekit.agents.llm import ChatContext, ImageContent
 from opentelemetry.trace import StatusCode
@@ -27,26 +26,13 @@ logger = logging.getLogger("hailhq.voicebot")
 
 async def decoded_pages(data):
     """Kill stalled parsers; native PDF/image work never blocks the call loop."""
-    process = await asyncio.create_subprocess_exec(
-        sys.executable,
-        "-m",
+    stdout = await run_isolated(
         "hailhq.voicebot.attachment_decoder",
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.DEVNULL,
-        env={"PATH": os.environ.get("PATH", ""), "PYTHONUTF8": "1"},
+        stdin=json.dumps(data).encode(),
+        timeout_s=12,
+        max_output=AGENT_ATTACHMENT_DECODED_BYTES,
     )
-    try:
-        stdout, _ = await asyncio.wait_for(
-            process.communicate(json.dumps(data).encode()), 12
-        )
-        if process.returncode or len(stdout) > AGENT_ATTACHMENT_DECODED_BYTES:
-            raise ValueError("The file could not be decoded")
-        return json.loads(stdout)
-    finally:
-        if process.returncode is None:
-            process.kill()
-            await process.wait()
+    return json.loads(stdout)
 
 
 async def inspect_tool_file(output, model):

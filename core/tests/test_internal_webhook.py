@@ -212,3 +212,75 @@ async def test_tollfree_capability_fails_closed_without_secret(monkeypatch):
     monkeypatch.setattr(internal_webhook.settings, "hail_internal_secret", "")
     assert await internal_webhook.tollfree_verification_supported() is False
     assert session.calls == []
+
+
+# --------------------------------------------------------------------------- #
+# quote_call_price
+# --------------------------------------------------------------------------- #
+
+_LEG = {
+    "direction": "outbound",
+    "carrier": "twilio",
+    "number_e164": "+2348100000000",
+    "caller_e164": "+14155550100",
+}
+
+
+async def test_quote_posts_signed_legs_and_reads_prices(monkeypatch, configured):
+    import json
+
+    from hailhq.core import hmac_signing
+    from hailhq.core.internal_webhook import quote_call_price
+
+    session = _FakeSession(
+        _FakeResponse(payload={"cents_per_minute": 42.5, "cents_per_call": 0})
+    )
+    _install(monkeypatch, session)
+    quote = await quote_call_price("org-1", [_LEG], True)
+    assert quote == (internal_webhook.Decimal("42.5"), internal_webhook.Decimal(0))
+    url, kwargs = session.calls[0]
+    assert url == "https://hail.so/api/internal/voice-rates/quote"
+    body = kwargs["data"]
+    assert json.loads(body) == {
+        "organization_id": "org-1",
+        "recording": True,
+        "legs": [_LEG],
+    }
+    assert kwargs["headers"]["X-Hail-Signature"] == hmac_signing.sign(
+        body, "test-secret"
+    )
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"cents_per_minute": 0},
+        {"cents_per_minute": -1},
+        {"cents_per_minute": "NaN"},
+        {"cents_per_minute": 10, "cents_per_call": -1},
+        {"cents_per_call": 1},
+        ["not", "an", "object"],
+    ],
+)
+async def test_quote_out_of_range_is_none(monkeypatch, configured, payload):
+    from hailhq.core.internal_webhook import quote_call_price
+
+    _install(monkeypatch, _FakeSession(_FakeResponse(payload=payload)))
+    assert await quote_call_price("org-1", [_LEG], False) is None
+
+
+async def test_quote_failures_are_none(monkeypatch, configured):
+    from hailhq.core.internal_webhook import quote_call_price
+
+    _install(monkeypatch, _FakeSession(_FakeResponse(status=503)))
+    assert await quote_call_price("org-1", [_LEG], False) is None
+    _install(monkeypatch, _FakeSession(exc=asyncio.TimeoutError()))
+    assert await quote_call_price("org-1", [_LEG], False) is None
+
+
+async def test_quote_unconfigured_is_none(monkeypatch):
+    from hailhq.core.internal_webhook import quote_call_price, quotes_enabled
+
+    monkeypatch.setattr(settings, "hail_base_url", "")
+    assert quotes_enabled() is False
+    assert await quote_call_price("org-1", [_LEG], False) is None
