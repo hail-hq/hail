@@ -1057,6 +1057,13 @@ class Sms(Base):
             "to_e164",
             "requested_at",
         ),
+        # Counts a workspace's trial texts; mirrors the migration so
+        # Base.metadata.create_all (tests) builds the same index.
+        Index(
+            "sms_trial_org_idx",
+            "organization_id",
+            postgresql_where=text("metadata ? 'sms_trial'"),
+        ),
     )
 
 
@@ -1119,6 +1126,61 @@ class SmsSenderIdentity(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         TS, server_default=text("now()"), nullable=False
+    )
+
+
+class SmsTrialPhone(Base):
+    """The one phone a workspace proved to receive US trial texts.
+
+    ``organization_id`` has no FK, matching SmsSenderIdentity (hail's DB does
+    not own the Organization table). The code is stored hashed. A phone can be
+    pending in many workspaces but verified in only one.
+    """
+
+    __tablename__ = "sms_trial_phones"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
+    phone_e164: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(
+        Text, server_default=text("'pending'"), nullable=False
+    )
+    code_hash: Mapped[str | None] = mapped_column(Text)
+    code_expires_at: Mapped[datetime | None] = mapped_column(TS)
+    code_attempts: Mapped[int] = mapped_column(
+        Integer, server_default=text("0"), nullable=False
+    )
+    code_sends: Mapped[int] = mapped_column(
+        Integer, server_default=text("0"), nullable=False
+    )
+    code_window_started_at: Mapped[datetime | None] = mapped_column(TS)
+    consent_version: Mapped[str] = mapped_column(Text, nullable=False)
+    consent_at: Mapped[datetime] = mapped_column(TS, nullable=False)
+    consent_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    verified_at: Mapped[datetime | None] = mapped_column(TS)
+    created_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint("organization_id", name="sms_trial_phones_org_uq"),
+        CheckConstraint(
+            "status IN ('pending','verified')",
+            name="sms_trial_phones_status_check",
+        ),
+        Index(
+            "sms_trial_phones_verified_phone_uq",
+            "phone_e164",
+            unique=True,
+            postgresql_where=text("status = 'verified'"),
+        ),
     )
 
 
