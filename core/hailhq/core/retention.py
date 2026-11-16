@@ -47,6 +47,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
+from hailhq.core.config import SELF_HOSTED_ORG_ID
 from hailhq.core.file_uploads import delete_org_verification_uploads
 from hailhq.core.models import (
     Call,
@@ -102,8 +103,12 @@ def closed_org_ids(now: datetime, organization_id: UUID | None = None):
     """SELECT of the organizations closed by ``now`` (one org when
     ``organization_id`` is given). Only an ``org_closures`` row closes an
     org: a missing ``organizations`` row does not (the self-hosted org has
-    none)."""
-    closed = select(OrgClosure.organization_id).where(OrgClosure.closed_at <= now)
+    none). The self-hosted org is never closed, even with a row: what reads
+    this releases numbers and deletes data."""
+    closed = select(OrgClosure.organization_id).where(
+        OrgClosure.closed_at <= now,
+        OrgClosure.organization_id != SELF_HOSTED_ORG_ID,
+    )
     if organization_id is not None:
         closed = closed.where(OrgClosure.organization_id == organization_id)
     return closed
@@ -112,9 +117,12 @@ def closed_org_ids(now: datetime, organization_id: UUID | None = None):
 def org_closed(org_column, now: datetime):
     """SQL test: the org in ``org_column`` is closed by ``now``. NOT EXISTS
     (``~org_closed(...)``) keeps rows whose org is NULL (pool numbers),
-    which ``NOT IN`` would drop."""
+    which ``NOT IN`` would drop. Never true for the self-hosted org, as in
+    ``closed_org_ids``."""
     return exists().where(
-        OrgClosure.organization_id == org_column, OrgClosure.closed_at <= now
+        OrgClosure.organization_id == org_column,
+        OrgClosure.closed_at <= now,
+        OrgClosure.organization_id != SELF_HOSTED_ORG_ID,
     )
 
 
@@ -138,8 +146,7 @@ async def clear_closed_org_registrations(
     (``closed_at`` reached; one org when ``organization_id`` is given):
 
     * drops ``REGISTRATION_ANSWER_REFS`` from ``provider_refs``;
-    * clears ``rejection_reason`` (a carrier's text can quote the filing;
-      the audit row keeps it);
+    * clears ``rejection_reason`` (a carrier's text can quote the filing);
     * clears ``subject_name``, except on a live number verification: two
       nameless live ones would break the
       ``carrier_verifications_number_nameless_live_uniq`` index.
@@ -224,7 +231,10 @@ async def purge_expired_data(session: AsyncSession, now: datetime) -> PurgeSumma
         row[0]
         for row in (
             await session.execute(
-                select(OrgClosure.organization_id).where(OrgClosure.closed_at < cutoff)
+                select(OrgClosure.organization_id).where(
+                    OrgClosure.closed_at < cutoff,
+                    OrgClosure.organization_id != SELF_HOSTED_ORG_ID,
+                )
             )
         ).all()
     ]

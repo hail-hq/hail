@@ -7,7 +7,10 @@ step:
 1. releases each number that is not released yet, through
    ``release_org_number`` (the same code as ``DELETE /numbers/{id}`` and the
    dunning release). A pending order is left to the order reconciler and
-   released on a later pass, once the carrier answered.
+   released on a later pass, once the carrier answered. A failed order
+   whose carrier number was not given back (``unreleased_resource_id``) is
+   given back here too (``retry_release``), so a final refusal is stored
+   and the registrations it blocks do not wait for good.
 2. cancels each carrier registration (number verifications, US texting
    brands and campaigns, toll-free verifications) through ``cancel_locked``
    (the same code as ``DELETE /verifications/{id}``), in any state, with
@@ -40,6 +43,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 from uuid import UUID
 
+from hailhq.api.number_orders import retry_release
 from hailhq.api.routes.numbers import release_org_number
 from hailhq.api.routes.verifications import Registry, cancel_locked
 from hailhq.core.carrier_routing import CARRIERS, final_refusal
@@ -111,6 +115,8 @@ async def _release_numbers(
                         PhoneNumber.provisioning_state == "failed",
                         PhoneNumber.released_at.is_(None),
                     ),
+                    # A failed order whose carrier number was not given back.
+                    PhoneNumber.provisioning_metadata.has_key("unreleased_resource_id"),
                 ),
             )
         )
@@ -132,6 +138,11 @@ async def _release_numbers(
                     org,
                 )
                 continue
+            if number.provisioning_state == "failed" and (
+                number.provisioning_metadata or {}
+            ).get("unreleased_resource_id"):
+                # Gives the carrier number back; a refusal is stored below.
+                await retry_release(db, number)
             await release_org_number(db, number, lk)
             counts.released += 1
         except Exception as exc:

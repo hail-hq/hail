@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from hailhq.api.org_close import close_org_carrier_items
 from hailhq.api.routes.verifications import sweep_verifications
+from hailhq.core.config import SELF_HOSTED_ORG_ID
 from hailhq.core.models import (
     AccountCredit,
     CarrierVerification,
@@ -317,3 +318,59 @@ async def test_a_number_on_a_texting_registration_is_released_first(
     assert number.provisioning_state == "released"
     assert number.sms_registration_id is None
     assert row.state == "cancelled"
+
+
+async def test_a_failed_order_number_not_given_back_is_released_or_refused(
+    async_session, voice_provider_mock, verifier
+) -> None:
+    org = uuid.uuid4()
+    await _close(async_session, org)
+    given = await _number(
+        async_session,
+        org,
+        state="failed",
+        released_at=datetime.now(timezone.utc),
+        provisioning_metadata={"unreleased_resource_id": "PNGIVE"},
+    )
+    refused = await _number(
+        async_session,
+        org,
+        state="failed",
+        country_code="GB",
+        provisioning_metadata={"unreleased_resource_id": "PNREFUSE"},
+    )
+    covering = await _verification(
+        async_session, org, "approved", "B1", country_code="GB"
+    )
+
+    async def release(resource_id):
+        if resource_id == "PNREFUSE":
+            raise CarrierRequestError(422)
+
+    voice_provider_mock.release_number.side_effect = release
+    counts = await _run(async_session, verifier)
+
+    assert counts.released == 1 and counts.refused == 1
+    await async_session.refresh(given)
+    await async_session.refresh(refused)
+    await async_session.refresh(covering)
+    assert "unreleased_resource_id" not in given.provisioning_metadata
+    assert refused.provisioning_metadata["release_refused"]["status"] == 422
+    # The refusal is final: the registration it blocked is cancelled.
+    assert covering.state == "cancelled" and counts.waiting == 0
+
+
+async def test_the_self_hosted_org_is_never_closed(
+    async_session, voice_provider_mock, verifier
+) -> None:
+    await _close(async_session, SELF_HOSTED_ORG_ID)
+    number = await _number(async_session, SELF_HOSTED_ORG_ID)
+    row = await _verification(async_session, SELF_HOSTED_ORG_ID, "approved", "B1")
+
+    counts = await _run(async_session, verifier)
+
+    assert counts.as_dict() == dict.fromkeys(counts.as_dict(), 0)
+    voice_provider_mock.release_number.assert_not_awaited()
+    await async_session.refresh(number)
+    await async_session.refresh(row)
+    assert number.provisioning_state == "active" and row.state == "approved"
