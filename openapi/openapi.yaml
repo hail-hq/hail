@@ -680,7 +680,7 @@ paths:
 
         ```
 
-        curl --fail-with-body --upload-file passport.jpg '<upload_url>'
+        curl --silent --show-error --upload-file passport.jpg '<upload_url>'
 
         ```
 

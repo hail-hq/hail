@@ -39,6 +39,7 @@ export async function updateCollection(
   const url = `https://api.postman.com/collections/${collectionUid}`;
   const headers = { "X-Api-Key": apiKey, "Content-Type": "application/json" };
   const existing = await fetcher(url, { headers });
+  firewallCheck(existing, "Read");
   if (!existing.ok)
     throw new Error(
       `Read Postman collection failed (HTTP ${existing.status})${await errorDetail(existing)}`,
@@ -57,18 +58,23 @@ export async function updateCollection(
     headers,
     body: JSON.stringify({ collection: next }),
   });
-  // Cloudflare in front of Postman blocks some text (see postman.test.mjs).
-  // Its challenge page does not say which, so name the cause here.
-  if (response.headers?.get("cf-mitigated") === "challenge")
-    throw new Error(
-      `Update Postman collection failed (HTTP ${response.status}): Postman's firewall (Cloudflare) blocked the update. Some text in the collection matches a firewall rule. Upload parts of the collection to a test collection to find it.`,
-    );
+  firewallCheck(response, "Update");
   // Use synchronous updates. Do not report a queued 202 task as completed.
   if (response.status !== 200)
     throw new Error(
       `Update Postman collection failed (HTTP ${response.status})${await errorDetail(response)}`,
     );
   return response.json();
+}
+
+// Cloudflare in front of Postman answers with a challenge page that does not
+// say why. Text in the collection was the cause once (see postman.test.mjs);
+// the caller's IP or request rate can be too.
+function firewallCheck(response, step) {
+  if (response.headers?.get("cf-mitigated") !== "challenge") return;
+  throw new Error(
+    `${step} Postman collection failed (HTTP ${response.status}): Postman's firewall (Cloudflare) blocked the ${step.toLowerCase()}. Likely cause: text in the collection matches a firewall rule; upload parts of it to a test collection to find which. It can also block the caller's IP or request rate.`,
+  );
 }
 
 // Postman's error body names the cause (for example a missing role). It
