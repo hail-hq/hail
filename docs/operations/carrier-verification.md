@@ -27,7 +27,7 @@ Nothing else needs to be set. A `.env` without `HAIL_VERIFICATION_POLL_SECONDS` 
 | `submitting`      | Hail is sending it to the carrier right now.                  | `_submit_row` before the carrier call (so a crash cannot submit twice).                     |
 | `submitted`       | Carrier is reviewing.                                         | `_submit_row` after the carrier accepted.                                                   |
 | `approved`        | Carrier approved. Numbers can be bought.                      | `GET` refresh or the background pass, from the carrier's status.                            |
-| `rejected`        | Carrier or a superadmin refused. `rejection_reason` says why. | Carrier status, superadmin reject, or the background pass when the carrier refuses a draft. |
+| `rejected`        | Carrier or a superadmin refused. `rejection_reason` says why and what to fix (see [Rejection reasons](#rejection-reasons)). | Carrier status, superadmin reject, or the background pass when the carrier refuses a draft. |
 | `cancelled`       | Customer withdrew or dismissed it.                            | `DELETE /verifications/{id}`.                                                               |
 
 For a number (`purpose=number`): an organization may hold several live verifications per (carrier, country, number type, `subject_type`): several people, several companies. Only an exact duplicate is refused: the same `subject_type` and the same `subject_name`, ignoring case (unique index `carrier_verifications_number_live_uniq` on `(organization_id, provider, country_code, number_type, subject_type, lower(subject_name))`, rows with a name only). That is a 409 `You already have a verification for <name> as a person/company for this number type.` For US SMS (`purpose=sms`): one live registration per (organization, carrier, country, number type) (`carrier_verifications_sms_live_uniq`). `cancelled` and `rejected` rows do not count, so the customer can start over.
@@ -301,3 +301,16 @@ Official guidance checked November 14, 2026:
 [verification API](https://www.twilio.com/docs/messaging/api/tollfree-verification-resource).
 The SDK regression tests use the pinned real SDK with an offline HTTP recorder.
 No live provider filing, message, charge or refund is part of local validation.
+
+## Rejection reasons
+
+A number verification the carrier rejects gets a `rejection_reason` the customer can act on.
+The console, the rejection email, the API and the MCP server all show it.
+The plug-in builds it in `status()` with [`rejections.py`](../../core/hailhq/core/providers/verification/rejections.py):
+
+- **Twilio.** The bundle holds no reason. Each rejected supporting document has `failure_reason` and `errors[].code`, and the newest evaluation lists failed fields. A known code gets Hail's fix (`TWILIO_FIXES`, from Twilio's 18001-18064 error list). Any other code shows Twilio's text after "The carrier said:". Some rejections carry no reason at all; then the generic line stays.
+- **Telnyx.** The requirement group lists each `declined` or `expired` requirement. Hail names it from `GET /requirement_types/{id}`.
+- **DIDWW.** The address verification's `reject_reasons` and `reject_comment` follow "The carrier said:".
+
+The carrier's text can quote what the customer filed. It is shown only to that customer, kept in the audit row `verification.reject` (`carrier_reason`), and never logged.
+

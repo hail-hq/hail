@@ -732,6 +732,32 @@ async def test_status_mapping(telnyx_status, state) -> None:
     assert (status.reason is not None) == (state == "rejected")
 
 
+async def test_rejection_names_each_failed_requirement() -> None:
+    group = _group("mobile", status="declined")
+    reqs = group["regulatory_requirements"]
+    for r in reqs:
+        r["status"] = "approved"
+    reqs[0]["status"], reqs[1]["status"] = "declined", "expired"
+    names = {reqs[0]["requirement_id"]: "Proof of Address"}
+
+    def answers(request):
+        if "/requirement_types/" in request.url.path:
+            req_id = request.url.path.rsplit("/", 1)[1]
+            if req_id in names:
+                return httpx.Response(200, json={"data": {"name": names[req_id]}})
+            return httpx.Response(404, json={"errors": []})
+        return httpx.Response(200, json={"data": group})
+
+    status = await provider(Telnyx(answers)).status({"group_id": GROUP})
+    assert status.state == "rejected"
+    assert 'The carrier did not accept "Proof of Address".' in status.reason
+    assert "A document has expired." in status.reason
+    assert reqs[0]["requirement_id"] not in status.reason
+    assert status.raw_reason == (
+        f"Proof of Address: declined; {reqs[1]['requirement_id']}: expired"
+    )
+
+
 async def test_purchase_handle_is_the_group_id() -> None:
     fake = Telnyx(lambda request: httpx.Response(200, json={"data": {}}))
     assert await provider(fake).purchase_handle({"group_id": GROUP}) == {

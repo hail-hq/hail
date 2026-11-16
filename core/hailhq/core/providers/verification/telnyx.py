@@ -48,6 +48,7 @@ from hailhq.core.providers.verification.forms import (
     pick_option,
     validate_input,
 )
+from hailhq.core.providers.verification.rejections import customer_reason
 
 logger = logging.getLogger(__name__)
 
@@ -416,6 +417,25 @@ class TelnyxVerificationProvider(VerificationProvider):
             )
         )["data"]
 
+    async def _requirement_name(self, requirement_id: str) -> str | None:
+        """The requirement's name, like "Proof of Address", or None when
+        Telnyx cannot say. Never raises: the name only words the reason."""
+        try:
+            data = (
+                await self._api.request(
+                    "GET", f"/requirement_types/{path_id(requirement_id)}"
+                )
+            )["data"]
+        except Exception:
+            logger.warning(
+                "could not read Telnyx requirement type %s",
+                requirement_id,
+                exc_info=True,
+            )
+            return None
+        name = data.get("name") if isinstance(data, dict) else None
+        return name.strip() if isinstance(name, str) and name.strip() else None
+
     async def _problems(self, refs: dict) -> list[Problem]:
         """Telnyx has no evaluation call. A draft is complete when every
         requirement holds a value and no document was denied: Telnyx will
@@ -478,19 +498,40 @@ class TelnyxVerificationProvider(VerificationProvider):
         if state == "approved":
             return ProviderStatus(state="approved")
         if state in ("declined", "expired"):
-            declined = [
-                r["requirement_id"]
+            failed = [
+                (r["requirement_id"], r["status"])
                 for r in group.get("regulatory_requirements") or []
                 if r.get("status") in ("declined", "expired")
             ]
-            reason = (
-                "The carrier declined the details. Start again."
-                if state == "declined"
-                else "The carrier's approval expired. Start again."
+            fixes, raw = [], []
+            for req_id, req_status in failed:
+                name = await self._requirement_name(req_id)
+                raw.append(f"{name or req_id}: {req_status}")
+                if req_status == "expired":
+                    fixes.append(
+                        f'"{name}" has expired. Upload one that is still valid.'
+                        if name
+                        else "A document has expired. Upload one that is still valid."
+                    )
+                else:
+                    fixes.append(
+                        f'The carrier did not accept "{name}". Check it is '
+                        "correct and matches your other details."
+                        if name
+                        else "The carrier did not accept one of the details. "
+                        "Check each one matches your documents."
+                    )
+            if not fixes:
+                fixes.append(
+                    "The carrier declined the details."
+                    if state == "declined"
+                    else "The carrier's approval expired."
+                )
+            return ProviderStatus(
+                state="rejected",
+                reason=customer_reason(fixes, []),
+                raw_reason="; ".join(raw) or None,
             )
-            if declined:
-                reason += f" Requirements: {', '.join(declined)}."
-            return ProviderStatus(state="rejected", reason=reason)
         if state == "pending-approval":
             return ProviderStatus(state="pending")
         return ProviderStatus(state="draft")

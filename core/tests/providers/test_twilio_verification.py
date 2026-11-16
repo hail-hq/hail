@@ -583,6 +583,100 @@ async def test_status_mapping(provider, twilio_status, state) -> None:
     assert (await provider.status(REFS)).state == state
 
 
+def _rejected_bundle(documents: dict, evaluation: list | None = None) -> None:
+    responses.add(
+        responses.GET,
+        f"{NUMBERS}/Bundles/{REFS['bundle_sid']}",
+        json={"sid": REFS["bundle_sid"], "status": "twilio-rejected"},
+        status=200,
+    )
+    for sid, doc in documents.items():
+        responses.add(
+            responses.GET,
+            f"{NUMBERS}/SupportingDocuments/{sid}",
+            json={"sid": sid, **doc},
+            status=doc.pop("_status", 200),
+        )
+    responses.add(
+        responses.GET,
+        f"{NUMBERS}/Bundles/{REFS['bundle_sid']}/Evaluations",
+        json={
+            "results": (
+                [{"sid": "EL1", "status": "noncompliant", "results": evaluation}]
+                if evaluation is not None
+                else []
+            ),
+            "meta": {
+                "page": 0,
+                "page_size": 1,
+                "first_page_url": "x",
+                "previous_page_url": None,
+                "url": "x",
+                "next_page_url": None,
+                "key": "results",
+            },
+        },
+        status=200,
+    )
+
+
+@responses.activate
+async def test_rejection_reads_the_documents_reason(provider) -> None:
+    from hailhq.core.providers.verification.rejections import TWILIO_FIXES
+
+    twilio_text = "The name on the document does not match."
+    _rejected_bundle(
+        {
+            REFS["document_sids"][0]: {
+                "status": "rejected",
+                "failure_reason": twilio_text,
+                "errors": [{"code": 18008}],
+            }
+        },
+        evaluation=[],
+    )
+    status = await provider.status(REFS)
+    assert status.state == "rejected"
+    assert status.reason.startswith(TWILIO_FIXES[18008])
+    assert status.raw_reason == f"18008: {twilio_text}"
+
+
+@responses.activate
+async def test_rejection_reads_the_evaluation(provider) -> None:
+    _rejected_bundle(
+        {REFS["document_sids"][0]: {"status": "approved"}},
+        evaluation=[
+            {
+                "requirement_name": "individual_info",
+                "passed": False,
+                "error_code": None,
+                "failure_reason": None,
+                "invalid": [
+                    {
+                        "object_field": "first_name",
+                        "error_code": 18999,
+                        "failure_reason": "A brand new rule.",
+                    }
+                ],
+            }
+        ],
+    )
+    status = await provider.status(REFS)
+    assert "The carrier said: A brand new rule." in status.reason
+    assert status.raw_reason == "18999: A brand new rule."
+
+
+@responses.activate
+async def test_rejection_without_a_reason_stays_generic(provider) -> None:
+    from hailhq.core.providers.verification.base import DETAILS_REJECTED
+
+    _rejected_bundle({REFS["document_sids"][0]: {"_status": 500}})
+    status = await provider.status(REFS)
+    assert status.state == "rejected"
+    assert status.reason == DETAILS_REJECTED
+    assert status.raw_reason is None
+
+
 async def test_purchase_handle(provider) -> None:
     assert await provider.purchase_handle(REFS) == {
         "verification_id": REFS["bundle_sid"],

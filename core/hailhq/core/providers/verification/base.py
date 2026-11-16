@@ -340,8 +340,9 @@ class ProviderStatus(BaseModel):
     state: Literal["draft", "pending", "approved", "rejected"]
     # Shown to the customer: Hail's own wording.
     reason: str | None = None
-    # The carrier's own text for a rejection. Kept in the audit log only;
-    # never logged, never shown to the customer.
+    # The carrier's own text for a rejection. Kept in the audit log; never
+    # logged. ``reason`` may quote it when Hail has no fix of its own
+    # (see rejections.py).
     raw_reason: str | None = None
 
 

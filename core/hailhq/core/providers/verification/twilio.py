@@ -40,6 +40,7 @@ from hailhq.core.providers.verification.forms import (
     pick_option,
     validate_input,
 )
+from hailhq.core.providers.verification.rejections import twilio_reason
 from twilio.base.exceptions import TwilioRestException
 from twilio.rest import Client as TwilioClient
 
@@ -612,12 +613,49 @@ class TwilioVerificationProvider(VerificationProvider):
         if bundle.status == "twilio-approved":
             return ProviderStatus(state="approved")
         if bundle.status == "twilio-rejected":
+            try:
+                problems = await asyncio.to_thread(self._rejection_problems, refs)
+            except Exception:  # the reason must never block the rejection
+                logger.warning(
+                    "could not read why Twilio rejected bundle %s",
+                    refs["bundle_sid"],
+                    exc_info=True,
+                )
+                problems = []
+            raw = "; ".join(
+                f"{code}: {text}" if code else str(text) for code, text in problems
+            )
             return ProviderStatus(
                 state="rejected",
-                reason=DETAILS_REJECTED,
-                raw_reason=getattr(bundle, "failure_reason", None),
+                reason=twilio_reason(problems) if problems else DETAILS_REJECTED,
+                raw_reason=raw or None,
             )
         return ProviderStatus(state="pending")
+
+    def _rejection_problems(self, refs: dict) -> list[tuple[int | None, str | None]]:
+        """Why Twilio rejected a bundle, as (error code, Twilio's text) pairs.
+        The bundle itself holds no reason: each rejected document has
+        ``failure_reason`` and ``errors[].code``, and the newest evaluation
+        lists failed requirements."""
+        found: list[tuple[int | None, str | None]] = []
+        for sid in refs.get("document_sids") or []:
+            doc = self._rc.supporting_documents(sid).fetch()
+            codes = [
+                int(e["code"])
+                for e in doc.errors or []
+                if isinstance(e, dict) and e.get("code")
+            ]
+            if codes:
+                found += [(code, doc.failure_reason) for code in codes]
+            elif doc.failure_reason:
+                found.append((None, doc.failure_reason))
+        evaluations = self._rc.bundles(refs["bundle_sid"]).evaluations.list(limit=1)
+        for result in (evaluations[0].results or []) if evaluations else []:
+            for item in [result, *(result.get("invalid") or [])]:
+                code, text = item.get("error_code"), item.get("failure_reason")
+                if code or text:
+                    found.append((int(code) if code else None, text))
+        return list(dict.fromkeys(found))
 
     def subject_name(
         self,

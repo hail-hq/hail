@@ -206,10 +206,10 @@ async def rejected_registration(
     """The carrier refused the end-user registration of a bought number.
     Releases the number, takes the approval back and marks the Hail
     verification rejected. Returns the reason shown to the buyer: Hail's own
-    wording. The carrier's text is kept in the DB only (the audit row's
-    ``carrier_reason`` and the number's
-    ``provisioning_metadata['carrier_reason']``): never logged, never shown.
-    The log line names the carrier and the org, number and verification ids.
+    wording plus the carrier's text, if any. The carrier's text is also kept
+    in the audit row's ``carrier_reason`` and the number's
+    ``provisioning_metadata['carrier_reason']``. It is never logged: the log
+    line names only the carrier and the org, number and verification ids.
 
     Caller holds the org lock and fails the order. The carrier calls run
     under that lock on purpose: two concurrent reconciles must never both
@@ -232,7 +232,13 @@ async def rejected_registration(
                 "approval back by hand: number=%s",
                 number.id,
             )
-    reason = REGISTRATION_REJECTED
+    # DIDWW's reasons come from a fixed list plus a reviewer's note; Hail
+    # has no fixes for them, so the customer reads the carrier's words.
+    reason = (
+        f"{REGISTRATION_REJECTED}. The carrier said: {raw.strip()}"
+        if raw and raw.strip()
+        else REGISTRATION_REJECTED
+    )
     verification = await _purchase_verification(db, number)
     # Not the carrier's text: a reviewer's note can quote the customer's
     # papers, and logs leave this server. It is kept in the DB below.
@@ -251,8 +257,8 @@ async def rejected_registration(
         }
     if verification is not None:
         verification.state = "rejected"
-        # Hail's wording for the customer; the carrier's text is in the
-        # audit row below.
+        # Hail's wording plus the carrier's text; the carrier's text alone
+        # is in the audit row below.
         verification.rejection_reason = reason
         verification.updated_at = datetime.now(timezone.utc)
         # Same audit trail as every other system-driven rejection
