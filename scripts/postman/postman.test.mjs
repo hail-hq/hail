@@ -262,7 +262,7 @@ test("publishing refuses wrong targets and reports failed or queued updates", as
 test("export has no text Postman's firewall blocks", () => {
   // Postman's Cloudflare firewall answers 403 "Just a moment..." to an update
   // with `curl -sS`, `--data-binary @file` or `-d @file` in it. Write upload
-  // examples as `curl --silent --show-error --upload-file <file> '<url>'`.
+  // examples as `curl --silent --show-error --globoff --upload-file <file> '<url>'`.
   const text = JSON.stringify(collection);
   for (const blocked of [/curl -s/, /(?:-d|--data[a-z-]*)(?:\s*|=)@/]) {
     assert.doesNotMatch(text, blocked);
@@ -283,7 +283,7 @@ test("publishing names the firewall when Cloudflare blocks the update", async ()
       : { ok: true, status: 200, json: async () => ({ collection: existing }) };
   await assert.rejects(
     updateCollection(collection, uid, "PMAK-test", challenged),
-    /Postman's firewall \(Cloudflare\) blocked the update/,
+    /Postman's firewall \(Cloudflare\) blocked the update\. Likely cause: text in the collection/,
   );
   const challengedRead = async () => ({
     status: 403,
@@ -293,6 +293,6 @@ test("publishing names the firewall when Cloudflare blocks the update", async ()
   });
   await assert.rejects(
     updateCollection(collection, uid, "PMAK-test", challengedRead),
-    /Read Postman collection failed \(HTTP 403\): Postman's firewall \(Cloudflare\) blocked the read/,
+    /Read Postman collection failed \(HTTP 403\): Postman's firewall \(Cloudflare\) blocked the read\. Possible cause: the caller's IP/,
   );
 });

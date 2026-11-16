@@ -39,7 +39,7 @@ export async function updateCollection(
   const url = `https://api.postman.com/collections/${collectionUid}`;
   const headers = { "X-Api-Key": apiKey, "Content-Type": "application/json" };
   const existing = await fetcher(url, { headers });
-  firewallCheck(existing, "Read");
+  firewallCheck(existing, "Read", READ_BLOCKED);
   if (!existing.ok)
     throw new Error(
       `Read Postman collection failed (HTTP ${existing.status})${await errorDetail(existing)}`,
@@ -58,7 +58,7 @@ export async function updateCollection(
     headers,
     body: JSON.stringify({ collection: next }),
   });
-  firewallCheck(response, "Update");
+  firewallCheck(response, "Update", UPDATE_BLOCKED);
   // Use synchronous updates. Do not report a queued 202 task as completed.
   if (response.status !== 200)
     throw new Error(
@@ -70,12 +70,13 @@ export async function updateCollection(
 // Cloudflare in front of Postman answers with a challenge page that does not
 // say why. Text in the collection was the cause once (see postman.test.mjs);
 // the caller's IP or request rate can be too. A read sends no collection.
-function firewallCheck(response, step) {
+const UPDATE_BLOCKED =
+  "Likely cause: text in the collection matches a firewall rule; upload parts of it to a test collection to find which. It can also block the caller's IP or request rate.";
+const READ_BLOCKED =
+  "Possible cause: the caller's IP or request rate; try again later or from another network.";
+
+function firewallCheck(response, step, cause) {
   if (response.headers?.get("cf-mitigated") !== "challenge") return;
-  const cause =
-    step === "Update"
-      ? "Likely cause: text in the collection matches a firewall rule; upload parts of it to a test collection to find which. It can also block the caller's IP or request rate."
-      : "It blocks the caller's IP or request rate; try again later or from another network.";
   throw new Error(
     `${step} Postman collection failed (HTTP ${response.status}): Postman's firewall (Cloudflare) blocked the ${step.toLowerCase()}. ${cause}`,
   );
