@@ -1,24 +1,26 @@
 """0081 adds sms_trial_phones and the sms trial index."""
 
-import importlib.util
+import os
+import subprocess
+import sys
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
 
+import psycopg
 import pytest
-from alembic.migration import MigrationContext
-from alembic.operations import Operations
+from hailhq.core.db import to_sync_url
 from hailhq.core.models import SmsTrialPhone
-from sqlalchemy import text
+from hailhq.core.testing.fixtures import database_url  # noqa: F401
 from sqlalchemy.exc import IntegrityError
 
-pytestmark = pytest.mark.recreate_schema
-spec = importlib.util.spec_from_file_location(
-    "sms_trial_phones_migration",
-    Path(__file__).parents[1] / "migrations/versions/0081_sms_trial_phones.py",
+from .test_migrations import (  # noqa: F401
+    API_DIR,
+    _run_alembic,
+    _to_libpq_url,
+    empty_db,
 )
-migration = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(migration)
+
+pytestmark = pytest.mark.recreate_schema
 
 PHONE = "+14155550142"
 
@@ -33,49 +35,71 @@ def _row(org: uuid.UUID, phone: str = PHONE, status: str = "pending"):
     )
 
 
-async def test_sms_trial_phones_round_trip(db):
-    async with db.begin() as conn:
+def _index_defs(conn: psycopg.Connection, table: str) -> dict[str, str]:
+    return dict(
+        conn.execute(
+            "SELECT indexname, indexdef FROM pg_indexes WHERE tablename = %s",
+            (table,),
+        ).fetchall()
+    )
 
-        def apply(sync):
-            migration.op = Operations(MigrationContext.configure(sync))
-            migration.downgrade()
-            migration.upgrade()
 
-        await conn.run_sync(apply)
+def test_sms_trial_phones_round_trip(empty_db: str) -> None:  # noqa: F811
+    """Real alembic, as deploys run it: the sms index is built CONCURRENTLY
+    in an autocommit block, which cannot run inside a transaction."""
+    url = _to_libpq_url(to_sync_url(empty_db))
+    _run_alembic(empty_db, ["upgrade", "head"])
+    with psycopg.connect(url, autocommit=True) as conn:
+        phone_defs = _index_defs(conn, "sms_trial_phones")
+        verified = phone_defs["sms_trial_phones_verified_phone_uq"]
+        assert "WHERE (status = 'verified'" in verified
+        log = phone_defs["sms_trial_phones_code_send_log_idx"]
+        assert "USING gin (code_send_log jsonb_path_ops)" in log
+        trial = _index_defs(conn, "sms")["sms_trial_org_idx"]
+        assert "metadata ? 'sms_trial'" in trial
+        checks = {
+            r[0]
+            for r in conn.execute(
+                "SELECT conname FROM pg_constraint "
+                "WHERE conrelid = 'sms_trial_phones'::regclass AND contype = 'c'"
+            ).fetchall()
+        }
+        assert {
+            "sms_trial_phones_phone_e164_check",
+            "sms_trial_phones_pending_phone_e164_check",
+        } <= checks
 
-        async def indexdefs(table):
-            return (
-                (
-                    await conn.execute(
-                        text("SELECT indexdef FROM pg_indexes WHERE tablename=:t"),
-                        {"t": table},
-                    )
-                )
-                .scalars()
-                .all()
-            )
+    _run_alembic(empty_db, ["downgrade", "0080"])
+    with psycopg.connect(url, autocommit=True) as conn:
+        assert "sms_trial_org_idx" not in _index_defs(conn, "sms")
+        assert _index_defs(conn, "sms_trial_phones") == {}
 
-        phone_defs = await indexdefs("sms_trial_phones")
-        verified = [d for d in phone_defs if "sms_trial_phones_verified_phone_uq" in d]
-        assert verified and "WHERE (status = 'verified'" in verified[0]
-        sms_defs = await indexdefs("sms")
-        trial = [d for d in sms_defs if "sms_trial_org_idx" in d]
-        assert trial and "metadata ? 'sms_trial'" in trial[0]
+    _run_alembic(empty_db, ["upgrade", "head"])
+    with psycopg.connect(url, autocommit=True) as conn:
+        assert "sms_trial_org_idx" in _index_defs(conn, "sms")
 
-        checks = (
-            (
-                await conn.execute(
-                    text(
-                        "SELECT conname FROM pg_constraint "
-                        "WHERE conrelid = 'sms_trial_phones'::regclass "
-                        "AND contype = 'c'"
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
-        assert "sms_trial_phones_phone_e164_check" in checks
+
+def _offline_sql(revisions: str, *, down: bool = False) -> str:
+    """The SQL alembic would run, without a database."""
+    env = {**os.environ, "DATABASE_URL": "postgresql+psycopg://offline@localhost/x"}
+    result = subprocess.run(
+        [sys.executable, "-m", "alembic", "downgrade" if down else "upgrade"]
+        + [revisions, "--sql"],
+        cwd=str(API_DIR),
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return result.stdout
+
+
+def test_sms_index_is_built_and_dropped_concurrently() -> None:
+    """``sms`` is a hot table: building the index must not block writes."""
+    assert "CREATE INDEX CONCURRENTLY sms_trial_org_idx" in _offline_sql("0080:0081")
+    assert "DROP INDEX CONCURRENTLY sms_trial_org_idx" in _offline_sql(
+        "0081:0080", down=True
+    )
 
 
 async def test_one_workspace_per_verified_phone(async_session):

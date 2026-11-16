@@ -1239,6 +1239,13 @@ class SmsTrialPhone(Base):
             unique=True,
             postgresql_where=text("status = 'verified'"),
         ),
+        # Narrows the per-phone code count to rows holding that phone.
+        Index(
+            "sms_trial_phones_code_send_log_idx",
+            "code_send_log",
+            postgresql_using="gin",
+            postgresql_ops={"code_send_log": "jsonb_path_ops"},
+        ),
     )
 
 

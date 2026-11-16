@@ -12,7 +12,11 @@ Tables checked, and why each does not fit:
 - carrier_verifications: carrier filings, not phone proof.
 - website users.sms_opt_in_*: per user, account notices, no proof.
 organization_id has no FK (the website owns that table).
-Also adds a partial index on sms to count a workspace's trial texts.
+A GIN index on code_send_log finds the rows holding one phone's code texts
+for the per-phone code limit.
+Also adds a partial index on sms to count a workspace's trial texts. It is
+built CONCURRENTLY so texts keep writing to sms while it builds; that cannot
+run in a transaction, hence the autocommit block.
 """
 
 import sqlalchemy as sa
@@ -89,14 +93,27 @@ def upgrade():
         postgresql_where=sa.text("status = 'verified'"),
     )
     op.create_index(
-        "sms_trial_org_idx",
-        "sms",
-        ["organization_id"],
-        postgresql_where=sa.text("metadata ? 'sms_trial'"),
+        "sms_trial_phones_code_send_log_idx",
+        "sms_trial_phones",
+        ["code_send_log"],
+        postgresql_using="gin",
+        postgresql_ops={"code_send_log": "jsonb_path_ops"},
     )
+    with op.get_context().autocommit_block():
+        op.create_index(
+            "sms_trial_org_idx",
+            "sms",
+            ["organization_id"],
+            postgresql_where=sa.text("metadata ? 'sms_trial'"),
+            postgresql_concurrently=True,
+        )
 
 
 def downgrade():
-    op.drop_index("sms_trial_org_idx", table_name="sms")
+    with op.get_context().autocommit_block():
+        op.drop_index(
+            "sms_trial_org_idx", table_name="sms", postgresql_concurrently=True
+        )
+    op.drop_index("sms_trial_phones_code_send_log_idx", table_name="sms_trial_phones")
     op.drop_index("sms_trial_phones_verified_phone_uq", table_name="sms_trial_phones")
     op.drop_table("sms_trial_phones")

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -270,14 +271,21 @@ async def start_phone_proof(
     # workspace that later switched phone. The lock makes the count and the
     # send log write atomic per phone (always after org_lock).
     await key_lock(db, f"sms_trial_phone:{phone}")
+    # The containment test uses the GIN index to find the rows that hold
+    # this phone; only their entries are unpacked and filtered.
     at_rows = (
         await db.execute(
             text(
                 "SELECT (e->>'at')::timestamptz AS at FROM sms_trial_phones, "
                 "jsonb_array_elements(code_send_log) e "
-                "WHERE e->>'phone' = :phone AND (e->>'at')::timestamptz > :cutoff"
+                "WHERE code_send_log @> CAST(:probe AS jsonb) "
+                "AND e->>'phone' = :phone AND (e->>'at')::timestamptz > :cutoff"
             ),
-            {"phone": phone, "cutoff": cutoff},
+            {
+                "probe": json.dumps([{"phone": phone}]),
+                "phone": phone,
+                "cutoff": cutoff,
+            },
         )
     ).all()
     if len(at_rows) >= MAX_CODE_SENDS_PER_DAY:
