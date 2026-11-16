@@ -197,9 +197,10 @@ async def _cap_to_balance(
     max_duration_seconds: int,
     *,
     legs: list[dict[str, str]],
-) -> tuple[int, tuple[Decimal, datetime] | None]:
+) -> tuple[int, tuple[Decimal, datetime, Decimal, Decimal] | None]:
     """Shorten the call's time limit to what the balance pays for, and the
-    hold to set aside for it (cents, until; see hailhq.core.call_allowance).
+    hold to set aside for it (cents, until, the price per minute and per
+    call; see hailhq.core.call_allowance).
     Takes the org lock, held until the call row is committed. 402 when the
     balance does not pay for one minute. When the price is unknown (the
     quote failed), the limit is at most the default and nothing is held."""
@@ -247,7 +248,12 @@ async def _cap_to_balance(
         )
     seconds = _shorter_limit(max_duration_seconds, cap_seconds(minutes))
     billed = paid_minutes(seconds)
-    return seconds, (per_minute * billed + per_call, hold_until(now, seconds))
+    return seconds, (
+        per_minute * billed + per_call,
+        hold_until(now, seconds),
+        per_minute,
+        per_call,
+    )
 
 
 async def _cleanup_partial_livekit(

@@ -880,7 +880,7 @@ class Call(Base):
 
 class CallBalanceHold(Base):
     """Money a live call sets aside from the balance (migration 0079). One
-    row per call; the amount and the end time only grow. See
+    row per call; the amount, the end time and the prices only grow. See
     hailhq.core.call_allowance."""
 
     __tablename__ = "call_balance_holds"
@@ -890,6 +890,10 @@ class CallBalanceHold(Base):
     )
     cents: Mapped[Decimal] = mapped_column(Numeric(14, 1), nullable=False)
     hold_until: Mapped[datetime] = mapped_column(TS, nullable=False)
+    # The highest prices held for the call: once it ends, the hold shrinks
+    # to its real minutes at these (hailhq.core.call_allowance).
+    cents_per_minute: Mapped[Decimal] = mapped_column(Numeric, nullable=False)
+    cents_per_call: Mapped[Decimal] = mapped_column(Numeric, nullable=False)
     # Handover dials approved for the call; each may bill the second line.
     dials: Mapped[int] = mapped_column(Integer, server_default="0", nullable=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -899,6 +903,10 @@ class CallBalanceHold(Base):
     __table_args__ = (
         CheckConstraint("cents >= 0", name="call_balance_holds_cents_check"),
         CheckConstraint("dials >= 0", name="call_balance_holds_dials_check"),
+        CheckConstraint(
+            "cents_per_minute >= 0 AND cents_per_call >= 0",
+            name="call_balance_holds_prices_check",
+        ),
         Index("call_balance_holds_until_idx", "hold_until"),
     )
 

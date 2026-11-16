@@ -37,6 +37,8 @@ from .conftest import insert_org_and_key
 # A made-up number abroad, priced well above the US minimum.
 ABROAD = "+2348100000000"
 SECRET = "test-internal-secret"
+# The quote fixture's default price, as a hold stores it.
+PRICES = {"cents_per_minute": Decimal(40), "cents_per_call": Decimal(0)}
 
 
 @pytest.fixture()
@@ -105,6 +107,8 @@ async def test_call_is_capped_to_the_balance(
     assert call.max_duration_seconds == 710
     row = await _hold(async_session, call.id)
     assert row.cents == Decimal(40) * 12
+    # The price it shrinks to once the call ends.
+    assert (row.cents_per_minute, row.cents_per_call) == (Decimal(40), Decimal(0))
     meta = livekit_mock.dispatch_agent.await_args.kwargs["metadata"]
     assert meta["max_duration_seconds"] == 710
     assert quote.legs[-1][0]["number_e164"] == ABROAD
@@ -213,8 +217,11 @@ async def test_ended_call_hold_stops_counting(async_session, quote):
         # Priced at 0 cents: no debit row, nothing more to come.
         "free": (Call(**base, **ended, answered_at=two_min, ended_at=now), 10),
         # Usage row not priced yet (a slow rater): counts past the grace and
-        # past hold_until, up to a day after it.
+        # past hold_until, up to a day after it, shrunk to the real cost:
+        # 1 billed minute plus 1 spare, at 40¢.
         "unpriced": (Call(**base, **ended, answered_at=hour, ended_at=hour), -60),
+        # A real cost above the hold counts the hold.
+        "unpriced_long": (Call(**base, **ended, answered_at=hour, ended_at=hour), 10),
         "unpriced_stale": (
             Call(**base, **ended, answered_at=hour, ended_at=hour),
             -2 * 24 * 60,
@@ -228,13 +235,14 @@ async def test_ended_call_hold_stops_counting(async_session, quote):
                 call_id=call.id,
                 cents=Decimal(100),
                 hold_until=now + timedelta(minutes=minutes_left),
+                **PRICES,
             )
         )
     usage = {
         name: UsageEvent(
             organization_id=org,
             channel="voice",
-            units=60_000,
+            units=600_000 if name == "unpriced_long" else 60_000,
             # Any ':suffix' after the call id matches, as the rater parses it.
             ref={
                 "debited": f"{calls[name][0].id}:recording-v1",
@@ -242,7 +250,7 @@ async def test_ended_call_hold_stops_counting(async_session, quote):
             }.get(name, str(calls[name][0].id)),
             priced_at=now if name in ("debited", "free") else None,
         )
-        for name in ("debited", "free", "unpriced", "unpriced_stale")
+        for name in ("debited", "free", "unpriced", "unpriced_long", "unpriced_stale")
     }
     async_session.add_all(usage.values())
     await async_session.flush()
@@ -257,9 +265,9 @@ async def test_ended_call_hold_stops_counting(async_session, quote):
         )
     )
     await async_session.commit()
-    # 500 less the debit (10), and the live, just-ended, completed,
-    # no-end-time and unpriced calls.
-    assert await available_cents(async_session, org) == Decimal(-10)
+    # 500 less the debit (10), the live, just-ended, completed, no-end-time
+    # and long unpriced calls (100 each), and the short unpriced call (80).
+    assert await available_cents(async_session, org) == Decimal(-90)
 
 
 async def test_unknown_price_falls_back_to_default_limit(
@@ -333,7 +341,9 @@ async def _handover(
     await async_session.flush()
     if hold:
         async_session.add(
-            CallBalanceHold(call_id=call.id, cents=hold[0], hold_until=hold[1])
+            CallBalanceHold(
+                call_id=call.id, cents=hold[0], hold_until=hold[1], **PRICES
+            )
         )
     if tries:
         async_session.add(
@@ -342,6 +352,7 @@ async def _handover(
                 cents=Decimal(0),
                 hold_until=datetime.now(timezone.utc),
                 dials=tries,
+                **PRICES,
             )
         )
     await async_session.commit()
@@ -460,7 +471,9 @@ async def test_hold_prunes_expired_rows(
         async_session.add(call)
         await async_session.flush()
         async_session.add(
-            CallBalanceHold(call_id=call.id, cents=Decimal(10), hold_until=old)
+            CallBalanceHold(
+                call_id=call.id, cents=Decimal(10), hold_until=old, **PRICES
+            )
         )
         rows[owner] = call.id
     await async_session.commit()

@@ -1933,6 +1933,8 @@ async def _handover_cap(
             hold_until(
                 now, (HANDOVER_RING_MINUTES * 60) + HANDOVER_PICKUP_SECONDS + seconds
             ),
+            per_minute,
+            per_call,
             dial=True,
         )
     await db.commit()

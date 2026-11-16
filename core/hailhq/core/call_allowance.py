@@ -89,46 +89,54 @@ def hold_until(now: datetime, seconds: int) -> datetime:
     return now + timedelta(seconds=seconds + SAFETY_SECONDS + HOLD_GRACE_SECONDS)
 
 
-# A hold counts while:
-# - the call is live and the hold has not expired (a stuck call stops at
-#   hold_until);
-# - the call ended billable (the voicebot bills a call that was answered or
-#   completed) and its usage row is not priced yet. The rater writes the
-#   debit and stamps priced_at in one transaction, and stamps a 0-cent row
-#   with no debit. A row it never prices stops counting UNPRICED_HOLD_DAYS
-#   after hold_until;
-# - the call ended billable with no usage row, within the grace. The
-#   voicebot writes the row with the final status, so a call still without
-#   one (0 ms, or closed by another writer) is not billed.
+# What each hold counts:
+# - a live call: the full hold, until hold_until (a stuck call stops there);
+# - a call that ended billable (the voicebot bills a call that was answered
+#   or completed) whose usage row is not priced yet: what it really cost, at
+#   most the hold. That is the highest price per minute held for it times
+#   its billed minutes, plus its fees; each handover dial adds a minute and
+#   a fee (it may have billed the second line), and one more minute covers
+#   carrier legs billed a little longer than the voicebot measured. The
+#   rater writes the debit and stamps priced_at in one transaction, and
+#   stamps a 0-cent row with no debit. A row it never prices stops counting
+#   UNPRICED_HOLD_DAYS after hold_until;
+# - a call that ended billable with no usage row: the full hold, within the
+#   grace. The voicebot writes the row with the final status, so a call
+#   still without one (0 ms, or closed by another writer) is not billed;
+# - anything else (unbilled, priced): nothing.
 # A call in a final status with no end time counts from its last update.
 # A voice ref is the call id, plus an optional ':<suffix>' (the rater
 # parses it the same way); usage_events_voice_ref_idx serves the match.
 _HELD_SQL = text("""
-    SELECT COALESCE(SUM(h.cents), 0)
+    SELECT COALESCE(SUM(
+      CASE
+        WHEN c.ended_at IS NULL AND c.status NOT IN :terminal THEN
+          CASE WHEN h.hold_until > :now THEN h.cents ELSE 0 END
+        WHEN NOT (c.answered_at IS NOT NULL OR c.status = 'completed') THEN 0
+        WHEN u.unpriced THEN
+          CASE WHEN h.hold_until > :unpriced_until THEN LEAST(
+            h.cents,
+            h.cents_per_minute * (CEIL(u.ms / 60000.0) + 1 + h.dials)
+              + h.cents_per_call * (1 + h.dials)
+          ) ELSE 0 END
+        WHEN u.unpriced IS NULL
+          AND h.hold_until > :now
+          AND COALESCE(c.ended_at, c.updated_at) > :debit_window THEN h.cents
+        ELSE 0
+      END
+    ), 0)
     FROM call_balance_holds h
     JOIN calls c ON c.id = h.call_id
+    CROSS JOIN LATERAL (
+      SELECT bool_or(u.priced_at IS NULL) AS unpriced,
+             SUM(u.units) FILTER (WHERE u.priced_at IS NULL) AS ms
+      FROM usage_events u
+      WHERE u.organization_id = :org
+        AND u.channel = 'voice'
+        AND split_part(u.ref, ':', 1) = c.id::text
+    ) u
     WHERE c.organization_id = :org
       AND h.call_id IS DISTINCT FROM :exclude
-      AND (
-        (c.ended_at IS NULL AND c.status NOT IN :terminal
-         AND h.hold_until > :now)
-        OR (
-          (c.ended_at IS NOT NULL OR c.status IN :terminal)
-          AND (c.answered_at IS NOT NULL OR c.status = 'completed')
-          AND CASE (
-            SELECT bool_or(u.priced_at IS NULL)
-            FROM usage_events u
-            WHERE u.organization_id = :org
-              AND u.channel = 'voice'
-              AND split_part(u.ref, ':', 1) = c.id::text
-          )
-            WHEN true THEN h.hold_until > :unpriced_until
-            WHEN false THEN false
-            ELSE h.hold_until > :now
-              AND COALESCE(c.ended_at, c.updated_at) > :debit_window
-          END
-        )
-      )
 """).bindparams(bindparam("terminal", expanding=True))
 
 
@@ -173,12 +181,16 @@ async def hold(
     call_id: uuid.UUID,
     cents: Decimal,
     until: datetime,
+    cents_per_minute: Decimal,
+    cents_per_call: Decimal,
     *,
     dial: bool = False,
 ) -> None:
     """Set aside ``cents`` for a call until ``until``, or grow its hold to
     at least that: a hold never shrinks, even when two handovers race. The
-    column keeps tenths of a cent, so the amount is rounded up. ``dial``
+    column keeps tenths of a cent, so the amount is rounded up. The prices
+    (the highest held for the call is kept) set what the hold shrinks to
+    once the call ends (_HELD_SQL). ``dial``
     counts one more approved handover dial. Also deletes up to 100 holds a
     day past their end, skipping rows another transaction has locked, so no
     call waits on another's cleanup."""
@@ -187,6 +199,8 @@ async def hold(
         call_id=call_id,
         cents=round_up_tenth(cents),
         hold_until=until,
+        cents_per_minute=cents_per_minute,
+        cents_per_call=cents_per_call,
         dials=1 if dial else 0,
     )
     await db.execute(
@@ -196,6 +210,12 @@ async def hold(
                 "cents": func.greatest(CallBalanceHold.cents, stmt.excluded.cents),
                 "hold_until": func.greatest(
                     CallBalanceHold.hold_until, stmt.excluded.hold_until
+                ),
+                "cents_per_minute": func.greatest(
+                    CallBalanceHold.cents_per_minute, stmt.excluded.cents_per_minute
+                ),
+                "cents_per_call": func.greatest(
+                    CallBalanceHold.cents_per_call, stmt.excluded.cents_per_call
                 ),
                 "dials": CallBalanceHold.dials + stmt.excluded.dials,
             },

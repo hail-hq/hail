@@ -19,8 +19,10 @@ Tables checked first:
 
 One row per call; the organization is the call's. ``dials`` counts the
 handover dials approved for the call (each may bill the second line). The
-amount and the end time only grow. Rows a day past their end are deleted,
-100 at a time, when a hold is written.
+prices are the highest held for the call: once it ends, the hold shrinks to
+its real minutes at them. The amount, the end time and the prices only
+grow. Rows a day past their end are deleted, 100 at a time, when a hold is
+written.
 
 Revision ID: 0079
 Revises: 0078
@@ -42,8 +44,12 @@ def upgrade() -> None:
           call_id    UUID PRIMARY KEY REFERENCES calls(id) ON DELETE CASCADE,
           cents      NUMERIC(14,1) NOT NULL CHECK (cents >= 0),
           hold_until TIMESTAMPTZ NOT NULL,
+          cents_per_minute NUMERIC NOT NULL,
+          cents_per_call   NUMERIC NOT NULL,
           dials      INTEGER NOT NULL DEFAULT 0 CHECK (dials >= 0),
-          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          CONSTRAINT call_balance_holds_prices_check
+            CHECK (cents_per_minute >= 0 AND cents_per_call >= 0)
         )
         """)
     op.execute("""

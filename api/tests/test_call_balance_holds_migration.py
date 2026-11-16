@@ -38,7 +38,15 @@ async def test_call_balance_holds_migration_round_trip(db):
             .scalars()
             .all()
         )
-        assert columns == ["call_id", "cents", "created_at", "dials", "hold_until"]
+        assert columns == [
+            "call_id",
+            "cents",
+            "cents_per_call",
+            "cents_per_minute",
+            "created_at",
+            "dials",
+            "hold_until",
+        ]
         delete_rule = (
             await conn.execute(
                 text(
