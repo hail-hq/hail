@@ -73,13 +73,13 @@ _CONSOLE_ONLY_RESPONSE: dict = {
 async def _trial_status(db: AsyncSession, organization_id: UUID) -> SmsTrialResponse:
     row = await get_trial_phone(db, organization_id)
     used = await trial_texts_used(db, organization_id)
-    pending = row is not None and row.status == "pending"
     return SmsTrialResponse(
         configured=await trial_number(db) is not None,
         available=await trial_sender(db) is not None,
         status=row.status if row is not None else "none",
         phone=row.phone_e164 if row is not None else None,
-        code_expires_at=row.code_expires_at if pending else None,
+        pending_phone=row.pending_phone_e164 if row is not None else None,
+        code_expires_at=row.code_expires_at if row is not None else None,
         texts_used=used,
         texts_limit=SMS_TRIAL_LIMIT,
         texts_left=max(SMS_TRIAL_LIMIT - used, 0),
@@ -151,6 +151,8 @@ async def start_sms_trial_phone(
     """Text a 6-digit code to the workspace's own US mobile.
 
     The code expires in 10 minutes. A new code replaces the old one. A
+    verified phone keeps getting trial texts until the new phone is
+    confirmed; until then the new phone shows as pending_phone. A
     workspace or a phone gets at most 5 codes in 24 hours. Code texts are
     free and do not count toward the 25 trial texts. Console sessions only.
     """
@@ -192,8 +194,9 @@ async def start_sms_trial_phone(
 
     # start_phone_proof holds the workspace and phone locks until the commit,
     # so only the send runs between the claim and the commit. Text and audit
-    # the phone as stored (canonical), never the request's spelling.
-    phone = issued.row.phone_e164
+    # the phone as stored (canonical), never the request's spelling: the
+    # new phone, which may wait beside a verified one.
+    phone = issued.phone
     try:
         result = await sms_route(number.provider).send_sms(
             from_e164=number.e164,

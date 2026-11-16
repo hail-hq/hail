@@ -106,6 +106,7 @@ async def test_get_trial_off(client, org_and_key, monkeypatch):
         "available": False,
         "status": "none",
         "phone": None,
+        "pending_phone": None,
         "code_expires_at": None,
         "texts_used": 0,
         "texts_limit": 25,
@@ -577,3 +578,46 @@ async def test_confirm_refuses_full_width_digits(jwt_client) -> None:
     assert resp.json()["detail"][0]["loc"] == ["body", "code"]
     # Refused by the schema, not by the route's "Send a code first."
     assert resp.json()["detail"][0]["type"] == "string_pattern_mismatch"
+
+
+async def test_switching_phone_keeps_trial_texts_until_confirmed(
+    jwt_client, org_and_key, async_session, monkeypatch, sms_mock, session_factory
+):
+    """Verified A, code asked for B: B gets the code, A keeps getting trial
+    texts. Confirming B moves the trial to B."""
+    org_id = org_and_key[0]
+    new_phone = "+14155550143"
+    await seed_sms_trial(async_session, monkeypatch)
+    await verify_trial_phone(async_session, org_id, PHONE)
+
+    resp = await jwt_client.post(
+        "/v1/sms/trial/phone", json={**START, "phone": new_phone}
+    )
+    assert resp.status_code == 200, resp.text
+    assert sms_mock.send_sms.call_args.kwargs["to_e164"] == new_phone
+    code = _code(sms_mock)
+    body = resp.json()
+    assert body["status"] == "verified" and body["phone"] == PHONE
+    assert body["pending_phone"] == new_phone
+    assert body["code_expires_at"] is not None
+    audits = await _audit(session_factory, org_id, "sms.trial.code_sent")
+    assert [a.payload for a in audits] == [{"phone": new_phone}]
+
+    text = {"to": PHONE, "body": "hi", "recipient_consent": True}
+    sent = await jwt_client.post("/v1/sms", json=text)
+    assert sent.status_code == 201, sent.text
+    assert sent.json()["from_e164"] == TRIAL_E164
+
+    resp = await jwt_client.post("/v1/sms/trial/phone/confirm", json={"code": code})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["status"] == "verified" and body["phone"] == new_phone
+    assert body["pending_phone"] is None and body["code_expires_at"] is None
+    audits = await _audit(session_factory, org_id, "sms.trial.verified")
+    assert [a.payload for a in audits] == [{"phone": new_phone}]
+
+    refused = await jwt_client.post("/v1/sms", json=text)
+    assert refused.status_code == 422, refused.text
+    sent = await jwt_client.post("/v1/sms", json={**text, "to": new_phone})
+    assert sent.status_code == 201, sent.text
+    assert sent.json()["from_e164"] == TRIAL_E164

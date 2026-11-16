@@ -621,8 +621,18 @@ class SmsTrialResponse(BaseModel):
     phone: str | None = Field(
         description="The trial phone in E.164. Null when status is 'none'."
     )
+    pending_phone: str | None = Field(
+        description=(
+            "A new phone in E.164 that got a code and is not confirmed yet. "
+            "Until it is, the verified phone keeps getting trial texts. Null "
+            "when no new phone waits."
+        )
+    )
     code_expires_at: datetime | None = Field(
-        description="When the current code expires. Null when no code is open."
+        description=(
+            "When the open code expires, for pending_phone when set, else for "
+            "phone. Null when no code is open."
+        )
     )
     texts_used: int = Field(description="Trial texts this workspace has sent.")
     texts_limit: int = Field(description="Trial texts a workspace can send, ever.")

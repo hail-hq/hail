@@ -1178,6 +1178,10 @@ class SmsTrialPhone(Base):
     ``organization_id`` has no FK, matching SmsSenderIdentity (hail's DB does
     not own the Organization table). The code is stored hashed. A phone can be
     pending in many workspaces but verified in only one.
+
+    A verified workspace that asks for a code to a new phone keeps
+    ``phone_e164`` verified and stores the new one in ``pending_phone_e164``;
+    the confirm moves it into ``phone_e164``.
     """
 
     __tablename__ = "sms_trial_phones"
@@ -1189,6 +1193,8 @@ class SmsTrialPhone(Base):
         UUID(as_uuid=True), nullable=False
     )
     phone_e164: Mapped[str] = mapped_column(Text, nullable=False)
+    # The phone the open code went to, while ``phone_e164`` stays verified.
+    pending_phone_e164: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(
         Text, server_default=text("'pending'"), nullable=False
     )
@@ -1222,6 +1228,10 @@ class SmsTrialPhone(Base):
         CheckConstraint(
             r"phone_e164 ~ '^\+[1-9][0-9]{6,14}$'",
             name="sms_trial_phones_phone_e164_check",
+        ),
+        CheckConstraint(
+            r"pending_phone_e164 ~ '^\+[1-9][0-9]{6,14}$'",
+            name="sms_trial_phones_pending_phone_e164_check",
         ),
         Index(
             "sms_trial_phones_verified_phone_uq",

@@ -106,3 +106,14 @@ async def test_phone_must_be_canonical_e164(async_session, bad):
     async_session.add(_row(uuid.uuid4(), phone=bad))
     with pytest.raises(IntegrityError, match="sms_trial_phones_phone_e164_check"):
         await async_session.flush()
+
+
+@pytest.mark.parametrize("bad", [PHONE + "\n", "+123", "14155550142"])
+async def test_pending_phone_must_be_canonical_e164(async_session, bad):
+    row = _row(uuid.uuid4(), status="verified")
+    row.pending_phone_e164 = bad
+    async_session.add(row)
+    with pytest.raises(
+        IntegrityError, match="sms_trial_phones_pending_phone_e164_check"
+    ):
+        await async_session.flush()

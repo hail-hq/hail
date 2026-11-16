@@ -36,6 +36,7 @@ def upgrade():
         ),
         sa.Column("organization_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("phone_e164", sa.Text(), nullable=False),
+        sa.Column("pending_phone_e164", sa.Text(), nullable=True),
         sa.Column(
             "status", sa.Text(), server_default=sa.text("'pending'"), nullable=False
         ),
@@ -74,6 +75,10 @@ def upgrade():
         sa.CheckConstraint(
             r"phone_e164 ~ '^\+[1-9][0-9]{6,14}$'",
             name="sms_trial_phones_phone_e164_check",
+        ),
+        sa.CheckConstraint(
+            r"pending_phone_e164 ~ '^\+[1-9][0-9]{6,14}$'",
+            name="sms_trial_phones_pending_phone_e164_check",
         ),
     )
     op.create_index(

@@ -162,6 +162,7 @@ async def test_trial_sender_needs_an_approved_registration(async_session, monkey
 
 
 PHONE = "+14155550142"
+OTHER = "+14155550143"
 NOW = datetime(2026, 11, 16, 12, 0, tzinfo=UTC)
 
 
@@ -256,15 +257,68 @@ async def test_same_verified_phone_sends_no_code(async_session):
     assert not await is_verified_trial_phone(async_session, org, "+14155550143")
 
 
-async def test_new_phone_resets_to_pending(async_session):
+async def test_new_phone_keeps_the_verified_phone_until_confirmed(async_session):
+    """A new code goes to the new phone; the verified phone keeps getting
+    trial texts until the new one is confirmed, so a typo cannot end the
+    trial."""
+    org = await _org(async_session)
+    issued = await _start(async_session, org)
+    verified = await confirm_phone(async_session, org, issued.code, now=NOW)
+    verified_at = verified.verified_at
+    new = await _start(async_session, org, phone=OTHER)
+    assert new.code is not None and new.phone == OTHER
+    assert new.row.status == "verified" and new.row.verified_at == verified_at
+    assert new.row.phone_e164 == PHONE and new.row.pending_phone_e164 == OTHER
+    assert await is_verified_trial_phone(async_session, org, PHONE)
+    assert not await is_verified_trial_phone(async_session, org, OTHER)
+    assert len(new.row.code_send_log) == 2
+    assert new.row.code_send_log[-1]["phone"] == OTHER
+
+    later = NOW + timedelta(minutes=1)
+    row = await confirm_phone(async_session, org, new.code, now=later)
+    assert row.status == "verified" and row.verified_at == later
+    assert row.phone_e164 == OTHER and row.pending_phone_e164 is None
+    assert await is_verified_trial_phone(async_session, org, OTHER)
+    assert not await is_verified_trial_phone(async_session, org, PHONE)
+
+
+async def test_burned_switch_code_keeps_the_verified_phone(async_session):
     org = await _org(async_session)
     issued = await _start(async_session, org)
     await confirm_phone(async_session, org, issued.code, now=NOW)
-    new = await _start(async_session, org, phone="+14155550143")
-    assert new.code is not None
-    assert new.row.status == "pending" and new.row.verified_at is None
-    assert not await is_verified_trial_phone(async_session, org, PHONE)
-    assert len(new.row.code_send_log) == 2
+    new = await _start(async_session, org, phone=OTHER)
+    wrong = "000000" if new.code != "000000" else "111111"
+    for _ in range(5):
+        with pytest.raises(WrongCode):
+            await confirm_phone(async_session, org, wrong, now=NOW)
+    row = await get_trial_phone(async_session, org)
+    assert row.pending_phone_e164 is None and row.code_hash is None
+    assert row.status == "verified" and row.phone_e164 == PHONE
+    assert await is_verified_trial_phone(async_session, org, PHONE)
+
+
+async def test_switch_to_a_phone_taken_meanwhile_keeps_the_verified_phone(
+    async_session,
+):
+    a, b = await _org(async_session), await _org(async_session)
+    first = await _start(async_session, a)
+    await confirm_phone(async_session, a, first.code, now=NOW)
+    switch = await _start(async_session, a, phone=OTHER)
+    other = await _start(async_session, b, phone=OTHER)
+    await confirm_phone(async_session, b, other.code, now=NOW)
+    with pytest.raises(PhoneTaken):
+        await confirm_phone(async_session, a, switch.code, now=NOW)
+    assert await is_verified_trial_phone(async_session, a, PHONE)
+    assert not await is_verified_trial_phone(async_session, a, OTHER)
+
+
+async def test_new_pending_phone_replaces_the_unconfirmed_one(async_session):
+    org = await _org(async_session)
+    await _start(async_session, org)
+    new = await _start(async_session, org, phone=OTHER)
+    assert new.phone == OTHER
+    assert new.row.status == "pending" and new.row.phone_e164 == OTHER
+    assert new.row.pending_phone_e164 is None
 
 
 async def test_confirm_right_code_verifies(async_session):
@@ -656,3 +710,12 @@ async def test_trial_hint_applies_with_texts_left(async_session, monkeypatch):
     _, _, org = await _ready(async_session, monkeypatch)
     await _trial_texts(async_session, org, SMS_TRIAL_LIMIT - 1)
     assert await trial_hint_applies(async_session, org) is True
+
+
+async def test_claim_keeps_the_verified_phone_during_a_switch(
+    async_session, monkeypatch
+):
+    _, _, org = await _ready(async_session, monkeypatch)
+    await _start(async_session, org, phone=OTHER)
+    assert await _claim(async_session, org) is not None
+    assert await _claim(async_session, org, to=OTHER) is None

@@ -109,6 +109,12 @@ class TrialSend:
 class IssuedCode:
     row: SmsTrialPhone
     code: str | None  # None: the phone is already verified, no text is sent
+    phone: str  # canonical E.164: text the code here
+
+
+def _code_phone(row: SmsTrialPhone) -> str:
+    """The phone the open code was sent to."""
+    return row.pending_phone_e164 or row.phone_e164
 
 
 def code_text(code: str) -> str:
@@ -218,8 +224,12 @@ async def start_phone_proof(
     user_id: UUID | None,
     now: datetime | None = None,
 ) -> IssuedCode:
-    """Issue a code for ``phone``. The caller texts it to ``row.phone_e164``
-    (the canonical form), then commits."""
+    """Issue a code for ``phone``. The caller texts it to ``IssuedCode.phone``
+    (the canonical form), then commits.
+
+    A verified row keeps its phone verified: the new phone waits in
+    ``pending_phone_e164`` until ``confirm_phone``, so a typo never stops
+    the trial texts."""
     now = (now or datetime.now(UTC)).astimezone(UTC)
     phone = _canonical_phone(phone)
     await org_lock(db, organization_id)
@@ -244,7 +254,7 @@ async def start_phone_proof(
 
     row = await get_trial_phone(db, organization_id)
     if row is not None and row.status == "verified" and row.phone_e164 == phone:
-        return IssuedCode(row=row, code=None)
+        return IssuedCode(row=row, code=None, phone=phone)
 
     cutoff = now - CODE_WINDOW
     log = [
@@ -276,10 +286,18 @@ async def start_phone_proof(
         )
 
     code = f"{secrets.randbelow(10**6):06d}"
+    if row is not None and row.status == "verified":
+        # Keep the verified phone and its status until the new one confirms.
+        target = {"pending_phone_e164": phone}
+    else:
+        target = {
+            "phone_e164": phone,
+            "pending_phone_e164": None,
+            "status": "pending",
+            "verified_at": None,
+        }
     fields = {
-        "phone_e164": phone,
-        "status": "pending",
-        "verified_at": None,
+        **target,
         "code_hash": _hash_code(organization_id, phone, code),
         "code_expires_at": now + CODE_TTL,
         "code_attempts": 0,
@@ -299,7 +317,7 @@ async def start_phone_proof(
         for key, value in fields.items():
             setattr(row, key, value)
     await db.flush()
-    return IssuedCode(row=row, code=code)
+    return IssuedCode(row=row, code=code, phone=phone)
 
 
 async def confirm_phone(
@@ -318,7 +336,7 @@ async def confirm_phone(
         raise NoPendingCode()
     if now > row.code_expires_at:
         raise CodeExpired()
-    expected = _hash_code(organization_id, row.phone_e164, code.strip())
+    expected = _hash_code(organization_id, _code_phone(row), code.strip())
     if not hmac.compare_digest(expected, row.code_hash):
         row.code_attempts += 1
         row.updated_at = now
@@ -326,10 +344,15 @@ async def confirm_phone(
         if tries_left == 0:
             row.code_hash = None
             row.code_expires_at = None
+            row.pending_phone_e164 = None
         await db.flush()
         raise WrongCode(tries_left)
     try:
         async with db.begin_nested():
+            # The unique index on verified phones maps a phone another
+            # workspace verified meanwhile to PhoneTaken.
+            row.phone_e164 = _code_phone(row)
+            row.pending_phone_e164 = None
             row.status = "verified"
             row.verified_at = now
             row.code_hash = None
