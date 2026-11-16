@@ -384,16 +384,20 @@ async def claim_trial_send(
     The verified phone is checked under the lock too, so a text never goes
     to a phone the workspace switched away from.
     """
-    number = await trial_sender(db)
-    if number is None:
+    # Cheapest checks first: settings, then one indexed lookup, then the
+    # trial number and its registration.
+    if not trial_enabled():
         return None
-    if organization_id == number.organization_id:
-        return None
-    if explicit_from is not None and explicit_from != number.e164:
+    if explicit_from is not None and explicit_from != settings.hail_sms_trial_number:
         return None
     if not is_us(to):
         return None
     if not await is_verified_trial_phone(db, organization_id, to):
+        return None
+    number = await trial_sender(db)
+    if number is None:
+        return None
+    if organization_id == number.organization_id:
         return None
     await org_lock(db, organization_id)
     # Again under the lock: start_phone_proof and confirm_phone take the same
