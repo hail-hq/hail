@@ -4,14 +4,20 @@ slug: claude-ai-connectors-directory
 category: mcp-registry
 url: "https://claude.ai/directory/manage"
 score: 5
-status: drafted
+status: submitted
 ---
 
 # Claude.ai Connectors Directory
 
 Review the live [Directory Policy](https://support.claude.com/en/articles/13145358-anthropic-software-directory-policy) before submitting.
 
-## Listing content
+## TODO
+
+- [x] Submitted (reported by the owner, before 2026-11-16)
+- [ ] Approved
+- [ ] Published
+
+## Content
 
 Paste these into the portal at <https://claude.ai/directory/manage>.
 
@@ -56,7 +62,7 @@ Paste these into the portal at <https://claude.ai/directory/manage>.
 | Registrations        | `get_verification_requirements`, `check_verification`, `submit_verification`, `confirm_verification`, `get_verification`, `list_verifications`, `cancel_verification`                           |
 | Contacts and account | `create_contact`, `list_contacts`, `lookup_contact`, `whoami`                                                                                                                                   |
 
-## Portal steps
+## Steps to submit
 
 1. Introduction: read the overview.
 2. Connection: server URL `https://mcp.hail.so`, transport HTTP (Streamable), per-user OAuth.
@@ -95,9 +101,25 @@ Unit tests, tool discovery and calls through other clients are separate evidence
 Tests that require paid actions, number release or registration documents need explicit authorization and disposable resources.
 Each tool needs a recorded result. An error response alone does not demonstrate successful functionality.
 
-## Remaining steps
+## Notes
 
-- Obtain written permission for AI phone calls, or agree a separate connector scope with Anthropic.
-- Deploy and verify the description and MCP telemetry changes.
-- Prepare the review account and complete the client-level tool tests.
-- Complete the truthful acknowledgements and submit the draft.
+### Status
+
+The owner reports the connector was submitted before 2026-11-16. No email from Anthropic yet.
+
+Check the status (from <https://claude.com/docs/directory/submission-status.md>, read 2026-11-16):
+
+1. Open <https://claude.ai/directory/manage>. Sign in with the organization that submitted Hail.
+2. Open the Hail connector from the list of submissions.
+3. Read the card at the top. It shows the status and the next step.
+
+| Status            | Who acts next | What to do                                                       |
+| ----------------- | ------------- | ---------------------------------------------------------------- |
+| Draft             | Hail          | Nothing was sent. Finish the steps and submit.                   |
+| In review         | Anthropic     | Wait. Anthropic emails the primary contact if it needs anything. |
+| Changes requested | Hail          | Click **View feedback**, fix, resubmit.                          |
+| Not approved      | Hail          | Click **View feedback**. Edit and resubmit.                      |
+| Approved          | Hail          | Click **Publish**. Editing first sends it back to draft.         |
+| Published         | Nobody        | Live as a Community connector.                                   |
+
+Anthropic gives no fixed review time. Escalate a stuck review to `mcp-review@anthropic.com` with the listing name, the organization, and the status the portal shows.
