@@ -155,41 +155,7 @@ Flip `status: submitted` (then `submitted (live)`) in this file's frontmatter an
 >
 > Hail is open source. Use Hail Cloud, or host it yourself.
 
-**`server.json`**. **Corrected 2026-07-07: using GitHub-org naming (Path B), and a shortened description (the original 222-char version fails real schema validation, 100-char hard limit).** Ready, validated file at `mcp/server.json`:
-
-```json
-{
-  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.hail-hq/hail-mcp",
-  "title": "Hail",
-  "description": "A real phone number and email inbox for your AI agent. Calls, texts, and email in one place.",
-  "websiteUrl": "https://hail.so/mcp",
-  "repository": {
-    "url": "https://github.com/hail-hq/hail",
-    "source": "github",
-    "subfolder": "mcp"
-  },
-  "version": "0.1.0",
-  "icons": [
-    {
-      "src": "https://hail.so/assets/monogram-512.png",
-      "sizes": ["512x512"],
-      "mimeType": "image/png"
-    },
-    {
-      "src": "https://hail.so/assets/monogram-1024.png",
-      "sizes": ["1024x1024"],
-      "mimeType": "image/png"
-    }
-  ],
-  "remotes": [
-    {
-      "type": "streamable-http",
-      "url": "https://mcp.hail.so"
-    }
-  ]
-}
-```
+**`server.json`**. **Corrected 2026-07-07: using GitHub-org naming (Path B), and a shortened description (the original 222-char version fails real schema validation, 100-char hard limit).** The live file is [`mcp/server.json`](../../mcp/server.json). Edit it there and bump `version`; merging publishes it.
 
 Asset source paths (already mirrored, confirmed resolving live at the URLs above): `hail-website/public/assets/brand/logo/monogram-512.png`, `hail-website/public/assets/brand/logo/monogram-1024.png`.
 

@@ -36,7 +36,7 @@ status: drafted
 ## Content
 
 **Title:**
-I gave my AI agent a phone number and an email inbox it can actually use (self-hosted, AGPLv3) — feedback wanted
+I gave my AI agent a phone number and an email inbox it can actually use (self-hosted, AGPLv3). Feedback wanted
 
 **Body:**
 

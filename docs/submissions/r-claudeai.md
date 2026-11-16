@@ -41,7 +41,7 @@ status: drafted
 
 ### Title
 
-I gave Claude a real phone number and a real email inbox (via MCP) — it called my no-show customers itself
+I gave Claude a real phone number and a real email inbox (via MCP). It called my no-show customers itself
 
 ### Flair
 

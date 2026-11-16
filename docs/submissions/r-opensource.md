@@ -39,7 +39,7 @@ status: drafted
 ## Content
 
 **Title:**
-Gave my AI agent a real phone number and email inbox — self-hosted, AGPLv3, here's the actual loop it runs
+Gave my AI agent a real phone number and email inbox: self-hosted, AGPLv3, here's the actual loop it runs
 
 **Body:**
 

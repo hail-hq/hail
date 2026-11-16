@@ -71,3 +71,12 @@ def test_bare_inbox_fails():
 
 def test_inbox_in_a_path_passes():
     validate(GOOD.replace("## Notes", "See `/console/inbox`.\n\n## Notes"))
+
+
+def test_bare_plural_inboxes_fails():
+    with pytest.raises(ValidationError, match="line 20"):
+        validate(GOOD.replace("email inbox", "inboxes"))
+
+
+def test_email_inbox_across_a_line_break_passes():
+    validate(GOOD.replace("email inbox", "email\ninbox"))

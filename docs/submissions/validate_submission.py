@@ -8,7 +8,16 @@ REQUIRED_KEYS = ["target", "slug", "category", "url", "score", "status"]
 VALID_STATUSES = {"drafted", "submitted", "rejected", "n/a"}
 REQUIRED_SECTIONS = ["## TODO", "## Steps to submit", "## Content", "## Notes"]
 # "inbox" alone confuses non-native English readers: always write "email inbox".
-BARE_INBOX = re.compile(r"(?<!email )(?<![/\w-])inbox\b", re.IGNORECASE)
+INBOX = re.compile(r"(?<![/\w-])inbox(es)?\b", re.IGNORECASE)
+EMAIL_BEFORE = re.compile(r"email\s+$", re.IGNORECASE)
+
+
+def find_bare_inbox(text):
+    """Return the 1-based line of the first "inbox" not preceded by "email"."""
+    for match in INBOX.finditer(text):
+        if not EMAIL_BEFORE.search(text[max(0, match.start() - 20) : match.start()]):
+            return text[: match.start()].count("\n") + 1
+    return None
 
 
 class ValidationError(Exception):
@@ -51,12 +60,9 @@ def validate(text):
     if missing_sections:
         raise ValidationError(f"missing sections: {missing_sections}")
 
-    bare = BARE_INBOX.search(body)
-    if bare:
-        line = body[: bare.start()].count("\n") + 1
-        raise ValidationError(
-            f'write "email inbox", not "inbox" alone (body line {line})'
-        )
+    line = find_bare_inbox(text)
+    if line:
+        raise ValidationError(f'write "email inbox", not "inbox" alone (line {line})')
 
     return fields
 

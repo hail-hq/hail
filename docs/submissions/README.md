@@ -36,7 +36,7 @@ Rules:
 >
 > Hail is open source. Use Hail Cloud, or host it yourself.
 
-Search terms in this copy, with US monthly volume from the hail-website SEO bank (`docs/seo/`, Ahrefs, October and November 2026): ai receptionist (13,000), ai answering service (3,900), ai phone agent (1,700), phone number for ai agent (20).
+Search terms in this copy, with US monthly search volume (Ahrefs, October and November 2026): ai receptionist (13,000), ai answering service (3,900), ai phone agent (1,700), phone number for ai agent (20).
 
 ## Tracker
 
