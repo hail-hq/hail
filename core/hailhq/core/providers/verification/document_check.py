@@ -18,7 +18,7 @@ import asyncio
 import logging
 import re
 import unicodedata
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Collection
 from datetime import date
 
 from hailhq.core.providers.llm.document_reader import read_document
@@ -125,13 +125,10 @@ def _same_name(typed: str, printed: str, drop: frozenset[str] = frozenset()) -> 
 
 
 def _holds(typed: str, part: str) -> bool:
-    """True when the typed name holds every word of a printed part."""
-    return any(
-        b[0] <= a[0] or (b[1] and b[1] in a[1])
-        for a in _forms(typed)
-        for b in _forms(part)
-        if b[0]
-    )
+    """True when the typed name holds every word of a printed part, as whole
+    words: "Smith" is not in "John Goldsmith". Apostrophes and hyphens may
+    join or split ("OBrien" holds "O'Brien")."""
+    return any(b[0] <= a[0] for a in _forms(typed) for b in _forms(part) if b[0])
 
 
 def _part_matches(typed: str, printed: str, latin: str) -> bool:
@@ -580,19 +577,24 @@ async def check_documents(
     today: date,
     reader: Reader | None = None,
     before_send: Callable[[str], Awaitable[bool]] | None = None,
+    skipped: Collection[str] = (),
 ) -> VerificationDocumentCheckResponse:
     """Read every slot of this request that has a file, at once, within
     ``CHECK_TIMEOUT_S`` in total. A slot without a file here is not read.
     ``documents[slot].option`` is the type the customer chose, or empty when
     not chosen yet; the warnings then skip the type check. ``before_send``
-    runs with the slot name before each file goes to the model; False skips
-    that file (the
-    daily cap), and its slot is ``read: false`` with no warning."""
+    runs with the slot name just before each file goes to the model; False
+    skips that file. ``skipped`` slots had a file the caller did not read
+    (the daily cap): they come back ``read: false`` with no warning. When
+    the caller stops waiting, every read still running is cancelled."""
     slots = [
         s
         for s in requirements.documents
         if (doc := documents.get(s.name)) is not None and doc.file is not None
     ]
+
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + CHECK_TIMEOUT_S
 
     async def one(slot: DocumentSlot) -> _Read | None:
         file = documents[slot.name].file
@@ -603,7 +605,8 @@ async def check_documents(
             data=file.data,
             prompt=_prompt(requirements, slot, targets),
             schema=_schema(slot, targets),
-            timeout_s=CHECK_TIMEOUT_S,
+            # What is left of the request's budget, not a fresh one.
+            timeout_s=max(deadline - loop.time(), 0.1),
             before_send=(
                 (lambda: before_send(slot.name)) if before_send is not None else None
             ),
@@ -612,24 +615,35 @@ async def check_documents(
 
     tasks = {s.name: asyncio.ensure_future(one(s)) for s in slots}
     reads: dict[str, _Read] = {}
-    if tasks:
-        done, pending = await asyncio.wait(tasks.values(), timeout=CHECK_TIMEOUT_S)
+    done: set[asyncio.Future] = set()
+    try:
+        if tasks:
+            done, pending = await asyncio.wait(tasks.values(), timeout=CHECK_TIMEOUT_S)
+            if pending:
+                logger.warning(
+                    "document check: %d of %d reads over the time limit",
+                    len(pending),
+                    len(tasks),
+                )
+    finally:
+        # Here, or when the request itself is cancelled: stop every read
+        # still running (its decoder is killed, its model call dropped), and
+        # let them unwind before the request ends.
+        pending = [t for t in tasks.values() if not t.done()]
         for task in pending:
             task.cancel()
         if pending:
-            # Let the cancelled reads unwind (a decoder killed, a counter
-            # rolled back) before the request ends.
             await asyncio.wait(pending, timeout=2)
             for task in pending:
                 task.add_done_callback(lambda t: t.cancelled() or t.exception())
-        for name, task in tasks.items():
-            if task in done and task.exception() is None and task.result():
-                reads[name] = task.result()
-            elif task in done and task.exception() is not None:
-                logger.warning(
-                    "document check: a read failed (%s)",
-                    type(task.exception()).__name__,
-                )
+    for name, task in tasks.items():
+        if task in done and task.exception() is None and task.result():
+            reads[name] = task.result()
+        elif task in done and task.exception() is not None:
+            logger.warning(
+                "document check: a read failed (%s)",
+                type(task.exception()).__name__,
+            )
 
     out_fields: dict[str, str] = {}
     out_address: dict[str, str] = {}
@@ -652,7 +666,12 @@ async def check_documents(
                 out_fields.setdefault(key, value)
 
     warnings: list[VerificationDocumentWarning] = []
-    out_documents: dict[str, VerificationDocumentRead] = {}
+    out_documents: dict[str, VerificationDocumentRead] = {
+        name: VerificationDocumentRead(
+            read=False, option=None, fields={}, expiry_date=None, printed_name=None
+        )
+        for name in skipped
+    }
     for slot in slots:
         read = reads.get(slot.name)
         if read is None:

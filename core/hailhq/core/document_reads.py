@@ -1,6 +1,8 @@
 """The daily cap on AI document reads (``POST /verifications/document-check``).
 
-Each file the check sends to the model is one read. Hail pays the model
+Each file the check sends to the model is one read. The reads of a request
+are reserved before any file is fetched; a reserved read whose file never
+reaches the model is given back. Hail pays the model
 provider for every read, and reads are free to customers for now, so each
 workspace gets at most ``DAILY_DOCUMENT_READS`` per UTC day. Past the cap the
 check skips the model: the slot comes back ``read: false`` with no error and
@@ -26,14 +28,15 @@ from uuid import UUID
 
 from hailhq.core.db import key_lock
 from hailhq.core.models import AgentSendLog
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = [
     "DAILY_DOCUMENT_READS",
     "DOCUMENT_READ_CHANNEL",
     "document_reads_today",
-    "take_document_read",
+    "release_document_reads",
+    "reserve_document_reads",
 ]
 
 # Reads per workspace per UTC day. A placeholder until the pricing decision
@@ -64,29 +67,49 @@ async def document_reads_today(
     ).scalar_one()
 
 
-async def take_document_read(
-    db: AsyncSession, organization_id: UUID, slot: str
-) -> bool:
-    """Count one read for the workspace and return True, or return False when
-    today's cap is used up. Takes a short lock of its own (not the
-    workspace lock, which is held through carrier calls) for the count and
-    the write, so two checks at once cannot pass the cap, and commits.
-    Give it its own session: it commits."""
+async def reserve_document_reads(
+    db: AsyncSession, organization_id: UUID, slots: list[str]
+) -> dict[str, UUID]:
+    """Reserve one read per slot, in order, as far as today's cap allows,
+    in one short transaction: a lock of its own (not the workspace lock,
+    which is held through carrier calls), the count, then the rows, then
+    commit. Returns the reserved slots with their row ids; a slot left out
+    is over the cap. Runs before any file is fetched or decoded, so a
+    workspace over its cap costs nothing. Give it its own session: it
+    commits."""
+    if not slots:
+        return {}
     try:
         await key_lock(db, f"document_read:{organization_id}")
-        if await document_reads_today(db, organization_id) >= DAILY_DOCUMENT_READS:
-            await db.rollback()
-            return False
-        db.add(
+        left = DAILY_DOCUMENT_READS - await document_reads_today(db, organization_id)
+        rows = [
             AgentSendLog(
                 organization_id=organization_id,
                 channel=DOCUMENT_READ_CHANNEL,
                 recipient=slot,
             )
-        )
+            for slot in slots[: max(left, 0)]
+        ]
+        db.add_all(rows)
+        await db.flush()
+        reserved = {row.recipient: row.id for row in rows}
         await db.commit()
-        return True
+        return reserved
     except BaseException:
-        # Also on cancellation (the check's time limit).
+        # Also on cancellation.
+        await db.rollback()
+        raise
+
+
+async def release_document_reads(db: AsyncSession, row_ids: list[UUID]) -> None:
+    """Give back reserved reads whose file never went to the model (a file
+    skipped, unsupported, over the limits or out of time): only a sent file
+    counts. Give it its own session: it commits."""
+    if not row_ids:
+        return
+    try:
+        await db.execute(delete(AgentSendLog).where(AgentSendLog.id.in_(row_ids)))
+        await db.commit()
+    except BaseException:
         await db.rollback()
         raise

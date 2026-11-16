@@ -195,7 +195,7 @@ async def test_the_prompt_lists_every_type_of_the_slot_and_the_address() -> None
         "id_card",
         "none",
     ]
-    assert call["timeout_s"] == document_check.CHECK_TIMEOUT_S
+    assert 0 < call["timeout_s"] <= document_check.CHECK_TIMEOUT_S
 
 
 async def test_the_proof_of_address_fills_the_address_first() -> None:
@@ -449,7 +449,7 @@ async def test_reader_sends_the_file_and_the_schema(
     assert call["thinking"] == {"type": "disabled"}
     assert call["output_config"]["format"] == {"type": "json_schema", "schema": {}}
     assert call["messages"][0]["content"][0]["type"] == "document"
-    assert call["timeout"] == 15.0
+    assert 14.9 < call["timeout"] <= 15.0
 
 
 async def test_reader_sends_an_image_as_a_smaller_jpeg(
@@ -742,15 +742,25 @@ async def test_reader_drops_a_decode_over_its_limit(
 ) -> None:
     client, calls = _fake_client(_response("{}"))
     monkeypatch.setattr(document_reader, "_client", client)
-    monkeypatch.setattr(document_reader, "_DECODE_LIMIT_S", 0.05)
-
-    async def slow(*_):
-        await asyncio.sleep(1)
-        return b""
-
-    monkeypatch.setattr(document_reader, "_run_decoder", slow)
-    assert await _read() is None
+    # The real child process, given no time: killed, and the read fails open.
+    monkeypatch.setattr(document_reader, "_DECODE_LIMIT_S", 0.001)
+    assert await _read(data=_png((400, 300))) is None
     assert calls == []
+
+
+async def test_reader_gives_the_model_only_the_time_left(
+    reader_settings, monkeypatch
+) -> None:
+    client, calls = _fake_client(_response("{}"))
+    monkeypatch.setattr(document_reader, "_client", client)
+
+    async def decode(*_):
+        await asyncio.sleep(0.3)
+        return _jpeg((40, 30))
+
+    monkeypatch.setattr(document_reader, "_run_decoder", decode)
+    await _read(timeout_s=1.0)
+    assert 0.5 < calls[0]["timeout"] < 0.75
 
 
 async def test_reader_waits_for_a_busy_decoder_without_counting_the_wait(
@@ -768,12 +778,12 @@ async def test_reader_waits_for_a_busy_decoder_without_counting_the_wait(
 
     monkeypatch.setattr(document_reader, "_run_decoder", decode)
     begin = asyncio.get_running_loop().time()
-    results = await asyncio.gather(_read(), _read(), _read())
-    # Two decode at once; the third waits 0.4 s for its turn, then decodes
+    results = await asyncio.gather(*(_read() for _ in range(5)))
+    # Four decode at once; the fifth waits 0.4 s for its turn, then decodes
     # in 0.4 s: 0.8 s in all, over the 0.5 s limit, and still read.
-    assert results == [{}, {}, {}]
-    assert started[2] - begin >= 0.35
-    assert len(calls) == 3
+    assert results == [{}] * 5
+    assert started[4] - begin >= 0.35
+    assert len(calls) == 5
 
 
 async def test_reader_decodes_a_real_image_in_a_child_process(
@@ -787,3 +797,91 @@ async def test_reader_decodes_a_real_image_in_a_child_process(
     assert await _read(data=_png((400, 300))) == {}
     block = calls[0]["messages"][0]["content"][0]
     assert block["source"]["media_type"] == "image/jpeg"
+
+
+# -- review round 3 --------------------------------------------------------------
+
+
+async def test_a_part_printed_alone_must_be_whole_words() -> None:
+    req = _req(fields=(FieldSpec(name="x1", label="Email"),), address_required=True)
+    smith = _answer(given_names="", surnames="SMITH")
+    out = await _check(
+        req=req, address={"customer_name": "John Goldsmith"}, reader=_reader(smith)
+    )
+    assert _kinds(out) == ["name"]
+    ann = _answer(given_names="ANN", surnames="")
+    out = await _check(
+        req=req, address={"customer_name": "Joanne"}, reader=_reader(ann)
+    )
+    assert _kinds(out) == ["name"]
+    obrien = _answer(given_names="", surnames="O'BRIEN")
+    ok = await _check(
+        req=req, address={"customer_name": "Siobhan OBrien"}, reader=_reader(obrien)
+    )
+    assert ok.warnings == []
+
+
+async def test_a_skipped_slot_is_read_false() -> None:
+    out = await check_documents(
+        _req(),
+        {},
+        {},
+        {"proof_of_identity": DocumentInput(option="id_card")},
+        today=TODAY,
+        reader=_reader(),
+        skipped=["proof_of_identity"],
+    )
+    assert out.documents["proof_of_identity"].read is False
+    assert out.warnings == []
+
+
+async def test_a_cancelled_check_stops_its_reads() -> None:
+    stopped = asyncio.Event()
+
+    async def slow(**kwargs):
+        try:
+            await asyncio.sleep(10)
+        except asyncio.CancelledError:
+            stopped.set()
+            raise
+
+    task = asyncio.ensure_future(_check(reader=slow))
+    await asyncio.sleep(0.05)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert stopped.is_set()
+
+
+async def test_reads_over_the_time_limit_are_logged_as_counts(
+    monkeypatch, caplog
+) -> None:
+    monkeypatch.setattr(document_check, "CHECK_TIMEOUT_S", 0.05)
+
+    async def slow(**kwargs):
+        await asyncio.sleep(5)
+
+    out = await _check(reader=slow)
+    assert out.documents["proof_of_identity"].read is False
+    assert "1 of 1 reads over the time limit" in caplog.text
+
+
+async def test_isolated_process_is_killed_at_its_limit() -> None:
+    from hailhq.core.isolated_process import run_isolated
+
+    with pytest.raises(TimeoutError):
+        await run_isolated(
+            "hailhq.core.providers.llm.document_image",
+            "image/png",
+            stdin=_png((400, 300)),
+            timeout_s=0.001,
+            max_output=1024,
+        )
+    with pytest.raises(ValueError):
+        await run_isolated(
+            "hailhq.core.providers.llm.document_image",
+            "image/jpeg",
+            stdin=b"not an image",
+            timeout_s=10,
+            max_output=1024,
+        )

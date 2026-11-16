@@ -188,13 +188,17 @@ async def collect_files(
 async def fetch_files(
     collected: CollectedFiles, slots: Iterable[str], s3: S3MailClient | None
 ) -> dict[str, UploadedFile]:
-    """Every slot's file, by slot, in ``slots`` order. Each distinct upload
+    """The files of ``slots``, by slot, in that order. Each distinct upload
     is fetched once, a few at a time. Every fetch finishes (the total was
     checked, so this is bounded), then the first failure in slot order is
     raised, with its cause: the same request always gets the same error.
     The total is checked again on the bytes read: an object may differ from
     its row."""
-    rows, parts = collected
+    slots = list(slots)
+    # Only the uploads of these slots: a caller may read fewer slots than
+    # it collected.
+    rows = {slot: row for slot, row in collected.rows.items() if slot in slots}
+    parts = collected.parts
     fetches = asyncio.Semaphore(_MAX_PARALLEL_FETCHES)
 
     async def fetch(row: FileUpload) -> UploadedFile:

@@ -18,15 +18,14 @@ import asyncio
 import base64
 import json
 import logging
-import os
 import re
-import sys
 import weakref
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 import anthropic
 from hailhq.core.config import settings
+from hailhq.core.isolated_process import run_isolated
 from hailhq.core.providers.llm.bedrock import bedrock_client
 
 __all__ = ["READABLE_TYPES", "document_reader_configured", "read_document"]
@@ -49,11 +48,12 @@ _MAX_TOKENS = 2048
 _MAX_PDF_PAGES = 100
 _PDF_PAGE = re.compile(rb"/Type\s*/Page(?![a-zA-Z])")
 # Images are decoded in a child process without credentials, under CPU and
-# memory limits (document_image.py), at most 2 at once. A decode waits for
-# its turn (bounded only by the caller's own deadline: another request being
-# busy is no reason to drop a file), then has ``_DECODE_LIMIT_S`` from its
-# start; past that its process is killed.
-_DECODES = 2
+# memory limits (document_image.py, run by core/isolated_process.py), at
+# most 4 at once. A decode waits for its turn (bounded only by the caller's
+# own deadline: another request being busy is no reason to drop a file),
+# then has ``_DECODE_LIMIT_S`` from its start; past that its process is
+# killed.
+_DECODES = 4
 _DECODE_LIMIT_S = 10.0
 _MAX_DECODED_BYTES = 8 * 1024 * 1024
 # One semaphore per event loop (tests run several loops; the API runs one).
@@ -99,27 +99,14 @@ def _pdf_fits(data: bytes) -> bool:
 
 
 async def _run_decoder(content_type: str, data: bytes) -> bytes:
-    """``document_image.py`` in a child process with no credentials in its
-    environment. Killed when the caller stops waiting."""
-    process = await asyncio.create_subprocess_exec(
-        sys.executable,
-        "-m",
+    """``document_image.py`` in a credential-free child process."""
+    return await run_isolated(
         "hailhq.core.providers.llm.document_image",
         content_type,
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.DEVNULL,
-        env={"PATH": os.environ.get("PATH", ""), "PYTHONUTF8": "1"},
+        stdin=data,
+        timeout_s=_DECODE_LIMIT_S,
+        max_output=_MAX_DECODED_BYTES,
     )
-    try:
-        stdout, _ = await process.communicate(data)
-        if process.returncode or not stdout or len(stdout) > _MAX_DECODED_BYTES:
-            raise ValueError("the image could not be decoded")
-        return stdout
-    finally:
-        if process.returncode is None:
-            process.kill()
-            await process.wait()
 
 
 async def _decode_image(content_type: str, data: bytes) -> bytes:
@@ -127,9 +114,7 @@ async def _decode_image(content_type: str, data: bytes) -> bytes:
     loop = asyncio.get_running_loop()
     slots = _decode_slots.setdefault(loop, asyncio.Semaphore(_DECODES))
     async with slots:
-        return await asyncio.wait_for(
-            _run_decoder(content_type, data), timeout=_DECODE_LIMIT_S
-        )
+        return await _run_decoder(content_type, data)
 
 
 def _file_block(content_type: str, data: bytes) -> dict[str, Any]:
@@ -155,11 +140,14 @@ async def read_document(
     """The model's answer to ``prompt`` about the file, as JSON that matches
     ``schema`` (structured output). None when the reader is not configured,
     the file type is not readable or over the limits, ``before_send``
-    answers False (no read left today), or the call fails, times out or is
-    refused: the caller then goes on without it. ``before_send`` runs only
-    when the file is about to go to the model, so only a sent file counts."""
+    answers False, or the call fails, times out or is refused: the caller
+    then goes on without it. ``before_send`` runs only when the file is
+    about to go to the model, so only a sent file counts. ``timeout_s`` is
+    the whole budget: the model call gets what the decode left of it."""
     if not document_reader_configured() or content_type not in READABLE_TYPES:
         return None
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout_s
     try:
         if content_type == "application/pdf":
             if not _pdf_fits(data):
@@ -189,7 +177,7 @@ async def read_document(
                     ],
                 }
             ],
-            timeout=timeout_s,
+            timeout=max(deadline - loop.time(), 0.1),
         )
     except Exception as exc:
         # Fail open: no warning, no prefill. Never the message: it can quote

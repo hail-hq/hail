@@ -69,7 +69,10 @@ from hailhq.core.billing import get_balance_cents, get_ledger_cents
 from hailhq.core.carrier_offer import Approval
 from hailhq.core.config import SELF_HOSTED_ORG_ID, settings
 from hailhq.core.db import get_session, org_lock, session_scope, try_org_lock
-from hailhq.core.document_reads import take_document_read
+from hailhq.core.document_reads import (
+    release_document_reads,
+    reserve_document_reads,
+)
 from hailhq.core.file_uploads import (
     delete_upload_objects,
 )
@@ -2418,6 +2421,23 @@ async def check_verification_documents(
         "body",
     )
     provider = _provider_or_404(registry, offer["provider"], "number")
+    # Nothing is written. End the read transaction before the carrier call.
+    await db.rollback()
+    requirements = await _requirements(
+        provider,
+        sub.country_code,
+        sub.number_type,
+        sub.subject_type,  # type: ignore[arg-type]
+        where="body",
+    )
+    # Every slot must be in the form before any part is read or any upload
+    # row is looked up.
+    slots = [s.name for s in requirements.documents]
+    for slot in sub.documents:
+        if slot not in slots:
+            raise unprocessable(
+                "this slot is not in the form", loc=["body", "documents", slot]
+            )
     for key in form:
         prefix, _, slot = key.partition(".")
         if prefix == "file" and slot not in sub.documents:
@@ -2427,51 +2447,51 @@ async def check_verification_documents(
     collected = await collect_files(
         form, sub.documents, db, principal.organization_id, s3
     )
-    # Nothing is written yet. End the read transaction before the slow calls
-    # (the carrier's form, the bucket, the model). The upload rows are
-    # detached first: a rollback expires loaded rows, and reading an expired
-    # row would need the database again.
+    # The upload rows are detached, then the transaction ends before the
+    # slow calls (the bucket, the model): a rollback expires loaded rows, and
+    # reading an expired row would need the database again.
     for row in collected.rows.values():
         if row in db:
             db.expunge(row)
     await db.rollback()
 
-    requirements = await _requirements(
-        provider,
-        sub.country_code,
-        sub.number_type,
-        sub.subject_type,  # type: ignore[arg-type]
-        where="body",
-    )
-    slots = {s.name for s in requirements.documents}
-    for slot in sub.documents:
-        if slot not in slots:
-            raise unprocessable(
-                "this slot is not in the form", loc=["body", "documents", slot]
-            )
-    files = await fetch_files(collected, sub.documents, s3)
-    documents = {
-        slot: DocumentInput(
-            option=part.option, fields=part.fields, file=files.get(slot)
+    # The daily cap, before any file is fetched or decoded: the reads of
+    # this request are reserved in one short transaction of their own. A
+    # slot over the cap is not read. A reserved read whose file never
+    # reaches the model is given back below.
+    with_file = [s for s in slots if s in collected.rows or s in collected.parts]
+    async with session_scope() as counter:
+        reserved = await reserve_document_reads(
+            counter, principal.organization_id, with_file
         )
-        for slot, part in sub.documents.items()
-    }
+    sent: set[str] = set()
+    try:
+        files = await fetch_files(collected, list(reserved), s3)
+        documents = {
+            slot: DocumentInput(
+                option=part.option, fields=part.fields, file=files.get(slot)
+            )
+            for slot, part in sub.documents.items()
+        }
 
-    # The daily cap: each file about to go to the model takes one read, on
-    # a session of its own (reads run in parallel and may be cancelled at
-    # the time limit; the request's session stays out of it).
-    async def take_read(slot: str) -> bool:
-        async with session_scope() as counter:
-            return await take_document_read(counter, principal.organization_id, slot)
+        async def mark_sent(slot: str) -> bool:
+            sent.add(slot)
+            return True
 
-    return await check_documents(
-        requirements,
-        sub.fields,
-        sub.address,
-        documents,
-        today=datetime.now(timezone.utc).date(),
-        before_send=take_read,
-    )
+        return await check_documents(
+            requirements,
+            sub.fields,
+            sub.address,
+            documents,
+            today=datetime.now(timezone.utc).date(),
+            before_send=mark_sent,
+            skipped=[s for s in with_file if s not in reserved],
+        )
+    finally:
+        unsent = [row_id for slot, row_id in reserved.items() if slot not in sent]
+        if unsent:
+            async with session_scope() as counter:
+                await release_document_reads(counter, unsent)
 
 
 async def _submit_row(

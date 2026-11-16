@@ -226,3 +226,56 @@ async def test_a_read_not_sent_is_not_counted(
     resp = await _post(client, key, files=files)
     assert resp.json()["documents"]["proof_of_identity"]["read"] is False
     assert await document_reads_today(async_session, org_id) == 0
+
+
+async def test_over_the_cap_no_upload_is_fetched(
+    client, org_and_key, carrier, monkeypatch, async_session
+) -> None:
+    """The cap is checked before any file is fetched or decoded."""
+    from unittest.mock import AsyncMock
+
+    from hailhq.api.deps import get_s3_mail_optional
+    from hailhq.api.main import app
+    from hailhq.core import document_reads
+
+    from .test_verifications_uploads import _JPEG, _upload
+
+    monkeypatch.setattr(document_reads, "DAILY_DOCUMENT_READS", 0)
+    calls = _fake_reader(monkeypatch)
+    store = AsyncMock()
+    store.fetch_raw.return_value = _JPEG
+    app.dependency_overrides[get_s3_mail_optional] = lambda: store
+    try:
+        org_id, _, key = org_and_key
+        row = await _upload(async_session, org_id)
+        resp = await client.post(
+            "/verifications/document-check",
+            data=_form(**{"upload.proof_of_identity": str(row.id)}),
+            files={"x": (None, "")},
+            headers=_auth(key),
+        )
+    finally:
+        app.dependency_overrides.pop(get_s3_mail_optional, None)
+    assert resp.status_code == 200
+    assert resp.json()["documents"]["proof_of_identity"]["read"] is False
+    store.fetch_raw.assert_not_awaited()
+    assert calls == []
+
+
+async def test_a_slot_not_in_the_form_is_refused_before_any_file_is_read(
+    client, org_and_key, carrier, monkeypatch
+) -> None:
+    from hailhq.api import verification_files
+
+    async def boom(*_a, **_k):
+        raise AssertionError("no file may be read")
+
+    monkeypatch.setattr(verification_files, "read_file", boom)
+    _, _, key = org_and_key
+    resp = await _post(
+        client,
+        key,
+        documents=json.dumps({"proof_of_identity": {}, "nope": {}}),
+    )
+    assert resp.status_code == 422
+    assert resp.json()["detail"][0]["loc"] == ["body", "documents", "nope"]
