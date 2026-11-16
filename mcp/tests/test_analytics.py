@@ -64,6 +64,8 @@ async def _session(
         "hailhq.core.config.settings.hail_api_key", "" if oauth else "hl_live_test"
     )
     monkeypatch.setattr("hailhq.core.config.settings.next_public_posthog_key", token)
+    # The reload below sets this flag; monkeypatch puts it back after the test.
+    monkeypatch.setattr("hailhq.mcp.tools._analytics_actor", False)
     # A capture that escapes the patch below goes nowhere.
     monkeypatch.setattr(
         "hailhq.core.config.settings.next_public_posthog_host", "http://127.0.0.1:9"
@@ -86,13 +88,14 @@ async def _session(
         "hailhq.mcp.hail_client.HailClient.list_number_regions", regions
     )
     auth = _AUTH if oauth else {}
-    # What _actor_for caches for this bearer when Logfire telemetry is on.
+    # What _actor_for caches for this bearer.
     key = hashlib.sha256(b"user.jwt.token").hexdigest()
     actor = {"organization_id": _ORG, "user_id": _USER, "user_email": _SECRET}
     cache = {key: (time.monotonic() + 300, actor)}
     monkeypatch.setattr("hailhq.mcp.tools._actor_cache", cache)
     call = {"name": "list_number_regions", "arguments": {}}
 
+    # Imported here: building the app at import needs the auth settings above.
     import hailhq.mcp.server as srv
 
     srv = importlib.reload(srv)
