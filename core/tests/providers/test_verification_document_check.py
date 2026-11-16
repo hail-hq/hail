@@ -680,16 +680,17 @@ async def test_reader_skips_a_pdf_over_the_page_limit(
     assert len(calls) == 1
 
 
-async def test_reader_reports_an_answer_only(reader_settings, monkeypatch) -> None:
-    answered: list[int] = []
-    client, _ = _fake_client(_response("{}"))
-    monkeypatch.setattr(document_reader, "_client", client)
-    await _read(on_answer=lambda: answered.append(1))
-    assert answered == [1]
+async def test_reader_reports_a_send_even_when_the_call_fails(
+    reader_settings, monkeypatch
+) -> None:
+    sends: list[int] = []
     client, _ = _fake_client(error=RuntimeError("boom"))
     monkeypatch.setattr(document_reader, "_client", client)
-    await _read(on_answer=lambda: answered.append(1))
-    assert answered == [1]
+    assert await _read(on_send=lambda: sends.append(1)) is None
+    assert sends == [1]
+    # Stopped before the model (not decodable): no send.
+    assert await _read(data=b"not an image", on_send=lambda: sends.append(1)) is None
+    assert sends == [1]
 
 
 async def test_reader_uses_the_document_model_setting(

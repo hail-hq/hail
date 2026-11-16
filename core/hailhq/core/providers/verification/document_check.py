@@ -581,14 +581,14 @@ async def check_documents(
     *,
     today: date,
     reader: Reader | None = None,
-    on_answer: Callable[[str], None] | None = None,
+    on_send: Callable[[str], None] | None = None,
     skipped: Collection[str] = (),
 ) -> VerificationDocumentCheckResponse:
     """Read every slot of this request that has a file, at once, within
     ``CHECK_TIMEOUT_S`` in total. A slot without a file here is not read.
     ``documents[slot].option`` is the type the customer chose, or empty when
-    not chosen yet; the warnings then skip the type check. ``on_answer``
-    runs with the slot name when the model answered for its file.
+    not chosen yet; the warnings then skip the type check. ``on_send``
+    runs with the slot name just before its file goes to the model.
     ``skipped`` slots had a file the caller did not read
     (the daily cap): they come back ``read: false`` with no warning. When
     the caller stops waiting, every read still running is cancelled."""
@@ -612,9 +612,7 @@ async def check_documents(
             schema=_schema(slot, targets),
             # What is left of the request's budget, not a fresh one.
             timeout_s=max(deadline - loop.time(), 0.1),
-            on_answer=(
-                (lambda: on_answer(slot.name)) if on_answer is not None else None
-            ),
+            on_send=((lambda: on_send(slot.name)) if on_send is not None else None),
         )
         return _Read(slot, targets, answer) if answer else None
 

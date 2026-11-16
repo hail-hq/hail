@@ -2457,9 +2457,10 @@ async def check_verification_documents(
 
     # The daily cap, before any file is fetched or decoded: the reads of
     # this request are reserved in one short transaction of their own. A
-    # slot over the cap is not read. A reserved read whose file got no
-    # answer from the model (skipped, failed, out of time) is given back
-    # below.
+    # slot over the cap is not read. A read is used once its file is sent
+    # to the model, whatever happens to the call after (an error, a timeout,
+    # a cancellation). A reserved read whose file was never sent (not
+    # readable, over the limits, not decoded) is given back below.
     with_file = [s for s in slots if s in collected.rows or s in collected.parts]
     if not document_reader_configured():
         # Nothing could read the files: no read is counted, nothing fetched.
@@ -2494,8 +2495,7 @@ async def check_verification_documents(
             sub.address,
             documents,
             today=datetime.now(timezone.utc).date(),
-            # A read counts once the model answered for its file.
-            on_answer=sent.add,
+            on_send=sent.add,
             skipped=[s for s in with_file if s not in reserved],
         )
     finally:

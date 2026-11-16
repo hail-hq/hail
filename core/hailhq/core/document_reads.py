@@ -1,8 +1,10 @@
 """The daily cap on AI document reads (``POST /verifications/document-check``).
 
-Each file the model answers for is one read. The reads of a request are
-reserved before any file is fetched; a reserved read whose file got no
-answer (skipped, failed, out of time) is given back. Hail pays the model
+Each file sent to the model is one read, whatever happens to the call after
+(an error, a timeout, a cancellation): Hail may already be paying for it.
+The reads of a request are reserved before any file is fetched; a reserved
+read whose file was never sent (not readable, over the limits, not decoded)
+is given back. Hail pays the model
 provider for every read, and reads are free to customers for now, so each
 workspace gets at most ``DAILY_DOCUMENT_READS`` per UTC day. Past the cap the
 check skips the model: the slot comes back ``read: false`` with no error and

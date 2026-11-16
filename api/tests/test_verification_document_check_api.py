@@ -47,9 +47,9 @@ def _fake_reader(monkeypatch, answer=_ANSWER):
 
     async def read(**kwargs):
         calls.append(kwargs)
-        # As the real reader: a read counts once the model answered.
-        if answer is not None and kwargs.get("on_answer"):
-            kwargs["on_answer"]()
+        # As the real reader: the read is used once the file is sent.
+        if answer is not None and kwargs.get("on_send"):
+            kwargs["on_send"]()
         return answer
 
     monkeypatch.setattr(document_check, "read_document", read)
@@ -284,16 +284,72 @@ async def test_a_slot_not_in_the_form_is_refused_before_any_file_is_read(
     assert resp.json()["detail"][0]["loc"] == ["body", "documents", "nope"]
 
 
-async def test_a_read_without_an_answer_is_given_back(
+def _real_reader(monkeypatch, error: Exception | None = None):
+    """The real reader with a fake model client: it decodes in the child
+    process, then sends to the fake model."""
+    from types import SimpleNamespace
+
+    from hailhq.core.config import settings
+    from hailhq.core.providers.llm import document_reader
+
+    monkeypatch.setattr(document_check, "read_document", _real_read_document)
+    monkeypatch.setattr(settings, "anthropic_backup_model", "claude-haiku-5-5")
+    monkeypatch.setattr(settings, "anthropic_api_key", "test-key")
+    monkeypatch.setattr(settings, "anthropic_bedrock_region", "")
+    sent: list[dict] = []
+
+    async def create(**kwargs):
+        sent.append(kwargs)
+        if error:
+            raise error
+        return SimpleNamespace(
+            stop_reason="end_turn",
+            content=[SimpleNamespace(type="text", text=json.dumps(_ANSWER))],
+        )
+
+    client = SimpleNamespace(messages=SimpleNamespace(create=create))
+    monkeypatch.setattr(document_reader, "_client", client)
+    return sent
+
+
+def _png_file() -> dict:
+    import io
+
+    from PIL import Image
+
+    out = io.BytesIO()
+    Image.new("RGB", (60, 40), "white").save(out, "PNG")
+    return {"file.proof_of_identity": ("id.png", out.getvalue(), "image/png")}
+
+
+async def test_a_read_whose_file_cannot_be_decoded_is_given_back(
     client, org_and_key, carrier, monkeypatch, async_session
 ) -> None:
     from hailhq.core.document_reads import document_reads_today
 
-    _fake_reader(monkeypatch, None)
+    sent = _real_reader(monkeypatch)
     org_id, _, key = org_and_key
-    resp = await _post(client, key)
+    broken = {"file.proof_of_identity": ("id.png", b"\x89PNG broken", "image/png")}
+    resp = await _post(client, key, files=broken)
     assert resp.json()["documents"]["proof_of_identity"]["read"] is False
+    assert sent == []
     assert await document_reads_today(async_session, org_id) == 0
+
+
+async def test_a_read_sent_to_the_model_counts_even_when_the_call_fails(
+    client, org_and_key, carrier, monkeypatch, async_session
+) -> None:
+    from hailhq.core.document_reads import document_reads_today
+
+    sent = _real_reader(monkeypatch, error=TimeoutError())
+    org_id, _, key = org_and_key
+    resp = await _post(client, key, files=_png_file())
+    assert resp.json()["documents"]["proof_of_identity"]["read"] is False
+    assert len(sent) == 1
+    assert await document_reads_today(async_session, org_id) == 1
+    _real_reader(monkeypatch, error=RuntimeError("upstream 500"))
+    await _post(client, key, files=_png_file())
+    assert await document_reads_today(async_session, org_id) == 2
 
 
 async def test_without_a_reader_nothing_is_counted_or_fetched(

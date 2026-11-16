@@ -135,15 +135,17 @@ async def read_document(
     prompt: str,
     schema: dict[str, Any],
     timeout_s: float,
-    on_answer: Callable[[], None] | None = None,
+    on_send: Callable[[], None] | None = None,
 ) -> dict[str, Any] | None:
     """The model's answer to ``prompt`` about the file, as JSON that matches
     ``schema`` (structured output). None when the reader is not configured,
     the file type is not readable or over the limits, or the call fails,
     times out or is refused: the caller then goes on without it.
-    ``on_answer`` runs when the model answered (whatever it said): a file
-    that never got an answer does not use a read. ``timeout_s`` is the
-    whole budget: the model call gets what the decode left of it."""
+    ``on_send`` runs just before the file goes to the model: from then on
+    the read is used, whatever happens to the call (an error, a timeout, a
+    cancellation). A file stopped before that (not readable, over the
+    limits, not decoded) never uses one. ``timeout_s`` is the whole budget:
+    the model call gets what the decode left of it."""
     if not document_reader_configured() or content_type not in READABLE_TYPES:
         return None
     loop = asyncio.get_running_loop()
@@ -156,6 +158,8 @@ async def read_document(
         else:
             data = await _decode_image(content_type, data)
             content_type = "image/jpeg"
+        if on_send is not None:
+            on_send()
         response = await _get_client().messages.create(
             model=document_reader_model(),
             max_tokens=_MAX_TOKENS,
@@ -182,8 +186,6 @@ async def read_document(
         # the request.
         logger.warning("document read failed (%s)", type(exc).__name__)
         return None
-    if on_answer is not None:
-        on_answer()
     if response.stop_reason != "end_turn":
         logger.warning("document read stopped early (%s)", response.stop_reason)
         return None
