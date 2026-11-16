@@ -76,11 +76,10 @@ Every tool sets the MCP hints `readOnlyHint`, `destructiveHint`, `idempotentHint
 A tool call carries text only, so a file in base64 makes the model write every character into the call. That is slow and fails for most real files. `create_file_upload` returns a one-time link instead, and the agent's shell sends the bytes:
 
 1. `create_file_upload`: `{"purpose": "email_attachment", "filename": "invoice.pdf", "content_type": "application/pdf"}`. The result has `id`, `upload_url`, `expires_at` (15 minutes) and a ready `curl` line.
-2. Run the `curl` line with the file's path after the `@`:
+2. Replace `FILE_PATH` in the `curl` line with the file's absolute path and run it. Keep the single quotes, so a file name cannot run as a command; write any `'` in the path as `'\''`. For `/home/agent/invoice.pdf`:
 
    ```bash
-   curl -sS -X PUT --data-binary @invoice.pdf \
-     -H 'Content-Type: application/pdf' \
+   curl --silent --show-error --globoff --upload-file '/home/agent/invoice.pdf' \
      'https://api.hail.so/v1/uploads/<id>?token=<token>'
    ```
 
