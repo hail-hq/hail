@@ -127,8 +127,8 @@ async def get_sms_trial(
             {
                 429: {
                     "description": (
-                        "The workspace or the phone got 5 codes in the last "
-                        "24 hours."
+                        "The workspace asked for, or the phone got, 5 codes "
+                        "in the last 24 hours."
                     ),
                     "headers": {
                         "Retry-After": {

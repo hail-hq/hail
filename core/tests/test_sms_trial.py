@@ -237,8 +237,7 @@ async def test_sixth_code_in_a_day_is_refused(async_session):
     with pytest.raises(CodeBudgetExceeded) as e:
         await _start(async_session, org)
     assert str(e.value) == (
-        "This phone got the maximum of 5 codes in the last 24 hours. "
-        "Try again later."
+        "Your workspace asked for 5 codes in the last 24 hours. Try again later."
     )
     assert e.value.retry_after == timedelta(hours=24)
     issued = await _start(async_session, org, now=NOW + timedelta(hours=24))
@@ -356,6 +355,10 @@ async def test_phone_code_cap_spans_workspaces(async_session):
     with pytest.raises(CodeBudgetExceeded) as e:
         await _start(async_session, b)
     assert e.value.retry_after == timedelta(hours=24)
+    assert str(e.value) == (
+        "This phone got the maximum of 5 codes in the last 24 hours. "
+        "Try again later."
+    )
     with pytest.raises(CodeBudgetExceeded):
         await _start(async_session, a)
     other = await _start(async_session, b, phone="+14155550143")

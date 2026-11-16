@@ -51,12 +51,23 @@ class PhoneTaken(Exception):
 
 
 class CodeBudgetExceeded(Exception):
-    def __init__(self, retry_after: timedelta) -> None:
-        super().__init__(
-            f"This phone got the maximum of {MAX_CODE_SENDS_PER_DAY} codes in "
-            "the last 24 hours. Try again later."
-        )
+    """The workspace asked for, or the phone got, the most codes allowed in
+    ``CODE_WINDOW``. ``per_phone`` picks which one the copy names."""
+
+    def __init__(self, retry_after: timedelta, *, per_phone: bool) -> None:
+        if per_phone:
+            msg = (
+                f"This phone got the maximum of {MAX_CODE_SENDS_PER_DAY} codes "
+                "in the last 24 hours. Try again later."
+            )
+        else:
+            msg = (
+                f"Your workspace asked for {MAX_CODE_SENDS_PER_DAY} codes in the "
+                "last 24 hours. Try again later."
+            )
+        super().__init__(msg)
         self.retry_after = retry_after
+        self.per_phone = per_phone
 
 
 class NoPendingCode(Exception):
@@ -243,7 +254,7 @@ async def start_phone_proof(
     ]
     if len(log) >= MAX_CODE_SENDS_PER_DAY:
         oldest = min(datetime.fromisoformat(e["at"]) for e in log)
-        raise CodeBudgetExceeded(oldest + CODE_WINDOW - now)
+        raise CodeBudgetExceeded(oldest + CODE_WINDOW - now, per_phone=False)
 
     # Per-phone cap across all workspaces, counting entries left by a
     # workspace that later switched phone. The lock makes the count and the
@@ -260,7 +271,9 @@ async def start_phone_proof(
         )
     ).all()
     if len(at_rows) >= MAX_CODE_SENDS_PER_DAY:
-        raise CodeBudgetExceeded(min(r.at for r in at_rows) + CODE_WINDOW - now)
+        raise CodeBudgetExceeded(
+            min(r.at for r in at_rows) + CODE_WINDOW - now, per_phone=True
+        )
 
     code = f"{secrets.randbelow(10**6):06d}"
     fields = {

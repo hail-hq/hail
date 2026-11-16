@@ -290,8 +290,7 @@ async def test_start_maps_errors(
         assert resp.status_code == 429, resp.text
         assert int(resp.headers["Retry-After"]) > 0
         assert resp.json()["detail"] == (
-            "This phone got the maximum of 5 codes in the last 24 hours. "
-            "Try again later."
+            "Your workspace asked for 5 codes in the last 24 hours. Try again later."
         )
     assert sms_mock.send_sms.call_count == sends
 
