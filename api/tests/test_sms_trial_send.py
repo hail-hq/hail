@@ -17,6 +17,7 @@ from hailhq.core.sms_trial import (
 )
 from sqlalchemy import func, select, text, update
 
+from .test_sms_api import STATUS_AUTH_TOKEN, _signed_status_form
 from .conftest import (
     approve_us_sms,
     insert_org_and_key,
@@ -381,3 +382,56 @@ async def test_cap_counts_only_this_workspace(
 
     assert resp.status_code == 201, resp.text
     assert resp.json()["from_e164"] == TRIAL_E164
+
+
+async def test_trial_text_refused_at_create_is_recorded_and_not_counted(
+    client, async_session, org_and_key, sms_mock, monkeypatch
+) -> None:
+    from hailhq.core.providers.sms import ProviderSmsResult
+
+    org_id, _, plaintext = org_and_key
+    await seed_sms_trial(async_session, monkeypatch)
+    await verify_trial_phone(async_session, org_id)
+    sms_mock.send_sms.side_effect = None
+    sms_mock.send_sms.return_value = ProviderSmsResult(
+        provider_message_sid="SM_stopped",
+        status="failed",
+        segment_count=1,
+        error_code="21610",
+    )
+
+    resp = await client.post("/sms", json=_payload(), headers=_auth(plaintext))
+
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["status"] == "failed"
+    assert resp.json()["error_code"] == "21610"
+    assert await trial_texts_used(async_session, org_id) == 0
+
+
+async def test_trial_text_refused_by_callback_frees_the_cap(
+    client, async_session, org_and_key, sms_mock, monkeypatch
+) -> None:
+    org_id, _, plaintext = org_and_key
+    await seed_sms_trial(async_session, monkeypatch)
+    await verify_trial_phone(async_session, org_id)
+    monkeypatch.setattr(settings, "twilio_auth_token", STATUS_AUTH_TOKEN)
+    monkeypatch.setattr(settings, "hail_api_url", "http://t")
+
+    sent = await client.post("/sms", json=_payload(), headers=_auth(plaintext))
+    assert sent.status_code == 201, sent.text
+    assert await trial_texts_used(async_session, org_id) == 1
+    sid = (
+        await async_session.get(Sms, uuid.UUID(sent.json()["id"]))
+    ).provider_message_sid
+
+    form, headers = _signed_status_form(
+        {"MessageSid": sid, "MessageStatus": "failed", "ErrorCode": "21610"}
+    )
+    cb = await client.post("/sms/status", data=form, headers=headers)
+    assert cb.status_code == 200
+    assert cb.json() == {"status": "applied"}
+
+    async_session.expire_all()
+    assert await trial_texts_used(async_session, org_id) == 0
+    row = await async_session.get(Sms, uuid.UUID(sent.json()["id"]))
+    assert row.error_code == "21610"

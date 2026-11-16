@@ -481,16 +481,38 @@ async def create_sms(
 TERMINAL_SMS_STATUSES = frozenset({"delivered", "undelivered", "failed"})
 
 
-async def apply_sms_status(db: AsyncSession, sms: Sms, new_status: str) -> None:
-    """Record a status change and fan out terminal ones. Caller commits."""
+async def apply_sms_status(
+    db: AsyncSession,
+    sms: Sms,
+    new_status: str,
+    *,
+    error_code: str | None = None,
+) -> None:
+    """Record a status change and fan out terminal ones. Caller commits.
+
+    A carrier ``error_code`` (a Twilio 21610 after a STOP, for example) is
+    kept on the row when the row has none, and rides on the event and fan-out.
+    """
     prior = sms.status
     sms.status = new_status
+    if error_code is not None and not sms.error_code:
+        sms.error_code = error_code
+    event_payload: dict[str, str] = {"from": prior, "to": new_status}
+    data = {
+        "id": str(sms.id),
+        "to": sms.to_e164,
+        "from": sms.from_e164,
+        "status": new_status,
+    }
+    if error_code is not None:
+        event_payload["error_code"] = error_code
+        data["error_code"] = error_code
     db.add(
         SmsEvent(
             sms_id=sms.id,
             organization_id=sms.organization_id,
             kind="state_change",
-            payload={"from": prior, "to": new_status},
+            payload=event_payload,
         )
     )
     if new_status in TERMINAL_SMS_STATUSES:
@@ -499,12 +521,7 @@ async def apply_sms_status(db: AsyncSession, sms: Sms, new_status: str) -> None:
             organization_id=sms.organization_id,
             event_type=f"sms.{new_status}",
             event_id=sms.id,
-            data={
-                "id": str(sms.id),
-                "to": sms.to_e164,
-                "from": sms.from_e164,
-                "status": new_status,
-            },
+            data=data,
         )
 
 
