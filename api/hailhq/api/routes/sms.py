@@ -71,6 +71,12 @@ from hailhq.core.sms_registration_gate import (
     us_registration_block,
 )
 from hailhq.core.sms_setup import org_messaging_service_sid
+from hailhq.core.sms_trial import (
+    TRIAL_HINT,
+    TrialBodyTooLong,
+    claim_trial_send,
+    trial_enabled,
+)
 from hailhq.core.telemetry_identity import tag_context
 from hailhq.core.urls import join_url
 from hailhq.core.webhook_fanout import fanout_sms_event
@@ -299,7 +305,43 @@ async def create_sms(
     # SmsSenderIdentity query on explicit-``from`` sends.
     from_number = None
     from_e164 = None
-    if body.from_ is None:
+    sms_body = body.body
+    metadata = dict(body.metadata)
+    # No ``from`` and a US recipient: prefer a number on an approved US SMS
+    # registration, the only kind the registration gate lets through.
+    registered = (
+        await registered_sms_number(db, principal.organization_id)
+        if body.from_ is None and is_us(body.to)
+        else None
+    )
+    # Trial texts: no ``from`` and no registered number, or ``from`` names
+    # the trial number. ``claim_trial_send`` decides the rest.
+    trial = None
+    trial_from = body.from_ is not None and body.from_ == settings.hail_sms_trial_number
+    if trial_from or (body.from_ is None and is_us(body.to) and registered is None):
+        try:
+            trial = await claim_trial_send(
+                db,
+                principal.organization_id,
+                to=body.to,
+                body=body.body,
+                limit=1600,
+                explicit_from=body.from_,
+            )
+        except TrialBodyTooLong as exc:
+            # The claim holds the workspace lock: release it before answering.
+            await db.rollback()
+            raise await cache_failure(
+                idem, unprocessable(str(exc), loc=["body", "body"])
+            ) from None
+    if trial is not None:
+        # The claim holds the workspace lock: nothing commits before the
+        # insert and commit below, in this same transaction.
+        from_number = trial.number
+        from_e164 = trial.number.e164
+        sms_body = trial.body
+        metadata = {**metadata, **trial.metadata}
+    elif body.from_ is None:
         sender_id_row = (
             await db.execute(
                 select(SmsSenderIdentity).where(
@@ -320,15 +362,11 @@ async def create_sms(
     if from_e164 is None:
         # Explicit ``from``, or a corridor that still requires a dedicated
         # SMS-capable number.
-        # No ``from`` and a US recipient: prefer a number on an approved US
-        # SMS registration, the only kind the gate below lets through.
-        from_number = (
-            await registered_sms_number(db, principal.organization_id)
-            if body.from_ is None and is_us(body.to)
-            else None
-        ) or await resolve_org_number(
+        from_number = registered or await resolve_org_number(
             db, principal.organization_id, body.from_, capability="sms"
         )
+        # A US text the trial could send: the refusal says how.
+        hint = " " + TRIAL_HINT if trial_enabled() and is_us(body.to) else ""
         if from_number is None:
             if body.from_ is not None:
                 msg = (
@@ -339,13 +377,15 @@ async def create_sms(
                 msg = (
                     "no dedicated SMS-capable phone number on this organization; "
                     "SMS requires a dedicated number, not the shared voice pool"
-                )
+                ) + hint
             raise await cache_failure(idem, unprocessable(msg, loc=["body", "from"]))
         block = await us_registration_block(
             db, principal.organization_id, from_number, body.to
         )
         if block:
-            raise await cache_failure(idem, unprocessable(block, loc=["body", "from"]))
+            raise await cache_failure(
+                idem, unprocessable(block + hint, loc=["body", "from"])
+            )
         from_e164 = from_number.e164
 
     sms = Sms(
@@ -360,8 +400,8 @@ async def create_sms(
         to_e164=body.to,
         direction="outbound",
         status="queued",
-        body=body.body,
-        metadata_=dict(body.metadata),
+        body=sms_body,
+        metadata_=metadata,
     )
     # No refresh needed: expire_on_commit=False and asyncpg INSERT..RETURNING
     # (eager_defaults) leave id/timestamps populated on the instance.

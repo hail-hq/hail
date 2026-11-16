@@ -471,7 +471,9 @@ class SmsCreate(ConsentAttestationMixin):
             "always use 'HAIL', depending on the carrier. Every other destination, "
             "including the US and Canada, "
             "uses the organization's oldest active SMS-capable number; if none "
-            "exists the request fails with 422. SMS never uses the shared pool."
+            "exists the request fails with 422. SMS never uses the shared pool. "
+            "A US workspace without an approved registration can omit from to "
+            "send up to 25 trial texts to its verified trial phone."
         ),
     )
     body: str = Field(
@@ -483,11 +485,22 @@ class SmsCreate(ConsentAttestationMixin):
         default_factory=dict,
         description=(
             "Free-form JSON object attached to the message and echoed back "
-            "on reads. Not interpreted by Hail."
+            "on reads. Not interpreted by Hail. The key 'sms_trial' is "
+            "reserved and rejected."
         ),
     )
 
     _validate_e164 = field_validator("to", "from_")(_e164_or_error)
+
+    @field_validator("metadata")
+    @classmethod
+    def _metadata_has_no_reserved_keys(cls, v: dict) -> dict:
+        # Trial texts are counted by this key (sms_trial.SMS_TRIAL_META_KEY;
+        # a literal here because models imports this module). A caller must
+        # not be able to plant it.
+        if "sms_trial" in v:
+            raise ValueError("metadata keys are reserved: sms_trial")
+        return v
 
 
 SmsStatus = Literal["queued", "sent", "delivered", "failed", "undelivered", "received"]
