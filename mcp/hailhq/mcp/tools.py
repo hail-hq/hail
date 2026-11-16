@@ -98,6 +98,7 @@ from typing import Annotated, Any, Literal, get_args
 
 import httpx
 from hailhq.core.carrier_offer import SubjectType
+from hailhq.core.config import settings
 from hailhq.core.file_uploads import (
     PURPOSES as _UPLOAD_PURPOSES,
 )
@@ -1768,7 +1769,10 @@ def cached_actor_ids(bearer: str) -> tuple[str | None, str | None]:
 @contextlib.asynccontextmanager
 async def _actor_for(client: HailClient, cache_key: str | None = None):
     identity: dict[str, Any] = {}
-    if telemetry_enabled():
+    # Logfire tags spans with the actor. PostHog analytics reads the cache
+    # (``cached_actor_ids``), which exists only for per-bearer clients.
+    tracing = telemetry_enabled()
+    if tracing or (cache_key and settings.next_public_posthog_key):
         key = _actor_cache_key(cache_key) if cache_key else None
         hit = _actor_cache.get(key) if key else None
         if hit and hit[0] > time.monotonic():
@@ -1785,7 +1789,7 @@ async def _actor_for(client: HailClient, cache_key: str | None = None):
                     "actor_kind": actor.get("auth_kind"),
                 }
                 org_id = actor.get("organization_id")
-                if org_id:
+                if org_id and tracing:
                     identity["organization_name"] = await fetch_organization_name(
                         str(org_id)
                     )

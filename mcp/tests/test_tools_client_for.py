@@ -108,3 +108,26 @@ async def test_actor_enrichment_failure_does_not_prevent_tool_execution(monkeypa
     client = SimpleNamespace(whoami=AsyncMock(side_effect=RuntimeError("unavailable")))
     async with tools._actor_for(client):
         assert get_identity() == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cache_key", ["user.jwt", None])
+async def test_analytics_fills_actor_cache_without_logfire(monkeypatch, cache_key):
+    from unittest.mock import AsyncMock
+
+    from hailhq.mcp import tools
+
+    monkeypatch.setattr(tools, "telemetry_enabled", lambda: False)
+    monkeypatch.setattr(tools.settings, "next_public_posthog_key", "phc_test")
+    monkeypatch.setattr(tools, "_actor_cache", {})
+    org_name = AsyncMock(return_value="Example Workspace")
+    monkeypatch.setattr(tools, "fetch_organization_name", org_name)
+    whoami = AsyncMock(return_value={"organization_id": "org-id", "user_id": "user-id"})
+    async with tools._actor_for(SimpleNamespace(whoami=whoami), cache_key=cache_key):
+        pass
+    org_name.assert_not_awaited()
+    if cache_key:
+        assert tools.cached_actor_ids(cache_key) == ("org-id", "user-id")
+    else:
+        # Static-key mode has no per-bearer cache for analytics to read.
+        whoami.assert_not_awaited()

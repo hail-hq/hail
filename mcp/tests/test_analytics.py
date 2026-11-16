@@ -86,7 +86,7 @@ async def _session(
         "hailhq.mcp.hail_client.HailClient.list_number_regions", regions
     )
     auth = _AUTH if oauth else {}
-    # What _actor_for caches for this bearer when Logfire telemetry is on.
+    # What _actor_for caches for this bearer.
     key = hashlib.sha256(b"user.jwt.token").hexdigest()
     actor = {"organization_id": _ORG, "user_id": _USER, "user_email": _SECRET}
     cache = {key: (time.monotonic() + 300, actor)}
