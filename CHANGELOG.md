@@ -6,6 +6,8 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Added
 
+- [Hail for Vercel Chat SDK](https://github.com/hail-hq/chat-sdk-adapter/releases/tag/v0.1.0): the published [`@hail-hq/chat-sdk-adapter`](https://www.npmjs.com/package/@hail-hq/chat-sdk-adapter) connects SMS webhooks and replies to Chat SDK. Hail maintains the adapter; its Vercel vendor-official listing requires separate acceptance.
+
 - MCP: the server now sends usage instructions, a website link and a vector icon when a client connects. Every tool input has a description.
 - MCP: supports protocol 2026-07-28 (`server/discover`) and sends a title and description.
 - Upload links: `POST /v1/uploads` returns a one-time URL to `PUT` a file to with no key, for email attachments and verification documents. `POST /v1/verifications/check` checks a verification form without filing it. MCP: `create_file_upload` and `check_verification`.
