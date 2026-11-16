@@ -9,20 +9,43 @@ Rules:
 - Sell the outcome: the AI gets its own phone number and email inbox.
 - Always write "email inbox", never "inbox" alone. Non-native English readers may not know the word. `validate_submission.py` fails on a bare "inbox".
 - Use one wording everywhere. Do not A/B test across directories: traffic per listing is too small to compare.
+- Each pasted copy in a submission file sits between `<!-- copy:NAME -->` and `<!-- /copy -->`. CI fails when it differs from the block with the same name below. To change the wording, edit the block here, then the marked copies.
 
 **Tagline** (47 characters; fits Claude's 55 and Product Hunt's 60):
 
+<!-- copy:tagline -->
+
 > Give your AI a phone number and an email inbox.
+
+<!-- /copy -->
 
 **Short** (92 characters; fits the 100-character MCP Registry `description`):
 
+<!-- copy:short -->
+
 > A real phone number and email inbox for your AI agent. Calls, texts, and email in one place.
+
+<!-- /copy -->
 
 **Medium** (243 characters; fits Product Hunt's 260 and card descriptions):
 
+<!-- copy:medium -->
+
 > Hail gives your AI agent its own phone number and email inbox. It answers calls like an AI receptionist, calls back, texts, and replies to email. It remembers each person. Get a number in 120+ countries. Works with Claude, ChatGPT, and Cursor.
 
+<!-- /copy -->
+
+**Speed line** (for the GitHub repo description and the `README.md` header; the owner wants it tried as a strong second line in more places, such as a hail.so section heading or the footer):
+
+<!-- copy:speed -->
+
+> Give your agent a real phone number and an email inbox, in minutes, not days.
+
+<!-- /copy -->
+
 **Long** (825 characters; for Claude, Muse, ChatGPT and other long description fields):
+
+<!-- copy:long -->
 
 > Hail gives your AI agent a real phone number and an email inbox. Then your agent can do the work people do on the phone and in email.
 >
@@ -35,6 +58,8 @@ Rules:
 > Connect Hail to Claude, ChatGPT, Cursor, or another MCP client in minutes, with nothing to install. Or build it into your app with the API, CLI, or Python SDK.
 >
 > Hail is open source. Use Hail Cloud, or host it yourself.
+
+<!-- /copy -->
 
 Search terms in this copy, with US monthly search volume (Ahrefs, October and November 2026): ai receptionist (13,000), ai answering service (3,900), ai phone agent (1,700), phone number for ai agent (20).
 

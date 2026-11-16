@@ -27,7 +27,13 @@ Review the live [Directory Policy](https://support.claude.com/en/articles/131453
 Paste these into the portal at <https://claude.ai/directory/manage>.
 
 - **Name:** Hail
-- **Tagline (55 characters or fewer):** Give your AI a phone number and an email inbox.
+- **Tagline (55 characters or fewer):**
+
+  <!-- copy:tagline -->
+
+  Give your AI a phone number and an email inbox.
+  <!-- /copy -->
+
 - **Categories:** Communication, Productivity, Developer Tools
 - **Docs URL:** <https://hail.so/docs/mcp>
 - **Privacy policy URL:** <https://hail.so/legal/privacy>
@@ -37,6 +43,8 @@ Paste these into the portal at <https://claude.ai/directory/manage>.
 - **Icon:** the square monogram from the hail-website repo, `public/assets/brand/logo/monogram-512.png`.
 
 **Description (2,000 characters or fewer):**
+
+<!-- copy:long -->
 
 > Hail gives your AI agent a real phone number and an email inbox. Then your agent can do the work people do on the phone and in email.
 >
@@ -49,6 +57,8 @@ Paste these into the portal at <https://claude.ai/directory/manage>.
 > Connect Hail to Claude, ChatGPT, Cursor, or another MCP client in minutes, with nothing to install. Or build it into your app with the API, CLI, or Python SDK.
 >
 > Hail is open source. Use Hail Cloud, or host it yourself.
+
+<!-- /copy -->
 
 **Use cases:**
 

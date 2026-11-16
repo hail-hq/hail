@@ -50,11 +50,21 @@ status: n/a
 
 **Name:** Hail
 
-**One-liner:** Give your AI a phone number and an email inbox.
+**One-liner:**
+
+<!-- copy:tagline -->
+
+Give your AI a phone number and an email inbox.
+
+<!-- /copy -->
 
 **Description:**
 
+<!-- copy:medium -->
+
 Hail gives your AI agent its own phone number and email inbox. It answers calls like an AI receptionist, calls back, texts, and replies to email. It remembers each person. Get a number in 120+ countries. Works with Claude, ChatGPT, and Cursor.
+
+<!-- /copy -->
 
 **Server URL (paste into Smithery):**
 

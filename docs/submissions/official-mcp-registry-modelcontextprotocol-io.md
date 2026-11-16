@@ -139,9 +139,15 @@ Flip `status: submitted` (then `submitted (live)`) in this file's frontmatter an
 
 **One-liner** (for `description` / anywhere a short pitch is needed):
 
+<!-- copy:short -->
+
 > A real phone number and email inbox for your AI agent. Calls, texts, and email in one place.
 
+<!-- /copy -->
+
 **Longer description** (for `websiteUrl` context / any registry aggregator that mirrors this listing with more room):
+
+<!-- copy:long -->
 
 > Hail gives your AI agent a real phone number and an email inbox. Then your agent can do the work people do on the phone and in email.
 >
@@ -154,6 +160,8 @@ Flip `status: submitted` (then `submitted (live)`) in this file's frontmatter an
 > Connect Hail to Claude, ChatGPT, Cursor, or another MCP client in minutes, with nothing to install. Or build it into your app with the API, CLI, or Python SDK.
 >
 > Hail is open source. Use Hail Cloud, or host it yourself.
+
+<!-- /copy -->
 
 **`server.json`**. **Corrected 2026-07-07: using GitHub-org naming (Path B), and a shortened description (the original 222-char version fails real schema validation, 100-char hard limit).** The live file is [`mcp/server.json`](../../mcp/server.json). Edit it there and bump `version`; merging publishes it.
 

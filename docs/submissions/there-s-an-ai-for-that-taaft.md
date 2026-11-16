@@ -43,13 +43,24 @@ status: drafted
 **Tool URL:** `https://hail.so`
 
 **One-liner (tagline):**
+
+<!-- copy:tagline -->
+
 Give your AI a phone number and an email inbox.
+
+<!-- /copy -->
 
 **Short description:**
 
+<!-- copy:medium -->
+
 Hail gives your AI agent its own phone number and email inbox. It answers calls like an AI receptionist, calls back, texts, and replies to email. It remembers each person. Get a number in 120+ countries. Works with Claude, ChatGPT, and Cursor.
 
+<!-- /copy -->
+
 **Full description:**
+
+<!-- copy:long -->
 
 Hail gives your AI agent a real phone number and an email inbox. Then your agent can do the work people do on the phone and in email.
 
@@ -62,6 +73,8 @@ Get a local or toll-free number in 120+ countries. Hail helps with the paperwork
 Connect Hail to Claude, ChatGPT, Cursor, or another MCP client in minutes, with nothing to install. Or build it into your app with the API, CLI, or Python SDK.
 
 Hail is open source. Use Hail Cloud, or host it yourself.
+
+<!-- /copy -->
 
 **Tags/keywords:** AI agents, voice calls, SMS, email, communication API, MCP server, developer tools, self-hosted, open source, CLI, Python SDK, deliverability, automation
 

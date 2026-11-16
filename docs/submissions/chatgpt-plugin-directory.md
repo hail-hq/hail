@@ -54,6 +54,7 @@ Negative test cases (Hail tools must not run):
 3. "Translate 'good morning' into Spanish."
 
 Other items:
+
 - Release notes.
 - Reviewer credentials, entered in the dashboard form "Review details". Never put them in the plugin package (the ZIP file uploaded on the Plugins page). OpenAI rejects a package that contains `test_credentials` or `reviewer_instructions`.
 - `websiteURL`: `https://hail.so`

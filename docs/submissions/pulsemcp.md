@@ -34,11 +34,19 @@ Nothing to paste into a PulseMCP-specific field — there is none. The listing i
 
 **One-liner:**
 
+<!-- copy:short -->
+
 > A real phone number and email inbox for your AI agent. Calls, texts, and email in one place.
+
+<!-- /copy -->
 
 **Description** (mirrors the `server.json` `description` field the crawler ingests):
 
+<!-- copy:short -->
+
 > A real phone number and email inbox for your AI agent. Calls, texts, and email in one place.
+
+<!-- /copy -->
 
 **Repo / manual-fallback URL:**
 

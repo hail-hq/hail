@@ -44,9 +44,17 @@ status: drafted
 
 **Repo:** `https://github.com/hail-hq/hail`
 
-**One-liner:** Give your AI a phone number and an email inbox.
+**One-liner:**
+
+<!-- copy:tagline -->
+
+Give your AI a phone number and an email inbox.
+
+<!-- /copy -->
 
 **Description (long):**
+
+<!-- copy:long -->
 
 Hail gives your AI agent a real phone number and an email inbox. Then your agent can do the work people do on the phone and in email.
 
@@ -59,6 +67,8 @@ Get a local or toll-free number in 120+ countries. Hail helps with the paperwork
 Connect Hail to Claude, ChatGPT, Cursor, or another MCP client in minutes, with nothing to install. Or build it into your app with the API, CLI, or Python SDK.
 
 Hail is open source. Use Hail Cloud, or host it yourself.
+
+<!-- /copy -->
 
 **License:** Open Source — AGPL-3.0-or-later ([`LICENSE`](../../LICENSE))
 

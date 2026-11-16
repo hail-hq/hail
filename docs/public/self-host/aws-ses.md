@@ -60,7 +60,7 @@ This is operator setup, done once per deployment. Hail does not configure SES fo
 
 > This MAIL FROM subdomain — `bounces.mail.hail.so` on the **operator parent** — is operator-managed: you configure it once, manually, in the steps above. **Custom tenant domains are different**: Hail configures their MAIL FROM automatically. `POST /email-domains` (kind=`custom`) calls `PutEmailIdentityMailFromAttributes` for `send.<domain>` and returns the MX + SPF records to publish together with the DKIM CNAMEs. `POST /email-domains/{id}/verify` then re-polls both the DKIM status and the MAIL FROM status. Refer to §7.
 
-## 5. DMARC alignment (required for inbox delivery)
+## 5. DMARC alignment (required for email inbox delivery)
 
 Without an aligned MAIL FROM, SES uses `<random>@amazonses.com` as the Return-Path. SPF then authenticates against `amazonses.com`, not against your domain. This breaks DMARC alignment, and the DMARC policies of recipients push your mail to spam.
 
@@ -68,7 +68,7 @@ With `bounces.mail.hail.so` as MAIL FROM:
 
 - **SPF** authenticates against `bounces.mail.hail.so` → aligns with the From-domain `mail.hail.so`.
 - **DKIM** signs with `mail.hail.so` → aligns.
-- Both aligned → DMARC `pass` → inbox.
+- Both aligned → DMARC `pass` → email inbox.
 
 Publish a DMARC record. Start at `p=none` (monitor-only). Increase the policy after some weeks of clean reports:
 
@@ -423,7 +423,7 @@ the SES side in [`infra/terraform/ses_events.tf`](https://github.com/hail-hq/hai
 Tenants configure routing per `email_domains` row:
 
 ```bash
-# Forward every inbound on the org's hail-mail address to a real inbox
+# Forward every inbound on the org's hail-mail address to a real email inbox
 curl -X PATCH $HAIL_API_URL/v1/email-domains/$DOMAIN_ID \
   -H "Authorization: Bearer $HAIL_API_KEY" \
   -H "Content-Type: application/json" \
