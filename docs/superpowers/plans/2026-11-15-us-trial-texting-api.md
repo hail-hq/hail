@@ -166,7 +166,7 @@ git commit -m "feat(sms): trial texting setting and body wrapper"
   - `phone_e164: str` not null
   - `status: str` default `'pending'`, CHECK `sms_trial_phones_status_check`: `status IN ('pending','verified')`
   - `code_hash: str | None`, `code_expires_at: datetime | None`, `code_attempts: int` default 0
-  - `code_sends: int` default 0, `code_window_started_at: datetime | None`
+  - `code_send_log: list` JSONB not null default `'[]'`: one `{"phone", "at"}` entry per code text, pruned to the last 24 hours on write (rolling per-workspace and per-phone budgets; a phone-keyed `key_lock` guards the per-phone count)
   - `consent_version: str` not null, `consent_at: datetime` not null, `consent_user_id: UUID | None`
   - `verified_at: datetime | None`, `created_at`, `updated_at` (`now()`)
   - Partial unique index `sms_trial_phones_verified_phone_uq` on `(phone_e164)` WHERE `status = 'verified'`
