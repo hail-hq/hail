@@ -239,7 +239,7 @@ registration does not verify toll-free messaging.
 
 **Open decision: charge per read or keep free.** Reads are free to customers now; Hail pays the provider. Options:
 
-1. Charge per read from credits. Needs a price in hail-website `lib/private-rates.ts` and a usage row the rater prices.
+1. Charge per read from credits. Needs a per-read price in the website rater (prices are kept out of this repo) and a usage row the rater prices.
 2. Keep free, with the daily cap (today).
 3. Free only for workspaces that hold credits; others fill the form by hand.
 
