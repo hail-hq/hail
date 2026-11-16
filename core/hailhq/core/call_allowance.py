@@ -240,8 +240,9 @@ async def forget_price(db: AsyncSession, call_id: uuid.UUID) -> None:
     """Mark the call's hold as run at an unknown price (a handover whose
     quote failed), so the full hold counts after the call ends, and count
     the approved dial, so a later handover's hold covers it. A call that
-    holds nothing (an inbound call) gets a 0-cent row, so a later priced
-    handover keeps the prices unknown and counts this dial too."""
+    holds nothing (inbound, or started at an unknown price) gets a 0-cent
+    row, so a later priced handover keeps the prices unknown and counts
+    this dial too."""
     await hold(
         db,
         call_id,

@@ -642,6 +642,39 @@ async def test_handover_unknown_price_uses_the_agent_limit(
     )
 
 
+async def test_priced_handover_counts_an_earlier_unpriced_dial(
+    client, async_session, add_phone_number, quote, monkeypatch
+):
+    monkeypatch.setattr(settings, "livekit_twilio_sip_outbound_trunk_id", "ST_tw")
+    quote.price = None
+    data, call = await _handover(
+        client, async_session, add_phone_number, 100_000, timedelta(seconds=30)
+    )
+    assert data["max_seconds"] is None
+    quote.price = (Decimal(20), Decimal(0))
+    contact = (
+        await async_session.execute(
+            select(Contact).where(Contact.organization_id == call.organization_id)
+        )
+    ).scalar_one()
+    body = json.dumps({"call_id": str(call.id), "contact_id": str(contact.id)})
+    r = await client.post(
+        "/internal/agent/handover",
+        content=body.encode(),
+        headers={
+            "Content-Type": "application/json",
+            "X-Hail-Signature": hmac_signing.sign(body.encode(), SECRET),
+        },
+    )
+    assert r.json()["ok"] is True
+    # The priced handover counts the earlier dial, and its price stays
+    # unknown, so the full hold counts once the call ends.
+    row = await _hold(async_session, call.id)
+    assert row.dials == 2
+    assert row.cents > 0
+    assert (row.cents_per_minute, row.cents_per_call) == (None, None)
+
+
 async def test_handover_unknown_price_counts_the_full_hold(
     client, async_session, add_phone_number, quote, monkeypatch
 ):
