@@ -199,6 +199,26 @@ async def start_phone_proof(
     if sends >= MAX_CODE_SENDS_PER_DAY:
         raise CodeBudgetExceeded(window_start + CODE_WINDOW - now)
 
+    # Per-phone cap across all workspaces, so many workspaces cannot flood
+    # one phone with codes.
+    recent = (
+        await db.execute(
+            select(
+                SmsTrialPhone.code_sends, SmsTrialPhone.code_window_started_at
+            ).where(
+                SmsTrialPhone.phone_e164 == phone,
+                SmsTrialPhone.organization_id != organization_id,
+                SmsTrialPhone.code_window_started_at > now - CODE_WINDOW,
+            )
+        )
+    ).all()
+    phone_sends = sends + sum(r.code_sends for r in recent)
+    if phone_sends >= MAX_CODE_SENDS_PER_DAY:
+        starts = [r.code_window_started_at for r in recent]
+        if sends:
+            starts.append(window_start)
+        raise CodeBudgetExceeded(min(starts) + CODE_WINDOW - now)
+
     code = f"{secrets.randbelow(10**6):06d}"
     fields = {
         "phone_e164": phone,
@@ -249,13 +269,13 @@ async def confirm_phone(
             row.code_expires_at = None
         await db.flush()
         raise WrongCode(tries_left)
-    row.status = "verified"
-    row.verified_at = now
-    row.code_hash = None
-    row.code_expires_at = None
-    row.code_attempts = 0
     try:
         async with db.begin_nested():
+            row.status = "verified"
+            row.verified_at = now
+            row.code_hash = None
+            row.code_expires_at = None
+            row.code_attempts = 0
             await db.flush()
     except IntegrityError as exc:
         raise PhoneTaken() from exc

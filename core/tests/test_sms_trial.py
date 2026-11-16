@@ -314,3 +314,24 @@ async def test_confirm_race_second_workspace_gets_phone_taken(async_session):
     await confirm_phone(async_session, a, ia.code, now=NOW)
     with pytest.raises(PhoneTaken):
         await confirm_phone(async_session, b, ib.code, now=NOW)
+    row_b = await get_trial_phone(async_session, b)
+    assert row_b.status == "pending" and row_b.code_hash is not None
+    row_b.code_attempts = 1
+    await async_session.flush()
+
+
+async def test_phone_code_cap_spans_workspaces(async_session):
+    a, b = await _org(async_session), await _org(async_session)
+    for _ in range(3):
+        await _start(async_session, a)
+    for _ in range(2):
+        await _start(async_session, b)
+    with pytest.raises(CodeBudgetExceeded) as e:
+        await _start(async_session, b)
+    assert e.value.retry_after == timedelta(hours=24)
+    with pytest.raises(CodeBudgetExceeded):
+        await _start(async_session, a)
+    other = await _start(async_session, b, phone="+14155550143")
+    assert other.code is not None
+    later = await _start(async_session, b, now=NOW + timedelta(hours=24))
+    assert later.code is not None
