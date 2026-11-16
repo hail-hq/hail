@@ -48,6 +48,7 @@ from hailhq.core.testing.fixtures import (  # noqa: F401
 )
 from jwt.algorithms import OKPAlgorithm as _OKPAlgorithm
 from sqlalchemy.ext.asyncio import AsyncSession
+from twilio.request_validator import RequestValidator
 
 
 def mint_test_key() -> tuple[str, str]:
@@ -608,3 +609,14 @@ async def seed_trial_texts(
             )
         )
     await session.commit()
+
+
+STATUS_AUTH_TOKEN = "test-twilio-auth-token"
+STATUS_URL = "http://t/sms/status"
+
+
+def _signed_status_form(
+    params: dict[str, str],
+) -> tuple[dict[str, str], dict[str, str]]:
+    sig = RequestValidator(STATUS_AUTH_TOKEN).compute_signature(STATUS_URL, params)
+    return params, {"X-Twilio-Signature": sig}

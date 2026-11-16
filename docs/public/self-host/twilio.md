@@ -58,6 +58,13 @@ your approved Trust Hub primary profile (business identity ISV Reseller or
 Partner); without it, SMS registration through Twilio is off. Texts from an
 organization's US long codes to US numbers return 422 until it is approved.
 
+**Trial texting (United States).** Set `HAIL_SMS_TRIAL_NUMBER` to a toll-free
+number in your own organization with approved toll-free verification; empty
+turns it off. Set `HAIL_SMS_TRIAL_SENDING=true` only once that verification
+covers trial texts. Each organization verifies one phone and sends up to 25
+texts to it before its US registration is approved. Code:
+[`core/hailhq/core/sms_trial.py`](../../../core/hailhq/core/sms_trial.py).
+
 **Sender ID (optional, rest-of-world).** For destinations that allow it, set a
 custom alphanumeric sender with `PATCH /sms/sender-id` (read the current value
 with `GET /sms/sender-id`). Clear it by sending `null`. When you set none, Hail

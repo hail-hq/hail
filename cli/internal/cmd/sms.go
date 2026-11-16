@@ -43,6 +43,9 @@ including the US and
 Canada, uses your organization's oldest active SMS-capable number (422 when
 there is none). SMS never uses the shared voice pool.
 
+A US workspace without an approved registration can omit --from to send up to
+25 trial texts to its verified trial phone (console: Numbers > Trial texting).
+
 Example (minimal):
   hail sms +15551234567 --body "Hello!" --recipient-consent`,
 		Args:    argsOrHelp(1, "<to-number>"),

@@ -7,19 +7,13 @@ from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import select
-from twilio.request_validator import RequestValidator
 
-from .conftest import approve_us_sms, insert_org_and_key  # noqa: F401
-
-STATUS_AUTH_TOKEN = "test-twilio-auth-token"
-STATUS_URL = "http://t/sms/status"
-
-
-def _signed_status_form(
-    params: dict[str, str],
-) -> tuple[dict[str, str], dict[str, str]]:
-    sig = RequestValidator(STATUS_AUTH_TOKEN).compute_signature(STATUS_URL, params)
-    return params, {"X-Twilio-Signature": sig}
+from .conftest import (  # noqa: F401
+    STATUS_AUTH_TOKEN,
+    _signed_status_form,
+    approve_us_sms,
+    insert_org_and_key,
+)
 
 
 async def _seed_sent_sms(async_session, organization_id, *, provider_message_sid: str):
@@ -750,7 +744,7 @@ async def test_status_callback_stores_error_code(
             select(WebhookDelivery).where(WebhookDelivery.event_type == "sms.failed")
         )
     ).scalar_one()
-    assert "21610" in str(delivery.payload)
+    assert delivery.payload["data"]["error_code"] == "21610"
 
 
 async def test_sms_status_out_of_order_terminal_callback_is_absorbed(

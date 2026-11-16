@@ -2533,6 +2533,7 @@ def register_tools(
         Other destinations use an eligible workspace SMS-capable number.
         A missing required number returns 422. SMS does not use the shared voice-call pool.
         US long-code texting to US recipients requires ready A2P 10DLC registration and an attached number.
+        Without from_, a workspace without it can send up to 25 trial texts to its own verified phone, set up in the console. Each starts with "[Hail trial]".
 
         Hail does not verify consent.
 
