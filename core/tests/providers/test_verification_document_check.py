@@ -30,6 +30,8 @@ from PIL import Image
 
 TODAY = date(2026, 11, 16)
 _PNG = UploadedFile(filename="upload", content_type="image/png", data=b"\x89PNG")
+# Another file: a file given for two slots is read once.
+_BILL = UploadedFile(filename="upload", content_type="image/png", data=b"\x89PNG-bill")
 
 
 def _req(subject_type="person", address_required=False, fields=None) -> Requirements:
@@ -202,7 +204,7 @@ async def test_the_proof_of_address_fills_the_address_first() -> None:
     req = _req(address_required=True)
     docs = {
         **_docs(),
-        "proof_of_address": DocumentInput(option="utility_bill", file=_PNG),
+        "proof_of_address": DocumentInput(option="utility_bill", file=_BILL),
     }
     id_answer = _answer(values=[{"key": "address.city", "value": "Old Town"}])
     bill = _answer(
@@ -706,7 +708,7 @@ async def test_reader_uses_the_document_model_setting(
 # -- image decoding (in a child process) ------------------------------------
 
 
-def test_decode_refuses_a_png_over_the_pixel_cap(monkeypatch) -> None:
+def test_decode_refuses_a_png_over_the_hard_bound(monkeypatch) -> None:
     from hailhq.core.providers.llm import document_image
 
     monkeypatch.setattr(document_image, "MAX_PIXELS", 40 * 30 - 1)
@@ -921,3 +923,76 @@ async def test_a_part_with_no_letters_is_not_taken_for_the_name() -> None:
         req=req, address={"customer_name": "John Smith"}, reader=_reader(answer)
     )
     assert out.warnings == []
+
+
+# -- review round 4 ----------------------------------------------------------------
+
+
+def test_decode_scales_down_a_600_dpi_a4_scan() -> None:
+    from hailhq.core.providers.llm import document_image
+
+    # 4960 x 7016 pixels: 35 million, over the old 25 million cap.
+    out = Image.open(io.BytesIO(document_image.decode("image/png", _png((4960, 7016)))))
+    assert max(out.size) == document_image.LONG_SIDE
+
+
+async def test_company_legal_forms_with_dots_match() -> None:
+    req = _req(
+        subject_type="business",
+        fields=(FieldSpec(name="business_name", label="Business Name"),),
+    )
+    answer = _answer(business_name="ACME S.A.", given_names="", surnames="")
+    same = await _check(
+        req=req, fields={"business_name": "Acme SA"}, reader=_reader(answer)
+    )
+    assert same.warnings == []
+    kg = _answer(business_name="MUSTER GMBH & CO. KG", given_names="", surnames="")
+    plain = await _check(
+        req=req, fields={"business_name": "Muster"}, reader=_reader(kg)
+    )
+    assert plain.warnings == []
+
+
+async def test_one_file_for_two_slots_is_read_once() -> None:
+    req = _req(address_required=True)
+    docs = {
+        **_docs(),
+        "proof_of_address": DocumentInput(option="utility_bill", file=_PNG),
+    }
+    reader = _reader(
+        _answer(
+            values=[
+                {"key": "proof_of_identity.document_number", "value": "XK1"},
+                {"key": "address.city", "value": "Sampleton"},
+            ]
+        )
+    )
+    sends: list[str] = []
+    out = await check_documents(
+        req, {}, {}, docs, today=TODAY, reader=reader, on_send=sends.append
+    )
+    assert len(reader.calls) == 1
+    call = reader.calls[0]
+    assert "It is also given as: Proof of address." in call["prompt"]
+    assert set(call["schema"]["properties"]["option"]["enum"]) == {
+        "passport",
+        "id_card",
+        "utility_bill",
+        "none",
+    }
+    assert out.documents["proof_of_identity"].fields == {"document_number": "XK1"}
+    assert out.documents["proof_of_address"].read is True
+    assert out.address == {"city": "Sampleton"}
+
+
+async def test_reader_marks_the_send_only_once_the_request_can_go(
+    reader_settings, monkeypatch
+) -> None:
+    sends: list[int] = []
+
+    def broken_client():
+        raise RuntimeError("no client")
+
+    monkeypatch.setattr(document_reader, "_get_client", broken_client)
+    assert await _read(on_send=lambda: sends.append(1)) is None
+    assert sends == []

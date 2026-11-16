@@ -139,9 +139,10 @@ async def test_quote_and_slots_are_checked(client, org_and_key, carrier) -> None
     )
     assert unknown.status_code == 422
     assert unknown.json()["detail"][0]["loc"] == ["body", "documents", "nope"]
+    # A file part for a slot not in documents is left out, as submit does.
     stray = await _post(client, key, documents="{}")
-    assert stray.status_code == 422
-    assert stray.json()["detail"][0]["loc"] == ["body", "file.proof_of_identity"]
+    assert stray.status_code == 200
+    assert stray.json()["documents"] == {}
 
 
 async def test_requires_auth(client) -> None:
@@ -363,3 +364,79 @@ async def test_without_a_reader_nothing_is_counted_or_fetched(
     resp = await _post(client, key)
     assert resp.json()["documents"]["proof_of_identity"]["read"] is False
     assert await document_reads_today(async_session, org_id) == 0
+
+
+async def test_one_upload_in_two_slots_is_read_once_and_counted_once(
+    client, org_and_key, carrier, monkeypatch, async_session
+) -> None:
+    from unittest.mock import AsyncMock
+
+    from hailhq.api.deps import get_s3_mail_optional
+    from hailhq.api.main import app
+    from hailhq.core.document_reads import document_reads_today
+    from hailhq.core.providers.verification import (
+        DocumentOption,
+        DocumentSlot,
+        FieldSpec,
+        Requirements,
+    )
+
+    from .test_verifications_uploads import _JPEG, _upload
+
+    async def two_slots(country_code, number_type, subject_type):
+        passport = (DocumentOption(key="passport", label="Passport"),)
+        return Requirements(
+            provider="fake",
+            country_code=country_code,
+            number_type=number_type,
+            subject_type=subject_type,
+            required=True,
+            fields=(FieldSpec(name="first_name", label="First name"),),
+            documents=(
+                DocumentSlot(name="identity", label="Identity", options=passport),
+                DocumentSlot(name="birth", label="Birth date", options=passport),
+            ),
+            subject_types=("person",),
+        )
+
+    monkeypatch.setattr(carrier, "requirements", two_slots)
+    calls = _fake_reader(monkeypatch)
+    store = AsyncMock()
+    store.fetch_raw.return_value = _JPEG
+    app.dependency_overrides[get_s3_mail_optional] = lambda: store
+    try:
+        org_id, _, key = org_and_key
+        row = await _upload(async_session, org_id)
+        resp = await client.post(
+            "/verifications/document-check",
+            data=_form(
+                documents=json.dumps({"identity": {}, "birth": {}}),
+                **{"upload.identity": str(row.id), "upload.birth": str(row.id)},
+            ),
+            files={"x": (None, "")},
+            headers=_auth(key),
+        )
+    finally:
+        app.dependency_overrides.pop(get_s3_mail_optional, None)
+    assert resp.status_code == 200, resp.text
+    docs = resp.json()["documents"]
+    assert docs["identity"]["read"] and docs["birth"]["read"]
+    assert len(calls) == 1
+    assert store.fetch_raw.await_count == 1
+    assert await document_reads_today(async_session, org_id) == 1
+
+
+async def test_a_failed_give_back_never_hides_the_answer(
+    client, org_and_key, carrier, monkeypatch
+) -> None:
+    from hailhq.api.routes import verifications as routes
+
+    _fake_reader(monkeypatch, None)
+
+    async def broken(*_a, **_k):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(routes, "release_document_reads", broken)
+    _, _, key = org_and_key
+    resp = await _post(client, key)
+    assert resp.status_code == 200

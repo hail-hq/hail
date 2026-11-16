@@ -158,19 +158,20 @@ async def read_document(
         else:
             data = await _decode_image(content_type, data)
             content_type = "image/jpeg"
-        if on_send is not None:
-            on_send()
-        response = await _get_client().messages.create(
-            model=document_reader_model(),
-            max_tokens=_MAX_TOKENS,
+        # Everything that can fail here, before anything leaves: the client,
+        # the request and its time.
+        client = _get_client()
+        request = {
+            "model": document_reader_model(),
+            "max_tokens": _MAX_TOKENS,
             # Haiku 5.5 takes thinking "disabled": fast, and the task is
             # reading, not reasoning.
-            thinking={"type": "disabled"},
-            output_config={
+            "thinking": {"type": "disabled"},
+            "output_config": {
                 "effort": "low",
                 "format": {"type": "json_schema", "schema": schema},
             },
-            messages=[
+            "messages": [
                 {
                     "role": "user",
                     "content": [
@@ -179,8 +180,15 @@ async def read_document(
                     ],
                 }
             ],
-            timeout=max(deadline - loop.time(), 0.1),
-        )
+        }
+        left = deadline - loop.time()
+        if left <= 0:
+            logger.warning("document read skipped: no time left")
+            return None
+        # The read is used from here on, whatever happens to the call.
+        if on_send is not None:
+            on_send()
+        response = await client.messages.create(**request, timeout=left)
     except Exception as exc:
         # Fail open: no warning, no prefill. Never the message: it can quote
         # the request.

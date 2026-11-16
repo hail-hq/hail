@@ -27,12 +27,13 @@ except ImportError:  # not on every platform
 # providers refuse large images (about 5 MB on Anthropic's API, less on
 # Bedrock).
 LONG_SIDE = 1568
-# The most pixels decoded. A PNG over this is refused. A JPEG is first
-# decoded at a reduced scale (``draft``, down to 1/8 per side), so a 48 to
-# 200 million pixel phone photo decodes at about 12 million; it is refused
-# only when still over this after that. Its header may claim up to
+# The most pixels decoded, within the child's 1 GB memory limit (100 million
+# pixels with transparency is 400 MB). A larger scan (a 600 dpi A4 page is
+# 35 million) is decoded, then scaled down. A JPEG is first decoded at a
+# reduced scale (``draft``, down to 1/8 per side), so a 48 to 200 million
+# pixel phone photo decodes at about 12 million. Its header may claim up to
 # ``MAX_HEADER_PIXELS``.
-MAX_PIXELS = 25_000_000
+MAX_PIXELS = 100_000_000
 MAX_HEADER_PIXELS = 256_000_000
 # Pillow decodes only the format the file was declared as, never another
 # format it happens to know. Pillow opens a phone's multi-picture JPEG

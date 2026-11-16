@@ -1719,6 +1719,23 @@ def _duplicate_detail(subject_type: str, subject_name: str | None) -> str:
     )
 
 
+def _form_values(form) -> dict:
+    """The named parts of a verification form, read the same way for
+    submit, check and the document check."""
+    return {
+        "provider": _text_part(form, "provider") or None,
+        "quote_id": _text_part(form, "quote_id") or None,
+        "number_id": _text_part(form, "number_id") or None,
+        "purpose": _text_part(form, "purpose", "number"),
+        "country_code": _text_part(form, "country_code").upper(),
+        "number_type": _text_part(form, "number_type"),
+        "subject_type": _text_part(form, "subject_type"),
+        "fields": _json_part(form, "fields", {}),
+        "address": _json_part(form, "address", None),
+        "documents": _json_part(form, "documents", {}),
+    }
+
+
 def _form_422(exc: ValidationError) -> HTTPException:
     """422 for a form that does not fit its model, naming each field."""
     return unprocessable(
@@ -1799,18 +1816,7 @@ async def _prepare_submission(
         )
 
     try:
-        sub = _Submission(
-            provider=_text_part(form, "provider") or None,
-            quote_id=_text_part(form, "quote_id") or None,
-            number_id=_text_part(form, "number_id") or None,
-            purpose=_text_part(form, "purpose", "number"),
-            country_code=_text_part(form, "country_code").upper(),
-            number_type=_text_part(form, "number_type"),
-            subject_type=_text_part(form, "subject_type"),  # type: ignore[arg-type]
-            fields=_json_part(form, "fields", {}),
-            address=_json_part(form, "address", None),
-            documents=_json_part(form, "documents", {}),
-        )
+        sub = _Submission(**_form_values(form))
     except ValidationError as exc:
         raise _form_422(exc) from exc
 
@@ -2393,15 +2399,17 @@ async def check_verification_documents(
     AI model (Anthropic) for this check only.
     """
     form = await _parse_form(request)
+    values = _form_values(form)
     try:
         sub = _DocumentCheckForm(
-            quote_id=_text_part(form, "quote_id") or None,
-            country_code=_text_part(form, "country_code").upper(),
-            number_type=_text_part(form, "number_type"),
-            subject_type=_text_part(form, "subject_type"),
-            fields=_json_part(form, "fields", {}) or {},
-            address=_json_part(form, "address", {}) or {},
-            documents=_json_part(form, "documents", {}) or {},
+            quote_id=values["quote_id"],
+            country_code=values["country_code"],
+            number_type=values["number_type"],
+            subject_type=values["subject_type"],
+            # May be partial or empty: the files fill them.
+            fields=values["fields"] or {},
+            address=values["address"] or {},
+            documents=values["documents"] or {},
         )
     except ValidationError as exc:
         raise _form_422(exc) from exc
@@ -2438,12 +2446,8 @@ async def check_verification_documents(
             raise unprocessable(
                 "this slot is not in the form", loc=["body", "documents", slot]
             )
-    for key in form:
-        prefix, _, slot = key.partition(".")
-        if prefix == "file" and slot not in sub.documents:
-            raise unprocessable(
-                "this file names a slot that is not in documents", loc=["body", key]
-            )
+    # A file.<slot> part for a slot not in documents is left out, as submit
+    # does.
     collected = await collect_files(
         form, sub.documents, db, principal.organization_id, s3
     )
@@ -2462,33 +2466,37 @@ async def check_verification_documents(
     # a cancellation). A reserved read whose file was never sent (not
     # readable, over the limits, not decoded) is given back below.
     with_file = [s for s in slots if s in collected.rows or s in collected.parts]
-    if not document_reader_configured():
-        # Nothing could read the files: no read is counted, nothing fetched.
-        return await check_documents(
-            requirements,
-            sub.fields,
-            sub.address,
-            {
-                slot: DocumentInput(option=part.option, fields=part.fields)
-                for slot, part in sub.documents.items()
-            },
-            today=datetime.now(timezone.utc).date(),
-            skipped=with_file,
+    # One read per distinct file: an upload, or the same file part, given
+    # for several slots is read once for all of them (check_documents sends
+    # it once). Each group is named by its first slot.
+    groups: dict[str, list[str]] = {}
+    for slot in with_file:
+        row = collected.rows.get(slot)
+        key = (
+            f"upload:{row.id}"
+            if row is not None
+            else f"part:{hashlib.sha256(collected.parts[slot].data).hexdigest()}"
         )
-    async with session_scope() as counter:
-        reserved = await reserve_document_reads(
-            counter, principal.organization_id, with_file
-        )
+        groups.setdefault(key, []).append(slot)
+    leads = [group[0] for group in groups.values()]
+    reserved: dict[str, UUID] = {}
+    if document_reader_configured():
+        async with session_scope() as counter:
+            reserved = await reserve_document_reads(
+                counter, principal.organization_id, leads
+            )
+    to_read = [
+        slot for group in groups.values() if group[0] in reserved for slot in group
+    ]
     sent: set[str] = set()
     try:
-        files = await fetch_files(collected, list(reserved), s3)
+        files = await fetch_files(collected, to_read, s3)
         documents = {
             slot: DocumentInput(
                 option=part.option, fields=part.fields, file=files.get(slot)
             )
             for slot, part in sub.documents.items()
         }
-
         return await check_documents(
             requirements,
             sub.fields,
@@ -2496,13 +2504,22 @@ async def check_verification_documents(
             documents,
             today=datetime.now(timezone.utc).date(),
             on_send=sent.add,
-            skipped=[s for s in with_file if s not in reserved],
+            # Over the cap, or no model: read false, no warning.
+            skipped=[s for s in with_file if s not in to_read],
         )
     finally:
         unsent = [row_id for slot, row_id in reserved.items() if slot not in sent]
         if unsent:
-            async with session_scope() as counter:
-                await release_document_reads(counter, unsent)
+            try:
+                async with session_scope() as counter:
+                    await release_document_reads(counter, unsent)
+            except Exception as exc:
+                # Never hide the request's own outcome; the reads stay used.
+                logger.warning(
+                    "could not give back %d document read(s) (%s)",
+                    len(unsent),
+                    type(exc).__name__,
+                )
 
 
 async def _submit_row(
