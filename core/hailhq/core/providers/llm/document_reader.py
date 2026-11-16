@@ -1,15 +1,33 @@
 """Reads one uploaded document with Anthropic's vision model and returns the
 JSON the caller's schema asks for.
 
-The model is ``DOCUMENT_READER_MODEL``, by default ``ANTHROPIC_BACKUP_MODEL``
-(Haiku 5.5: cheap and fast, and it reads images and PDFs). Any model set here
-must take thinking "disabled" and structured output. It runs on Amazon Bedrock
-when ``ANTHROPIC_BEDROCK_REGION`` is set (then a Bedrock id, like
-``eu.anthropic.claude-haiku-5-5``), else on Anthropic's API with
-``ANTHROPIC_API_KEY``. With neither, or with no model id, nothing is read.
+The models are tried in this order, each id once (``_models``):
+
+1. ``DOCUMENT_READER_MODEL``, by default ``ANTHROPIC_BACKUP_MODEL`` (Haiku
+   5.5: cheap and fast, and it reads images and PDFs), with thinking
+   "disabled".
+2. ``ANTHROPIC_BACKUP_MODEL``, with thinking "disabled".
+3. ``ANTHROPIC_MODEL``, with thinking "between_tools": Sonnet 5.5 refuses
+   "disabled" with a 400. Probed on 2026-11-16 on Bedrock eu-central-1:
+   ``eu.anthropic.claude-haiku-5-5`` reads a PNG and a PDF with "disabled";
+   ``eu.anthropic.claude-sonnet-5-5`` refuses "disabled" and reads both with
+   "between_tools".
+
+Every model also needs image and PDF input and structured output (effort
+"low", a JSON schema). The next model is tried only when the call before it
+raised an API error (a refusal of the request, a missing model, a server or
+connection error), never after a timeout, and only while ``_MIN_SEND_S`` is
+left of the same deadline. One read is used for all the tries. A model that
+cannot take the request is harmless: its try fails and the read fails open.
+They run on Amazon Bedrock when ``ANTHROPIC_BEDROCK_REGION`` is set (then
+Bedrock ids, like ``eu.anthropic.claude-haiku-5-5``), else on Anthropic's
+API with ``ANTHROPIC_API_KEY``. With neither, or with no model id, nothing
+is read. Every model is Anthropic's: the documents never go to another
+provider.
 
 The document goes to the model provider and nowhere else. Nothing here logs
-the file, the prompt or the answer: only the exception type on a failure.
+the file, the prompt or the answer: only the exception type on a failure,
+and which try it was.
 """
 
 from __future__ import annotations
@@ -61,10 +79,29 @@ _decode_slots: weakref.WeakKeyDictionary[
 
 _client: anthropic.AsyncAnthropic | anthropic.AsyncAnthropicBedrock | None = None
 
+# Thinking off. Sonnet 5.5 takes only "between_tools" for that.
+_NO_THINKING = {"type": "disabled"}
+_BETWEEN_TOOLS = {"type": "between_tools"}
+
 
 def document_reader_model() -> str:
     """``DOCUMENT_READER_MODEL``, else ``ANTHROPIC_BACKUP_MODEL``."""
     return settings.document_reader_model or settings.anthropic_backup_model
+
+
+def _models() -> list[tuple[str, dict[str, str]]]:
+    """The models to try, in order, each with the thinking value it takes:
+    see the module docstring. Each id once, at its first place."""
+    chain = [
+        (document_reader_model(), _NO_THINKING),
+        (settings.anthropic_backup_model, _NO_THINKING),
+        (settings.anthropic_model, _BETWEEN_TOOLS),
+    ]
+    out: list[tuple[str, dict[str, str]]] = []
+    for model, thinking in chain:
+        if model and model not in {m for m, _ in out}:
+            out.append((model, thinking))
+    return out
 
 
 def document_reader_configured() -> bool:
@@ -103,15 +140,15 @@ async def _run_decoder(content_type: str, data: bytes, limit_s: float) -> bytes:
 
 async def _decode_image(content_type: str, data: bytes, deadline: float) -> bytes:
     """Waits for a free decode, then gives it ``_DECODE_LIMIT_S``, or what is
-    left of the read's time when less. With under a second left, it does
-    not start."""
+    left of the read's time when less. With under ``_MIN_SEND_S`` left, it
+    does not start."""
     loop = asyncio.get_running_loop()
     slots = _decode_slots.get(loop)
     if slots is None:
         slots = _decode_slots[loop] = asyncio.Semaphore(_DECODES)
     async with slots:
         left = deadline - loop.time()
-        if left < 1.0:
+        if left < _MIN_SEND_S:
             raise TimeoutError("no time left to decode")
         return await _run_decoder(content_type, data, min(_DECODE_LIMIT_S, left))
 
@@ -143,8 +180,9 @@ async def read_document(
     ``on_send`` runs just before the file goes to the model: from then on
     the read is used, whatever happens to the call (an error, a timeout, a
     cancellation). A file stopped before that (not readable, over the
-    limits, not decoded) never uses one. ``timeout_s`` is the whole budget:
-    the model call gets what the decode left of it."""
+    limits, not decoded) never uses one; a fallback model never uses a
+    second one. ``timeout_s`` is the whole budget: the model calls get what
+    the decode left of it."""
     if not document_reader_configured() or content_type not in READABLE_TYPES:
         return None
     loop = asyncio.get_running_loop()
@@ -158,12 +196,11 @@ async def read_document(
         # Everything that can fail here, before anything leaves: the client,
         # the request and its time.
         client = _get_client()
+        models = _models()
+        # Thinking off (each model's own value, in ``models``): fast, and the
+        # task is reading, not reasoning.
         request = {
-            "model": document_reader_model(),
             "max_tokens": _MAX_TOKENS,
-            # Haiku 5.5 takes thinking "disabled": fast, and the task is
-            # reading, not reasoning.
-            "thinking": {"type": "disabled"},
             "output_config": {
                 "effort": "low",
                 "format": {"type": "json_schema", "schema": schema},
@@ -183,14 +220,41 @@ async def read_document(
             # Too little time for any answer: do not use a read on it.
             logger.warning("document read skipped: no time left")
             return None
-        # The read is used from here on, whatever happens to the call.
+        # The read is used from here on, whatever happens to the calls.
         if on_send is not None:
             on_send()
-        response = await client.messages.create(**request, timeout=left)
     except Exception as exc:
         # Fail open: no warning, no prefill. Never the message: it can quote
         # the request.
         logger.warning("document read failed (%s)", type(exc).__name__)
+        return None
+    response = None
+    for index, (model, thinking) in enumerate(models):
+        if index:
+            left = deadline - loop.time()
+            if left < _MIN_SEND_S:
+                logger.warning("document read: no time left for try %d", index)
+                return None
+        try:
+            response = await client.messages.create(
+                **request, model=model, thinking=thinking, timeout=left
+            )
+            break
+        except (anthropic.APITimeoutError, TimeoutError):
+            # A slow model: another one would not finish in time either.
+            logger.warning("document read timed out (try %d)", index)
+            return None
+        except (anthropic.APIStatusError, anthropic.APIConnectionError) as exc:
+            # A refused request, a missing or broken model: the next one.
+            logger.warning(
+                "document read failed (%s, try %d)", type(exc).__name__, index
+            )
+        except Exception as exc:
+            logger.warning(
+                "document read failed (%s, try %d)", type(exc).__name__, index
+            )
+            return None
+    if response is None:
         return None
     if response.stop_reason != "end_turn":
         logger.warning("document read stopped early (%s)", response.stop_reason)

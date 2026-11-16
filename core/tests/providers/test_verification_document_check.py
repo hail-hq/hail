@@ -11,6 +11,8 @@ import sys
 from datetime import date
 from types import SimpleNamespace
 
+import anthropic
+import httpx2
 import pytest
 from hailhq.core.config import settings
 from hailhq.core.providers.llm import document_reader
@@ -25,9 +27,14 @@ from hailhq.core.providers.verification.base import (
 )
 from hailhq.core.providers.verification.document_check import (
     check_documents,
+    document_cautions,
     name_matches,
 )
-from hailhq.core.schemas import VerificationPrintedName
+from hailhq.core.schemas import (
+    VerificationDocumentCautionRead,
+    VerificationDocumentCheckResponse,
+    VerificationPrintedName,
+)
 from PIL import Image
 
 TODAY = date(2026, 11, 16)
@@ -399,6 +406,8 @@ async def test_a_slot_without_a_file_is_not_read() -> None:
 
 @pytest.fixture()
 def reader_settings(monkeypatch):
+    monkeypatch.setattr(settings, "document_reader_model", "")
+    monkeypatch.setattr(settings, "anthropic_model", "")
     monkeypatch.setattr(settings, "anthropic_backup_model", "claude-haiku-5-5")
     monkeypatch.setattr(settings, "anthropic_bedrock_region", "")
     monkeypatch.setattr(settings, "anthropic_api_key", "test-key")
@@ -455,7 +464,9 @@ async def test_reader_sends_the_file_and_the_schema(
     assert call["thinking"] == {"type": "disabled"}
     assert call["output_config"]["format"] == {"type": "json_schema", "schema": {}}
     assert call["messages"][0]["content"][0]["type"] == "document"
-    assert 14.9 < call["timeout"] <= 15.0
+    # The PDF is prepared in a real child process first: a cold start can
+    # take most of a second.
+    assert 13.5 < call["timeout"] <= 15.0
 
 
 async def test_reader_sends_an_image_as_a_smaller_jpeg(
@@ -1202,3 +1213,211 @@ async def test_the_largest_images_decode_within_the_child_memory_limit() -> None
             max_output=8 * 1024 * 1024,
         )
         assert out[:2] == b"\xff\xd8", mode
+
+
+# -- the cautions: the same rules from an earlier read, no file ----------------
+
+
+def _echo(out: VerificationDocumentCheckResponse) -> dict:
+    """The reads as the console sends them back: each read slot's
+    ``documents.<slot>`` (the whole object; only two keys are used)."""
+    return {
+        slot: VerificationDocumentCautionRead.model_validate(read.model_dump())
+        for slot, read in out.documents.items()
+        if read.read
+    }
+
+
+def _form_only(docs: dict[str, DocumentInput]) -> dict[str, DocumentInput]:
+    return {
+        slot: DocumentInput(option=d.option, fields=d.fields)
+        for slot, d in docs.items()
+    }
+
+
+def _name_and_type(out: VerificationDocumentCheckResponse) -> list:
+    return [w for w in out.warnings if w.kind in ("name", "document_type")]
+
+
+@pytest.mark.parametrize(
+    "fields,option",
+    [
+        ({"first_name": "Elena", "last_name": "Maria"}, "id_card"),
+        ({"first_name": "Maria Elena", "last_name": "Tester Sample"}, "passport"),
+        ({"first_name": "", "last_name": "Sample"}, ""),
+        ({}, "id_card"),
+    ],
+)
+async def test_cautions_give_the_checks_name_and_type_warnings(fields, option) -> None:
+    docs = _docs(option=option)
+    out = await _check(fields=fields, docs=docs)
+    cautions = document_cautions(_req(), fields, {}, _form_only(docs), _echo(out))
+    assert cautions == _name_and_type(out)
+
+
+async def test_cautions_follow_each_edit_without_a_new_read() -> None:
+    out = await _check(fields={"first_name": "Elena", "last_name": "Maria"})
+    reads = _echo(out)
+    fixed = {"first_name": "Maria Elena", "last_name": "Tester Sample"}
+    assert document_cautions(_req(), fixed, {}, _form_only(_docs()), reads) == []
+    # The type changed to one the file does not look like.
+    wrong = document_cautions(_req(), fixed, {}, _form_only(_docs("passport")), reads)
+    assert [w.kind for w in wrong] == ["document_type"]
+    assert "Change the document type to ID card." in wrong[0].message
+
+
+async def test_cautions_never_say_a_file_is_none_of_the_types() -> None:
+    out = await _check(
+        docs=_docs(option="passport"), reader=_reader(_answer(option="none"))
+    )
+    assert _kinds(out) == ["document_type"]
+    reads = _echo(out)
+    assert reads["proof_of_identity"].option is None
+    cautions = document_cautions(_req(), {}, {}, _form_only(_docs("passport")), reads)
+    assert cautions == []
+
+
+def test_cautions_check_only_slots_with_a_read() -> None:
+    fields = {"first_name": "Someone", "last_name": "Else"}
+    assert document_cautions(_req(), fields, {}, _form_only(_docs()), {}) == []
+    no_name = {"proof_of_identity": VerificationDocumentCautionRead(option="id_card")}
+    assert document_cautions(_req(), fields, {}, _form_only(_docs()), no_name) == []
+
+
+def test_cautions_skip_a_proof_of_address_by_its_read_type() -> None:
+    printed = _printed(given="M", family="TESTER")
+    reads = {
+        "proof_of_address": VerificationDocumentCautionRead(
+            option="utility_bill", printed_name=printed
+        )
+    }
+    docs = {"proof_of_address": DocumentInput(option="")}
+    fields = {"first_name": "Maria Elena", "last_name": "Tester Sample"}
+    assert document_cautions(_req(), fields, {}, docs, reads) == []
+
+
+async def test_cautions_give_one_name_warning_for_one_file_in_two_slots() -> None:
+    base = _req()
+    second = base.documents[0].model_copy(
+        update={
+            "name": "proof_of_birth",
+            "label": "Proof of birth",
+            "options": base.documents[0].options[:1],
+        }
+    )
+    req = base.model_copy(update={"documents": (base.documents[0], second)})
+    docs = {
+        **_docs(option="passport"),
+        "proof_of_birth": DocumentInput(option="", file=_PNG),
+    }
+    fields = {"first_name": "Someone", "last_name": "Else"}
+    out = await check_documents(
+        req, fields, {}, docs, today=TODAY, reader=_reader(_answer())
+    )
+    cautions = document_cautions(req, fields, {}, _form_only(docs), _echo(out))
+    assert cautions == _name_and_type(out)
+    assert len([w for w in cautions if w.field == "first_name"]) == 1
+
+
+# -- the reader's fallback models ---------------------------------------------
+
+
+def _api_error(status: int) -> anthropic.APIStatusError:
+    response = httpx2.Response(
+        status, request=httpx2.Request("POST", "https://api.example/v1/messages")
+    )
+    cls = {400: anthropic.BadRequestError, 404: anthropic.NotFoundError}.get(
+        status, anthropic.InternalServerError
+    )
+    return cls("Model eu.example-model not found", response=response, body=None)
+
+
+def _client_of(*outcomes, delay: float = 0.0):
+    """A fake client: each call takes ``delay`` s, then raises or returns
+    the next outcome."""
+    calls: list[dict] = []
+    queue = list(outcomes)
+
+    async def create(**kwargs):
+        calls.append(kwargs)
+        await asyncio.sleep(delay)
+        outcome = queue.pop(0)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
+    return SimpleNamespace(messages=SimpleNamespace(create=create)), calls
+
+
+@pytest.fixture()
+def three_models(reader_settings, monkeypatch):
+    monkeypatch.setattr(settings, "document_reader_model", "model-a")
+    monkeypatch.setattr(settings, "anthropic_backup_model", "model-b")
+    monkeypatch.setattr(settings, "anthropic_model", "model-c")
+
+    async def decode(*_):
+        return _jpeg((40, 30))
+
+    monkeypatch.setattr(document_reader, "_run_decoder", decode)
+
+
+async def test_reader_falls_back_after_a_missing_model_with_one_read(
+    three_models, monkeypatch, caplog
+) -> None:
+    client, calls = _client_of(_api_error(404), _response('{"kind": "passport"}'))
+    monkeypatch.setattr(document_reader, "_client", client)
+    sends: list[int] = []
+    assert await _read(on_send=lambda: sends.append(1)) == {"kind": "passport"}
+    assert [c["model"] for c in calls] == ["model-a", "model-b"]
+    assert [c["thinking"] for c in calls] == [{"type": "disabled"}] * 2
+    assert sends == [1]
+    # The second try gets what is left of the same deadline.
+    assert calls[1]["timeout"] <= calls[0]["timeout"]
+    # Only the type and the try: never the message.
+    assert "NotFoundError, try 0" in caplog.text
+    assert "eu.example-model" not in caplog.text
+
+
+async def test_reader_sends_between_tools_to_the_last_model(
+    three_models, monkeypatch
+) -> None:
+    client, calls = _client_of(_api_error(404), _api_error(400), _response("{}"))
+    monkeypatch.setattr(document_reader, "_client", client)
+    sends: list[int] = []
+    assert await _read(on_send=lambda: sends.append(1)) == {}
+    assert [c["model"] for c in calls] == ["model-a", "model-b", "model-c"]
+    assert calls[2]["thinking"] == {"type": "between_tools"}
+    assert sends == [1]
+
+
+async def test_reader_tries_each_model_once(three_models, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "document_reader_model", "")
+    monkeypatch.setattr(settings, "anthropic_model", "model-b")
+    assert document_reader._models() == [("model-b", {"type": "disabled"})]
+    client, calls = _client_of(_api_error(503))
+    monkeypatch.setattr(document_reader, "_client", client)
+    assert await _read() is None
+    assert len(calls) == 1
+
+
+async def test_reader_does_not_fall_back_after_a_timeout(
+    three_models, monkeypatch
+) -> None:
+    timeout = anthropic.APITimeoutError(
+        request=httpx2.Request("POST", "https://api.example/v1/messages")
+    )
+    client, calls = _client_of(timeout, _response("{}"))
+    monkeypatch.setattr(document_reader, "_client", client)
+    sends: list[int] = []
+    assert await _read(on_send=lambda: sends.append(1)) is None
+    assert len(calls) == 1 and sends == [1]
+
+
+async def test_reader_does_not_fall_back_without_time_left(
+    three_models, monkeypatch
+) -> None:
+    client, calls = _client_of(_api_error(503), _response("{}"), delay=0.6)
+    monkeypatch.setattr(document_reader, "_client", client)
+    # 1.5 s in all: after a 0.6 s failure, under _MIN_SEND_S is left.
+    assert await _read(timeout_s=1.5) is None
+    assert len(calls) == 1
