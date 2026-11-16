@@ -591,7 +591,7 @@ async def test_revoke_registration_restamps_address_and_returns_reason():
     )
     reason = await revoke_registration(ADDR, org, "PT", "national")
     assert reason == (
-        "Document is blurry; Address mismatch. Upload a clear utility bill."
+        "Document is blurry. Address mismatch. Upload a clear utility bill."
     )
     sent = json.loads(responses.calls[0].request.body)["data"]
     assert sent == {

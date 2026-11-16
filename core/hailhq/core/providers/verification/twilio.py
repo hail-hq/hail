@@ -626,14 +626,18 @@ class TwilioVerificationProvider(VerificationProvider):
             return ProviderStatus(state="approved")
         if bundle.status == "twilio-rejected":
             problems = await self._rejection_problems(refs)
-            # One text can cover several codes: write it once.
+            # One text can cover several codes: write it once, as
+            # "18003, 18999: text".
             by_text: dict[str | None, list[str]] = {}
             for code, text in problems:
-                by_text.setdefault(text, []).append(str(code) if code else "")
-            raw = "; ".join(
-                ": ".join(p for p in (", ".join(c for c in codes if c), text) if p)
-                for text, codes in by_text.items()
-            )
+                by_text.setdefault(text, [])
+                if code:
+                    by_text[text].append(str(code))
+            entries = []
+            for text, codes in by_text.items():
+                label = ", ".join(codes)
+                entries.append(f"{label}: {text}" if label and text else label or text)
+            raw = "; ".join(e for e in entries if e)
             return ProviderStatus(
                 state="rejected",
                 reason=twilio_reason(problems) if problems else DETAILS_REJECTED,
@@ -668,7 +672,7 @@ class TwilioVerificationProvider(VerificationProvider):
 
     def _document_problems(self, sid: str) -> list[tuple[int | None, str | None]]:
         doc = self._rc.supporting_documents(sid).fetch()
-        if doc.status in ("approved", "provisionally-approved"):
+        if doc.status not in (None, "rejected", "expired"):
             # A reused document keeps an old reason after it was fixed.
             return []
         codes = [
@@ -694,7 +698,8 @@ class TwilioVerificationProvider(VerificationProvider):
             if result.get("passed"):
                 continue
             before = len(found)
-            for item in [result, *(result.get("invalid") or [])]:
+            # The failed fields say more than the requirement's summary.
+            for item in result.get("invalid") or [result]:
                 code, text = _code(item.get("error_code")), item.get("failure_reason")
                 if code or text:
                     found.append((code, text))

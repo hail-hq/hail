@@ -717,7 +717,7 @@ async def test_fixed_document_and_missing_item(provider) -> None:
 
 
 @responses.activate
-async def test_expired_document_text_is_covered_by_hails_fix(provider) -> None:
+async def test_unknown_code_keeps_the_documents_text(provider) -> None:
     from hailhq.core.providers.verification.rejections import TWILIO_FIXES
 
     _rejected_bundle(
@@ -732,8 +732,8 @@ async def test_expired_document_text_is_covered_by_hails_fix(provider) -> None:
     )
     status = await provider.status(REFS)
     assert status.reason.startswith(TWILIO_FIXES[18003])
-    # The one text covers both codes, and Hail's fix covers the text.
-    assert "Expired, and a new rule." not in status.reason
+    # Hail has no fix for 18999, so its text is shown, once.
+    assert status.reason.count("Expired, and a new rule.") == 1
     assert status.raw_reason == "18003, 18999: Expired, and a new rule."
 
 

@@ -300,7 +300,9 @@ async def test_didww_registration_rejected_revokes_approval(
         "The carrier said: Document is blurry. "
         "Fix that and start a new verification."
     )
-    assert number.provisioning_metadata["failure_reason"] == shown
+    assert number.provisioning_metadata["failure_reason"] == (
+        f"{NEUTRAL_REJECTION}; the verification's rejection_reason says what to fix"
+    )
     assert number.provisioning_metadata["carrier_reason"] == "Document is blurry"
     messages = [r.getMessage() for r in caplog.records]
     # The reviewer's note can quote personal data: kept in the DB, not logged.

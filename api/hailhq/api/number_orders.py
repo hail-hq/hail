@@ -105,9 +105,10 @@ async def finish_order(
 ):
     """Caller holds org lock. Move reservation to month fee, or refund once.
 
-    ``reason`` is stored for a failed order and shown to the buyer. From
-    ``rejected_registration`` it can quote the carrier's text, which can
-    quote personal data: never log it.
+    ``reason`` is stored for a failed order and shown to the buyer; it is
+    Hail's own wording, never the carrier's text (``rejected_registration``
+    keeps that as ``carrier_reason`` in the metadata and on the
+    verification).
     ``keep_setup`` charges the setup fee even on failure:
     the carrier already billed it and does not refund (the number was
     bought, then its registration was rejected or never cleared)."""
@@ -206,9 +207,11 @@ async def rejected_registration(
 ) -> str:
     """The carrier refused the end-user registration of a bought number.
     Releases the number, takes the approval back and marks the Hail
-    verification rejected. Returns the reason shown to the buyer: Hail's own
-    wording plus the carrier's text, if any. The carrier's text is also kept
-    in the audit row's ``carrier_reason`` and the number's
+    verification rejected. The verification's ``rejection_reason`` quotes
+    the carrier's text, if any, so the customer knows what to fix. The
+    returned order reason is Hail's own wording only: it reaches the 409
+    (which Logfire records) and the number's metadata. The carrier's text
+    is also kept in the audit row's ``carrier_reason`` and the number's
     ``provisioning_metadata['carrier_reason']``. It is never logged: the log
     line names only the carrier and the org, number and verification ids.
 
@@ -275,7 +278,12 @@ async def rejected_registration(
             actor_user_id=None,
             actor_kind="system",
         )
-    return reason
+        if raw and raw.strip():
+            # The order's failure_reason reaches the 409 (which Logfire
+            # records) and the number's metadata: Hail's wording only. The
+            # carrier's text stays on the verification.
+            return f"{REGISTRATION_REJECTED}; the verification's rejection_reason says what to fix"
+    return REGISTRATION_REJECTED
 
 
 async def _purchase_verification(
@@ -914,13 +922,6 @@ async def purchase_number(
         reason = number.provisioning_metadata.get(
             "failure_reason", "the carrier did not complete the order"
         )
-        if number.provisioning_metadata.get("carrier_reason"):
-            # The carrier's text can quote personal data, and Logfire
-            # records this exception. The verification holds the full reason.
-            reason = (
-                f"{REGISTRATION_REJECTED}. The verification's rejection_reason "
-                "says what to fix"
-            )
         raise HTTPException(
             status_code=409,
             detail=(

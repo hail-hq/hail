@@ -55,7 +55,7 @@ logger = logging.getLogger(__name__)
 
 
 # Requirement id -> name. Telnyx ids are fixed per requirement type.
-_REQUIREMENT_NAMES: dict[str, str] = {}
+_REQUIREMENT_NAMES: dict[str, str | None] = {}
 
 
 def _capital(text: str) -> str:
@@ -440,6 +440,7 @@ class TelnyxVerificationProvider(VerificationProvider):
                 )
             )["data"]
         except Exception:
+            # Not cached: a later poll may reach Telnyx again.
             logger.warning(
                 "could not read Telnyx requirement type %s",
                 requirement_id,
@@ -448,8 +449,7 @@ class TelnyxVerificationProvider(VerificationProvider):
             return None
         name = data.get("name") if isinstance(data, dict) else None
         name = name.strip() if isinstance(name, str) and name.strip() else None
-        if name:
-            _REQUIREMENT_NAMES[requirement_id] = name
+        _REQUIREMENT_NAMES[requirement_id] = name
         return name
 
     async def _problems(self, refs: dict) -> list[Problem]:

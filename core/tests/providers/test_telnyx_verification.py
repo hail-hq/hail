@@ -33,6 +33,14 @@ GROUP = "8a3c1e4e-0000-4000-8000-000000000001"
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
+@pytest.fixture(autouse=True)
+def _fresh_requirement_names(monkeypatch):
+    """Requirement names are cached per process; each test starts empty."""
+    from hailhq.core.providers.verification import telnyx as telnyx_mod
+
+    monkeypatch.setattr(telnyx_mod, "_REQUIREMENT_NAMES", {})
+
+
 def _rules(name: str) -> dict:
     return json.loads((FIXTURES / f"telnyx-regulatory-SE-{name}.json").read_text())
 

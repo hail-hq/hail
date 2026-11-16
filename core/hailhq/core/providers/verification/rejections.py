@@ -18,8 +18,8 @@ from collections.abc import Iterable
 from hailhq.core.providers.verification.base import DETAILS_REJECTED
 
 # Twilio Regulatory Compliance codes, from Twilio's error list
-# (https://www.twilio.com/docs/api/errors, 18001-18064). A code missing here
-# shows Twilio's own text instead.
+# (https://www.twilio.com/docs/api/errors, 18001-18064 on documents,
+# 22214-22219 on evaluations). A code missing here shows Twilio's own text.
 TWILIO_FIXES: dict[int, str] = {
     18001: "The document is not a type the carrier accepts here. "
     "Upload one of the accepted document types.",
@@ -78,6 +78,14 @@ TWILIO_FIXES: dict[int, str] = {
     "details of an active business.",
     18064: "The details do not meet the carrier's rules for a business. Try "
     "again as a person.",
+    # Evaluation codes: a part of the filing is missing or does not match.
+    22214: "The person or business details are missing. Fill them in.",
+    22215: "A required detail is missing. Fill in every field.",
+    22216: "A required document is missing. Upload it.",
+    22217: "A required detail on a document is missing. Fill in every field.",
+    22218: "The details on a document do not match the details you typed. "
+    "Type them exactly as printed on it.",
+    22219: "The address is missing. Enter it.",
 }
 
 # "There is an issue with one or more of your Supporting Documents."
@@ -88,7 +96,8 @@ FIX_AND_START_AGAIN = "Fix that and start again."
 FIX_THESE_AND_START_AGAIN = "Fix these and start again."
 
 
-def _sentence(text: str) -> str:
+def sentence(text: str) -> str:
+    """``text`` as one sentence: trimmed, ending in . ! or ?."""
     text = text.strip()
     return text if text.endswith((".", "!", "?")) else text + "."
 
@@ -105,7 +114,7 @@ def customer_reason(
     fix for. Duplicates are dropped, order is kept. Nothing at all gives
     ``fallback``. The reason ends with ``next_step``."""
     fixes = list(dict.fromkeys(f.strip() for f in fixes if f and f.strip()))
-    said = list(dict.fromkeys(_sentence(t) for t in carrier_texts if t and t.strip()))
+    said = list(dict.fromkeys(sentence(t) for t in carrier_texts if t and t.strip()))
     if not fixes and not said:
         return fallback
     parts = [*fixes]
@@ -129,8 +138,9 @@ def twilio_reason(problems: Iterable[tuple[int | None, str | None]]) -> str:
     if any(code not in _TWILIO_SUMMARY for code, _ in problems):
         problems = [p for p in problems if p[0] not in _TWILIO_SUMMARY]
     # One text can cover several codes (one document, many errors). A text
-    # with a code Hail has a fix for is covered by that fix.
-    covered = {text for code, text in problems if code in TWILIO_FIXES}
+    # is covered only when Hail has a fix for every one of its codes.
+    unknown = {text for code, text in problems if code not in TWILIO_FIXES}
+    covered = {text for code, text in problems if code in TWILIO_FIXES} - unknown
     fixes: list[str] = []
     said: list[str] = []
     for code, text in problems:
