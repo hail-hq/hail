@@ -719,3 +719,22 @@ async def test_claim_keeps_the_verified_phone_during_a_switch(
     await _start(async_session, org, phone=OTHER)
     assert await _claim(async_session, org) is not None
     assert await _claim(async_session, org, to=OTHER) is None
+
+
+async def test_asking_again_for_the_verified_phone_drops_the_pending_one(
+    async_session,
+):
+    org = await _org(async_session)
+    first = await _start(async_session, org)
+    await confirm_phone(async_session, org, first.code, now=NOW)
+    switch = await _start(async_session, org, phone=OTHER)
+    later = NOW + timedelta(minutes=1)
+    again = await _start(async_session, org, now=later)
+    assert again.code is None
+    row = again.row
+    assert row.status == "verified" and row.phone_e164 == PHONE
+    assert row.pending_phone_e164 is None
+    assert row.code_hash is None and row.code_expires_at is None
+    assert row.code_attempts == 0 and row.updated_at == later
+    with pytest.raises(NoPendingCode):
+        await confirm_phone(async_session, org, switch.code, now=later)

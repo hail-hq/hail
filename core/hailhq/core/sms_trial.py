@@ -226,7 +226,8 @@ async def start_phone_proof(
     now: datetime | None = None,
 ) -> IssuedCode:
     """Issue a code for ``phone``. The caller texts it to ``IssuedCode.phone``
-    (the canonical form), then commits.
+    (the canonical form), then commits. With no code (the phone is already
+    the verified one) the caller commits too: a waiting new phone is dropped.
 
     A verified row keeps its phone verified: the new phone waits in
     ``pending_phone_e164`` until ``confirm_phone``, so a typo never stops
@@ -255,6 +256,15 @@ async def start_phone_proof(
 
     row = await get_trial_phone(db, organization_id)
     if row is not None and row.status == "verified" and row.phone_e164 == phone:
+        if row.pending_phone_e164 is not None:
+            # Asked again for the verified phone: drop the new phone that
+            # waits and its code, so no stale pending phone shows.
+            row.pending_phone_e164 = None
+            row.code_hash = None
+            row.code_expires_at = None
+            row.code_attempts = 0
+            row.updated_at = now
+            await db.flush()
         return IssuedCode(row=row, code=None, phone=phone)
 
     cutoff = now - CODE_WINDOW

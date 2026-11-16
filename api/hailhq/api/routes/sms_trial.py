@@ -152,7 +152,8 @@ async def start_sms_trial_phone(
 
     The code expires in 10 minutes. A new code replaces the old one. A
     verified phone keeps getting trial texts until the new phone is
-    confirmed; until then the new phone shows as pending_phone. A
+    confirmed; until then the new phone shows as pending_phone. Asking
+    again for the verified phone drops the waiting new phone. A
     workspace or a phone gets at most 5 codes in 24 hours. Code texts are
     free and do not count toward the 25 trial texts. Console sessions only.
     """
@@ -188,8 +189,9 @@ async def start_sms_trial_phone(
         ) from exc
 
     if issued.code is None:
-        # Already verified with this phone: nothing to text or write.
-        await db.rollback()
+        # Already verified with this phone: nothing to text. Commit drops a
+        # new phone that was waiting for its code.
+        await db.commit()
         return await _trial_status(db, principal.organization_id)
 
     # start_phone_proof holds the workspace and phone locks until the commit,

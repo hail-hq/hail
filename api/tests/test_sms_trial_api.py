@@ -621,3 +621,27 @@ async def test_switching_phone_keeps_trial_texts_until_confirmed(
     sent = await jwt_client.post("/v1/sms", json={**text, "to": new_phone})
     assert sent.status_code == 201, sent.text
     assert sent.json()["from_e164"] == TRIAL_E164
+
+
+async def test_asking_again_for_the_verified_phone_clears_the_pending_one(
+    jwt_client, org_and_key, async_session, monkeypatch, sms_mock, session_factory
+):
+    org_id = org_and_key[0]
+    await seed_sms_trial(async_session, monkeypatch)
+    await verify_trial_phone(async_session, org_id, PHONE)
+    switch = await jwt_client.post(
+        "/v1/sms/trial/phone", json={**START, "phone": "+14155550143"}
+    )
+    assert switch.status_code == 200, switch.text
+    sends = sms_mock.send_sms.call_count
+
+    resp = await jwt_client.post("/v1/sms/trial/phone", json=START)
+
+    assert resp.status_code == 200, resp.text
+    assert sms_mock.send_sms.call_count == sends
+    body = resp.json()
+    assert body["status"] == "verified" and body["phone"] == PHONE
+    assert body["pending_phone"] is None and body["code_expires_at"] is None
+    row = await _row(session_factory, org_id)
+    assert row.pending_phone_e164 is None and row.code_hash is None
+    assert (await jwt_client.get("/v1/sms/trial")).json()["pending_phone"] is None

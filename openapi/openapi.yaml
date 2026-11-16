@@ -3675,7 +3675,9 @@ paths:
 
         verified phone keeps getting trial texts until the new phone is
 
-        confirmed; until then the new phone shows as pending_phone. A
+        confirmed; until then the new phone shows as pending_phone. Asking
+
+        again for the verified phone drops the waiting new phone. A
 
         workspace or a phone gets at most 5 codes in 24 hours. Code texts are
 
