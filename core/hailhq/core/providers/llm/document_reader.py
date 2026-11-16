@@ -37,8 +37,14 @@ _MAX_TOKENS = 2048
 # providers refuse large images (about 5 MB on Anthropic's API, less on
 # Bedrock). A phone photo is sent at this size, upright as a viewer shows it.
 _IMAGE_LONG_SIDE = 1568
-# Refuse to decode an image larger than this many pixels (a decompression bomb).
-_MAX_PIXELS = 60_000_000
+# Refuse to decode an image larger than this many pixels (a decompression
+# bomb). A phone photo is about 12 to 24 million.
+_MAX_PIXELS = 25_000_000
+# Pillow decodes only the format the file was declared as, never another
+# format it happens to know.
+_IMAGE_FORMATS = {"image/jpeg": ("JPEG",), "image/png": ("PNG",)}
+# Images decoded at once, so a burst of uploads cannot take every thread.
+_decodes = asyncio.Semaphore(2)
 
 _client: anthropic.AsyncAnthropic | anthropic.AsyncAnthropicBedrock | None = None
 
@@ -64,14 +70,19 @@ def _get_client() -> anthropic.AsyncAnthropic | anthropic.AsyncAnthropicBedrock:
     return _client
 
 
-def _image_for_model(data: bytes) -> bytes:
+def _image_for_model(content_type: str, data: bytes) -> bytes:
     """The image as a JPEG at most ``_IMAGE_LONG_SIDE`` on its long side,
-    turned as its EXIF tag says, so the model sees what a person sees."""
-    with Image.open(io.BytesIO(data)) as image:
+    turned as its EXIF tag says, so the model sees what a person sees.
+    Raises for a file that is not its declared format, or too large."""
+    formats = _IMAGE_FORMATS[content_type]
+    with Image.open(io.BytesIO(data), formats=formats) as image:
         if image.width * image.height > _MAX_PIXELS:
             raise ValueError("image too large")
+        if image.format == "JPEG":
+            # Decode a large JPEG at a reduced scale from the start.
+            image.draft("RGB", (_IMAGE_LONG_SIDE, _IMAGE_LONG_SIDE))
         image = ImageOps.exif_transpose(image).convert("RGB")
-        image.thumbnail((_IMAGE_LONG_SIDE, _IMAGE_LONG_SIDE))
+        image.thumbnail((_IMAGE_LONG_SIDE, _IMAGE_LONG_SIDE), reducing_gap=3.0)
         out = io.BytesIO()
         image.save(out, "JPEG", quality=85)
         return out.getvalue()
@@ -104,7 +115,8 @@ async def read_document(
         return None
     try:
         if content_type != "application/pdf":
-            data = await asyncio.to_thread(_image_for_model, data)
+            async with _decodes:
+                data = await asyncio.to_thread(_image_for_model, content_type, data)
             content_type = "image/jpeg"
         response = await _get_client().messages.create(
             model=settings.anthropic_backup_model,

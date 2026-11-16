@@ -476,6 +476,43 @@ async def test_reader_skips_a_file_that_is_not_an_image(
     assert calls == []
 
 
+async def test_reader_skips_a_file_of_another_format_than_declared(
+    reader_settings, monkeypatch, caplog
+) -> None:
+    client, calls = _fake_client(_response("{}"))
+    monkeypatch.setattr(document_reader, "_client", client)
+    out = io.BytesIO()
+    Image.new("RGB", (40, 30), "white").save(out, "GIF")
+    # A GIF sent as a PNG, and a PNG sent as a JPEG: neither is decoded.
+    assert await _read(content_type="image/png", data=out.getvalue()) is None
+    assert await _read(content_type="image/jpeg", data=_png((40, 30))) is None
+    assert calls == []
+    assert "document read failed" in caplog.text
+
+
+async def test_reader_skips_an_image_over_the_pixel_cap(
+    reader_settings, monkeypatch
+) -> None:
+    client, calls = _fake_client(_response("{}"))
+    monkeypatch.setattr(document_reader, "_client", client)
+    monkeypatch.setattr(document_reader, "_MAX_PIXELS", 40 * 30 - 1)
+    assert await _read(data=_png((40, 30))) is None
+    assert calls == []
+
+
+async def test_reader_decodes_a_large_jpeg(reader_settings, monkeypatch) -> None:
+    client, calls = _fake_client(_response("{}"))
+    monkeypatch.setattr(document_reader, "_client", client)
+    out = io.BytesIO()
+    Image.new("RGB", (4000, 3000), "white").save(out, "JPEG")
+    assert await _read(content_type="image/jpeg", data=out.getvalue()) == {}
+    block = calls[0]["messages"][0]["content"][0]
+    sent = Image.open(
+        io.BytesIO(__import__("base64").b64decode(block["source"]["data"]))
+    )
+    assert max(sent.size) == 1568
+
+
 async def test_reader_is_off_without_a_model(reader_settings, monkeypatch) -> None:
     monkeypatch.setattr(settings, "anthropic_backup_model", "")
     assert await _read() is None
