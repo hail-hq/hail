@@ -66,7 +66,6 @@ _ANSWER = {
 
 
 def _fake_reader(monkeypatch, answer=_ANSWER):
-
     monkeypatch.setattr(routes, "document_reader_configured", lambda: True)
     calls: list[dict] = []
 
@@ -179,7 +178,6 @@ async def test_requires_auth(client) -> None:
 async def test_an_upload_id_is_read_after_the_transaction_ends(
     client, org_and_key, carrier, monkeypatch, async_session
 ) -> None:
-
     calls = _fake_reader(monkeypatch)
     store = AsyncMock()
     store.fetch_raw.return_value = _JPEG
@@ -204,7 +202,6 @@ async def test_an_upload_id_is_read_after_the_transaction_ends(
 async def test_a_workspace_gets_a_daily_number_of_reads(
     client, org_and_key, carrier, monkeypatch, async_session
 ) -> None:
-
     monkeypatch.setattr(document_reads, "DAILY_DOCUMENT_READS", 2)
     calls = _fake_reader(monkeypatch, {**_ANSWER, "expiry_date": "2031-01-01"})
     org_id, _, key = org_and_key
@@ -236,7 +233,6 @@ async def test_a_workspace_gets_a_daily_number_of_reads(
 async def test_a_read_not_sent_is_not_counted(
     client, org_and_key, carrier, monkeypatch, async_session
 ) -> None:
-
     _fake_reader(monkeypatch, None)
     org_id, _, key = org_and_key
     # A PDF over the page limit never reaches the model.
@@ -282,7 +278,6 @@ async def test_over_the_cap_no_upload_is_fetched(
 async def test_a_slot_not_in_the_form_is_refused_before_any_file_is_read(
     client, org_and_key, carrier, monkeypatch
 ) -> None:
-
     async def boom(*_a, **_k):
         raise AssertionError("no file may be read")
 
@@ -322,7 +317,6 @@ def _real_reader(monkeypatch, error: Exception | None = None):
 
 
 def _png_file() -> dict:
-
     out = io.BytesIO()
     Image.new("RGB", (60, 40), "white").save(out, "PNG")
     return {"file.proof_of_identity": ("id.png", out.getvalue(), "image/png")}
@@ -331,7 +325,6 @@ def _png_file() -> dict:
 async def test_a_read_whose_file_cannot_be_decoded_is_given_back(
     client, org_and_key, carrier, monkeypatch, async_session
 ) -> None:
-
     sent = _real_reader(monkeypatch)
     org_id, _, key = org_and_key
     broken = {"file.proof_of_identity": ("id.png", b"\x89PNG broken", "image/png")}
@@ -344,7 +337,6 @@ async def test_a_read_whose_file_cannot_be_decoded_is_given_back(
 async def test_a_read_sent_to_the_model_counts_even_when_the_call_fails(
     client, org_and_key, carrier, monkeypatch, async_session
 ) -> None:
-
     sent = _real_reader(monkeypatch, error=TimeoutError())
     org_id, _, key = org_and_key
     resp = await _post(client, key, files=_png_file())
@@ -359,7 +351,6 @@ async def test_a_read_sent_to_the_model_counts_even_when_the_call_fails(
 async def test_without_a_reader_nothing_is_counted_or_fetched(
     client, org_and_key, carrier, monkeypatch, async_session
 ) -> None:
-
     monkeypatch.setattr(routes, "document_reader_configured", lambda: False)
     org_id, _, key = org_and_key
     resp = await _post(client, key)
@@ -370,7 +361,6 @@ async def test_without_a_reader_nothing_is_counted_or_fetched(
 async def test_one_upload_in_two_slots_is_read_once_and_counted_once(
     client, org_and_key, carrier, monkeypatch, async_session
 ) -> None:
-
     async def two_slots(country_code, number_type, subject_type):
         passport = (DocumentOption(key="passport", label="Passport"),)
         return Requirements(
@@ -417,7 +407,6 @@ async def test_one_upload_in_two_slots_is_read_once_and_counted_once(
 async def test_a_failed_give_back_never_hides_the_answer(
     client, org_and_key, carrier, monkeypatch
 ) -> None:
-
     _fake_reader(monkeypatch, None)
 
     async def broken(*_a, **_k):
@@ -432,7 +421,6 @@ async def test_a_failed_give_back_never_hides_the_answer(
 async def test_a_failed_upload_fetch_leaves_the_file_parts_read(
     client, org_and_key, carrier, monkeypatch, async_session
 ) -> None:
-
     async def two_slots(country_code, number_type, subject_type):
         passport = (DocumentOption(key="passport", label="Passport"),)
         return Requirements(
@@ -490,7 +478,6 @@ async def test_wrong_json_types_are_422_and_null_is_empty(
 async def test_a_failed_reservation_reads_nothing_and_still_answers(
     client, org_and_key, carrier, monkeypatch
 ) -> None:
-
     calls = _fake_reader(monkeypatch)
 
     async def broken(*_a, **_k):
@@ -509,7 +496,6 @@ async def test_a_failed_reservation_reads_nothing_and_still_answers(
 async def test_an_upload_without_a_bucket_is_read_false(
     client, org_and_key, carrier, monkeypatch, async_session
 ) -> None:
-
     calls = _fake_reader(monkeypatch)
     app.dependency_overrides[get_s3_mail_optional] = lambda: None
     try:
@@ -531,7 +517,6 @@ async def test_an_upload_without_a_bucket_is_read_false(
 async def test_a_covering_file_is_sent_once_and_fills_its_slots(
     client, org_and_key, carrier, monkeypatch, async_session
 ) -> None:
-
     async def two_slots(country_code, number_type, subject_type):
         passport = (DocumentOption(key="passport", label="Passport"),)
         return Requirements(
