@@ -65,6 +65,7 @@ Every tool sets the MCP hints `readOnlyHint`, `destructiveHint`, `idempotentHint
 | `release_number`                | Release a number. Destructive and permanent. Needs `confirm_e164`.                                 |
 | `get_verification_requirements` | Read what a carrier needs to verify the org for a number type (read-only).                         |
 | `check_verification`            | Run every check Hail can run on a verification form. Files nothing (read-only).                    |
+| `check_verification_documents`  | Read the files of a verification form: values to fill it, and warnings. Uses daily document reads. |
 | `submit_verification`           | Send details and documents to the carrier. Irreversible. Needs `attest_authorized`.                |
 | `list_verifications`            | List the org's verifications and their states (read-only).                                         |
 | `get_verification`              | Fetch one verification; poll it for `approved` (read-only).                                        |
@@ -76,11 +77,10 @@ Every tool sets the MCP hints `readOnlyHint`, `destructiveHint`, `idempotentHint
 A tool call carries text only, so a file in base64 makes the model write every character into the call. That is slow and fails for most real files. `create_file_upload` returns a one-time link instead, and the agent's shell sends the bytes:
 
 1. `create_file_upload`: `{"purpose": "email_attachment", "filename": "invoice.pdf", "content_type": "application/pdf"}`. The result has `id`, `upload_url`, `expires_at` (15 minutes) and a ready `curl` line.
-2. Run the `curl` line with the file's path after the `@`:
+2. Replace `FILE_PATH` in the `curl` line with the file's absolute path and run it. Keep the single quotes, so a file name cannot run as a command; write any `'` in the path as `'\''`. For `/home/agent/invoice.pdf`:
 
    ```bash
-   curl -sS -X PUT --data-binary @invoice.pdf \
-     -H 'Content-Type: application/pdf' \
+   curl --silent --show-error --globoff --upload-file '/home/agent/invoice.pdf' \
      'https://api.hail.so/v1/uploads/<id>?token=<token>'
    ```
 
@@ -117,11 +117,12 @@ Some numbers, for example a UK mobile, need a carrier check of the organization 
 1. `quote_numbers`: `{"country_code": "GB", "number_type": "mobile"}`. The offer has `readiness: "verification_required"`, its `quote_id`, and `subject_types`: who may verify for it (`person`, `business`, or both).
 2. Ask the user: "you or your company?". That is `subject_type` (`person` or `business`). It is required; never guess it.
 3. `get_verification_requirements`: `{"country_code": "GB", "number_type": "mobile", "quote_id": "<quote_id>", "subject_type": "person"}`. The result lists `fields`, `documents` (skip a slot whose `needs_input` is false) and `address_required`.
-4. Ask the user for every field and file. The agent must not invent or guess any value.
+4. Ask the user for the files first, then for every field the files do not show. The agent must not invent or guess any value.
    The balance must cover the offer's `setup_cents` plus `monthly_cents`, or `submit_verification` returns a 402 error and sends nothing. Ask the user to add credit first. That amount is set aside while the carrier checks the papers. It pays for setup and the first month when the number is bought with this verification, and comes back if the verification is rejected or cancelled, or if no number is bought within 30 days of approval. Each entry in the offer's `verifications` shows it as `held_cents`.
 5. Upload each file with `create_file_upload` (see [Sending a file](#sending-a-file)): `{"purpose": "verification_document", "filename": "passport.jpg", "content_type": "image/jpeg"}`. Run the `curl` line it returns. The upload id works for 1 hour.
-6. `check_verification` with the same arguments as `submit_verification`, minus `attest_authorized`. It runs every check Hail can run (credit, duplicates, required fields, documents, file types and sizes) and files nothing. Fix any `problems` with the user.
-7. `submit_verification`. Each `files` entry is `{"slot", "upload_id"}`, or `{"slot", "content_type", "content_base64"}` for a very small file. Slot names in `files` must be keys in `documents`:
+6. `check_verification_documents` with the files and the `documents` (the `option` may wait). An AI model reads each file. It returns the values the files show, by the form's own keys, and `warnings`: an unreadable, upside-down or expired document, a file of another type than the chosen one, or a typed name that differs from the printed one. Confirm the values with the user and tell them each warning. A warning never blocks the submission. A workspace has 30 reads per day; after that a file comes back `read: false` with `skipped: "daily_limit"`. Only the first 3 pages of a PDF are read, and a PDF of more than 5 pages is not read.
+7. `check_verification` with the same arguments as `submit_verification`, minus `attest_authorized`. It runs every check Hail can run (credit, duplicates, required fields, documents, file types and sizes) and files nothing. Fix any `problems` with the user.
+8. `submit_verification`. Each `files` entry is `{"slot", "upload_id"}`, or `{"slot", "content_type", "content_base64"}` for a very small file. Slot names in `files` must be keys in `documents`:
 
    ```json
    {
@@ -148,9 +149,9 @@ Some numbers, for example a UK mobile, need a carrier check of the organization 
 
    The result holds the verification `id` and `state`, never the details. If the carrier finds a problem, the result lists `problems` (`loc`, `msg`) and nothing is stored. Fix them with the user and submit again. A used upload is deleted once the verification is saved; after a failed submit it stays for the retry.
 
-8. `get_verification`: `{"verification_id": "<id>"}`. Poll every few minutes to hours, not every few seconds. Review takes business days. Hail sends no email or webhook when it ends.
-9. On `approved`: `quote_numbers` again. The offer is now `ready`. Then `acquire_number` and `route_number` as above. The organization may hold several approved verifications (several people or companies). Each entry in the offer's `verifications` has a `subject_name`: the person's or company's name from the form. When more than one is approved, show the user the names, ask which one, and pass its `id` as `verification_id` to `acquire_number`.
-10. On `rejected`: read `rejection_reason`, ask the user, call `cancel_verification` to dismiss it, and submit a new one.
+9. `get_verification`: `{"verification_id": "<id>"}`. Poll every few minutes to hours, not every few seconds. Review takes business days. Hail sends no email or webhook when it ends.
+10. On `approved`: `quote_numbers` again. The offer is now `ready`. Then `acquire_number` and `route_number` as above. The organization may hold several approved verifications (several people or companies). Each entry in the offer's `verifications` has a `subject_name`: the person's or company's name from the form. When more than one is approved, show the user the names, ask which one, and pass its `id` as `verification_id` to `acquire_number`.
+11. On `rejected`: read `rejection_reason`, ask the user, call `cancel_verification` to dismiss it, and submit a new one.
 
 A person's US texting registration may wait on the person. `confirmation: "code"`: ask them for the code the carrier texted and call `confirm_verification` with `{"verification_id": "<id>", "code": "<code>"}`. `confirmation: "reply"`: they answer the carrier's text; nothing to call.
 

@@ -1,7 +1,7 @@
 """Tests for the per-tool-call HailClient helper.
 
 In oauth-rs mode the helper builds a fresh HailClient from the bearer
-on FastMCP's request context, hands it to the tool, and closes it on
+on MCPServer's request context, hands it to the tool, and closes it on
 exit. In static-key mode the helper yields the shared singleton without
 closing.
 """
@@ -9,16 +9,19 @@ closing.
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
+from hailhq.core.telemetry_identity import get_identity, identity_scope
+from hailhq.mcp import tools
 from hailhq.mcp.auth import AuthMode
 from hailhq.mcp.hail_client import HailClient
 from hailhq.mcp.tools import _client_for
 
 
 def _ctx_with_bearer(bearer: str | None) -> SimpleNamespace:
-    """Minimal FastMCP Context stand-in with the headers attribute the
-    helper reaches into. Real FastMCP injects a richer Context object;
+    """Minimal MCPServer Context stand-in with the headers attribute the
+    helper reaches into. Real MCPServer injects a richer Context object;
     we only depend on ``ctx.request_context.request.headers``."""
     headers = {}
     if bearer is not None:
@@ -71,11 +74,6 @@ async def test_client_for_static_key_yields_singleton():
 async def test_actor_enrichment_preserves_verified_identity_and_restores_scope(
     monkeypatch,
 ):
-    from unittest.mock import AsyncMock
-
-    from hailhq.core.telemetry_identity import get_identity, identity_scope
-    from hailhq.mcp import tools
-
     monkeypatch.setattr(tools, "telemetry_enabled", lambda: True)
     monkeypatch.setattr(
         tools, "fetch_organization_name", AsyncMock(return_value="Example Workspace")
@@ -99,12 +97,63 @@ async def test_actor_enrichment_preserves_verified_identity_and_restores_scope(
 
 @pytest.mark.asyncio
 async def test_actor_enrichment_failure_does_not_prevent_tool_execution(monkeypatch):
-    from unittest.mock import AsyncMock
-
-    from hailhq.core.telemetry_identity import get_identity
-    from hailhq.mcp import tools
-
     monkeypatch.setattr(tools, "telemetry_enabled", lambda: True)
     client = SimpleNamespace(whoami=AsyncMock(side_effect=RuntimeError("unavailable")))
     async with tools._actor_for(client):
         assert get_identity() == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cache_key", ["user.jwt", None])
+async def test_analytics_fills_actor_cache_without_logfire(monkeypatch, cache_key):
+    monkeypatch.setattr(tools, "telemetry_enabled", lambda: False)
+    monkeypatch.setattr(tools, "_analytics_actor", True)
+    monkeypatch.setattr(tools, "_actor_cache", {})
+    org_name = AsyncMock(return_value="Example Workspace")
+    monkeypatch.setattr(tools, "fetch_organization_name", org_name)
+    whoami = AsyncMock(return_value={"organization_id": "org-id", "user_id": "user-id"})
+    async with tools._actor_for(SimpleNamespace(whoami=whoami), cache_key=cache_key):
+        pass
+    org_name.assert_not_awaited()
+    if cache_key:
+        assert tools.cached_actor_ids(cache_key) == ("org-id", "user-id")
+    else:
+        # Static-key mode has no per-bearer cache for analytics to read.
+        whoami.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_failed_actor_lookup_is_not_retried_every_call(monkeypatch):
+    monkeypatch.setattr(tools, "telemetry_enabled", lambda: False)
+    monkeypatch.setattr(tools, "_analytics_actor", True)
+    monkeypatch.setattr(tools, "_actor_cache", {})
+    whoami = AsyncMock(side_effect=RuntimeError("unavailable"))
+    client = SimpleNamespace(whoami=whoami)
+    for _ in range(3):
+        async with tools._actor_for(client, cache_key="user.jwt"):
+            pass
+    assert whoami.await_count == 1
+    assert tools.cached_actor_ids("user.jwt") == (None, None)
+
+
+@pytest.mark.asyncio
+async def test_no_actor_lookup_when_analytics_setup_failed(monkeypatch):
+    monkeypatch.setattr(tools, "telemetry_enabled", lambda: False)
+    monkeypatch.setattr(tools, "_analytics_actor", False)
+    whoami = AsyncMock()
+    async with tools._actor_for(SimpleNamespace(whoami=whoami), cache_key="u"):
+        pass
+    whoami.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_org_name_failure_keeps_actor_ids(monkeypatch):
+    monkeypatch.setattr(tools, "telemetry_enabled", lambda: True)
+    monkeypatch.setattr(tools, "_actor_cache", {})
+    monkeypatch.setattr(
+        tools, "fetch_organization_name", AsyncMock(side_effect=RuntimeError("down"))
+    )
+    whoami = AsyncMock(return_value={"organization_id": "org-id", "user_id": "user-id"})
+    async with tools._actor_for(SimpleNamespace(whoami=whoami), cache_key="user.jwt"):
+        assert get_identity()["user_id"] == "user-id"
+    assert tools.cached_actor_ids("user.jwt") == ("org-id", "user-id")

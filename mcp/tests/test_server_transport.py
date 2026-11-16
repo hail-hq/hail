@@ -1,7 +1,7 @@
 """Smoke tests for the server's boot wiring.
 
 In oauth-rs mode: unauth requests get 401 with the protected-resource
-hint, and FastMCP auto-mounts /.well-known/oauth-protected-resource.
+hint, and MCPServer auto-mounts /.well-known/oauth-protected-resource.
 In static-key mode: no auth, no protected-resource route. SSE is gone
 in both modes.
 """
@@ -15,7 +15,7 @@ import httpx
 import pytest
 import respx
 from hailhq.mcp import discovery_auth
-from hailhq.mcp.metadata import INSTRUCTIONS
+from hailhq.mcp.metadata import DESCRIPTION, INSTRUCTIONS, TITLE, server_version
 
 
 def _boot(
@@ -60,7 +60,7 @@ _MCP_ACCEPT = "application/json, text/event-stream"
 
 def _parse_mcp_body(resp: httpx.Response) -> dict:
     """A success response may be framed as bare JSON or as SSE, depending
-    on FastMCP's json_response setting. Empirically confirmed against a
+    on MCPServer's json_response setting. Empirically confirmed against a
     locally booted oauth-rs server: with the
     default json_response=False, a 200 comes back as
     Content-Type: text/event-stream with the JSON-RPC payload on a
@@ -216,6 +216,10 @@ async def test_initialize_advertises_icons_website_and_instructions(monkeypatch,
         },
     ]
     assert info["websiteUrl"] == "https://brand.test/site/mcp"
+    assert info["name"] == "hail"
+    assert info["title"] == TITLE
+    assert info["description"] == DESCRIPTION
+    assert info["version"] == server_version()
     assert result["instructions"] == INSTRUCTIONS
 
 
@@ -251,7 +255,7 @@ async def test_vector_icon_redirects_only_to_an_svg(
 async def test_oauth_rs_unauth_initialize_succeeds(monkeypatch):
     """Capability discovery must not require a bearer.
 
-    Reaching FastMCP's streamable handler needs the parent app's lifespan
+    Reaching MCPServer's streamable handler needs the parent app's lifespan
     running (it starts mcp_app.session_manager) — same requirement as
     test_static_key_no_auth_no_protected_resource_route above. httpx's
     ASGITransport does not run lifespan on its own, so drive it explicitly.
@@ -323,9 +327,9 @@ async def test_oauth_rs_unauth_tools_list_succeeds(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_oauth_rs_unauth_tools_call_still_401s(monkeypatch):
-    """The safelist is only initialize and tools/list — tools/call must still require
+    """tools/call is not in the discovery safelist and must still require
     auth. No lifespan needed here: like the pre-existing ping/401 test,
-    auth is rejected before the request ever reaches FastMCP's
+    auth is rejected before the request ever reaches MCPServer's
     session-manager-dependent streamable handler."""
     srv = _boot(monkeypatch, oauth=True)
     transport = httpx.ASGITransport(app=srv.app)
@@ -351,7 +355,7 @@ async def test_oauth_rs_oversized_body_not_buffered_unbounded(monkeypatch):
     """DiscoveryAuthMiddleware's pre-auth body peek is capped
     (_MAX_PEEK_BYTES). A body past the cap must not get the synthetic
     bearer injected, even if its (unparsed, because unread past the cap)
-    method name is "initialize" — it falls through to FastMCP's real auth
+    method name is "initialize" — it falls through to MCPServer's real auth
     middleware unmodified and 401s exactly like any other unauthenticated,
     non-safelisted request. This exercises the cap without sending a truly
     huge body: 200 KiB is comfortably past the 64 KiB ceiling."""
@@ -378,11 +382,11 @@ async def test_oauth_rs_oversized_body_not_buffered_unbounded(monkeypatch):
 @pytest.mark.asyncio
 async def test_oauth_rs_anon_initialize_capped_per_ip(monkeypatch):
     """Fix: an unauthenticated caller looping "initialize" must not
-    accumulate unbounded MCP sessions (this SDK version's session manager
-    has no idle timeout, so each successful anonymous initialize is a
-    permanent session). Once the per-IP cap
+    accumulate unbounded MCP sessions (server.py turns the SDK's session
+    count limit off, and each successful anonymous initialize holds a
+    session for at least 30 idle minutes). Once the per-IP cap
     (discovery_auth._ANON_INIT_MAX_PER_WINDOW) is exceeded, further
-    anonymous initialize calls fall through to FastMCP's real auth
+    anonymous initialize calls fall through to MCPServer's real auth
     middleware unmodified (no synthetic bearer injected) — same
     established pattern as test_oauth_rs_oversized_body_not_buffered_unbounded
     above: a plain 401, not a bespoke response shape.
@@ -431,17 +435,16 @@ async def test_oauth_rs_publishes_protected_resource_metadata(monkeypatch):
         resp = await c.get("/.well-known/oauth-protected-resource")
     assert resp.status_code == 200
     body = resp.json()
-    # Pydantic AnyHttpUrl canonicalises bare-host URLs with a trailing
-    # slash (https://mcp.hail.so → https://mcp.hail.so/). Strip the slash
-    # for the comparison rather than fighting the framework.
-    assert body["resource"].rstrip("/") == "https://mcp.hail.so"
+    # The value clients have always seen: a bare host gets a trailing slash,
+    # as mcp 1.x's AnyHttpUrl parsing gave it.
+    assert body["resource"] == "https://mcp.hail.so/"
     assert "https://hail.so/api/auth" in body["authorization_servers"]
 
 
 @pytest.mark.asyncio
 async def test_static_key_no_auth_no_protected_resource_route(monkeypatch):
     srv = _boot(monkeypatch, oauth=False)
-    # The POST to "/" reaches FastMCP's streamable handler in static-key
+    # The POST to "/" reaches MCPServer's streamable handler in static-key
     # mode (no auth middleware to short-circuit it), and that handler
     # requires the session manager — which only starts under the parent
     # app's lifespan. httpx.ASGITransport does not run lifespan, so drive
@@ -501,6 +504,14 @@ async def test_glama_file_claim_is_not_served(monkeypatch, oauth, method):
     assert resp.status_code == 404
 
 
+def test_open_sessions_are_capped(monkeypatch):
+    """A caller with any bearer can open sessions, so the count stays capped."""
+    from mcp.server.streamable_http_manager import DEFAULT_MAX_SESSIONS
+
+    srv = _boot(monkeypatch, oauth=True)
+    assert srv.mcp_app.session_manager.max_sessions == DEFAULT_MAX_SESSIONS == 10_000
+
+
 @pytest.mark.asyncio
 async def test_healthz_works_in_both_modes(monkeypatch):
     for oauth in (True, False):
@@ -515,7 +526,7 @@ async def test_healthz_works_in_both_modes(monkeypatch):
 @pytest.mark.asyncio
 async def test_oauth_rs_requires_mcp_resource_url(monkeypatch):
     """Empty MCP_RESOURCE_URL in oauth-rs mode is a boot-time error,
-    not a deferred pydantic-validation surprise at FastMCP construction."""
+    not a deferred pydantic-validation surprise at MCPServer construction."""
     with pytest.raises(RuntimeError, match="MCP_RESOURCE_URL"):
         _boot(monkeypatch, oauth=True, mcp_resource_url="")
 
@@ -523,7 +534,7 @@ async def test_oauth_rs_requires_mcp_resource_url(monkeypatch):
 @pytest.mark.asyncio
 async def test_oauth_rs_unauth_session_less_tools_list_creates_no_session(monkeypatch):
     """tools/list only gets the synthetic bearer when it carries an
-    Mcp-Session-Id. Without one, FastMCP's session manager would mint a new
+    Mcp-Session-Id. Without one, MCPServer's session manager would mint a new
     permanent session (then answer 400), bypassing the per-IP initialize cap.
     It must 401 and leave the session table alone.
     """
@@ -543,6 +554,191 @@ async def test_oauth_rs_unauth_session_less_tools_list_creates_no_session(monkey
         assert len(sessions) == 0
 
 
+_MODERN = "2026-07-28"
+
+
+def _modern_request(method: str, request_id: int = 1, **params) -> dict:
+    """A 2026-07-28 request: no handshake, the client's identity in _meta."""
+    return {
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "method": method,
+        "params": {
+            **params,
+            "_meta": {
+                "io.modelcontextprotocol/protocolVersion": _MODERN,
+                "io.modelcontextprotocol/clientInfo": {"name": "t", "version": "1"},
+                "io.modelcontextprotocol/clientCapabilities": {},
+            },
+        },
+    }
+
+
+def _modern_headers(method: str, **extra: str) -> dict[str, str]:
+    return {
+        "Accept": _MCP_ACCEPT,
+        "MCP-Protocol-Version": _MODERN,
+        "Mcp-Method": method,
+        **extra,
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("oauth", [False, True])
+async def test_server_discover_carries_identity_without_a_session(monkeypatch, oauth):
+    """A 2026-07-28 client learns the server's title, description, website,
+    icons and instructions from server/discover, with no bearer in oauth-rs
+    and without opening a session."""
+    srv = _boot(monkeypatch, oauth=oauth, mcp_resource_url="https://mcp.brand.test/")
+    async with srv.app.router.lifespan_context(srv.app):
+        sessions = srv.mcp_app.session_manager._server_instances
+        transport = httpx.ASGITransport(app=srv.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+            resp = await c.post(
+                "/",
+                headers=_modern_headers("server/discover"),
+                json=_modern_request("server/discover"),
+            )
+        assert len(sessions) == 0
+
+    assert resp.status_code == 200
+    result = _parse_mcp_body(resp)["result"]
+    info = result["_meta"]["io.modelcontextprotocol/serverInfo"]
+    assert info["name"] == "hail"
+    assert info["title"] == TITLE
+    assert info["description"] == DESCRIPTION
+    assert info["websiteUrl"] == "https://brand.test/site/mcp"
+    assert info["icons"][1]["mimeType"] == "image/svg+xml"
+    assert result["instructions"] == INSTRUCTIONS
+    assert _MODERN in result["supportedVersions"]
+    # Nothing pushes list changes, on either protocol.
+    assert result["capabilities"]["tools"] == {"listChanged": False}
+
+
+@pytest.mark.asyncio
+async def test_oauth_rs_modern_tools_list_is_public_but_tools_call_is_not(
+    monkeypatch,
+):
+    srv = _boot(monkeypatch, oauth=True)
+    async with srv.app.router.lifespan_context(srv.app):
+        sessions = srv.mcp_app.session_manager._server_instances
+        transport = httpx.ASGITransport(app=srv.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+            listed = await c.post(
+                "/",
+                headers=_modern_headers("tools/list"),
+                json=_modern_request("tools/list"),
+            )
+            called = await c.post(
+                "/",
+                headers=_modern_headers("tools/call", **{"Mcp-Name": "whoami"}),
+                json=_modern_request("tools/call", 2, name="whoami", arguments={}),
+            )
+        assert len(sessions) == 0
+
+    assert listed.status_code == 200
+    names = {t["name"] for t in _parse_mcp_body(listed)["result"]["tools"]}
+    assert {"place_call", "whoami"} <= names
+    assert called.status_code == 401
+    assert "resource_metadata=" in called.headers.get("www-authenticate", "")
+
+
+_EMPTY_LISTS = {
+    "resources/list": "resources",
+    "resources/templates/list": "resourceTemplates",
+    "prompts/list": "prompts",
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method", list(_EMPTY_LISTS))
+async def test_oauth_rs_empty_lists_are_public(monkeypatch, method):
+    """The SDK advertises resources and prompts, so a client checking them
+    with no bearer gets the empty lists, on either protocol, and no session."""
+    srv = _boot(monkeypatch, oauth=True)
+    async with srv.app.router.lifespan_context(srv.app):
+        sessions = srv.mcp_app.session_manager._server_instances
+        transport = httpx.ASGITransport(app=srv.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+            modern = await c.post(
+                "/", headers=_modern_headers(method), json=_modern_request(method)
+            )
+            assert len(sessions) == 0
+            init = await c.post(
+                "/",
+                headers={"Accept": _MCP_ACCEPT},
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2025-06-18",
+                        "capabilities": {},
+                        "clientInfo": {"name": "test", "version": "0.0.0"},
+                    },
+                },
+            )
+            legacy = await c.post(
+                "/",
+                headers={
+                    "Accept": _MCP_ACCEPT,
+                    "Mcp-Session-Id": init.headers["mcp-session-id"],
+                },
+                json={"jsonrpc": "2.0", "id": 2, "method": method, "params": {}},
+            )
+            session_less = await c.post(
+                "/",
+                headers={"Accept": _MCP_ACCEPT},
+                json={"jsonrpc": "2.0", "id": 3, "method": method},
+            )
+        assert len(sessions) == 1
+
+    key = _EMPTY_LISTS[method]
+    assert modern.status_code == 200
+    assert _parse_mcp_body(modern)["result"][key] == []
+    assert legacy.status_code == 200
+    assert _parse_mcp_body(legacy)["result"][key] == []
+    assert session_less.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_oauth_rs_unauth_resources_read_still_401s(monkeypatch):
+    srv = _boot(monkeypatch, oauth=True)
+    async with srv.app.router.lifespan_context(srv.app):
+        transport = httpx.ASGITransport(app=srv.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+            resp = await c.post(
+                "/",
+                headers=_modern_headers("resources/read"),
+                json=_modern_request("resources/read", uri="file:///x"),
+            )
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("version", [None, "2025-06-18"])
+async def test_oauth_rs_session_less_legacy_discover_creates_no_session(
+    monkeypatch, version
+):
+    """On an older protocol a session-less POST would open a session, so an
+    anonymous server/discover there 401s like a session-less tools/list."""
+    srv = _boot(monkeypatch, oauth=True)
+    headers = {"Accept": _MCP_ACCEPT}
+    if version:
+        headers["MCP-Protocol-Version"] = version
+    async with srv.app.router.lifespan_context(srv.app):
+        sessions = srv.mcp_app.session_manager._server_instances
+        transport = httpx.ASGITransport(app=srv.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+            resp = await c.post(
+                "/",
+                headers=headers,
+                json={"jsonrpc": "2.0", "id": 1, "method": "server/discover"},
+            )
+        assert len(sessions) == 0
+    assert resp.status_code == 401
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "body",
@@ -557,7 +753,7 @@ async def test_oauth_rs_unauth_session_less_tools_list_creates_no_session(monkey
 async def test_oauth_rs_unauth_odd_json_bodies_401_not_500(monkeypatch, body):
     """The pre-auth body peek must never turn an unauthenticated request into
     a 500: unhashable "method" values, deeply nested JSON and over-long
-    integer literals all fall through to FastMCP's auth and 401."""
+    integer literals all fall through to MCPServer's auth and 401."""
     srv = _boot(monkeypatch, oauth=True)
     transport = httpx.ASGITransport(app=srv.app, raise_app_exceptions=False)
     async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
@@ -661,27 +857,18 @@ async def test_oauth_rs_unauth_initialized_notification_unknown_session_no_sessi
 async def test_oauth_rs_sdk_client_connects_anonymously_and_lists_tools(monkeypatch):
     """The real mcp SDK client (initialize + notifications/initialized +
     tools/list) works with no bearer token."""
-    from mcp.client.streamable_http import streamablehttp_client
+    import httpx2
+    from mcp.client.streamable_http import streamable_http_client
 
     from mcp import ClientSession
 
     srv = _boot(monkeypatch, oauth=True)
-
-    def factory(headers=None, timeout=None, auth=None):
-        return httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=srv.app),
-            headers=headers,
-            timeout=timeout,
-            auth=auth,
-        )
+    client = httpx2.AsyncClient(transport=httpx2.ASGITransport(app=srv.app))
 
     async with (
         srv.app.router.lifespan_context(srv.app),
-        streamablehttp_client("http://t/", httpx_client_factory=factory) as (
-            read,
-            write,
-            _,
-        ),
+        client,
+        streamable_http_client("http://t/", http_client=client) as (read, write),
         ClientSession(read, write) as session,
     ):
         await session.initialize()
@@ -689,3 +876,100 @@ async def test_oauth_rs_sdk_client_connects_anonymously_and_lists_tools(monkeypa
     names = {t.name for t in tools.tools}
     assert "place_call" in names
     assert "whoami" in names
+
+
+@pytest.mark.asyncio
+async def test_oauth_rs_modern_sdk_client_discovers_anonymously(monkeypatch):
+    """The SDK client in its default mode probes server/discover, adopts the
+    2026-07-28 protocol, reads the server identity and lists tools, all with
+    no bearer token."""
+    import httpx2
+    from mcp.client.streamable_http import streamable_http_client
+
+    from mcp import Client
+
+    srv = _boot(monkeypatch, oauth=True)
+    http = httpx2.AsyncClient(transport=httpx2.ASGITransport(app=srv.app))
+    async with (
+        srv.app.router.lifespan_context(srv.app),
+        http,
+        Client(streamable_http_client("http://t/", http_client=http)) as client,
+    ):
+        assert client.protocol_version == _MODERN
+        assert client.server_info.title == TITLE
+        assert client.server_info.description == DESCRIPTION
+        tools = await client.list_tools()
+    assert "place_call" in {t.name for t in tools.tools}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("modern", [False, True])
+@respx.mock
+async def test_oauth_rs_tools_call_forwards_the_bearer(monkeypatch, modern):
+    """A tool call with a bearer reaches the tool, which forwards that bearer
+    to the API, on both protocol eras."""
+    monkeypatch.setattr("hailhq.core.config.settings.hail_api_url", "http://api.test")
+    whoami = respx.get("http://api.test/whoami").respond(
+        json={
+            "auth_kind": "jwt",
+            "organization_id": "00000000-0000-0000-0000-000000000001",
+            "user_id": None,
+            "email": None,
+            "name": None,
+            "superadmin": False,
+        }
+    )
+    srv = _boot(monkeypatch, oauth=True)
+    auth = {"Authorization": "Bearer user.jwt.token"}
+    async with srv.app.router.lifespan_context(srv.app):
+        transport = httpx.ASGITransport(app=srv.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+            if modern:
+                resp = await c.post(
+                    "/",
+                    headers={
+                        **_modern_headers("tools/call", **{"Mcp-Name": "whoami"}),
+                        **auth,
+                    },
+                    json=_modern_request("tools/call", name="whoami", arguments={}),
+                )
+            else:
+                init = await c.post(
+                    "/",
+                    headers={"Accept": _MCP_ACCEPT, **auth},
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "initialize",
+                        "params": {
+                            "protocolVersion": "2025-06-18",
+                            "capabilities": {},
+                            "clientInfo": {"name": "t", "version": "1"},
+                        },
+                    },
+                )
+                session = {
+                    "Mcp-Session-Id": init.headers["mcp-session-id"],
+                    "MCP-Protocol-Version": "2025-06-18",
+                }
+                await c.post(
+                    "/",
+                    headers={"Accept": _MCP_ACCEPT, **auth, **session},
+                    json={"jsonrpc": "2.0", "method": "notifications/initialized"},
+                )
+                resp = await c.post(
+                    "/",
+                    headers={"Accept": _MCP_ACCEPT, **auth, **session},
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 2,
+                        "method": "tools/call",
+                        "params": {"name": "whoami", "arguments": {}},
+                    },
+                )
+
+    assert resp.status_code == 200
+    result = _parse_mcp_body(resp)["result"]
+    assert result.get("isError") is not True
+    assert result["structuredContent"]["auth_kind"] == "jwt"
+    assert whoami.calls.last.request.headers["authorization"] == "Bearer user.jwt.token"

@@ -78,7 +78,7 @@ picking up this codebase: read it before making any infra-shaped change.**
 
 Internal runbooks (not published) live in `docs/operations/`:
 [number-order-failures.md](docs/operations/number-order-failures.md) (carrier error references, account restrictions, and safe reconciliation),
-[carrier-verification.md](docs/operations/carrier-verification.md) (verification states, background pass, cancel rules),
+[carrier-verification.md](docs/operations/carrier-verification.md) (verification states, background pass, cancel rules; [Document check (AI read)](docs/operations/carrier-verification.md#document-check-ai-read): model setting, 30 reads/day cap, open pricing decision),
 [number-catalog-sync.md](docs/operations/number-catalog-sync.md) (the `costs/<carrier>.json` files, weekly sync, secrets, purchase gate),
 [voice-rate-sync.md](docs/operations/voice-rate-sync.md) (carrier call rates in `costs/voice.json`, weekly sync),
 [call-leg-costs.md](docs/operations/call-leg-costs.md) (what each carrier charged per call leg, the `call_legs` table),
@@ -92,6 +92,7 @@ Some changes only work when they ship in a fixed order. Follow these every time.
 
 1. **Monday cost jobs.** They run in a fixed order, each writing its own files. The table and rules are in [costs/README.md](costs/README.md#weekly-jobs-in-order).
 2. **hail before hail-website.** A change that spans both repos merges and deploys in hail first: migrations, API fields, endpoints, `costs/*.json` (hail-website reads them from `main`). Merge the hail-website PR only after the hail deploy finishes. The hail-website code must never call something hail does not serve yet.
+   - Exception: hail code that calls a new hail-website route merges after that route is deployed. Example: the call price quote (`POST /api/internal/voice-rates/quote`) ships in hail-website first, then the hail call balance cap that calls it. In the other order, every billed call and handover falls back to the default limit until the route is live.
 3. **Per-destination call pricing.** The PRs merge in this order, each after the one before is deployed:
    1. hail: carrier call rates in `costs/voice.json` and the weekly sync.
    2. hail: the real carrier cost of each call leg.
@@ -122,6 +123,6 @@ Follow [docs/operations/agent-prompts.md](docs/operations/agent-prompts.md) for 
 - Commit `.env` or `.env.local`.
 - Introduce a dashboard / web UI in v1.
 - Add a dependency without checking license compatibility with AGPLv3.
-- Add env vars without updating `.env.example` in the same commit.
+- Add env vars without updating `.env.example` in the same commit. Exception: a setting with a working code default stays out of `.env` files; document it next to the code and in the ops doc.
 - Duplicate schemas across services (use `core/`).
 - Run destructive git operations unprompted.

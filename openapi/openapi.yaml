@@ -388,7 +388,11 @@ paths:
               schema:
                 type: integer
         "402":
-          description: insufficient credits; top up at https://hail.so/console/billing
+          description:
+            insufficient credits; top up at https://hail.so/console/billing.
+            Also returned when the credit left, less what live calls have set aside,
+            pays for less than one minute to this destination. A call's time limit
+            is cut to the minutes the credit pays for.
         "422":
           description: Validation Error
           content:
@@ -676,7 +680,7 @@ paths:
 
         ```
 
-        curl -sS -X PUT --data-binary @passport.jpg '<upload_url>'
+        curl --silent --show-error --globoff --upload-file 'passport.jpg' '<upload_url>'
 
         ```
 
@@ -2714,21 +2718,19 @@ paths:
               - type: "null"
             description:
               "Optional. Keep only options that do all these jobs, priced
-              and listed for these jobs only, the same as /numbers/quotes. Without
-              it, options are priced for every job they do, and each number type
-              shows its best option in this order: buy now before
-              order by hand, then ready now, then options that do every job the type
-              offers (even when a number that does fewer jobs costs less), then lower
-              price, then fewer papers."
+              and listed for these jobs only, the same as /numbers/quotes. Without it,
+              options are priced for every job they do, and each number type shows its
+              best option in this order: buy now before order by hand, then ready now,
+              then options that do every job the type offers (even when a number that
+              does fewer jobs costs less), then lower price, then fewer papers."
             title: Capabilities
           description:
-            "Optional. Keep only options that do all these jobs, priced
-            and listed for these jobs only, the same as /numbers/quotes. Without
-            it, options are priced for every job they do, and each number type
-            shows its best option in this order: buy now before
-            order by hand, then ready now, then options that do every job the type offers
-            (even when a number that does fewer jobs costs less), then lower price,
-            then fewer papers."
+            "Optional. Keep only options that do all these jobs, priced and
+            listed for these jobs only, the same as /numbers/quotes. Without it, options
+            are priced for every job they do, and each number type shows its best option
+            in this order: buy now before order by hand, then ready now, then options
+            that do every job the type offers (even when a number that does fewer jobs
+            costs less), then lower price, then fewer papers."
         - name: authorization
           in: header
           required: false
@@ -5537,6 +5539,182 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
+  /v1/verifications/document-check:
+    post:
+      tags:
+        - verifications
+      summary: Check Verification Documents
+      description:
+        "Read the documents of a number verification form before you submit
+        it
+
+        (multipart/form-data).
+
+
+        Send the documents first: the same parts as `POST /verifications`, with
+
+        a file per slot to read (`file.<slot>`, or `upload.<slot>` with the id
+
+        of a `verification_document` upload). Only the slots with a file in
+
+        this request are read. A file that stands for other slots too (one
+
+        passport for several proofs) is sent once, for its slot, with
+
+        `documents.<slot>.covers` listing the other slots: it is read once and
+
+        fills all of them. One file given for several slots uses one read. A
+
+        `file.<slot>` part for a slot not in `documents` is not read and comes
+
+        back `read` false. `quote_id`, `country_code`, `number_type` and
+
+        `subject_type` are required. `documents` may leave out `option` while
+
+        the type is not chosen; `fields` and `address` may be empty or partial.
+
+
+        Returns the values the files show, by the carrier's field names, to
+
+        fill the form (`fields`, `address`, `documents.<slot>.fields`, and the
+
+        document type each file looks like in `documents.<slot>.option`). Also
+
+        returns `warnings`: an unreadable, upside-down or expired document, a
+
+        file that does not match the chosen document type, or a typed name that
+
+        differs from the printed one. Show each warning with its fix. You can
+
+        still submit.
+
+
+        A file nothing was read from has `read` false: with an `unreadable`
+
+        warning when the file is not clear, else with no warning (the read
+
+        failed or took too long, the file is over the size or page limits, or
+
+        the workspace used its 30 reads for today). Nothing is filed, saved,
+
+        held or charged, and uploads are not used up. The files are read by an
+
+        AI model (Anthropic) for this check only."
+      operationId: check_verification_documents
+      parameters:
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerificationDocumentCheckResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /v1/verifications/document-cautions:
+    post:
+      tags:
+        - verifications
+      summary: Check Verification Document Cautions
+      description:
+        "Check the typed names and chosen document types again, against
+        the
+
+        reads an earlier `POST /verifications/document-check` returned (JSON).
+
+
+        Send the form as it is now, with each slot's earlier read in
+
+        `documents.<slot>.read` (the `documents.<slot>` that check returned).
+
+        Only slots with a read are checked. Returns the `name` and
+
+        `document_type` warnings that check would give for this form. No file is
+
+        sent, no AI model runs, no daily read is used, and nothing is saved."
+      operationId: check_verification_document_cautions
+      parameters:
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VerificationDocumentCautionsRequest"
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerificationDocumentCautionsResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
   /v1/verifications/{verification_id}:
     get:
       tags:
@@ -5936,7 +6114,9 @@ components:
         city:
           type: string
           title: City
-          description: City or locality.
+          description:
+            City or town of the street address, as written on mail sent
+            there.
         region:
           type: string
           title: Region
@@ -5944,7 +6124,7 @@ components:
         postal_code:
           type: string
           title: Postal Code
-          description: Postal or ZIP code.
+          description: Postal or ZIP code of the street address, such as `94103`.
         country_code:
           type: string
           title: Country Code
@@ -10439,6 +10619,282 @@ components:
       description:
         Returned by ``POST /verifications/check`` when every local check
         passes.
+    VerificationDocumentCautionDocument:
+      properties:
+        option:
+          type: string
+          title: Option
+          description: The chosen document type key, or empty when not chosen yet.
+          default: ""
+        fields:
+          additionalProperties:
+            type: string
+          type: object
+          title: Fields
+          description: The values typed for this slot's fields, by field name.
+        read:
+          anyOf:
+            - $ref: "#/components/schemas/VerificationDocumentCautionRead"
+            - type: "null"
+          description:
+            The slot's `documents.<slot>` from an earlier document check,
+            or null when it has no successful read. Only slots with a read are checked.
+      type: object
+      title: VerificationDocumentCautionDocument
+      description: "One slot of the form: what is typed now, and its earlier read."
+    VerificationDocumentCautionRead:
+      properties:
+        option:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Option
+          description: The document type the file looked like, or null.
+        printed_name:
+          anyOf:
+            - $ref: "#/components/schemas/VerificationPrintedName"
+            - type: "null"
+          description: The name printed on the file, or null (no name check).
+      type: object
+      title: VerificationDocumentCautionRead
+      description:
+        "A slot's earlier read, as `POST /verifications/document-check`
+
+        returned it in `documents.<slot>`. Only `option` and `printed_name` are
+
+        used; the other keys of that object may be sent and are ignored."
+    VerificationDocumentCautionsRequest:
+      properties:
+        quote_id:
+          type: string
+          format: uuid
+          title: Quote Id
+          description: The `quote_id` of the number offer being verified.
+        country_code:
+          type: string
+          maxLength: 2
+          minLength: 2
+          title: Country Code
+          description: ISO 3166-1 alpha-2 country of the number, like GB.
+        number_type:
+          type: string
+          title: Number Type
+          description: The number type of the offer, like `local` or `mobile`.
+        subject_type:
+          type: string
+          enum:
+            - person
+            - business
+          title: Subject Type
+          description: "'person' (you) or 'business' (your company)."
+        fields:
+          additionalProperties:
+            type: string
+          type: object
+          title: Fields
+          description: The form's typed fields, by name.
+        address:
+          additionalProperties:
+            type: string
+          type: object
+          title: Address
+          description: The typed address parts (`customer_name` is compared).
+        documents:
+          additionalProperties:
+            $ref: "#/components/schemas/VerificationDocumentCautionDocument"
+          type: object
+          title: Documents
+          description: The form's document slots, by name.
+      type: object
+      required:
+        - quote_id
+        - country_code
+        - number_type
+        - subject_type
+      title: VerificationDocumentCautionsRequest
+      description: Body of ``POST /verifications/document-cautions``.
+    VerificationDocumentCautionsResponse:
+      properties:
+        warnings:
+          items:
+            $ref: "#/components/schemas/VerificationDocumentWarning"
+          type: array
+          title: Warnings
+          description:
+            "`name` and `document_type` warnings: the typed form against
+            the earlier reads. Empty when nothing differs."
+      type: object
+      required:
+        - warnings
+      title: VerificationDocumentCautionsResponse
+      description: Returned by ``POST /verifications/document-cautions``.
+    VerificationDocumentCheckResponse:
+      properties:
+        fields:
+          additionalProperties:
+            type: string
+          type: object
+          title: Fields
+          description:
+            Values for the form's own `fields`, by field name, read from
+            the files.
+        address:
+          additionalProperties:
+            type: string
+          type: object
+          title: Address
+          description:
+            Address parts read from the files (`customer_name`, `street`,
+            `city`, `region`, `postal_code`, `country_code`). Only the parts found.
+        documents:
+          additionalProperties:
+            $ref: "#/components/schemas/VerificationDocumentRead"
+          type: object
+          title: Documents
+          description: What was read from each slot that had a file, by slot name.
+        warnings:
+          items:
+            $ref: "#/components/schemas/VerificationDocumentWarning"
+          type: array
+          title: Warnings
+          description: Things the carrier may refuse. Empty when nothing was found.
+        note:
+          type: string
+          title: Note
+          description: What the check does not cover.
+      type: object
+      required:
+        - fields
+        - address
+        - documents
+        - warnings
+        - note
+      title: VerificationDocumentCheckResponse
+      description: Returned by ``POST /verifications/document-check``.
+    VerificationDocumentRead:
+      properties:
+        read:
+          type: boolean
+          title: Read
+          description:
+            "False when nothing was read from the file: the reader is off,
+            the file type is not supported, the read failed or took too long (no warning),
+            or the file is unreadable (an 'unreadable' warning). The other values
+            are then empty."
+        option:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Option
+          description:
+            The slot's document type the file looks like, as an option
+            key, or null when none fits or it was not read.
+        fields:
+          additionalProperties:
+            type: string
+          type: object
+          title: Fields
+          description:
+            Values for the fields of the slot's document types, by field
+            name, as printed on the file.
+        expiry_date:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Expiry Date
+          description: The expiry date printed on the file (YYYY-MM-DD), or null.
+        printed_name:
+          anyOf:
+            - $ref: "#/components/schemas/VerificationPrintedName"
+            - type: "null"
+          description: The name printed on the file, or null when not read.
+        skipped:
+          anyOf:
+            - type: string
+              const: daily_limit
+            - type: "null"
+          title: Skipped
+          description:
+            "Why the file was not read, when Hail chose not to: 'daily_limit'
+            when the workspace has used today's document reads. Null otherwise."
+      type: object
+      required:
+        - read
+        - option
+        - fields
+        - expiry_date
+        - printed_name
+      title: VerificationDocumentRead
+      description: What was read from one slot's file.
+    VerificationDocumentWarning:
+      properties:
+        field:
+          type: string
+          title: Field
+          description:
+            "Where to show it: a slot name for the document itself, or
+            the path of a typed value (`first_name`, `<slot>.<field>`, `address.customer_name`)."
+        kind:
+          type: string
+          enum:
+            - unreadable
+            - rotated
+            - expired
+            - document_type
+            - name
+          title: Kind
+          description: "'unreadable', 'rotated' (upside down or on its side),
+            'expired', 'document_type' (the file does not match the chosen type),
+            or 'name' (the typed name differs from the printed one)."
+        message:
+          type: string
+          title: Message
+          description: What is wrong and how to fix it.
+      type: object
+      required:
+        - field
+        - kind
+        - message
+      title: VerificationDocumentWarning
+      description:
+        "Something on an uploaded document the carrier may refuse. A warning
+
+        only: you can still submit."
+    VerificationPrintedName:
+      properties:
+        given_names:
+          type: string
+          title: Given Names
+          description: A person's given names.
+        surnames:
+          type: string
+          title: Surnames
+          description: A person's surnames.
+        latin_given_names:
+          type: string
+          title: Latin Given Names
+          description:
+            The given names in Latin letters as the document prints them
+            (its machine-readable zone or a transliteration), or empty.
+          default: ""
+        latin_surnames:
+          type: string
+          title: Latin Surnames
+          description: The surnames in Latin letters, the same way.
+          default: ""
+        business_name:
+          type: string
+          title: Business Name
+          description: A company's name.
+      type: object
+      required:
+        - given_names
+        - surnames
+        - business_name
+      title: VerificationPrintedName
+      description:
+        The name printed on a document, as read. Empty strings when not
+        printed.
     VerificationRequirements:
       properties:
         country_code:
