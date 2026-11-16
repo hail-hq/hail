@@ -228,9 +228,7 @@ def private_span(
         isinstance(error_type := (event.attributes or {}).get("exception.type"), str)
         and error_type.startswith(_DB_ERROR_PREFIXES)
         for event in span.events
-    ) or any(
-        marker in (span.status.description or "") for marker in _SQL_ERROR_MARKERS
-    )
+    ) or any(marker in (span.status.description or "") for marker in _SQL_ERROR_MARKERS)
     attributes = _safe_attributes(
         span.attributes, include_content=include_content, sql=sql
     )
