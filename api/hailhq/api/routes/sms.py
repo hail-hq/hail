@@ -75,7 +75,7 @@ from hailhq.core.sms_trial import (
     TRIAL_HINT,
     TrialBodyTooLong,
     claim_trial_send,
-    trial_enabled,
+    trial_hint_applies,
 )
 from hailhq.core.telemetry_identity import tag_context
 from hailhq.core.urls import join_url
@@ -216,6 +216,16 @@ async def deliver_sms(
     return None
 
 
+async def _with_trial_hint(
+    db: AsyncSession, organization_id: UUID, to: str, msg: str
+) -> str:
+    """``msg``, plus how to send a trial text when the workspace can still
+    send one to this US destination."""
+    if is_us(to) and await trial_hint_applies(db, organization_id):
+        return f"{msg} {TRIAL_HINT}"
+    return msg
+
+
 @router.post(
     "",
     response_model=SmsResponse,
@@ -334,6 +344,11 @@ async def create_sms(
             raise await cache_failure(
                 idem, unprocessable(str(exc), loc=["body", "body"])
             ) from None
+        if trial is None and db.in_transaction():
+            # A refused claim may hold the workspace lock (all texts used,
+            # phone changed). Nothing is written yet: release the lock
+            # before the checks below, which can call the carrier.
+            await db.rollback()
     if trial is not None:
         # The claim holds the workspace lock: nothing commits before the
         # insert and commit below, in this same transaction.
@@ -365,8 +380,6 @@ async def create_sms(
         from_number = registered or await resolve_org_number(
             db, principal.organization_id, body.from_, capability="sms"
         )
-        # A US text the trial could send: the refusal says how.
-        hint = " " + TRIAL_HINT if trial_enabled() and is_us(body.to) else ""
         if from_number is None:
             if body.from_ is not None:
                 msg = (
@@ -374,18 +387,20 @@ async def create_sms(
                     "organization, is not active, or lacks the sms capability"
                 )
             else:
-                msg = (
+                msg = await _with_trial_hint(
+                    db,
+                    principal.organization_id,
+                    body.to,
                     "no dedicated SMS-capable phone number on this organization; "
-                    "SMS requires a dedicated number, not the shared voice pool"
-                ) + hint
+                    "SMS requires a dedicated number, not the shared voice pool",
+                )
             raise await cache_failure(idem, unprocessable(msg, loc=["body", "from"]))
         block = await us_registration_block(
             db, principal.organization_id, from_number, body.to
         )
         if block:
-            raise await cache_failure(
-                idem, unprocessable(block + hint, loc=["body", "from"])
-            )
+            msg = await _with_trial_hint(db, principal.organization_id, body.to, block)
+            raise await cache_failure(idem, unprocessable(msg, loc=["body", "from"]))
         from_e164 = from_number.e164
 
     sms = Sms(

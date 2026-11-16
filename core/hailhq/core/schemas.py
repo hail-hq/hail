@@ -25,7 +25,9 @@ from pydantic import (
     model_validator,
 )
 
-E164 = re.compile(r"^\+[1-9]\d{1,14}$")
+# ``[0-9]``, not ``\d``: ``\d`` also matches non-ASCII digits, and this
+# pattern is reused where Python flags do not carry (pydantic ``pattern=``).
+E164 = re.compile(r"^\+[1-9][0-9]{1,14}$", re.ASCII)
 
 
 def _e164_or_error(v: str | None) -> str | None:

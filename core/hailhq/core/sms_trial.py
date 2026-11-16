@@ -10,11 +10,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
+import phonenumbers
 from hailhq.core.config import settings
 from hailhq.core.db import key_lock, org_lock
 from hailhq.core.models import PhoneNumber, Sms, SmsTrialPhone
 from hailhq.core.sms_registration_gate import is_us, on_approved_registration
-import phonenumbers
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -342,6 +342,19 @@ async def trial_texts_used(db: AsyncSession, organization_id: UUID) -> int:
             )
         )
     ).scalar_one()
+
+
+async def trial_hint_applies(db: AsyncSession, organization_id: UUID) -> bool:
+    """True when the trial can still send for this workspace: sending is on,
+    the workspace is not the trial number's owner, and it has trial texts
+    left. Refusals add ``TRIAL_HINT`` only then; the caller checks that the
+    destination is US."""
+    if not trial_enabled():
+        return False
+    number = await trial_sender(db)
+    if number is None or number.organization_id == organization_id:
+        return False
+    return await trial_texts_used(db, organization_id) < SMS_TRIAL_LIMIT
 
 
 async def claim_trial_send(

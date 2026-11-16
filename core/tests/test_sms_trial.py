@@ -16,28 +16,29 @@ from hailhq.core.models import (
 from hailhq.core.sms_trial import (
     CODE_TTL,
     SMS_TRIAL_LIMIT,
-    TrialBodyTooLong,
-    TrialSend,
-    claim_trial_send,
-    trial_texts_used,
+    TRIAL_FOOTER,
+    TRIAL_PREFIX,
     CodeBudgetExceeded,
     CodeExpired,
     NoPendingCode,
     PhoneIsHailNumber,
     PhoneNotUs,
     PhoneTaken,
+    TrialBodyTooLong,
+    TrialSend,
     WrongCode,
+    claim_trial_send,
     code_text,
     confirm_phone,
     get_trial_phone,
     is_verified_trial_phone,
     start_phone_proof,
-    TRIAL_FOOTER,
-    TRIAL_PREFIX,
     trial_body,
     trial_enabled,
+    trial_hint_applies,
     trial_number,
     trial_sender,
+    trial_texts_used,
 )
 from pydantic import ValidationError
 
@@ -617,3 +618,24 @@ async def test_unparsable_phone_is_not_us(async_session, bad):
     org = await _org(async_session)
     with pytest.raises(PhoneNotUs):
         await _start(async_session, org, phone=bad)
+
+
+@pytest.mark.parametrize("case", ["off", "owner", "cap_used", "not_approved"])
+async def test_trial_hint_applies_only_when_usable(async_session, monkeypatch, case):
+    owner, _, org = await _ready(
+        async_session, monkeypatch, approve=case != "not_approved"
+    )
+    who = org
+    if case == "off":
+        monkeypatch.setattr(settings, "hail_sms_trial_sending", False)
+    elif case == "owner":
+        who = owner
+    elif case == "cap_used":
+        await _trial_texts(async_session, org, SMS_TRIAL_LIMIT)
+    assert await trial_hint_applies(async_session, who) is False
+
+
+async def test_trial_hint_applies_with_texts_left(async_session, monkeypatch):
+    _, _, org = await _ready(async_session, monkeypatch)
+    await _trial_texts(async_session, org, SMS_TRIAL_LIMIT - 1)
+    assert await trial_hint_applies(async_session, org) is True

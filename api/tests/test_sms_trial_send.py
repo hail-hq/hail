@@ -15,7 +15,7 @@ from hailhq.core.sms_trial import (
     TrialBodyTooLong,
     trial_texts_used,
 )
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, text, update
 
 from .conftest import (
     approve_us_sms,
@@ -68,6 +68,40 @@ async def _own_number(session, org_id, e164: str = OWN_NUMBER) -> None:
     await session.commit()
 
 
+async def _own_trial_number(session, org_id) -> None:
+    """Move the trial number and its registration to ``org_id``: that
+    workspace becomes the trial number's owner."""
+    number_id = (
+        await session.execute(
+            select(PhoneNumber.id).where(PhoneNumber.e164 == TRIAL_E164)
+        )
+    ).scalar_one()
+    await session.execute(
+        update(PhoneNumber)
+        .where(PhoneNumber.id == number_id)
+        .values(organization_id=org_id)
+    )
+    await session.execute(
+        update(CarrierVerification)
+        .where(CarrierVerification.number_id == number_id)
+        .values(organization_id=org_id)
+    )
+    await session.commit()
+
+
+async def _holds_advisory_lock(session) -> bool:
+    """True when this session's connection holds an advisory lock, such as
+    the workspace lock a trial claim takes."""
+    return (
+        await session.execute(
+            text(
+                "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' "
+                "AND pid = pg_backend_pid()"
+            )
+        )
+    ).scalar_one() > 0
+
+
 def _trial_sends(sms_mock) -> list:
     return [
         c
@@ -82,9 +116,10 @@ def _trial_sends(sms_mock) -> list:
         ("not_verified_phone", True),
         ("pending_phone", True),
         ("other_workspace_phone", True),
-        ("cap_used_25", True),
+        ("cap_used_25", False),
         ("explicit_own_unregistered_from", True),
         ("feature_off", False),
+        ("owner_workspace", False),
     ],
 )
 async def test_trial_send_refused(
@@ -115,6 +150,13 @@ async def test_trial_send_refused(
     elif case == "feature_off":
         await verify_trial_phone(async_session, org_id)
         monkeypatch.setattr(settings, "hail_sms_trial_sending", False)
+    elif case == "owner_workspace":
+        # Hail's own workspace (the trial number's owner) sends from another
+        # of its numbers that is not registered.
+        await verify_trial_phone(async_session, org_id)
+        await _own_trial_number(async_session, org_id)
+        await _own_number(async_session, org_id)
+        payload = _payload(**{"from": OWN_NUMBER})
     before = await _sms_count(async_session, org_id)
 
     resp = await client.post("/sms", json=payload, headers=_auth(plaintext))
@@ -236,19 +278,8 @@ async def test_hail_own_workspace_sends_normally(
     """The trial number's owner sends from it as its own number, with no
     trial wrapping, even to a verified trial phone of its own."""
     org_id, _, plaintext = org_and_key
-    number = await seed_sms_trial(async_session, monkeypatch)
-    number_id = number.id
-    await async_session.execute(
-        update(PhoneNumber)
-        .where(PhoneNumber.id == number_id)
-        .values(organization_id=org_id)
-    )
-    await async_session.execute(
-        update(CarrierVerification)
-        .where(CarrierVerification.number_id == number_id)
-        .values(organization_id=org_id)
-    )
-    await async_session.commit()
+    await seed_sms_trial(async_session, monkeypatch)
+    await _own_trial_number(async_session, org_id)
     await verify_trial_phone(async_session, org_id)
 
     resp = await client.post(
@@ -326,7 +357,11 @@ async def test_26th_trial_text_refused(
 
     second = await client.post("/sms", json=_payload(), headers=_auth(plaintext))
     assert second.status_code == 422
-    assert _msg(second).endswith(" " + TRIAL_HINT)
+    # All 25 used: the refusal does not point to the trial.
+    assert TRIAL_HINT not in _msg(second)
+    # The refused claim took the workspace lock; the route released it
+    # before going on.
+    assert not await _holds_advisory_lock(async_session)
     assert len(_trial_sends(sms_mock)) == 1
     assert await _sms_count(async_session, org_id) == 25
 
