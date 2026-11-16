@@ -18,6 +18,10 @@ import logging
 from typing import Any
 
 from hailhq.core.config import settings
+from hailhq.mcp.tools import cached_actor_ids, resolve_actor_for_analytics
+from posthog import Posthog
+from posthog.mcp import get_request_headers, instrument
+from posthog.mcp.types import MCPAnalyticsOptions
 
 logger = logging.getLogger(__name__)
 _FLUSH_SECONDS = 2
@@ -55,9 +59,6 @@ _USER_PROPERTY = "hail_user_id"
 
 
 def _actor(_request: Any, extra: Any) -> dict[str, str] | None:
-    from hailhq.mcp.tools import cached_actor_ids
-    from posthog.mcp import get_request_headers
-
     scheme, _, bearer = (
         (get_request_headers(extra) or {}).get("authorization") or ""
     ).partition(" ")
@@ -105,17 +106,11 @@ class Analytics:
 
 def instrument_analytics(server: Any) -> Analytics | None:
     """Instrument ``server`` for tool-call analytics. ``None`` when off."""
-    from hailhq.mcp.tools import resolve_actor_for_analytics
-
     resolve_actor_for_analytics(False)
     token = settings.next_public_posthog_key
     if not token:
         return None
     try:
-        from posthog import Posthog
-        from posthog.mcp import instrument
-        from posthog.mcp.types import MCPAnalyticsOptions
-
         client = Posthog(token, host=settings.next_public_posthog_host or None)
         options = MCPAnalyticsOptions(
             context=False,

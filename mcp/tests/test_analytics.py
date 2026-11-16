@@ -95,6 +95,7 @@ async def _session(
     monkeypatch.setattr("hailhq.mcp.tools._actor_cache", cache)
     call = {"name": "list_number_regions", "arguments": {}}
 
+    # Imported here: building the app at import needs the auth settings above.
     import hailhq.mcp.server as srv
 
     srv = importlib.reload(srv)

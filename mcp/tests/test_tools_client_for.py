@@ -9,8 +9,11 @@ closing.
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
+from hailhq.core.telemetry_identity import get_identity, identity_scope
+from hailhq.mcp import tools
 from hailhq.mcp.auth import AuthMode
 from hailhq.mcp.hail_client import HailClient
 from hailhq.mcp.tools import _client_for
@@ -71,11 +74,6 @@ async def test_client_for_static_key_yields_singleton():
 async def test_actor_enrichment_preserves_verified_identity_and_restores_scope(
     monkeypatch,
 ):
-    from unittest.mock import AsyncMock
-
-    from hailhq.core.telemetry_identity import get_identity, identity_scope
-    from hailhq.mcp import tools
-
     monkeypatch.setattr(tools, "telemetry_enabled", lambda: True)
     monkeypatch.setattr(
         tools, "fetch_organization_name", AsyncMock(return_value="Example Workspace")
@@ -99,11 +97,6 @@ async def test_actor_enrichment_preserves_verified_identity_and_restores_scope(
 
 @pytest.mark.asyncio
 async def test_actor_enrichment_failure_does_not_prevent_tool_execution(monkeypatch):
-    from unittest.mock import AsyncMock
-
-    from hailhq.core.telemetry_identity import get_identity
-    from hailhq.mcp import tools
-
     monkeypatch.setattr(tools, "telemetry_enabled", lambda: True)
     client = SimpleNamespace(whoami=AsyncMock(side_effect=RuntimeError("unavailable")))
     async with tools._actor_for(client):
@@ -113,10 +106,6 @@ async def test_actor_enrichment_failure_does_not_prevent_tool_execution(monkeypa
 @pytest.mark.asyncio
 @pytest.mark.parametrize("cache_key", ["user.jwt", None])
 async def test_analytics_fills_actor_cache_without_logfire(monkeypatch, cache_key):
-    from unittest.mock import AsyncMock
-
-    from hailhq.mcp import tools
-
     monkeypatch.setattr(tools, "telemetry_enabled", lambda: False)
     monkeypatch.setattr(tools, "_analytics_actor", True)
     monkeypatch.setattr(tools, "_actor_cache", {})
@@ -135,10 +124,6 @@ async def test_analytics_fills_actor_cache_without_logfire(monkeypatch, cache_ke
 
 @pytest.mark.asyncio
 async def test_failed_actor_lookup_is_not_retried_every_call(monkeypatch):
-    from unittest.mock import AsyncMock
-
-    from hailhq.mcp import tools
-
     monkeypatch.setattr(tools, "telemetry_enabled", lambda: False)
     monkeypatch.setattr(tools, "_analytics_actor", True)
     monkeypatch.setattr(tools, "_actor_cache", {})
@@ -153,10 +138,6 @@ async def test_failed_actor_lookup_is_not_retried_every_call(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_no_actor_lookup_when_analytics_setup_failed(monkeypatch):
-    from unittest.mock import AsyncMock
-
-    from hailhq.mcp import tools
-
     monkeypatch.setattr(tools, "telemetry_enabled", lambda: False)
     monkeypatch.setattr(tools, "_analytics_actor", False)
     whoami = AsyncMock()
