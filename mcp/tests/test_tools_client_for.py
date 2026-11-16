@@ -144,3 +144,16 @@ async def test_no_actor_lookup_when_analytics_setup_failed(monkeypatch):
     async with tools._actor_for(SimpleNamespace(whoami=whoami), cache_key="u"):
         pass
     whoami.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_org_name_failure_keeps_actor_ids(monkeypatch):
+    monkeypatch.setattr(tools, "telemetry_enabled", lambda: True)
+    monkeypatch.setattr(tools, "_actor_cache", {})
+    monkeypatch.setattr(
+        tools, "fetch_organization_name", AsyncMock(side_effect=RuntimeError("down"))
+    )
+    whoami = AsyncMock(return_value={"organization_id": "org-id", "user_id": "user-id"})
+    async with tools._actor_for(SimpleNamespace(whoami=whoami), cache_key="user.jwt"):
+        assert get_identity()["user_id"] == "user-id"
+    assert tools.cached_actor_ids("user.jwt") == ("org-id", "user-id")

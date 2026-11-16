@@ -1809,7 +1809,8 @@ async def _actor_for(client: HailClient, cache_key: str | None = None):
                 ttl = _ACTOR_TTL_SECONDS
             except Exception:
                 # Metadata enrichment never decides whether the tool is authorized.
-                identity, ttl = {}, _ACTOR_FAILURE_TTL_SECONDS
+                # Keep the ids whoami already returned; retry sooner.
+                ttl = _ACTOR_FAILURE_TTL_SECONDS
             if key:
                 if len(_actor_cache) >= _ACTOR_CACHE_MAX:
                     _actor_cache.clear()

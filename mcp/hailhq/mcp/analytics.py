@@ -19,11 +19,16 @@ from typing import Any
 
 from hailhq.core.config import settings
 from hailhq.mcp.tools import cached_actor_ids, resolve_actor_for_analytics
-from posthog import Posthog
-from posthog.mcp import get_request_headers, instrument
-from posthog.mcp.types import MCPAnalyticsOptions
 
 logger = logging.getLogger(__name__)
+
+try:
+    from posthog import Posthog
+    from posthog.mcp import get_request_headers, instrument
+    from posthog.mcp.types import MCPAnalyticsOptions
+except ImportError:  # analytics must never block startup
+    logger.warning("PostHog SDK import failed; MCP analytics is off", exc_info=True)
+    Posthog = None
 _FLUSH_SECONDS = 2
 
 _KEPT_PROPERTIES = frozenset(
@@ -108,7 +113,7 @@ def instrument_analytics(server: Any) -> Analytics | None:
     """Instrument ``server`` for tool-call analytics. ``None`` when off."""
     resolve_actor_for_analytics(False)
     token = settings.next_public_posthog_key
-    if not token:
+    if not token or Posthog is None:
         return None
     try:
         client = Posthog(token, host=settings.next_public_posthog_host or None)
