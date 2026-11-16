@@ -23,6 +23,7 @@ _SECRET = "+14155550123 secret body"
 _AUTH = {"Authorization": "Bearer user.jwt.token"}
 _ORG = "00000000-0000-0000-0000-0000000000aa"
 _USER = "00000000-0000-0000-0000-0000000000bb"
+_MODEL = "claude-test"
 
 
 def _body(resp: httpx.Response) -> dict:
@@ -93,7 +94,9 @@ async def _session(
     actor = {"organization_id": _ORG, "user_id": _USER, "user_email": _SECRET}
     cache = {key: (time.monotonic() + 300, actor)}
     monkeypatch.setattr("hailhq.mcp.tools._actor_cache", cache)
-    call = {"name": "list_number_regions", "arguments": {}}
+    # Analytics adds an optional llm_model input; the agent fills it.
+    args = {"llm_model": _MODEL} if token else {}
+    call = {"name": "list_number_regions", "arguments": args}
 
     # Imported here: building the app at import needs the auth settings above.
     import hailhq.mcp.server as srv
@@ -157,6 +160,16 @@ async def test_analytics_keeps_responses_unchanged(monkeypatch, oauth, protocol,
     seen, events = await _session(monkeypatch, "phc_test", **kw)
 
     assert plain_events == []
+    # The only difference agents see: an optional llm_model input on each tool.
+    listed = [
+        r for r in seen if isinstance(r[2], dict) and "tools" in r[2].get("result", {})
+    ]
+    assert listed
+    for _, _, body in listed:
+        for tool in body["result"]["tools"]:
+            props = tool["inputSchema"].get("properties", {})
+            assert props.pop("llm_model")["type"] == "string"
+            assert "llm_model" not in tool["inputSchema"].get("required", [])
     assert seen == plain
     is_error = seen[-1][2]["result"].get("isError", False)
 
@@ -166,6 +179,8 @@ async def test_analytics_keeps_responses_unchanged(monkeypatch, oauth, protocol,
     assert props["$mcp_tool_name"] == "list_number_regions"
     assert props["$mcp_is_error"] is is_error
     assert props["$mcp_server_build"] == "abc1234"
+    assert props["$mcp_llm_model"] == _MODEL
+    assert props["$mcp_llm_model_source"] == "self_reported"
     assert set(props) <= analytics._KEPT_PROPERTIES
     if oauth:
         assert calls[0]["distinct_id"] == _USER

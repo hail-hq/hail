@@ -1,13 +1,14 @@
 """Optional PostHog MCP analytics for the HTTP server.
 
 Off unless ``NEXT_PUBLIC_POSTHOG_KEY`` is set. Events carry tool names,
-timings, outcomes and client names only. Argument values, results, error
+timings, outcomes, client names and the calling model only. Argument values, results, error
 messages and agent intent never leave the process: ``_keep_metadata`` drops
 every property not on ``_KEPT_PROPERTIES``. In oauth-rs mode the caller's
 user id (OAuth token or API key owner) becomes ``distinct_id``, the same
 person id the website identifies, and the org id becomes the ``organization``
-group. Both come from the actor cache tool calls fill. Tool schemas and tool results stay
-unchanged, because the SDK options that inject arguments are turned off.
+group. Both come from the actor cache tool calls fill. The only schema change
+is the SDK's optional ``llm_model`` argument, which the SDK removes before the
+tool runs. Tool results stay unchanged.
 Any setup or capture failure logs a warning and the server keeps serving.
 """
 
@@ -49,6 +50,8 @@ _KEPT_PROPERTIES = frozenset(
         "$mcp_tool_name",
         "$mcp_resource_name",
         "$mcp_tool_category",
+        "$mcp_llm_model",
+        "$mcp_llm_model_source",
         "$mcp_listed_tool_names",
         "$mcp_input_keys",
         "$mcp_duration_ms",
@@ -120,7 +123,6 @@ def instrument_analytics(server: Any) -> Analytics | None:
         options = MCPAnalyticsOptions(
             context=False,
             enable_conversation_id=False,
-            capture_model=False,
             enable_exception_autocapture=False,
             before_send=_keep_metadata,
             event_properties=_actor,
