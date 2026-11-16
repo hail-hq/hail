@@ -2032,6 +2032,12 @@ _VERIFICATION_DOCUMENTS = _d(
     "Map from each needed document slot to ``{option, fields}``, with the "
     "option chosen from that slot in the requirements."
 )
+_DOCUMENT_CHECK_DOCUMENTS = _d(
+    "Map from each document slot to ``{option, fields, covers}``. ``option`` "
+    "may be empty while the type is not chosen. ``covers`` lists the other "
+    "slots the same file stands for: the file is sent once, for this slot, "
+    "and one read fills all of them."
+)
 _VERIFICATION_FILES = _d(
     "The document files, one per slot named in ``documents``. Use an upload: "
     "the ``id`` from ``create_file_upload`` with purpose "
@@ -3520,7 +3526,7 @@ def register_tools(
         country_code: Annotated[str, _COUNTRY_CODE],
         number_type: Annotated[str, _NUMBER_TYPE_SCHEMA, _NUMBER_TYPE],
         fields: Annotated[_JsonObject, _VERIFICATION_FIELDS],
-        documents: Annotated[_JsonObject, _VERIFICATION_DOCUMENTS],
+        documents: Annotated[_JsonObject, _DOCUMENT_CHECK_DOCUMENTS],
         files: Annotated[_VERIFICATION_FILES_LIST, _VERIFICATION_FILES],
         quote_id: Annotated[str | None, _UUID_OR_NULL, _VERIFICATION_QUOTE_ID] = None,
         subject_type: Annotated[
@@ -3530,9 +3536,8 @@ def register_tools(
     ) -> dict[str, Any]:
         """Read the files of a number verification form, before the form is filled or submitted.
 
-        Takes the arguments of ``check_verification``. ``documents`` may leave out
-        ``option`` while the type is not chosen; ``fields`` and ``address`` may be
-        empty or partial. An AI model reads each file.
+        Takes the arguments of ``check_verification``. ``fields`` and ``address``
+        may be empty or partial. An AI model reads each file.
         Returns ``fields``, ``address`` and ``documents.<slot>.fields``: the values the
         files show, by the form's own keys, to fill the form after the user confirms
         them. ``documents.<slot>.option`` is the document type the file looks like.

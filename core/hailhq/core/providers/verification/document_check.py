@@ -388,6 +388,8 @@ class _Read:
         self, slot: DocumentSlot, targets: dict[str, FieldSpec], answer: dict
     ) -> None:
         self.slot = slot
+        # The slots of one file share one answer: one name check per box.
+        self.answer_id = id(answer)
         self.readable = answer.get("readable") is not False
         orientation = answer.get("orientation")
         self.orientation = orientation if orientation in _ORIENTATIONS else "upright"
@@ -731,6 +733,7 @@ async def check_documents(
         )
         for name in skipped
     }
+    named: set[tuple[int, str]] = set()
     for slot in slots:
         read = reads.get(slot.name)
         if read is None:
@@ -740,9 +743,11 @@ async def check_documents(
             continue
         chosen = documents[slot.name].option or None
         warnings += _document_warnings(read, chosen, today)
-        warnings += _name_warnings(
-            read, requirements, fields, address, documents, chosen
-        )
+        for w in _name_warnings(read, requirements, fields, address, documents, chosen):
+            # One file in several slots: its slots differ only in the label.
+            if (read.answer_id, w.field) not in named:
+                named.add((read.answer_id, w.field))
+                warnings.append(w)
         out_documents[slot.name] = VerificationDocumentRead(
             # An unreadable file was looked at, but nothing was read from it.
             read=read.readable,

@@ -55,6 +55,8 @@ _PDF_PAGE = re.compile(rb"/Type\s*/Page(?![a-zA-Z])")
 # killed.
 _DECODES = 4
 _DECODE_LIMIT_S = 10.0
+# The least time left at which a file is still sent to the model.
+_MIN_SEND_S = 1.0
 _MAX_DECODED_BYTES = 8 * 1024 * 1024
 # One semaphore per event loop (tests run several loops; the API runs one).
 _decode_slots: weakref.WeakKeyDictionary[
@@ -187,7 +189,8 @@ async def read_document(
             ],
         }
         left = deadline - loop.time()
-        if left <= 0:
+        if left < _MIN_SEND_S:
+            # Too little time for any answer: do not use a read on it.
             logger.warning("document read skipped: no time left")
             return None
         # The read is used from here on, whatever happens to the call.

@@ -599,6 +599,15 @@ async def test_a_covering_file_is_sent_once_and_fills_its_slots(
     assert len(calls) == 1
     assert "It is also given as: Birth date." in calls[0]["prompt"]
     assert await document_reads_today(async_session, org_id) == 1
+    # The holder sent no file: the covered slot still comes back, read false.
+    orphan = await _post(
+        client,
+        key,
+        documents=json.dumps({"identity": {"covers": ["birth"]}}),
+        files={"x": (None, "")},
+    )
+    assert orphan.status_code == 200, orphan.text
+    assert orphan.json()["documents"]["birth"]["read"] is False
     bad = await _post(
         client,
         key,

@@ -55,10 +55,10 @@ from hailhq.api.sms_registration import (
 )
 from hailhq.api.superadmin import require_superadmin
 from hailhq.api.verification_files import (
+    MAX_PARALLEL_FETCHES,
     MAX_REQUEST_BYTES,
     collect_files,
     fetch_files,
-    files_too_large,
 )
 from hailhq.core import (
     sms_registration_fees,
@@ -2516,6 +2516,8 @@ async def check_verification_documents(
             if holder in group and other not in group:
                 group.append(other)
     with_file = [slot for group in groups.values() for slot in group]
+    # A covered slot whose holder sent no file: read false, as it is not read.
+    orphans = [slot for slot in covered_by if slot not in with_file]
     # An upload cannot be read without the bucket: read false, no read used.
     if s3 is None:
         groups = {
@@ -2542,14 +2544,21 @@ async def check_verification_documents(
     to_read = [g for g in groups.values() if g[0] in reserved]
     sent: set[str] = set()
     try:
-        # Each file once. A failed fetch makes only its slots read false
-        # (and its read is given back); the other files are still read.
+        # Each file once, a few at a time. A failed fetch makes only its
+        # slots read false (and its read is given back); the other files are
+        # still read. So does a file past the request's total.
+        gate = asyncio.Semaphore(MAX_PARALLEL_FETCHES)
+
+        async def fetch_one(lead: str) -> dict[str, UploadedFile]:
+            async with gate:
+                return await fetch_files(collected, [lead], s3)
+
         results = await asyncio.gather(
-            *(fetch_files(collected, [g[0]], s3) for g in to_read),
-            return_exceptions=True,
+            *(fetch_one(g[0]) for g in to_read), return_exceptions=True
         )
         files: dict[str, UploadedFile] = {}
         read_groups: list[list[str]] = []
+        total = 0
         for group, result in zip(to_read, results):
             if isinstance(result, BaseException):
                 logger.warning(
@@ -2557,11 +2566,14 @@ async def check_verification_documents(
                     type(result).__name__,
                 )
                 continue
+            total += len(result[group[0]].data)
+            if total > MAX_REQUEST_BYTES:
+                total -= len(result[group[0]].data)
+                logger.warning("document check: a file is past the total size")
+                continue
             for slot in group:
                 files[slot] = result[group[0]]
             read_groups.append(group)
-        if sum(len(files[g[0]].data) for g in read_groups) > MAX_REQUEST_BYTES:
-            raise files_too_large()
         documents = {
             slot: DocumentInput(
                 option=part.option, fields=part.fields, file=files.get(slot)
@@ -2582,7 +2594,7 @@ async def check_verification_documents(
             groups=read_groups,
             # Over the cap, no model, not fetched, or a file part left out:
             # read false, no warning.
-            skipped=[s for s in [*with_file, *stray] if s not in files],
+            skipped=[s for s in [*with_file, *stray, *orphans] if s not in files],
         )
     finally:
         unsent = [row_id for slot, row_id in reserved.items() if slot not in sent]

@@ -50,7 +50,7 @@ MAX_REQUEST_BYTES = 30 * 1024 * 1024
 ALLOWED_FILE_TYPES = set(VERIFICATION_FILE_TYPES)
 _READ_CHUNK = 1024 * 1024
 # ``upload.<slot>`` objects fetched from the bucket at once.
-_MAX_PARALLEL_FETCHES = 4
+MAX_PARALLEL_FETCHES = 4
 
 
 def files_too_large() -> HTTPException:
@@ -202,7 +202,7 @@ async def fetch_files(
     # it collected.
     rows = {slot: row for slot, row in collected.rows.items() if slot in slots}
     parts = collected.parts
-    fetches = asyncio.Semaphore(_MAX_PARALLEL_FETCHES)
+    fetches = asyncio.Semaphore(MAX_PARALLEL_FETCHES)
 
     async def fetch(row: FileUpload) -> UploadedFile:
         async with fetches:

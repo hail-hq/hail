@@ -1058,3 +1058,38 @@ async def test_the_callers_groups_name_the_reads() -> None:
     assert len(reader.calls) == 1
     reader.calls[0]["on_send"]()
     assert sends == ["proof_of_identity"]
+
+
+async def test_under_a_second_left_the_file_is_not_sent(
+    reader_settings, monkeypatch
+) -> None:
+    client, calls = _fake_client(_response("{}"))
+    monkeypatch.setattr(document_reader, "_client", client)
+    sends: list[int] = []
+    out = await _read(
+        content_type="application/pdf", timeout_s=0.5, on_send=lambda: sends.append(1)
+    )
+    assert out is None and calls == [] and sends == []
+
+
+async def test_one_file_in_two_slots_gives_one_name_warning() -> None:
+    base = _req()
+    second = base.documents[0].model_copy(
+        update={"name": "proof_of_birth", "label": "Proof of birth"}
+    )
+    req = base.model_copy(update={"documents": (base.documents[0], second)})
+    docs = {
+        **_docs(option="passport"),
+        # Same file, type not chosen: its label differs ("document").
+        "proof_of_birth": DocumentInput(option="", file=_PNG),
+    }
+    out = await check_documents(
+        req,
+        {"first_name": "Someone", "last_name": "Else"},
+        {},
+        docs,
+        today=TODAY,
+        reader=_reader(_answer()),
+    )
+    names = [w for w in out.warnings if w.field == "first_name"]
+    assert len(names) == 1
