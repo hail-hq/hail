@@ -58,6 +58,13 @@ def decode(content_type: str, data: bytes) -> bytes:
         # image: a 100 million pixel RGBA scan is 400 MB once decoded, and
         # one more full-size copy would pass the 1 GB limit. The EXIF turn
         # comes after (the bounding box is square, so it fits either way).
+        # Pillow scales palette and 1-bit images with NEAREST, which breaks
+        # small print: those are converted first (a 100 million pixel
+        # palette image is 400 MB as RGBA, still in the limit).
+        if image.mode in ("P", "PA"):
+            image = image.convert("RGBA")
+        elif image.mode == "1":
+            image = image.convert("L")
         image.thumbnail((LONG_SIDE, LONG_SIDE), reducing_gap=3.0)
         image = ImageOps.exif_transpose(image)
         if image.mode.startswith("I"):
@@ -65,7 +72,7 @@ def decode(content_type: str, data: bytes) -> bytes:
             peak = image.getextrema()[1] or 1
             scale = 255 / peak if peak > 255 else 1
             image = image.convert("I").point(lambda v: v * scale).convert("L")
-        if image.mode in ("RGBA", "LA", "P", "PA"):
+        if image.mode in ("RGBA", "LA"):
             # Transparent pixels on white, as a viewer shows them, not black.
             rgba = image.convert("RGBA")
             image = Image.new("RGB", rgba.size, "white")

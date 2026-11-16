@@ -1074,13 +1074,17 @@ async def test_under_a_second_left_the_file_is_not_sent(
 
 async def test_one_file_in_two_slots_gives_one_name_warning() -> None:
     base = _req()
+    # Its only type is not the one the file shows: its label is "document".
     second = base.documents[0].model_copy(
-        update={"name": "proof_of_birth", "label": "Proof of birth"}
+        update={
+            "name": "proof_of_birth",
+            "label": "Proof of birth",
+            "options": base.documents[0].options[:1],
+        }
     )
     req = base.model_copy(update={"documents": (base.documents[0], second)})
     docs = {
         **_docs(option="passport"),
-        # Same file, type not chosen: its label differs ("document").
         "proof_of_birth": DocumentInput(option="", file=_PNG),
     }
     out = await check_documents(
@@ -1093,3 +1097,23 @@ async def test_one_file_in_two_slots_gives_one_name_warning() -> None:
     )
     names = [w for w in out.warnings if w.field == "first_name"]
     assert len(names) == 1
+
+
+def test_decode_scales_a_palette_image_with_a_real_filter(monkeypatch) -> None:
+    """Pillow scales palette and 1-bit images with NEAREST; they are
+    converted before the scale-down."""
+    from hailhq.core.providers.llm import document_image
+
+    modes: list[str] = []
+    real = document_image.ImageOps.exif_transpose
+
+    def watch(image, **kw):
+        modes.append(image.mode)
+        return real(image, **kw)
+
+    monkeypatch.setattr(document_image.ImageOps, "exif_transpose", watch)
+    for mode in ("P", "1"):
+        src = io.BytesIO()
+        Image.new(mode, (3200, 2400)).save(src, "PNG")
+        document_image.decode("image/png", src.getvalue())
+    assert modes == ["RGBA", "L"]
