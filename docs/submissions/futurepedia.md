@@ -14,7 +14,7 @@ status: drafted
 - [ ] Decide whether the $247/$497 spend is worth it before doing anything else — this is a paid-only submission, no free tier (see Notes)
 - [ ] Confirm which tier to buy: Basic ($247, 7-day publish, currently sold out per last check) or Verified ($497, 2-business-day publish, verified checkmark)
 - [ ] Get sign-off from whoever owns marketing spend to actually run the checkout
-- [ ] Logo asset ready: `hail-website/public/assets/monogram-512.png` (square) or `hail-website/public/assets/avatar-1024.png`
+- [ ] Logo asset ready: `hail-website/public/assets/brand/logo/monogram-512.png` (square) or `hail-website/public/assets/brand/logo/avatar-1024.png`
 - [ ] Screenshot/demo asset prepared if the paid tier's form asks for one (not confirmed — form fields beyond pricing weren't fully enumerated; verify at checkout)
 - [ ] Draft copy reviewed against the feature-claim policy (see Notes on SMS/vendor accuracy)
 - [ ] Account created on futurepedia.io if checkout requires one
@@ -31,7 +31,7 @@ status: drafted
 6. Paste the **long description** from **Content** below into the main description field.
 7. Select a **category**: closest match is "Productivity" or "AI Agents" / "Developer Tools" — pick whichever the category picker actually offers; there is no "communications" category confirmed to exist.
 8. Add **tags/keywords** from **Content** below if a tags field is offered.
-9. Upload the **logo** from `hail-website/public/assets/monogram-512.png`.
+9. Upload the **logo** from `hail-website/public/assets/brand/logo/monogram-512.png`.
 10. If a video-upload field appears (both paid tiers mention "add a video to your page"), skip it — no demo video exists yet. Leave it blank rather than link a placeholder.
 11. Check the agreement checkbox for the Futurepedia Terms of Service, HubSpot Website Terms of Use, and Privacy Policy — read them once before checking, don't blind-accept.
 12. Proceed to checkout and pay for the chosen tier. This is a hard paywall — there is no way to submit without payment.
@@ -56,7 +56,7 @@ Hail is a self-hostable, AGPLv3 communication platform built for AI agents. It g
 
 **License:** AGPL-3.0-or-later — [`LICENSE`](../../LICENSE)
 
-**Logo asset:** `hail-website/public/assets/monogram-512.png` (square mark; `hail-website/public/assets/avatar-1024.png` as an alternate raster)
+**Logo asset:** `hail-website/public/assets/brand/logo/monogram-512.png` (square mark; `hail-website/public/assets/brand/logo/avatar-1024.png` as an alternate raster)
 
 **Contact email (if requested):** `hi@hail.so`
 

@@ -14,7 +14,7 @@ status: drafted
 - [ ] Confirm there is no self-serve submission form anywhere on opentools.com before booking a call — re-check `/registry` and any footer/nav "submit" or "list your server" link in case that's changed
 - [ ] Find the actual scheduling link/contact (no public booking URL located during drafting — check site footer, `/about`, `/contact`, and any listed team email or Calendly/Cal.com link)
 - [ ] Draft copy reviewed against the feature-claim policy (voice/email present-tense and vendor-accurate; SMS flagged as not yet shipped) — done below
-- [ ] Logo asset ready — `hail-website/public/assets/hail-monogram.svg` (square mark) or `avatar-1024.png` (raster) in case the call requires an emailed asset in advance
+- [ ] Logo asset ready — `hail-website/public/assets/brand/logo/hail-monogram.svg` (square mark) or `avatar-1024.png` (raster) in case the call requires an emailed asset in advance
 - [ ] Call scheduled
 - [ ] Call held — capture whatever undocumented requirements/criteria they state, and record here
 - [ ] Submitted (however the call determines — form, email follow-up, etc.)
@@ -66,7 +66,7 @@ Hail is a self-hostable, AGPLv3 communication platform built for AI agents. It g
 | `get_email_stats` | Aggregate email delivery/deliverability stats |
 | `get_events` | Page through the account-wide event stream |
 
-**Logo asset:** `hail-website/public/assets/hail-monogram.svg` (square mark; `avatar-1024.png` as a raster fallback)
+**Logo asset:** `hail-website/public/assets/brand/logo/hail-monogram.svg` (square mark; `avatar-1024.png` as a raster fallback)
 
 ## Notes
 

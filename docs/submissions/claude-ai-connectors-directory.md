@@ -80,7 +80,6 @@ Paste these into the portal at <https://claude.ai/directory/manage>.
 9. Compliance: check the acknowledgements below only after reading each against current practice.
 10. Review: fix what the checklist flags, then submit.
 
-
 ## Policy acknowledgements
 
 1. The submitter must read the guidelines personally before affirming that statement.

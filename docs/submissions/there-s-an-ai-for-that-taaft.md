@@ -61,7 +61,7 @@ Hail gives an AI agent a real phone number, inbox, and messaging line. It places
 
 **License:** AGPL-3.0-or-later — [`LICENSE`](../../LICENSE)
 
-**Logo asset:** `hail-website/public/assets/monogram-512.png` (square mark, upload-ready). Alternate raster: `hail-website/public/assets/avatar-1024.png`. Social/OG card if a screenshot slot exists: `hail-website/public/assets/og-card-1200x630.png`.
+**Logo asset:** `hail-website/public/assets/brand/logo/monogram-512.png` (square mark, upload-ready). Alternate raster: `hail-website/public/assets/brand/logo/avatar-1024.png`. Social/OG card if a screenshot slot exists: `hail-website/public/assets/brand/social/link-card.png`.
 
 ## Notes
 

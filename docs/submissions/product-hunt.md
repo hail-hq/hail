@@ -86,10 +86,10 @@ hail mcp endpoint                  # prints your self-hosted connector URL (e.g.
 **Gallery (upload in this order — first item becomes the listing thumbnail):**
 
 1. `hail/docs/assets/gifs/hail-tail-live-stream.gif` — animated terminal demo of `hail tail` streaming live call events. Best available motion asset; use as thumbnail.
-2. `hail-website/public/assets/og-card-1200x630.png` — static brand card (placeholder slide until a real product screenshot is captured — see TODO). Path is in the separate `hail-website` repo; confirm the file is actually there before uploading (not part of this `hail` monorepo checkout).
-3. `hail-website/public/assets/wordmark-1200.png` — wordmark, as a clean closing slide. Same caveat: confirm in `hail-website` before uploading.
+2. `hail-website/public/assets/brand/social/link-card.png` — static brand card (placeholder slide until a real product screenshot is captured — see TODO). Path is in the separate `hail-website` repo; confirm the file is actually there before uploading (not part of this `hail` monorepo checkout).
+3. `hail-website/public/assets/brand/logo/wordmark-1200.png` — wordmark, as a clean closing slide. Same caveat: confirm in `hail-website` before uploading.
 
-**Product icon (separate upload, square):** `hail-website/public/assets/monogram-512.png` (fallback: `hail-website/public/assets/hail-monogram.svg`) — both paths are in the `hail-website` repo; confirm presence there first.
+**Product icon (separate upload, square):** `hail-website/public/assets/brand/logo/monogram-512.png` (fallback: `hail-website/public/assets/brand/logo/hail-monogram.svg`) — both paths are in the `hail-website` repo; confirm presence there first.
 
 **Maker's first comment (post immediately at launch):**
 

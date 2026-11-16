@@ -181,7 +181,7 @@ Flip `status: submitted` (then `submitted (live)`) in this file's frontmatter an
 }
 ```
 
-Asset source paths (already mirrored, confirmed resolving live at the URLs above): `hail-website/public/assets/monogram-512.png`, `hail-website/public/assets/monogram-1024.png`.
+Asset source paths (already mirrored, confirmed resolving live at the URLs above): `hail-website/public/assets/brand/logo/monogram-512.png`, `hail-website/public/assets/brand/logo/monogram-1024.png`.
 
 **Tool inventory** (for reference / any listing field that asks what the server does. Not a `server.json` field, the schema has no tags/tools array. This is the literal, code-verified list from `mcp/hailhq/mcp/tools.py`, 11 tools):
 

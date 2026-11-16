@@ -13,7 +13,7 @@ status: drafted
 
 - [ ] Create/confirm a Toolify.ai account to submit under (form may require login before it accepts a listing).
 - [ ] Decide submission tier: free queue (2-4 weeks) vs. paid **Express** ($100, faster review) vs. **Sponsor** tier — Toolify's stated preference for tools with 5K+ monthly visits is a soft signal, not a hard gate, but `hail.so`'s current traffic is unknown/unverified from this environment. If traffic is under 5K/mo, weigh whether Express is worth it to avoid a low-priority free-queue slot.
-- [ ] Logo exported and ready to upload: `hail-website/public/assets/avatar-1024.png` (raster, square) — confirm Toolify's exact size/format requirement at upload time and re-export from `hail-monogram.svg` if they need a different resolution.
+- [ ] Logo exported and ready to upload: `hail-website/public/assets/brand/logo/avatar-1024.png` (raster, square) — confirm Toolify's exact size/format requirement at upload time and re-export from `hail-monogram.svg` if they need a different resolution.
 - [ ] Capture 4-6 screenshots — **none exist yet**, this is a real gap, not just an asset-fetch step. Hail is a CLI/API/MCP product with no traditional dashboard, so shoot: (1) the `hail.so` marketing homepage hero, (2) the `/mcp` connectors page showing client logos (Claude, ChatGPT, Cursor, etc.), (3) a terminal running `hail tail` streaming live call/SMS/email events (or use `hail/docs/assets/gifs/hail-tail-live-stream.gif` as a source frame), (4) the pricing page, (5) an MCP client (e.g. Claude.ai connector settings) mid-authorization against `mcp.hail.so`, (6) a code snippet panel showing the CLI quickstart from the README. Export all at consistent dimensions per Toolify's spec.
 - [ ] Draft copy reviewed against the feature-claim policy (voice/SMS/email present-tense as shipped; provider names only where actually wired in `core/hailhq/core/providers/`).
 - [ ] **Flag before publishing:** the live `hail.so` marketing site and pricing model present SMS as a shipped, billed capability (send/receive on the same number as voice), and this draft's Content follows that public stance per brief. But in this repo checkout, `core/hailhq/core/providers/` has no `sms/` module, no `send_sms` path in the CLI, SDK, OpenAPI spec, or MCP tool list (`mcp/hailhq/mcp/tools.py`) — only `voice/twilio.py` (calls) and `email/ses.py` (email) are wired end-to-end. Confirm with the team that SMS is actually live in production before this goes out; if it isn't yet, strip the SMS claim from Content and note it as coming soon instead.
@@ -31,7 +31,7 @@ status: drafted
 7. Select **Category** — pick the closest match Toolify exposes (likely something under "Developer Tools," "AI Agent," or "Communication" / "API" — there is no single canonical "AI Directory" category on their taxonomy, choose whichever reads closest to an agent-facing communications API).
 8. Fill in **Tags/Keywords** with the list from Content below, comma-separated or one-per-box depending on the widget.
 9. Set **Pricing model** — select "Free" or "Open Source" if offered (Hail is AGPLv3 and self-hostable) and add "Paid cloud option" or similar if the form allows a secondary tag, since managed Hail Cloud is also billed.
-10. Upload the **logo**: `hail-website/public/assets/avatar-1024.png`.
+10. Upload the **logo**: `hail-website/public/assets/brand/logo/avatar-1024.png`.
 11. Upload **screenshots** (4-6): use the set captured per the TODO item above. Order them to lead with the homepage hero, then the MCP connector view, then the terminal demo — put the most visually self-explanatory one first since Toolify surfaces the first image as the card thumbnail.
 12. If there's a **contact email** field, use the address the team wants tied to this listing.
 13. If there's a **GitHub / repo link** field, paste `https://github.com/hail-hq/hail`.
@@ -89,7 +89,7 @@ hail tail                                      # live cross-channel event stream
 
 Or connect an MCP client directly to `https://mcp.hail.so` — no install required.
 
-**Logo asset:** `hail-website/public/assets/avatar-1024.png` (raster); `hail-website/public/assets/hail-monogram.svg` if an SVG upload is accepted.
+**Logo asset:** `hail-website/public/assets/brand/logo/avatar-1024.png` (raster); `hail-website/public/assets/brand/logo/hail-monogram.svg` if an SVG upload is accepted.
 
 **Screenshots (4-6, see TODO — not yet captured):** homepage hero, `/mcp` connectors page, terminal running `hail tail`, pricing page, MCP client authorization flow, CLI quickstart snippet.
 

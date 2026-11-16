@@ -55,8 +55,8 @@ https://mcp.hail.so
 **Icon** (pulled from `server.json`, mirrored at):
 
 ```
-hail-website/public/assets/monogram-512.png
-hail-website/public/assets/monogram-1024.png
+hail-website/public/assets/brand/logo/monogram-512.png
+hail-website/public/assets/brand/logo/monogram-1024.png
 ```
 
 **Tool inventory** (11 tools, for cross-checking the listing's tool list against `mcp/hailhq/mcp/tools.py`):

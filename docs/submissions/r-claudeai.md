@@ -91,7 +91,7 @@ Happy to answer questions about the connector setup or what the call pipeline lo
 
 - Demo evidence (preferred): a fresh screen recording of this specific Claude session — capture before posting, no path exists yet.
 - Fallback demo asset: `hail/docs/assets/gifs/hail-tail-live-stream.gif` (repo-relative, in the `hail` repo, not `hail-website`) — real product recording of `hail tail` streaming live call events. Generic, not specific to this Claude flow; use only if the purpose-shot recording isn't ready.
-- Brand assets if a small inline mark is wanted (logo in a comment reply, not the post body): `hail-website/public/assets/hail-wordmark.svg`, `hail-website/public/assets/hail-wordmark-inverted.svg`, `hail-website/public/assets/monogram-512.png`. Do not lead the post with a logo — this sub penalizes anything that opens like an ad.
+- Brand assets if a small inline mark is wanted (logo in a comment reply, not the post body): `hail-website/public/assets/brand/logo/hail-wordmark.svg`, `hail-website/public/assets/brand/logo/hail-wordmark-inverted.svg`, `hail-website/public/assets/brand/logo/monogram-512.png`. Do not lead the post with a logo — this sub penalizes anything that opens like an ad.
 
 ## Notes
 

@@ -47,7 +47,7 @@ Hail is a self-hostable, AGPLv3 communication platform built for AI agents. It g
 
 **License:** AGPLv3
 
-**Logo asset:** `hail-website/public/assets/hail-monogram.svg` (square mark; `hail-website/public/assets/avatar-1024.png` as raster fallback)
+**Logo asset:** `hail-website/public/assets/brand/logo/hail-monogram.svg` (square mark; `hail-website/public/assets/brand/logo/avatar-1024.png` as raster fallback)
 
 ## Notes
 

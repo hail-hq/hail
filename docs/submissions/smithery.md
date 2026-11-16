@@ -90,7 +90,7 @@ npx -y @smithery/cli mcp publish "https://mcp.hail.so" -n @hail-hq/hail
 
 **License:** AGPLv3 — `github.com/hail-hq/hail`
 
-**Logo asset:** `hail-website/public/assets/hail-monogram.svg` (square mark, use for the listing icon; `avatar-1024.png` as a raster fallback if SVG isn't accepted)
+**Logo asset:** `hail-website/public/assets/brand/logo/hail-monogram.svg` (square mark, use for the listing icon; `avatar-1024.png` as a raster fallback if SVG isn't accepted)
 
 ## Notes
 

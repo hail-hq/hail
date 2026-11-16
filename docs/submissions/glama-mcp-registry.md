@@ -23,7 +23,7 @@ below describe the previous setup.
 - [x] Confirm root `README.md` reads cleanly as a standalone doc for a crawler: install (`git clone` + `docker compose up`), usage (CLI/HTTP/MCP snippets), license — all present as of this draft (verified below)
 - [x] ~~Confirm live whether glama.ai/mcp/servers/new requires GitHub sign-in or accepts an anonymous URL paste~~ — **corrected 2026-07-07: no submission step exists at all.** Glama auto-discovers MCP servers from GitHub; the listing was already live at `https://glama.ai/mcp/servers/hail-hq/hail` with no action taken. See Notes.
 - [x] Draft copy reviewed against the feature-claim policy (voice/email present-tense and vendor-accurate; SMS flagged as not yet shipped)
-- [ ] Logo asset ready — `hail-website/public/assets/hail-monogram.svg` (square mark, light) or `avatar-1024.png` (raster) — only relevant if the claimed dashboard offers an editable avatar; unconfirmed until claim completes
+- [ ] Logo asset ready — `hail-website/public/assets/brand/logo/hail-monogram.svg` (square mark, light) or `avatar-1024.png` (raster) — only relevant if the claimed dashboard offers an editable avatar; unconfirmed until claim completes
 - [x] "Claim" the org-owned listing via `glama.json` + "Login with GitHub to claim" — `glama.json` added and PR opened: https://github.com/hail-hq/hail/pull/4
 - [ ] Once claimed: configure Docker build instructions to point at `mcp/Dockerfile` (repo-root build context — the file does `COPY core /app/core` + `COPY mcp /app/mcp`, so it is NOT self-contained if built from within `mcp/`) — this is likely why the auto-crawl build/introspection check is stuck pending
 - [ ] Once a real score renders (not "pending"), pull the badge from `https://glama.ai/mcp/servers/hail-hq/hail/badges/score.svg` and add it to the already-open `awesome-mcp-servers` PR (#9561) per that repo's `glama-check` bot requirement
@@ -77,7 +77,7 @@ Hail is a self-hostable, AGPLv3 communication platform built for AI agents. It g
 
 **License:** AGPL-3.0-or-later — [`LICENSE`](../../LICENSE)
 
-**Logo asset (if a separate avatar upload exists):** `hail-website/public/assets/hail-monogram.svg` (square mark; `avatar-1024.png` as a raster fallback)
+**Logo asset (if a separate avatar upload exists):** `hail-website/public/assets/brand/logo/hail-monogram.svg` (square mark; `avatar-1024.png` as a raster fallback)
 
 ## Notes
 

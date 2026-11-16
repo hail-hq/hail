@@ -17,7 +17,7 @@ Grok has no public connector directory to submit to. Each user adds a custom con
 
 ## Steps to submit
 
-None. A user adds Hail like this (from <https://docs.x.ai/grok/connectors>, as summarized by Manufact on 2026-11-04):
+None. A user adds Hail like this. The steps come from Manufact's summary (2026-11-04) of <https://docs.x.ai/grok/connectors>, not from the xAI page itself:
 
 1. Open <https://grok.com/connectors>.
 2. Choose **New Connector**, then **Custom**.
@@ -31,5 +31,5 @@ Grok Business and Enterprise: a team admin adds the connector in the xAI cloud c
 
 ## Notes
 
-- Checked 2026-11-16. Source: <https://manufact.com/blog/distribute-mcp-server-across-directories> (updated 2026-11-04), which links the xAI docs above. I did not read the xAI page itself.
+- Checked 2026-11-16. Source: <https://manufact.com/blog/distribute-mcp-server-across-directories> (updated 2026-11-04), which links the xAI docs above. The xAI page itself was not read.
 - hail.so has no Grok setup guide yet.
