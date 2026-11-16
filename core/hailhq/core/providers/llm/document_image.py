@@ -102,6 +102,8 @@ def decode(content_type: str, data: bytes) -> bytes:
 def first_pages(data: bytes) -> bytes:
     """A PDF of the first ``PDF_PAGES_SENT`` pages. Raises for a file that is
     not a PDF, or of more than ``MAX_PDF_PAGES`` pages."""
+    # Imported here, not at the top: only a PDF needs PDFium, and an image
+    # decode should not load it under the child's memory limit.
     import pypdfium2 as pdfium
 
     with pdfium.PdfDocument(data) as pdf:

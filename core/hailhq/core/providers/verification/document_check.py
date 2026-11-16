@@ -385,11 +385,17 @@ class _Read:
     """One slot's answer, cleaned."""
 
     def __init__(
-        self, slot: DocumentSlot, targets: dict[str, FieldSpec], answer: dict
+        self,
+        slot: DocumentSlot,
+        targets: dict[str, FieldSpec],
+        answer: dict,
+        file_key: str,
     ) -> None:
         self.slot = slot
         # The slots of one file share one answer: one name check per box.
-        self.answer_id = id(answer)
+        # Named by the file's first slot, not id(answer): a freed answer's id
+        # can be reused by another file's answer.
+        self.file_key = file_key
         self.readable = answer.get("readable") is not False
         orientation = answer.get("orientation")
         self.orientation = orientation if orientation in _ORIENTATIONS else "upright"
@@ -674,7 +680,11 @@ async def check_documents(
             timeout_s=max(deadline - loop.time(), 0.1),
             on_send=((lambda: on_send(lead.name)) if on_send is not None else None),
         )
-        return [_Read(slot, targets, answer) for slot in group] if answer else []
+        return (
+            [_Read(slot, targets, answer, lead.name) for slot in group]
+            if answer
+            else []
+        )
 
     tasks = {g[0].name: asyncio.ensure_future(one(g)) for g in shared.values()}
     reads: dict[str, _Read] = {}
@@ -714,8 +724,10 @@ async def check_documents(
     # A proof of address fills the address first.
     for read in sorted(
         reads.values(),
-        key=lambda r: not _proves_address(
-            r.slot, r.option or documents[r.slot.name].option or None
+        key=lambda r: (
+            not _proves_address(
+                r.slot, r.option or documents[r.slot.name].option or None
+            )
         ),
     ):
         for key, value in read.values.items():
@@ -741,7 +753,7 @@ async def check_documents(
         )
         for name in skipped
     }
-    named: set[tuple[int, str]] = set()
+    named: set[tuple[str, str]] = set()
     for slot in slots:
         read = reads.get(slot.name)
         if read is None:
@@ -753,8 +765,8 @@ async def check_documents(
         warnings += _document_warnings(read, chosen, today)
         for w in _name_warnings(read, requirements, fields, address, documents, chosen):
             # One file in several slots: its slots differ only in the label.
-            if (read.answer_id, w.field) not in named:
-                named.add((read.answer_id, w.field))
+            if (read.file_key, w.field) not in named:
+                named.add((read.file_key, w.field))
                 warnings.append(w)
         out_documents[slot.name] = VerificationDocumentRead(
             # An unreadable file was looked at, but nothing was read from it.
