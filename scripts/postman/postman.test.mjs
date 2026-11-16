@@ -262,11 +262,13 @@ test("publishing refuses wrong targets and reports failed or queued updates", as
 test("export has no text Postman's firewall blocks", () => {
   // Postman's Cloudflare firewall answers 403 "Just a moment..." to an update
   // with `curl -sS`, `--data-binary @file` or `-d @file` in it. Write upload
-  // examples as `curl --silent --show-error --globoff --upload-file <file> '<url>'`.
+  // examples as `curl --silent --show-error --globoff --upload-file '<file>' '<url>'`.
   const text = JSON.stringify(collection);
   for (const blocked of [/curl -s/, /(?:-d|--data[a-z-]*)(?:\s*|=)@/]) {
     assert.doesNotMatch(text, blocked);
   }
+  // A quoted file name cannot run as a command when a reader swaps in theirs.
+  assert.doesNotMatch(text, /--upload-file [^']/);
 });
 
 test("publishing names the firewall when Cloudflare blocks the update", async () => {
