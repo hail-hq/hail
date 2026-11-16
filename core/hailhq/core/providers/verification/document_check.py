@@ -99,7 +99,8 @@ def _forms(text: str, drop: frozenset[str] = frozenset()) -> list[_Form]:
     apostrophes and hyphens may split or join words. Words in ``drop``
     (legal forms of a company) are left out."""
     forms: list[_Form] = []
-    folded = text.casefold()
+    # Composed first: a decomposed "u" plus a diaeresis must read as "ü".
+    folded = unicodedata.normalize("NFC", text).casefold()
     for variant in (folded, folded.translate(_UMLAUTS)):
         plain = unicodedata.normalize("NFKD", variant)
         plain = "".join(c for c in plain if not unicodedata.combining(c))
@@ -616,6 +617,7 @@ async def check_documents(
     reader: Reader | None = None,
     on_send: Callable[[str], None] | None = None,
     skipped: Collection[str] = (),
+    groups: list[list[str]] | None = None,
 ) -> VerificationDocumentCheckResponse:
     """Read every slot of this request that has a file, at once, within
     ``CHECK_TIMEOUT_S`` in total. A slot without a file here is not read.
@@ -625,7 +627,10 @@ async def check_documents(
     given for several slots is sent once, named by the first of them.
     ``skipped`` slots had a file the caller did not read
     (the daily cap): they come back ``read: false`` with no warning. When
-    the caller stops waiting, every read still running is cancelled."""
+    the caller stops waiting, every read still running is cancelled.
+    ``groups`` names the slots that share one file, first slot first (the
+    caller's grouping, so its reads and ``on_send`` names agree); without
+    it, slots with the same file bytes share a read."""
     slots = [
         s
         for s in requirements.documents
@@ -634,11 +639,18 @@ async def check_documents(
     # One read per distinct file: a file given for several slots (one
     # upload, or one passport covering several proofs) is sent once, for
     # all of them. The group is named by its first slot.
-    groups: dict[str, list[DocumentSlot]] = {}
-    for slot in slots:
-        file = documents[slot.name].file
-        assert file is not None
-        groups.setdefault(hashlib.sha256(file.data).hexdigest(), []).append(slot)
+    by_name = {s.name: s for s in slots}
+    shared: dict[str, list[DocumentSlot]] = {}
+    if groups is not None:
+        for names in groups:
+            group = [by_name[n] for n in names if n in by_name]
+            if group:
+                shared[group[0].name] = group
+    else:
+        for slot in slots:
+            file = documents[slot.name].file
+            assert file is not None
+            shared.setdefault(hashlib.sha256(file.data).hexdigest(), []).append(slot)
 
     loop = asyncio.get_running_loop()
     deadline = loop.time() + CHECK_TIMEOUT_S
@@ -659,7 +671,7 @@ async def check_documents(
         )
         return [_Read(slot, targets, answer) for slot in group] if answer else []
 
-    tasks = {g[0].name: asyncio.ensure_future(one(g)) for g in groups.values()}
+    tasks = {g[0].name: asyncio.ensure_future(one(g)) for g in shared.values()}
     reads: dict[str, _Read] = {}
     done: set[asyncio.Future] = set()
     try:

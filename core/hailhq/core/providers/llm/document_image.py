@@ -54,6 +54,11 @@ def decode(content_type: str, data: bytes) -> bytes:
         # For a JPEG this is the size after draft: what is really decoded.
         if image.width * image.height > MAX_PIXELS:
             raise ValueError("image too large")
+        # Scale down first, in place, so every step after works on a small
+        # image: a 100 million pixel RGBA scan is 400 MB once decoded, and
+        # one more full-size copy would pass the 1 GB limit. The EXIF turn
+        # comes after (the bounding box is square, so it fits either way).
+        image.thumbnail((LONG_SIDE, LONG_SIDE), reducing_gap=3.0)
         image = ImageOps.exif_transpose(image)
         if image.mode.startswith("I"):
             # 16- or 32-bit grey (scanner output): scale to 8 bits, never clip.
@@ -67,7 +72,6 @@ def decode(content_type: str, data: bytes) -> bytes:
             image.paste(rgba, mask=rgba.getchannel("A"))
         else:
             image = image.convert("RGB")
-        image.thumbnail((LONG_SIDE, LONG_SIDE), reducing_gap=3.0)
         out = io.BytesIO()
         image.save(out, "JPEG", quality=85)
         return out.getvalue()

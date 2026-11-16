@@ -998,3 +998,63 @@ async def test_reader_marks_the_send_only_once_the_request_can_go(
     monkeypatch.setattr(document_reader, "_get_client", broken_client)
     assert await _read(on_send=lambda: sends.append(1)) is None
     assert sends == []
+
+
+# -- review round 5 --------------------------------------------------------------
+
+
+def test_decode_scales_down_before_any_full_size_copy(monkeypatch) -> None:
+    """A 100 million pixel RGBA scan is 400 MB once decoded; any second
+    full-size copy (the EXIF turn, the white background) would pass the
+    child's 1 GB limit. So the image is scaled down first."""
+    from hailhq.core.providers.llm import document_image
+
+    seen: list[tuple[int, int]] = []
+    real = document_image.ImageOps.exif_transpose
+
+    def watch(image, **kw):
+        seen.append(image.size)
+        return real(image, **kw)
+
+    monkeypatch.setattr(document_image.ImageOps, "exif_transpose", watch)
+    src = io.BytesIO()
+    Image.new("RGBA", (4000, 3000), (0, 0, 0, 0)).save(src, "PNG")
+    document_image.decode("image/png", src.getvalue())
+    assert max(seen[0]) <= document_image.LONG_SIDE
+    # The size math: 100 million RGBA pixels decoded, then only small copies.
+    assert document_image.MAX_PIXELS * 4 < 1024**3 // 2
+
+
+def test_a_decomposed_umlaut_reads_as_one() -> None:
+    import unicodedata as ud
+
+    printed = _printed(given="Jürgen", family="Müller")
+    decomposed = ud.normalize("NFD", "Mueller")
+    assert name_matches(printed, "Juergen", decomposed)
+    assert name_matches(
+        _printed(given="Jurgen", family=ud.normalize("NFD", "Müller")),
+        "Jurgen",
+        "Mueller",
+    )
+
+
+async def test_the_callers_groups_name_the_reads() -> None:
+    docs = {
+        **_docs(),
+        "proof_of_address": DocumentInput(option="utility_bill", file=_BILL),
+    }
+    sends: list[str] = []
+    reader = _reader(_answer())
+    await check_documents(
+        _req(),
+        {},
+        {},
+        docs,
+        today=TODAY,
+        reader=reader,
+        on_send=sends.append,
+        groups=[["proof_of_identity", "proof_of_address"]],
+    )
+    assert len(reader.calls) == 1
+    reader.calls[0]["on_send"]()
+    assert sends == ["proof_of_identity"]

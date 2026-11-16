@@ -38,12 +38,10 @@ _READ_ONLY = {
     "get_sms_application",
     "preview_sms_application",
     "check_verification",
-    "check_verification_documents",
 }
 # Read-only tools that talk to outside systems.
 _READ_ONLY_OPEN_WORLD = {
     "check_verification",
-    "check_verification_documents",
     "get_sms_application",
     "preview_sms_application",
     "quote_numbers",
@@ -74,6 +72,8 @@ _OPEN_WORLD_WRITES = {
     "amend_sms_application",
     "cancel_verification",
     "confirm_verification",
+    # Uses the workspace's daily document reads, which cost money.
+    "check_verification_documents",
 }
 
 _EXPECTED_COUNT = 45
@@ -174,13 +174,10 @@ async def test_read_only_set_is_exact(tools_by_name) -> None:
 
 
 async def test_read_only_tools_are_idempotent_not_destructive(tools_by_name) -> None:
-    # Reads nothing back into the account, but each call uses reads of the
-    # workspace's daily document-read quota.
-    uses_quota = {"check_verification_documents"}
     for name in _READ_ONLY:
         a = tools_by_name[name].annotations
         assert a.destructive_hint is False, name
-        assert a.idempotent_hint is (name not in uses_quota), name
+        assert a.idempotent_hint is True, name
         assert a.open_world_hint is (name in _READ_ONLY_OPEN_WORLD), name
 
 

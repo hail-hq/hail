@@ -139,10 +139,11 @@ async def test_quote_and_slots_are_checked(client, org_and_key, carrier) -> None
     )
     assert unknown.status_code == 422
     assert unknown.json()["detail"][0]["loc"] == ["body", "documents", "nope"]
-    # A file part for a slot not in documents is left out, as submit does.
+    # A file part for a slot not in documents is not read, as submit does,
+    # and says so.
     stray = await _post(client, key, documents="{}")
     assert stray.status_code == 200
-    assert stray.json()["documents"] == {}
+    assert stray.json()["documents"]["proof_of_identity"]["read"] is False
 
 
 async def test_requires_auth(client) -> None:
@@ -499,3 +500,109 @@ async def test_a_failed_upload_fetch_leaves_the_file_parts_read(
     assert len(calls) == 1
     # The upload's read was never sent: given back.
     assert await document_reads_today(async_session, org_id) == 1
+
+
+async def test_wrong_json_types_are_422_and_null_is_empty(
+    client, org_and_key, carrier, monkeypatch
+) -> None:
+    _fake_reader(monkeypatch)
+    _, _, key = org_and_key
+    for part in ({"fields": "[]"}, {"address": '""'}, {"documents": "[]"}):
+        assert (await _post(client, key, **part)).status_code == 422, part
+    ok = await _post(client, key, fields="null", address="null")
+    assert ok.status_code == 200
+
+
+async def test_a_failed_reservation_reads_nothing_and_still_answers(
+    client, org_and_key, carrier, monkeypatch
+) -> None:
+    from hailhq.api.routes import verifications as routes
+
+    calls = _fake_reader(monkeypatch)
+
+    async def broken(*_a, **_k):
+        raise RuntimeError("lock timeout")
+
+    monkeypatch.setattr(routes, "reserve_document_reads", broken)
+    _, _, key = org_and_key
+    resp = await _post(client, key)
+    assert resp.status_code == 200
+    assert resp.json()["documents"]["proof_of_identity"]["read"] is False
+    assert calls == []
+
+
+async def test_an_upload_without_a_bucket_is_read_false(
+    client, org_and_key, carrier, monkeypatch, async_session
+) -> None:
+    from hailhq.api.deps import get_s3_mail_optional
+    from hailhq.api.main import app
+
+    from .test_verifications_uploads import _upload
+
+    calls = _fake_reader(monkeypatch)
+    app.dependency_overrides[get_s3_mail_optional] = lambda: None
+    try:
+        org_id, _, key = org_and_key
+        row = await _upload(async_session, org_id)
+        resp = await client.post(
+            "/verifications/document-check",
+            data=_form(**{"upload.proof_of_identity": str(row.id)}),
+            files={"x": (None, "")},
+            headers=_auth(key),
+        )
+    finally:
+        app.dependency_overrides.pop(get_s3_mail_optional, None)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["documents"]["proof_of_identity"]["read"] is False
+    assert calls == []
+
+
+async def test_a_covering_file_is_sent_once_and_fills_its_slots(
+    client, org_and_key, carrier, monkeypatch, async_session
+) -> None:
+    from hailhq.core.document_reads import document_reads_today
+    from hailhq.core.providers.verification import (
+        DocumentOption,
+        DocumentSlot,
+        Requirements,
+    )
+
+    async def two_slots(country_code, number_type, subject_type):
+        passport = (DocumentOption(key="passport", label="Passport"),)
+        return Requirements(
+            provider="fake",
+            country_code=country_code,
+            number_type=number_type,
+            subject_type=subject_type,
+            required=True,
+            documents=(
+                DocumentSlot(name="identity", label="Identity", options=passport),
+                DocumentSlot(name="birth", label="Birth date", options=passport),
+            ),
+            subject_types=("person",),
+        )
+
+    monkeypatch.setattr(carrier, "requirements", two_slots)
+    calls = _fake_reader(monkeypatch)
+    org_id, _, key = org_and_key
+    resp = await _post(
+        client,
+        key,
+        documents=json.dumps(
+            {"identity": {"option": "passport", "covers": ["birth"]}, "birth": {}}
+        ),
+        files={"file.identity": ("p.jpg", b"\xff\xd8jpeg", "image/jpeg")},
+    )
+    assert resp.status_code == 200, resp.text
+    docs = resp.json()["documents"]
+    assert docs["identity"]["read"] and docs["birth"]["read"]
+    assert len(calls) == 1
+    assert "It is also given as: Birth date." in calls[0]["prompt"]
+    assert await document_reads_today(async_session, org_id) == 1
+    bad = await _post(
+        client,
+        key,
+        documents=json.dumps({"identity": {"covers": ["nope"]}}),
+        files={"file.identity": ("p.jpg", b"\xff\xd8jpeg", "image/jpeg")},
+    )
+    assert bad.status_code == 422

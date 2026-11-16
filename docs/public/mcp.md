@@ -65,7 +65,7 @@ Every tool sets the MCP hints `readOnlyHint`, `destructiveHint`, `idempotentHint
 | `release_number`                | Release a number. Destructive and permanent. Needs `confirm_e164`.                                 |
 | `get_verification_requirements` | Read what a carrier needs to verify the org for a number type (read-only).                         |
 | `check_verification`            | Run every check Hail can run on a verification form. Files nothing (read-only).                    |
-| `check_verification_documents`  | Read the files of a verification form: values to fill it, and warnings. Files nothing (read-only). |
+| `check_verification_documents`  | Read the files of a verification form: values to fill it, and warnings. Uses daily document reads. |
 | `submit_verification`           | Send details and documents to the carrier. Irreversible. Needs `attest_authorized`.                |
 | `list_verifications`            | List the org's verifications and their states (read-only).                                         |
 | `get_verification`              | Fetch one verification; poll it for `approved` (read-only).                                        |

@@ -142,11 +142,14 @@ async def collect_files(
     db: AsyncSession,
     organization_id: UUID,
     s3: S3MailClient | None,
+    *,
+    require_s3: bool = True,
 ) -> CollectedFiles:
     """The ``upload.<slot>`` rows (one session: one query at a time) and the
     ``file.<slot>`` parts of ``slots``, then the total size from both, all
     before any object is fetched. An ``upload.`` part for another slot is
-    a 422."""
+    a 422. With ``require_s3`` False, uploads are collected even without a
+    bucket (the caller then leaves them unread) instead of a 503."""
     slots = list(slots)
     for key in form:
         if key.startswith("upload.") and key[len("upload.") :] not in slots:
@@ -177,7 +180,7 @@ async def collect_files(
     total += sum(row.size_bytes or 0 for row in rows.values())
     if total > MAX_REQUEST_BYTES:
         raise files_too_large()
-    if rows and s3 is None:
+    if rows and s3 is None and require_s3:
         raise HTTPException(
             status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="file uploads are not configured on this server",

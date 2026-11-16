@@ -5557,7 +5557,17 @@ paths:
 
         of a `verification_document` upload). Only the slots with a file in
 
-        this request are read. `quote_id`, `country_code`, `number_type` and
+        this request are read. A file that stands for other slots too (one
+
+        passport for several proofs) is sent once, for its slot, with
+
+        `documents.<slot>.covers` listing the other slots: it is read once and
+
+        fills all of them. One file given for several slots uses one read. A
+
+        `file.<slot>` part for a slot not in `documents` is not read and comes
+
+        back `read` false. `quote_id`, `country_code`, `number_type` and
 
         `subject_type` are required. `documents` may leave out `option` while
 

@@ -3506,7 +3506,9 @@ def register_tools(
         title="Read verification documents",
         annotations=ToolAnnotations(
             title="Read verification documents",
-            readOnlyHint=True,
+            # Not read-only: each call uses the workspace's daily document reads,
+            # which cost money.
+            readOnlyHint=False,
             destructiveHint=False,
             # Each call uses reads of the workspace's daily quota.
             idempotentHint=False,
@@ -3539,8 +3541,10 @@ def register_tools(
         type than the chosen one, or a typed name that differs from the printed one.
         Each message names the fix. A submission with warnings is still accepted.
         A file nothing was read from has ``read`` false; an unclear file also has an
-        ``unreadable`` warning. A workspace has 30 reads per day (one per file sent).
-        Nothing is filed, saved, held or charged, and uploads stay usable."""
+        ``unreadable`` warning.
+        Each file read uses one of the workspace's daily document reads (30 per day);
+        a file given for several slots uses one. Nothing is filed, saved, held or
+        charged, and uploads stay usable."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await check_verification_documents(

@@ -58,6 +58,7 @@ from hailhq.api.verification_files import (
     MAX_REQUEST_BYTES,
     collect_files,
     fetch_files,
+    files_too_large,
 )
 from hailhq.core import (
     sms_registration_fees,
@@ -68,7 +69,12 @@ from hailhq.core import (
 from hailhq.core.billing import get_balance_cents, get_ledger_cents
 from hailhq.core.carrier_offer import Approval
 from hailhq.core.config import SELF_HOSTED_ORG_ID, settings
-from hailhq.core.db import get_session, org_lock, session_scope, try_org_lock
+from hailhq.core.db import (
+    get_session,
+    independent_session_scope,
+    org_lock,
+    try_org_lock,
+)
 from hailhq.core.document_reads import (
     release_document_reads,
     reserve_document_reads,
@@ -99,6 +105,7 @@ from hailhq.core.providers.verification import (
     SubjectType,
     SubmitRefused,
     UnsupportedSubjectType,
+    UploadedFile,
     VerificationProvider,
     VerificationProviderError,
     VerificationRequirements,
@@ -2351,6 +2358,12 @@ async def check_verification(
     )
 
 
+class _DocumentCheckPart(_DocumentPart):
+    # Other slots this slot's file also stands for (one passport for several
+    # proofs): the file is sent once, here, and read once for all of them.
+    covers: list[str] = Field(default_factory=list)
+
+
 class _DocumentCheckForm(BaseModel):
     quote_id: UUID | None = None
     country_code: str = Field(min_length=2, max_length=2)
@@ -2358,7 +2371,7 @@ class _DocumentCheckForm(BaseModel):
     subject_type: str
     fields: dict[str, str] = Field(default_factory=dict)
     address: dict[str, str] = Field(default_factory=dict)
-    documents: dict[str, _DocumentPart] = Field(default_factory=dict)
+    documents: dict[str, _DocumentCheckPart] = Field(default_factory=dict)
 
 
 @router.post(
@@ -2379,7 +2392,12 @@ async def check_verification_documents(
     Send the documents first: the same parts as `POST /verifications`, with
     a file per slot to read (`file.<slot>`, or `upload.<slot>` with the id
     of a `verification_document` upload). Only the slots with a file in
-    this request are read. `quote_id`, `country_code`, `number_type` and
+    this request are read. A file that stands for other slots too (one
+    passport for several proofs) is sent once, for its slot, with
+    `documents.<slot>.covers` listing the other slots: it is read once and
+    fills all of them. One file given for several slots uses one read. A
+    `file.<slot>` part for a slot not in `documents` is not read and comes
+    back `read` false. `quote_id`, `country_code`, `number_type` and
     `subject_type` are required. `documents` may leave out `option` while
     the type is not chosen; `fields` and `address` may be empty or partial.
 
@@ -2406,10 +2424,11 @@ async def check_verification_documents(
             country_code=values["country_code"],
             number_type=values["number_type"],
             subject_type=values["subject_type"],
-            # May be partial or empty: the files fill them.
-            fields=values["fields"] or {},
-            address=values["address"] or {},
-            documents=values["documents"] or {},
+            # May be partial or empty: the files fill them. Only JSON null
+            # becomes empty; another wrong type is a 422, as for submit.
+            fields={} if values["fields"] is None else values["fields"],
+            address={} if values["address"] is None else values["address"],
+            documents={} if values["documents"] is None else values["documents"],
         )
     except ValidationError as exc:
         raise _form_422(exc) from exc
@@ -2446,10 +2465,26 @@ async def check_verification_documents(
             raise unprocessable(
                 "this slot is not in the form", loc=["body", "documents", slot]
             )
-    # A file.<slot> part for a slot not in documents is left out, as submit
-    # does.
+    covered_by: dict[str, str] = {}
+    for slot, part in sub.documents.items():
+        for other in part.covers:
+            if other not in slots or other == slot:
+                raise unprocessable(
+                    "covers names a slot that is not in the form",
+                    loc=["body", "documents", slot, "covers"],
+                )
+            covered_by.setdefault(other, slot)
+    # A file.<slot> part for a slot not in documents is not read, as submit
+    # does; it comes back read: false so the caller can see that.
+    stray = [
+        key.partition(".")[2]
+        for key in form
+        if key.startswith("file.")
+        and key.partition(".")[2] in slots
+        and key.partition(".")[2] not in sub.documents
+    ]
     collected = await collect_files(
-        form, sub.documents, db, principal.organization_id, s3
+        form, sub.documents, db, principal.organization_id, s3, require_s3=False
     )
     # The upload rows are detached, then the transaction ends before the
     # slow calls (the bucket, the model): a rollback expires loaded rows, and
@@ -2459,18 +2494,14 @@ async def check_verification_documents(
             db.expunge(row)
     await db.rollback()
 
-    # The daily cap, before any file is fetched or decoded: the reads of
-    # this request are reserved in one short transaction of their own. A
-    # slot over the cap is not read. A read is used once its file is sent
-    # to the model, whatever happens to the call after (an error, a timeout,
-    # a cancellation). A reserved read whose file was never sent (not
-    # readable, over the limits, not decoded) is given back below.
-    with_file = [s for s in slots if s in collected.rows or s in collected.parts]
     # One read per distinct file: an upload, or the same file part, given
-    # for several slots is read once for all of them (check_documents sends
-    # it once). Each group is named by its first slot.
+    # for several slots, and the slots a file covers, are read once for all
+    # of them. Each group is named by its first slot (the lead); the same
+    # groups go to check_documents, so the reads reserved, sent and given
+    # back are named the same way. Each part is hashed once, here.
+    own_file = [s for s in slots if s in collected.rows or s in collected.parts]
     groups: dict[str, list[str]] = {}
-    for slot in with_file:
+    for slot in own_file:
         row = collected.rows.get(slot)
         key = (
             f"upload:{row.id}"
@@ -2478,33 +2509,69 @@ async def check_verification_documents(
             else f"part:{hashlib.sha256(collected.parts[slot].data).hexdigest()}"
         )
         groups.setdefault(key, []).append(slot)
+    for other, holder in covered_by.items():
+        if other in own_file:
+            continue  # its own file wins
+        for group in groups.values():
+            if holder in group and other not in group:
+                group.append(other)
+    with_file = [slot for group in groups.values() for slot in group]
+    # An upload cannot be read without the bucket: read false, no read used.
+    if s3 is None:
+        groups = {
+            k: g for k, g in groups.items() if not any(s in collected.rows for s in g)
+        }
     leads = [group[0] for group in groups.values()]
+
+    # The daily cap, before any file is fetched or decoded: the reads of
+    # this request are reserved in one short transaction of their own. A
+    # slot over the cap is not read. A read is used right before its file
+    # is sent to the model, whatever happens to the call after. A reserved
+    # read whose file was never sent is given back below. A failure here
+    # (the database, the lock) reserves nothing: every slot is read false.
     reserved: dict[str, UUID] = {}
-    if document_reader_configured():
-        async with session_scope() as counter:
-            reserved = await reserve_document_reads(
-                counter, principal.organization_id, leads
-            )
-    to_read = [
-        slot for group in groups.values() if group[0] in reserved for slot in group
-    ]
+    if document_reader_configured() and leads:
+        try:
+            async with independent_session_scope() as counter:
+                reserved = await reserve_document_reads(
+                    counter, principal.organization_id, leads
+                )
+        except Exception as exc:
+            logger.warning("document check: no reads reserved (%s)", type(exc).__name__)
+            reserved = {}
+    to_read = [g for g in groups.values() if g[0] in reserved]
     sent: set[str] = set()
     try:
-        try:
-            files = await fetch_files(collected, to_read, s3)
-        except HTTPException as exc:
-            if exc.status_code != http_status.HTTP_503_SERVICE_UNAVAILABLE:
-                raise
-            # The bucket failed: the uploads are not read (their reads are
-            # given back below), the file parts still are. Fail open.
-            logger.warning("document check: uploads not fetched (503)")
-            files = {s: collected.parts[s] for s in to_read if s in collected.parts}
+        # Each file once. A failed fetch makes only its slots read false
+        # (and its read is given back); the other files are still read.
+        results = await asyncio.gather(
+            *(fetch_files(collected, [g[0]], s3) for g in to_read),
+            return_exceptions=True,
+        )
+        files: dict[str, UploadedFile] = {}
+        read_groups: list[list[str]] = []
+        for group, result in zip(to_read, results):
+            if isinstance(result, BaseException):
+                logger.warning(
+                    "document check: a file was not fetched (%s)",
+                    type(result).__name__,
+                )
+                continue
+            for slot in group:
+                files[slot] = result[group[0]]
+            read_groups.append(group)
+        if sum(len(files[g[0]].data) for g in read_groups) > MAX_REQUEST_BYTES:
+            raise files_too_large()
         documents = {
             slot: DocumentInput(
                 option=part.option, fields=part.fields, file=files.get(slot)
             )
             for slot, part in sub.documents.items()
         }
+        for slot in with_file:
+            if slot not in documents:
+                # A covered slot with no entry of its own still gets its read.
+                documents[slot] = DocumentInput(option="", file=files.get(slot))
         return await check_documents(
             requirements,
             sub.fields,
@@ -2512,14 +2579,16 @@ async def check_verification_documents(
             documents,
             today=datetime.now(timezone.utc).date(),
             on_send=sent.add,
-            # Over the cap, no model, or not fetched: read false, no warning.
-            skipped=[s for s in with_file if s not in files],
+            groups=read_groups,
+            # Over the cap, no model, not fetched, or a file part left out:
+            # read false, no warning.
+            skipped=[s for s in [*with_file, *stray] if s not in files],
         )
     finally:
         unsent = [row_id for slot, row_id in reserved.items() if slot not in sent]
         if unsent:
             try:
-                async with session_scope() as counter:
+                async with independent_session_scope() as counter:
                     await release_document_reads(counter, unsent)
             except Exception as exc:
                 # Never hide the request's own outcome; the reads stay used.
