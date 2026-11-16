@@ -14,6 +14,7 @@ from hailhq.core.billing import CALL_META_BILLED
 from hailhq.core.call_allowance import (
     available_cents,
     cap_seconds,
+    hold,
     minutes_affordable,
     round_up_tenth,
 )
@@ -222,6 +223,14 @@ async def test_ended_call_hold_stops_counting(async_session, quote):
         "unpriced": (Call(**base, **ended, answered_at=hour, ended_at=hour), -60),
         # A real cost above the hold counts the hold.
         "unpriced_long": (Call(**base, **ended, answered_at=hour, ended_at=hour), 10),
+        # One handover dial at 10¢ a minute and 5¢ a call: 1 billed minute,
+        # 1 spare and 1 for the dial (30), plus the fee for each line (10).
+        "unpriced_dial": (Call(**base, **ended, answered_at=hour, ended_at=hour), 10),
+        # A handover ran at a price Hail could not get: the full hold.
+        "unpriced_unknown": (
+            Call(**base, **ended, answered_at=hour, ended_at=hour),
+            10,
+        ),
         "unpriced_stale": (
             Call(**base, **ended, answered_at=hour, ended_at=hour),
             -2 * 24 * 60,
@@ -229,13 +238,21 @@ async def test_ended_call_hold_stops_counting(async_session, quote):
     }
     async_session.add_all([c for c, _ in calls.values()])
     await async_session.flush()
-    for call, minutes_left in calls.values():
+    prices = {
+        "unpriced_dial": {
+            "cents_per_minute": Decimal(10),
+            "cents_per_call": Decimal(5),
+            "dials": 1,
+        },
+        "unpriced_unknown": {"cents_per_minute": None, "cents_per_call": None},
+    }
+    for name, (call, minutes_left) in calls.items():
         async_session.add(
             CallBalanceHold(
                 call_id=call.id,
                 cents=Decimal(100),
                 hold_until=now + timedelta(minutes=minutes_left),
-                **PRICES,
+                **prices.get(name, PRICES),
             )
         )
     usage = {
@@ -250,7 +267,15 @@ async def test_ended_call_hold_stops_counting(async_session, quote):
             }.get(name, str(calls[name][0].id)),
             priced_at=now if name in ("debited", "free") else None,
         )
-        for name in ("debited", "free", "unpriced", "unpriced_long", "unpriced_stale")
+        for name in (
+            "debited",
+            "free",
+            "unpriced",
+            "unpriced_long",
+            "unpriced_dial",
+            "unpriced_unknown",
+            "unpriced_stale",
+        )
     }
     async_session.add_all(usage.values())
     await async_session.flush()
@@ -265,9 +290,10 @@ async def test_ended_call_hold_stops_counting(async_session, quote):
         )
     )
     await async_session.commit()
-    # 500 less the debit (10), the live, just-ended, completed, no-end-time
-    # and long unpriced calls (100 each), and the short unpriced call (80).
-    assert await available_cents(async_session, org) == Decimal(-90)
+    # 500 less the debit (10), the live, just-ended, completed, no-end-time,
+    # long unpriced and unknown-price calls (100 each), the short unpriced
+    # call (80) and the unpriced call with a handover dial (40).
+    assert await available_cents(async_session, org) == Decimal(-230)
 
 
 async def test_unknown_price_falls_back_to_default_limit(
@@ -606,6 +632,45 @@ async def test_handover_unknown_price_uses_the_agent_limit(
     # No balance cap: the voicebot applies the agent's own handover limit.
     assert data["max_seconds"] is None
     assert await _hold(async_session, call.id) is None
+
+
+async def test_handover_unknown_price_counts_the_full_hold(
+    client, async_session, add_phone_number, quote, monkeypatch
+):
+    monkeypatch.setattr(settings, "livekit_twilio_sip_outbound_trunk_id", "ST_tw")
+    quote.price = None
+    until = datetime.now(timezone.utc) + timedelta(minutes=10)
+    data, call = await _handover(
+        client,
+        async_session,
+        add_phone_number,
+        20,
+        timedelta(seconds=30),
+        hold=(Decimal(100), until),
+    )
+    assert data["ok"] is True
+    call_id = call.id
+    row = await _hold(async_session, call_id)
+    await async_session.refresh(row)
+    # The second line's price is unknown: once the call ends, the full hold
+    # counts, and a later priced handover does not bring a price back.
+    assert (row.cents, row.cents_per_minute, row.cents_per_call) == (
+        Decimal(100),
+        None,
+        None,
+    )
+    await hold(
+        async_session,
+        call_id,
+        Decimal(50),
+        until,
+        cents_per_minute=Decimal(40),
+        cents_per_call=Decimal(0),
+    )
+    await async_session.commit()
+    row = await _hold(async_session, call_id)
+    await async_session.refresh(row)
+    assert (row.cents_per_minute, row.cents_per_call) == (None, None)
 
 
 async def test_no_minute_left_is_logged(

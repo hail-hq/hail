@@ -613,7 +613,15 @@ async def create_call(
     if pool_number is not None:
         pool_number.reserved_call_id = call.id
     if balance_hold is not None:
-        await hold(db, call.id, *balance_hold)
+        cents, until, per_minute, per_call = balance_hold
+        await hold(
+            db,
+            call.id,
+            cents,
+            until,
+            cents_per_minute=per_minute,
+            cents_per_call=per_call,
+        )
 
     await db.commit()
     await db.refresh(call)

@@ -65,6 +65,7 @@ from hailhq.core.call_allowance import (
     HANDOVER_RING_MINUTES,
     available_cents,
     cap_seconds,
+    forget_price,
     handover_dials,
     hold,
     hold_until,
@@ -1889,9 +1890,13 @@ async def _handover_cap(
         quote_call_price(org, [main, second], recording),
     )
     if alone is None or both is None:
-        # The agent's own handover limit, nothing held: a slow price check
-        # must not cut off callers who have the credit.
+        # The agent's own handover limit, nothing more held: a slow price
+        # check must not cut off callers who have the credit. The second
+        # line's price is unknown, so the call's full hold counts after it
+        # ends.
         logger.warning("handover price unknown for call %s; agent limit", call.id)
+        await forget_price(db, call.id)
+        await db.commit()
         return None
     per_minute, per_call = both
     # The agent's own handover limit: the voicebot stops the handover there.
@@ -1933,8 +1938,8 @@ async def _handover_cap(
             hold_until(
                 now, (HANDOVER_RING_MINUTES * 60) + HANDOVER_PICKUP_SECONDS + seconds
             ),
-            per_minute,
-            per_call,
+            cents_per_minute=per_minute,
+            cents_per_call=per_call,
             dial=True,
         )
     await db.commit()

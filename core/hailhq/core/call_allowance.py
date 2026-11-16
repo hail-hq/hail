@@ -23,7 +23,7 @@ from decimal import Decimal
 from hailhq.core.billing import get_ledger_cents
 from hailhq.core.models import CallBalanceHold
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
-from sqlalchemy import bindparam, func, select, text
+from sqlalchemy import bindparam, case, func, null, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -96,7 +96,9 @@ def hold_until(now: datetime, seconds: int) -> datetime:
 #   most the hold. That is the highest price per minute held for it times
 #   its billed minutes, plus its fees; each handover dial adds a minute and
 #   a fee (it may have billed the second line), and one more minute covers
-#   carrier legs billed a little longer than the voicebot measured. The
+#   carrier legs billed a little longer than the voicebot measured. With no
+#   price stored (a handover ran at a price Hail could not get), the full
+#   hold (LEAST skips the NULL). The
 #   rater writes the debit and stamps priced_at in one transaction, and
 #   stamps a 0-cent row with no debit. A row it never prices stops counting
 #   UNPRICED_HOLD_DAYS after hold_until;
@@ -137,6 +139,8 @@ _HELD_SQL = text("""
     ) u
     WHERE c.organization_id = :org
       AND h.call_id IS DISTINCT FROM :exclude
+      -- No branch counts a hold this old; skip its usage lookup.
+      AND h.hold_until > :unpriced_until
 """).bindparams(bindparam("terminal", expanding=True))
 
 
@@ -181,19 +185,19 @@ async def hold(
     call_id: uuid.UUID,
     cents: Decimal,
     until: datetime,
-    cents_per_minute: Decimal,
-    cents_per_call: Decimal,
     *,
+    cents_per_minute: Decimal | None,
+    cents_per_call: Decimal | None,
     dial: bool = False,
 ) -> None:
     """Set aside ``cents`` for a call until ``until``, or grow its hold to
     at least that: a hold never shrinks, even when two handovers race. The
     column keeps tenths of a cent, so the amount is rounded up. The prices
-    (the highest held for the call is kept) set what the hold shrinks to
-    once the call ends (_HELD_SQL). ``dial``
-    counts one more approved handover dial. Also deletes up to 100 holds a
-    day past their end, skipping rows another transaction has locked, so no
-    call waits on another's cleanup."""
+    (the highest held for the call is kept) set what the hold counts once
+    the call ends (_HELD_SQL). None means a price Hail does not know: the
+    full hold counts, and the prices stay None from then on. ``dial`` counts one more approved handover
+    dial. Also deletes up to 100 holds a day past their end, skipping rows
+    another transaction has locked, so no call waits on another's cleanup."""
     await db.execute(_PRUNE_SQL, {"days": UNPRICED_HOLD_DAYS})
     stmt = insert(CallBalanceHold).values(
         call_id=call_id,
@@ -211,15 +215,34 @@ async def hold(
                 "hold_until": func.greatest(
                     CallBalanceHold.hold_until, stmt.excluded.hold_until
                 ),
-                "cents_per_minute": func.greatest(
+                "cents_per_minute": _kept_price(
                     CallBalanceHold.cents_per_minute, stmt.excluded.cents_per_minute
                 ),
-                "cents_per_call": func.greatest(
+                "cents_per_call": _kept_price(
                     CallBalanceHold.cents_per_call, stmt.excluded.cents_per_call
                 ),
                 "dials": CallBalanceHold.dials + stmt.excluded.dials,
             },
         )
+    )
+
+
+def _kept_price(old, new):
+    """The higher price, or NULL once either is unknown (GREATEST would skip
+    the NULL)."""
+    return case(
+        (or_(old.is_(None), new.is_(None)), null()), else_=func.greatest(old, new)
+    )
+
+
+async def forget_price(db: AsyncSession, call_id: uuid.UUID) -> None:
+    """Mark the call's hold as run at an unknown price (a handover whose
+    quote failed), so the full hold counts after the call ends. No-op when
+    the call holds nothing."""
+    await db.execute(
+        update(CallBalanceHold)
+        .where(CallBalanceHold.call_id == call_id)
+        .values(cents_per_minute=None, cents_per_call=None)
     )
 
 
