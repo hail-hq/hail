@@ -57,13 +57,15 @@ def _deploy_sources() -> set[str]:
         sources.add(str(dockerfile.relative_to(ROOT)))
         for line in dockerfile.read_text().splitlines():
             parts = line.split()
-            if not parts or parts[0] != "COPY" or "--from=" in line:
+            if not parts or parts[0] not in ("COPY", "ADD") or "--from=" in line:
                 continue
             args = [p for p in parts[1:] if not p.startswith("--")]
             sources.update(args[:-1])
     for compose in ROOT.glob("docker-compose*.yml"):
         sources.add(compose.name)
-        sources.update(re.findall(r"- \./([^:\s]+):", compose.read_text()))
+        text = compose.read_text()
+        sources.update(re.findall(r"- \./([^:\s]+):", text))
+        sources.update(re.findall(r"source: \./(\S+)", text))
     return {s.rstrip("/") for s in sources}
 
 
@@ -71,24 +73,29 @@ def _hits(files: list[str], patterns: list[re.Pattern[str]]) -> list[str]:
     return [f for f in files if any(p.match(f) for p in patterns)]
 
 
-def test_deploy_never_skips_what_the_services_use():
-    files = _tracked()
-    sources = _deploy_sources()
-    assert {"costs", "Caddyfile", "api/migrations"} <= sources
+def _used(files: list[str], sources: set[str]) -> list[str]:
     # Images copy Markdown (costs/README.md) but no service reads it.
-    used = [
+    return [
         f
         for f in files
         if any(f == s or f.startswith(f"{s}/") for s in sources)
         and not f.endswith(".md")
     ]
+
+
+def test_deploy_never_skips_what_the_services_use():
+    sources = _deploy_sources()
+    assert {"costs", "Caddyfile", "api/migrations"} <= sources
+    used = _used(_tracked(), sources)
     assert used
     assert _hits(used, _ignored("deploy.yml", "push")) == []
 
 
 def test_ci_never_skips_python_or_costs():
     files = _tracked()
-    checked = [
+    # The docker job builds what the images copy; the go job builds cli/;
+    # the sdk and mcp tests read openapi/.
+    checked = _used(files, _deploy_sources() | {"cli", "openapi"}) + [
         f
         for f in files
         if f.endswith((".py", ".toml", ".lock", "Dockerfile"))

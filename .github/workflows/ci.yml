@@ -5,6 +5,8 @@ on:
     # A PR that changes only these files runs nothing here: no job lints,
     # tests or builds them. Python files anywhere still run (lint covers the
     # whole tree), and so do costs/ (the API tests read it).
+    # A skipped run reports no checks, so a required check on main would
+    # block these PRs forever: drop this list before requiring a CI job.
     paths-ignore:
       - "**/*.md"
       - "**/*.tf"
@@ -71,7 +73,7 @@ jobs:
         env:
           DATABASE_URL: postgresql+psycopg://hail:hail@localhost:5432/hail
 
-  # Preserve the existing required check while the suites run in parallel.
+  # One check that sums up every Python suite (none is required on main today).
   test:
     if: ${{ always() }}
     needs: python-tests
