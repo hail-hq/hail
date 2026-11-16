@@ -1755,13 +1755,14 @@ def _actor_cache_key(bearer: str) -> str:
     return hashlib.sha256(bearer.encode()).hexdigest()
 
 
-def cached_organization_id(bearer: str) -> str | None:
-    """The org ``_actor_for`` already resolved for ``bearer``. Never calls the API."""
+def cached_actor_ids(bearer: str) -> tuple[str | None, str | None]:
+    """``(organization_id, user_id)`` that ``_actor_for`` already resolved for
+    ``bearer``. Never calls the API."""
     hit = _actor_cache.get(_actor_cache_key(bearer))
     if not hit or hit[0] <= time.monotonic():
-        return None
-    org_id = hit[1].get("organization_id")
-    return str(org_id) if org_id else None
+        return None, None
+    org_id, user_id = hit[1].get("organization_id"), hit[1].get("user_id")
+    return (str(org_id) if org_id else None, str(user_id) if user_id else None)
 
 
 @contextlib.asynccontextmanager
