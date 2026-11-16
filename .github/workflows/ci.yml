@@ -2,6 +2,20 @@ name: CI
 
 on:
   pull_request:
+    # A PR that changes only these files runs nothing here: no job lints,
+    # tests or builds them. Python files anywhere still run (lint covers the
+    # whole tree), and so do costs/ (the API tests read it).
+    paths-ignore:
+      - "**/*.md"
+      - "**/*.tf"
+      - "**/*.hcl"
+      - "docs-site/**"
+      - "web/**"
+      - "shared/**"
+      - "postman/**"
+      - "scripts/postman/**"
+      - ".agents/**"
+      - ".cursor-plugin/**"
   # The deployment workflow runs these checks for its exact main commit.
   workflow_call:
 

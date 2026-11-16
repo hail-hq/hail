@@ -54,7 +54,7 @@ git clone https://github.com/hail-hq/hail /opt/hail
 cd /opt/hail
 ```
 
-If your fork is private, clone via SSH (`git@github.com:<owner>/hail.git`) and authorize a deploy key on the VM. The CI deploy step runs `git fetch origin` on every push and gets a 403 error otherwise.
+If your fork is private, clone via SSH (`git@github.com:<owner>/hail.git`) and authorize a deploy key on the VM. The CI deploy step runs `git fetch origin` on every deploy and gets a 403 error otherwise.
 
 > **UFW + Docker caveat:** Docker writes its own iptables rules that _bypass_ UFW. The compose file binds the api/mcp ports to `127.0.0.1`. Thus external traffic cannot reach them, even if UFW permits it locally. If you add a new published port, keep the `127.0.0.1:` prefix, unless you intend the port to be public.
 

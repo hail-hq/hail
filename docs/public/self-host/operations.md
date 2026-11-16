@@ -184,10 +184,10 @@ Run `hail login`. The CLI opens `/device` on the website. You approve, and the C
 
 The MCP service (`hail/mcp`) picks one of two modes at boot from env:
 
-| Mode           | Env                                                            | Behaviour                                                                                                                                                                                  |
-| -------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Mode           | Env                                                            | Behaviour                                                                                                                                                                                    |
+| -------------- | -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **oauth-rs**   | `HAIL_AUTH_URL` + `MCP_RESOURCE_URL` set, `HAIL_API_KEY` empty | MCPServer rejects unauth requests with `401 WWW-Authenticate: Bearer resource_metadata=…`; tools forward each request's JWT to the API; `.well-known/oauth-protected-resource` is published. |
-| **static-key** | `HAIL_API_KEY` set, `HAIL_AUTH_URL` empty                      | No inbound auth; tools use the singleton `HailClient(api_key=HAIL_API_KEY)`; no protected-resource route.                                                                                  |
+| **static-key** | `HAIL_API_KEY` set, `HAIL_AUTH_URL` empty                      | No inbound auth; tools use the singleton `HailClient(api_key=HAIL_API_KEY)`; no protected-resource route.                                                                                    |
 
 If both are set, boot fails with `ambiguous MCP auth config`. If neither is set, boot fails with `MCP auth not configured`. The service decides the mode once; a restart is necessary to change it.
 
@@ -225,7 +225,7 @@ For v1, write migrations as raw SQL by hand (`env.py` has no SQLAlchemy `target_
 
 ### Migration discipline
 
-**The deploy workflow runs `alembic upgrade head` against prod on every push to `main`.** There is no human review gate between the merge of a migration and its execution. Three rules keep this safe. The workflow enforces one; the other two depend on you:
+**The deploy workflow runs `alembic upgrade head` against prod on every push to `main` that deploys.** A push that changes only docs, the web sites, the CLI or other files the services never read deploys nothing (`paths-ignore` in `.github/workflows/deploy.yml`); run the workflow by hand to deploy anyway. There is no human review gate between the merge of a migration and its execution. Three rules keep this safe. The workflow enforces one; the other two depend on you:
 
 1. **`api/migrations/env.py` caps statement runtime at 120s and lock-acquisition at 5s** via `SET LOCAL statement_timeout` / `SET LOCAL lock_timeout`. It issues them inside the migration transaction, so they apply to every statement that the migration runs. The choice of `SET LOCAL` (not `PGOPTIONS` or session-level `SET`) is deliberate. Neon's `-pooler` endpoint and other PgBouncer transaction-pooled connections reject the libpq startup option and reset session state between transactions. The per-transaction form is the only one that works on all of pooled / unpooled / direct.
 
@@ -359,7 +359,7 @@ collides with the CLI's release namespace — it did once (2026-08-13), and the 
 release then published its binaries onto a page whose tag pointed at older code.
 `release-cli.yml` now fails loudly if that tag already exists somewhere else.
 
-Hail does **not** release the service images (`hail-api`, `hail-voicebot`, `hail-mcp`) as versioned artifacts. The deploy workflow (`.github/workflows/deploy.yml`) pushes `latest` and `sha-<commit>` tags to GHCR on each push to `main` — the production VM pulls these. Self-hosters build from source via `docker compose up`. Versioned image releases are on the v1.x list.
+Hail does **not** release the service images (`hail-api`, `hail-voicebot`, `hail-mcp`) as versioned artifacts. The deploy workflow (`.github/workflows/deploy.yml`) pushes `latest` and `sha-<commit>` tags to GHCR on each push to `main` that deploys — the production VM pulls these. Self-hosters build from source via `docker compose up`. Versioned image releases are on the v1.x list.
 
 The images install exactly the versions in `uv.lock` (`uv sync --frozen`), never newer ones at build time. To move to newer releases, run `uv lock --upgrade` in a PR; CI tests the new lock before it reaches an image.
 
