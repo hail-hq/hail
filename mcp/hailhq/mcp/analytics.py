@@ -104,7 +104,7 @@ def instrument_analytics(server: Any) -> Analytics | None:
         from posthog.mcp import instrument
         from posthog.mcp.types import MCPAnalyticsOptions
 
-        client = Posthog(token, host=settings.mcp_posthog_host)
+        client = Posthog(token, host=settings.next_public_posthog_host or None)
         options = MCPAnalyticsOptions(
             context=False,
             enable_conversation_id=False,

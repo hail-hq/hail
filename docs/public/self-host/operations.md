@@ -201,7 +201,7 @@ Optional. The HTTP MCP server reuses `NEXT_PUBLIC_POSTHOG_KEY`, the PostHog proj
 - Never sent: argument values, tool results, error messages.
 - In oauth-rs mode, the caller's organization id is the `distinct_id` and the `organization` group. It comes from the actor cache that tools fill when Logfire telemetry is on (`HAIL_LOGFIRE_ENABLED=true`), so it adds no API call. Without it (telemetry off, static-key mode, or a caller's first `initialize` and `tools/list` before any tool call), events use the session id. Clients on protocol 2026-07-28 send no session id, so their sessionless events share one session id per process.
 - Tool schemas and results are unchanged. The stdio entry point sends nothing.
-- `MCP_POSTHOG_HOST` sets the ingestion host. The default is `https://eu.i.posthog.com`; use `https://us.i.posthog.com` for a US project.
+- `NEXT_PUBLIC_POSTHOG_HOST` sets the ingestion host for both. Empty means PostHog US Cloud.
 - Check it: call a read-only tool such as `list_number_regions`, then open the project's MCP analytics activity page and filter on `$mcp_server_build`.
 
 ## Database migrations
