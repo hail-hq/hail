@@ -8,11 +8,13 @@ import json
 import logging
 from unittest.mock import AsyncMock
 
+import pytest
 from hailhq.core.models import CarrierVerification
 from hailhq.core.providers.llm.document_reader import (
     read_document as _real_read_document,
 )
 from hailhq.core.providers.verification import document_check
+from hailhq.core.providers.verification.base import DocumentOption
 from sqlalchemy import func, select
 
 from . import test_verifications_api as base
@@ -635,3 +637,214 @@ async def test_a_covering_file_is_sent_once_and_fills_its_slots(
         files={"file.identity": ("p.jpg", b"\xff\xd8jpeg", "image/jpeg")},
     )
     assert bad.status_code == 422
+
+
+# -- POST /verifications/document-cautions -------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _no_cached_forms():
+    from hailhq.api.routes import verifications as routes
+
+    routes._caution_forms.clear()
+    yield
+    routes._caution_forms.clear()
+
+
+def _two_types(carrier) -> None:
+    """The fake carrier's identity slot takes a passport or an ID card."""
+    base = carrier.requirements
+
+    async def requirements(country_code, number_type, subject_type):
+        req = await base(country_code, number_type, subject_type)
+        slot = req.documents[0]
+        options = (*slot.options, DocumentOption(key="id_card", label="ID card"))
+        return req.model_copy(
+            update={"documents": (slot.model_copy(update={"options": options}),)}
+        )
+
+    carrier.requirements = requirements
+
+
+def _cautions_body(**over) -> dict:
+    body = {
+        "quote_id": base._QUOTE_ID,
+        "country_code": "GB",
+        "number_type": "mobile",
+        "subject_type": "person",
+        "fields": {"first_name": "Elena", "last_name": "Tester"},
+        "address": {},
+        "documents": {
+            "proof_of_identity": {
+                "option": "passport",
+                "fields": {},
+                "read": {
+                    "option": "passport",
+                    "printed_name": {
+                        "given_names": "MARIA ELENA",
+                        "surnames": "TESTER",
+                        "latin_given_names": "",
+                        "latin_surnames": "",
+                        "business_name": "",
+                    },
+                },
+            }
+        },
+    }
+    body.update(over)
+    return body
+
+
+async def _cautions(client, key, body):
+    return await client.post(
+        "/verifications/document-cautions", json=body, headers=_auth(key)
+    )
+
+
+async def test_cautions_give_the_name_warning_with_no_read_used(
+    client, org_and_key, carrier, monkeypatch, async_session
+) -> None:
+    from hailhq.core.document_reads import document_reads_today
+
+    async def no_model(**_):
+        raise AssertionError("no model is called")
+
+    monkeypatch.setattr(document_check, "read_document", no_model)
+    org_id, _, key = org_and_key
+    resp = await _cautions(client, key, _cautions_body())
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {
+        "warnings": [
+            {
+                "field": "first_name",
+                "kind": "name",
+                "message": (
+                    "Your Passport shows first name MARIA ELENA and last name "
+                    "TESTER. You typed Elena / Tester. Type them exactly as "
+                    "printed."
+                ),
+            }
+        ]
+    }
+    fixed = _cautions_body(fields={"first_name": "Maria Elena", "last_name": ""})
+    assert (await _cautions(client, key, fixed)).json() == {"warnings": []}
+    assert await document_reads_today(async_session, org_id) == 0
+    assert carrier.drafts == []
+    count = await async_session.scalar(select(func.count(CarrierVerification.id)))
+    assert count == 0
+
+
+async def test_cautions_take_the_document_checks_own_answer(
+    client, org_and_key, carrier, monkeypatch
+) -> None:
+    """The console sends back each slot's `documents.<slot>` as the check
+    returned it; the cautions then match the check's own warnings."""
+    _two_types(carrier)
+    _fake_reader(
+        monkeypatch, {**_ANSWER, "option": "id_card", "expiry_date": "2031-01-01"}
+    )
+    _, _, key = org_and_key
+    checked = (await _post(client, key)).json()
+    assert sorted(w["kind"] for w in checked["warnings"]) == ["document_type", "name"]
+    body = _cautions_body(
+        fields={"first_name": "Elena", "last_name": "Tester"},
+        documents={
+            "proof_of_identity": {
+                "option": "passport",
+                "read": checked["documents"]["proof_of_identity"],
+            }
+        },
+    )
+    resp = await _cautions(client, key, body)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["warnings"] == checked["warnings"]
+    # The type fixed: only the name is left.
+    body["documents"]["proof_of_identity"]["option"] = "id_card"
+    kinds = [w["kind"] for w in (await _cautions(client, key, body)).json()["warnings"]]
+    assert kinds == ["name"]
+
+
+async def test_cautions_skip_a_slot_without_a_read(
+    client, org_and_key, carrier
+) -> None:
+    _, _, key = org_and_key
+    body = _cautions_body(documents={"proof_of_identity": {"option": "passport"}})
+    resp = await _cautions(client, key, body)
+    assert resp.status_code == 200 and resp.json() == {"warnings": []}
+
+
+async def test_cautions_check_the_quote_the_slots_and_auth(
+    client, org_and_key, carrier
+) -> None:
+    _, _, key = org_and_key
+    unknown = await _cautions(client, key, _cautions_body(documents={"nope": {}}))
+    assert unknown.status_code == 422
+    assert unknown.json()["detail"][0]["loc"] == ["body", "documents", "nope"]
+    no_quote = _cautions_body()
+    del no_quote["quote_id"]
+    assert (await _cautions(client, key, no_quote)).status_code == 422
+    wrong = _cautions_body(subject_type="robot")
+    assert (await _cautions(client, key, wrong)).status_code == 422
+    resp = await client.post("/verifications/document-cautions", json={})
+    assert resp.status_code == 401
+
+
+async def test_cautions_ask_the_carrier_for_its_form_once(
+    client, org_and_key, carrier, monkeypatch
+) -> None:
+    from hailhq.api.routes import verifications as routes
+
+    asked: list[tuple] = []
+    base_requirements = carrier.requirements
+
+    async def requirements(*args):
+        asked.append(args)
+        return await base_requirements(*args)
+
+    carrier.requirements = requirements
+    _, _, key = org_and_key
+    for _ in range(3):
+        assert (await _cautions(client, key, _cautions_body())).status_code == 200
+    assert len(asked) == 1
+    # Past the time limit the form is asked again.
+    monkeypatch.setattr(routes, "_CAUTION_FORM_TTL_S", 0)
+    assert (await _cautions(client, key, _cautions_body())).status_code == 200
+    assert len(asked) == 2
+
+
+async def test_fetches_of_several_files_share_one_limit() -> None:
+    """The document check fetches each file with its own call; the shared
+    gate keeps them to MAX_PARALLEL_FETCHES at once in all."""
+    import asyncio
+    import uuid
+    from types import SimpleNamespace
+
+    from hailhq.api.verification_files import (
+        MAX_PARALLEL_FETCHES,
+        CollectedFiles,
+        fetch_files,
+    )
+
+    running = peak = 0
+
+    async def fetch_raw(_key):
+        nonlocal running, peak
+        running += 1
+        peak = max(peak, running)
+        await asyncio.sleep(0.02)
+        running -= 1
+        return b"\xff\xd8jpeg"
+
+    s3 = SimpleNamespace(fetch_raw=fetch_raw)
+    rows = {
+        f"slot{i}": SimpleNamespace(
+            id=uuid.uuid4(), s3_key=f"k{i}", content_type="image/jpeg"
+        )
+        for i in range(MAX_PARALLEL_FETCHES * 2)
+    }
+    collected = CollectedFiles(rows=rows, parts={})
+    gate = asyncio.Semaphore(MAX_PARALLEL_FETCHES)
+    await asyncio.gather(
+        *(fetch_files(collected, [slot], s3, gate=gate) for slot in rows)
+    )
+    assert peak == MAX_PARALLEL_FETCHES

@@ -31,13 +31,20 @@ from hailhq.core.providers.verification.base import (
 )
 from hailhq.core.providers.verification.forms import text_length
 from hailhq.core.schemas import (
+    VerificationDocumentCautionRead,
     VerificationDocumentCheckResponse,
     VerificationDocumentRead,
     VerificationDocumentWarning,
     VerificationPrintedName,
 )
 
-__all__ = ["CHECK_TIMEOUT_S", "NOTE", "check_documents", "name_matches"]
+__all__ = [
+    "CHECK_TIMEOUT_S",
+    "NOTE",
+    "check_documents",
+    "document_cautions",
+    "name_matches",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -429,6 +436,23 @@ class _Read:
                 False,
             )
 
+    @classmethod
+    def echoed(
+        cls,
+        slot: DocumentSlot,
+        echo: VerificationDocumentCautionRead,
+    ) -> _Read:
+        """An earlier read as the console sends it back: its type and printed
+        name only. Named by the printed name: the slots of one file share it,
+        so they get one name check per box, as in ``check_documents``."""
+        printed = echo.printed_name
+        answer = {"option": echo.option, **(printed.model_dump() if printed else {})}
+        key = "|".join(printed.model_dump().values()) if printed else slot.name
+        read = cls(slot, {}, answer, f"printed:{key}")
+        # The echo cannot tell "none of the types" from not read.
+        read.says_none = False
+        return read
+
     def own_fields(self) -> dict[str, str]:
         prefix = f"{self.slot.name}."
         return {
@@ -465,6 +489,34 @@ def _document_warnings(
                 message=f"This document is {how}. Turn it upright and upload it again.",
             )
         )
+    warnings += _type_warnings(read, chosen)
+    # A bill or statement has no expiry: a date it prints is a due date.
+    if (
+        read.expiry is not None
+        and read.expiry < today
+        and not _proves_address(read.slot, read.option or chosen)
+    ):
+        warnings.append(
+            VerificationDocumentWarning(
+                field=slot,
+                kind="expired",
+                message=(
+                    f"This document expired on {read.expiry.day} "
+                    f"{read.expiry:%B %Y}. "
+                    "Upload one that is still valid."
+                ),
+            )
+        )
+    return warnings
+
+
+def _type_warnings(
+    read: _Read, chosen: str | None
+) -> list[VerificationDocumentWarning]:
+    """The file looks like another type than the one chosen, or (a fresh
+    read only) like none of them."""
+    slot = read.slot.name
+    warnings: list[VerificationDocumentWarning] = []
     chosen_label = _option_label(read.slot, chosen)
     if chosen_label and read.option and read.option != chosen:
         found = _option_label(read.slot, read.option)
@@ -488,23 +540,6 @@ def _document_warnings(
                     f"You chose {chosen_label} as the document type, but this "
                     "does not look like one. Upload the right document, or "
                     "change the document type."
-                ),
-            )
-        )
-    # A bill or statement has no expiry: a date it prints is a due date.
-    if (
-        read.expiry is not None
-        and read.expiry < today
-        and not _proves_address(read.slot, read.option or chosen)
-    ):
-        warnings.append(
-            VerificationDocumentWarning(
-                field=slot,
-                kind="expired",
-                message=(
-                    f"This document expired on {read.expiry.day} "
-                    f"{read.expiry:%B %Y}. "
-                    "Upload one that is still valid."
                 ),
             )
         )
@@ -613,6 +648,62 @@ def _name_warnings(
             )
         )
     return warnings
+
+
+def _file_name_warnings(
+    read: _Read,
+    requirements: Requirements,
+    fields: dict[str, str],
+    address: dict[str, str],
+    documents: dict[str, DocumentInput],
+    named: set[tuple[str, str]],
+) -> list[VerificationDocumentWarning]:
+    """``_name_warnings`` once per file and box: the slots of one file differ
+    only in the label. ``named`` holds the (file, box) pairs already warned."""
+    chosen = documents[read.slot.name].option or None
+    out: list[VerificationDocumentWarning] = []
+    for w in _name_warnings(read, requirements, fields, address, documents, chosen):
+        if (read.file_key, w.field) not in named:
+            named.add((read.file_key, w.field))
+            out.append(w)
+    return out
+
+
+def _unique(
+    warnings: list[VerificationDocumentWarning],
+) -> list[VerificationDocumentWarning]:
+    """One warning per (field, message): one file in two slots gives the
+    same warning twice."""
+    unique: dict[tuple[str, str], VerificationDocumentWarning] = {}
+    for w in warnings:
+        unique.setdefault((w.field, w.message), w)
+    return list(unique.values())
+
+
+def document_cautions(
+    requirements: Requirements,
+    fields: dict[str, str],
+    address: dict[str, str],
+    documents: dict[str, DocumentInput],
+    reads: dict[str, VerificationDocumentCautionRead],
+) -> list[VerificationDocumentWarning]:
+    """The name and document type warnings of ``check_documents``, worked
+    out again from earlier reads (``reads``, by slot) and what is typed now,
+    with no file and no model. Only slots with a read and an entry in
+    ``documents`` are checked. The "looks like none of the types" warning
+    needs a fresh read, so it is not given here."""
+    warnings: list[VerificationDocumentWarning] = []
+    named: set[tuple[str, str]] = set()
+    for slot in requirements.documents:
+        echo = reads.get(slot.name)
+        if echo is None or slot.name not in documents:
+            continue
+        read = _Read.echoed(slot, echo)
+        warnings += _type_warnings(read, documents[slot.name].option or None)
+        warnings += _file_name_warnings(
+            read, requirements, fields, address, documents, named
+        )
+    return _unique(warnings)
 
 
 async def check_documents(
@@ -763,11 +854,9 @@ async def check_documents(
             continue
         chosen = documents[slot.name].option or None
         warnings += _document_warnings(read, chosen, today)
-        for w in _name_warnings(read, requirements, fields, address, documents, chosen):
-            # One file in several slots: its slots differ only in the label.
-            if (read.file_key, w.field) not in named:
-                named.add((read.file_key, w.field))
-                warnings.append(w)
+        warnings += _file_name_warnings(
+            read, requirements, fields, address, documents, named
+        )
         out_documents[slot.name] = VerificationDocumentRead(
             # An unreadable file was looked at, but nothing was read from it.
             read=read.readable,
@@ -777,10 +866,7 @@ async def check_documents(
             printed_name=read.printed if read.readable else None,
         )
 
-    # One file in two slots gives the same name warning twice.
-    unique: dict[tuple[str, str], VerificationDocumentWarning] = {}
-    for w in warnings:
-        unique.setdefault((w.field, w.message), w)
+    unique = _unique(warnings)
     logger.info(
         "document check: %d of %d files read, %d warnings",
         len(reads),
@@ -791,6 +877,6 @@ async def check_documents(
         fields=out_fields,
         address=out_address,
         documents=out_documents,
-        warnings=list(unique.values()),
+        warnings=unique,
         note=NOTE,
     )

@@ -2419,6 +2419,74 @@ class VerificationDocumentCheckResponse(BaseModel):
     note: str = Field(description="What the check does not cover.")
 
 
+class VerificationDocumentCautionRead(BaseModel):
+    """A slot's earlier read, as `POST /verifications/document-check`
+    returned it in `documents.<slot>`. Only `option` and `printed_name` are
+    used; the other keys of that object may be sent and are ignored."""
+
+    option: str | None = Field(
+        default=None,
+        description="The document type the file looked like, or null.",
+    )
+    printed_name: VerificationPrintedName | None = Field(
+        default=None,
+        description="The name printed on the file, or null (no name check).",
+    )
+
+
+class VerificationDocumentCautionDocument(BaseModel):
+    """One slot of the form: what is typed now, and its earlier read."""
+
+    option: str = Field(
+        default="",
+        description="The chosen document type key, or empty when not chosen yet.",
+    )
+    fields: dict[str, str] = Field(
+        default_factory=dict,
+        description="The values typed for this slot's fields, by field name.",
+    )
+    read: VerificationDocumentCautionRead | None = Field(
+        default=None,
+        description=(
+            "The slot's `documents.<slot>` from an earlier document check, or "
+            "null when it has no successful read. Only slots with a read are "
+            "checked."
+        ),
+    )
+
+
+class VerificationDocumentCautionsRequest(BaseModel):
+    """Body of ``POST /verifications/document-cautions``."""
+
+    quote_id: UUID = Field(
+        description="The `quote_id` of the number offer being verified."
+    )
+    country_code: str = Field(min_length=2, max_length=2)
+    number_type: str
+    subject_type: Literal["person", "business"]
+    fields: dict[str, str] = Field(
+        default_factory=dict, description="The form's typed fields, by name."
+    )
+    address: dict[str, str] = Field(
+        default_factory=dict,
+        description="The typed address parts (`customer_name` is compared).",
+    )
+    documents: dict[str, VerificationDocumentCautionDocument] = Field(
+        default_factory=dict, description="The form's document slots, by name."
+    )
+
+
+class VerificationDocumentCautionsResponse(BaseModel):
+    """Returned by ``POST /verifications/document-cautions``."""
+
+    warnings: list[VerificationDocumentWarning] = Field(
+        description=(
+            "`name` and `document_type` warnings: the typed form against the "
+            "earlier reads. Empty when nothing differs."
+        )
+    )
+
+
 class EmailResponse(EmailSummary):
     body_text: str | None = Field(description="Plain-text body, if any.")
     body_html: str | None = Field(description="HTML body, if any.")

@@ -5644,6 +5644,77 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
+  /v1/verifications/document-cautions:
+    post:
+      tags:
+        - verifications
+      summary: Check Verification Document Cautions
+      description:
+        "Check the typed names and chosen document types again, against
+        the
+
+        reads an earlier `POST /verifications/document-check` returned (JSON).
+
+
+        Send the form as it is now, with each slot's earlier read in
+
+        `documents.<slot>.read` (the `documents.<slot>` that check returned).
+
+        Only slots with a read are checked. Returns the `name` and
+
+        `document_type` warnings that check would give for this form. No file is
+
+        sent, no AI model runs, no daily read is used, and nothing is saved."
+      operationId: check_verification_document_cautions
+      parameters:
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VerificationDocumentCautionsRequest"
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerificationDocumentCautionsResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
   /v1/verifications/{verification_id}:
     get:
       tags:
@@ -10548,6 +10619,112 @@ components:
       description:
         Returned by ``POST /verifications/check`` when every local check
         passes.
+    VerificationDocumentCautionDocument:
+      properties:
+        option:
+          type: string
+          title: Option
+          description: The chosen document type key, or empty when not chosen yet.
+          default: ""
+        fields:
+          additionalProperties:
+            type: string
+          type: object
+          title: Fields
+          description: The values typed for this slot's fields, by field name.
+        read:
+          anyOf:
+            - $ref: "#/components/schemas/VerificationDocumentCautionRead"
+            - type: "null"
+          description:
+            The slot's `documents.<slot>` from an earlier document check,
+            or null when it has no successful read. Only slots with a read are checked.
+      type: object
+      title: VerificationDocumentCautionDocument
+      description: "One slot of the form: what is typed now, and its earlier read."
+    VerificationDocumentCautionRead:
+      properties:
+        option:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Option
+          description: The document type the file looked like, or null.
+        printed_name:
+          anyOf:
+            - $ref: "#/components/schemas/VerificationPrintedName"
+            - type: "null"
+          description: The name printed on the file, or null (no name check).
+      type: object
+      title: VerificationDocumentCautionRead
+      description:
+        "A slot's earlier read, as `POST /verifications/document-check`
+
+        returned it in `documents.<slot>`. Only `option` and `printed_name` are
+
+        used; the other keys of that object may be sent and are ignored."
+    VerificationDocumentCautionsRequest:
+      properties:
+        quote_id:
+          type: string
+          format: uuid
+          title: Quote Id
+          description: The `quote_id` of the number offer being verified.
+        country_code:
+          type: string
+          maxLength: 2
+          minLength: 2
+          title: Country Code
+        number_type:
+          type: string
+          title: Number Type
+        subject_type:
+          type: string
+          enum:
+            - person
+            - business
+          title: Subject Type
+        fields:
+          additionalProperties:
+            type: string
+          type: object
+          title: Fields
+          description: The form's typed fields, by name.
+        address:
+          additionalProperties:
+            type: string
+          type: object
+          title: Address
+          description: The typed address parts (`customer_name` is compared).
+        documents:
+          additionalProperties:
+            $ref: "#/components/schemas/VerificationDocumentCautionDocument"
+          type: object
+          title: Documents
+          description: The form's document slots, by name.
+      type: object
+      required:
+        - quote_id
+        - country_code
+        - number_type
+        - subject_type
+      title: VerificationDocumentCautionsRequest
+      description: Body of ``POST /verifications/document-cautions``.
+    VerificationDocumentCautionsResponse:
+      properties:
+        warnings:
+          items:
+            $ref: "#/components/schemas/VerificationDocumentWarning"
+          type: array
+          title: Warnings
+          description:
+            "`name` and `document_type` warnings: the typed form against
+            the earlier reads. Empty when nothing differs."
+      type: object
+      required:
+        - warnings
+      title: VerificationDocumentCautionsResponse
+      description: Returned by ``POST /verifications/document-cautions``.
     VerificationDocumentCheckResponse:
       properties:
         fields:

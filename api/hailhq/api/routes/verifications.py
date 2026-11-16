@@ -6,7 +6,8 @@ Number-verification files and details pass through in memory to the carrier.
 ``POST /verifications/document-check`` (below; reading in
 ``core/.../verification/document_check.py``, files loaded by
 ``api/verification_files.py``) also sends the files to an AI model to read
-them before submit.
+them before submit. ``POST /verifications/document-cautions`` checks the
+typed form again against those reads, with no file and no model.
 SMS applications keep submitted text fields and address privately for repair;
 only the organization-scoped application endpoint returns them. Files sent as
 ``file.<slot>`` parts are never stored. A document uploaded with an upload link
@@ -112,7 +113,10 @@ from hailhq.core.providers.verification import (
     get_verification_provider,
     length_problems,
 )
-from hailhq.core.providers.verification.document_check import check_documents
+from hailhq.core.providers.verification.document_check import (
+    check_documents,
+    document_cautions,
+)
 from hailhq.core.providers.verification.forms import validate_input
 from hailhq.core.providers.verification.sms_form import campaign_text
 from hailhq.core.providers.verification.sms_review import same_sender
@@ -122,6 +126,8 @@ from hailhq.core.schemas import (
     SmsApplicationResponse,
     VerificationCheckFile,
     VerificationCheckResponse,
+    VerificationDocumentCautionsRequest,
+    VerificationDocumentCautionsResponse,
     VerificationDocumentCheckResponse,
     VerificationResponse,
 )
@@ -158,6 +164,11 @@ _MAX_CONFIRM_ATTEMPTS = 5
 _SUBMITTING_STUCK_AFTER = timedelta(minutes=5)
 # When this process last asked the carrier about a submitted verification.
 _last_polled: dict[UUID, float] = {}
+# The form of each carrier, country, number type and subject, for
+# POST /verifications/document-cautions only: the console calls it after
+# each edit, and the carrier's form API is not cached. Successes only.
+_CAUTION_FORM_TTL_S = 600
+_caution_forms: dict[tuple[str, str, str, str], tuple[float, Requirements]] = {}
 
 PURPOSES = {"number", "sms"}
 
@@ -2560,13 +2571,9 @@ async def check_verification_documents(
         # slots read false (and its read is given back); the other files are
         # still read. So does a file past the request's total.
         gate = asyncio.Semaphore(MAX_PARALLEL_FETCHES)
-
-        async def fetch_one(lead: str) -> dict[str, UploadedFile]:
-            async with gate:
-                return await fetch_files(collected, [lead], s3)
-
         results = await asyncio.gather(
-            *(fetch_one(g[0]) for g in to_read), return_exceptions=True
+            *(fetch_files(collected, [g[0]], s3, gate=gate) for g in to_read),
+            return_exceptions=True,
         )
         files: dict[str, UploadedFile] = {}
         read_groups: list[list[str]] = []
@@ -2622,6 +2629,92 @@ async def check_verification_documents(
                     len(unsent),
                     type(exc).__name__,
                 )
+
+
+async def _caution_form(
+    provider_name: str,
+    provider: VerificationProvider,
+    country_code: str,
+    number_type: str,
+    subject_type: SubjectType,
+) -> Requirements:
+    """``_requirements``, kept ``_CAUTION_FORM_TTL_S`` in this process."""
+    key = (provider_name, country_code.upper(), number_type, subject_type)
+    now = time.monotonic()
+    hit = _caution_forms.get(key)
+    if hit is not None and now - hit[0] < _CAUTION_FORM_TTL_S:
+        return hit[1]
+    requirements = await _requirements(
+        provider, country_code, number_type, subject_type, where="body"
+    )
+    for old in [
+        k for k, (at, _) in _caution_forms.items() if now - at >= _CAUTION_FORM_TTL_S
+    ]:
+        del _caution_forms[old]
+    _caution_forms[key] = (now, requirements)
+    return requirements
+
+
+@router.post(
+    "/document-cautions",
+    response_model=VerificationDocumentCautionsResponse,
+    operation_id="check_verification_document_cautions",
+)
+async def check_verification_document_cautions(
+    body: VerificationDocumentCautionsRequest,
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+    registry: Annotated[Registry, Depends(get_verification_registry)],
+) -> VerificationDocumentCautionsResponse:
+    """Check the typed names and chosen document types again, against the
+    reads an earlier `POST /verifications/document-check` returned (JSON).
+
+    Send the form as it is now, with each slot's earlier read in
+    `documents.<slot>.read` (the `documents.<slot>` that check returned).
+    Only slots with a read are checked. Returns the `name` and
+    `document_type` warnings that check would give for this form. No file is
+    sent, no AI model runs, no daily read is used, and nothing is saved.
+    """
+    offer = await _quote_offer(
+        db,
+        principal.organization_id,
+        body.quote_id,
+        body.country_code,
+        body.number_type,
+        "body",
+    )
+    provider = _provider_or_404(registry, offer["provider"], "number")
+    # Nothing is written. End the read transaction before any carrier call.
+    await db.rollback()
+    requirements = await _caution_form(
+        offer["provider"],
+        provider,
+        body.country_code,
+        body.number_type,
+        body.subject_type,
+    )
+    slots = {s.name for s in requirements.documents}
+    for slot in body.documents:
+        if slot not in slots:
+            raise unprocessable(
+                "this slot is not in the form", loc=["body", "documents", slot]
+            )
+    return VerificationDocumentCautionsResponse(
+        warnings=document_cautions(
+            requirements,
+            body.fields,
+            body.address,
+            {
+                slot: DocumentInput(option=doc.option, fields=doc.fields)
+                for slot, doc in body.documents.items()
+            },
+            {
+                slot: doc.read
+                for slot, doc in body.documents.items()
+                if doc.read is not None
+            },
+        )
+    )
 
 
 async def _submit_row(
