@@ -634,7 +634,21 @@ def test_disclosure_purpose_coverage_requires_affirmative_fact():
 
 @pytest.mark.parametrize(
     "keyword",
-    ["STOP", "stopall", "UNSUBSCRIBE", "Cancel", "END", "QUIT", "HELP", "INFO"],
+    [
+        "STOP",
+        "stopall",
+        "UNSUBSCRIBE",
+        "Cancel",
+        "END",
+        "QUIT",
+        "REVOKE",
+        "optout",
+        "Opt  out",
+        "OPT-OUT",
+        "Stop.",
+        "HELP",
+        "INFO",
+    ],
 )
 def test_reserved_help_and_opt_out_keywords_cannot_enroll_recipients(keyword):
     data = {

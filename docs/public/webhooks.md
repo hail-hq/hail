@@ -224,8 +224,9 @@ on `GET /v1/events` (events stored before this field existed do not have it).
   the suppression. From anyone else, these words are a normal reply (`null`).
 - `HELP`: `HELP` or `INFO`.
 
-The keyword must be the whole text. Matching ignores case, extra spaces, and
-punctuation or emoji at the ends (`Stop.` counts). When Twilio sends its own opt-out
+The keyword must be the whole text. Matching ignores case and extra spaces. For
+the STOP words, punctuation or emoji at the ends are ignored too (`Stop.`
+counts, `Yes.` and `Help?` do not). When Twilio sends its own opt-out
 type for a text, that type decides too ([`sms_ingest.py`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/sms_ingest.py)).
 The carrier or Hail answers these keywords, depending on your setup, so a bot
 should not answer them too.
