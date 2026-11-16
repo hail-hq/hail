@@ -12,6 +12,8 @@
 # If the new voicebot does not register, it is removed and the old ones keep
 # running, so a bad image never leaves the number without an agent.
 #
+# Keep the drain loop in step with scripts/deploy/retire-vm.sh.
+#
 # Usage: scripts/deploy/roll-voicebot.sh docker compose -f a.yml -f b.yml
 # Prints the new container id on stdout; progress goes to stderr.
 set -euo pipefail

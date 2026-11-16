@@ -84,7 +84,8 @@ Internal runbooks (not published) live in `docs/operations/`:
 [call-leg-costs.md](docs/operations/call-leg-costs.md) (what each carrier charged per call leg, the `call_legs` table),
 [refresh-costs.md](docs/operations/refresh-costs.md) (weekly LLM/STT/TTS price refresh),
 [didww-by-request.md](docs/operations/didww-by-request.md) (ordering a DIDWW number a customer asked support for),
-[voice-llm.md](docs/operations/voice-llm.md) (the house LLM chain, Bedrock access and model ids).
+[voice-llm.md](docs/operations/voice-llm.md) (the house LLM chain, Bedrock access and model ids),
+[disaster-recovery.md](docs/operations/disaster-recovery.md) (replace a lost VM, restore the database).
 
 ## Order of work
 
