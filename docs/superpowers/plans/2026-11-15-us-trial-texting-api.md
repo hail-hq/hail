@@ -65,12 +65,14 @@ Also checked: `contacts` and `agent_handover_contacts` (directory people, no pro
 ### Task 1: Setting, trial number lookup, body wrapper
 
 **Files:**
+
 - Modify: `core/hailhq/core/config.py` (next to `sender_id_sms_carrier`, ~line 119)
 - Modify: `.env.example` (after `SENDER_ID_SMS_CARRIER=twilio`, ~line 169)
 - Create: `core/hailhq/core/sms_trial.py`
 - Test: `core/tests/test_sms_trial.py`
 
 **Interfaces:**
+
 - Produces (in `hailhq.core.sms_trial`):
   - `SMS_TRIAL_LIMIT: int = 25`
   - `SMS_TRIAL_META_KEY: str = "sms_trial"` (value stored: `True`)
@@ -155,11 +157,13 @@ git commit -m "feat(sms): trial texting setting and body wrapper"
 ### Task 2: `sms_trial_phones` table and the `sms` trial index
 
 **Files:**
+
 - Create: `api/migrations/versions/<next>_sms_trial_phones.py`
 - Modify: `core/hailhq/core/models.py` (new class after `SmsSenderIdentity`; index added to `Sms.__table_args__`)
 - Test: `api/tests/test_sms_trial_phones_migration.py` (pattern: `api/tests/test_tollfree_verification_migration.py`, `pytestmark = pytest.mark.recreate_schema`)
 
 **Interfaces:**
+
 - Produces `hailhq.core.models.SmsTrialPhone` (`__tablename__ = "sms_trial_phones"`):
   - `id: UUID` PK, `gen_random_uuid()`
   - `organization_id: UUID` not null, no FK (website-owned table), UNIQUE `sms_trial_phones_org_uq`
@@ -213,10 +217,12 @@ git commit -m "feat(sms): sms_trial_phones table"
 ### Task 3: Phone proof (start and confirm)
 
 **Files:**
+
 - Modify: `core/hailhq/core/sms_trial.py`
 - Test: `core/tests/test_sms_trial.py`
 
 **Interfaces:**
+
 - Consumes: `SmsTrialPhone` (Task 2), `is_us` from `hailhq.core.sms_registration_gate`, `org_lock` from `hailhq.core.db`.
 - Produces:
   - `CODE_TTL = timedelta(minutes=10)`, `MAX_CODE_TRIES = 5`, `MAX_CODE_SENDS_PER_DAY = 5`, `CODE_WINDOW = timedelta(hours=24)`
@@ -284,10 +290,12 @@ git commit -m "feat(sms): trial phone proof with a texted code"
 ### Task 4: Race-safe trial claim
 
 **Files:**
+
 - Modify: `core/hailhq/core/sms_trial.py`
 - Test: `core/tests/test_sms_trial.py`
 
 **Interfaces:**
+
 - Consumes: Task 1 (`trial_sender`, `trial_body`, constants), Task 3 (`is_verified_trial_phone`), `is_us`, `org_lock`.
 - Produces:
   - `async def trial_texts_used(db, organization_id: UUID) -> int`: count of `Sms` rows with `organization_id`, `direction='outbound'`, `Sms.metadata_.has_key(SMS_TRIAL_META_KEY)` (matches `sms_trial_org_idx`), and `status != 'failed'`. A failed row never reached the phone and is not billed, so it does not use the cap.
@@ -296,6 +304,7 @@ git commit -m "feat(sms): trial phone proof with a texted code"
   - `async def claim_trial_send(db, organization_id: UUID, *, to: str, body: str, limit: int, explicit_from: str | None = None, truncate: bool = False) -> TrialSend | None`
 
 `claim_trial_send` returns `None` (call site keeps today's answer) unless all hold, checked in this order:
+
 1. `number = await trial_sender(db)` is not `None` (configured and approved).
 2. `organization_id != number.organization_id` (Hail's own workspace sends normally).
 3. `explicit_from is None or explicit_from == number.e164`.
@@ -353,6 +362,7 @@ git commit -m "feat(sms): race-safe trial text claim"
 ### Task 5: Trial phone routes
 
 **Files:**
+
 - Create: `api/hailhq/api/routes/sms_trial.py` (`APIRouter(prefix="/sms/trial", tags=["sms"], responses=GENERAL_RATE_LIMITED_RESPONSES)`)
 - Modify: `api/hailhq/api/main.py` (`_CUSTOMER_ROUTERS`: put `sms_trial_routes.router` **before** `sms_routes.router`, or `GET /sms/{sms_id}` captures `trial` and returns 422)
 - Modify: `core/hailhq/core/schemas.py`
@@ -361,6 +371,7 @@ git commit -m "feat(sms): race-safe trial text claim"
 - Test: `api/tests/test_sms_trial_api.py`, `api/tests/test_auth_jwt.py`
 
 **Interfaces:**
+
 - Consumes: Tasks 1, 3, 4. `sms_route` from `hailhq.core.carrier_routing`. `write_audit_log`, `actor_of`.
 - Produces (`hailhq.api.deps.Principal`): `console_session: bool = False`, set `True` on the JWT path only when `"azp" not in claims` (the same test the superadmin flag uses: MCP OAuth tokens are JWTs too and always carry `azp`). Test in `test_auth_jwt.py`: a token with `azp` gives `console_session False`; one without gives `True`.
 - Produces (schemas):
@@ -422,15 +433,18 @@ git commit -m "feat(sms): trial phone routes"
 ### Task 6: Trial path in `POST /v1/sms`
 
 **Files:**
+
 - Modify: `api/hailhq/api/routes/sms.py:300-365` (`create_sms`)
 - Modify: `core/hailhq/core/schemas.py` (`SmsCreate.metadata` reserved key, `SmsCreate.from_` description)
 - Test: `api/tests/test_sms_trial_send.py`
 
 **Interfaces:**
+
 - Consumes: `claim_trial_send`, `TrialSend`, `TrialBodyTooLong`, `TRIAL_HINT`, `trial_enabled`, `SMS_TRIAL_META_KEY` (Tasks 1, 4); helpers from Task 5.
-- Produces: `SmsCreate` rejects `metadata` containing `"sms_trial"` (422 "metadata keys are reserved: sms_trial"), mirroring the `CallCreate` reserved-key validator in `core/hailhq/core/schemas.py`. `from_` description adds one sentence: "A US workspace without an approved registration can omit from to send up to 25 trial texts to its verified trial phone."
+- Produces: `SmsCreate` rejects `metadata` containing `"sms_trial"` (422 "metadata keys are reserved: sms*trial"), mirroring the `CallCreate` reserved-key validator in `core/hailhq/core/schemas.py`. `from*` description adds one sentence: "A US workspace without an approved registration can omit from to send up to 25 trial texts to its verified trial phone."
 
 Flow in `create_sms`, after `require_agent_send_allowed` and before the dedicated-number lookup:
+
 - When `body.from_ is None or body.from_ == settings.hail_sms_trial_number`, and no registered number applies (`body.from_ is not None` or `not is_us(body.to)` or `registered_sms_number(...) is None`): call `claim_trial_send(db, org, to=body.to, body=body.body, limit=1600, explicit_from=body.from_)`. `TrialBodyTooLong` → 422 (`loc=["body","body"]`). A `TrialSend` sets `from_number`, `from_e164`, the wrapped body, and `metadata_ = {**body.metadata, **trial.metadata}`.
 - `None` falls through to today's code. When `trial_enabled()` and `is_us(body.to)`, the two US 422s (no dedicated number; `us_registration_block`) end with `" " + TRIAL_HINT`.
 - The `Sms` insert and `commit` stay right after the claim (Task 4 contract).
@@ -483,6 +497,7 @@ git commit -m "feat(sms): trial texts from POST /v1/sms"
 ### Task 7: Trial path at the agent call sites
 
 **Files:**
+
 - Modify: `api/hailhq/api/routes/internal/agent.py`:
   - `_send_sms_to` (~324-441). Covers in-call sends on phone calls (`agent_send_sms` returns into it at ~636) and email-run member sends (`agent_email_run_send_sms`, ~1363).
   - `agent_send_sms` browser branch (~651-672, `transport == "browser"` only).
@@ -490,10 +505,12 @@ git commit -m "feat(sms): trial texts from POST /v1/sms"
 - Test: `api/tests/test_internal_agent_trial.py` (reuse `_signed`, `_internal_secret`, `_insert_live_call` patterns from `api/tests/test_internal_agent_send.py`; `_seed`/`_post` from `api/tests/test_internal_agent_handover.py`)
 
 **Interfaces:**
+
 - Consumes: `claim_trial_send`, `TrialBodyTooLong` (Task 4); `SMS_MAX_BODY_CHARS` (480, already imported in `agent.py`); Task 5 helpers.
 - Produces: `_SPOKEN_TRIAL_TOO_LONG_FMT = "Keep trial texts to {n} characters. Nothing was sent."` in `agent.py`.
 
 At each site, when the normal sender is `None` (or cannot text) **or** `us_registration_block(...)` is not `None`, call `claim_trial_send(db, org, to=<recipient>, body=<words>, limit=SMS_MAX_BODY_CHARS, truncate=<see below>)`. A `TrialSend` replaces `from_number` and the body, merges `trial.metadata` last into `metadata_`, then the existing insert, commit, audit and `deliver_sms` run. `None` keeps today's answer (`_SPOKEN_SMS_UNCONFIGURED`, `_deny(... reason=block)`, `skipped:number_cannot_text`, `blocked:us_registration`).
+
 - `_send_sms_to`: `truncate=False`; `TrialBodyTooLong` → `AgentSendResponse(ok=False, spoken=_SPOKEN_TRIAL_TOO_LONG_FMT.format(n=exc.max_chars))`. Pop `db.info["auto_bound_sms_number_id"]` before swapping the number, as today.
 - Browser branch: skip the trial when `call.metadata_.get("browser_trial")` (the hail.so demo is out of scope). `truncate=False`, `limit=SMS_MAX_BODY_CHARS`. The 70-character check stays on the caller's own words, before the wrap. Claim after `reserve_browser_preview` and before the `Sms` insert: `reserve_browser_preview` takes the same `org_lock` (advisory locks re-enter in one transaction) and only flushes, so the lock holds until the insert commits. Heads-up: `browser_messaging.capabilities` decides whether a browser conversation offers texts at all, and this plan does not change it, so this branch is reached only when a number exists but is blocked.
 - `agent_handover_sms`: keep the early `skipped:number_cannot_text` return unless `await is_verified_trial_phone(db, org, to)`. Only then fall through to the gates and the claim, so today's answers and `check_agent_send_allowed` logging stay the same for every other contact. `truncate=True` (the notice is cut today with `words[:SMS_MAX_BODY_CHARS]`; the footer must survive).
@@ -554,11 +571,13 @@ git commit -m "feat(agents): trial texts from agent sends and handover notices"
 Twilio toll-free numbers always handle STOP, START and UNSTOP; later texts fail with 21610 "asynchronously" (Twilio Advanced Opt-Out docs, read 2026-11-16). Today a create-time 21xxx is stored on the row (`TwilioSmsProvider.send_sms` returns it, `deliver_sms` saves `error_code`), but `receive_sms_status` ignores `ErrorCode`. A STOP to the trial number writes its suppression in Hail's own workspace, so the customer's own `check_sms_allowed` does not catch it: the carrier refusal is the only record.
 
 **Files:**
+
 - Modify: `api/hailhq/api/routes/sms.py` (`apply_sms_status`, ~429)
 - Modify: `api/hailhq/api/routes/sms_webhooks/twilio.py` (`receive_sms_status`)
 - Test: `api/tests/test_sms_api.py`, `api/tests/test_sms_trial_send.py`
 
 **Interfaces:**
+
 - Produces: `async def apply_sms_status(db, sms: Sms, new_status: str, *, error_code: str | None = None) -> None`. A non-`None` `error_code` is saved on `sms.error_code` (when it is empty), added to the `SmsEvent` payload, and to the terminal fan-out `data`. The Telnyx caller is unchanged.
 - `receive_sms_status` passes `params.get("ErrorCode") or None` for `failed`/`undelivered`.
 
@@ -598,6 +617,7 @@ git commit -m "fix(sms): keep the carrier error code from status callbacks"
 ### Task 9: Contracts, docs, and production handover
 
 **Files:**
+
 - Modify: `openapi/openapi.yaml` (regenerated, never hand-edited)
 - Modify: `cli/internal/client/client.gen.go` (regenerated), `cli/internal/cmd/sms.go` (`Long` help, ~35-45)
 - Modify: `mcp/hailhq/mcp/tools.py` (`send_sms_tool` docstring, ~2482-2493)
@@ -606,15 +626,17 @@ git commit -m "fix(sms): keep the carrier error code from status callbacks"
 - Modify (main checkout, not committed): `.env`
 
 **Interfaces:**
+
 - Consumes: everything above. No new names.
 
 Exact copy:
+
 - MCP `send_sms` docstring, replace the line "US long-code texting to US recipients requires ready A2P 10DLC registration and an attached number." with two lines:
   `US long-code texting to US recipients requires ready A2P 10DLC registration and an attached number.`
   `Without from_, a workspace without it can send up to 25 trial texts to its own verified phone, set up in the console. Each starts with "[Hail trial]".`
 - CLI `hail sms` `Long`, add one paragraph: `A US workspace without an approved registration can omit --from to send up to 25 trial texts to its verified trial phone (console: Numbers > Trial texting).`
-- `docs/public/self-host/twilio.md`, new section `**Trial texting (United States).**`: one paragraph: set `HAIL_SMS_TRIAL_NUMBER` to a toll-free number in the operator's own organization with approved toll-free verification; empty turns it off; set `HAIL_SMS_TRIAL_SENDING=true` once that verification covers trial texts; each organization verifies one phone and sends up to 25 texts; link `core/hailhq/core/sms_trial.py`.
-- CHANGELOG: `- US trial texting: a workspace can send up to 25 texts to its own verified phone before its US registration is approved. Set it up in the console under Numbers.`
+- `docs/public/self-host/twilio.md`, new section `**Trial texting (United States).**`: one paragraph: set `HAIL_SMS_TRIAL_NUMBER` to a toll-free number in the operator's own organization with approved toll-free verification; empty turns it off; set `HAIL_SMS_TRIAL_SENDING=true` once that verification covers trial texts; each organization verifies one phone and sends up to 25 texts, ever; verifying the phone needs the console, so self-hosts without it leave the number empty; link `core/hailhq/core/sms_trial.py`.
+- CHANGELOG: `- US trial texting: a workspace can send up to 25 texts, ever, to its own verified phone. Set it up in the console under Numbers.`
 
 - [ ] **Step 1: Regenerate the spec (API running on :8080 against a migrated local DB)**
 
@@ -683,6 +705,7 @@ git commit -m "docs(sms): trial texting contracts and docs"
 PR body: what merge does (GHA deploy on push to `main`, Alembic migration on deploy), what it does not do (the VM `.env` key, the toll-free verification). Generic steps only; the exact number and VM steps go in the chat reply.
 
 **After merge (owner, from the chat reply):**
+
 1. Copy the main checkout `.env` to the VM as is; restart the `api` service.
 2. No code or trial text goes out until the trial number's toll-free verification is approved (`trial_sender`). Before that, the console card shows the form with sending turned off, so the owner can screenshot the opt-in step for the filing. File the combined use case (account notices and trial texts) from that screenshot (spec, "Toll-free verification").
 3. Merge the hail-website console PR only after this deploy finishes.
