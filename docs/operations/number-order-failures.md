@@ -45,6 +45,8 @@ emits an INFO log for these handled responses:
   It does not prove Hail permanently lacks that country or number type.
 - `number_search_outcome: no_inventory`: code `10031` with its explicit
   no-numbers message. The requested filters found no stock.
+- `number_search_outcome: mixed`: both codes in one response. Do not read it as
+  a coverage gap. Check the `carrier_error_codes` field.
 
 The log includes country, number type, requested capabilities and fixed error
 codes. It excludes phone numbers, place filters and raw carrier responses.

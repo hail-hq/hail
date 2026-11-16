@@ -152,9 +152,10 @@ class TelnyxNumberDiscovery:
                 logger.info(
                     "Number search returned an expected empty result",
                     extra={
-                        "number_search_outcome": (
-                            "no_coverage" if "10015" in codes else "no_inventory"
-                        ),
+                        "number_search_outcome": {
+                            ("10015",): "no_coverage",
+                            ("10031",): "no_inventory",
+                        }.get(tuple(codes), "mixed"),
                         "number_search_country": country_code,
                         "number_search_type": number_type,
                         "number_search_capabilities": sorted(requested),

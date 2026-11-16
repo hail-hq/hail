@@ -393,3 +393,33 @@ async def test_normal_empty_inventory_does_not_add_a_search_log(caplog):
             == []
         )
     assert not any(hasattr(r, "number_search_outcome") for r in caplog.records)
+
+
+async def test_mixed_empty_inventory_codes_are_not_called_no_coverage(caplog):
+    import logging
+
+    caplog.set_level(logging.INFO, logger="hailhq.core.providers.voice.telnyx")
+    errors = [
+        {
+            "code": "10015",
+            "detail": "No coverage found in the specified country based on the provided search parameters.",
+        },
+        {
+            "code": "10031",
+            "detail": "No numbers found for the given filters. Please try again with best_effort=true.",
+        },
+    ]
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(400, json={"errors": errors})
+        )
+    ) as client:
+        assert (
+            await TelnyxNumberDiscovery("key", client).search(
+                "US", "toll_free", ["voice"]
+            )
+            == []
+        )
+    record = next(r for r in caplog.records if hasattr(r, "number_search_outcome"))
+    assert record.number_search_outcome == "mixed"
+    assert record.carrier_error_codes == ["10015", "10031"]
