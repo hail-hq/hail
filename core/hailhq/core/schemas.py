@@ -2354,9 +2354,10 @@ class VerificationDocumentRead(BaseModel):
 
     read: bool = Field(
         description=(
-            "False when the file was not read (the reader is off, the file "
-            "type is not supported, or the read failed or took too long). "
-            "The other values are then empty."
+            "False when nothing was read from the file: the reader is off, "
+            "the file type is not supported, the read failed or took too "
+            "long (no warning), or the file is unreadable (an 'unreadable' "
+            "warning). The other values are then empty."
         )
     )
     option: str | None = Field(

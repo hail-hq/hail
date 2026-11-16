@@ -99,7 +99,9 @@ async def check_verification_documents(
     differs from the printed one. Show each warning with its fix. You can
     still submit.
 
-    A file that could not be read has `read` false and gives no warning.
+    A file nothing was read from has `read` false: with an `unreadable`
+    warning when the file is not clear, else with no warning (the read
+    failed or took too long).
     Nothing is filed, saved, held or charged, and uploads are not used up.
     The files are read by an AI model (Anthropic) for this check only.
     """
@@ -172,7 +174,12 @@ async def check_verification_documents(
             detail="file uploads are not configured on this server",
         )
     # Nothing is written. End the read transaction before the slow calls
-    # (the carrier's form, the bucket, the model).
+    # (the carrier's form, the bucket, the model). The upload rows are
+    # detached first: a rollback expires loaded rows, and reading an expired
+    # row would need the database again.
+    for row in rows.values():
+        if row in db:
+            db.expunge(row)
     await db.rollback()
 
     requirements = await _requirements(

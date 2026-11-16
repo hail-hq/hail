@@ -3524,7 +3524,8 @@ def register_tools(
         refuse: an unreadable, upside-down or expired document, a file of another
         type than the chosen one, or a typed name that differs from the printed one.
         Each message names the fix. A submission with warnings is still accepted.
-        A file that could not be read has ``read`` false and no warning.
+        A file nothing was read from has ``read`` false; an unclear file also has an
+        ``unreadable`` warning.
         Nothing is filed, saved, held or charged, and uploads stay usable."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:

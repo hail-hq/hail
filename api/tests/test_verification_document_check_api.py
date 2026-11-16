@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import logging
+from unittest.mock import AsyncMock
 
 from hailhq.core.models import CarrierVerification
 from hailhq.core.providers.verification import document_check
@@ -137,3 +138,32 @@ async def test_quote_and_slots_are_checked(client, org_and_key, carrier) -> None
 async def test_requires_auth(client) -> None:
     resp = await client.post("/verifications/document-check", data={})
     assert resp.status_code == 401
+
+
+async def test_an_upload_id_is_read_after_the_transaction_ends(
+    client, org_and_key, carrier, monkeypatch, async_session
+) -> None:
+    from hailhq.api.deps import get_s3_mail_optional
+    from hailhq.api.main import app
+
+    from .test_verifications_uploads import _JPEG, _upload
+
+    calls = _fake_reader(monkeypatch)
+    store = AsyncMock()
+    store.fetch_raw.return_value = _JPEG
+    app.dependency_overrides[get_s3_mail_optional] = lambda: store
+    try:
+        org_id, _, key = org_and_key
+        row = await _upload(async_session, org_id)
+        resp = await client.post(
+            "/verifications/document-check",
+            data=_form(**{"upload.proof_of_identity": str(row.id)}),
+            files={"x": (None, "")},
+            headers=_auth(key),
+        )
+    finally:
+        app.dependency_overrides.pop(get_s3_mail_optional, None)
+    assert resp.status_code == 200, resp.text
+    assert calls[0]["data"] == _JPEG
+    # The upload is not used up.
+    assert store.fetch_raw.await_count == 1

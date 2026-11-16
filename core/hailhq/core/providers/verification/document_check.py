@@ -103,8 +103,13 @@ def name_matches(printed: VerificationPrintedName, first: str, last: str) -> boo
 
 
 def _full_name_matches(printed: VerificationPrintedName, full: str) -> bool:
-    printed_words = set(_tokens(printed.given_names)) | set(_tokens(printed.surnames))
-    return not printed_words or set(_tokens(full)) == printed_words
+    """The typed full name against the printed parts. When the document
+    prints only one part, the typed name must hold its words."""
+    given, family = set(_tokens(printed.given_names)), set(_tokens(printed.surnames))
+    typed = set(_tokens(full))
+    if given and family:
+        return typed == given | family
+    return (given | family) <= typed
 
 
 def _company_matches(printed: str, typed: str) -> bool:
@@ -134,6 +139,13 @@ def _slot_fields(slot: DocumentSlot) -> list[FieldSpec]:
         for spec in option.fields:
             seen.setdefault(spec.name, spec)
     return list(seen.values())
+
+
+def _typed(first: str, last: str) -> str:
+    """What the customer typed, for a message: "Ada / Lovelace", or one part."""
+    if first and last:
+        return f"{first} / {last}"
+    return f"first name {first}" if first else f"last name {last}"
 
 
 def _proves_address(slot: DocumentSlot) -> bool:
@@ -353,7 +365,12 @@ def _document_warnings(
                 ),
             )
         )
-    if read.expiry is not None and read.expiry < today:
+    # A bill or statement has no expiry: a date it prints is a due date.
+    if (
+        read.expiry is not None
+        and read.expiry < today
+        and not _proves_address(read.slot)
+    ):
         warnings.append(
             VerificationDocumentWarning(
                 field=slot,
@@ -435,8 +452,8 @@ def _name_warnings(
                     kind="name",
                     message=(
                         f"Your {what} shows first name {printed.given_names} and "
-                        f"last name {printed.surnames}. You typed {first} / {last}. "
-                        "Type them exactly as printed."
+                        f"last name {printed.surnames}. You typed "
+                        f"{_typed(first, last)}. Type them exactly as printed."
                     ),
                 )
             )
@@ -495,6 +512,8 @@ async def check_documents(
         done, pending = await asyncio.wait(tasks.values(), timeout=CHECK_TIMEOUT_S)
         for task in pending:
             task.cancel()
+            # Nothing waits for it: take its outcome so it is not reported.
+            task.add_done_callback(lambda t: t.cancelled() or t.exception())
         for name, task in tasks.items():
             if task in done and task.exception() is None and task.result():
                 reads[name] = task.result()
@@ -509,7 +528,7 @@ async def check_documents(
     # A proof of address fills the address first.
     for read in sorted(
         reads.values(),
-        key=lambda r: not any(o.needs_address for o in r.slot.options),
+        key=lambda r: not _proves_address(r.slot),
     ):
         for key, value in read.values.items():
             if key.startswith("address."):
@@ -537,7 +556,8 @@ async def check_documents(
             read, requirements, fields, address, documents, chosen
         )
         out_documents[slot.name] = VerificationDocumentRead(
-            read=True,
+            # An unreadable file was looked at, but nothing was read from it.
+            read=read.readable,
             option=read.option,
             fields=read.own_fields(),
             expiry_date=read.expiry.isoformat() if read.expiry else None,

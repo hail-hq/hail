@@ -17,6 +17,7 @@ import base64
 import io
 import json
 import logging
+import threading
 from typing import Any
 
 import anthropic
@@ -44,7 +45,10 @@ _MAX_PIXELS = 25_000_000
 # format it happens to know.
 _IMAGE_FORMATS = {"image/jpeg": ("JPEG",), "image/png": ("PNG",)}
 # Images decoded at once, so a burst of uploads cannot take every thread.
-_decodes = asyncio.Semaphore(2)
+# Held by the decoding thread itself: a read cancelled at the time limit
+# leaves its thread running, and the slot stays taken until it ends.
+_decodes = threading.BoundedSemaphore(2)
+_DECODE_WAIT_S = 10.0
 
 _client: anthropic.AsyncAnthropic | anthropic.AsyncAnthropicBedrock | None = None
 
@@ -74,6 +78,15 @@ def _image_for_model(content_type: str, data: bytes) -> bytes:
     """The image as a JPEG at most ``_IMAGE_LONG_SIDE`` on its long side,
     turned as its EXIF tag says, so the model sees what a person sees.
     Raises for a file that is not its declared format, or too large."""
+    if not _decodes.acquire(timeout=_DECODE_WAIT_S):
+        raise TimeoutError("too many images decoding")
+    try:
+        return _decode(content_type, data)
+    finally:
+        _decodes.release()
+
+
+def _decode(content_type: str, data: bytes) -> bytes:
     formats = _IMAGE_FORMATS[content_type]
     with Image.open(io.BytesIO(data), formats=formats) as image:
         if image.width * image.height > _MAX_PIXELS:
@@ -81,7 +94,14 @@ def _image_for_model(content_type: str, data: bytes) -> bytes:
         if image.format == "JPEG":
             # Decode a large JPEG at a reduced scale from the start.
             image.draft("RGB", (_IMAGE_LONG_SIDE, _IMAGE_LONG_SIDE))
-        image = ImageOps.exif_transpose(image).convert("RGB")
+        image = ImageOps.exif_transpose(image)
+        if image.mode in ("RGBA", "LA", "P", "PA"):
+            # Transparent pixels on white, as a viewer shows them, not black.
+            rgba = image.convert("RGBA")
+            image = Image.new("RGB", rgba.size, "white")
+            image.paste(rgba, mask=rgba.getchannel("A"))
+        else:
+            image = image.convert("RGB")
         image.thumbnail((_IMAGE_LONG_SIDE, _IMAGE_LONG_SIDE), reducing_gap=3.0)
         out = io.BytesIO()
         image.save(out, "JPEG", quality=85)
@@ -115,8 +135,7 @@ async def read_document(
         return None
     try:
         if content_type != "application/pdf":
-            async with _decodes:
-                data = await asyncio.to_thread(_image_for_model, content_type, data)
+            data = await asyncio.to_thread(_image_for_model, content_type, data)
             content_type = "image/jpeg"
         response = await _get_client().messages.create(
             model=settings.anthropic_backup_model,

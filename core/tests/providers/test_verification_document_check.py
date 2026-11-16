@@ -538,3 +538,46 @@ async def test_reader_drops_a_refusal_or_bad_json(reader_settings, monkeypatch) 
     client, _ = _fake_client(_response("not json"))
     monkeypatch.setattr(document_reader, "_client", client)
     assert await _read() is None
+
+
+async def test_an_unreadable_file_is_not_read() -> None:
+    out = await _check(reader=_reader(_answer(readable=False)))
+    assert out.documents["proof_of_identity"].read is False
+
+
+async def test_a_proof_of_address_has_no_expiry_warning() -> None:
+    docs = {"proof_of_address": DocumentInput(option="utility_bill", file=_PNG)}
+    bill = _answer(option="utility_bill", expiry_date="2024-01-15")
+    out = await _check(docs=docs, reader=_reader(bill))
+    assert "expired" not in _kinds(out)
+
+
+async def test_one_typed_part_is_named_alone_in_the_message() -> None:
+    out = await _check(fields={"first_name": "Elena", "last_name": ""})
+    assert "You typed first name Elena." in out.warnings[0].message
+
+
+async def test_a_full_name_holds_a_part_printed_alone() -> None:
+    req = _req(fields=(FieldSpec(name="x1", label="Email"),), address_required=True)
+    answer = _answer(given_names="")
+    ok = await _check(
+        req=req,
+        address={"customer_name": "Maria Tester Sample"},
+        reader=_reader(answer),
+    )
+    assert ok.warnings == []
+
+
+async def test_reader_puts_a_transparent_image_on_white(
+    reader_settings, monkeypatch
+) -> None:
+    client, calls = _fake_client(_response("{}"))
+    monkeypatch.setattr(document_reader, "_client", client)
+    out = io.BytesIO()
+    Image.new("RGBA", (40, 30), (0, 0, 0, 0)).save(out, "PNG")
+    await _read(data=out.getvalue())
+    block = calls[0]["messages"][0]["content"][0]
+    sent = Image.open(
+        io.BytesIO(__import__("base64").b64decode(block["source"]["data"]))
+    )
+    assert sent.convert("RGB").getpixel((5, 5))[0] > 240
