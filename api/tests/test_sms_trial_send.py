@@ -614,6 +614,43 @@ async def test_refused_trial_claim_keeps_agent_caps(
     assert not await _holds_advisory_lock(async_session)
 
 
+async def test_refused_owner_claim_keeps_agent_caps(
+    client, async_session, org_and_key, sms_mock, monkeypatch
+) -> None:
+    """The trial number's owner sends from it to its own verified phone: the
+    claim is refused and rolled back, then the send goes out as a normal
+    text and must still count toward the agent caps."""
+    org_id, _, plaintext = org_and_key
+    async_session.add(Organization(id=org_id, origin="agent"))
+    await async_session.commit()
+    monkeypatch.setattr(settings, "agent_sms_per_hour", 2)
+    await seed_sms_trial(async_session, monkeypatch)
+    await _own_trial_number(async_session, org_id)
+    await verify_trial_phone(async_session, org_id)
+
+    codes = []
+    with _rolled_back_statements(async_session) as rolled_back:
+        for _ in range(4):
+            resp = await client.post(
+                "/sms",
+                json=_payload(**{"from": TRIAL_E164}),
+                headers=_auth(plaintext),
+            )
+            codes.append(resp.status_code)
+
+    assert codes == [201, 201, 429, 429]
+    assert await _agent_send_logs(async_session, org_id) == 2
+    bodies = [c.kwargs["body"] for c in sms_mock.send_sms.call_args_list]
+    assert bodies == ["hi", "hi"]
+    # Each refused claim read the trial phone and rolled back reads only.
+    claim_txns = [
+        txn for txn in rolled_back if any("sms_trial_phones" in s for s in txn)
+    ]
+    assert len(claim_txns) == 4
+    for txn in claim_txns:
+        assert all(s.lstrip().split(None, 1)[0].upper() == "SELECT" for s in txn)
+
+
 async def test_refused_trial_claim_rolls_back_only_reads(
     client, async_session, org_and_key, sms_mock, monkeypatch
 ) -> None:
