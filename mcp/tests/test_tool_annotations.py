@@ -72,9 +72,11 @@ _OPEN_WORLD_WRITES = {
     "amend_sms_application",
     "cancel_verification",
     "confirm_verification",
+    # Uses the workspace's daily document reads, which cost money.
+    "check_verification_documents",
 }
 
-_EXPECTED_COUNT = 44
+_EXPECTED_COUNT = 45
 
 
 async def test_tool_count(tools_by_name) -> None:

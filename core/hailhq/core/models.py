@@ -2213,7 +2213,12 @@ class Organization(Base):
 class AgentSendLog(Base):
     """One row per allowed agent-origin send attempt — the counter behind
     the velocity caps in agent_caps.py. Written by the gate itself at
-    check time (counts attempts, uniform across channels)."""
+    check time (counts attempts, uniform across channels).
+
+    ``channel = 'document_read'`` rows count AI reads of verification
+    documents instead (document_reads.py, the daily cap), with the slot
+    name as ``recipient``. Every query here filters by channel, so those
+    rows never count as agent sends; a new query must do the same."""
 
     __tablename__ = "agent_send_log"
 
@@ -2225,7 +2230,7 @@ class AgentSendLog(Base):
     )
     channel: Mapped[str] = mapped_column(
         Text, nullable=False
-    )  # 'email' | 'sms' | 'voice'
+    )  # 'email' | 'sms' | 'voice' | 'document_read'
     recipient: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         TS, nullable=False, server_default=text("now()")

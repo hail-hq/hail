@@ -52,6 +52,8 @@ tool.
 forced tool (Haiku 5.5 does, Sonnet 5.5 does not, see Forced tools). With
 Sonnet 5.5 there and no other classifier, every check fails with HTTP 400.
 
+`ANTHROPIC_BACKUP_MODEL` also reads verification documents before submit, unless `DOCUMENT_READER_MODEL` names another model (see [carrier-verification.md](carrier-verification.md#document-check-ai-read)). On an API error the reader tries the next model of the same request: `DOCUMENT_READER_MODEL` (or `ANTHROPIC_BACKUP_MODEL`), then `ANTHROPIC_BACKUP_MODEL`, then `ANTHROPIC_MODEL`, each id once. Every model must read images and PDFs with structured output (effort `low`). The first two get thinking `disabled`; `ANTHROPIC_MODEL` gets thinking `between_tools`, because Sonnet 5.5 refuses `disabled` with HTTP 400. Probed on 2026-11-16, Bedrock eu-central-1: `eu.anthropic.claude-haiku-5-5` read a PNG and a PDF with `disabled`; `eu.anthropic.claude-sonnet-5-5` read both with `between_tools`. A model that refuses the request costs nothing: that try fails and the read fails open.
+
 Each classifier gets one try of at most 3 s
 (`CLASSIFIER_ATTEMPT_TIMEOUT_SECONDS` in `amd.py`), then the next one runs.
 
