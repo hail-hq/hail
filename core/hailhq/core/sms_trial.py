@@ -12,9 +12,9 @@ from uuid import UUID
 
 from hailhq.core.config import settings
 from hailhq.core.db import key_lock, org_lock
-from hailhq.core.models import PhoneNumber, SmsTrialPhone
+from hailhq.core.models import PhoneNumber, Sms, SmsTrialPhone
 from hailhq.core.sms_registration_gate import is_us, on_approved_registration
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -74,6 +74,22 @@ class WrongCode(Exception):
         else:
             super().__init__("The code is not correct. Send a new code.")
         self.tries_left = tries_left
+
+
+class TrialBodyTooLong(Exception):
+    def __init__(self, limit: int) -> None:
+        self.max_chars = limit - len(TRIAL_PREFIX) - len(TRIAL_FOOTER)
+        super().__init__(
+            f"Trial texts can have up to {self.max_chars} characters. "
+            "Nothing was sent."
+        )
+
+
+@dataclass(frozen=True)
+class TrialSend:
+    number: PhoneNumber
+    body: str
+    metadata: dict
 
 
 @dataclass(frozen=True)
@@ -282,3 +298,63 @@ async def confirm_phone(
     except IntegrityError as exc:
         raise PhoneTaken() from exc
     return row
+
+
+async def trial_texts_used(db: AsyncSession, organization_id: UUID) -> int:
+    """Trial texts this workspace sent. A failed text never reached the
+    phone and is not billed, so it does not count."""
+    return (
+        await db.execute(
+            select(func.count())
+            .select_from(Sms)
+            .where(
+                Sms.organization_id == organization_id,
+                Sms.direction == "outbound",
+                Sms.metadata_.has_key(SMS_TRIAL_META_KEY),
+                Sms.status != "failed",
+            )
+        )
+    ).scalar_one()
+
+
+async def claim_trial_send(
+    db: AsyncSession,
+    organization_id: UUID,
+    *,
+    to: str,
+    body: str,
+    limit: int,
+    explicit_from: str | None = None,
+    truncate: bool = False,
+) -> TrialSend | None:
+    """The trial send for this text, or None when the trial does not apply
+    (the caller then answers as it does without the trial).
+
+    Raises ``TrialBodyTooLong`` when the wrapped body exceeds ``limit`` and
+    ``truncate`` is off.
+
+    Caller contract: on a ``TrialSend``, this transaction holds the
+    workspace's ``org_lock``. Insert the ``Sms`` row with
+    ``TrialSend.metadata`` merged last (so no caller metadata can drop the
+    trial key) and commit in this same transaction, with no commit in
+    between. The commit releases the lock, so the next claim counts this
+    text and the cap of ``SMS_TRIAL_LIMIT`` holds under concurrent sends.
+    """
+    number = await trial_sender(db)
+    if number is None:
+        return None
+    if organization_id == number.organization_id:
+        return None
+    if explicit_from is not None and explicit_from != number.e164:
+        return None
+    if not is_us(to):
+        return None
+    if not await is_verified_trial_phone(db, organization_id, to):
+        return None
+    await org_lock(db, organization_id)
+    if await trial_texts_used(db, organization_id) >= SMS_TRIAL_LIMIT:
+        return None
+    wrapped = trial_body(body, limit=limit, truncate=truncate)
+    if wrapped is None:
+        raise TrialBodyTooLong(limit)
+    return TrialSend(number=number, body=wrapped, metadata={SMS_TRIAL_META_KEY: True})

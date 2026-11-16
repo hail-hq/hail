@@ -1,3 +1,4 @@
+import asyncio
 import re
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -8,9 +9,16 @@ from hailhq.core.models import (
     CarrierVerification,
     Organization,
     PhoneNumber,
+    Sms,
+    SmsTrialPhone,
 )
 from hailhq.core.sms_trial import (
     CODE_TTL,
+    SMS_TRIAL_LIMIT,
+    TrialBodyTooLong,
+    TrialSend,
+    claim_trial_send,
+    trial_texts_used,
     CodeBudgetExceeded,
     CodeExpired,
     NoPendingCode,
@@ -359,3 +367,199 @@ async def test_rolling_window(async_session):
     again = await _start(async_session, org, now=NOW + timedelta(hours=24, seconds=1))
     assert again.code is not None
     assert len(again.row.code_send_log) == 5
+
+
+# --- claim_trial_send ---
+
+
+async def _verify(session, org, phone=PHONE, status="verified"):
+    session.add(
+        SmsTrialPhone(
+            organization_id=org,
+            phone_e164=phone,
+            status=status,
+            consent_version="v1",
+            consent_at=NOW,
+            verified_at=NOW if status == "verified" else None,
+        )
+    )
+    await session.flush()
+
+
+async def _trial_texts(session, org, n, *, status="sent"):
+    for _ in range(n):
+        session.add(
+            Sms(
+                organization_id=org,
+                from_e164=TRIAL_E164,
+                to_e164=PHONE,
+                direction="outbound",
+                status=status,
+                body="[Hail trial] hi\nHail does not read replies.",
+                metadata_={"sms_trial": True},
+            )
+        )
+    await session.flush()
+
+
+async def _ready(session, monkeypatch, *, approve=True):
+    """A working baseline: trial number approved, sending on, a customer
+    workspace with a verified phone and no trial texts used."""
+    owner, number = await _seed(session)
+    if approve:
+        await _approve(session, owner, number)
+    monkeypatch.setattr(settings, "hail_sms_trial_number", TRIAL_E164)
+    monkeypatch.setattr(settings, "hail_sms_trial_sending", True)
+    org = await _org(session)
+    await _verify(session, org)
+    return owner, number, org
+
+
+async def _claim(session, org, **kw):
+    kw.setdefault("to", PHONE)
+    kw.setdefault("body", "hi")
+    kw.setdefault("limit", 1600)
+    return await claim_trial_send(session, org, **kw)
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "off",
+        "own_workspace",
+        "other_from",
+        "not_us",
+        "not_verified_phone",
+        "pending_phone",
+        "other_workspace_phone",
+        "number_not_approved",
+        "cap_used",
+    ],
+)
+async def test_claim_refuses(case, async_session, monkeypatch):
+    owner, _, org = await _ready(
+        async_session, monkeypatch, approve=case != "number_not_approved"
+    )
+    kw = {}
+    if case == "off":
+        monkeypatch.setattr(settings, "hail_sms_trial_sending", False)
+    elif case == "own_workspace":
+        org = owner
+        await _verify(async_session, owner, phone="+14155550143")
+        kw["to"] = "+14155550143"
+    elif case == "other_from":
+        kw["explicit_from"] = "+18005550198"
+    elif case == "not_us":
+        kw["to"] = "+447700900123"
+    elif case == "not_verified_phone":
+        kw["to"] = "+14155550143"
+    elif case == "pending_phone":
+        row = await get_trial_phone(async_session, org)
+        row.status = "pending"
+        await async_session.flush()
+    elif case == "other_workspace_phone":
+        other = await _org(async_session)
+        await _verify(async_session, other, phone="+14155550144")
+        kw["to"] = "+14155550144"
+    elif case == "cap_used":
+        await _trial_texts(async_session, org, SMS_TRIAL_LIMIT)
+    assert await _claim(async_session, org, **kw) is None
+
+
+async def test_claim_allows_and_wraps(async_session, monkeypatch):
+    _, number, org = await _ready(async_session, monkeypatch)
+    t = await _claim(async_session, org)
+    assert isinstance(t, TrialSend)
+    assert t.number.id == number.id and t.number.e164 == "+18005550199"
+    assert t.body == "[Hail trial] hi\nHail does not read replies."
+    assert t.metadata == {"sms_trial": True}
+    assert await _claim(async_session, org, explicit_from=TRIAL_E164) is not None
+
+
+async def test_claim_body_too_long_raises(async_session, monkeypatch):
+    _, _, org = await _ready(async_session, monkeypatch)
+    max_chars = 160 - len(TRIAL_PREFIX) - len(TRIAL_FOOTER)
+    assert await _claim(async_session, org, body="x" * max_chars, limit=160)
+    with pytest.raises(TrialBodyTooLong) as e:
+        await _claim(async_session, org, body="x" * (max_chars + 1), limit=160)
+    assert e.value.max_chars == max_chars
+    assert str(e.value) == (
+        f"Trial texts can have up to {max_chars} characters. Nothing was sent."
+    )
+    cut = await _claim(
+        async_session, org, body="x" * (max_chars + 1), limit=160, truncate=True
+    )
+    assert len(cut.body) == 160 and cut.body.endswith(TRIAL_FOOTER)
+
+
+async def test_failed_rows_do_not_use_the_cap(async_session, monkeypatch):
+    _, _, org = await _ready(async_session, monkeypatch)
+    await _trial_texts(async_session, org, 24)
+    await _trial_texts(async_session, org, 3, status="failed")
+    async_session.add(
+        Sms(
+            organization_id=org,
+            from_e164=PHONE,
+            to_e164=TRIAL_E164,
+            direction="inbound",
+            status="received",
+            body="hi",
+            metadata_={"sms_trial": True},
+        )
+    )
+    async_session.add(
+        Sms(
+            organization_id=org,
+            from_e164="+18005550198",
+            to_e164=PHONE,
+            body="not a trial text",
+        )
+    )
+    await async_session.flush()
+    assert await trial_texts_used(async_session, org) == 24
+    assert await _claim(async_session, org) is not None
+
+
+async def test_25th_ok_26th_refused(async_session, monkeypatch):
+    _, _, org = await _ready(async_session, monkeypatch)
+    await _trial_texts(async_session, org, 24)
+    assert await _claim(async_session, org) is not None
+    await _trial_texts(async_session, org, 1)
+    assert await trial_texts_used(async_session, org) == 25
+    assert await _claim(async_session, org) is None
+
+
+async def test_two_concurrent_claims_at_24_send_one(
+    async_session, session_factory, monkeypatch
+):
+    _, _, org = await _ready(async_session, monkeypatch)
+    await _trial_texts(async_session, org, 24)
+    await async_session.commit()
+
+    async def claim_and_send() -> TrialSend | None:
+        async with session_factory() as s:
+            t = await _claim(s, org)
+            if t is None:
+                await s.rollback()
+                return None
+            # Give the other session time to run its own count. Without the
+            # lock both would see 24 here and both would send.
+            await asyncio.sleep(0.2)
+            s.add(
+                Sms(
+                    organization_id=org,
+                    from_e164=t.number.e164,
+                    to_e164=PHONE,
+                    body=t.body,
+                    metadata_={**t.metadata},
+                )
+            )
+            await s.commit()
+            return t
+
+    results = await asyncio.wait_for(
+        asyncio.gather(claim_and_send(), claim_and_send()), timeout=10
+    )
+    assert sum(r is not None for r in results) == 1
+    async with session_factory() as fresh:
+        assert await trial_texts_used(fresh, org) == 25
