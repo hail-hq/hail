@@ -4,11 +4,21 @@ warnings, file and save nothing. The model is a fake; names are made up."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import uuid
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from hailhq.api.routes import verifications as routes
+from hailhq.api.verification_files import (
+    MAX_PARALLEL_FETCHES,
+    CollectedFiles,
+    fetch_files,
+)
+from hailhq.core.document_reads import document_reads_today
 from hailhq.core.models import CarrierVerification
 from hailhq.core.providers.llm.document_reader import (
     read_document as _real_read_document,
@@ -644,8 +654,6 @@ async def test_a_covering_file_is_sent_once_and_fills_its_slots(
 
 @pytest.fixture(autouse=True)
 def _no_cached_forms():
-    from hailhq.api.routes import verifications as routes
-
     routes._caution_forms.clear()
     yield
     routes._caution_forms.clear()
@@ -704,8 +712,6 @@ async def _cautions(client, key, body):
 async def test_cautions_give_the_name_warning_with_no_read_used(
     client, org_and_key, carrier, monkeypatch, async_session
 ) -> None:
-    from hailhq.core.document_reads import document_reads_today
-
     async def no_model(**_):
         raise AssertionError("no model is called")
 
@@ -792,8 +798,6 @@ async def test_cautions_check_the_quote_the_slots_and_auth(
 async def test_cautions_ask_the_carrier_for_its_form_once(
     client, org_and_key, carrier, monkeypatch
 ) -> None:
-    from hailhq.api.routes import verifications as routes
-
     asked: list[tuple] = []
     base_requirements = carrier.requirements
 
@@ -815,16 +819,6 @@ async def test_cautions_ask_the_carrier_for_its_form_once(
 async def test_fetches_of_several_files_share_one_limit() -> None:
     """The document check fetches each file with its own call; the shared
     gate keeps them to MAX_PARALLEL_FETCHES at once in all."""
-    import asyncio
-    import uuid
-    from types import SimpleNamespace
-
-    from hailhq.api.verification_files import (
-        MAX_PARALLEL_FETCHES,
-        CollectedFiles,
-        fetch_files,
-    )
-
     running = peak = 0
 
     async def fetch_raw(_key):
