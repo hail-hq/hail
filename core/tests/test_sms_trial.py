@@ -37,10 +37,12 @@ from hailhq.core.sms_trial import (
     trial_enabled,
     trial_hint_applies,
     trial_number,
+    trial_refusal_reason,
     trial_sender,
     trial_texts_used,
 )
 from pydantic import ValidationError
+from sqlalchemy import event, text
 
 TRIAL_E164 = "+18005550199"
 
@@ -738,3 +740,89 @@ async def test_asking_again_for_the_verified_phone_drops_the_pending_one(
     assert row.code_attempts == 0 and row.updated_at == later
     with pytest.raises(NoPendingCode):
         await confirm_phone(async_session, org, switch.code, now=later)
+
+
+# --- trial_refusal_reason ---
+
+
+@pytest.mark.parametrize(
+    "case,reason",
+    [
+        ("off", "Trial texting is not available."),
+        ("number_not_approved", "Trial texting is not available."),
+        ("number_missing", "Trial texting is not available."),
+        ("not_us", "Trial texts go only to your verified trial phone."),
+        ("not_verified_phone", "Trial texts go only to your verified trial phone."),
+        ("pending_phone", "Trial texts go only to your verified trial phone."),
+        ("cap_used", "No trial texts left."),
+        ("owner", None),
+        ("owner_off", None),
+        ("usable", None),
+    ],
+)
+async def test_trial_refusal_reason(async_session, monkeypatch, case, reason):
+    owner, number, org = await _ready(
+        async_session, monkeypatch, approve=case != "number_not_approved"
+    )
+    who, to = org, PHONE
+    if case in ("off", "owner_off"):
+        monkeypatch.setattr(settings, "hail_sms_trial_sending", False)
+    if case == "number_missing":
+        number.provisioning_state = "released"
+        await async_session.flush()
+    elif case == "not_us":
+        to = "+447700900123"
+    elif case == "not_verified_phone":
+        to = OTHER
+    elif case == "pending_phone":
+        row = await get_trial_phone(async_session, org)
+        row.status = "pending"
+        await async_session.flush()
+    elif case == "cap_used":
+        await _trial_texts(async_session, org, SMS_TRIAL_LIMIT)
+    elif case in ("owner", "owner_off"):
+        who = owner
+    assert await trial_refusal_reason(async_session, who, to=to) == reason
+
+
+# --- trial_texts_used and the partial index ---
+
+
+async def test_trial_texts_used_sends_the_index_predicate_as_a_literal(
+    async_session, monkeypatch
+):
+    """The partial index ``sms_trial_org_idx`` has the predicate
+    ``metadata ? 'sms_trial'``. A key sent as a bind parameter cannot match
+    it in a generic prepared plan, so the query must carry the literal."""
+    _, _, org = await _ready(async_session, monkeypatch)
+    seen: list[tuple[str, object]] = []
+
+    def _capture(_conn, _cursor, statement, parameters, _context, _many):
+        seen.append((statement, parameters))
+
+    engine = async_session.bind.sync_engine
+    event.listen(engine, "before_cursor_execute", _capture)
+    try:
+        await trial_texts_used(async_session, org)
+    finally:
+        event.remove(engine, "before_cursor_execute", _capture)
+    statement, parameters = next((s, p) for s, p in seen if "count(" in s)
+    assert "metadata ? 'sms_trial'" in statement
+    assert "sms_trial" not in repr(parameters)
+
+    # A generic plan (what a reused prepared statement gets) uses the index.
+    conn = await async_session.connection()
+    await conn.exec_driver_sql("SET LOCAL plan_cache_mode = force_generic_plan")
+    await conn.exec_driver_sql("SET LOCAL enable_seqscan = off")
+    await conn.exec_driver_sql(f"PREPARE trial_used_q AS {statement}")
+    try:
+        args = ", ".join(f"'{a}'" for a in parameters)
+        plan = "\n".join(
+            r[0]
+            for r in (
+                await conn.execute(text(f"EXPLAIN EXECUTE trial_used_q({args})"))
+            ).all()
+        )
+    finally:
+        await conn.exec_driver_sql("DEALLOCATE trial_used_q")
+    assert "sms_trial_org_idx" in plan, plan

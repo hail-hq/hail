@@ -16,7 +16,7 @@ from hailhq.core.config import settings
 from hailhq.core.db import key_lock, org_lock
 from hailhq.core.models import PhoneNumber, Sms, SmsTrialPhone
 from hailhq.core.sms_registration_gate import is_us, on_approved_registration
-from sqlalchemy import func, select, text
+from sqlalchemy import func, literal_column, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,6 +32,10 @@ CODE_TTL = timedelta(minutes=10)
 MAX_CODE_TRIES = 5
 MAX_CODE_SENDS_PER_DAY = 5
 CODE_WINDOW = timedelta(hours=24)
+# Why a text from the trial number cannot go out (``trial_refusal_reason``).
+TRIAL_NOT_AVAILABLE = "Trial texting is not available."
+TRIAL_WRONG_PHONE = "Trial texts go only to your verified trial phone."
+TRIAL_NONE_LEFT = "No trial texts left."
 
 
 class PhoneNotUs(Exception):
@@ -179,7 +183,16 @@ async def trial_sender(db: AsyncSession) -> PhoneNumber | None:
     registration. Database only, no carrier call."""
     if not settings.hail_sms_trial_sending:
         return None
-    number = await trial_number(db)
+    return await trial_sender_of(db, await trial_number(db))
+
+
+async def trial_sender_of(
+    db: AsyncSession, number: PhoneNumber | None
+) -> PhoneNumber | None:
+    """``number`` (from ``trial_number``) when sending is on and it is on an
+    approved registration, for a caller that already fetched it."""
+    if not settings.hail_sms_trial_sending:
+        return None
     if number is None or number.organization_id is None:
         return None
     if not await on_approved_registration(db, number.organization_id, number):
@@ -393,7 +406,9 @@ async def trial_texts_used(db: AsyncSession, organization_id: UUID) -> int:
             .where(
                 Sms.organization_id == organization_id,
                 Sms.direction == "outbound",
-                Sms.metadata_.has_key(SMS_TRIAL_META_KEY),
+                # The literal key, as in the partial index ``sms_trial_org_idx``:
+                # a bound key cannot match its predicate in a generic plan.
+                Sms.metadata_.op("?")(literal_column(f"'{SMS_TRIAL_META_KEY}'")),
                 Sms.status != "failed",
             )
         )
@@ -405,8 +420,6 @@ async def trial_hint_applies(db: AsyncSession, organization_id: UUID) -> bool:
     the workspace is not the trial number's owner, and it has trial texts
     left. Refusals add ``TRIAL_HINT`` only then; the caller checks that the
     destination is US."""
-    if not trial_enabled():
-        return False
     number = await trial_sender(db)
     if number is None or number.organization_id == organization_id:
         return False
@@ -465,3 +478,21 @@ async def claim_trial_send(
     if wrapped is None:
         raise TrialBodyTooLong(limit)
     return TrialSend(number=number, body=wrapped, metadata={SMS_TRIAL_META_KEY: True})
+
+
+async def trial_refusal_reason(
+    db: AsyncSession, organization_id: UUID, *, to: str
+) -> str | None:
+    """Why a text from the trial number to ``to`` cannot go out, for a
+    workspace whose ``claim_trial_send`` was refused. None for the trial
+    number's owner, which sends from it as its own number."""
+    number = await trial_number(db)
+    if number is not None and number.organization_id == organization_id:
+        return None
+    if await trial_sender_of(db, number) is None:
+        return TRIAL_NOT_AVAILABLE
+    if not is_us(to) or not await is_verified_trial_phone(db, organization_id, to):
+        return TRIAL_WRONG_PHONE
+    if await trial_texts_used(db, organization_id) >= SMS_TRIAL_LIMIT:
+        return TRIAL_NONE_LEFT
+    return None
