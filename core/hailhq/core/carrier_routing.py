@@ -277,19 +277,27 @@ def _http_status(exc: BaseException) -> int | None:
     return None
 
 
-def final_refusal(exc: BaseException) -> int | None:
-    """The HTTP status when a carrier refused a request for good (a 4xx a
-    retry does not change), else None. Reads ``exc`` and the errors it was
-    raised from, so a plug-in error that wraps the carrier's still counts.
-    Never the carrier's text: callers store and log the status only."""
+def carrier_http_status(exc: BaseException) -> int | None:
+    """The HTTP status of the carrier answer behind ``exc``, else None (a
+    timeout, a lost connection). Reads ``exc`` and the errors it was raised
+    from, so a plug-in error that wraps the carrier's still counts."""
     seen: BaseException | None = exc
     for _ in range(5):
         if seen is None:
             break
         status = _http_status(seen)
         if status is not None:
-            if 400 <= status < 500 and status not in _RETRYABLE_4XX:
-                return status
-            return None
+            return status
         seen = seen.__cause__ or seen.__context__
+    return None
+
+
+def final_refusal(exc: BaseException) -> int | None:
+    """The HTTP status when a carrier refused a request for good (a 4xx a
+    retry does not change), else None. Reads ``exc`` and the errors it was
+    raised from (``carrier_http_status``). Never the carrier's text: callers
+    store and log the status only."""
+    status = carrier_http_status(exc)
+    if status is not None and 400 <= status < 500 and status not in _RETRYABLE_4XX:
+        return status
     return None

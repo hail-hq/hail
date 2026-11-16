@@ -537,20 +537,23 @@ async def test_person_draft_policies_and_sole_proprietor_attributes() -> None:
 
 
 async def test_discard_order_and_404_does_not_stop_next() -> None:
+    from hailhq.core.providers.verification.base import VerificationProviderError
+
     r = _ok_responses()
     r["us_app_to_person.delete"] = _raise(_tw(404))
     r["trust_products.delete"] = _raise(_tw(500))
     r["customer_profiles.delete"] = True
     p = _provider(r)
-    await p.discard(
-        {
-            "profile_sid": "BU1",
-            "trust_sid": "BU2",
-            "brand_sid": "BN1",
-            "messaging_service_sid": "MG1",
-            "campaign_sid": "QE1",
-        }
-    )
+    with pytest.raises(VerificationProviderError):
+        await p.discard(
+            {
+                "profile_sid": "BU1",
+                "trust_sid": "BU2",
+                "brand_sid": "BN1",
+                "messaging_service_sid": "MG1",
+                "campaign_sid": "QE1",
+            }
+        )
     names = [n for n, _ in p._client.calls]
     assert names == [
         "messaging.v1.services.(MG1).us_app_to_person.(QE1).delete",
@@ -559,13 +562,23 @@ async def test_discard_order_and_404_does_not_stop_next() -> None:
     ]
 
 
-async def test_discard_never_raises_on_other_errors() -> None:
+async def test_discard_raises_on_other_errors_after_every_step() -> None:
+    from hailhq.core.providers.verification.base import VerificationProviderError
+
     r = _ok_responses()
     r["trust_products.delete"] = _raise(RuntimeError("x"))
     r["customer_profiles.delete"] = True
     p = _provider(r)
-    await p.discard({"profile_sid": "BU1", "trust_sid": "BU2", "brand_sid": "BN1"})
+    with pytest.raises(VerificationProviderError):
+        await p.discard({"profile_sid": "BU1", "trust_sid": "BU2", "brand_sid": "BN1"})
     assert len(p._client.calls) == 2
+
+
+async def test_discard_counts_a_final_refusal_as_done() -> None:
+    r = _ok_responses()
+    r["us_app_to_person.delete"] = _raise(_tw(400))
+    p = _provider(r)
+    await p.discard({"messaging_service_sid": "MG1", "campaign_sid": "QE1"})
 
 
 async def test_draft_cleans_up_on_non_twilio_error() -> None:

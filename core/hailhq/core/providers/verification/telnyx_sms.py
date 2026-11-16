@@ -28,6 +28,7 @@ from hailhq.core.providers.verification.base import (
     Requirements,
     SmsRegistrationProvider,
     VerificationProviderError,
+    discard_step_retry,
 )
 from hailhq.core.providers.verification.forms import display_name, text_length
 from hailhq.core.providers.verification.sms_form import (
@@ -407,7 +408,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                     # already asked for vetting and must not ask again.
                     refs.setdefault("vetting_requested", False)
                 return DraftResult(refs=refs)
-            await self.discard(refs)
+            await self.discard_draft(refs)
             if refused:
                 logger.warning(
                     "10DLC draft failed: status=%s errors=%s",
@@ -423,7 +424,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
             raise VerificationProviderError("Telnyx request failed") from exc
         if problems:
             billed = _billed(refs)
-            await self.discard(refs)
+            await self.discard_draft(refs)
             return DraftResult(refs={}, problems=problems, billed_refs=billed)
         return DraftResult(refs=refs)
 
@@ -1148,20 +1149,17 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
             ("campaign", refs.get("campaign_id")),
             ("brand", refs.get("brand_id")),
         )
+        retry: Exception | None = None
         for key, resource_id in steps:
             if not resource_id:
                 continue
             try:
                 await self._api.request("DELETE", f"/10dlc/{key}/{resource_id}")
-            except httpx.HTTPStatusError as exc:
-                if exc.response.status_code != 404:
-                    logger.warning(
-                        "10DLC discard failed: step=%s status=%s",
-                        key,
-                        exc.response.status_code,
-                    )
-            except Exception:
-                logger.warning("10DLC discard failed: step=%s", key)
+            except Exception as exc:
+                if discard_step_retry(exc, carrier="telnyx 10DLC", step=key):
+                    retry = retry or exc
+        if retry is not None:
+            raise VerificationProviderError("Telnyx discard failed") from retry
 
 
 def _same_person(brand: dict, fields: dict) -> bool:

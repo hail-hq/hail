@@ -30,6 +30,7 @@ from hailhq.core.models import (
     AccountCredit,
     AuditLog,
     CarrierVerification,
+    OrgClosure,
     PhoneNumber,
 )
 from hailhq.core.providers.verification import (
@@ -44,6 +45,7 @@ from hailhq.core.providers.verification import (
     SubmitRefused,
     UnsupportedSubjectType,
     VerificationProvider,
+    VerificationProviderError,
 )
 from hailhq.core.providers.verification.base import (
     BRAND_REJECTED,
@@ -149,6 +151,8 @@ class FakeSmsCarrier(SmsRegistrationProvider):
         self.detached: list[str] = []
         # True: detach_number says the number left its messaging service.
         self.detach_leaves_service = False
+        # Raised by discard: the carrier delete must be tried again.
+        self.discard_error: Exception | None = None
 
     async def requirements(self, country_code, number_type, subject_type):
         return Requirements(
@@ -220,6 +224,8 @@ class FakeSmsCarrier(SmsRegistrationProvider):
         return {}
 
     async def discard(self, refs):
+        if self.discard_error is not None:
+            raise self.discard_error
         self.discarded.append(refs)
 
     async def attach_number(self, refs, *, provider_resource_id, e164):
@@ -2912,6 +2918,75 @@ async def test_cancel_a_person_registration_frees_the_number_service(
     assert number.sms_registration_id is None
     assert number.messaging_service_sid is None
     assert any("enable-sms" in r.getMessage() for r in caplog.records)
+
+
+async def test_cancel_answers_503_and_keeps_the_row_when_the_carrier_delete_fails(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 10_000)
+    number = await _us_number(async_session, org_id)
+    vid = await _approved_sms_row(client, key, async_session, sms_carrier)
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    refs_before = dict(row.provider_refs)
+    sms_carrier.discard_error = VerificationProviderError("Telnyx discard failed")
+
+    resp = await client.delete(f"/verifications/{vid}", headers=_auth(key))
+
+    assert resp.status_code == 503, resp.text
+    assert resp.json()["detail"] == "carrier unavailable; try again later"
+    await async_session.refresh(row)
+    assert row.state == "approved" and row.cancelled_at is None
+    assert row.provider_refs == refs_before
+    await async_session.refresh(number)
+    assert number.sms_registration_id == row.id
+
+    # The carrier answers again: the same cancel goes through.
+    sms_carrier.discard_error = None
+    resp = await client.delete(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["state"] == "cancelled"
+
+
+async def test_a_closed_org_number_is_not_set_up_for_sms_again(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+) -> None:
+    """Account close cancels the registration while its numbers are being
+    released: a number that left a person's service stays off SMS."""
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 10_000)
+    number = await _us_number(async_session, org_id)
+    vid = await _approved_sms_row(
+        client, key, async_session, sms_carrier, subject_type="person"
+    )
+    sms_carrier.detach_leaves_service = True
+    async_session.add(
+        OrgClosure(
+            organization_id=org_id,
+            closed_at=datetime.now(timezone.utc) - timedelta(minutes=1),
+            source="hail_website",
+        )
+    )
+    await async_session.commit()
+    set_up: list = []
+
+    async def ensure_sms(db, phone_number):
+        set_up.append(phone_number.id)
+
+    monkeypatch.setattr(verifications_routes.sms_setup, "ensure_sms", ensure_sms)
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+
+    await verifications_routes.cancel_locked(
+        async_session, row, sms_carrier, keep_brand=False
+    )
+    await async_session.commit()
+
+    assert sms_carrier.detached == [number.provider_resource_id]
+    assert set_up == []
+    await async_session.refresh(number)
+    assert number.sms_registration_id is None and number.messaging_service_sid is None
 
 
 async def test_an_approved_number_verification_cannot_be_cancelled(

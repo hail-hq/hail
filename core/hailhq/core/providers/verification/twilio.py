@@ -35,6 +35,7 @@ from hailhq.core.providers.verification.base import (
     UnsupportedSubjectType,
     VerificationProvider,
     VerificationProviderError,
+    discard_step_retry,
 )
 from hailhq.core.providers.verification.forms import (
     display_name,
@@ -508,7 +509,7 @@ class TwilioVerificationProvider(VerificationProvider):
             for sid in [refs["end_user_sid"], *refs["document_sids"]]:
                 self._rc.bundles(bundle.sid).item_assignments.create(object_sid=sid)
         except TwilioRestException as exc:
-            self._discard_sync(refs)
+            self._drop_draft_sync(refs)
             if exc.status == 400:
                 return DraftResult(
                     refs={},
@@ -516,19 +517,19 @@ class TwilioVerificationProvider(VerificationProvider):
                 )
             raise VerificationProviderError("Twilio request failed") from exc
         except Exception:
-            self._discard_sync(refs)
+            self._drop_draft_sync(refs)
             raise
 
         try:
             problems = self._evaluate(refs)
         except TwilioRestException as exc:
-            self._discard_sync(refs)
+            self._drop_draft_sync(refs)
             raise VerificationProviderError("Twilio request failed") from exc
         except Exception:
-            self._discard_sync(refs)
+            self._drop_draft_sync(refs)
             raise
         if problems:
-            self._discard_sync(refs)
+            self._drop_draft_sync(refs)
             return DraftResult(refs={}, problems=problems)
         return DraftResult(refs=refs)
 
@@ -757,23 +758,37 @@ class TwilioVerificationProvider(VerificationProvider):
 
     # -- discard -----------------------------------------------------------
 
+    def _drop_draft_sync(self, refs: dict) -> None:
+        """``_discard_sync`` for a draft that failed while it was made: best
+        effort, so the error that stopped the draft is the one reported."""
+        try:
+            self._discard_sync(refs)
+        except VerificationProviderError:
+            logger.warning("twilio verification draft cleanup failed")
+
     def _discard_sync(self, refs: dict) -> None:
         steps = []
         if refs.get("bundle_sid"):
-            steps.append(self._rc.bundles(refs["bundle_sid"]).delete)
+            steps.append(("bundle", self._rc.bundles(refs["bundle_sid"]).delete))
         steps.extend(
-            self._rc.supporting_documents(s).delete
+            ("document", self._rc.supporting_documents(s).delete)
             for s in refs.get("document_sids", [])
         )
         if refs.get("end_user_sid"):
-            steps.append(self._rc.end_users(refs["end_user_sid"]).delete)
+            steps.append(("end_user", self._rc.end_users(refs["end_user_sid"]).delete))
         if refs.get("address_sid"):
-            steps.append(self._client.addresses(refs["address_sid"]).delete)
-        for step in steps:
+            steps.append(
+                ("address", self._client.addresses(refs["address_sid"]).delete)
+            )
+        retry: Exception | None = None
+        for key, step in steps:
             try:
                 step()
-            except Exception:  # best effort; a stray draft is harmless
-                logger.warning("twilio verification cleanup step failed", exc_info=True)
+            except Exception as exc:
+                if discard_step_retry(exc, carrier="twilio", step=key):
+                    retry = retry or exc
+        if retry is not None:
+            raise VerificationProviderError("Twilio discard failed") from retry
 
     async def discard(self, refs: dict) -> None:
         await asyncio.to_thread(self._discard_sync, refs)

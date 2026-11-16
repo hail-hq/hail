@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from types import MappingProxyType
@@ -19,6 +20,8 @@ from typing import Literal
 
 from hailhq.core.schemas import Address
 from pydantic import BaseModel, ConfigDict, Field, computed_field
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "BRAND_REJECTED",
@@ -54,6 +57,35 @@ FieldKind = Literal["text", "email", "phone", "url", "choices"]
 
 class VerificationProviderError(Exception):
     """The carrier failed in a way the customer cannot fix (outage, auth)."""
+
+
+def discard_step_retry(exc: BaseException, *, carrier: str, step: str) -> bool:
+    """True when a failed ``discard`` step must be tried again: an outage,
+    a timeout, a lost connection, or a 4xx a retry can change (401, 403,
+    408, 409, 425, 429; ``carrier_routing.final_refusal``). False when the
+    step is done: the carrier no longer holds the record (404), or refused
+    to delete it for good (logged; a retry would get the same answer).
+    Logs the status only, never the carrier's text."""
+    # Imported here: carrier_routing imports the voice adapters, and the
+    # Twilio and DIDWW ones import these verification plug-ins.
+    from hailhq.core.carrier_routing import carrier_http_status, final_refusal
+
+    status = carrier_http_status(exc)
+    if status == 404:
+        return False
+    if final_refusal(exc) is not None:
+        logger.warning(
+            "%s discard step %s refused for good: status=%s", carrier, step, status
+        )
+        return False
+    logger.warning(
+        "%s discard step %s failed (%s, status=%s); retried",
+        carrier,
+        step,
+        type(exc).__name__,
+        status,
+    )
+    return True
 
 
 class RegistrationHoldsAnotherNumber(VerificationProviderError):
@@ -396,7 +428,24 @@ class VerificationProvider(ABC):
 
     @abstractmethod
     async def discard(self, refs: dict) -> None:
-        """Delete a draft. Best effort; never raises."""
+        """Delete the draft or filing at the carrier. Runs every step, then
+        raises ``VerificationProviderError`` when a step must be tried again
+        (``discard_step_retry``): the caller keeps the row and its ids. A
+        record the carrier no longer holds, or refused to delete for good,
+        counts as done."""
+
+    async def discard_draft(self, refs: dict) -> None:
+        """``discard`` for a draft that failed while it was made: best
+        effort, never raises, so the error that stopped the draft is the
+        one reported."""
+        try:
+            await self.discard(refs)
+        except Exception as exc:
+            logger.warning(
+                "verification draft cleanup failed: %s (%s)",
+                type(self).__name__,
+                type(exc).__name__,
+            )
 
     def subject_name(
         self,

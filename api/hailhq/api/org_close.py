@@ -23,7 +23,9 @@ Run by ``POST /internal/org-closures`` (that org, after the response) and by
 every verification worker pass (every closed org), before
 ``clear_closed_org_registrations``. Safe to run again: released numbers and
 cancelled rows are skipped. One item's failure never stops the others; it is
-tried again on the next pass. A carrier refusal a retry does not change
+tried again on the next pass. A carrier delete that failed (``discard``
+raised: an outage, a timeout, a 429) keeps the registration and its carrier
+ids, so the next pass deletes it again. A carrier refusal a retry does not change
 (``final_refusal``) is stored and the item is not tried again:
 ``provisioning_metadata.release_refused`` on the number,
 ``provider_refs.close_refused`` on the registration, both
@@ -317,12 +319,10 @@ async def close_org_carrier_items(
     closed by ``now`` (one org when ``organization_id`` is given). See the
     module docstring. Commits per item. Never raises for one item."""
     counts = CloseCounts()
-    org_ids = (await db.execute(closed_org_ids(now, organization_id))).scalars().all()
-    await db.commit()
-    if not org_ids:
-        return counts
+    # A subquery, not a list: org_closures only grows.
+    org_ids = closed_org_ids(now, organization_id)
     await _release_numbers(db, org_ids, now, lk, counts)
     await _cancel_registrations(db, org_ids, now, registry, counts)
     if any(counts.as_dict().values()):
-        logger.info("account close: %d org(s), %s", len(org_ids), counts.as_dict())
+        logger.info("account close: %s", counts.as_dict())
     return counts

@@ -24,6 +24,7 @@ from hailhq.core.providers.verification.base import (
     Requirements,
     SmsRegistrationProvider,
     VerificationProviderError,
+    discard_step_retry,
 )
 from hailhq.core.providers.verification.forms import display_name
 from hailhq.core.providers.verification.sms_form import (
@@ -229,7 +230,7 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
             )
         except Exception as exc:
             _log_failure("draft", exc)
-            await self.discard(refs)
+            await self.discard_draft(refs)
             if isinstance(exc, TwilioRestException):
                 logger.warning(
                     "10DLC draft failed: status=%s code=%s", exc.status, exc.code
@@ -845,8 +846,11 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
                         refs["tollfree_verification_sid"]
                     ).delete
                 )
-            except TwilioRestException as exc:
-                if exc.status != 404:
+            except _TWILIO_ERRORS as exc:
+                # Already gone (404) is done. Any other answer raises, a
+                # final refusal too: account close stores it (close_refused)
+                # and keeps the ids for a delete by hand.
+                if not isinstance(exc, TwilioRestException) or exc.status != 404:
                     _log_failure("tollfree_discard", exc)
                     raise VerificationProviderError(
                         "Could not cancel registration. Try again."
@@ -875,21 +879,19 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
                 ).delete(),
             ),
         ]
+        retry: Exception | None = None
         for key, step in steps:
             if not refs.get(key) or (key == "campaign_sid" and not ms):
                 continue
             try:
                 await asyncio.to_thread(step)
-            except TwilioRestException as exc:
-                if exc.status != 404:
-                    logger.warning(
-                        "10DLC discard failed: step=%s status=%s code=%s",
-                        key,
-                        exc.status,
-                        exc.code,
-                    )
-            except Exception:
-                logger.warning("10DLC discard failed: step=%s", key)
+            except Exception as exc:
+                if discard_step_retry(exc, carrier="twilio 10DLC", step=key):
+                    retry = retry or exc
+        if retry is not None:
+            raise VerificationProviderError(
+                "Could not cancel registration. Try again."
+            ) from retry
 
 
 def _person_service_name(organization_id) -> str:

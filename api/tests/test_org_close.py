@@ -6,6 +6,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 
+import httpx
 import pytest
 from hailhq.api.org_close import close_org_carrier_items
 from hailhq.api.routes.verifications import sweep_verifications
@@ -15,6 +16,9 @@ from hailhq.core.models import (
     CarrierVerification,
     OrgClosure,
     PhoneNumber,
+)
+from hailhq.core.providers.verification.telnyx_sms import (
+    TelnyxSmsRegistrationProvider,
 )
 from hailhq.core.providers.voice.base import CarrierRequestError
 from sqlalchemy import func, select
@@ -230,6 +234,68 @@ async def test_a_retryable_cancel_failure_is_tried_again(
     assert counts.cancelled == 1
     await async_session.refresh(row)
     assert row.state == "cancelled"
+
+
+async def test_a_failed_campaign_delete_keeps_the_ids_and_is_retried(
+    async_session, voice_provider_mock
+) -> None:
+    """The real Telnyx plug-in: a 5xx on the campaign delete keeps the row
+    and its carrier ids, and the next pass deletes it again. A 404 there
+    (Telnyx no longer holds it) counts as done."""
+    org = uuid.uuid4()
+    await _close(async_session, org)
+    campaign_status = {"code": 500}
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(f"{request.method} {request.url.path}")
+        if "/10dlc/campaign/" in request.url.path:
+            return httpx.Response(campaign_status["code"], json={})
+        return httpx.Response(200, json={})
+
+    telnyx = TelnyxSmsRegistrationProvider(
+        api_key="k",
+        client=httpx.AsyncClient(
+            transport=httpx.MockTransport(handler),
+            base_url="https://api.telnyx.com/v2",
+        ),
+    )
+    row = CarrierVerification(
+        organization_id=org,
+        provider="telnyx",
+        country_code="US",
+        number_type="local",
+        subject_type="business",
+        subject_name="Acme",
+        purpose="sms",
+        state="approved",
+        provider_refs={"brand_id": "B1", "campaign_id": "C1"},
+        requirements_version="1",
+    )
+    async_session.add(row)
+    await async_session.commit()
+
+    async def run():
+        return await close_org_carrier_items(
+            async_session, datetime.now(timezone.utc), lambda *_: telnyx, None
+        )
+
+    counts = await run()
+    assert counts.failed == 1 and counts.cancelled == counts.refused == 0
+    assert calls == ["DELETE /v2/10dlc/campaign/C1", "DELETE /v2/10dlc/brand/B1"]
+    await async_session.refresh(row)
+    assert row.state == "approved" and row.cancelled_at is None
+    assert row.provider_refs["campaign_id"] == "C1"
+    assert row.provider_refs["brand_id"] == "B1"
+    assert "close_refused" not in row.provider_refs
+
+    campaign_status["code"] = 404
+    calls.clear()
+    counts = await run()
+    assert counts.cancelled == 1 and counts.failed == 0
+    assert calls == ["DELETE /v2/10dlc/campaign/C1", "DELETE /v2/10dlc/brand/B1"]
+    await async_session.refresh(row)
+    assert row.state == "cancelled" and "campaign_id" not in row.provider_refs
 
 
 async def test_one_org_only_when_named(

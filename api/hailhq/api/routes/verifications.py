@@ -120,7 +120,11 @@ from hailhq.core.providers.verification.document_check import (
 from hailhq.core.providers.verification.forms import validate_input
 from hailhq.core.providers.verification.sms_form import campaign_text
 from hailhq.core.providers.verification.sms_review import same_sender
-from hailhq.core.retention import clear_closed_org_registrations, org_closed
+from hailhq.core.retention import (
+    clear_closed_org_registrations,
+    org_closed,
+    org_is_closed,
+)
 from hailhq.core.s3_mail import S3MailClient
 from hailhq.core.schemas import (
     SmsApplicationAmendRequest,
@@ -2247,7 +2251,7 @@ async def create_verification(
         # Not a reused brand: this request did not make it, and a filing that
         # won the race may be using it.
         if not draft.refs.get("brand_reused"):
-            await prepared.provider.discard(draft.refs)
+            await prepared.provider.discard_draft(draft.refs)
         if isinstance(exc, IntegrityError):
             raise HTTPException(
                 status_code=http_status.HTTP_409_CONFLICT,
@@ -3491,7 +3495,15 @@ async def cancel_verification(
             detail="The verification changed while cancellation was prepared; refresh its current status.",
         )
     approved_sms = row.purpose == "sms" and row.state in ("approved", "submitted")
-    state_before = await cancel_locked(db, row, provider)
+    try:
+        state_before = await cancel_locked(db, row, provider)
+    except VerificationProviderError as exc:
+        # The carrier still holds the filing: keep the row and its ids.
+        await db.rollback()
+        raise HTTPException(
+            status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="carrier unavailable; try again later",
+        ) from exc
     await db.commit()
     _notify_billing([row])
     if approved_sms:
@@ -3523,7 +3535,9 @@ async def cancel_locked(
     whether the row may be cancelled, commits, and rates, notifies and
     audits. ``keep_brand`` False discards a rejected filing whole, a brand
     ``discard_rejected`` would keep too (account close). Returns the state
-    before."""
+    before. Raises ``VerificationProviderError`` when the carrier delete
+    must be tried again (``discard``): nothing is wiped, so the caller rolls
+    back and keeps the row and its ids."""
     state_before = row.state
     if row.purpose == "sms" and row.state in ("approved", "submitted"):
         await _detach_registration(db, row, provider)
@@ -3548,9 +3562,13 @@ async def _detach_registration(
 ) -> None:
     """Take every number off an approved SMS registration that is being
     cancelled. A number that left the registration's own messaging service
-    (a person's Twilio campaign) goes back to the organization's service."""
+    (a person's Twilio campaign) goes back to the organization's service,
+    unless the organization is closed: its numbers are being released."""
     if isinstance(provider, SmsRegistrationProvider):
-        for number in await detach_org_numbers(db, row, provider):
+        moved = await detach_org_numbers(db, row, provider)
+        if moved and await org_is_closed(db, row.organization_id):
+            moved = []
+        for number in moved:
             try:
                 await sms_setup.ensure_sms(db, number)
             except sms_setup.SmsSetupError:
