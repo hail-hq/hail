@@ -514,6 +514,8 @@ async def test_sms_received_payload_names_the_compliance_keyword(async_session) 
         ("+14155551234", "START", None, "START"),
         ("+14155551236", "end", None, "STOP"),
         ("+14155551237", "please stop texting me", "STOP", "STOP"),
+        # No opt-out type, as from Telnyx: the body alone decides.
+        ("+14155551238", "quit", None, "STOP"),
     ]
     for index, (sender, body, opt_out_type, _) in enumerate(texts):
         await ingest_inbound_sms(

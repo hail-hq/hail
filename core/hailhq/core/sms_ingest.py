@@ -408,17 +408,20 @@ async def ingest_inbound_sms(
     # Record a lifecycle event so the inbound message surfaces on the
     # org-wide GET /events stream (which is built solely from SmsEvent rows),
     # matching how outbound sends and inbound email appear there.
+    # STOP, START or HELP when the text is one of those keywords, so
+    # integrations that answer texts can skip it. Otherwise null.
+    received = {
+        "from": from_e164,
+        "to": to_e164,
+        "body": body,
+        "compliance_keyword": action,
+    }
     db.add(
         SmsEvent(
             sms_id=sms.id,
             organization_id=organization_id,
             kind="received",
-            payload={
-                "from": from_e164,
-                "to": to_e164,
-                "body": body,
-                "compliance_keyword": action,
-            },
+            payload=received,
         )
     )
     await db.flush()
@@ -428,15 +431,7 @@ async def ingest_inbound_sms(
         organization_id=organization_id,
         event_type="sms.received",
         event_id=sms.id,
-        data={
-            "id": str(sms.id),
-            "from": from_e164,
-            "to": to_e164,
-            "body": body,
-            # STOP, START or HELP when the text is one of those keywords, so
-            # integrations that answer texts can skip it. Otherwise null.
-            "compliance_keyword": action,
-        },
+        data={"id": str(sms.id), **received},
     )
 
     return IngestResult(sms_id=sms.id)
