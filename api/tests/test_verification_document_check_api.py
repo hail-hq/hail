@@ -121,7 +121,12 @@ async def test_a_failed_read_is_200_with_nothing_read(
 async def test_quote_and_slots_are_checked(client, org_and_key, carrier) -> None:
     _, _, key = org_and_key
     assert (await _post(client, key, quote_id="")).status_code == 422
-    unknown = await _post(client, key, documents=json.dumps({"nope": {}}))
+    unknown = await _post(
+        client,
+        key,
+        documents=json.dumps({"nope": {}}),
+        files={"file.nope": ("a.jpg", b"\xff\xd8jpeg", "image/jpeg")},
+    )
     assert unknown.status_code == 422
     assert unknown.json()["detail"][0]["loc"] == ["body", "documents", "nope"]
     stray = await _post(client, key, documents="{}")

@@ -26,6 +26,7 @@ from hailhq.api.deps import Principal, get_current_principal, get_s3_mail_option
 from hailhq.api.errors import unprocessable
 from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.api.routes.verifications import (
+    _MAX_PARALLEL_FETCHES,
     MAX_REQUEST_BYTES,
     Registry,
     _DocumentPart,
@@ -135,19 +136,6 @@ async def check_verification_documents(
         "body",
     )
     provider = _provider_or_404(registry, offer["provider"], "number")
-    requirements = await _requirements(
-        provider,
-        sub.country_code,
-        sub.number_type,
-        sub.subject_type,  # type: ignore[arg-type]
-        where="body",
-    )
-    slots = {s.name for s in requirements.documents}
-    for slot in sub.documents:
-        if slot not in slots:
-            raise unprocessable(
-                "this slot is not in the form", loc=["body", "documents", slot]
-            )
     for key in form:
         prefix, _, slot = key.partition(".")
         if prefix in ("file", "upload") and slot not in sub.documents:
@@ -155,6 +143,7 @@ async def check_verification_documents(
                 "this file names a slot that is not in documents", loc=["body", key]
             )
 
+    # The upload rows and the file parts, then the total size from both.
     rows: dict[str, FileUpload] = {}
     files: dict[str, UploadedFile] = {}
     total = 0
@@ -182,17 +171,46 @@ async def check_verification_documents(
             status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="file uploads are not configured on this server",
         )
-    distinct = {row.id: row for row in rows.values()}
-    fetched = dict(
-        zip(
-            distinct,
-            await asyncio.gather(*(_read_upload(s3, row) for row in distinct.values())),
-        )
-    )
-    for slot, row in rows.items():
-        files[slot] = fetched[row.id]
-    # Nothing was written. End the read transaction before the slow part.
+    # Nothing is written. End the read transaction before the slow calls
+    # (the carrier's form, the bucket, the model).
     await db.rollback()
+
+    requirements = await _requirements(
+        provider,
+        sub.country_code,
+        sub.number_type,
+        sub.subject_type,  # type: ignore[arg-type]
+        where="body",
+    )
+    slots = {s.name for s in requirements.documents}
+    for slot in sub.documents:
+        if slot not in slots:
+            raise unprocessable(
+                "this slot is not in the form", loc=["body", "documents", slot]
+            )
+
+    # Each distinct upload once, a few at a time, as submit fetches them.
+    # Every fetch finishes, then the first failure in slot order is raised:
+    # the same request always gets the same error.
+    fetches = asyncio.Semaphore(_MAX_PARALLEL_FETCHES)
+
+    async def fetch(row: FileUpload) -> UploadedFile:
+        async with fetches:
+            return await _read_upload(s3, row)
+
+    distinct = {row.id: row for row in rows.values()}
+    results = await asyncio.gather(
+        *(fetch(row) for row in distinct.values()), return_exceptions=True
+    )
+    fetched = dict(zip(distinct, results))
+    for slot, row in rows.items():
+        result = fetched[row.id]
+        if isinstance(result, BaseException):
+            raise result
+        files[slot] = result
+    # Again with the bytes read: an object may differ from its row.
+    if sum(len(f.data) for f in files.values()) > MAX_REQUEST_BYTES:
+        raise _files_too_large()
 
     documents = {
         slot: DocumentInput(

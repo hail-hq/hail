@@ -12,7 +12,9 @@ the file, the prompt or the answer: only the exception type on a failure.
 
 from __future__ import annotations
 
+import asyncio
 import base64
+import io
 import json
 import logging
 from typing import Any
@@ -20,6 +22,7 @@ from typing import Any
 import anthropic
 from hailhq.core.config import settings
 from hailhq.core.providers.llm.bedrock import bedrock_client
+from PIL import Image, ImageOps
 
 __all__ = ["READABLE_TYPES", "document_reader_configured", "read_document"]
 
@@ -30,6 +33,12 @@ READABLE_TYPES = {"image/jpeg", "image/png", "application/pdf"}
 
 # Enough for one form's worth of values. Short on purpose: the answer is JSON.
 _MAX_TOKENS = 2048
+# The model scales a larger image down to this long side anyway, and the
+# providers refuse large images (about 5 MB on Anthropic's API, less on
+# Bedrock). A phone photo is sent at this size, upright as a viewer shows it.
+_IMAGE_LONG_SIDE = 1568
+# Refuse to decode an image larger than this many pixels (a decompression bomb).
+_MAX_PIXELS = 60_000_000
 
 _client: anthropic.AsyncAnthropic | anthropic.AsyncAnthropicBedrock | None = None
 
@@ -53,6 +62,19 @@ def _get_client() -> anthropic.AsyncAnthropic | anthropic.AsyncAnthropicBedrock:
                 api_key=settings.anthropic_api_key, max_retries=0
             )
     return _client
+
+
+def _image_for_model(data: bytes) -> bytes:
+    """The image as a JPEG at most ``_IMAGE_LONG_SIDE`` on its long side,
+    turned as its EXIF tag says, so the model sees what a person sees."""
+    with Image.open(io.BytesIO(data)) as image:
+        if image.width * image.height > _MAX_PIXELS:
+            raise ValueError("image too large")
+        image = ImageOps.exif_transpose(image).convert("RGB")
+        image.thumbnail((_IMAGE_LONG_SIDE, _IMAGE_LONG_SIDE))
+        out = io.BytesIO()
+        image.save(out, "JPEG", quality=85)
+        return out.getvalue()
 
 
 def _file_block(content_type: str, data: bytes) -> dict[str, Any]:
@@ -81,6 +103,9 @@ async def read_document(
     if not document_reader_configured() or content_type not in READABLE_TYPES:
         return None
     try:
+        if content_type != "application/pdf":
+            data = await asyncio.to_thread(_image_for_model, data)
+            content_type = "image/jpeg"
         response = await _get_client().messages.create(
             model=settings.anthropic_backup_model,
             max_tokens=_MAX_TOKENS,

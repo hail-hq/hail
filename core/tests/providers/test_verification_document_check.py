@@ -4,6 +4,7 @@ warnings worked out from them. The model is a fake; every name is made up."""
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
 from datetime import date
 from types import SimpleNamespace
@@ -25,6 +26,7 @@ from hailhq.core.providers.verification.document_check import (
     name_matches,
 )
 from hailhq.core.schemas import VerificationPrintedName
+from PIL import Image
 
 TODAY = date(2026, 11, 16)
 _PNG = UploadedFile(filename="upload", content_type="image/png", data=b"\x89PNG")
@@ -146,6 +148,11 @@ def test_a_missing_part_does_not_match() -> None:
 
 def test_swapped_parts_do_not_match() -> None:
     assert not name_matches(_printed(), "Example Tester", "Jose Maria")
+
+
+def test_an_empty_box_is_not_compared() -> None:
+    assert name_matches(_printed(), "", "Tester Example")
+    assert not name_matches(_printed(), "", "Tester")
 
 
 # -- values ------------------------------------------------------------------
@@ -316,6 +323,26 @@ async def test_an_unreadable_file_gives_one_warning_and_no_name_check() -> None:
     )
     assert _kinds(out) == ["unreadable"]
     assert out.documents["proof_of_identity"].printed_name is None
+    # What it guessed from an unreadable file fills nothing.
+    assert out.fields == {} and out.documents["proof_of_identity"].fields == {}
+
+
+async def test_only_the_typed_part_of_a_name_is_compared() -> None:
+    out = await _check(fields={"first_name": "", "last_name": "TESTER SAMPLE"})
+    assert out.warnings == []
+    out = await _check(fields={"first_name": "", "last_name": "Sample"})
+    assert [(w.kind, w.field) for w in out.warnings] == [("name", "last_name")]
+
+
+async def test_a_proof_of_address_is_not_name_checked() -> None:
+    docs = {"proof_of_address": DocumentInput(option="utility_bill", file=_PNG)}
+    bill = _answer(option="utility_bill", given_names="M", surnames="TESTER")
+    out = await _check(
+        fields={"first_name": "Maria Elena", "last_name": "Tester Sample"},
+        docs=docs,
+        reader=_reader(bill),
+    )
+    assert "name" not in _kinds(out)
 
 
 # -- fail open ---------------------------------------------------------------
@@ -393,10 +420,16 @@ def _response(text: str, stop: str = "end_turn"):
     )
 
 
+def _png(size=(4000, 3000)) -> bytes:
+    out = io.BytesIO()
+    Image.new("RGB", size, "white").save(out, "PNG")
+    return out.getvalue()
+
+
 async def _read(**over):
     kwargs = {
         "content_type": "image/png",
-        "data": b"x",
+        "data": _png((40, 30)),
         "prompt": "p",
         "schema": {},
         "timeout_s": 15.0,
@@ -417,6 +450,30 @@ async def test_reader_sends_the_file_and_the_schema(
     assert call["output_config"]["format"] == {"type": "json_schema", "schema": {}}
     assert call["messages"][0]["content"][0]["type"] == "document"
     assert call["timeout"] == 15.0
+
+
+async def test_reader_sends_an_image_as_a_smaller_jpeg(
+    reader_settings, monkeypatch
+) -> None:
+    client, calls = _fake_client(_response("{}"))
+    monkeypatch.setattr(document_reader, "_client", client)
+    await _read(data=_png())
+    block = calls[0]["messages"][0]["content"][0]
+    assert block["type"] == "image"
+    assert block["source"]["media_type"] == "image/jpeg"
+    sent = Image.open(
+        io.BytesIO(__import__("base64").b64decode(block["source"]["data"]))
+    )
+    assert max(sent.size) == 1568
+
+
+async def test_reader_skips_a_file_that_is_not_an_image(
+    reader_settings, monkeypatch
+) -> None:
+    client, calls = _fake_client(_response("{}"))
+    monkeypatch.setattr(document_reader, "_client", client)
+    assert await _read(data=b"not an image") is None
+    assert calls == []
 
 
 async def test_reader_is_off_without_a_model(reader_settings, monkeypatch) -> None:

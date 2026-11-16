@@ -1894,6 +1894,18 @@ _ADDRESS_SCHEMA = {k: v for k, v in Address.model_json_schema().items() if k != 
 _ADDRESS_OR_NULL = Annotated[
     Any, WithJsonSchema({"anyOf": [_ADDRESS_SCHEMA, {"type": "null"}]})
 ]
+# The same parts, each optional: a document check takes a partial address.
+_PARTIAL_ADDRESS_OR_NULL = Annotated[
+    Any,
+    WithJsonSchema(
+        {
+            "anyOf": [
+                {k: v for k, v in _ADDRESS_SCHEMA.items() if k != "required"},
+                {"type": "null"},
+            ]
+        }
+    ),
+]
 _SLOT_SCHEMA = {"type": "string", "pattern": f"^{_SLOT_NAME.pattern}$"}
 _VERIFICATION_FILES_LIST = Annotated[
     Any,
@@ -3498,7 +3510,7 @@ def register_tools(
         subject_type: Annotated[
             str | None, _SUBJECT_TYPE_OR_NULL, _SUBJECT_TYPE_REQUIRED
         ] = None,
-        address: Annotated[_ADDRESS_OR_NULL, _VERIFICATION_ADDRESS] = None,
+        address: Annotated[_PARTIAL_ADDRESS_OR_NULL, _VERIFICATION_ADDRESS] = None,
     ) -> dict[str, Any]:
         """Read the files of a number verification form, before the form is filled or submitted.
 

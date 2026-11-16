@@ -93,10 +93,12 @@ def name_matches(printed: VerificationPrintedName, first: str, last: str) -> boo
     """True when the typed first and last names hold the same words as the
     printed given names and surnames. Order, accents, case and hyphens may
     differ. A missing, extra or swapped word does not match. A part the
-    document does not print is not compared."""
+    document does not print, or a box left empty, is not compared: the empty
+    box is filled from the document."""
     given, family = set(_tokens(printed.given_names)), set(_tokens(printed.surnames))
-    return (not given or set(_tokens(first)) == given) and (
-        not family or set(_tokens(last)) == family
+    typed_given, typed_family = set(_tokens(first)), set(_tokens(last))
+    return (not given or not typed_given or typed_given == given) and (
+        not family or not typed_family or typed_family == family
     )
 
 
@@ -132,6 +134,11 @@ def _slot_fields(slot: DocumentSlot) -> list[FieldSpec]:
         for spec in option.fields:
             seen.setdefault(spec.name, spec)
     return list(seen.values())
+
+
+def _proves_address(slot: DocumentSlot) -> bool:
+    """True for a proof of address: every type it takes refers to the address."""
+    return bool(slot.options) and all(o.needs_address for o in slot.options)
 
 
 def _targets(requirements: Requirements, slot: DocumentSlot) -> dict[str, FieldSpec]:
@@ -275,6 +282,14 @@ class _Read:
             value = _clean(spec, item.get("value")) if spec else None
             if value is not None and isinstance(key, str):
                 self.values.setdefault(key, value)
+        if not self.readable:
+            # Values from a file the model could not read are guesses.
+            self.values, self.expiry, self.option, self.says_none = (
+                {},
+                None,
+                None,
+                False,
+            )
 
     def own_fields(self) -> dict[str, str]:
         prefix = f"{self.slot.name}."
@@ -362,29 +377,33 @@ def _name_warnings(
 ) -> list[VerificationDocumentWarning]:
     """The typed name against the printed one. Only boxes that hold a value
     are compared: an empty box is filled from the document instead."""
-    if not read.readable:
+    # A proof of address may print a short form of the name ("J Smith"):
+    # only the other documents are compared.
+    if not read.readable or _proves_address(read.slot):
         return []
     printed = read.printed
     what = _option_label(read.slot, read.option or chosen) or "document"
-    # Every typed name box: the form's own fields, then each document's.
-    boxes: list[tuple[str, str, str]] = []  # (role, path, value)
+    # Every typed name box, by group: the form's own fields ("") and each
+    # document's fields. A first name pairs with the last name of its group.
+    boxes: list[tuple[str, str, str, str]] = []  # (group, role, path, value)
     for spec in requirements.fields:
         role = _role(spec)
         if role:
-            boxes.append((role, spec.name, (fields.get(spec.name) or "").strip()))
+            value = (fields.get(spec.name) or "").strip()
+            boxes.append(("", role, spec.name, value))
     for slot in requirements.documents:
         doc = documents.get(slot.name)
         for spec in _slot_fields(slot):
             role = _role(spec)
             if role and doc is not None:
                 value = (doc.fields.get(spec.name) or "").strip()
-                boxes.append((role, f"{slot.name}.{spec.name}", value))
+                boxes.append((slot.name, role, f"{slot.name}.{spec.name}", value))
 
     warnings: list[VerificationDocumentWarning] = []
     if requirements.subject_type == "business":
         if not printed.business_name:
             return []
-        for role, path, value in boxes:
+        for _, role, path, value in boxes:
             if (
                 role == "company"
                 and value
@@ -405,13 +424,14 @@ def _name_warnings(
 
     if not (printed.given_names or printed.surnames):
         return []
-    givens = [(p, v) for r, p, v in boxes if r == "given"]
-    families = [(p, v) for r, p, v in boxes if r == "family"]
-    for (gpath, first), (_, last) in zip(givens, families):
+    givens = [(g, p, v) for g, r, p, v in boxes if r == "given"]
+    for group, gpath, first in givens:
+        family = next((b for b in boxes if b[0] == group and b[1] == "family"), None)
+        last = family[3] if family else ""
         if (first or last) and not name_matches(printed, first, last):
             warnings.append(
                 VerificationDocumentWarning(
-                    field=gpath,
+                    field=gpath if first or family is None else family[2],
                     kind="name",
                     message=(
                         f"Your {what} shows first name {printed.given_names} and "
