@@ -87,9 +87,12 @@ async def test_didww_attach_sets_voice_in_trunk(
             return {
                 "data": [
                     {"id": "grp-0", "attributes": {"metered_channels_count": 0}},
+                    {"id": "grp-n", "attributes": {"metered_channels_count": None}},
                     {"id": "grp-1", "attributes": {"metered_channels_count": 100}},
                 ]
             }
+        if path == "dids/did-9":
+            return {"data": {"id": "did-9", "relationships": {}}}
         return {"data": [{"id": "did-9", "attributes": {"number": "351300509184"}}]}
 
     def fake_patch(path, body, **kwargs):
@@ -133,6 +136,8 @@ async def test_didww_attach_needs_a_pay_per_minute_group(
     def fake_get(path, params=None, **kwargs):
         if path == "shared_capacity_groups":
             return {"data": [{"id": "g", "attributes": {"metered_channels_count": 0}}]}
+        if path == "dids/did-9":
+            return {"data": {"id": "did-9", "relationships": {}}}
         return {"data": [{"id": "did-9", "attributes": {"number": "351300509184"}}]}
 
     client.get.side_effect = fake_get
@@ -182,3 +187,33 @@ async def test_didww_attach_to_a_missing_did_is_a_request_error(
     assert not isinstance(exc.value, CarrierNotConfigured)
     assert exc.value.status == 404
     client.patch.assert_not_called()
+
+
+async def test_didww_attach_keeps_a_group_the_did_already_has(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An operator may have put the DID in a group with paid shared channels:
+    attaching only sets the trunk."""
+    monkeypatch.setattr(settings, "didww_api_key", "key")
+    monkeypatch.setattr(settings, "didww_voice_in_trunk_id", "trunk-1")
+    client = MagicMock()
+
+    def fake_get(path, params=None, **kwargs):
+        assert path != "shared_capacity_groups"
+        return {
+            "data": {
+                "id": "did-9",
+                "relationships": {
+                    "shared_capacity_group": {
+                        "data": {"type": "shared_capacity_groups", "id": "paid"}
+                    }
+                },
+            }
+        }
+
+    client.get.side_effect = fake_get
+    monkeypatch.setattr(didww, "didww_client", lambda: client)
+    await didww.attach_inbound_number("did-9", "+351300509184")
+    body = client.patch.call_args[0][1]
+    assert "shared_capacity_group" not in body["data"]["relationships"]
+    assert body["data"]["relationships"]["voice_in_trunk"]["data"]["id"] == "trunk-1"

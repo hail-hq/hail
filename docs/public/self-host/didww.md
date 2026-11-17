@@ -227,10 +227,12 @@ the DID when it routes calls to an agent; you create the trunk once.
    channels, and DIDWW rejects calls to a number with no capacity.
    **Phone Numbers → Capacity → Standard → Create Capacity Group**: any
    name, a number of pay-per-minute (metered) channels, for example 100.
+   Pick a pool that covers the countries you sell (Standard covers most).
    Pay-per-minute channels have no setup or monthly fee
    ([DIDWW capacity](https://doc.didww.com/phone-numbers/capacity/how-capacity-works.html)).
-   Hail puts each number it routes in the first group with pay-per-minute
-   channels; with none, routing a number fails with a setup error.
+   Hail puts each number it routes in the group with the most
+   pay-per-minute channels, unless the number is already in a group; with
+   none, routing a number fails with a setup error.
 
 `PATCH /v1/numbers/{id}` with `voice_agent_id` then assigns the DID to the
 trunk and the capacity group (`PATCH /v3/dids/{id}`, relationships

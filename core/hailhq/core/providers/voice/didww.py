@@ -703,16 +703,31 @@ def _set_voice_in_trunk_sync(
     )
 
 
-def _metered_group_sync() -> str:
-    """The account's capacity group with pay-per-minute channels. Without
-    one, no DIDWW number Hail sells can take a call."""
-    groups = didww_client().get("shared_capacity_groups").get("data", [])
-    for group in groups:
-        if (group.get("attributes") or {}).get("metered_channels_count", 0) > 0:
-            return group["id"]
-    raise CarrierNotConfigured(
-        "DIDWW has no capacity group with pay-per-minute channels"
+def _capacity_group_sync(did_id: str) -> str | None:
+    """The capacity group to put the DID in, or None to leave it as it is.
+
+    A DID already in a group keeps it: an operator may have given it paid
+    shared channels. Otherwise the account's group with the most
+    pay-per-minute channels (sorted by id on a tie, so the pick is stable).
+    Without one, no DIDWW number Hail sells can take a call."""
+    client = didww_client()
+    did = client.get(f"dids/{did_id}")["data"]
+    current = (did.get("relationships") or {}).get("shared_capacity_group") or {}
+    if current.get("data"):
+        return None
+    groups = client.get("shared_capacity_groups", params={"page[size]": 100}).get(
+        "data", []
     )
+    metered = [
+        (-((g.get("attributes") or {}).get("metered_channels_count") or 0), g["id"])
+        for g in groups
+    ]
+    metered = [m for m in metered if m[0] < 0]
+    if not metered:
+        raise CarrierNotConfigured(
+            "DIDWW has no capacity group with pay-per-minute channels"
+        )
+    return min(metered)[1]
 
 
 async def attach_inbound_number(resource_id: str | None, e164: str) -> None:
@@ -722,7 +737,7 @@ async def attach_inbound_number(resource_id: str | None, e164: str) -> None:
     def attach() -> None:
         did_id = _did_id_sync(resource_id, e164)
         _set_voice_in_trunk_sync(
-            did_id, settings.didww_voice_in_trunk_id, _metered_group_sync()
+            did_id, settings.didww_voice_in_trunk_id, _capacity_group_sync(did_id)
         )
 
     try:
