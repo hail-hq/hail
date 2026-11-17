@@ -56,21 +56,9 @@ data "aws_iam_policy_document" "main" {
     resources = ["${aws_s3_bucket.inbound.arn}/verification-kept/*"]
   }
 
-  # Deleting a kept file lists its key; the retention sweep lists a closed
-  # organization's folder.
-  statement {
-    sid       = "VerificationKeptList"
-    actions   = ["s3:ListBucket"]
-    resources = [aws_s3_bucket.inbound.arn]
-    condition {
-      test     = "StringLike"
-      variable = "s3:prefix"
-      values   = ["verification-kept/*"]
-    }
-  }
-
-  # The retention sweep lists a closed organization's folder to delete it,
-  # and the upload-link sweep an expired link's attempts.
+  # The retention sweep lists a closed organization's folders (uploaded and
+  # kept documents) to delete them, and the upload-link sweep an expired
+  # link's attempts.
   statement {
     sid       = "VerificationUploadsList"
     actions   = ["s3:ListBucket"]
@@ -78,7 +66,7 @@ data "aws_iam_policy_document" "main" {
     condition {
       test     = "StringLike"
       variable = "s3:prefix"
-      values   = ["verification-uploads/*"]
+      values   = ["verification-uploads/*", "verification-kept/*"]
     }
   }
 

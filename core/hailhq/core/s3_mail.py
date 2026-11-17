@@ -68,6 +68,22 @@ class S3MailClient:
             **extra,
         )
 
+    async def touch(
+        self, key: str, content_type: str, *, encrypt: bool = False
+    ) -> None:
+        """Copy an object onto itself, so its age (and a lifecycle rule's
+        clock) starts again. ``encrypt`` as in ``put_attachment``."""
+        extra = {"ServerSideEncryption": "AES256"} if encrypt else {}
+        await asyncio.to_thread(
+            self._client.copy_object,
+            Bucket=self._bucket,
+            Key=key,
+            CopySource={"Bucket": self._bucket, "Key": key},
+            MetadataDirective="REPLACE",
+            ContentType=content_type,
+            **extra,
+        )
+
     async def delete(self, key: str) -> None:
         await asyncio.to_thread(
             self._client.delete_object, Bucket=self._bucket, Key=key

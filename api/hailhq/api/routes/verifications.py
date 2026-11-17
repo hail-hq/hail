@@ -2571,6 +2571,8 @@ async def _file(
                 logger.exception("verification draft discard failed")
             raise _hold_402(prepared.hold_cents)
     db.add(row)
+    # The kept files a resubmit moved: (slot, key, type).
+    moved_files: list = []
     try:
         if prepared.hold_cents:
             await db.flush()
@@ -2587,15 +2589,19 @@ async def _file(
                 # The files sent again move to the new filing in the same
                 # commit, so no storage error can lose them.
                 await db.flush()
-                await db.execute(
+                moved = await db.execute(
                     update(FileUpload)
                     .where(
                         FileUpload.id.in_(list(prepared.reused.values())),
                         FileUpload.verification_id == source_id,
                     )
                     .values(verification_id=row.id)
+                    .returning(
+                        FileUpload.slot, FileUpload.s3_key, FileUpload.content_type
+                    )
                     .execution_options(synchronize_session=False)
                 )
+                moved_files = list(moved.all())
         await db.commit()
     except Exception as exc:
         # The carrier record exists but the row does not: remove it, or it
@@ -2629,11 +2635,30 @@ async def _file(
         extra=None if source_id is None else {"resubmitted_from": str(source_id)},
     )
     # Whatever the submit did: a filing the carrier refused is the one to fix.
-    await _keep_files(db, s3, row, prepared)
+    # A slot whose kept file did not move (it was deleted meanwhile) keeps
+    # the bytes just sent.
+    await _keep_files(db, s3, row, prepared, moved={slot for slot, _, _ in moved_files})
     await _delete_used_uploads(db, s3, prepared.uploads)
+    # Built now: the dismiss below may roll back, which expires the row.
+    out = _out(row, registry)
     if source_id is not None:
+        await _touch_kept(s3, moved_files)
         await _dismiss_resubmitted(db, source_id, registry, s3)
-    return _out(row, registry)
+    return out
+
+
+async def _touch_kept(s3: S3MailClient | None, files: list) -> None:
+    """Restart the bucket's expiry clock of kept files a resubmit moved: the
+    new filing keeps them 30 days from now, past the lifecycle rule counted
+    from the first upload. Best effort: on a failure the rule may delete one
+    early, and a resubmit then asks for that file again."""
+    for _, s3_key, content_type in files:
+        if s3 is None:
+            return
+        try:
+            await s3.touch(s3_key, content_type, encrypt=True)
+        except Exception as exc:
+            logger.warning("could not renew a kept file (%s)", type(exc).__name__)
 
 
 async def _take_kept_answers(db: AsyncSession, source_id: UUID) -> None:
@@ -2647,6 +2672,8 @@ async def _take_kept_answers(db: AsyncSession, source_id: UUID) -> None:
             v.id == source_id,
             v.state == "rejected",
             v.provider_refs.has_key("application"),
+            # Not past the keep window: the worker may be deleting them.
+            v.created_at > func.now() - REGISTRATION_KEPT_FOR,
         )
         .values(
             provider_refs=v.provider_refs.op("-")("application"),
@@ -2704,6 +2731,8 @@ async def _keep_files(
     s3: S3MailClient | None,
     row: CarrierVerification,
     prepared: _Prepared,
+    *,
+    moved: set[str] = frozenset(),
 ) -> None:
     """Keep encrypted copies of a number registration's files for a
     resubmit. Fails open: the filing is already with the carrier, so a
@@ -2721,7 +2750,7 @@ async def _keep_files(
         )
         for slot, doc in prepared.documents.items()
         # A kept file sent again already belongs to this filing (_file).
-        if doc.file is not None and slot not in prepared.reused
+        if doc.file is not None and slot not in moved
     ]
     if not files:
         return
@@ -4002,7 +4031,15 @@ async def _kept_hold(
             )
         )
     ).scalar_one_or_none()
-    if offer is None or offer.get("by_request"):
+    if (
+        offer is None
+        or offer.get("by_request")
+        or telephony_catalog.not_sold(
+            offer.get("provider", ""),
+            (offer.get("country_code") or "").upper(),
+            offer.get("number_type"),
+        )
+    ):
         return None
     return int(offer.get("setup_cents", 0)) + int(offer.get("monthly_cents", 0))
 

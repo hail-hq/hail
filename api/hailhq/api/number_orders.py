@@ -35,7 +35,7 @@ from hailhq.core.providers.voice import (
 )
 from hailhq.core.retention import org_closed, org_is_closed
 from hailhq.core.schemas import NumberAcquireRequest
-from sqlalchemy import and_, delete, or_, select, update
+from sqlalchemy import String, and_, cast, delete, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -1057,28 +1057,18 @@ async def purge_expired_quotes() -> int:
     carrier and the credit to set aside from it."""
     now = datetime.now(timezone.utc)
     async with session_scope() as db:
-        # Read once: a few rows, not a scan per quote.
-        kept = [
-            UUID(quote_id)
-            for quote_id in (
-                await db.execute(
-                    select(
-                        CarrierVerification.provider_refs["application"][
-                            "quote_id"
-                        ].astext
-                    ).where(
-                        CarrierVerification.purpose == "number",
-                        CarrierVerification.provider_refs["application"].has_key(
-                            "quote_id"
-                        ),
-                    )
-                )
-            ).scalars()
-            if quote_id
-        ]
+        # One uncorrelated subquery: Postgres reads the kept quotes once.
+        kept = select(
+            CarrierVerification.provider_refs["application"]["quote_id"].astext
+        ).where(
+            CarrierVerification.purpose == "number",
+            CarrierVerification.provider_refs["application"]["quote_id"].astext.is_not(
+                None
+            ),
+        )
         result = await db.execute(
             delete(NumberOffer).where(
-                NumberOffer.id.notin_(kept),
+                cast(NumberOffer.id, String).notin_(kept),
                 or_(
                     and_(
                         NumberOffer.number_id.is_(None),

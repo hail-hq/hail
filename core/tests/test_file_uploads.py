@@ -203,3 +203,13 @@ async def test_a_failed_keep_deletes_only_the_files_not_written() -> None:
             .all()
         )
         assert kept == ["a"]
+
+
+async def test_touch_copies_the_object_onto_itself() -> None:
+    client = MagicMock()
+    store = S3MailClient(client=client, bucket="b")
+    await store.touch("k", "image/png", encrypt=True)
+    kwargs = client.copy_object.call_args.kwargs
+    assert kwargs["CopySource"] == {"Bucket": "b", "Key": "k"}
+    assert kwargs["MetadataDirective"] == "REPLACE"
+    assert kwargs["ServerSideEncryption"] == "AES256"

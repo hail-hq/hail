@@ -242,7 +242,8 @@ async def delete_kept_files(
     for row_id, s3_key in rows:
         if s3 is not None:
             try:
-                await delete_upload_objects(s3, s3_key)
+                # One object per kept file, with no attempt suffix.
+                await s3.delete(s3_key)
             except Exception as exc:
                 logger.warning(
                     "could not delete kept registration file %s (%s); the "

@@ -54,6 +54,7 @@ class FakeStore:
     def __init__(self) -> None:
         self.objects: dict[str, bytes] = {}
         self.puts: list[dict] = []
+        self.touched: list[tuple[str, bool]] = []
         self.fail_put = False
 
     async def put_attachment(self, key, payload, content_type, *, encrypt=False):
@@ -64,6 +65,12 @@ class FakeStore:
 
     async def fetch_raw(self, key, *, max_bytes=None):
         return self.objects[key]
+
+    async def delete(self, key):
+        self.objects.pop(key, None)
+
+    async def touch(self, key, content_type, *, encrypt=False):
+        self.touched.append((key, encrypt))
 
     async def delete_prefix(self, prefix, *, keep=None):
         gone = [k for k in self.objects if k.startswith(prefix) and k != keep]
@@ -307,16 +314,16 @@ async def test_a_failed_object_delete_keeps_the_row_for_the_next_pass(
     vid = await _rejected(client, key, carrier)
     await _age(async_session, vid, 30)
 
-    async def down(prefix, *, keep=None):
+    async def down(key):
         raise RuntimeError("s3 down")
 
-    real = store.delete_prefix
-    store.delete_prefix = down
+    real = store.delete
+    store.delete = down
     _, files = await forget_kept_registrations(
         async_session, datetime.now(timezone.utc)
     )
     assert files == 0 and len(await _kept(async_session, vid)) == 1
-    store.delete_prefix = real
+    store.delete = real
     _, files = await forget_kept_registrations(
         async_session, datetime.now(timezone.utc)
     )
@@ -643,6 +650,8 @@ async def test_a_resubmit_moves_the_reused_files_to_the_new_filing(
     assert resp.status_code == 201, resp.text
     [after] = await _kept(async_session, resp.json()["id"])
     assert after.id == before.id and store.objects[after.s3_key]
+    # Its bucket clock starts again, as the new filing keeps it 30 days.
+    assert store.touched == [(after.s3_key, True)]
 
 
 async def test_a_resubmit_accepts_the_parts_as_filed(
