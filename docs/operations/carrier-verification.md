@@ -7,7 +7,7 @@
 Some countries require the buyer of a phone number to be verified first (ID, address, or a regulatory bundle). Hail collects the details in the console, files them with the carrier, and follows the carrier's decision. Once approved, `POST /numbers` can buy numbers of that country and type for the organization.
 
 - Twilio is the only carrier plug-in in v1. It is registered in [`core/hailhq/core/providers/verification/__init__.py`](../../core/hailhq/core/providers/verification/__init__.py) and is active whenever `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN` are set.
-- Hail stores state, opaque carrier IDs, and the name of the person or company (`subject_name`). Number verification keeps no addresses or documents. SMS registration retains submitted text fields and address privately for application repair, until 30 days after a cancel or rejection, or until the account closes, whichever comes first; document files are never kept on the verification (table `carrier_verifications`, [`core/hailhq/core/models.py`](../../core/hailhq/core/models.py)). A document sent with an upload link (`POST /v1/uploads`, then the `upload.<slot>` part) is stored until the verification is saved, then it is deleted. The GC (`core/hailhq/core/email_attachment_gc.py`, every 10 minutes) deletes any left 1 hour after upload. `POST /v1/verifications/check` runs every check before filing and saves nothing. The name is never logged.
+- Hail stores state, opaque carrier IDs, and the name of the person or company (`subject_name`). Number verification keeps the customer's answers and an encrypted copy of each file for 30 days after submit, for a resubmit (see [Kept answers and files](#kept-answers-and-files-resubmit)). SMS registration retains submitted text fields and address privately for application repair, until 30 days after a cancel or rejection, or until the account closes, whichever comes first; document files are never kept on the verification (table `carrier_verifications`, [`core/hailhq/core/models.py`](../../core/hailhq/core/models.py)). A document sent with an upload link (`POST /v1/uploads`, then the `upload.<slot>` part) is stored until the verification is saved, then it is deleted. The GC (`core/hailhq/core/email_attachment_gc.py`, every 10 minutes) deletes any left 1 hour after upload. `POST /v1/verifications/check` runs every check before filing and saves nothing. The name is never logged.
 - **At account close** (`POST /internal/org-closures`, then every background pass for each org in `org_closures`), [`close_org_carrier_items`](../../api/hailhq/api/org_close.py) first releases the org's numbers and cancels its registrations at the carrier (see [Cancel rules](#cancel-rules)). Then [`clear_closed_org_registrations`](../../core/hailhq/core/retention.py) deletes the saved answers and the text made from them (`provider_refs` keys in `REGISTRATION_ANSWER_REFS`: `application`, `application_amendment_hash`, `campaign`, `replies`, `subject_name`), `rejection_reason`, and `subject_name` (except on a live number verification, which a unique index needs named). It keeps the state, dates, carrier ids and billing keys. It logs counts only. hail-website's account deletion calls `POST /internal/org-closures`; an account deleted before that has no closure row, so nothing is cleared for it.
 - **UK (GB):** a new number verification for Telnyx GB local, mobile or toll-free cannot start (Hail sells those from Twilio only), and Telnyx GB national takes a company only (a person gets 422, `ctx.subject_types: ["business"]`). Existing rows still load, poll and cancel. Rules and reason: [number-catalog-sync.md](number-catalog-sync.md#rules-the-sync-cannot-hold).
 - **Customer-facing text never names a carrier.** Error details, docstrings (they become OpenAPI descriptions), and console copy say "the carrier", never "Twilio" or "bundle".
@@ -246,6 +246,62 @@ registration does not verify toll-free messaging.
 1. Charge per read from credits. Needs a per-read price in the website rater (prices are kept out of this repo) and a usage row the rater prices.
 2. Keep free, with the daily cap (today).
 3. Free only for workspaces that hold credits; others fill the form by hand.
+
+## Kept answers and files (resubmit)
+
+A rejected number registration (`purpose=number`) can be fixed and filed again without typing everything again:
+
+```bash
+curl -X POST https://api.hail.so/v1/verifications/$ID/resubmit \
+  -H "Authorization: Bearer $HAIL_API_KEY" \
+  -F 'fields={"first_name":"Ada","last_name":"King"}' \
+  -F 'file.proof_of_identity=@passport.jpg;type=image/jpeg'
+```
+
+What Hail keeps, from the moment of `POST /verifications`:
+
+| What                                                        | Where                                                                                                                                                                                                                                                                                                              |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Typed answers (fields, address, document options, quote id) | `carrier_verifications.provider_refs.application` (the same key US texting uses). Encrypted with Fernet and `HAIL_PROVIDER_SECRET_KEY` under `sealed`; only `schema_version` and `quote_id` stay readable. Without that key (self-host), stored as plain JSON. If the key changes, the answers read as gone (404). |
+| Each file                                                   | Mail bucket, `verification-kept/<org>/<upload id>`, written with S3 server-side encryption (`AES256`). Row in `file_uploads` with `purpose = 'verification_kept'`, `verification_id` and `slot`.                                                                                                                   |
+
+When it is deleted (whichever comes first):
+
+| Trigger                             | Answers                                                                  | Files                                                                                                                                                                                                 |
+| ----------------------------------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 30 days after submit (`created_at`) | Background pass (`forget_kept_registrations`). Reads return 404 at once. | Background pass.                                                                                                                                                                                      |
+| Carrier approves                    | At once (`_apply_status`).                                               | Right after that commit (`_refresh`); the background pass retries.                                                                                                                                    |
+| Customer cancels (`DELETE`)         | At once (`_wiped_refs`).                                                 | Right after the cancel; the background pass retries.                                                                                                                                                  |
+| Resubmit filed                      | Moved to the new row in the same commit.                                 | Files sent again move to the new row in the same commit (no copy), and each object is copied onto itself so the lifecycle clock restarts. The old row's other files are deleted after the new filing. |
+| Account close                       | `POST /internal/org-closures` and every pass.                            | Same.                                                                                                                                                                                                 |
+| Backstop                            | none                                                                     | S3 lifecycle rule `expire-verification-kept`: 32 days.                                                                                                                                                |
+
+A rejection (carrier, carrier refusal of the draft, or superadmin) keeps both. The background pass runs every `HAIL_VERIFICATION_POLL_SECONDS` (600 s). A failed S3 delete keeps the row and is retried on the next pass. A failed S3 write at submit only logs (`could not keep the files of verification <id>`); the files written before it stay kept, the filing goes ahead, and the customer adds the missing files again on a resubmit. No value or file name is ever logged.
+
+Resubmit rules ([`resubmit_verification`](../../api/hailhq/api/routes/verifications.py)):
+
+- Only a `rejected` number registration whose answers are kept (`resubmittable: true`, `kept_until` on the verification). Else 409 or 404.
+- `fields`, `address`, `documents` each replace the kept value whole. `file.<slot>` / `upload.<slot>` replace that slot's kept file; other slots reuse the kept file while they keep the document option it was filed with (a new option needs a new file). `quote_id` defaults to the kept quote. The quote purge (`purge_expired_quotes`) skips a quote a kept application names, so it works for the console's form and the resubmit for the 30 days. A 409 means that offer is no longer sold: quote again and pass the new one.
+- `purpose`, `country_code`, `number_type`, `subject_type`, `number_id` cannot change (422). `provider` is ignored, as on `POST /verifications`.
+- The new filing runs every check of `POST /verifications` (422, 402 credit hold, 409). Nothing changes on the old row unless the new one is saved. Then the old row is dismissed like `DELETE` (carrier draft discarded); if the carrier is down, it stays `rejected` with nothing kept.
+- Two resubmits at once: the first to commit takes the answers; the other gets 409 and its carrier draft is discarded.
+- `GET /verifications/{id}/application` returns the kept answers, file names (never the bytes), `quote_id` and `hold_cents` (what a resubmit sets aside), `Cache-Control: no-store`. MCP: `get_sms_application`, `resubmit_verification`.
+
+Support resubmits for a customer with the same call, using an API key of the customer's workspace (the console uses "Fix and resubmit" on the rejected row). Find kept rows:
+
+```sql
+BEGIN READ ONLY;
+SELECT v.id, v.organization_id, v.state, v.created_at + interval '30 days' AS kept_until,
+       count(f.id) AS files
+FROM carrier_verifications v
+LEFT JOIN file_uploads f ON f.verification_id = v.id AND f.purpose = 'verification_kept'
+WHERE v.purpose = 'number' AND v.provider_refs ? 'application'
+GROUP BY v.id
+ORDER BY v.created_at DESC;
+ROLLBACK;
+```
+
+Infra: the API's IAM policy needs `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject` on `verification-kept/*` and `s3:ListBucket` with that prefix ([`infra/terraform/iam.tf`](../../infra/terraform/iam.tf)), plus the lifecycle rule in [`infra/terraform/s3_mail.tf`](../../infra/terraform/s3_mail.tf). Apply the Terraform stack before or with the deploy (`cd infra && terragrunt apply`). Until then, keeping files fails open (answers are kept, files are not).
 
 ## Cancel rules
 

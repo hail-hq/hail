@@ -2,7 +2,17 @@
 carrier-side record and submit it. A superadmin can still approve a draft the
 carrier did not take at creation.
 
-Number-verification files and details pass through in memory to the carrier.
+Number-verification files and details go to the carrier. Hail also keeps
+them so a rejected filing can be fixed and sent again
+(``POST /verifications/{id}/resubmit``): the typed answers (fields, address,
+document options) in ``provider_refs.application``, encrypted with
+``HAIL_PROVIDER_SECRET_KEY`` when it is set (``_seal``), and an encrypted copy of
+each file as a ``verification_kept`` upload (``core/.../file_uploads.py``).
+Both are deleted 30 days after submit, or sooner when the registration is
+approved or cancelled or the account closes (``forget_kept_registrations``,
+run by the verification worker, plus the same deletes inline where those
+happen). ``GET /verifications/{id}/application`` returns the answers and the
+file names, never the files.
 ``POST /verifications/document-check`` (below; reading in
 ``core/.../verification/document_check.py``, files loaded by
 ``api/verification_files.py``) also sends the files to an AI model to read
@@ -10,10 +20,11 @@ them before submit. ``POST /verifications/document-cautions`` checks the
 typed form again against those reads, with no file and no model.
 SMS applications keep submitted text fields and address privately for repair;
 only the organization-scoped application endpoint returns them. Files sent as
-``file.<slot>`` parts are never stored. A document uploaded with an upload link
-(``POST /uploads``, named here as ``upload.<slot>``) is kept in the mail bucket
-until a verification using it is saved, then deleted; the GC deletes any left
-1 hour after upload. Other identifying data is not written to disk or logs, except
+``file.<slot>`` parts are stored only as the kept copies above. A document
+uploaded with an upload link (``POST /uploads``, named here as
+``upload.<slot>``) is kept in the mail bucket until a verification using it is
+saved, then deleted; the GC deletes any left 1 hour after upload. Other
+identifying data is not written to disk or logs, except
 the name of the person or company (``subject_name``), which the
 database keeps so the customer can tell verifications apart. It is never
 logged. One more exception: when the carrier rejects a verification, its own reason is
@@ -82,7 +93,13 @@ from hailhq.core.document_reads import (
     reserve_document_reads,
 )
 from hailhq.core.file_uploads import (
+    KEPT_PURPOSE,
+    REGISTRATION_KEPT_FOR,
+    KeptFile,
+    delete_kept_files,
     delete_upload_objects,
+    keep_verification_files,
+    kept_filename,
 )
 from hailhq.core.internal_webhook import (
     notify_sms_registration_changed,
@@ -133,6 +150,7 @@ from hailhq.core.retention import (
 )
 from hailhq.core.s3_mail import S3MailClient
 from hailhq.core.schemas import (
+    KeptFileInfo,
     SmsApplicationAmendRequest,
     SmsApplicationResponse,
     VerificationCheckFile,
@@ -142,6 +160,7 @@ from hailhq.core.schemas import (
     VerificationDocumentCheckResponse,
     VerificationResponse,
 )
+from hailhq.core.secret_cipher import SecretCipher
 from hailhq.core.sms_registration_gate import US_SMS_COUNTRY_CODES
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import (
@@ -152,6 +171,7 @@ from sqlalchemy import (
     cast,
     delete,
     func,
+    or_,
     select,
     text,
     update,
@@ -482,11 +502,12 @@ def _refusal_mark(
     return {DISCARD_REFUSED: mark}
 
 
-def _wiped_refs(row: CarrierVerification) -> dict:
+def _wiped_refs(row: CarrierVerification, *, rejected: bool = False) -> dict:
     """``provider_refs`` once emptied. A filing that reused a brand keeps the
     mark: the fee rater reads it on every sweep, and without it would bill
     the submission. A ``DISCARD_REFUSED`` mark stays: it names what the
-    carrier still holds."""
+    carrier still holds. A number registration keeps its answers only when
+    it is being ``rejected`` (for a resubmit), never on a cancel."""
     refs = row.provider_refs or {}
     kept = {"brand_reused": True} if refs.get("brand_reused") else {}
     if DISCARD_REFUSED in refs:
@@ -499,7 +520,32 @@ def _wiped_refs(row: CarrierVerification) -> dict:
         and not _application_expired(row, datetime.now(timezone.utc))
     ):
         kept["application"] = copy.deepcopy(refs["application"])
+    if rejected and _number_answers_kept(row, datetime.now(timezone.utc)):
+        kept["application"] = copy.deepcopy(refs["application"])
     return kept
+
+
+def _number_answers_kept(row: CarrierVerification, now: datetime) -> bool:
+    """True while a number registration's saved answers may be kept and
+    read: not approved or cancelled, and less than ``REGISTRATION_KEPT_FOR``
+    after submit (the row's ``created_at``: a resubmit is a new row)."""
+    return (
+        row.purpose == "number"
+        and isinstance((row.provider_refs or {}).get("application"), dict)
+        and row.state not in ("approved", "cancelled")
+        and row.created_at > now - REGISTRATION_KEPT_FOR
+    )
+
+
+def _number_kept_ended(now: datetime):
+    """SQL: a number registration whose kept answers and files must go now
+    (approved, cancelled, or ``REGISTRATION_KEPT_FOR`` after submit). Account
+    close is checked apart: ``org_closed``."""
+    v = CarrierVerification
+    return or_(
+        v.state.in_(("approved", "cancelled")),
+        v.created_at <= now - REGISTRATION_KEPT_FOR,
+    )
 
 
 async def _kept_brand(
@@ -754,6 +800,9 @@ def _apply_status(row: CarrierVerification, status: ProviderStatus | None) -> bo
         row.submitted_at = now
     if status.state == "approved":
         row.state, row.approved_at, row.updated_at = "approved", now, now
+        # Nothing to resubmit once approved: the answers go now, the files
+        # right after the commit (_refresh).
+        _drop_number_answers(row)
     elif status.state == "rejected":
         row.state, row.rejection_reason, row.updated_at = "rejected", status.reason, now
     elif row.state == "submitting" and status.state == "pending":
@@ -777,6 +826,92 @@ def _apply_status(row: CarrierVerification, status: ProviderStatus | None) -> bo
         return False
     _last_polled.pop(row.id, None)
     return True
+
+
+def _drop_number_answers(row: CarrierVerification) -> bool:
+    """Remove a number registration's saved answers from the row (the
+    caller commits). True when there were some."""
+    refs = row.provider_refs or {}
+    if row.purpose != "number" or "application" not in refs:
+        return False
+    row.provider_refs = {k: v for k, v in refs.items() if k != "application"}
+    flag_modified(row, "provider_refs")
+    return True
+
+
+async def _forget_kept_files(
+    db: AsyncSession,
+    verification_ids: list[UUID],
+    s3: S3MailClient | None = None,
+    *,
+    loaded: tuple[CarrierVerification, ...] = (),
+) -> int:
+    """Delete the kept files of these verifications now. Best effort: a
+    file whose delete fails stays for the verification worker, and any
+    error only logs, so the caller's request still answers. ``loaded`` are
+    rows the caller still reads: a rollback here reloads them. Commits."""
+    try:
+        return await _delete_kept_of(db, verification_ids, s3)
+    except Exception as exc:
+        await db.rollback()
+        logger.warning(
+            "could not delete kept registration files now (%s); the "
+            "verification worker tries again",
+            type(exc).__name__,
+        )
+        await _reload(db, loaded)
+        return 0
+
+
+async def _reload(db: AsyncSession, rows: tuple[CarrierVerification, ...]) -> None:
+    """Reload rows a rollback expired, for a caller that still reads them.
+    Best effort: a failed reload (the connection is gone) only logs."""
+    try:
+        for row in rows:
+            await db.refresh(row)
+    except Exception as exc:
+        await db.rollback()
+        logger.warning("could not reload verifications (%s)", type(exc).__name__)
+
+
+async def _delete_kept_of(
+    db: AsyncSession, verification_ids: list[UUID], s3: S3MailClient | None
+) -> int:
+    ids = (
+        (
+            await db.execute(
+                select(FileUpload.id).where(
+                    FileUpload.purpose == KEPT_PURPOSE,
+                    FileUpload.verification_id.in_(verification_ids),
+                    # One still being written is left to the worker, or its
+                    # object would land after its row is gone.
+                    FileUpload.uploaded_at.is_not(None),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    await db.commit()
+    if not ids:
+        return 0
+    return await delete_kept_files(db, s3 or get_s3_mail_optional(), list(ids))
+
+
+async def _forget_approved_files(
+    db: AsyncSession,
+    rows: list[CarrierVerification],
+    *,
+    loaded: list[CarrierVerification] | None = None,
+) -> None:
+    """After a poll's commit: delete the kept files of the number
+    registrations it approved (their answers went in ``_apply_status``).
+    ``loaded``: every row the caller still reads (default: ``rows``)."""
+    approved = [r for r in rows if r.purpose == "number" and r.state == "approved"]
+    if approved:
+        await _forget_kept_files(
+            db, [r.id for r in approved], loaded=tuple(loaded or rows)
+        )
 
 
 async def _settle_sms_approval(
@@ -1403,6 +1538,7 @@ async def _refresh(
     await db.commit()  # also ends the row lock
     if not changed:
         return
+    await _forget_approved_files(db, [row])
     _notify_billing([row])
     if was_submitting and row.state in ("submitted", "approved", "rejected"):
         # approved_by is set only by a superadmin's approve; an automatic
@@ -1461,6 +1597,12 @@ def _out(
             provider, SmsRegistrationProvider
         ) and provider.keeps_brand(refs)
     confirmation, step = _sms_progress(row, registry)
+    # Sealed answers need the key to read them back. Not decrypted here:
+    # this runs for every row of every list.
+    kept = _number_answers_kept(row, datetime.now(timezone.utc)) and (
+        "sealed" not in row.provider_refs["application"]
+        or bool(settings.hail_provider_secret_key)
+    )
     return model.model_validate(row).model_copy(
         update={
             "confirmation": confirmation,
@@ -1472,6 +1614,8 @@ def _out(
                 refs.get("runtime_ready") if row.purpose == "sms" else None
             ),
             "cancellable": _can_cancel(row),
+            "kept_until": (row.created_at + REGISTRATION_KEPT_FOR) if kept else None,
+            "resubmittable": kept and row.state == "rejected",
             "waiting_for_credit": credit_needed_cents is not None,
             "credit_needed_cents": credit_needed_cents,
         }
@@ -1588,6 +1732,7 @@ async def refresh_number_verifications(
         if await _poll_and_apply(db, r, st, registry, b)
     ]
     await db.commit()  # saves changes and ends the row locks
+    await _forget_approved_files(db, changed, loaded=rows)
     _notify_billing(changed)
 
 
@@ -1707,6 +1852,68 @@ def _application_record(
         },
         "address": address.model_dump() if address else None,
     }
+
+
+def _number_application_record(
+    sub: _Submission, requirements: Requirements, quote_id: UUID | None
+) -> dict | None:
+    """The private saved answers of a number registration
+    (``provider_refs.application``), for a resubmit: the form's fields, the
+    address, each slot's document option and fields, and the quote it was
+    filed for. Never the files: they are ``verification_kept`` uploads."""
+    record = _application_record(
+        sub.subject_type, requirements, sub.fields, sub.address
+    )
+    slots = {slot.name for slot in requirements.documents}
+    record["documents"] = {
+        slot: {"option": value.option, "fields": dict(value.fields)}
+        for slot, value in sub.documents.items()
+        if slot in slots
+    }
+    record["quote_id"] = str(quote_id) if quote_id else None
+    return _seal(record)
+
+
+def _seal(record: dict) -> dict | None:
+    """A number registration's saved answers as stored: the answers
+    encrypted (Fernet, ``HAIL_PROVIDER_SECRET_KEY``) under ``sealed``, with
+    only ``schema_version`` and ``quote_id`` left readable (the quote purge
+    reads it). Without the key (a self-host that did not set it) they are
+    stored as they are."""
+    if not settings.hail_provider_secret_key:
+        return record
+    plain = {k: v for k, v in record.items() if k not in ("schema_version", "quote_id")}
+    try:
+        sealed = SecretCipher(settings.hail_provider_secret_key).encrypt(
+            json.dumps(plain)
+        )
+    except Exception as exc:
+        # A key that is set but unusable: keep nothing rather than block the
+        # filing or store the answers in the clear.
+        logger.warning("could not seal registration answers (%s)", type(exc).__name__)
+        return None
+    return {
+        "schema_version": record["schema_version"],
+        "quote_id": record.get("quote_id"),
+        "sealed": sealed,
+    }
+
+
+def _unseal(application: dict) -> dict | None:
+    """The saved answers in the clear, or None when they cannot be read (the
+    key changed, or was removed). Never logs a value."""
+    if "sealed" not in application:
+        return application
+    try:
+        plain = json.loads(
+            SecretCipher(settings.hail_provider_secret_key).decrypt(
+                application["sealed"]
+            )
+        )
+    except Exception as exc:
+        logger.warning("saved registration answers unreadable (%s)", type(exc).__name__)
+        return None
+    return {**application, **plain}
 
 
 async def _sms_mobile_problems(
@@ -1913,6 +2120,12 @@ class _Prepared(NamedTuple):
     # The ``upload.<slot>`` rows read, and every file read, for the check.
     uploads: list[FileUpload]
     files: list[VerificationCheckFile]
+    # The name of each slot's file, as the customer sent it. Kept with the
+    # file's copy; never sent to the carrier, never logged.
+    names: dict[str, str]
+    # Resubmit: the kept file rows sent again, by slot. They move to the new
+    # filing instead of being copied.
+    reused: dict[str, UUID]
 
 
 async def _prepare_submission(
@@ -1923,14 +2136,20 @@ async def _prepare_submission(
     s3: S3MailClient | None,
     *,
     lock: bool,
+    form=None,
+    kept: dict[str, FileUpload] | None = None,
 ) -> _Prepared:
     """Every step of ``POST /verifications`` before anything is filed:
     the form and purpose rules, the carrier pick, the credit checks (402),
     the carrier's form (a read), the duplicate check (409), the length
     limits and the files. Shared with ``POST /verifications/check``, which
-    passes ``lock=False``: it saves nothing, so it takes no lock.
+    passes ``lock=False``: it saves nothing, so it takes no lock, and with
+    ``POST /verifications/{id}/resubmit``, which passes the ``form`` it
+    built from the kept answers and the ``kept`` files of each slot, used
+    where the request sends no file for that slot.
     """
-    form = await _parse_form(request)
+    if form is None:
+        form = await _parse_form(request)
     if _text_part(form, "subject_type") not in ("person", "business"):
         raise unprocessable(
             "subject_type is required: 'person' (you) or 'business' (your company)",
@@ -2078,6 +2297,41 @@ async def _prepare_submission(
     collected = await collect_files(
         form, sub.documents, db, principal.organization_id, s3
     )
+    uploads = list({row.id: row for row in collected.rows.values()}.values())
+    names = {
+        slot: kept_filename(getattr(form.get(f"file.{slot}"), "filename", None))
+        for slot in collected.parts
+    }
+    names.update({slot: row.filename for slot, row in collected.rows.items()})
+    reused = {
+        slot: row
+        for slot, row in (kept or {}).items()
+        if slot in sub.documents
+        and slot not in collected.rows
+        and slot not in collected.parts
+    }
+    if reused:
+        if s3 is None:
+            raise HTTPException(
+                status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="file storage is not configured on this server",
+            )
+        # fetch_files checks the 30 MB total again on the bytes read.
+        collected = collected._replace(rows={**collected.rows, **reused})
+        names.update({slot: row.filename for slot, row in reused.items()})
+        # A kept file whose object is gone (the bucket's backstop expired it)
+        # must be sent again: say which, never a 503 on every retry.
+        for slot, row in reused.items():
+            try:
+                present = await s3.count_prefix(row.s3_key, up_to=1)
+            except Exception:
+                present = 1  # unknown: fetch_files reports it
+            if not present:
+                raise unprocessable(
+                    f"Hail no longer has the file for {slot}; send it again "
+                    f"as file.{slot} or upload.{slot}",
+                    loc=["body", f"file.{slot}"],
+                )
     loaded = await fetch_files(collected, sub.documents, s3)
     documents: dict[str, DocumentInput] = {}
     files: list[VerificationCheckFile] = []
@@ -2169,8 +2423,11 @@ async def _prepare_submission(
         subject_name=subject_name,
         documents=documents,
         draft_kwargs=draft_kwargs,
-        uploads=list({row.id: row for row in collected.rows.values()}.values()),
+        # Not the kept files: they belong to the registration they came from.
+        uploads=uploads,
         files=files,
+        names=names,
+        reused={slot: row.id for slot, row in reused.items()},
     )
 
 
@@ -2237,11 +2494,34 @@ async def create_verification(
     The carrier checks the details right away. Problems come back as 422 with
     the field named, and nothing is kept. When it passes, the verification is
     submitted to the carrier for its review; read it back to follow the state.
+
+    For a number registration Hail keeps your answers (fields, address,
+    document options) and an encrypted copy of each file for 30 days after
+    submit, so a rejected filing can be fixed and sent again
+    (`POST /v1/verifications/{id}/resubmit`). They are deleted sooner when
+    the registration is approved or cancelled, or the account closes.
     A `provider` part is deprecated and ignored: Hail picks the carrier.
     """
     prepared = await _prepare_submission(
         request, principal, db, registry, s3, lock=True
     )
+    return await _file(prepared, principal, db, registry, s3)
+
+
+async def _file(
+    prepared: _Prepared,
+    principal: Principal,
+    db: AsyncSession,
+    registry: Registry,
+    s3: S3MailClient | None,
+    *,
+    source_id: UUID | None = None,
+) -> VerificationResponse:
+    """File a checked submission: the carrier draft, the row, the hold, the
+    submit, the kept files. ``source_id`` is the rejected registration a
+    resubmit files again: its kept answers are taken in the same commit as
+    the new row (only once: a second resubmit at the same time is a 409),
+    and once the new row is filed it is dismissed."""
     try:
         draft = await prepared.provider.create_draft(
             organization_id=str(principal.organization_id),
@@ -2280,6 +2560,13 @@ async def create_verification(
             prepared.sub.fields,
             prepared.sub.address,
         )
+    else:
+        # Kept privately for a resubmit (30 days, see _number_answers_kept).
+        record = _number_application_record(
+            prepared.sub, prepared.requirements, prepared.sub.quote_id
+        )
+        if record is not None:
+            draft.refs["application"] = record
 
     _stamp_campaign_filed(prepared.provider, draft.refs)
     if draft.billed_refs:
@@ -2331,6 +2618,8 @@ async def create_verification(
                 logger.exception("verification draft discard failed")
             raise _hold_402(prepared.hold_cents)
     db.add(row)
+    # The kept files a resubmit moved: (slot, key, type).
+    moved_files: list = []
     try:
         if prepared.hold_cents:
             await db.flush()
@@ -2341,6 +2630,25 @@ async def create_verification(
                 prepared.hold_cents,
                 channel="voice" if "voice" in prepared.offer["capabilities"] else "sms",
             )
+        if source_id is not None:
+            await _take_kept_answers(db, source_id)
+            if prepared.reused:
+                # The files sent again move to the new filing in the same
+                # commit, so no storage error can lose them.
+                await db.flush()
+                moved = await db.execute(
+                    update(FileUpload)
+                    .where(
+                        FileUpload.id.in_(list(prepared.reused.values())),
+                        FileUpload.verification_id == source_id,
+                    )
+                    .values(verification_id=row.id)
+                    .returning(
+                        FileUpload.slot, FileUpload.s3_key, FileUpload.content_type
+                    )
+                    .execution_options(synchronize_session=False)
+                )
+                moved_files = list(moved.all())
         await db.commit()
     except Exception as exc:
         # The carrier record exists but the row does not: remove it, or it
@@ -2370,21 +2678,179 @@ async def create_verification(
         prepared.provider,
         before=None,
         actor=actor_of(principal),
-        action="verification.submit",
+        action="verification.submit" if source_id is None else "verification.resubmit",
+        extra=None if source_id is None else {"resubmitted_from": str(source_id)},
     )
-    await _delete_used_uploads(db, s3, prepared.uploads)
-    return _out(row, registry)
+    # The filing is with the carrier: the response is built now, from the
+    # row as it stands, so no best-effort cleanup below (each may roll back,
+    # which expires the ORM objects) can turn it into an error.
+    out = _out(row, registry)
+    keeps = _keeps_files(row)
+    row_id, purpose = row.id, row.purpose
+    used = [(upload.id, upload.s3_key) for upload in prepared.uploads]
+    # Whatever the submit did: a filing the carrier refused is the one to fix.
+    # A slot whose kept file did not move (it was deleted meanwhile) keeps
+    # the bytes just sent.
+    if keeps:
+        await _keep_files(
+            db, s3, row, prepared, moved={slot for slot, _, _ in moved_files}
+        )
+    await _delete_used_uploads(db, s3, used)
+    if purpose == "number" and not keeps:
+        await _forget_kept_files(db, [row_id], s3)
+    if source_id is not None:
+        if keeps:  # else the moved files were just deleted
+            await _touch_kept(s3, moved_files)
+        await _dismiss_resubmitted(db, source_id, registry, s3)
+    return out
+
+
+def _keeps_files(row: CarrierVerification) -> bool:
+    """The one rule for what a filing keeps for a resubmit: a number
+    registration, not approved (nothing to resubmit), with its answers
+    stored (no answers, no files)."""
+    return (
+        row.purpose == "number"
+        and row.state != "approved"
+        and "application" in (row.provider_refs or {})
+    )
+
+
+async def _touch_kept(s3: S3MailClient | None, files: list) -> None:
+    """Restart the bucket's expiry clock of kept files a resubmit moved: the
+    new filing keeps them 30 days from now, past the lifecycle rule counted
+    from the first upload. Best effort: on a failure the rule may delete one
+    early, and a resubmit then asks for that file again."""
+    if s3 is None or not files:
+        return
+    results = await asyncio.gather(
+        *(s3.touch(key, content_type, encrypt=True) for _, key, content_type in files),
+        return_exceptions=True,
+    )
+    for result in results:
+        if isinstance(result, BaseException):
+            logger.warning("could not renew a kept file (%s)", type(result).__name__)
+
+
+async def _take_kept_answers(db: AsyncSession, source_id: UUID) -> None:
+    """In the new filing's transaction: remove the kept answers from the
+    registration a resubmit files again. 409 when another resubmit took
+    them first, or it is no longer rejected."""
+    v = CarrierVerification
+    taken = await db.execute(
+        update(v)
+        .where(
+            v.id == source_id,
+            v.state == "rejected",
+            v.provider_refs.has_key("application"),
+            # Not past the keep window: the worker may be deleting them.
+            v.created_at > func.now() - REGISTRATION_KEPT_FOR,
+        )
+        .values(
+            provider_refs=v.provider_refs.op("-")("application"),
+            updated_at=func.now(),
+        )
+        .execution_options(synchronize_session=False)
+    )
+    if taken.rowcount != 1:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail=(
+                "This registration was already sent again or changed. Refresh "
+                "the list of verifications."
+            ),
+        )
+
+
+async def _dismiss_resubmitted(
+    db: AsyncSession,
+    source_id: UUID,
+    registry: Registry,
+    s3: S3MailClient | None,
+) -> None:
+    """After a resubmit is filed: delete the old registration's kept files
+    and dismiss it (as ``DELETE /verifications/{id}``: the carrier's copy
+    of the rejected filing is discarded). Best effort: the new filing
+    stands, so a failure only logs. An outage leaves the old row rejected,
+    with nothing kept; the customer can dismiss it later."""
+    try:
+        await _forget_kept_files(db, [source_id], s3)
+        source = await db.get(CarrierVerification, source_id)
+        if source is None:
+            return
+        await org_lock(db, source.organization_id)
+        await db.refresh(source, with_for_update=True)
+        if source.state != "rejected":
+            await db.commit()
+            return
+        await cancel_locked(
+            db, source, registry(source.provider, source.purpose), mark_refused=True
+        )
+        await db.commit()
+        _notify_billing([source])
+    except Exception as exc:
+        await db.rollback()
+        logger.warning(
+            "could not dismiss resubmitted verification %s (%s)",
+            source_id,
+            type(exc).__name__,
+        )
+
+
+async def _keep_files(
+    db: AsyncSession,
+    s3: S3MailClient | None,
+    row: CarrierVerification,
+    prepared: _Prepared,
+    *,
+    moved: set[str] = frozenset(),
+) -> None:
+    """Keep encrypted copies of a number registration's files for a
+    resubmit. Fails open: the filing is already with the carrier, so a
+    storage error only logs (ids and the error type, never a name) and the
+    customer adds the files again on a resubmit. No bucket: nothing kept."""
+    if not _keeps_files(row) or s3 is None:
+        return
+    files = [
+        KeptFile(
+            slot=slot,
+            filename=prepared.names.get(slot, ""),
+            content_type=doc.file.content_type,
+            data=doc.file.data,
+        )
+        for slot, doc in prepared.documents.items()
+        # A kept file sent again already belongs to this filing (_file).
+        if doc.file is not None and slot not in moved
+    ]
+    if not files:
+        return
+    verification_id = row.id
+    try:
+        await keep_verification_files(
+            db, s3, row.organization_id, verification_id, files
+        )
+    except Exception as exc:
+        await db.rollback()
+        logger.warning(
+            "could not keep the files of verification %s (%s); the filing "
+            "went ahead",
+            verification_id,
+            type(exc).__name__,
+        )
+        # The caller built its response before this: nothing reads the
+        # rows the rollback expired.
 
 
 async def _delete_used_uploads(
-    db: AsyncSession, s3: S3MailClient | None, uploads: list[FileUpload]
+    db: AsyncSession,
+    s3: S3MailClient | None,
+    targets: list[tuple[UUID, str]],
 ) -> None:
-    """Delete the uploads a saved verification used. Best effort: the GC
-    removes any left after ``VERIFICATION_UPLOAD_TTL``."""
-    if not uploads or s3 is None:
+    """Delete the uploads a saved verification used, given as plain
+    ``(id, s3_key)`` values (a rollback expires ORM objects). Best effort:
+    the GC removes any left after ``VERIFICATION_UPLOAD_TTL``."""
+    if not targets or s3 is None:
         return
-    # Plain values first: a rollback below expires the ORM objects.
-    targets = [(upload.id, upload.s3_key) for upload in uploads]
     results = await asyncio.gather(
         *(delete_upload_objects(s3, s3_key) for _, s3_key in targets),
         return_exceptions=True,
@@ -3161,7 +3627,7 @@ async def _reject_row(
         return "kept"
     # Wiped before the state moves: the row has not ended yet, so its
     # answers are kept however long it waited.
-    row.provider_refs = {**_wiped_refs(row), **refused}
+    row.provider_refs = {**_wiped_refs(row, rejected=True), **refused}
     row.state, row.rejection_reason = "rejected", reason
     row.approved_by = None
     row.updated_at = datetime.now(timezone.utc)
@@ -3234,12 +3700,86 @@ async def sweep_verifications(db: AsyncSession, registry: Registry) -> dict[str,
     forgotten = await forget_old_applications(db, now)
     # Last: a refresh above may have written a closed org's answers back.
     closed = await clear_closed_org_registrations(db, now)
+    kept_answers, kept_files = await forget_kept_registrations(db, now)
     return {
         "submitted": submitted,
         "refreshed": refreshed,
         "forgotten": forgotten,
         "closed": closed,
+        "kept_answers_deleted": kept_answers,
+        "kept_files_deleted": kept_files,
     }
+
+
+# A kept file still without ``uploaded_at`` this long after its row was made
+# was cut off before or during its S3 write.
+_KEPT_WRITE_CUT_OFF_AFTER = timedelta(hours=1)
+
+
+async def forget_kept_registrations(
+    db: AsyncSession,
+    now: datetime,
+    s3: S3MailClient | None = None,
+    organization_id: UUID | None = None,
+) -> tuple[int, int]:
+    """Delete the answers and files a number registration keeps for a
+    resubmit once they must go: approved, cancelled, ``REGISTRATION_KEPT_FOR``
+    after submit, or the account closed (one org when ``organization_id`` is
+    given). A kept file also goes once its registration has no answers left
+    (a resubmit took them, or a delete above), and when its write was cut
+    off. The inline deletes (approval, cancel, resubmit) are the fast path;
+    this is the rule. Returns (rows that lost answers, files deleted). Never
+    logs a value."""
+    v = CarrierVerification
+    must_go = or_(_number_kept_ended(now), org_closed(v.organization_id, now))
+    answers = (
+        update(v)
+        .where(
+            v.purpose == "number",
+            v.provider_refs.has_key("application"),
+            must_go,
+        )
+        .values(provider_refs=v.provider_refs.op("-")("application"))
+        .execution_options(synchronize_session=False)
+    )
+    if organization_id is not None:
+        answers = answers.where(v.organization_id == organization_id)
+    forgotten = (await db.execute(answers)).rowcount or 0
+    await db.commit()
+
+    f = FileUpload
+    files = (
+        select(f.id, f.verification_id)
+        .join(v, v.id == f.verification_id)
+        .where(
+            f.purpose == KEPT_PURPOSE,
+            or_(
+                f.uploaded_at.is_not(None),
+                f.created_at <= now - _KEPT_WRITE_CUT_OFF_AFTER,
+            ),
+            or_(
+                must_go,
+                ~v.provider_refs.has_key("application"),
+                f.uploaded_at.is_(None),
+            ),
+        )
+    )
+    if organization_id is not None:
+        files = files.where(f.organization_id == organization_id)
+    picked = (await db.execute(files)).all()
+    await db.commit()
+    deleted = (
+        await delete_kept_files(
+            db,
+            s3 or get_s3_mail_optional(),
+            [file_id for file_id, _ in picked],
+            # A resubmit may have moved one to its new filing meanwhile.
+            verification_ids=list({vid for _, vid in picked}),
+        )
+        if picked
+        else 0
+    )
+    return forgotten, deleted
 
 
 async def forget_old_applications(db: AsyncSession, now: datetime) -> int:
@@ -3396,6 +3936,7 @@ async def list_verifications(
     ]
     if asked:
         await db.commit()  # saves changes and ends the row locks
+    await _forget_approved_files(db, changed, loaded=rows)
     _notify_billing(changed)
     for row in sorted(gated, key=lambda r: r.created_at):  # oldest first
         await _refresh(db, row, registry)
@@ -3433,9 +3974,19 @@ async def get_verification_application(
     db: Annotated[AsyncSession, Depends(get_session)],
     registry: Annotated[Registry, Depends(get_verification_registry)],
 ) -> SmsApplicationResponse:
-    """Read your organization's saved SMS answers, including after rejection.
-    Answers of a cancelled or rejected registration are kept for 30 days
-    after it ended; after that this returns 404.
+    """Read your organization's saved answers, including after rejection.
+
+    A number registration (`purpose=number`) keeps its answers (fields,
+    address, document options) and its files for 30 days after submit, so a
+    rejected filing can be fixed and sent again
+    (`POST /v1/verifications/{id}/resubmit`). They are deleted sooner when
+    it is approved or cancelled, or the account closes; then this returns
+    404. `files` lists the kept files by name; their bytes are never
+    returned.
+
+    For US texting (`purpose=sms`): answers of a cancelled or rejected
+    registration are kept for 30 days after it ended; after that this
+    returns 404.
 
     Older applications may recover their verified sender identity through
     read-only provider calls; a 404 asks for original details and support when
@@ -3443,6 +3994,12 @@ async def get_verification_application(
     fields or addresses. No records are filed or charged here.
     """
     row = await _org_row_or_404(db, principal, verification_id)
+    if row.purpose == "number":
+        response.headers["Cache-Control"] = "no-store"
+        # An approval the carrier made since the last poll deletes the
+        # answers: never return them after it.
+        await _refresh(db, row, registry)
+        return await _number_application(db, row, principal)
     # Answers past APPLICATION_KEPT_FOR are gone, even before the background
     # pass deletes them, and are not rebuilt from the carrier either.
     expired = _application_expired(row, datetime.now(timezone.utc))
@@ -3483,6 +4040,101 @@ async def get_verification_application(
         )
     response.headers["Cache-Control"] = "no-store"
     return SmsApplicationResponse.model_validate(application)
+
+
+async def _kept_rows(db: AsyncSession, row: CarrierVerification) -> list[FileUpload]:
+    """The kept files of a number registration, written in full."""
+    return list(
+        (
+            await db.execute(
+                select(FileUpload)
+                .where(
+                    FileUpload.purpose == KEPT_PURPOSE,
+                    FileUpload.verification_id == row.id,
+                    FileUpload.uploaded_at.is_not(None),
+                )
+                .order_by(FileUpload.slot)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+def _no_kept_answers() -> HTTPException:
+    return HTTPException(
+        status_code=404,
+        detail=(
+            "Hail no longer keeps the answers of this registration. Start a "
+            "new one with POST /v1/verifications."
+        ),
+    )
+
+
+async def _number_application(
+    db: AsyncSession, row: CarrierVerification, principal: Principal
+) -> SmsApplicationResponse:
+    """A number registration's kept answers and file names, or 404."""
+    if not _number_answers_kept(row, datetime.now(timezone.utc)):
+        raise _no_kept_answers()
+    application = _unseal(row.provider_refs["application"])
+    if application is None:
+        raise _no_kept_answers()
+    return SmsApplicationResponse.model_validate(
+        {
+            "schema_version": application.get("schema_version", 1),
+            "subject_type": application.get("subject_type", row.subject_type),
+            "fields": application.get("fields") or {},
+            "address": application.get("address"),
+            "documents": application.get("documents") or {},
+            "files": [
+                KeptFileInfo(
+                    slot=kept.slot or "",
+                    filename=kept.filename,
+                    content_type=kept.content_type,
+                    size_bytes=kept.size_bytes or 0,
+                )
+                for kept in await _kept_rows(db, row)
+            ],
+            "kept_until": row.created_at + REGISTRATION_KEPT_FOR,
+            "quote_id": application.get("quote_id"),
+            # A shared key sets nothing aside, as on create.
+            "hold_cents": (
+                None
+                if principal.auth_kind == "shared"
+                else await _kept_hold(db, row, application.get("quote_id"))
+            ),
+        }
+    )
+
+
+async def _kept_hold(
+    db: AsyncSession, row: CarrierVerification, quote_id: str | None
+) -> int | None:
+    """What a resubmit with the kept quote sets aside, as create does: setup
+    and the first month, nothing for a by-request offer. None when the quote
+    is gone."""
+    if not quote_id:
+        return None
+    offer = (
+        await db.execute(
+            select(NumberOffer.offer).where(
+                NumberOffer.id == UUID(quote_id),
+                NumberOffer.organization_id == row.organization_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if (
+        offer is None
+        or offer.get("by_request")
+        or telephony_catalog.not_sold(
+            offer.get("provider", ""),
+            (offer.get("country_code") or "").upper(),
+            offer.get("number_type"),
+        )
+    ):
+        return None
+    return int(offer.get("setup_cents", 0)) + int(offer.get("monthly_cents", 0))
 
 
 @router.patch(
@@ -3613,6 +4265,143 @@ async def amend_sms_application(
     return await _out_checked(db, row, registry)
 
 
+# The parts a resubmit may not change: they stay as filed. Other parts are
+# ignored, as on ``POST /verifications`` (``provider`` too).
+_RESUBMIT_FIXED = (
+    "purpose",
+    "country_code",
+    "number_type",
+    "subject_type",
+    "number_id",
+)
+
+
+@router.post(
+    "/{verification_id}/resubmit",
+    response_model=VerificationResponse,
+    status_code=http_status.HTTP_201_CREATED,
+    operation_id="resubmit_verification",
+    responses={
+        402: {
+            "description": (
+                "Not enough credit for the offer's setup and first month. "
+                "Nothing is filed and the rejected registration is unchanged."
+            ),
+        },
+        404: {"description": "Not found, or Hail no longer keeps its answers."},
+        409: {
+            "description": (
+                "Not a rejected number registration, or it was already sent "
+                "again. Nothing is filed."
+            ),
+        },
+    },
+)
+async def resubmit_verification(
+    verification_id: UUID,
+    request: Request,
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+    registry: Annotated[Registry, Depends(get_verification_registry)],
+    s3: Annotated[S3MailClient | None, Depends(get_s3_mail_optional)],
+) -> VerificationResponse:
+    """Fix a rejected number registration and file it again
+    (multipart/form-data), without typing everything again.
+
+    Hail keeps a number registration's answers and files for 30 days after
+    submit (`kept_until` on the verification; read them with
+    `GET /v1/verifications/{id}/application`). This files a new
+    registration from them, with your changes. Every part is optional:
+
+    * `fields` (JSON object), `address` (JSON object) and `documents` (JSON
+      object: slot name to `{"option": ..., "fields": {...}}`) each replace
+      the kept value whole when sent;
+    * `file.<slot>`, or `upload.<slot>` (an upload id, as in
+      `POST /v1/verifications`), replaces the kept file of that slot. A slot
+      with no new file reuses the kept one, while it keeps the document
+      `option` it was filed with (a new option needs a new file). A kept
+      file whose slot is no longer in `documents` is not sent;
+    * `quote_id`: the offer to verify for. Default: the quote of the
+      rejected filing, which Hail keeps while the answers are kept. Pass a
+      new one for a newer price, or when that offer is no longer sold (409).
+
+    The purpose, country, number type and subject type stay as filed:
+    sending one of them with another value is a 422. The new registration goes through every check of
+    `POST /v1/verifications` (422, 402, 409, the credit set aside) and
+    answers the same way, as a new verification with its own id. Once it is
+    filed, the rejected one is dismissed (as `DELETE /v1/verifications/{id}`)
+    and its kept answers and files are deleted. Only one resubmit of a
+    registration can succeed; another one sent at the same time is a 409.
+    """
+    source = await _org_row_or_404(db, principal, verification_id)
+    if source.purpose != "number" or source.state != "rejected":
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail="Only a rejected number registration can be sent again.",
+        )
+    if not _number_answers_kept(source, datetime.now(timezone.utc)):
+        raise _no_kept_answers()
+    sent = await _parse_form(request)
+    filed = {
+        "purpose": "number",
+        "country_code": source.country_code,
+        "number_type": source.number_type,
+        "subject_type": source.subject_type,
+        "number_id": "",
+    }
+    for key in _RESUBMIT_FIXED:
+        value = _text_part(sent, key)
+        if value and value.upper() != filed[key].upper():
+            raise unprocessable(
+                f"{key} cannot be changed on a resubmit", loc=["body", key]
+            )
+    saved = _unseal(source.provider_refs["application"])
+    if saved is None:
+        raise _no_kept_answers()
+
+    def part(name: str, kept_value) -> str:
+        value = _text_part(sent, name)
+        return value if value != "" else json.dumps(kept_value)
+
+    form: dict = {
+        "purpose": "number",
+        "country_code": source.country_code,
+        "number_type": source.number_type,
+        "subject_type": source.subject_type,
+        "quote_id": _text_part(sent, "quote_id") or saved.get("quote_id") or "",
+        "fields": part("fields", saved.get("fields") or {}),
+        "address": part("address", saved.get("address")),
+        "documents": part("documents", saved.get("documents") or {}),
+    }
+    for key in sent:
+        if key.startswith(("file.", "upload.")):
+            form[key] = sent.get(key)
+    # A kept file goes again only for a slot that keeps the document type it
+    # was filed with: a new type needs a new file.
+    options = {
+        slot: (value or {}).get("option")
+        for slot, value in (saved.get("documents") or {}).items()
+    }
+    try:
+        new_options = {
+            slot: (value or {}).get("option")
+            for slot, value in json.loads(form["documents"]).items()
+            if isinstance(value, dict)
+        }
+    except (TypeError, ValueError, AttributeError):
+        new_options = {}  # _prepare_submission answers 422 for it
+    kept = {
+        row.slot: row
+        for row in await _kept_rows(db, source)
+        if row.slot and new_options.get(row.slot) == options.get(row.slot)
+    }
+    source_id = source.id
+    prepared = await _prepare_submission(
+        request, principal, db, registry, s3, lock=True, form=form, kept=kept
+    )
+    return await _file(prepared, principal, db, registry, s3, source_id=source_id)
+
+
 def _can_cancel(row: CarrierVerification) -> bool:
     if row.state in ("awaiting_review", "rejected"):
         return True
@@ -3692,6 +4481,9 @@ async def cancel_verification(
         ) from exc
     await db.commit()
     _notify_billing([row])
+    if row.purpose == "number":
+        # The answers went with the cancel (_wiped_refs); the files now.
+        await _forget_kept_files(db, [row.id], loaded=(row,))
     if approved_sms:
         actor_user_id, actor_kind = actor_of(principal)
         await write_audit_log(
@@ -4052,8 +4844,9 @@ async def admin_reject(
             row.updated_at = datetime.now(timezone.utc)
             await _commit_and_notify(db, row, before)
             raise _carrier_unavailable() from exc
-    # Wiped before the state moves (see _reject_row).
-    row.provider_refs = {**_wiped_refs(row), **refused}
+    # Wiped before the state moves (see _reject_row). The customer's answers
+    # stay, to fix and resubmit.
+    row.provider_refs = {**_wiped_refs(row, rejected=True), **refused}
     row.state, row.rejection_reason = "rejected", body.reason
     row.updated_at = datetime.now(timezone.utc)
     await _release_number_hold(db, row)

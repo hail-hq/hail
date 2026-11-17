@@ -244,8 +244,8 @@ consent screenshots. If you
 write the API's bucket policy by hand instead of with the module, copy the
 statements in [`infra/terraform/iam.tf`](https://github.com/hail-hq/hail/blob/main/infra/terraform/iam.tf).
 Copy all of them. Besides the inbound mail folders, the API gets, puts and
-deletes objects under `outbound-attachments/*`, `verification-uploads/*` and
-`sms-evidence/*`, and lists those three folders. `s3:ListBucket` is granted
+deletes objects under `outbound-attachments/*`, `verification-uploads/*`,
+`verification-kept/*` and `sms-evidence/*`, and lists those four folders. `s3:ListBucket` is granted
 on the bucket ARN itself (not on an object path), with a `StringLike`
 condition on `s3:prefix`, as in that file.
 

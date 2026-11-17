@@ -57,6 +57,7 @@ _DESTRUCTIVE = {
     "delete_agent",
     "acquire_number",
     "submit_verification",
+    "resubmit_verification",
     "amend_sms_application",
     "cancel_verification",
 }
@@ -69,6 +70,7 @@ _OPEN_WORLD_WRITES = {
     "release_number",
     "acquire_number",
     "submit_verification",
+    "resubmit_verification",
     "amend_sms_application",
     "cancel_verification",
     "confirm_verification",
@@ -76,7 +78,7 @@ _OPEN_WORLD_WRITES = {
     "check_verification_documents",
 }
 
-_EXPECTED_COUNT = 45
+_EXPECTED_COUNT = 46
 
 
 async def test_tool_count(tools_by_name) -> None:
@@ -187,7 +189,11 @@ async def test_destructive_set_is_exact(tools_by_name) -> None:
     }
     assert got == _DESTRUCTIVE
     # Not idempotent: a repeat submits again or fails.
-    not_idempotent = {"submit_verification", "cancel_verification"}
+    not_idempotent = {
+        "submit_verification",
+        "resubmit_verification",
+        "cancel_verification",
+    }
     for name in _DESTRUCTIVE:
         a = tools_by_name[name].annotations
         assert a.idempotent_hint is (name not in not_idempotent), name

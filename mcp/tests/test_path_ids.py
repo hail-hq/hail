@@ -121,6 +121,7 @@ def test_the_id_method_list_is_the_expected_one() -> None:
         "get_verification",
         "get_sms_application",
         "amend_sms_application",
+        "resubmit_verification",
         "cancel_verification",
         "confirm_verification",
         "get_email",
@@ -150,6 +151,7 @@ async def test_hostile_id_raises_before_sending(
 
 _TOOL_CASES = [
     ("cancel_verification", "verification_id", {}),
+    ("resubmit_verification", "verification_id", {"attest_authorized": True}),
     ("confirm_verification", "verification_id", {"code": "123456"}),
     ("get_verification", "verification_id", {}),
     ("get_sms_application", "verification_id", {}),

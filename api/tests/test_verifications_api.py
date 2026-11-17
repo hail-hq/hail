@@ -71,6 +71,13 @@ from twilio.base.exceptions import TwilioRestException
 from .conftest import insert_org_and_key
 
 
+def _ids(refs: dict) -> dict:
+    """The carrier's own keys of ``provider_refs``: without the saved
+    answers (``application``), which ride along in the refs a plug-in gets
+    and which no plug-in reads."""
+    return {k: v for k, v in refs.items() if k != "application"}
+
+
 class FakeCarrier(VerificationProvider):
     name = "fake"
 
@@ -114,7 +121,7 @@ class FakeCarrier(VerificationProvider):
         return self.check_problems
 
     async def submit(self, refs):
-        self.submitted.append(refs)
+        self.submitted.append(_ids(refs))
 
     async def status(self, refs):
         return self.remote_status
@@ -123,7 +130,7 @@ class FakeCarrier(VerificationProvider):
         return {"verification_id": refs["bundle_sid"], "address_id": None}
 
     async def discard(self, refs):
-        self.discarded.append(refs)
+        self.discarded.append(_ids(refs))
 
     def subject_name(self, requirements, fields, address, documents):
         return display_name(fields.get("first_name"), fields.get("last_name"))
@@ -467,7 +474,7 @@ async def test_requires_auth(client) -> None:
 # -- create ---------------------------------------------------------------
 
 
-async def test_create_stores_state_refs_and_the_name_only(
+async def test_create_stores_state_refs_the_name_and_the_kept_answers(
     client, org_and_key, carrier, async_session
 ) -> None:
     org_id, _, key = org_and_key
@@ -489,11 +496,24 @@ async def test_create_stores_state_refs_and_the_name_only(
     assert file.filename == "upload"  # the customer's file name is dropped
 
     row = (await async_session.execute(select(CarrierVerification))).scalar_one()
-    assert row.provider_refs == {"bundle_sid": "B1"}
-    # The name is the one personal value kept; nothing else from the form.
+    assert _ids(row.provider_refs) == {"bundle_sid": "B1"}
+    # The answers are kept for a resubmit, in one private key; never the file.
+    assert row.provider_refs["application"] == {
+        "schema_version": 1,
+        "subject_type": "person",
+        "fields": {"first_name": "Ada", "last_name": "Lovelace"},
+        "address": None,
+        "documents": {"proof_of_identity": {"option": "passport", "fields": {}}},
+        "quote_id": _QUOTE_ID,
+    }
     assert row.subject_name == "Ada Lovelace"
-    stored = " ".join(str(v) for k, v in vars(row).items() if k != "subject_name")
+    stored = " ".join(
+        str(v)
+        for k, v in vars(row).items()
+        if k not in ("subject_name", "provider_refs")
+    )
     assert "Ada" not in stored and "Lovelace" not in stored and "jpeg" not in stored
+    assert "jpeg" not in str(row.provider_refs)
 
 
 async def test_create_returns_field_problems_and_stores_nothing(
@@ -996,7 +1016,7 @@ async def test_cancel_is_refused_while_under_review(
     assert resp.status_code == 409 and "under review" in resp.json()["detail"]
     assert carrier.discarded == []
     row = await async_session.get(CarrierVerification, uuid.UUID(vid))
-    assert row.state == "submitted" and row.provider_refs == {"bundle_sid": "B1"}
+    assert row.state == "submitted" and _ids(row.provider_refs) == {"bundle_sid": "B1"}
 
 
 async def test_rejected_verification_can_be_dismissed(
@@ -2029,7 +2049,14 @@ async def test_sweeper_submits_waiting_drafts_and_pulls_decisions(
         async_session,
         lambda name, purpose="number": carrier if name == "fake" else None,
     )
-    assert counts == {"submitted": 0, "refreshed": 0, "forgotten": 0, "closed": 0}
+    assert counts == {
+        "submitted": 0,
+        "refreshed": 0,
+        "forgotten": 0,
+        "closed": 0,
+        "kept_answers_deleted": 0,
+        "kept_files_deleted": 0,
+    }
     assert carrier.submitted == []
     await _set_state(async_session, waiting, "awaiting_review", age_s=3 * 60)
     carrier.remote_status = ProviderStatus(state="approved")
@@ -2123,10 +2150,19 @@ async def test_sweeper_keeps_a_refused_draft_when_the_discard_fails(
         async_session,
         lambda name, purpose="number": carrier if name == "fake" else None,
     )
-    assert counts == {"submitted": 0, "refreshed": 0, "forgotten": 0, "closed": 0}
+    assert counts == {
+        "submitted": 0,
+        "refreshed": 0,
+        "forgotten": 0,
+        "closed": 0,
+        "kept_answers_deleted": 0,
+        "kept_files_deleted": 0,
+    }
     row = await async_session.get(CarrierVerification, uuid.UUID(vid))
     await async_session.refresh(row)
-    assert row.state == "awaiting_review" and row.provider_refs == {"bundle_sid": "B1"}
+    assert row.state == "awaiting_review" and _ids(row.provider_refs) == {
+        "bundle_sid": "B1"
+    }
     assert (
         await async_session.execute(
             select(AuditLog).where(AuditLog.action == "verification.reject")
@@ -2192,7 +2228,7 @@ async def test_a_check_that_fails_partway_keeps_only_the_ids_it_added(
     )
     row = await async_session.get(CarrierVerification, uuid.UUID(vid))
     await async_session.refresh(row)
-    assert row.provider_refs == {"bundle_sid": "B1", "filed_id": "F1"}
+    assert _ids(row.provider_refs) == {"bundle_sid": "B1", "filed_id": "F1"}
 
 
 async def test_a_discard_that_fails_partway_keeps_the_ids_it_added(
@@ -2218,7 +2254,7 @@ async def test_a_discard_that_fails_partway_keeps_the_ids_it_added(
     row = await async_session.get(CarrierVerification, uuid.UUID(vid))
     await async_session.refresh(row)
     assert row.state == "awaiting_review"
-    assert row.provider_refs == {"bundle_sid": "B1", "deleting_id": "D1"}
+    assert _ids(row.provider_refs) == {"bundle_sid": "B1", "deleting_id": "D1"}
 
 
 @pytest.mark.parametrize(
@@ -2252,10 +2288,10 @@ async def test_ids_check_wrote_survive_a_failed_or_cut_discard(
     if not isinstance(fail, asyncio.CancelledError):
         await sweep_verifications(async_session, registry)
         # The row in memory matches the saved one, not discard()'s half.
-        assert row.provider_refs == {"bundle_sid": "B1", "filed_id": "F1"}
+        assert _ids(row.provider_refs) == {"bundle_sid": "B1", "filed_id": "F1"}
     await async_session.refresh(row)
     assert row.state == "awaiting_review"
-    assert row.provider_refs == {"bundle_sid": "B1", "filed_id": "F1"}
+    assert _ids(row.provider_refs) == {"bundle_sid": "B1", "filed_id": "F1"}
 
 
 async def test_a_refused_submit_discards_the_refs_as_they_are_now(
@@ -2316,7 +2352,7 @@ async def test_ids_submit_wrote_survive_a_failed_or_cut_discard(
         await sweep_verifications(async_session, registry)
     row = await async_session.get(CarrierVerification, uuid.UUID(vid))
     await async_session.refresh(row)
-    assert row.provider_refs == {"bundle_sid": "B1", "filed_id": "F1"}
+    assert _ids(row.provider_refs) == {"bundle_sid": "B1", "filed_id": "F1"}
     # A failed discard waits for the next try; a cut one is left
     # 'submitting', for _refresh to settle.
     cut_off = isinstance(fail, asyncio.CancelledError)
@@ -5698,7 +5734,7 @@ async def test_a_sweeper_check_that_fails_keeps_the_ids_it_wrote(
     row = await async_session.get(CarrierVerification, uuid.UUID(vid))
     await async_session.refresh(row)
     assert row.state == "awaiting_review"
-    assert row.provider_refs == {"bundle_sid": "B1", "filed_id": "F1"}
+    assert _ids(row.provider_refs) == {"bundle_sid": "B1", "filed_id": "F1"}
 
 
 @pytest.mark.usefixtures("us_number")
@@ -7113,7 +7149,7 @@ async def test_a_superadmin_reject_whose_discard_fails_answers_502(
     row = await async_session.get(CarrierVerification, uuid.UUID(vid))
     await async_session.refresh(row)
     assert row.state == "awaiting_review"
-    assert row.provider_refs == {"bundle_sid": "B1", "filed_id": "F1"}
+    assert _ids(row.provider_refs) == {"bundle_sid": "B1", "filed_id": "F1"}
     assert (
         await async_session.execute(
             select(AuditLog).where(AuditLog.action == "verification.reject")
@@ -7172,7 +7208,7 @@ async def test_a_status_poll_that_fails_partway_keeps_only_the_ids_it_added(
     row = await async_session.get(CarrierVerification, uuid.UUID(vid))
     await async_session.refresh(row)
     assert row.state == "submitted"
-    assert row.provider_refs == {"bundle_sid": "B1", "campaign_id": "C1"}
+    assert _ids(row.provider_refs) == {"bundle_sid": "B1", "campaign_id": "C1"}
 
 
 @pytest.mark.usefixtures("us_number")

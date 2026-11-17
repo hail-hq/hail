@@ -28,8 +28,10 @@ explicit replacement for that cascade. Unlike Call/Sms/Email, contacts have
 no separate "content" field to scrub — a ``Contact`` row *is* identifying
 data (name, phone, email) — so it's deleted outright, not content-cleared.
 
-Also clears the US texting registration answers on ``carrier_verifications``
-at close, with no 12-month wait: see ``clear_closed_org_registrations``.
+Also clears the registration answers on ``carrier_verifications`` at close,
+with no 12-month wait: see ``clear_closed_org_registrations``. The files a
+number registration kept for a resubmit go at close too
+(``hailhq.api.routes.verifications.forget_kept_registrations``).
 
 Run as a one-shot script::
 
@@ -85,8 +87,9 @@ RETENTION_PERIOD_AFTER_CLOSURE = timedelta(days=365)
 
 
 # The ``provider_refs`` keys that hold what the customer typed into a US
-# texting registration, or text made from it: the answers (names, address,
-# tax ID, contacts), a hash of the last amendment, the texting program text,
+# texting registration or a number registration, or text made from it: the
+# answers (names, address, tax ID, contacts; a number registration's
+# document options too), a hash of the last amendment, the texting program text,
 # the filed STOP/HELP replies (sender name, contact email) and the sender
 # name. Every other key is a carrier id, a flag or a time
 # (core/tests/test_retention.py checks the list).

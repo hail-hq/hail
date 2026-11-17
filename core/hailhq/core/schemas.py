@@ -3109,8 +3109,30 @@ class Address(BaseModel):
     country_code: str = Field(description="ISO alpha-2 address country.")
 
 
+class KeptDocumentAnswer(BaseModel):
+    """A document slot's saved choice on a number registration."""
+
+    option: str = Field(default="", description="The document option chosen.")
+    fields: dict[str, str] = Field(
+        default_factory=dict, description="The document's typed fields."
+    )
+
+
+class KeptFileInfo(BaseModel):
+    """A file Hail keeps for a resubmit. The bytes are never returned."""
+
+    slot: str = Field(description="The document slot it was filed for.")
+    filename: str = Field(description="The file name as it was sent.")
+    content_type: str = Field(
+        description="'image/jpeg', 'image/png' or 'application/pdf'."
+    )
+    size_bytes: int = Field(description="Size in bytes.")
+
+
 class SmsApplicationResponse(BaseModel):
-    """Private submitted SMS answers, or verified sender details for an old filing."""
+    """Private saved answers of a registration: a US texting application
+    (or verified sender details for an old filing), or a number
+    registration kept for a resubmit."""
 
     schema_version: int = Field(
         default=1, description="Version of this saved-answer response format."
@@ -3123,6 +3145,40 @@ class SmsApplicationResponse(BaseModel):
     )
     address: Address | None = Field(
         default=None, description="Original sender address, when available."
+    )
+    documents: dict[str, KeptDocumentAnswer] | None = Field(
+        default=None,
+        description=(
+            "Number registration only: each document slot's option and "
+            "fields, by slot name. Null for US texting."
+        ),
+    )
+    files: list[KeptFileInfo] = Field(
+        default_factory=list,
+        description=(
+            "Number registration only: the files Hail keeps, by slot. A "
+            "resubmit reuses each one unless you send a new file for its slot."
+        ),
+    )
+    kept_until: datetime | None = Field(
+        default=None,
+        description="Number registration only: when Hail deletes these answers and files.",
+    )
+    quote_id: UUID | None = Field(
+        default=None,
+        description=(
+            "Number registration only: the quote it was filed for. It keeps "
+            "working with GET /v1/verifications/requirements and the resubmit "
+            "while the answers are kept."
+        ),
+    )
+    hold_cents: int | None = Field(
+        default=None,
+        description=(
+            "Number registration only: the credit a resubmit with that quote "
+            "sets aside (its setup and first month). Null when nothing is set "
+            "aside or the quote is gone."
+        ),
     )
 
 
@@ -3227,6 +3283,23 @@ class VerificationResponse(BaseModel):
     cancellable: bool = Field(
         default=False,
         description="True when `DELETE /v1/verifications/{id}` accepts this verification now.",
+    )
+    kept_until: datetime | None = Field(
+        default=None,
+        description=(
+            "For a number registration: when Hail deletes the answers and "
+            "files it keeps so the filing can be fixed and sent again (30 "
+            "days after submit). They go sooner when it is approved or "
+            "cancelled, or the account closes. Null when nothing is kept."
+        ),
+    )
+    resubmittable: bool = Field(
+        default=False,
+        description=(
+            "True when `POST /v1/verifications/{id}/resubmit` accepts this "
+            "verification now: a rejected number registration whose answers "
+            "are still kept (`kept_until`)."
+        ),
     )
     identity_confirmed: bool = Field(
         default=False,

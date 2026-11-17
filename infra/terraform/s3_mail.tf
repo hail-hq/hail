@@ -48,6 +48,20 @@ resource "aws_s3_bucket_lifecycle_configuration" "inbound" {
     }
   }
 
+  # Backstop for the copies of registration files kept for a resubmit: the
+  # app deletes them 30 days after submit at the latest (the verification
+  # worker); S3 removes any it missed after 32 days.
+  rule {
+    id     = "expire-verification-kept"
+    status = "Enabled"
+    filter {
+      prefix = "verification-kept/"
+    }
+    expiration {
+      days = 32
+    }
+  }
+
   # No bucket-wide expiration rule for outbound-attachments/: those objects
   # are retained per the app-level contract (used attachments are kept
   # indefinitely and reusable across sends; only never-used uploads expire,
