@@ -331,11 +331,19 @@ def failure_kind(exc: BaseException, *, unknown: FailureKind = "outage") -> Fail
     with no carrier answer that is not a network, timeout or configuration
     error: a ``discard`` step passes "refused" (a bug in Hail or the
     plug-in must not retry for good); elsewhere, such an error (a database
-    error) is retried. Never reads the carrier's text."""
-    status = carrier_http_status(exc)
-    if status is None:
-        if any(isinstance(seen, _NOT_NOW_ERRORS) for seen in _chain(exc)):
+    error) is retried. Never reads the carrier's text.
+
+    The error nearest ``exc`` that has a carrier status or is a network
+    error decides: a lost connection while handling a 403 is an outage,
+    and a plug-in error raised from a 409 is a refusal."""
+    status = None
+    for seen in _chain(exc):
+        status = _http_status(seen)
+        if status is not None:
+            break
+        if isinstance(seen, _NOT_NOW_ERRORS):
             return "outage"
+    if status is None:
         return unknown
     if status in _GONE:
         return "gone"

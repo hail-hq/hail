@@ -321,6 +321,33 @@ def test_failure_kind_network_errors_of_each_carrier_sdk() -> None:
         assert carrier_routing.failure_kind(error, unknown="refused") == "outage"
 
 
+def test_failure_kind_reads_the_nearest_error_first() -> None:
+    """A lost connection while handling a 403 (its ``__context__``) is an
+    outage, bare or wrapped by a plug-in; a 403 raised while handling a
+    lost connection is a refusal."""
+    import httpx
+
+    request = httpx.Request("DELETE", "https://example.test")
+
+    def raised_during(error: Exception, handling: Exception) -> Exception:
+        try:
+            try:
+                raise handling
+            except Exception:
+                raise error
+        except Exception as exc:
+            return exc
+
+    connect = raised_during(httpx.ConnectError("x", request=request), _http(403))
+    assert connect.__context__ is not None
+    assert carrier_routing.failure_kind(connect, unknown="refused") == "outage"
+    assert carrier_routing.failure_kind(_wrapped(connect), unknown="refused") == (
+        "outage"
+    )
+    refused = raised_during(_http(403), httpx.ConnectError("x", request=request))
+    assert carrier_routing.failure_kind(refused) == "refused"
+
+
 def test_failure_kind_of_an_error_with_no_carrier_answer() -> None:
     """A bug (KeyError) is ``unknown``: a discard step counts it refused,
     other callers retry it."""
