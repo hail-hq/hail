@@ -34,6 +34,8 @@ billing unit. Use only the components visible in the table. A missing rate stays
 missing. Deprecated models have no current offers. Do not invent a single
 purchase price, availability, ratings, reviews, or product image. This markup
 describes comparisons; it does not promise Google shopping eligibility.
+The model creator is not always the rate vendor. Omit `seller` until the data
+explicitly identifies the seller for each hosted rate.
 
 An audit category is evidence. A setup guide is an article, even if an audit
 calls it a product page. Match the rendered content rather than adding a fake

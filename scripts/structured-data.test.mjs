@@ -29,6 +29,7 @@ test("both apps rebuild when only shared structured data changes", () => {
     git("config", "user.name", "Test");
     git("config", "user.email", "test@example.com");
     mkdirSync(join(directory, "shared"));
+    mkdirSync(join(directory, "app"));
     writeFileSync(join(directory, "shared/schema.ts"), "before");
     git("add", "shared/schema.ts");
     git("commit", "--quiet", "-m", "Initial fixture");
@@ -40,18 +41,50 @@ test("both apps rebuild when only shared structured data changes", () => {
       const { ignoreCommand } = JSON.parse(
         readFileSync(new URL(file, import.meta.url)),
       );
-      const run = spawnSync("sh", ["-c", ignoreCommand], {
-        cwd: directory,
-        env: { ...process.env, VERCEL_GIT_PREVIOUS_SHA: base },
-      });
-      assert.equal(
-        run.status,
-        1,
-        `${file}: shared changes must request a build`,
-      );
+      for (const cwd of [directory, join(directory, "app")]) {
+        const run = spawnSync("sh", ["-c", ignoreCommand], {
+          cwd,
+          env: { ...process.env, VERCEL_GIT_PREVIOUS_SHA: base },
+        });
+        assert.equal(
+          run.status,
+          1,
+          `${file}: shared changes must request a build from ${cwd}`,
+        );
+      }
     }
   } finally {
     rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("Vercel build filters fit its 256 character limit", () => {
+  for (const file of ["../vercel.json", "../docs-site/vercel.json"]) {
+    const { ignoreCommand } = JSON.parse(
+      readFileSync(new URL(file, import.meta.url)),
+    );
+    assert.ok(
+      ignoreCommand.length <= 256,
+      `${file}: ${ignoreCommand.length} characters`,
+    );
+  }
+});
+
+test("a hosted model rate does not label the model creator as the seller", () => {
+  const { models } = JSON.parse(
+    readFileSync(new URL("../costs/llm.json", import.meta.url)),
+  );
+  const model = models.find((row) => row.model_id === "llama-4-maverick");
+  const product = modelProduct(
+    model,
+    "llm",
+    "https://hail.so/costs/compare/example",
+  );
+  assert.equal(product.brand.name, "Meta");
+  assert.ok(product.offers.length > 0);
+  for (const offer of product.offers) {
+    assert.match(offer.url, /amazonaws\.com/);
+    assert.ok(!offer.seller);
   }
 });
 

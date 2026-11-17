@@ -54,7 +54,6 @@ export function modelProduct(
             "@type": "Offer",
             name,
             url: model.source_url,
-            seller: { "@type": "Organization", name: model.provider },
             priceSpecification: {
               "@type": "UnitPriceSpecification",
               price,
