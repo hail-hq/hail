@@ -103,6 +103,15 @@ Some changes only work when they ship in a fixed order. Follow these every time.
    The copy (step 5) never ships before the rater (step 3) is live. Otherwise the site shows prices Hail does not charge.
    Decided on 2026-11-09: step 5 (copy) ships before step 4 (plain forwarding), once step 3 is live.
 
+## Public structured data
+
+Before changing costs or docs schema, read
+[docs/operations/structured-data.md](docs/operations/structured-data.md).
+Use `shared/JsonLd.tsx` and the builders in `shared/structured-data.ts`.
+Model comparisons use `web/lib/model-schema.ts` with the checked cost rows.
+Keep schema in route templates so new docs, API operations, and pairs inherit it.
+Never invent prices, stock, reviews, images, or publication dates to clear an audit.
+
 ## Agent prompt maintenance
 
 Shared runtime instructions live in `core/hailhq/core/prompts.py`. Keep them out of customer APIs and the console.
