@@ -1841,6 +1841,12 @@ class FileUpload(Base):
     * ``verification_document``: a document for one carrier verification.
       ``POST /verifications`` reads it and deletes it; rows left over are
       deleted 1 hour after upload.
+    * ``verification_kept``: Hail's own encrypted copy of a file a number
+      registration was filed with, for ``verification_id`` and ``slot``,
+      kept for a resubmit. Deleted 30 days after submit, or when the
+      registration is approved or cancelled or the account closes
+      (``hailhq.api.routes.verifications.forget_kept_registrations``).
+      ``uploaded_at`` is set once the object is written.
 
     An upload link (``POST /uploads``) makes the row first with
     ``uploaded_at`` null and ``token_hash`` set; the ``PUT`` that sends the
@@ -1876,6 +1882,18 @@ class FileUpload(Base):
     link_expires_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
     uploaded_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
     sha256: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # A kept registration file: the verification it was filed with, and the
+    # document slot. Set for ``verification_kept`` only.
+    verification_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "carrier_verifications.id",
+            name="file_uploads_verification_id_fkey",
+            ondelete="CASCADE",
+        ),
+        nullable=True,
+    )
+    slot: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # The link rules, on the database clock (``statement_timestamp()``, the
     # time of each statement), so they hold on any number of API hosts.
@@ -1897,8 +1915,23 @@ class FileUpload(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "purpose IN ('email_attachment', 'verification_document')",
+            "purpose IN ('email_attachment', 'verification_document', "
+            "'verification_kept')",
             name="file_uploads_purpose_check",
+        ),
+        # A kept file always names its verification and slot; no other
+        # upload does.
+        CheckConstraint(
+            "(purpose = 'verification_kept') = "
+            "(verification_id IS NOT NULL AND slot IS NOT NULL)",
+            name="file_uploads_kept_link_check",
+        ),
+        Index(
+            "file_uploads_verification_slot_uniq",
+            "verification_id",
+            "slot",
+            unique=True,
+            postgresql_where=text("verification_id IS NOT NULL"),
         ),
         CheckConstraint(
             "uploaded_at IS NULL OR size_bytes IS NOT NULL",
@@ -2200,11 +2233,13 @@ class NumberOffer(Base):
 class CarrierVerification(Base):
     """A customer's verification with a carrier, needed before buying numbers
     in some countries. Holds state, opaque carrier IDs and the name of the
-    person or company it is for (``subject_name``). No addresses or
-    document data are stored for number verification. SMS provider_refs also
-    retains the submitted application text/address for organization-scoped repair,
-    until 30 days after it ends or the account closes (``hailhq.core.retention``);
-    document files are never stored here."""
+    person or company it is for (``subject_name``). ``provider_refs.application``
+    keeps what the customer typed, privately, for the organization only:
+    for SMS until 30 days after it ends; for a number registration (fields,
+    address, document options) until 30 days after submit, or sooner when it
+    is approved or cancelled. Both go at account close
+    (``hailhq.core.retention``). A number registration's files are kept as
+    ``file_uploads`` rows (``verification_kept``), not here."""
 
     __tablename__ = "carrier_verifications"
 

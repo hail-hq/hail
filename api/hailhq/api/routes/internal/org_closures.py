@@ -8,8 +8,10 @@ then calls this endpoint, which upserts the same row (see
 
 After the response, for that org, it releases the numbers and cancels the
 carrier registrations (``hailhq.api.org_close.close_org_carrier_items``),
-then deletes the US texting registration answers
-(``hailhq.core.retention.clear_closed_org_registrations``). The carrier
+then deletes the registration answers
+(``hailhq.core.retention.clear_closed_org_registrations``) and the files a
+number registration kept for a resubmit
+(``hailhq.api.routes.verifications.forget_kept_registrations``). The carrier
 calls can take longer than the caller waits, so they run after the
 response. The verification worker runs both for every closed org on each
 pass, so a failure here is retried there, and a closure row with no call is
@@ -35,6 +37,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends
 from hailhq.api.org_close import close_org_carrier_items
 from hailhq.api.routes.calls import get_livekit_optional
 from hailhq.api.routes.internal.auth import verify_internal_request
+from hailhq.api.routes.verifications import forget_kept_registrations
 from hailhq.core.db import background_context, get_session, session_scope
 from hailhq.core.livekit import LiveKitClient
 from hailhq.core.models import OrgClosure
@@ -79,6 +82,14 @@ async def close_org(organization_id: UUID, lk: LiveKitClient | None) -> None:
         except Exception:
             await db.rollback()
             logger.exception("org closure: could not clear verification answers")
+        try:
+            _, files = await forget_kept_registrations(
+                db, now, organization_id=organization_id
+            )
+            logger.info("org closure: %d kept registration file(s) deleted", files)
+        except Exception:
+            await db.rollback()
+            logger.exception("org closure: could not delete kept registration files")
 
 
 async def _close_after_response(

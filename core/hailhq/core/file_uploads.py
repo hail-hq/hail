@@ -1,6 +1,6 @@
 """Rules shared by every uploaded file (the ``file_uploads`` table).
 
-Two kinds of upload share one table and one mail-bucket layout:
+Three kinds of file share one table and one mail-bucket layout:
 
 * ``email_attachment``: a file to attach to outbound email. Stored under
   ``outbound-attachments/<organization_id>/<id>.<attempt>``; its id works in
@@ -10,6 +10,14 @@ Two kinds of upload share one table and one mail-bucket layout:
   ``verification-uploads/<organization_id>/<id>.<attempt>``,
   read once by ``POST /verifications`` and deleted after; the GC removes any
   left over after ``VERIFICATION_UPLOAD_TTL``.
+* ``verification_kept``: a copy of a file a number registration was filed
+  with, kept so a rejected filing can be fixed and sent again
+  (``POST /verifications/{id}/resubmit``). Stored under
+  ``verification-kept/<organization_id>/<id>`` with server-side encryption,
+  linked to its ``carrier_verifications`` row and slot. Deleted
+  ``REGISTRATION_KEPT_FOR`` after submit, or sooner when the registration is
+  approved or cancelled or the account closes (the verification worker).
+  Hail makes these itself; no client can upload one.
 
 An upload link (``POST /uploads``) lets a caller with no Hail credentials
 (an agent's shell) send the bytes once with ``PUT /uploads/<id>?token=...``.
@@ -22,23 +30,30 @@ it, so two PUTs to one link never overwrite each other. (A direct
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 import secrets
 from datetime import timedelta
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, NamedTuple
 from uuid import UUID, uuid4
 
 from hailhq.core.config import settings
 from hailhq.core.email_attachment_limits import MAX_EMAIL_ATTACHMENT_BYTES
 from hailhq.core.s3_mail import S3MailClient
-from sqlalchemy import func
+from sqlalchemy import delete, func, select
 
 if TYPE_CHECKING:
     from hailhq.core.models import FileUpload
     from sqlalchemy.ext.asyncio import AsyncSession
 
+logger = logging.getLogger(__name__)
+
+# What a client may upload (``POST /uploads``).
 Purpose = Literal["email_attachment", "verification_document"]
 PURPOSES: tuple[str, ...] = ("email_attachment", "verification_document")
+# Files Hail keeps itself: never a client upload.
+KEPT_PURPOSE = "verification_kept"
+STORED_PURPOSES: tuple[str, ...] = (*PURPOSES, KEPT_PURPOSE)
 
 # Carriers take these document types only.
 VERIFICATION_FILE_TYPES: tuple[str, ...] = (
@@ -56,13 +71,18 @@ MAX_PENDING_LINKS = 50
 LINK_SWEEP_GRACE = timedelta(minutes=15)
 # An uploaded verification document is usable this long, then deleted.
 VERIFICATION_UPLOAD_TTL = timedelta(hours=1)
+# A number registration's answers and files are kept this long after
+# submit, for a resubmit.
+REGISTRATION_KEPT_FOR = timedelta(days=30)
 
 _PREFIXES = {
     "email_attachment": "outbound-attachments/",
     "verification_document": "verification-uploads/",
+    KEPT_PURPOSE: "verification-kept/",
 }
 EMAIL_ATTACHMENTS_PREFIX = _PREFIXES["email_attachment"]
 VERIFICATION_UPLOADS_PREFIX = _PREFIXES["verification_document"]
+VERIFICATION_KEPT_PREFIX = _PREFIXES[KEPT_PURPOSE]
 
 # ``type/subtype`` only, no parameters: the value is put into a shell
 # command (the curl line the MCP returns), so no quote or space may pass.
@@ -77,7 +97,7 @@ _PDF_MARKER_WINDOW = 1024
 
 def max_bytes(purpose: str) -> int:
     """The size limit of one file of this purpose."""
-    if purpose == "verification_document":
+    if purpose in ("verification_document", KEPT_PURPOSE):
         return VERIFICATION_MAX_FILE_BYTES
     return MAX_EMAIL_ATTACHMENT_BYTES
 
@@ -126,6 +146,115 @@ async def store_upload(
     return row
 
 
+class KeptFile(NamedTuple):
+    """One file of a number registration, to keep for a resubmit."""
+
+    slot: str
+    filename: str
+    content_type: str
+    data: bytes
+
+
+def kept_filename(name: str | None) -> str:
+    """The name shown back for a kept file: the last path part, at most
+    200 characters, ``document`` when there is none."""
+    base = (name or "").replace("\\", "/").rsplit("/", 1)[-1].strip()
+    return base[:200] or "document"
+
+
+async def keep_verification_files(
+    db: AsyncSession,
+    s3: S3MailClient,
+    organization_id: UUID,
+    verification_id: UUID,
+    files: list[KeptFile],
+) -> int:
+    """Keep encrypted copies of a registration's files; returns how many.
+
+    Each row is committed first with ``uploaded_at`` null, so a crash after
+    the S3 write leaves a row the worker cleans up; ``uploaded_at`` is set
+    once the object is written. A failed write deletes its row again and
+    raises: the caller decides what a failure means. Never logs a name."""
+    # Here, not at the top: hailhq.core.models imports this module.
+    from hailhq.core.models import FileUpload
+
+    rows = []
+    for file in files:
+        row_id = uuid4()
+        rows.append(
+            (
+                FileUpload(
+                    id=row_id,
+                    organization_id=organization_id,
+                    purpose=KEPT_PURPOSE,
+                    verification_id=verification_id,
+                    slot=file.slot,
+                    filename=kept_filename(file.filename),
+                    content_type=file.content_type,
+                    s3_key=object_key(KEPT_PURPOSE, organization_id, row_id),
+                ),
+                file,
+            )
+        )
+    db.add_all([row for row, _ in rows])
+    await db.commit()
+    kept = 0
+    try:
+        for row, file in rows:
+            await s3.put_attachment(
+                row.s3_key, file.data, file.content_type, encrypt=True
+            )
+            row.size_bytes = len(file.data)
+            row.sha256 = hashlib.sha256(file.data).hexdigest()
+            row.uploaded_at = func.statement_timestamp()
+            await db.commit()
+            kept += 1
+    except Exception:
+        await db.rollback()
+        await delete_kept_files(db, s3, [row.id for row, _ in rows])
+        raise
+    return kept
+
+
+async def delete_kept_files(
+    db: AsyncSession, s3: S3MailClient | None, upload_ids: list[UUID]
+) -> int:
+    """Delete kept files (object, then row) one at a time; returns how many.
+    A failed object delete keeps its row, so the worker tries again. With
+    no bucket configured only the rows go: there is no object."""
+    # Here, not at the top: hailhq.core.models imports this module.
+    from hailhq.core.models import FileUpload
+
+    if not upload_ids:
+        return 0
+    rows = (
+        await db.execute(
+            select(FileUpload.id, FileUpload.s3_key).where(
+                FileUpload.id.in_(upload_ids),
+                FileUpload.purpose == KEPT_PURPOSE,
+            )
+        )
+    ).all()
+    await db.commit()
+    deleted = 0
+    for row_id, s3_key in rows:
+        if s3 is not None:
+            try:
+                await delete_upload_objects(s3, s3_key)
+            except Exception as exc:
+                logger.warning(
+                    "could not delete kept registration file %s (%s); the "
+                    "verification worker tries again",
+                    row_id,
+                    type(exc).__name__,
+                )
+                continue
+        await db.execute(delete(FileUpload).where(FileUpload.id == row_id))
+        await db.commit()
+        deleted += 1
+    return deleted
+
+
 def object_prefix(s3_key: str) -> str:
     """The prefix holding every object of one upload: its key without the
     ``.<attempt>`` suffix. A PUT cut off between its S3 write and its update
@@ -155,28 +284,40 @@ def hash_token(token: str) -> str:
 async def delete_org_verification_uploads(
     organization_id: UUID, store: S3MailClient | None = None
 ) -> int:
-    """Delete one organization's verification documents; returns how many."""
+    """Delete one organization's verification documents, uploaded and kept;
+    returns how many."""
     if store is None:
         if not settings.hail_mail_bucket:
             return 0
         store = S3MailClient(bucket=settings.hail_mail_bucket)
-    return await store.delete_prefix(f"{VERIFICATION_UPLOADS_PREFIX}{organization_id}/")
+    deleted = 0
+    for prefix in (VERIFICATION_UPLOADS_PREFIX, VERIFICATION_KEPT_PREFIX):
+        deleted += await store.delete_prefix(f"{prefix}{organization_id}/")
+    return deleted
 
 
 __all__ = [
     "EMAIL_ATTACHMENTS_PREFIX",
+    "KEPT_PURPOSE",
     "LINK_SWEEP_GRACE",
     "LINK_TTL",
     "MAX_PENDING_LINKS",
     "PURPOSES",
+    "REGISTRATION_KEPT_FOR",
+    "STORED_PURPOSES",
     "VERIFICATION_FILE_TYPES",
+    "VERIFICATION_KEPT_PREFIX",
     "VERIFICATION_MAX_FILE_BYTES",
     "VERIFICATION_UPLOADS_PREFIX",
     "VERIFICATION_UPLOAD_TTL",
+    "KeptFile",
     "Purpose",
+    "delete_kept_files",
     "delete_org_verification_uploads",
     "delete_upload_objects",
     "hash_token",
+    "keep_verification_files",
+    "kept_filename",
     "matches_declared_type",
     "max_bytes",
     "new_token",

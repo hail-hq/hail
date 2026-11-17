@@ -768,6 +768,50 @@ class HailClient:
         _raise_verification_error(resp)
         return VerificationResponse.model_validate(resp.json()).model_dump(mode="json")
 
+    async def resubmit_verification(
+        self,
+        verification_id: str,
+        *,
+        fields: dict[str, str] | None = None,
+        documents: dict[str, Any] | None = None,
+        files: list[tuple[str, str, bytes]] | None = None,
+        address: dict[str, str] | None = None,
+        quote_id: str | None = None,
+        uploads: list[tuple[str, str]] | None = None,
+    ) -> dict[str, Any]:
+        """POST /verifications/{id}/resubmit: file a rejected number
+        registration again from what Hail kept. Only the parts given are
+        sent; the API reuses the kept value of every other one. Errors as
+        ``submit_verification``."""
+        verification_id_ = _path_id(verification_id, name="verification_id")
+        if quote_id is not None:
+            quote_id = str(uuid.UUID(quote_id))  # ValueError before anything is sent
+        text: dict[str, str] = {}
+        if fields is not None:
+            text["fields"] = json.dumps(fields)
+        if documents is not None:
+            text["documents"] = json.dumps(documents)
+        if address is not None:
+            text["address"] = json.dumps(address)
+        if quote_id is not None:
+            text["quote_id"] = quote_id
+        for slot, upload_id in uploads or []:
+            text[f"upload.{slot}"] = upload_id
+        parts: list = [(name, (None, value)) for name, value in text.items()]
+        parts += [
+            (f"file.{slot}", ("upload", content, content_type))
+            for slot, content_type, content in files or []
+        ]
+        # Always multipart, even with nothing to change.
+        parts = parts or [("_", (None, "1"))]
+        resp = await self._client.post(
+            f"/verifications/{verification_id_}/resubmit",
+            files=parts,
+            timeout=120.0,
+        )
+        _raise_verification_error(resp)
+        return VerificationResponse.model_validate(resp.json()).model_dump(mode="json")
+
     async def check_verification(
         self,
         *,
