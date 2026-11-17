@@ -3533,6 +3533,9 @@ type SmsApplicationResponse struct {
 	// KeptUntil Number registration only: when Hail deletes these answers and files.
 	KeptUntil *time.Time `json:"kept_until,omitempty"`
 
+	// QuoteId Number registration only: the quote it was filed for. It keeps working with GET /v1/verifications/requirements and the resubmit while the answers are kept.
+	QuoteId *openapi_types.UUID `json:"quote_id,omitempty"`
+
 	// SchemaVersion Version of this saved-answer response format.
 	SchemaVersion *int `json:"schema_version,omitempty"`
 

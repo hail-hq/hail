@@ -3902,6 +3902,7 @@ async def _number_application(
                 for kept in await _kept_rows(db, row)
             ],
             "kept_until": row.created_at + REGISTRATION_KEPT_FOR,
+            "quote_id": application.get("quote_id"),
         }
     )
 
@@ -4092,7 +4093,8 @@ async def resubmit_verification(
       with no new file reuses the kept one. A kept file whose slot is no
       longer in `documents` is not sent;
     * `quote_id`: the offer to verify for. Default: the quote of the
-      rejected filing. Pass a new one when that quote is gone (404).
+      rejected filing, which Hail keeps while the answers are kept. Pass a
+      new one for a newer price, or when that offer is no longer sold (409).
 
     The purpose, country, number type and subject type stay as filed:
     sending one of them is a 422. The new registration goes through every check of

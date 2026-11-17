@@ -3154,6 +3154,14 @@ class SmsApplicationResponse(BaseModel):
         default=None,
         description="Number registration only: when Hail deletes these answers and files.",
     )
+    quote_id: UUID | None = Field(
+        default=None,
+        description=(
+            "Number registration only: the quote it was filed for. It keeps "
+            "working with GET /v1/verifications/requirements and the resubmit "
+            "while the answers are kept."
+        ),
+    )
 
 
 class SmsApplicationAmendRequest(BaseModel):

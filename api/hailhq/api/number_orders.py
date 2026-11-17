@@ -35,7 +35,7 @@ from hailhq.core.providers.voice import (
 )
 from hailhq.core.retention import org_closed, org_is_closed
 from hailhq.core.schemas import NumberAcquireRequest
-from sqlalchemy import and_, delete, or_, select, update
+from sqlalchemy import String, and_, cast, delete, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -1051,11 +1051,20 @@ async def retry_unreleased_numbers():
 
 async def purge_expired_quotes() -> int:
     """Delete stale quotes: unused ones after QUOTE_RETENTION, consumed ones
-    after CONSUMED_QUOTE_RETENTION. Returns how many."""
+    after CONSUMED_QUOTE_RETENTION. Returns how many. A quote a number
+    registration kept for a resubmit stays while its answers are kept (30
+    days after submit at most): the resubmit and the console's form read the
+    carrier and the credit to set aside from it."""
     now = datetime.now(timezone.utc)
+    kept = select(CarrierVerification.id).where(
+        CarrierVerification.purpose == "number",
+        CarrierVerification.provider_refs["application"]["quote_id"].astext
+        == cast(NumberOffer.id, String),
+    )
     async with session_scope() as db:
         result = await db.execute(
             delete(NumberOffer).where(
+                ~kept.exists(),
                 or_(
                     and_(
                         NumberOffer.number_id.is_(None),
@@ -1065,7 +1074,7 @@ async def purge_expired_quotes() -> int:
                         NumberOffer.number_id.is_not(None),
                         NumberOffer.expires_at < now - CONSUMED_QUOTE_RETENTION,
                     ),
-                )
+                ),
             )
         )
         await db.commit()

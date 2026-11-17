@@ -17,13 +17,19 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from hailhq.api.deps import get_s3_mail_optional
 from hailhq.api.main import app
+from hailhq.api.number_orders import purge_expired_quotes
 from hailhq.api.routes import verifications as verifications_routes
 from hailhq.api.routes.verifications import (
     forget_kept_registrations,
     sweep_verifications,
 )
 from hailhq.core.file_uploads import KEPT_PURPOSE, VERIFICATION_KEPT_PREFIX
-from hailhq.core.models import CarrierVerification, FileUpload, OrgClosure
+from hailhq.core.models import (
+    CarrierVerification,
+    FileUpload,
+    NumberOffer,
+    OrgClosure,
+)
 from hailhq.core.providers.verification import Problem, ProviderStatus
 from sqlalchemy import select, update
 
@@ -453,3 +459,46 @@ async def test_the_answers_never_reach_the_log(
     await _age(async_session, vid, 31)
     await sweep_verifications(async_session, _registry(carrier))
     assert "Lovelace" not in caplog.text and "ada.jpg" not in caplog.text
+
+
+async def test_the_kept_quote_outlives_the_quote_purge(
+    client, org_and_key, carrier, store, async_session
+) -> None:
+    """A carrier review takes days; the quote must still work for the
+    resubmit and the console's form while the answers are kept."""
+    _, _, key = org_and_key
+    vid = await _rejected(client, key, carrier)
+    application = (
+        await client.get(f"/verifications/{vid}/application", headers=_auth(key))
+    ).json()
+    quote_id = uuid.UUID(application["quote_id"])
+    await async_session.execute(
+        update(NumberOffer)
+        .where(NumberOffer.id == quote_id)
+        .values(expires_at=datetime.now(timezone.utc) - timedelta(days=3))
+    )
+    await async_session.commit()
+    await purge_expired_quotes()
+    async_session.expire_all()
+    assert await async_session.get(NumberOffer, quote_id) is not None
+
+    resp = await client.post(
+        f"/verifications/{vid}/resubmit",
+        files={"_": (None, "1")},
+        headers=_auth(key),
+    )
+    assert resp.status_code == 201, resp.text
+    # The old filing gave its answers to the new one, which names the quote.
+    await purge_expired_quotes()
+    async_session.expire_all()
+    assert await async_session.get(NumberOffer, quote_id) is not None
+    new = await _row(async_session, resp.json()["id"])
+    await async_session.execute(
+        update(CarrierVerification)
+        .where(CarrierVerification.id == new.id)
+        .values(provider_refs={})
+    )
+    await async_session.commit()
+    await purge_expired_quotes()
+    async_session.expire_all()
+    assert await async_session.get(NumberOffer, quote_id) is None

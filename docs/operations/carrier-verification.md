@@ -281,7 +281,7 @@ A rejection (carrier, carrier refusal of the draft, or superadmin) keeps both. T
 Resubmit rules ([`resubmit_verification`](../../api/hailhq/api/routes/verifications.py)):
 
 - Only a `rejected` number registration whose answers are kept (`resubmittable: true`, `kept_until` on the verification). Else 409 or 404.
-- `fields`, `address`, `documents` each replace the kept value whole. `file.<slot>` / `upload.<slot>` replace that slot's kept file; other slots reuse the kept file. `quote_id` defaults to the kept quote; a 404 means the quote is gone, so quote again and pass the new one.
+- `fields`, `address`, `documents` each replace the kept value whole. `file.<slot>` / `upload.<slot>` replace that slot's kept file; other slots reuse the kept file. `quote_id` defaults to the kept quote. The quote purge (`purge_expired_quotes`) skips a quote a kept application names, so it works for the console's form and the resubmit for the 30 days. A 409 means that offer is no longer sold: quote again and pass the new one.
 - `purpose`, `country_code`, `number_type`, `subject_type`, `number_id`, `provider` cannot change (422).
 - The new filing runs every check of `POST /verifications` (422, 402 credit hold, 409). Nothing changes on the old row unless the new one is saved. Then the old row is dismissed like `DELETE` (carrier draft discarded); if the carrier is down, it stays `rejected` with nothing kept.
 - Two resubmits at once: the first to commit takes the answers; the other gets 409 and its carrier draft is discarded.
