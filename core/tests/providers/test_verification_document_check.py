@@ -210,6 +210,38 @@ async def test_the_prompt_lists_every_type_of_the_slot_and_the_address() -> None
     assert 0 < call["timeout_s"] <= document_check.CHECK_TIMEOUT_S
 
 
+@pytest.mark.parametrize("subject_type", ["person", "business"])
+async def test_the_prompt_asks_for_the_holder_never_the_issuer(subject_type) -> None:
+    # A bill prints the issuer's name too (the bank, phone company or
+    # utility). Every name the model reads is the holder's.
+    reader = _reader(_answer())
+    await _check(req=_req(subject_type=subject_type), reader=reader)
+    prompt = reader.calls[0]["prompt"]
+    names = next(x for x in prompt.splitlines() if x.startswith("- given_names"))
+    assert "the person the document is about or addressed to" in names
+    assert "Never a person who signs for the issuer" in names
+    company = next(x for x in prompt.splitlines() if x.startswith("- business_name"))
+    assert "the company the document is about or addressed to" in company
+    assert "Never the company that issued the document" in company
+    values = next(x for x in prompt.splitlines() if x.startswith("- values"))
+    assert "the holder's, as above, never the issuer's" in values
+
+
+async def test_an_empty_company_name_is_not_compared() -> None:
+    # A bill addressed to a person, sent for a company: no company name read,
+    # so the typed one gets no warning.
+    req = _req(
+        subject_type="business",
+        fields=(FieldSpec(name="business_name", label="Business Name"),),
+    )
+    answer = _answer(business_name="", values=[])
+    out = await _check(
+        req=req, fields={"business_name": "Example Trading Ltd"}, reader=_reader(answer)
+    )
+    assert out.warnings == []
+    assert out.fields == {}
+
+
 async def test_the_proof_of_address_fills_the_address_first() -> None:
     req = _req(address_required=True)
     docs = {
