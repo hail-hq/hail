@@ -96,6 +96,7 @@ async def _seed_call(
                 event_types=[WebhookEventType.CALL_ANALYZED.value],
                 secret_encrypted="x",
                 created_at=ended_at - timedelta(hours=1),
+                updated_at=ended_at - timedelta(hours=1),
             )
         )
     await session.commit()
@@ -169,6 +170,27 @@ async def test_subscription_created_after_the_call_is_not_enough(
     assert await next_call_to_analyze(async_session) is None
 
 
+async def test_adding_the_event_to_an_old_subscription_does_not_replay(
+    async_session,
+) -> None:
+    call = await _seed_call(async_session, subscribe=False)
+    sub = WebhookSubscription(
+        organization_id=call.organization_id,
+        target_url="https://example.com/old",
+        event_types=["call.completed"],
+        secret_encrypted="x",
+        created_at=call.ended_at - timedelta(days=3),
+        updated_at=call.ended_at - timedelta(days=3),
+    )
+    async_session.add(sub)
+    await async_session.commit()
+    # What PATCH /v1/webhooks/{id} writes when the event is added.
+    sub.event_types = ["call.completed", "call.analyzed"]
+    sub.updated_at = datetime.now(timezone.utc)
+    await async_session.commit()
+    assert await next_call_to_analyze(async_session) is None
+
+
 async def test_disabled_or_other_event_subscription_is_not_enough(
     async_session,
 ) -> None:
@@ -181,6 +203,7 @@ async def test_disabled_or_other_event_subscription_is_not_enough(
                 event_types=["call.completed"],
                 secret_encrypted="x",
                 created_at=call.ended_at - timedelta(hours=1),
+                updated_at=call.ended_at - timedelta(hours=1),
             ),
             WebhookSubscription(
                 organization_id=call.organization_id,
@@ -189,6 +212,7 @@ async def test_disabled_or_other_event_subscription_is_not_enough(
                 secret_encrypted="x",
                 status="disabled",
                 created_at=call.ended_at - timedelta(hours=1),
+                updated_at=call.ended_at - timedelta(hours=1),
             ),
         ]
     )

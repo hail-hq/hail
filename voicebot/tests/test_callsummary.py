@@ -79,6 +79,7 @@ async def _seed(session, *, subscribe=True, turns=None) -> uuid.UUID:
                 event_types=["call.analyzed"],
                 secret_encrypted="x",
                 created_at=ended_at - timedelta(hours=1),
+                updated_at=ended_at - timedelta(hours=1),
             )
         )
     await session.commit()

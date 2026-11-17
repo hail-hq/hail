@@ -210,7 +210,9 @@ curl -X POST "$HAIL_API_URL/v1/webhooks" \
   `summary` is null and the event is still sent.
 - Only phone calls with at least one spoken turn are sent. A call nobody spoke on gets no event.
 - Only calls that end after your `call.analyzed` subscription was created
-  are sent. A call not sent within 24 hours of its end is dropped.
+  or last changed (`PATCH`, secret rotation) are sent, so turning it on
+  never replays past calls. A call not sent within 24 hours of its end is
+  dropped.
 - Once it is sent, `GET /v1/events` shows an `analyzed` call event. It holds
   counts only (`turns`, and `summary` true or false), not the text.
 - Self-hosting: the voicebot sends this event from its text worker, which

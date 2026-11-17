@@ -115,8 +115,8 @@ async def next_call_to_analyze(
     event, or None. It ended between ``ANALYSIS_WINDOW`` and
     ``SETTLE_DELAY`` ago, has at least one turn row, has no ``analyzed``
     marker, and its org has an active subscription to ``call.analyzed``
-    created before the call ended (so a new subscription never gets events
-    for calls that ended before it). Takes no lock:
+    last created or changed before the call ended (so a new, edited or
+    re-enabled subscription never gets events for older calls). Takes no lock:
     :func:`send_call_analyzed` decides who sends."""
     now = now or datetime.now(timezone.utc)
     # The subscriptions table is small: with no listener, calls is not read.
@@ -136,7 +136,10 @@ async def next_call_to_analyze(
     listening = exists().where(
         WebhookSubscription.organization_id == Call.organization_id,
         WebhookSubscription.status == "active",
-        WebhookSubscription.created_at <= Call.ended_at,
+        # Set on create and by every PATCH (event types, status, URL) or
+        # secret rotation, never by the delivery worker: adding the event
+        # or re-enabling a subscription does not replay past calls.
+        WebhookSubscription.updated_at <= Call.ended_at,
         literal(WebhookEventType.CALL_ANALYZED.value)
         == any_(WebhookSubscription.event_types),
     )
