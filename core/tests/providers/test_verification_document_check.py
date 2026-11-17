@@ -99,6 +99,7 @@ def _answer(**over) -> dict:
         "orientation": "upright",
         "kind": "national ID card",
         "option": "id_card",
+        "none_of_types": False,
         "given_names": "MARIA ELENA",
         "surnames": "TESTER SAMPLE",
         "business_name": "",
@@ -204,8 +205,8 @@ async def test_the_prompt_lists_every_type_of_the_slot_and_the_address() -> None
     assert call["schema"]["properties"]["option"]["enum"] == [
         "passport",
         "id_card",
-        "none_of_these",
     ]
+    assert call["schema"]["properties"]["none_of_types"] == {"type": "boolean"}
     assert 0 < call["timeout_s"] <= document_check.CHECK_TIMEOUT_S
 
 
@@ -1024,7 +1025,6 @@ async def test_one_file_for_two_slots_is_read_once() -> None:
         "passport",
         "id_card",
         "utility_bill",
-        "none_of_these",
     }
     assert out.documents["proof_of_identity"].fields == {"document_number": "XK1"}
     assert out.documents["proof_of_address"].read is True
@@ -1278,24 +1278,12 @@ async def test_cautions_say_a_file_is_none_of_the_types_for_the_type_chosen_now(
     None
 ):
     out = await _check(
-        docs=_docs(option="passport"), reader=_reader(_answer(option="none_of_these"))
+        docs=_docs(option="passport"), reader=_reader(_answer(none_of_types=True))
     )
     assert _kinds(out) == ["document_type"]
     reads = _echo(out)
     assert reads["proof_of_identity"].option is None
     assert reads["proof_of_identity"].none_of_types is True
-    # Only for a read that names no type: a type key wins.
-    named = {
-        "proof_of_identity": reads["proof_of_identity"].model_copy(
-            update={"option": "passport"}
-        )
-    }
-    assert (
-        document_cautions(
-            _req(), {}, {}, _form_only(_docs("passport")), named, today=TODAY
-        )
-        == []
-    )
     cautions = document_cautions(
         _req(), {}, {}, _form_only(_docs("passport")), reads, today=TODAY
     )
@@ -1321,9 +1309,9 @@ async def test_cautions_say_a_file_is_none_of_the_types_for_the_type_chosen_now(
     )
 
 
-async def test_a_carrier_type_keyed_none_is_a_type_not_none_of_the_types() -> None:
-    """A carrier type may be keyed "none" (or even the sentinel): picked and
-    read as that type, it gives no "does not look like one" warning."""
+async def test_no_carrier_type_key_can_mean_none_of_the_types() -> None:
+    """The enum holds carrier keys only, so a type keyed "none" (or any
+    word) is a type; "none of them" is its own answer."""
     base = _req()
     for key in ("none", "none_of_these"):
         slot = base.documents[0].model_copy(
@@ -1334,24 +1322,41 @@ async def test_a_carrier_type_keyed_none_is_a_type_not_none_of_the_types() -> No
         out = await check_documents(
             req, {}, {}, _docs(option=key), today=TODAY, reader=reader
         )
-        enum = reader.calls[0]["schema"]["properties"]["option"]["enum"]
-        assert len(enum) == len(set(enum))
+        assert reader.calls[0]["schema"]["properties"]["option"]["enum"] == [key]
         assert "document_type" not in _kinds(out)
         assert out.documents["proof_of_identity"].option == key
         assert out.documents["proof_of_identity"].none_of_types is False
 
 
-def test_an_unreadable_echo_never_says_none_of_the_types() -> None:
-    """The "none" answer goes through the same constructor as a fresh read,
-    so an unread file can never give that warning."""
-    echo = VerificationDocumentCautionRead(none_of_types=True)
-    read = document_check._Read.echoed(_req().documents[0], echo)
-    assert read.says_none is True
+async def test_one_file_for_two_slots_says_none_for_each_slot() -> None:
+    """A file covering two slots: one answer, "none of them" for each slot,
+    whatever keys the slots share."""
+    base = _req()
+    second = base.documents[0].model_copy(
+        update={"name": "proof_of_birth", "label": "Proof of birth"}
+    )
+    req = base.model_copy(update={"documents": (base.documents[0], second)})
+    docs = {
+        **_docs(option="passport"),
+        "proof_of_birth": DocumentInput(option="passport", file=_PNG),
+    }
+    out = await check_documents(
+        req, {}, {}, docs, today=TODAY, reader=_reader(_answer(none_of_types=True))
+    )
+    assert all(d.none_of_types and d.option is None for d in out.documents.values())
+    assert [w.field for w in out.warnings] == ["proof_of_identity", "proof_of_birth"]
+
+
+def test_an_echo_says_none_from_its_flag_alone() -> None:
+    """An echo's none_of_types gives the warning even with a stale or
+    unknown option; an unread file never says it."""
+    slot = _req().documents[0]
+    for option in (None, "passport", "gone"):
+        echo = VerificationDocumentCautionRead(option=option, none_of_types=True)
+        read = document_check._Read.echoed(slot, echo)
+        assert read.says_none is True and read.option is None
     unread = document_check._Read(
-        _req().documents[0],
-        {},
-        {"readable": False, "option": document_check._NO_TYPE},
-        "proof_of_identity",
+        slot, {}, {"readable": False, "none_of_types": True}, "proof_of_identity"
     )
     assert unread.says_none is False
 
@@ -1376,7 +1381,7 @@ async def test_cautions_work_out_expired_again_for_the_type_chosen_now() -> None
     """A file of none of the types: whether its date is an expiry follows
     the type chosen (a bill's date is a due date)."""
     req = _mixed_address_slot()
-    answer = _answer(option="none_of_these", expiry_date="2020-01-01")
+    answer = _answer(none_of_types=True, expiry_date="2020-01-01")
     out = await check_documents(
         req, {}, {}, _docs("id_card"), today=TODAY, reader=_reader(answer)
     )

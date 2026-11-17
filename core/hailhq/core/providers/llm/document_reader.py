@@ -18,11 +18,13 @@ thinking off). Probed on 2026-11-16 on Bedrock eu-central-1:
 
 Every model also needs image and PDF input and structured output (effort
 "low", a JSON schema). The next model is tried only when another model can
-help (``_next_model_may_help``): a missing model or one without access, a
-rate limit (set per model), a server or connection error, or a 400 about the
-model itself (an unknown id, its thinking value). Never after a timeout, and
-never after another refusal of the request (a 400 or 413 about the file):
-the document is not sent to more models then. Only while ``_MIN_SEND_S`` is
+help (``_next_model_may_help``): a 403 or 404 (a missing model or one
+without access), a 429 (rate limits are set per model), a 5xx, a connection
+error, or a 400 or 424 whose text holds one of the probed phrases in
+``_MODEL_ERRORS`` (an unknown id, a base id that needs an inference profile,
+a refused thinking value, a parameter not supported on this model). Never
+after a timeout, and never after any other 400 or 424, or a 413: those are
+about the file, and the document is not sent to more models. Only while ``_MIN_SEND_S`` is
 left of the same deadline. One read is used for all the tries. A model that
 cannot take the request is harmless: its try fails and the read fails open.
 They run on Amazon Bedrock when ``ANTHROPIC_BEDROCK_REGION`` is set (then

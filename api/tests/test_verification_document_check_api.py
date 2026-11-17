@@ -590,11 +590,19 @@ async def test_a_covering_file_is_sent_once_and_fills_its_slots(
 
 @pytest.fixture(autouse=True)
 def _no_cached_forms():
-    routes._caution_forms.clear()
-    routes._caution_fetches.clear()
+    for kept in (
+        routes._caution_forms,
+        routes._caution_fetches,
+        routes._caution_refusals,
+    ):
+        kept.clear()
     yield
-    routes._caution_forms.clear()
-    routes._caution_fetches.clear()
+    for kept in (
+        routes._caution_forms,
+        routes._caution_fetches,
+        routes._caution_refusals,
+    ):
+        kept.clear()
 
 
 def _two_types(carrier) -> None:
@@ -861,8 +869,9 @@ async def test_cautions_keep_the_form_when_the_refresh_fails(
     with caplog.at_level(logging.WARNING, logger=routes.logger.name):
         assert await routes._caution_form(*args, slots=["nope"]) == form
     assert len(calls) == 2
-    failures = [r for r in caplog.records if "lookup failed" in r.getMessage()]
+    failures = [r for r in caplog.records if "requirements" in r.getMessage()]
     assert len(failures) == 1 and failures[0].exc_info is None
+    assert "refresh failed (RuntimeError); kept form used" in failures[0].getMessage()
     # Backed off: within _CAUTION_FORM_REFRESH_S of the failure, no call.
     monkeypatch.setattr(routes, "_CAUTION_FORM_REFRESH_S", 600)
     assert await routes._caution_form(*args, slots=["nope"]) == form
@@ -874,21 +883,55 @@ async def test_cautions_keep_the_form_when_the_refresh_fails(
     assert len(calls) == 2
 
 
-async def test_cautions_never_hide_a_refused_refresh(carrier, monkeypatch) -> None:
+async def test_cautions_drop_a_form_the_carrier_refuses(carrier, monkeypatch) -> None:
     """A refresh the carrier refuses (a subject type it no longer takes) is
-    the 422 it is, not the kept form."""
+    the 422 it is: the kept form is dropped, and the refusal answers the
+    next requests without another carrier call."""
     form = await carrier.requirements("GB", "mobile", "person")
     started, release = asyncio.Event(), asyncio.Event()
     release.set()
     refused = UnsupportedSubjectType("no persons", allowed=("business",))
-    provider, calls = _slow_provider(started, release, [form, refused])
+    outcomes = [form, refused]
+    provider, calls = _slow_provider(started, release, outcomes)
     args = ("fake", provider, "GB", "mobile", "person")
     assert await routes._caution_form(*args) == form
     monkeypatch.setattr(routes, "_CAUTION_FORM_REFRESH_S", 0)
     with pytest.raises(HTTPException) as failed:
         await routes._caution_form(*args, slots=["nope"])
     assert failed.value.status_code == 422
+    assert routes._caution_forms == {}
+    for slots in (["nope"], []):
+        with pytest.raises(HTTPException) as again:
+            await routes._caution_form(*args, slots=slots)
+        assert again.value.status_code == 422
+        assert again.value.detail == failed.value.detail
     assert len(calls) == 2
+    # Past the time limit the carrier is asked again.
+    monkeypatch.setattr(routes, "_CAUTION_FORM_TTL_S", 0)
+    outcomes.append(form)
+    assert await routes._caution_form(*args) == form
+    assert len(calls) == 3
+
+
+async def test_each_caller_logs_its_own_outcome(carrier, caplog) -> None:
+    """A carrier outage with no kept form: every caller sharing the call
+    answers 503 and logs it with its traceback."""
+    started, release = asyncio.Event(), asyncio.Event()
+    provider, calls = _slow_provider(started, release, [RuntimeError("down")])
+    args = ("fake", provider, "GB", "mobile", "person")
+    with caplog.at_level(logging.WARNING, logger=routes.logger.name):
+        first = asyncio.ensure_future(routes._caution_form(*args))
+        await started.wait()
+        second = asyncio.ensure_future(routes._caution_form(*args))
+        await asyncio.sleep(0)
+        release.set()
+        results = await asyncio.gather(first, second, return_exceptions=True)
+    assert [r.status_code for r in results] == [503, 503]
+    assert len(calls) == 1
+    logged = [r for r in caplog.records if "lookup failed" in r.getMessage()]
+    assert len(logged) == 2 and all(r.exc_info for r in logged)
+    # An outage is never kept.
+    assert routes._caution_refusals == {} and routes._caution_forms == {}
 
 
 async def test_fetches_of_several_files_share_one_limit() -> None:

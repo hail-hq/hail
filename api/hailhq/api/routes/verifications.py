@@ -176,6 +176,9 @@ _CAUTION_FORM_REFRESH_S = 30
 _caution_forms: dict[tuple[str, str, str, str], tuple[float, float, Requirements]] = {}
 # The carrier call running for each key: requests that miss at once share it.
 _caution_fetches: dict[tuple[str, str, str, str], asyncio.Task[Requirements]] = {}
+# Each carrier refusal (a 4xx: it no longer serves this form), with when it
+# came, kept as long as a form: the console asks after every edit.
+_caution_refusals: dict[tuple[str, str, str, str], tuple[float, HTTPException]] = {}
 
 PURPOSES = {"number", "sms"}
 
@@ -578,11 +581,10 @@ async def _requirements(
     number_type: str,
     subject_type: SubjectType,
     where: str = "query",
-    quiet: bool = False,
+    log: bool = True,
 ) -> Requirements:
     """``where`` names the request part the inputs came from, for error paths.
-    ``quiet`` logs a carrier failure as one warning line, without the
-    traceback."""
+    ``log=False`` leaves logging a carrier failure to the caller."""
     if number_type not in NUMBER_TYPES:
         raise unprocessable("unknown number_type", loc=[where, "number_type"])
     try:
@@ -594,11 +596,7 @@ async def _requirements(
         error.detail[0]["ctx"] = {"subject_types": list(exc.allowed)}
         raise error from exc
     except Exception as exc:
-        if quiet:
-            logger.warning(
-                "verification requirements lookup failed (%s)", type(exc).__name__
-            )
-        else:
+        if log:
             logger.exception("verification requirements lookup failed")
         raise HTTPException(
             status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -2646,6 +2644,15 @@ async def check_verification_documents(
                 )
 
 
+def _refusal(exc: HTTPException) -> HTTPException:
+    """A fresh copy of a kept refusal, so no request changes the kept one."""
+    return HTTPException(
+        status_code=exc.status_code,
+        detail=copy.deepcopy(exc.detail),
+        headers=exc.headers,
+    )
+
+
 async def _caution_form(
     provider_name: str,
     provider: VerificationProvider,
@@ -2658,12 +2665,18 @@ async def _caution_form(
     kept form that lacks one of ``slots`` and was checked
     ``_CAUTION_FORM_REFRESH_S`` ago or more is fetched again (the carrier
     may have added the slot). When the carrier is down for that refresh,
-    the kept form answers and the next refresh waits as long again; a
-    refused request (a 4xx) is not hidden. Requests that miss at once share
-    one carrier call; a request that is cancelled does not stop it for the
-    others. Only a form is kept, never an error."""
+    the kept form answers and the next refresh waits as long again. When
+    the carrier refuses (a 4xx), the kept form is dropped and the refusal is
+    kept instead, as long as a form. An outage is never kept. Requests that
+    miss at once share one carrier call; a request that is cancelled does
+    not stop it for the others. Each request logs its own outcome."""
     key = (provider_name, country_code.upper(), number_type, subject_type)
     now = time.monotonic()
+    refused = _caution_refusals.get(key)
+    if refused is not None:
+        if now - refused[0] < _CAUTION_FORM_TTL_S:
+            raise _refusal(refused[1])
+        del _caution_refusals[key]
     kept = _caution_forms.get(key)
     if kept is not None and now - kept[0] >= _CAUTION_FORM_TTL_S:
         kept = None
@@ -2676,23 +2689,26 @@ async def _caution_form(
             return form
     task = _caution_fetches.get(key)
     if task is None:
-        # A refresh logs a carrier failure as one line: the kept form answers.
-        refresh = kept is not None
 
         async def fetch() -> Requirements:
             try:
+                # Logged by each caller below, by what it answers.
                 requirements = await _requirements(
                     provider,
                     country_code,
                     number_type,
                     subject_type,
                     where="body",
-                    quiet=refresh,
+                    log=False,
                 )
             except HTTPException as exc:
+                at = time.monotonic()
                 held = _caution_forms.get(key)
-                if refresh and held is not None and exc.status_code >= 500:
-                    _caution_forms[key] = (held[0], time.monotonic(), held[2])
+                if exc.status_code < 500:
+                    _caution_forms.pop(key, None)
+                    _caution_refusals[key] = (at, _refusal(exc))
+                elif held is not None:
+                    _caution_forms[key] = (held[0], at, held[2])
                 raise
             finally:
                 _caution_fetches.pop(key, None)
@@ -2712,10 +2728,18 @@ async def _caution_form(
     try:
         return await asyncio.shield(task)
     except HTTPException as exc:
-        if kept is not None and exc.status_code >= 500:
+        if exc.status_code < 500:
+            raise
+        cause = type(exc.__cause__).__name__
+        if kept is not None:
             # The carrier is down: the kept form answers (a missing slot
             # then gets its 422).
+            logger.warning(
+                "verification requirements refresh failed (%s); kept form used",
+                cause,
+            )
             return kept[2]
+        logger.exception("verification requirements lookup failed")
         raise
 
 
