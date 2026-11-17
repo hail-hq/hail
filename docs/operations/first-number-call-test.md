@@ -36,7 +36,8 @@ Run it from a repo checkout. The script is
   SELECT n.organization_id, n.inbound_registered_at IS NOT NULL AS registered,
          COALESCE(a.status = 'live' AND a.voice_enabled, false) AS agent_ready
   FROM phone_numbers n LEFT JOIN agents a ON a.id = n.voice_agent_id
-  WHERE n.e164 = :'e164' AND n.provisioning_state = 'active';
+  WHERE n.e164 = :'e164' AND n.provisioning_state = 'active'
+    AND NOT n.is_pool;
   SQL
   ```
 - The call reaches the customer's agent and shows in their call log. Get
@@ -64,20 +65,19 @@ Run it from a repo checkout. The script is
 
 Your outbound call only shows what your side saw. A carrier announcement or
 voicemail also picks up. Check the customer's side too: it is the row you
-delete afterwards. Match it by the caller ID the script printed, so you
-never pick a real caller's call.
+delete afterwards. Pick the row whose `from_e164` is the caller ID the
+script printed and whose time matches the test, so you never pick a real
+caller's call. Some carriers change the caller ID's format (for example
+`00` instead of `+`).
 
 ```bash
 psql "$DATABASE_URL" <<'SQL'
 \set org '<org id>'
 \set e164 '+<customer number>'
-\set caller '+<caller ID the script printed>'
-SELECT id, status, end_reason, answered_at, ended_at
+SELECT id, from_e164, requested_at, status, end_reason, answered_at
 FROM calls
-WHERE organization_id = :'org' AND direction = 'inbound'
-  AND to_e164 = :'e164' AND from_e164 = :'caller'
-  AND requested_at > now() - interval '1 hour'
-ORDER BY requested_at DESC;
+WHERE organization_id = :'org' AND direction = 'inbound' AND to_e164 = :'e164'
+ORDER BY requested_at DESC LIMIT 10;
 SQL
 ```
 
@@ -89,10 +89,11 @@ SQL
   - `user_rejected`: voice is suspended for the workspace.
   - `carrier_route_failed`: the call came in on another carrier's LiveKit
     trunk, or the number has no voice capability.
-- No inbound row at all: the carrier or the LiveKit inbound trunk refused
-  the call, or Hail dropped it because the number is not an active number
-  of a workspace. Check the carrier panel (call capacity, where the number
-  points) and the Before query above.
+- No inbound row for the test: the carrier or the LiveKit inbound trunk
+  refused the call, or Hail dropped it because the number is not an active
+  number of a workspace. Check the carrier panel (call capacity, where the
+  number points) and the Before query above. Also check the voicebot logs
+  for `could not open the call`.
 
 ## After
 

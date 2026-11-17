@@ -60,6 +60,10 @@ class CallTestError(Exception):
     """The call could not be placed, or did not end in time."""
 
 
+class CallMaybeLive(Exception):
+    """POST /v1/calls gave no clear answer: the call may be live."""
+
+
 def call_body(number: str, from_number: str | None) -> dict:
     body = {
         "to": number,
@@ -77,7 +81,12 @@ def call_body(number: str, from_number: str | None) -> dict:
 
 
 def place_call(
-    client: httpx.Client, api_url: str, number: str, from_number: str | None
+    client: httpx.Client,
+    api_url: str,
+    number: str,
+    from_number: str | None,
+    *,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> dict:
     url = join_url(api_url, "v1/calls")
     body = call_body(number, from_number)
@@ -87,7 +96,13 @@ def place_call(
     except httpx.TransportError:
         # Same key: if Hail took the first request, it answers with that
         # call instead of placing a second one.
+        sleep(2)
         response = client.post(url, json=body, headers=headers)
+        if response.status_code != 201:
+            # A 409 means the first request is still being handled.
+            raise CallMaybeLive(
+                f"retry answered {response.status_code}: {response.text}"
+            )
     if response.status_code != 201:
         raise CallTestError(
             f"POST /v1/calls answered {response.status_code}: {response.text}"
@@ -256,7 +271,7 @@ def main(argv: list[str] | None = None) -> int:
         except CallTestError as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 2
-        except (httpx.HTTPError, ValueError) as exc:
+        except (CallMaybeLive, httpx.HTTPError, ValueError) as exc:
             # The request may have reached Hail: the call can be live now.
             print(MAYBE_LIVE.format(exc=repr(exc)), file=sys.stderr)
             return 2
@@ -264,7 +279,8 @@ def main(argv: list[str] | None = None) -> int:
         if not isinstance(call_id, str) or not call_id:
             print(MAYBE_LIVE.format(exc=f"body {placed!r}"), file=sys.stderr)
             return 2
-        print(f"Placed call {call_id} to {args.number}. Waiting for it to end.")
+        print(f"Placed call {call_id} to {args.number}.")
+        print(f"Caller ID used: {placed.get('from_e164')}. Waiting for the end.")
         try:
             call = wait_for_end(client, api_url, call_id, timeout=args.timeout)
         except CallTestError as exc:
@@ -273,7 +289,6 @@ def main(argv: list[str] | None = None) -> int:
     answered, text = verdict(call)
     print(text)
     print(f"Call id (your workspace): {call_id}")
-    print(f"Caller ID used: {call.get('from_e164')}")
     if answered:
         # A carrier announcement or voicemail also picks up. Only the
         # customer's inbound row shows the call reached their agent.

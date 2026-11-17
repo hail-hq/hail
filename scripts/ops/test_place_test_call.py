@@ -313,6 +313,18 @@ def test_place_call_retries_once_with_the_same_key():
         [httpx.ConnectError("reset"), httpx.Response(201, json=call("queued"))],
         seen,
     )
-    assert ptc.place_call(client, API, "+14155550100", None)["id"] == CALL_ID
+    placed = ptc.place_call(client, API, "+14155550100", None, sleep=lambda s: None)
+    assert placed["id"] == CALL_ID
     assert len(seen) == 2
     assert seen[0].headers["Idempotency-Key"] == seen[1].headers["Idempotency-Key"]
+
+
+def test_place_call_retry_conflict_means_the_call_may_be_live():
+    client = client_for(
+        [
+            httpx.ReadTimeout("slow"),
+            httpx.Response(409, json={"detail": "still processing"}),
+        ]
+    )
+    with pytest.raises(ptc.CallMaybeLive, match="409"):
+        ptc.place_call(client, API, "+14155550100", None, sleep=lambda s: None)
