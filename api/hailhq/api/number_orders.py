@@ -552,7 +552,8 @@ async def acquire_offer(
             ),
         )
     # A quote made before Hail stopped selling this kind of number at this
-    # carrier (telephony_catalog.not_sold): another carrier may still sell it.
+    # carrier (telephony_catalog.not_sold): another carrier may still sell it,
+    # so this says refresh, not "we don't offer".
     if telephony_catalog.not_sold(offer.provider, country, kind):
         raise HTTPException(
             status_code=409,

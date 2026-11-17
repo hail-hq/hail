@@ -312,10 +312,11 @@ async def telnyx_offers(
         requirements = [r for rule in matched for r in rule["regulatory_requirements"]]
         subjects = sorted(subject_types_for(requirements))
         if company_only:
-            subjects = [s for s in subjects if s == "business"]
+            # subject_types_for always allows a business.
+            subjects = ["business"]
             # No rules and no group would sell a company-only number to
-            # anyone, and rules no company can meet sell it to no one.
-            if (not requirements and not group) or not subjects:
+            # anyone: unknown, not an exemption.
+            if not requirements and not group:
                 continue
         labels = [
             r.get("name") or r.get("field_type") or "Verification" for r in requirements
