@@ -111,7 +111,7 @@ Some carrier rows are listed but not sold, or sold to companies only. The sync r
 
 | Carrier, country, type | Rule | Why |
 | --- | --- | --- |
-| Telnyx GB `local`, `mobile`, `toll_free` | Not sold: no quote, option, purchase or new verification. Twilio sells them. | Telnyx declines private individuals for UK numbers. Every Telnyx GB order asks for "Company Website URL (Business Use Only)", and Telnyx declined the "N/A" Hail sends for a person (0 of 3 person filings approved). Twilio approved its person filing and asks a person for no website or use-case text. Twilio costs a little more ($1.15 a month for local, against $1.00 plus $1.00 setup). |
+| Telnyx GB `local`, `mobile`, `toll_free` | Not sold: no quote, option, purchase or new verification. Twilio sells them. | Every Telnyx GB order asks for "Company Website URL (Business Use Only)", a live site that names the business, and Telnyx declines the "N/A" Hail sends for a private individual. Twilio asks an individual for no website or use-case text. |
 | Telnyx GB `national` (03) | Companies only: offers list `subject_types: ["business"]`, a person verification is a 422 (`UnsupportedSubjectType`). | Same Telnyx rule. Twilio has no GB national numbers. |
 
 - Numbers already bought keep their carrier, calls, routing, renewal and release. Renewal prices still come from the owning carrier's file.

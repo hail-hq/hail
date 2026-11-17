@@ -36,14 +36,12 @@ _DEFAULT_DIR = Path(__file__).resolve().parents[3] / "costs"
 # Rules per (carrier, country, number type) that the carrier catalogs cannot
 # hold: the weekly sync rewrites costs/*.json from the carriers' APIs.
 #
-# UK (GB): Telnyx declines private individuals. Every Telnyx GB order asks
-# for "Company Website URL (Business Use Only)", and Telnyx declined the
-# "N/A" Hail sends for a person (0 of 3 person filings approved). Twilio
-# approved its person filing and asks a person for no website or use-case
-# text. Twilio costs a little more ($1.15 a month for local, against
-# Telnyx's $1.00 plus $1.00 setup). So GB local, mobile and toll-free
-# numbers come from Twilio only. Twilio has no GB national (03) numbers:
-# Telnyx keeps those, for companies only.
+# UK (GB): every Telnyx GB order asks for "Company Website URL (Business
+# Use Only)", a live site that names the business, and Telnyx declines the
+# "N/A" Hail sends for a private individual. Twilio asks an individual for
+# no website or use-case text. So GB local, mobile and toll-free numbers
+# come from Twilio only. Twilio has no GB national (03) numbers: Telnyx
+# keeps those, for companies only.
 #
 # Only new quotes, purchases and verifications follow these rules. Numbers
 # already bought keep their carrier, routing, renewal and release.
