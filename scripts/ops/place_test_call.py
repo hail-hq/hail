@@ -107,8 +107,8 @@ def place_call(
 
     A 201 or a replayed answer is final (a refusal raises CallTestError).
     At the deadline the outcome is unknown (CallMaybeLive) after a lost
-    request, a 409 still processing or a fresh 5xx; otherwise the last
-    refusal is final."""
+    request, a 409 still processing or a fresh 5xx (it counts as a lost
+    request and is tried again); otherwise the last refusal is final."""
     url = join_url(api_url, "v1/calls")
     body = call_body(number, from_number)
     headers = {"Idempotency-Key": str(uuid.uuid4())}
@@ -126,6 +126,10 @@ def place_call(
             wait = POST_RETRY_SECONDS
         elif response.status_code == 201 or _replayed(response):
             break
+        elif response.status_code >= 500 and not _pool_exhausted(response):
+            # A gateway or server error: the request reached Hail and may
+            # still run, the same as a lost answer.
+            lost, wait = True, POST_RETRY_SECONDS
         elif response.status_code == 429:
             wait = max(POST_RETRY_SECONDS, _retry_after(response))
         elif lost or _still_processing(response) or _pool_exhausted(response):
@@ -135,16 +139,15 @@ def place_call(
         left = deadline - clock()
         if left <= 0:
             if response is None:
-                raise CallMaybeLive(f"no answer: {problem}")
+                if lost:
+                    raise CallMaybeLive(f"no answer: {problem}")
+                raise CallTestError(f"POST /v1/calls was never sent: {problem}")
             break
         sleep(min(wait, left))
     if response.status_code == 201:
         return response.json()
     text = f"answered {response.status_code}: {response.text}"
-    if _replayed(response):
-        raise CallTestError(f"POST /v1/calls {text}")
-    fresh_5xx = response.status_code >= 500 and not _pool_exhausted(response)
-    if lost or fresh_5xx or _still_processing(response):
+    if not _replayed(response) and (lost or _still_processing(response)):
         raise CallMaybeLive(text)
     raise CallTestError(f"POST /v1/calls {text}")
 

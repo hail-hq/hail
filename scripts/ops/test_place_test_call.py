@@ -356,7 +356,7 @@ def test_place_call_final_conflict_is_a_plain_error():
 
 
 def test_place_call_fresh_server_error_may_be_live():
-    client = client_for([httpx.Response(502, text="dispatch failed")])
+    client = client_for([httpx.Response(502, text="dispatch failed")] * 100)
     with pytest.raises(ptc.CallMaybeLive, match="502"):
         post(client)
 
@@ -519,3 +519,17 @@ def test_refuses_a_bad_timeout(timeout, monkeypatch):
     with pytest.raises(SystemExit) as exc:
         ptc.main(argv)
     assert exc.value.code == 2
+
+
+def test_place_call_never_sent_is_final():
+    client = client_for([httpx.ConnectError("dns")] * 100)
+    with pytest.raises(ptc.CallTestError, match="never sent"):
+        post(client)
+
+
+def test_place_call_gateway_error_is_retried_until_replay():
+    replay = {"Idempotency-Replay": "true"}
+    client = client_for(
+        [httpx.Response(504), httpx.Response(201, json=call("queued"), headers=replay)]
+    )
+    assert post(client)["id"] == CALL_ID
