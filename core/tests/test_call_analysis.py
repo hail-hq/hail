@@ -13,6 +13,7 @@ from hailhq.core.call_analysis import (
     CLAIM_LEASE,
     call_transcript,
     claim_call_to_analyze,
+    release_call_claim,
     send_call_analyzed,
 )
 from hailhq.core.models import (
@@ -220,6 +221,14 @@ async def test_a_live_claim_keeps_the_call_until_the_lease_ends(
     assert claims == 2
 
 
+async def test_a_released_claim_is_retried_at_once(async_session) -> None:
+    call = await _seed_call(async_session)
+    call_id = call.id
+    assert (await claim_call_to_analyze(async_session)).id == call_id
+    await release_call_claim(async_session, call_id)
+    assert (await claim_call_to_analyze(async_session)).id == call_id
+
+
 async def test_two_workers_race_one_claim(session_factory) -> None:
     async with session_factory() as s:
         call = await _seed_call(s)
@@ -363,11 +372,22 @@ async def test_subscription_made_after_the_call_gets_no_delivery(
         secret_encrypted="x",
     )
     async_session.add(late)
+    # The old subscription rotates its secret after the call was picked:
+    # it still gets the event.
+    old = (
+        await async_session.execute(
+            select(WebhookSubscription).where(
+                WebhookSubscription.target_url == "https://example.com/hook",
+                WebhookSubscription.organization_id == call.organization_id,
+            )
+        )
+    ).scalar_one()
+    old.updated_at = datetime.now(timezone.utc)
     await async_session.commit()
     turns = await call_transcript(async_session, call_id)
     assert await send_call_analyzed(async_session, call_id, turns, None)
     [delivery] = await _deliveries(async_session, call_id)
-    assert delivery.subscription_id != late.id
+    assert delivery.subscription_id == old.id
     # The same ``at`` text as GET /v1/calls/{id} (pydantic JSON).
     assert delivery.payload["data"]["transcript"][0]["at"].endswith("Z")
 
