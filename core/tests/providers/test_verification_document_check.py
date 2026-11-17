@@ -1284,6 +1284,18 @@ async def test_cautions_say_a_file_is_none_of_the_types_for_the_type_chosen_now(
     reads = _echo(out)
     assert reads["proof_of_identity"].option is None
     assert reads["proof_of_identity"].none_of_types is True
+    # Only for a read that names no type: a type key wins.
+    named = {
+        "proof_of_identity": reads["proof_of_identity"].model_copy(
+            update={"option": "passport"}
+        )
+    }
+    assert (
+        document_cautions(
+            _req(), {}, {}, _form_only(_docs("passport")), named, today=TODAY
+        )
+        == []
+    )
     cautions = document_cautions(
         _req(), {}, {}, _form_only(_docs("passport")), reads, today=TODAY
     )
@@ -1538,6 +1550,9 @@ async def test_reader_sends_each_model_its_own_thinking_value(
         _api_error(400, "The provided model identifier is invalid."),
         _api_error(400, 'To turn thinking off on this model, send "thinking"'),
         _api_error(403, "You don't have access to the model"),
+        _api_error(424, "ModelErrorException"),
+        _api_error(400, "output_config.effort is not supported on this model"),
+        _api_error(400, "Invocation with on-demand throughput isn't supported."),
     ],
 )
 async def test_reader_falls_back_when_another_model_may_help(

@@ -108,20 +108,32 @@ def _models() -> list[tuple[str, dict[str, str] | None]]:
     return out
 
 
+# Words of a 400 that is about the model, not the file: an unknown id
+# (Bedrock: "The provided model identifier is invalid.", probed on
+# 2026-11-17), a thinking value or a feature the model refuses ("... on this
+# model"), a Bedrock id that needs an inference profile.
+_MODEL_400 = (
+    "model identifier",
+    "thinking",
+    "this model",
+    "inference profile",
+    "on-demand throughput",
+)
+
+
 def _next_model_may_help(exc: anthropic.APIStatusError) -> bool:
     """True when the error is about this model, not about the request: the
     next model may then answer. Rate limits are set per model (Bedrock and
-    Anthropic's API). A 400 is about the model only for an unknown id
-    (Bedrock: "The provided model identifier is invalid.", probed on
-    2026-11-17) or a thinking value the model refuses. Any other 400, and a
-    413, is about the file or the request: every model would refuse it too.
-    Bedrock words some file errors "The model returned the following
-    errors", so "model" alone does not count."""
+    Anthropic's API); 424 is Bedrock's model error. A 400 is about the model
+    only with the words in ``_MODEL_400``. Any other 400, and a 413, is
+    about the file or the request: every model would refuse it too. Bedrock
+    words some file errors "The model returned the following errors", so
+    "model" alone does not count."""
     status = exc.status_code
-    if status in (403, 404, 429) or status >= 500:
+    if status in (403, 404, 424, 429) or status >= 500:
         return True
     text = str(exc.message).lower()
-    return status == 400 and ("model identifier" in text or "thinking" in text)
+    return status == 400 and any(words in text for words in _MODEL_400)
 
 
 def document_reader_configured() -> bool:

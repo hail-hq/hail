@@ -448,7 +448,7 @@ class _Read:
         box. An echo without ``file_slot`` is named by its printed name."""
         printed = echo.printed_name
         answer = {
-            "option": "none" if echo.none_of_types else echo.option,
+            "option": echo.option,
             "expiry_date": echo.expiry_date,
             **(printed.model_dump() if printed else {}),
         }
@@ -457,7 +457,10 @@ class _Read:
         else:
             name = "|".join(printed.model_dump().values()) if printed else slot.name
             key = f"printed:{name}"
-        return cls(slot, {}, answer, key)
+        read = cls(slot, {}, answer, key)
+        # Set here, not as option "none": a carrier's type key may be "none".
+        read.says_none = echo.none_of_types and read.option is None
+        return read
 
     def own_fields(self) -> dict[str, str]:
         prefix = f"{self.slot.name}."

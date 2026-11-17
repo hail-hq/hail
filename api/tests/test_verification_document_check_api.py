@@ -819,14 +819,13 @@ async def test_cautions_share_one_carrier_call_and_survive_a_cancelled_caller(
     # The console drops the older call on each edit.
     first.cancel()
     release.set()
-    got, age = await second
-    assert got == form and age == 0.0
+    assert await second == form
     assert len(calls) == 1
     with pytest.raises(asyncio.CancelledError):
         await first
     # Kept for the next request, and the call is no longer running.
     assert routes._caution_fetches == {}
-    assert (await routes._caution_form(*args))[0] == form
+    assert await routes._caution_form(*args) == form
     assert len(calls) == 1
 
 
@@ -840,7 +839,27 @@ async def test_cautions_do_not_keep_a_failed_carrier_call(carrier) -> None:
         await routes._caution_form(*args)
     assert failed.value.status_code == 503
     assert routes._caution_forms == {} and routes._caution_fetches == {}
-    assert (await routes._caution_form(*args))[0] == form
+    assert await routes._caution_form(*args) == form
+    assert len(calls) == 2
+
+
+async def test_cautions_keep_the_form_when_the_refresh_fails(
+    carrier, monkeypatch
+) -> None:
+    """A slot the kept form lacks, and the carrier down: the kept form
+    answers (the slot gets its 422), not the carrier's error."""
+    form = await carrier.requirements("GB", "mobile", "person")
+    started, release = asyncio.Event(), asyncio.Event()
+    release.set()
+    provider, calls = _slow_provider(started, release, [form, RuntimeError("down")])
+    args = ("fake", provider, "GB", "mobile", "person")
+    assert await routes._caution_form(*args) == form
+    monkeypatch.setattr(routes, "_CAUTION_FORM_REFRESH_S", 0)
+    assert await routes._caution_form(*args, slots=["nope"]) == form
+    assert len(calls) == 2
+    # A slot the form has: no refresh.
+    known = form.documents[0].name
+    assert await routes._caution_form(*args, slots=[known]) == form
     assert len(calls) == 2
 
 

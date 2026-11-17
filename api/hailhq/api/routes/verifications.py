@@ -32,7 +32,7 @@ import json
 import logging
 import math
 import time
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Collection
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
@@ -2642,19 +2642,24 @@ async def _caution_form(
     country_code: str,
     number_type: str,
     subject_type: SubjectType,
-    max_age_s: float = _CAUTION_FORM_TTL_S,
-) -> tuple[Requirements, float]:
-    """``_requirements``, kept ``_CAUTION_FORM_TTL_S`` in this process, and
-    its age in seconds. A form older than ``max_age_s`` is fetched again.
-    Requests that miss at once share one carrier call; a request that is
-    cancelled does not stop it for the others. Only a form is kept, never
-    an error."""
+    slots: Collection[str] = (),
+) -> Requirements:
+    """``_requirements``, kept ``_CAUTION_FORM_TTL_S`` in this process. A
+    kept form that lacks one of ``slots`` and is ``_CAUTION_FORM_REFRESH_S``
+    or older is fetched again (the carrier may have added the slot); when
+    that fetch fails, the kept form is used. Requests that miss at once
+    share one carrier call; a request that is cancelled does not stop it
+    for the others. Only a form is kept, never an error."""
     key = (provider_name, country_code.upper(), number_type, subject_type)
     hit = _caution_forms.get(key)
     if hit is not None:
-        age = time.monotonic() - hit[0]
-        if age < min(max_age_s, _CAUTION_FORM_TTL_S):
-            return hit[1], age
+        at, kept = hit
+        age = time.monotonic() - at
+        names = {s.name for s in kept.documents}
+        if age < _CAUTION_FORM_TTL_S and (
+            age < _CAUTION_FORM_REFRESH_S or all(s in names for s in slots)
+        ):
+            return kept
     task = _caution_fetches.get(key)
     if task is None:
 
@@ -2678,7 +2683,14 @@ async def _caution_form(
         task = _caution_fetches[key] = asyncio.ensure_future(fetch())
         # Read its outcome even when every caller has gone.
         task.add_done_callback(lambda t: t.cancelled() or t.exception())
-    return await asyncio.shield(task), 0.0
+    try:
+        return await asyncio.shield(task)
+    except HTTPException:
+        if hit is not None and time.monotonic() - hit[0] < _CAUTION_FORM_TTL_S:
+            # A refresh for a missing slot failed: the kept form answers
+            # (the slot then gets its 422).
+            return hit[1]
+        raise
 
 
 @router.post(
@@ -2712,19 +2724,15 @@ async def check_verification_document_cautions(
     provider = _provider_or_404(registry, offer["provider"], "number")
     # Nothing is written. End the read transaction before any carrier call.
     await db.rollback()
-    form = (
+    requirements = await _caution_form(
         offer["provider"],
         provider,
         body.country_code,
         body.number_type,
         body.subject_type,
+        slots=body.documents,
     )
-    requirements, age = await _caution_form(*form)
     slots = {s.name for s in requirements.documents}
-    if age >= _CAUTION_FORM_REFRESH_S and any(s not in slots for s in body.documents):
-        # The carrier may have added the slot since the form was kept.
-        requirements, _ = await _caution_form(*form, max_age_s=_CAUTION_FORM_REFRESH_S)
-        slots = {s.name for s in requirements.documents}
     for slot in body.documents:
         if slot not in slots:
             raise unprocessable(
