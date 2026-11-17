@@ -110,6 +110,7 @@ Before changing costs or docs schema, read
 Use `shared/JsonLd.tsx` and the builders in `shared/structured-data.ts`.
 Model comparisons use `web/lib/model-schema.ts` with the checked cost rows.
 Keep schema in route templates so new docs, API operations, and pairs inherit it.
+Run `pnpm run check:structured-data` for the automatic build-and-render check.
 Never invent prices, stock, reviews, images, or publication dates to clear an audit.
 
 ## Agent prompt maintenance

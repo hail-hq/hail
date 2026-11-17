@@ -1,12 +1,26 @@
 # Costs and docs structured data
 
-From the repository root, check the shared schema contracts:
+From the repository root, run the same check as GitHub:
 
 ```sh
-pnpm run test:structured-data
-pnpm run docs:build
-pnpm run site:build
+pnpm run check:structured-data
 ```
+
+[Structured data / Rendered schema](../../.github/workflows/structured-data.yml)
+runs this command for relevant pull requests and main-branch changes. Draft jobs
+skip; marking a pull request ready starts the check. It watches the apps, shared
+code, public docs, OpenAPI, costs, dependencies, and schema-check files.
+
+The command builds both apps with the existing build commands. The recurring
+[`structured-data-check.mjs`](../../scripts/structured-data-check.mjs) runner then
+starts the built apps on local ports assigned by the OS. It passes their origins
+to the schema tests and requires zero skipped tests. Its output reports each
+app's page count and the test results. It stops its servers after success,
+failure, or interruption. It uses no production services or credentials.
+
+For builder tests without building or starting apps, run `pnpm run test:structured-data`.
+Its two HTTP tests skip when origins are absent. Required mode
+(`STRUCTURED_DATA_REQUIRED=1`) fails if either origin is missing.
 
 Use [`JsonLd`](../../shared/JsonLd.tsx) for every JSON-LD script. It escapes `<`
 before rendering, including text derived from Markdown or model data.
@@ -47,7 +61,7 @@ To check every rendered sitemap page, start the built apps on unused ports:
 ```sh
 pnpm --filter @hail-hq/docs-site exec next start --port 3422
 pnpm --filter @hail-hq/web exec next start --port 3423
-DOCS_TEST_ORIGIN=http://localhost:3422 COSTS_TEST_ORIGIN=http://localhost:3423 pnpm run test:structured-data
+STRUCTURED_DATA_REQUIRED=1 DOCS_TEST_ORIGIN=http://localhost:3422 COSTS_TEST_ORIGIN=http://localhost:3423 pnpm run test:structured-data
 ```
 
 Run each server in its own terminal. The rendered test checks canonical URLs,

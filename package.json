@@ -18,7 +18,8 @@
     "docs:urls": "node docs-site/scripts/urls.mjs",
     "docs:check-urls": "node docs-site/scripts/urls.mjs --check",
     "test:site-audit": "node --test scripts/site-audit.test.mjs",
-    "test:structured-data": "node --test scripts/structured-data.test.mjs",
+    "test:structured-data": "node --test --test-reporter=tap scripts/structured-data*.test.mjs",
+    "check:structured-data": "pnpm run docs:build && pnpm run site:build && node scripts/structured-data-check.mjs",
     "postman:test": "node --test scripts/postman/*.test.mjs",
     "postman:generate": "node scripts/postman/generate.mjs",
     "postman:publish": "node scripts/postman/publish.mjs"

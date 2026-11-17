@@ -257,14 +257,16 @@ function nodesFrom(html) {
   });
 }
 
-for (const [zone, origin] of [
-  ["docs", process.env.DOCS_TEST_ORIGIN],
-  ["costs", process.env.COSTS_TEST_ORIGIN],
+for (const [zone, key] of [
+  ["docs", "DOCS_TEST_ORIGIN"],
+  ["costs", "COSTS_TEST_ORIGIN"],
 ]) {
+  const origin = process.env[key];
   test(
     `${zone} sitemap pages include the correct structured data`,
-    { skip: !origin },
-    async () => {
+    { skip: !origin && process.env.STRUCTURED_DATA_REQUIRED !== "1" },
+    async (t) => {
+      assert.ok(origin, `${key} is required for rendered schema checks`);
       const sitemap = await fetch(`${origin}/${zone}/sitemap.xml`).then((r) =>
         r.text(),
       );
@@ -313,6 +315,7 @@ for (const [zone, origin] of [
           );
         }
       }
+      t.diagnostic(`${zone}: checked ${urls.length} sitemap pages`);
     },
   );
 }
