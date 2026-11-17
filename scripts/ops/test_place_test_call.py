@@ -533,3 +533,20 @@ def test_place_call_gateway_error_is_retried_until_replay():
         [httpx.Response(504), httpx.Response(201, json=call("queued"), headers=replay)]
     )
     assert post(client)["id"] == CALL_ID
+
+
+def test_place_call_in_flight_request_then_no_answer_may_be_live():
+    client = client_for(
+        [httpx.ConnectError("dns"), httpx.Response(409, json=STILL)]
+        + [httpx.ConnectError("dns")] * 100
+    )
+    with pytest.raises(ptc.CallMaybeLive):
+        post(client)
+
+
+def test_place_call_lost_after_a_5xx_survives_later_connect_errors():
+    seen = []
+    client = client_for([httpx.Response(502)] + [httpx.ConnectError("dns")] * 100, seen)
+    with pytest.raises(ptc.CallMaybeLive):
+        post(client)
+    assert len({r.headers["Idempotency-Key"] for r in seen}) == 1

@@ -100,10 +100,11 @@ def place_call(
     passed; the last one lands at the deadline.
 
     Tried again: a network error, a 409 "still processing", a fresh 429
-    and the shared-pool 503 (both place nothing). Once a request was sent
-    and got no answer (a read or write error, not a connect error), any
-    fresh answer is tried again too: the lost request may still claim the
-    key, and only Hail's replayed answer settles it.
+    and the shared-pool 503 (both place nothing). Once a request may run
+    on Hail without its answer (a read or write error, a fresh 5xx, or a
+    409 still processing; not a connect error), any fresh answer is tried
+    again too: that request may still claim the key, and only Hail's
+    replayed answer settles it.
 
     A 201 or a replayed answer is final (a refusal raises CallTestError).
     At the deadline the outcome is unknown (CallMaybeLive) after a lost
@@ -132,7 +133,10 @@ def place_call(
             lost, wait = True, POST_RETRY_SECONDS
         elif response.status_code == 429:
             wait = max(POST_RETRY_SECONDS, _retry_after(response))
-        elif lost or _still_processing(response) or _pool_exhausted(response):
+        elif _still_processing(response):
+            # A request with this key runs on Hail: the call may go out.
+            lost, wait = True, POST_RETRY_SECONDS
+        elif lost or _pool_exhausted(response):
             wait = POST_RETRY_SECONDS
         else:
             break
