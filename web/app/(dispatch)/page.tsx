@@ -11,6 +11,9 @@ import {
   COSTS_SITE_DESCRIPTION,
   COSTS_SITE_TITLE,
 } from "@/lib/site-copy";
+import { SITE_ORIGIN } from "@/lib/url";
+import { JsonLd } from "../../../shared/JsonLd";
+import { collectionSchema } from "../../../shared/structured-data";
 
 export const dynamic = "force-static";
 
@@ -67,6 +70,21 @@ export default function CostsPage() {
 
   return (
     <>
+      <JsonLd
+        data={collectionSchema({
+          title: COSTS_HERO_COPY.heading,
+          description: COSTS_SITE_DESCRIPTION,
+          path: "/costs",
+          origin: SITE_ORIGIN,
+          items: [
+            { name: "Language models", path: "/costs#llm" },
+            { name: "Speech recognition", path: "/costs#stt" },
+            { name: "Speech synthesis", path: "/costs#tts" },
+            { name: "Phone numbers", path: "/costs#telephony" },
+            { name: "SMS", path: "/costs#sms" },
+          ],
+        })}
+      />
       <div className="dispatch-tape">
         <div className="wrap row">
           <div className="left">
@@ -129,7 +147,9 @@ export default function CostsPage() {
               <div className="k">LLMs</div>
               <div className="v">{llm.models.length}</div>
               <div className="n">
-                {rowRange(llm.models, 'output_per_mtok_usd',
+                {rowRange(
+                  llm.models,
+                  "output_per_mtok_usd",
                   2,
                   0,
                   "Mtok output",
@@ -140,18 +160,16 @@ export default function CostsPage() {
               <div className="k">STT</div>
               <div className="v">{stt.models.length}</div>
               <div className="n">
-                {rowRange(stt.models, 'price_per_minute_usd',
-                  6,
-                  4,
-                  "min",
-                )}
+                {rowRange(stt.models, "price_per_minute_usd", 6, 4, "min")}
               </div>
             </div>
             <div className="stat">
               <div className="k">TTS</div>
               <div className="v">{tts.models.length}</div>
               <div className="n">
-                {rowRange(tts.models, 'price_per_1m_chars_usd',
+                {rowRange(
+                  tts.models,
+                  "price_per_1m_chars_usd",
                   0,
                   0,
                   "1M chars",
@@ -162,12 +180,8 @@ export default function CostsPage() {
               <div className="k">SMS</div>
               <div className="v">{sms.providers.length}</div>
               <div className="n">
-                {rowRange(sms.providers, 'usd_per_segment',
-                  5,
-                  5,
-                  "segment",
-                )}{" "}
-                · base
+                {rowRange(sms.providers, "usd_per_segment", 5, 5, "segment")} ·
+                base
               </div>
             </div>
             <div className="stat">
@@ -266,7 +280,8 @@ export default function CostsPage() {
               </a>
             </li>
             <li>
-              Phone numbers, one file per carrier (Twilio&apos;s also holds the 10DLC fees):{" "}
+              Phone numbers, one file per carrier (Twilio&apos;s also holds the
+              10DLC fees):{" "}
               <code>
                 https://raw.githubusercontent.com/hail-hq/hail/main/costs/twilio.json
               </code>

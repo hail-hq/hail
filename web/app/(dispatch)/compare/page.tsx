@@ -4,6 +4,8 @@ import { CompareModels } from "@/components/compare-picker";
 import { featuredPairs } from "@/lib/featured";
 import { SITE_ORIGIN } from "@/lib/url";
 import { pageMetadata } from "../../../../shared/site-metadata";
+import { JsonLd } from "../../../../shared/JsonLd";
+import { collectionSchema } from "../../../../shared/structured-data";
 
 export const dynamic = "force-static";
 
@@ -19,6 +21,19 @@ export const metadata = pageMetadata({
 export default function ComparePage() {
   return (
     <>
+      <JsonLd
+        data={collectionSchema({
+          title: "Compare AI model costs",
+          description:
+            "Compare pricing for language, speech recognition, and speech synthesis models.",
+          path: "/costs/compare",
+          origin: SITE_ORIGIN,
+          items: featuredPairs.map((pair) => ({
+            name: pair.models.map((model) => model.display_name).join(" vs "),
+            path: `/costs/compare/${pair.slug}`,
+          })),
+        })}
+      />
       <header
         style={{
           padding: "40px 0 28px",
