@@ -27,7 +27,7 @@ from hailhq.core.schemas import TERMINAL_CALL_STATUSES, CallTranscriptTurn
 from hailhq.core.threads import spoken_text
 from hailhq.core.webhook_events import WebhookEventType
 from hailhq.core.webhook_fanout import call_event_data, fanout_call_event
-from sqlalchemy import any_, delete, exists, func, literal, or_, select
+from sqlalchemy import any_, exists, func, literal, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = [
@@ -40,7 +40,6 @@ __all__ = [
     "call_duration_seconds",
     "call_transcript",
     "claim_call_to_analyze",
-    "release_call_claim",
     "send_call_analyzed",
 ]
 
@@ -143,11 +142,11 @@ def _analyzed(call_id_col: Any) -> Any:
     )
 
 
-def _claimed(call_id_col: Any, now: Any) -> Any:
+def _claimed(call_id_col: Any) -> Any:
     return exists().where(
         CallEvent.call_id == call_id_col,
         CallEvent.kind == CLAIM_KIND,
-        CallEvent.occurred_at > now - CLAIM_LEASE,
+        CallEvent.occurred_at > func.now() - CLAIM_LEASE,
     )
 
 
@@ -159,7 +158,6 @@ _CLAIM_TRIES = 3
 async def claim_call_to_analyze(
     db: AsyncSession,
     *,
-    now: datetime | None = None,
     exclude: set[uuid.UUID] | None = None,
 ) -> Call | None:
     """Claim the oldest ended phone call that still needs its
@@ -177,13 +175,9 @@ async def claim_call_to_analyze(
     A claim older than ``CLAIM_LEASE`` no longer counts, so a crashed worker
     does not drop the event. :func:`send_call_analyzed` still checks the
     marker, so a worker whose lease ran out cannot send a second event.
-    Claims are written and aged on the DB clock (``now()``), so clock skew
-    between voicebot hosts does not change the lease. ``now`` (tests) sets
-    both clocks."""
-    # The lease uses the DB clock unless a test sets the time.
-    test_clock = now is not None
-    now = now or datetime.now(timezone.utc)
-    lease_now: Any = now if test_clock else func.now()
+    Every time here is the DB clock (``now()``), so a voicebot host's clock
+    skew moves neither the windows nor the lease."""
+    now = func.now()
     # The subscriptions table is small: with no listener, calls is not read.
     orgs = (
         await db.scalars(
@@ -225,7 +219,7 @@ async def claim_call_to_analyze(
             listening,
             has_turn,
             ~_analyzed(Call.id),
-            ~_claimed(Call.id, lease_now),
+            ~_claimed(Call.id),
         )
         .order_by(Call.ended_at, Call.id)
         .limit(1)
@@ -240,34 +234,20 @@ async def claim_call_to_analyze(
         if call is None:
             await db.rollback()
             return None
+        call_id = call.id  # a rollback expires ``call``
         # Check again in a new statement. Under READ COMMITTED the select
         # above read a snapshot taken before it got the lock, so a claim or
         # marker that another worker committed in between is seen only here.
-        if await db.scalar(
-            select(or_(_analyzed(call.id), _claimed(call.id, lease_now)))
-        ):
+        if await db.scalar(select(or_(_analyzed(call_id), _claimed(call_id)))):
             await db.rollback()
-            skip.add(call.id)
+            skip.add(call_id)
             continue
-        # Worker job state: GET /v1/events leaves these rows out.
-        claim = CallEvent(call_id=call.id, kind=CLAIM_KIND, payload={})
-        if test_clock:
-            claim.occurred_at = now
-        db.add(claim)
+        # Worker job state: GET /v1/events leaves these rows out. Its
+        # occurred_at is the DB's now(), the clock the lease is read on.
+        db.add(CallEvent(call_id=call_id, kind=CLAIM_KIND, payload={}))
         await db.commit()
         return call
     return None
-
-
-async def release_call_claim(db: AsyncSession, call_id: uuid.UUID) -> None:
-    """Drop a call's claims after a failed try, so the next poll can retry
-    it at once instead of after ``CLAIM_LEASE``."""
-    await db.execute(
-        delete(CallEvent).where(
-            CallEvent.call_id == call_id, CallEvent.kind == CLAIM_KIND
-        )
-    )
-    await db.commit()
 
 
 async def send_call_analyzed(
@@ -310,10 +290,9 @@ async def send_call_analyzed(
             event_type=WebhookEventType.CALL_ANALYZED.value,
             event_id=call.id,
             data=call_analyzed_data(call, transcript, summary),
-            # A subscription made after the call ended gets no event for it.
-            # Not ``updated_at``: a secret rotation or URL change after the
-            # call was picked must not drop the event.
-            created_before=call.ended_at,
+            # The same rule as the pick (``listening``): a subscription
+            # made or changed after the call ended gets no event for it.
+            changed_before=call.ended_at,
         )
     await db.commit()
     return sent > 0

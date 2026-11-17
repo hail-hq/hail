@@ -26,7 +26,6 @@ from hailhq.core.call_analysis import (
     ANALYSIS_WINDOW,
     call_transcript,
     claim_call_to_analyze,
-    release_call_claim,
     send_call_analyzed,
 )
 from hailhq.core.db import session_scope
@@ -58,9 +57,9 @@ class _Failure:
 
 
 # Calls whose last try failed. In memory only: a restart tries such a call
-# again, while it is inside the window. A failed try drops its claim when the
-# DB lets it, so the next poll retries; else the claim runs out after
-# ``CLAIM_LEASE``.
+# again, while it is inside the window. A failed try keeps its claim, so the
+# next try comes after ``CLAIM_LEASE``: the tries outlast a short DB outage,
+# and no other worker runs the model again meanwhile.
 _failures: dict[uuid.UUID, _Failure] = {}
 
 
@@ -158,11 +157,6 @@ async def analyze_once(_api: Any = None) -> bool:
         failure.count += 1
         failure.summary, failure.summarized = summary, summarized
         failure.turns = turns if summarized else None
-        try:
-            async with session_scope() as db:
-                await release_call_claim(db, call_id)
-        except Exception:
-            logger.warning("call_id=%s could not release the analysis claim", call_id)
         raise
     _failures.pop(call_id, None)
     return True

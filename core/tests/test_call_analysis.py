@@ -13,7 +13,6 @@ from hailhq.core.call_analysis import (
     CLAIM_LEASE,
     call_transcript,
     claim_call_to_analyze,
-    release_call_claim,
     send_call_analyzed,
 )
 from hailhq.core.models import (
@@ -26,7 +25,7 @@ from hailhq.core.models import (
 )
 from hailhq.core.threads import TEXT_MARKER
 from hailhq.core.webhook_events import WebhookEventType
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 
 ORG_NUMBER = "+14155550100"
@@ -106,6 +105,16 @@ async def _seed_call(
         )
     await session.commit()
     return call
+
+
+async def _age_claims(session, call_id) -> None:
+    """Make the call's claims older than the lease (the claimer died)."""
+    await session.execute(
+        update(CallEvent)
+        .where(CallEvent.call_id == call_id, CallEvent.kind == CLAIM_KIND)
+        .values(occurred_at=CallEvent.occurred_at - CLAIM_LEASE - timedelta(seconds=1))
+    )
+    await session.commit()
 
 
 async def _deliveries(session, call_id) -> list[WebhookDelivery]:
@@ -211,22 +220,14 @@ async def test_a_live_claim_keeps_the_call_until_the_lease_ends(
     # Claimed: no other worker gets it, so the model runs once.
     assert await claim_call_to_analyze(async_session) is None
     # The claimer died: after the lease the call is claimed again.
-    later = datetime.now(timezone.utc) + CLAIM_LEASE + timedelta(seconds=1)
-    assert (await claim_call_to_analyze(async_session, now=later)).id == call_id
+    await _age_claims(async_session, call_id)
+    assert (await claim_call_to_analyze(async_session)).id == call_id
     claims = await async_session.scalar(
         select(func.count())
         .select_from(CallEvent)
         .where(CallEvent.call_id == call_id, CallEvent.kind == CLAIM_KIND)
     )
     assert claims == 2
-
-
-async def test_a_released_claim_is_retried_at_once(async_session) -> None:
-    call = await _seed_call(async_session)
-    call_id = call.id
-    assert (await claim_call_to_analyze(async_session)).id == call_id
-    await release_call_claim(async_session, call_id)
-    assert (await claim_call_to_analyze(async_session)).id == call_id
 
 
 async def test_two_workers_race_one_claim(session_factory) -> None:
@@ -356,8 +357,8 @@ async def test_send_enqueues_one_delivery_with_the_payload(async_session) -> Non
     assert not await send_call_analyzed(async_session, call_id, turns, "again")
     assert len(await _deliveries(async_session, call_id)) == 1
     assert await claim_call_to_analyze(async_session) is None
-    later = datetime.now(timezone.utc) + CLAIM_LEASE + timedelta(seconds=1)
-    assert await claim_call_to_analyze(async_session, now=later) is None
+    await _age_claims(async_session, call_id)
+    assert await claim_call_to_analyze(async_session) is None
 
 
 async def test_subscription_made_after_the_call_gets_no_delivery(
@@ -372,22 +373,11 @@ async def test_subscription_made_after_the_call_gets_no_delivery(
         secret_encrypted="x",
     )
     async_session.add(late)
-    # The old subscription rotates its secret after the call was picked:
-    # it still gets the event.
-    old = (
-        await async_session.execute(
-            select(WebhookSubscription).where(
-                WebhookSubscription.target_url == "https://example.com/hook",
-                WebhookSubscription.organization_id == call.organization_id,
-            )
-        )
-    ).scalar_one()
-    old.updated_at = datetime.now(timezone.utc)
     await async_session.commit()
     turns = await call_transcript(async_session, call_id)
     assert await send_call_analyzed(async_session, call_id, turns, None)
     [delivery] = await _deliveries(async_session, call_id)
-    assert delivery.subscription_id == old.id
+    assert delivery.subscription_id != late.id
     # The same ``at`` text as GET /v1/calls/{id} (pydantic JSON).
     assert delivery.payload["data"]["transcript"][0]["at"].endswith("Z")
 
@@ -438,5 +428,5 @@ async def test_empty_after_filtering_is_marked_not_sent(async_session) -> None:
     assert turns == []
     assert not await send_call_analyzed(async_session, call_id, turns, None)
     assert await _deliveries(async_session, call_id) == []
-    later = datetime.now(timezone.utc) + CLAIM_LEASE + timedelta(seconds=1)
-    assert await claim_call_to_analyze(async_session, now=later) is None
+    await _age_claims(async_session, call_id)
+    assert await claim_call_to_analyze(async_session) is None

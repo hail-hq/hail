@@ -8,6 +8,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from hailhq.core import call_analysis
 from hailhq.core.models import (
     Agent,
     Call,
@@ -204,6 +205,8 @@ async def test_failed_send_is_retried_then_given_up(
     async_session, llm, monkeypatch
 ) -> None:
     call_id = await _seed(async_session)
+    # A failed try keeps its claim until the lease ends; end it at once.
+    monkeypatch.setattr(call_analysis, "CLAIM_LEASE", timedelta(0))
 
     sent_turns: list = []
 
@@ -234,6 +237,8 @@ async def test_failure_before_the_send_counts_too(
     async_session, llm, monkeypatch
 ) -> None:
     call_id = await _seed(async_session)
+    # A failed try keeps its claim until the lease ends; end it at once.
+    monkeypatch.setattr(call_analysis, "CLAIM_LEASE", timedelta(0))
 
     async def broken_transcript(db, cid):
         raise RuntimeError("bad row")
