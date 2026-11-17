@@ -67,7 +67,7 @@ the call row.
 
 ## 2. Check that the rows can go
 
-Run the script in step 4 with `\set apply false`. It makes every check and
+Run the script in step 4 with `\set mode check`. It makes every check and
 every delete, then rolls back. Go on only when it ends with
 `Checks passed`. Otherwise the recording would be gone while the call stays
 in the customer's call log.
@@ -81,8 +81,9 @@ The script stops, and changes nothing, when:
 - a usage row is not priced yet (the usage rater has not run);
 - a charge still waits for the settle step. It runs once no call leg cost
   is `pending`: usually within minutes, and within 48 hours for most calls
-  (Hail stops waiting for a leg cost then). When the step keeps failing for
-  a call, the script can refuse for up to 14 days after the charge.
+  (Hail stops waiting for a leg cost then). When the step skips a call (for
+  example, the website cannot load its call rate table), the script can
+  refuse for up to 14 days after the charge.
   Deleting before it would leave a stray `voice_cost:` row.
 
 Run it again later when it stops for one of the last four.
@@ -106,14 +107,14 @@ Delete it now anyway.
 
 ## 4. Delete the rows
 
-The same script runs both times: `apply` is `false` in step 2 and `true`
-here. Any other value rolls back and deletes nothing.
+The same script runs both times: `mode` is `check` in step 2 and `delete`
+here. Only `delete` commits; any other value rolls back.
 
 ```bash
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
 \set org '<org id>'
 \set call '<call id>'
-\set apply '<false in step 2, true in step 4>'
+\set mode '<check in step 2, delete in step 4>'
 BEGIN;
 -- The workspace's billing lock, as purchases and the raters take it.
 SELECT pg_advisory_xact_lock(hashtextextended((:'org')::uuid::text, 0));
@@ -182,14 +183,16 @@ WHERE organization_id = :'org'
               UNION ALL SELECT 'voice_cost:' || id FROM gone);
 DELETE FROM usage_events WHERE id IN (SELECT id FROM gone);
 DELETE FROM calls WHERE id = :'call' AND organization_id = :'org';
+SELECT :'mode' = 'delete' AS apply \gset
 \if :apply
   COMMIT;
 \else
-  \echo 'Checks passed. Nothing deleted: apply is not true.'
+  \echo 'Checks passed. Check run: nothing deleted.'
   ROLLBACK;
 \endif
 SQL
 ```
 
-With `apply` true the output must end with `COMMIT`. Run the two queries
-in step 1 again: both return no rows for the call.
+With `delete`, the last `DELETE` must print `DELETE 1` and the output must
+end with `COMMIT`. Run the two queries in step 1 again: both return no rows
+for the call.
