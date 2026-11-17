@@ -722,3 +722,34 @@ async def test_the_saved_answers_are_gone_once_the_carrier_approved(
     resp = await client.get(f"/verifications/{vid}/application", headers=_auth(key))
     assert resp.status_code == 404
     assert await _kept(async_session) == [] and store.objects == {}
+
+
+async def test_a_file_still_being_written_is_left_to_the_worker(
+    client, org_and_key, carrier, store, async_session
+) -> None:
+    """A cancel during the write must not delete the row before its object
+    lands; the worker removes it once the write is done or cut off."""
+    org_id, _, key = org_and_key
+    vid = await _rejected(client, key, carrier)
+    writing = FileUpload(
+        organization_id=org_id,
+        purpose=KEPT_PURPOSE,
+        verification_id=uuid.UUID(vid),
+        slot="proof_of_address",
+        filename="bill.pdf",
+        content_type="application/pdf",
+        s3_key=f"{VERIFICATION_KEPT_PREFIX}{org_id}/{uuid.uuid4()}",
+    )
+    async_session.add(writing)
+    await async_session.commit()
+    resp = await client.delete(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.status_code == 200
+    assert [k.slot for k in await _kept(async_session, vid)] == ["proof_of_address"]
+    await async_session.execute(
+        update(FileUpload)
+        .where(FileUpload.id == writing.id)
+        .values(created_at=datetime.now(timezone.utc) - timedelta(hours=2))
+    )
+    await async_session.commit()
+    await forget_kept_registrations(async_session, datetime.now(timezone.utc))
+    assert await _kept(async_session, vid) == []

@@ -167,7 +167,6 @@ from sqlalchemy import (
     DateTime,
     Row,
     String,
-    and_,
     case,
     cast,
     delete,
@@ -841,11 +840,16 @@ def _drop_number_answers(row: CarrierVerification) -> bool:
 
 
 async def _forget_kept_files(
-    db: AsyncSession, verification_ids: list[UUID], s3: S3MailClient | None = None
+    db: AsyncSession,
+    verification_ids: list[UUID],
+    s3: S3MailClient | None = None,
+    *,
+    loaded: tuple[CarrierVerification, ...] = (),
 ) -> int:
     """Delete the kept files of these verifications now. Best effort: a
     file whose delete fails stays for the verification worker, and any
-    error only logs, so the caller's request still answers. Commits."""
+    error only logs, so the caller's request still answers. ``loaded`` are
+    rows the caller still reads: a rollback here reloads them. Commits."""
     try:
         return await _delete_kept_of(db, verification_ids, s3)
     except Exception as exc:
@@ -855,6 +859,8 @@ async def _forget_kept_files(
             "verification worker tries again",
             type(exc).__name__,
         )
+        for row in loaded:
+            await db.refresh(row)
         return 0
 
 
@@ -867,6 +873,9 @@ async def _delete_kept_of(
                 select(FileUpload.id).where(
                     FileUpload.purpose == KEPT_PURPOSE,
                     FileUpload.verification_id.in_(verification_ids),
+                    # One still being written is left to the worker, or its
+                    # object would land after its row is gone.
+                    FileUpload.uploaded_at.is_not(None),
                 )
             )
         )
@@ -884,9 +893,9 @@ async def _forget_approved_files(
 ) -> None:
     """After a poll's commit: delete the kept files of the number
     registrations it approved (their answers went in ``_apply_status``)."""
-    approved = [r.id for r in rows if r.purpose == "number" and r.state == "approved"]
+    approved = [r for r in rows if r.purpose == "number" and r.state == "approved"]
     if approved:
-        await _forget_kept_files(db, approved)
+        await _forget_kept_files(db, [r.id for r in approved], loaded=tuple(rows))
 
 
 async def _settle_sms_approval(
@@ -2287,7 +2296,6 @@ async def _prepare_submission(
         # fetch_files checks the 30 MB total again on the bytes read.
         collected = collected._replace(rows={**collected.rows, **reused})
         names.update({slot: row.filename for slot, row in reused.items()})
-    if reused:
         # A kept file whose object is gone (the bucket's backstop expired it)
         # must be sent again: say which, never a 503 on every retry.
         for slot, row in reused.items():
@@ -2655,7 +2663,7 @@ async def _file(
     await _delete_used_uploads(db, s3, prepared.uploads)
     if row.purpose == "number" and row.state == "approved":
         # Approved at once: nothing to resubmit, so nothing stays kept.
-        await _forget_kept_files(db, [row.id], s3)
+        await _forget_kept_files(db, [row.id], s3, loaded=(row,))
     # Built now: the dismiss below may roll back, which expires the row.
     out = _out(row, registry)
     if source_id is not None:
@@ -2669,13 +2677,15 @@ async def _touch_kept(s3: S3MailClient | None, files: list) -> None:
     new filing keeps them 30 days from now, past the lifecycle rule counted
     from the first upload. Best effort: on a failure the rule may delete one
     early, and a resubmit then asks for that file again."""
-    for _, s3_key, content_type in files:
-        if s3 is None:
-            return
-        try:
-            await s3.touch(s3_key, content_type, encrypt=True)
-        except Exception as exc:
-            logger.warning("could not renew a kept file (%s)", type(exc).__name__)
+    if s3 is None or not files:
+        return
+    results = await asyncio.gather(
+        *(s3.touch(key, content_type, encrypt=True) for _, key, content_type in files),
+        return_exceptions=True,
+    )
+    for result in results:
+        if isinstance(result, BaseException):
+            logger.warning("could not renew a kept file (%s)", type(result).__name__)
 
 
 async def _take_kept_answers(db: AsyncSession, source_id: UUID) -> None:
@@ -3700,12 +3710,13 @@ async def forget_kept_registrations(
         .where(
             f.purpose == KEPT_PURPOSE,
             or_(
+                f.uploaded_at.is_not(None),
+                f.created_at <= now - _KEPT_WRITE_CUT_OFF_AFTER,
+            ),
+            or_(
                 must_go,
                 ~v.provider_refs.has_key("application"),
-                and_(
-                    f.uploaded_at.is_(None),
-                    f.created_at <= now - _KEPT_WRITE_CUT_OFF_AFTER,
-                ),
+                f.uploaded_at.is_(None),
             ),
         )
     )
@@ -4420,7 +4431,7 @@ async def cancel_verification(
     _notify_billing([row])
     if row.purpose == "number":
         # The answers went with the cancel (_wiped_refs); the files now.
-        await _forget_kept_files(db, [row.id])
+        await _forget_kept_files(db, [row.id], loaded=(row,))
     if approved_sms:
         actor_user_id, actor_kind = actor_of(principal)
         await write_audit_log(
