@@ -2675,14 +2675,20 @@ async def _file(
     # A slot whose kept file did not move (it was deleted meanwhile) keeps
     # the bytes just sent.
     await _keep_files(db, s3, row, prepared, moved={slot for slot, _, _ in moved_files})
-    await _delete_used_uploads(db, s3, prepared.uploads)
-    if row.purpose == "number" and row.state == "approved":
-        # Approved at once: nothing to resubmit, so nothing stays kept.
+    await _delete_used_uploads(db, s3, prepared.uploads, loaded=(row,))
+    # One rule for what stays kept: a number registration, not approved
+    # (nothing to resubmit), with its answers stored (no answers, no files).
+    keeps = (
+        row.purpose == "number"
+        and row.state != "approved"
+        and "application" in (row.provider_refs or {})
+    )
+    if row.purpose == "number" and not keeps:
         await _forget_kept_files(db, [row.id], s3, loaded=(row,))
     # Built now: the dismiss below may roll back, which expires the row.
     out = _out(row, registry)
     if source_id is not None:
-        if row.state != "approved":  # else the files are gone already
+        if keeps:  # else the moved files were just deleted
             await _touch_kept(s3, moved_files)
         await _dismiss_resubmitted(db, source_id, registry, s3)
     return out
@@ -2822,10 +2828,15 @@ async def _keep_files(
 
 
 async def _delete_used_uploads(
-    db: AsyncSession, s3: S3MailClient | None, uploads: list[FileUpload]
+    db: AsyncSession,
+    s3: S3MailClient | None,
+    uploads: list[FileUpload],
+    *,
+    loaded: tuple[CarrierVerification, ...] = (),
 ) -> None:
     """Delete the uploads a saved verification used. Best effort: the GC
-    removes any left after ``VERIFICATION_UPLOAD_TTL``."""
+    removes any left after ``VERIFICATION_UPLOAD_TTL``. ``loaded`` are rows
+    the caller still reads: a rollback here reloads them."""
     if not uploads or s3 is None:
         return
     # Plain values first: a rollback below expires the ORM objects.
@@ -2859,6 +2870,8 @@ async def _delete_used_uploads(
             len(deleted),
             type(exc).__name__,
         )
+        for row in loaded:
+            await db.refresh(row)
 
 
 @router.post(

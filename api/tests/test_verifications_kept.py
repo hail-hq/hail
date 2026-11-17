@@ -35,15 +35,18 @@ from hailhq.core.models import (
 )
 from hailhq.core.providers.verification import Problem, ProviderStatus
 from hailhq.core.secret_cipher import generate_key
-from sqlalchemy import select, update
+from sqlalchemy import delete as sql_delete
+from sqlalchemy import select, text, update
 
 from .test_verifications_api import (  # noqa: F401  (fixtures)
     _auth,
     _create,
+    _submission,
     _unsent,
     carrier,
     pinned_catalog,
 )
+from .test_verifications_uploads import _upload
 
 _JPEG = b"\xff\xd8jpeg"
 
@@ -765,3 +768,93 @@ async def test_an_unusable_key_keeps_nothing_and_files_all_the_same(
     row = await _row(async_session, resp.json()["id"])
     assert "application" not in row.provider_refs
     assert "Lovelace" not in json.dumps(row.provider_refs)
+
+
+async def test_a_failed_upload_row_delete_still_answers_the_filing(
+    client, org_and_key, carrier, store, async_session, monkeypatch
+) -> None:
+    """The filing is with the carrier: a failed cleanup of the used upload's
+    row rolls back, and the response still reads the new registration."""
+    org_id, _, key = org_and_key
+    upload = await _upload(async_session, org_id, data=_JPEG)
+    store.objects[upload.s3_key] = _JPEG
+
+    def failing_delete(target, *args, **kwargs):
+        statement = sql_delete(target, *args, **kwargs)
+        # The database refuses it, inside an open transaction.
+        return (
+            statement.where(text("(1 / 0) = 1")) if target is FileUpload else statement
+        )
+
+    monkeypatch.setattr(verifications_routes, "delete", failing_delete)
+    resp = await client.post(
+        "/verifications",
+        data={**_submission(), "upload.proof_of_identity": str(upload.id)},
+        files={"_": (None, "1")},
+        headers=_auth(key),
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["state"] == "submitted"
+    assert resp.json()["resubmittable"] is False and resp.json()["kept_until"]
+
+
+async def test_a_resubmit_that_keeps_no_answers_keeps_no_files(
+    client, org_and_key, carrier, store, async_session, monkeypatch
+) -> None:
+    """The answers could not be sealed for the new filing: the files it
+    moved go too, and none is renewed."""
+    _, _, key = org_and_key
+    vid = await _rejected(client, key, carrier)
+    monkeypatch.setattr(settings, "hail_provider_secret_key", "not-a-fernet-key")
+    resp = await client.post(
+        f"/verifications/{vid}/resubmit",
+        files={"_": (None, "1")},
+        headers=_auth(key),
+    )
+    assert resp.status_code == 201, resp.text
+    new = await _row(async_session, resp.json()["id"])
+    assert "application" not in new.provider_refs
+    assert await _kept(async_session) == [] and store.objects == {}
+    assert store.touched == []
+
+
+@pytest.mark.parametrize(
+    "spell", [str.upper, lambda q: q.replace("-", ""), lambda q: "{" + q + "}"]
+)
+async def test_the_kept_quote_survives_the_purge_in_any_uuid_spelling(
+    client, org_and_key, carrier, store, async_session, spell
+) -> None:
+    org_id, _, key = org_and_key
+    vid = await _rejected(client, key, carrier)
+    row = await _row(async_session, vid)
+    quote_id = row.provider_refs["application"]["quote_id"]
+    refs = dict(row.provider_refs)
+    refs["application"] = {**refs["application"], "quote_id": spell(quote_id)}
+    await async_session.execute(
+        update(CarrierVerification)
+        .where(CarrierVerification.id == row.id)
+        .values(provider_refs=refs)
+    )
+    # Another registration whose quote id is not a UUID: skipped, never a
+    # failed purge.
+    async_session.add(
+        CarrierVerification(
+            organization_id=org_id,
+            provider="fake",
+            country_code="GB",
+            number_type="mobile",
+            subject_type="person",
+            state="rejected",
+            requirements_version="v1",
+            provider_refs={"application": {"quote_id": "None"}},
+        )
+    )
+    await async_session.execute(
+        update(NumberOffer)
+        .where(NumberOffer.id == uuid.UUID(quote_id))
+        .values(expires_at=datetime.now(timezone.utc) - timedelta(days=3))
+    )
+    await async_session.commit()
+    await purge_expired_quotes()
+    async_session.expire_all()
+    assert await async_session.get(NumberOffer, uuid.UUID(quote_id)) is not None

@@ -35,7 +35,8 @@ from hailhq.core.providers.voice import (
 )
 from hailhq.core.retention import org_closed, org_is_closed
 from hailhq.core.schemas import NumberAcquireRequest
-from sqlalchemy import String, and_, cast, delete, or_, select, update
+from sqlalchemy import and_, case, cast, delete, or_, select, update
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -52,6 +53,9 @@ QUOTE_RETENTION = timedelta(hours=24)
 # Consumed quotes answer replays of the purchase that used them (idempotency
 # keys live 24h) and are deleted after this long.
 CONSUMED_QUOTE_RETENTION = timedelta(days=7)
+# Text Postgres reads as a uuid: 32 hex digits, optional hyphens between
+# groups of 4, optional braces.
+_UUID_TEXT = r"^\{?[0-9a-f]{4}(-?[0-9a-f]{4}){7}\}?$"
 
 NUMBER_TAKEN_DETAIL = "This number is already held or has a pending order"
 NUMBER_SETUP_HELP_DETAIL = (
@@ -1057,19 +1061,17 @@ async def purge_expired_quotes() -> int:
     carrier and the credit to set aside from it."""
     now = datetime.now(timezone.utc)
     async with session_scope() as db:
-        # One uncorrelated subquery: Postgres reads the kept quotes once.
-        # Compared as text: a value that is not a UUID never fails the purge.
-        kept = select(
-            CarrierVerification.provider_refs["application"]["quote_id"].astext
-        ).where(
-            CarrierVerification.purpose == "number",
-            CarrierVerification.provider_refs["application"]["quote_id"].astext.is_not(
-                None
-            ),
+        # One uncorrelated subquery: Postgres reads the kept quotes once,
+        # and the ids compare as uuids (any spelling Postgres reads as one).
+        # A value that is not a UUID is skipped, never fails the purge.
+        quote_id = CarrierVerification.provider_refs["application"]["quote_id"].astext
+        is_uuid = quote_id.op("~*")(_UUID_TEXT)
+        kept = select(cast(case((is_uuid, quote_id)), PG_UUID(as_uuid=True))).where(
+            CarrierVerification.purpose == "number", is_uuid
         )
         result = await db.execute(
             delete(NumberOffer).where(
-                cast(NumberOffer.id, String).notin_(kept),
+                NumberOffer.id.notin_(kept),
                 or_(
                     and_(
                         NumberOffer.number_id.is_(None),
