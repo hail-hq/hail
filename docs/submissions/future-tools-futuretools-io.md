@@ -43,7 +43,7 @@ status: drafted
 
 <!-- copy:medium -->
 
-Hail gives your AI agent its own phone number and email inbox. It answers calls like an AI receptionist, calls back, texts, and replies to email. It remembers each person. Get a number in 120+ countries. Works with Claude, ChatGPT, and Cursor.
+Hail gives your AI agent its own phone number and email inbox. It handles calls, texts, and email like an AI receptionist, and remembers each person. Get a number in 120+ countries. Works with Claude, ChatGPT, and Cursor.
 
 <!-- /copy -->
 
@@ -53,7 +53,7 @@ Hail gives your AI agent its own phone number and email inbox. It answers calls 
 
 Hail gives your AI agent a real phone number and an email inbox. Then your agent can do the work people do on the phone and in email.
 
-Use it as an AI phone agent or an AI answering service. It answers calls day and night, takes messages, and passes urgent calls to a person. It can also call people, send text messages (SMS), and reply to email.
+Use it as an AI phone agent or an AI answering service. It handles calls, texts (SMS), and email day and night, and passes urgent calls to a person.
 
 Hail keeps the whole conversation. When someone calls after an email, your agent already knows what was said.
 

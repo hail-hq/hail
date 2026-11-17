@@ -7,6 +7,7 @@ Decided 2026-11-16. Paste these into every listing. Each submission file below a
 Rules:
 
 - Sell the outcome: the AI gets its own phone number and email inbox.
+- Describe the work broadly ("handles calls, texts, and email"). Do not list narrow verbs ("make calls, send texts"): they read as limits.
 - Always write "email inbox", never "inbox" alone. Non-native English readers may not know the word. `validate_submission.py` fails on a bare "inbox".
 - Use one wording everywhere. Do not A/B test across directories: traffic per listing is too small to compare.
 - Each pasted copy in a submission file sits between `<!-- copy:NAME -->` and `<!-- /copy -->`. CI fails when it differs from the block with the same name below. To change the wording, edit the block here, then the marked copies.
@@ -27,11 +28,11 @@ Rules:
 
 <!-- /copy -->
 
-**Medium** (243 characters; fits Product Hunt's 260 and card descriptions):
+**Medium** (221 characters; fits Product Hunt's 260 and card descriptions):
 
 <!-- copy:medium -->
 
-> Hail gives your AI agent its own phone number and email inbox. It answers calls like an AI receptionist, calls back, texts, and replies to email. It remembers each person. Get a number in 120+ countries. Works with Claude, ChatGPT, and Cursor.
+> Hail gives your AI agent its own phone number and email inbox. It handles calls, texts, and email like an AI receptionist, and remembers each person. Get a number in 120+ countries. Works with Claude, ChatGPT, and Cursor.
 
 <!-- /copy -->
 
@@ -43,13 +44,13 @@ Rules:
 
 <!-- /copy -->
 
-**Long** (825 characters; for Claude, Muse, ChatGPT and other long description fields):
+**Long** (762 characters; for Claude, Muse, ChatGPT and other long description fields):
 
 <!-- copy:long -->
 
 > Hail gives your AI agent a real phone number and an email inbox. Then your agent can do the work people do on the phone and in email.
 >
-> Use it as an AI phone agent or an AI answering service. It answers calls day and night, takes messages, and passes urgent calls to a person. It can also call people, send text messages (SMS), and reply to email.
+> Use it as an AI phone agent or an AI answering service. It handles calls, texts (SMS), and email day and night, and passes urgent calls to a person.
 >
 > Hail keeps the whole conversation. When someone calls after an email, your agent already knows what was said.
 >

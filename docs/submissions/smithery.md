@@ -62,7 +62,7 @@ Give your AI a phone number and an email inbox.
 
 <!-- copy:medium -->
 
-Hail gives your AI agent its own phone number and email inbox. It answers calls like an AI receptionist, calls back, texts, and replies to email. It remembers each person. Get a number in 120+ countries. Works with Claude, ChatGPT, and Cursor.
+Hail gives your AI agent its own phone number and email inbox. It handles calls, texts, and email like an AI receptionist, and remembers each person. Get a number in 120+ countries. Works with Claude, ChatGPT, and Cursor.
 
 <!-- /copy -->
 

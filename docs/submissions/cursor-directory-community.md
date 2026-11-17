@@ -48,7 +48,7 @@ Give your AI a phone number and an email inbox.
 
 Hail gives your AI agent a real phone number and an email inbox. Then your agent can do the work people do on the phone and in email.
 
-Use it as an AI phone agent or an AI answering service. It answers calls day and night, takes messages, and passes urgent calls to a person. It can also call people, send text messages (SMS), and reply to email.
+Use it as an AI phone agent or an AI answering service. It handles calls, texts (SMS), and email day and night, and passes urgent calls to a person.
 
 Hail keeps the whole conversation. When someone calls after an email, your agent already knows what was said.
 

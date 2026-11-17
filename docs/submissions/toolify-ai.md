@@ -61,7 +61,7 @@ Give your AI a phone number and an email inbox.
 
 Hail gives your AI agent a real phone number and an email inbox. Then your agent can do the work people do on the phone and in email.
 
-Use it as an AI phone agent or an AI answering service. It answers calls day and night, takes messages, and passes urgent calls to a person. It can also call people, send text messages (SMS), and reply to email.
+Use it as an AI phone agent or an AI answering service. It handles calls, texts (SMS), and email day and night, and passes urgent calls to a person.
 
 Hail keeps the whole conversation. When someone calls after an email, your agent already knows what was said.
 
@@ -75,7 +75,7 @@ Hail is open source. Use Hail Cloud, or host it yourself.
 
 Common uses: answer calls after hours, confirm appointments by text, follow up on new leads by phone and email, and send delivery updates. Every call, text, and email is saved, so you can review the history before you follow up.
 
-Pick a built-in voice or bring your own. Choose the AI model that runs the conversation, or use the default.
+Pick a built-in voice or bring your own. Choose the AI model that runs the conversation, or use the default. Set it all up in the Hail console, or from your AI assistant.
 
 **Category:** ai-directory (map to Toolify's closest taxonomy match at submission time — see Steps step 7)
 
