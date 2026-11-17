@@ -65,7 +65,10 @@ from hailhq.core.carrier_routing import CARRIERS, carrier_http_status, failure_k
 from hailhq.core.db import org_lock
 from hailhq.core.livekit import LiveKitClient
 from hailhq.core.models import CarrierVerification, PhoneNumber
-from hailhq.core.providers.verification.base import DiscardRefused
+from hailhq.core.providers.verification.base import (
+    DiscardRefused,
+    escaped_discard_error,
+)
 from hailhq.core.retention import closed_org_ids
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -374,7 +377,14 @@ async def _cancel_registrations(
                 )
                 continue
             if row.state == "cancelled":
-                await provider.discard({"brand_id": refs["kept_brand_id"]})
+                try:
+                    await provider.discard({"brand_id": refs["kept_brand_id"]})
+                except Exception as exc:
+                    error = escaped_discard_error(exc)
+                    if error is exc:
+                        raise
+                    if error is not None:
+                        raise error from exc
                 row.provider_refs = {
                     k: v
                     for k, v in refs.items()

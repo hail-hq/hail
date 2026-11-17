@@ -114,7 +114,10 @@ from hailhq.core.providers.verification import (
     get_verification_provider,
     length_problems,
 )
-from hailhq.core.providers.verification.base import DiscardRefused
+from hailhq.core.providers.verification.base import (
+    DiscardRefused,
+    escaped_discard_error,
+)
 from hailhq.core.providers.verification.document_check import (
     check_documents,
     document_cautions,
@@ -3533,7 +3536,7 @@ async def cancel_verification(
     When the carrier is down or rate-limits the delete, the call answers
     503 and changes nothing: try again later. When the carrier refuses the
     delete, the verification is cancelled in Hail all the same and Hail's
-    fees stop as above; Hail support deletes it at the carrier."""
+    fees stop as above."""
     row = await _org_row_or_404(db, principal, verification_id)
     await db.refresh(row, with_for_update=True)
     if not _can_cancel(row):
@@ -3614,14 +3617,23 @@ async def cancel_locked(
         await _detach_registration(db, row, provider, now)
     kept: dict = {}
     try:
-        if (
-            keep_brand
-            and isinstance(provider, SmsRegistrationProvider)
-            and row.state == "rejected"
-        ):
-            kept = await provider.discard_rejected(row.provider_refs)
-        elif provider is not None:
-            await provider.discard(row.provider_refs)
+        try:
+            if (
+                keep_brand
+                and isinstance(provider, SmsRegistrationProvider)
+                and row.state == "rejected"
+            ):
+                kept = await provider.discard_rejected(row.provider_refs)
+            elif provider is not None:
+                await provider.discard(row.provider_refs)
+        except Exception as exc:
+            # One that escaped the plug-in's steps (a bug, a raw carrier
+            # error) counts as discard would have raised it.
+            error = escaped_discard_error(exc)
+            if error is exc:
+                raise
+            if error is not None:
+                raise error from exc
     except DiscardRefused as exc:
         if not mark_refused:
             raise

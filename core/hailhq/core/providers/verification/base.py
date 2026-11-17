@@ -51,6 +51,7 @@ __all__ = [
     "VerificationProvider",
     "VerificationProviderError",
     "VerificationRequirements",
+    "escaped_discard_error",
 ]
 
 SubjectType = Literal["person", "business"]
@@ -108,6 +109,25 @@ class DiscardFailures:
             raise VerificationProviderError(message) from self.retry
         if self.refused is not None:
             raise DiscardRefused(message) from self.refused
+
+
+def escaped_discard_error(exc: BaseException) -> VerificationProviderError | None:
+    """``exc`` raised by a ``discard`` outside its steps (``DiscardFailures``
+    only sees errors inside a step), as ``discard`` would have raised it:
+    None when the carrier no longer holds the record (404, 410),
+    ``VerificationProviderError`` for an outage, else ``DiscardRefused``
+    (a refusal, or a bug). Raise the result ``from exc``."""
+    # Imported here: see DiscardFailures.add.
+    from hailhq.core.carrier_routing import failure_kind
+
+    if isinstance(exc, VerificationProviderError):
+        return exc
+    kind = failure_kind(exc, unknown="refused")
+    if kind == "gone":
+        return None
+    if kind == "outage":
+        return VerificationProviderError("discard failed")
+    return DiscardRefused("discard refused")
 
 
 class RegistrationHoldsAnotherNumber(VerificationProviderError):

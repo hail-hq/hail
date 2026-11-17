@@ -320,3 +320,20 @@ def test_failure_kind_of_an_error_with_no_carrier_answer() -> None:
     other callers retry it."""
     assert carrier_routing.failure_kind(KeyError("x")) == "outage"
     assert carrier_routing.failure_kind(KeyError("x"), unknown="refused") == "refused"
+
+
+def test_escaped_discard_error() -> None:
+    """An error a discard raised outside its steps, as discard raises it."""
+    from hailhq.core.providers.verification.base import (
+        DiscardRefused,
+        VerificationProviderError,
+        escaped_discard_error,
+    )
+
+    assert escaped_discard_error(_http(404)) is None
+    outage = escaped_discard_error(TimeoutError())
+    assert type(outage) is VerificationProviderError
+    assert isinstance(escaped_discard_error(_http(409)), DiscardRefused)
+    assert isinstance(escaped_discard_error(KeyError("x")), DiscardRefused)
+    own = VerificationProviderError("x")
+    assert escaped_discard_error(own) is own

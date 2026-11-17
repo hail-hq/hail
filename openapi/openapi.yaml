@@ -5818,7 +5818,7 @@ paths:
 
         delete, the verification is cancelled in Hail all the same and Hail's
 
-        fees stop as above; Hail support deletes it at the carrier."
+        fees stop as above."
       operationId: cancel_verification
       parameters:
         - name: verification_id

@@ -3010,15 +3010,18 @@ def _refused(cause: Exception) -> DiscardRefused:
 
 
 @pytest.mark.parametrize(
-    ("cause", "status"),
+    ("cause", "status", "wrapped"),
     [
-        (CarrierRequestError(409), 409),
-        (CarrierRequestError(422), 422),
-        (KeyError("x"), None),
+        (CarrierRequestError(409), 409, True),
+        (CarrierRequestError(422), 422, True),
+        (KeyError("x"), None, True),
+        # Raised by discard outside its steps: counted the same way.
+        (CarrierRequestError(403), 403, False),
+        (KeyError("y"), None, False),
     ],
 )
 async def test_cancel_goes_through_with_a_mark_when_the_carrier_refuses(
-    client, org_and_key, sms_carrier, async_session, cause, status
+    client, org_and_key, sms_carrier, async_session, cause, status, wrapped
 ) -> None:
     """A carrier that refuses the delete (or a bug in the delete) does not
     block the cancel: the row is cancelled in Hail, and the carrier ids are
@@ -3031,7 +3034,7 @@ async def test_cancel_goes_through_with_a_mark_when_the_carrier_refuses(
     await async_session.refresh(row)
     row.provider_refs = {**row.provider_refs, "campaign_id": "C1", "brand_id": "B1"}
     await async_session.commit()
-    sms_carrier.discard_error = _refused(cause)
+    sms_carrier.discard_error = _refused(cause) if wrapped else cause
 
     resp = await client.delete(f"/verifications/{vid}", headers=_auth(key))
 

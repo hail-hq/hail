@@ -608,15 +608,41 @@ async def test_a_bug_in_a_carrier_delete_is_retried_for_the_window_only(
     assert row.provider_refs["close_refused"]["status"] is None
 
 
-async def test_an_error_outside_a_carrier_step_is_retried_with_no_limit(
+async def test_a_bug_that_escapes_a_carrier_delete_counts_as_a_refusal(
     async_session, voice_provider_mock, verifier
 ) -> None:
-    """A raw error that is not a carrier answer (a database error, say) is
-    not a refusal: no window."""
+    """An error raised by ``discard`` outside its steps (a raw KeyError)
+    counts like one inside a step: marked after the window."""
     org = uuid.uuid4()
     await _close(async_session, org)
     row = await _verification(async_session, org, "approved", "B7")
-    verifier.fail["B7"] = RuntimeError("db")
+    verifier.fail["B7"] = KeyError("x")
+    start = datetime.now(timezone.utc)
+
+    assert (await _at(async_session, verifier, start)).failed == 1
+    counts = await _at(async_session, verifier, start + timedelta(days=7))
+    assert counts.refused == 1
+    await async_session.refresh(row)
+    assert row.provider_refs["close_refused"]["status"] is None
+
+
+async def test_an_error_outside_a_carrier_step_is_retried_with_no_limit(
+    async_session, voice_provider_mock, verifier, monkeypatch
+) -> None:
+    """An error that is not from the carrier delete (the database, say) is
+    not a refusal: no window."""
+    from hailhq.api.routes import verifications as verifications_routes
+
+    org = uuid.uuid4()
+    await _close(async_session, org)
+    row = await _verification(async_session, org, "approved", "B7")
+
+    async def hold_release_fails(db, row):
+        raise RuntimeError("db")
+
+    monkeypatch.setattr(
+        verifications_routes, "_release_number_hold", hold_release_fails
+    )
     start = datetime.now(timezone.utc)
     for at in (start, start + timedelta(days=30)):
         counts = await _at(async_session, verifier, at)
