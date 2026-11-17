@@ -1,0 +1,183 @@
+"""Tests for scripts/ops/place_test_call.py. HTTP is mocked: no real calls."""
+
+from __future__ import annotations
+
+import importlib.util
+import json
+import sys
+from pathlib import Path
+
+import httpx
+import pytest
+
+HERE = Path(__file__).resolve().parent
+spec = importlib.util.spec_from_file_location(
+    "place_test_call", HERE / "place_test_call.py"
+)
+ptc = importlib.util.module_from_spec(spec)
+sys.modules["place_test_call"] = ptc
+spec.loader.exec_module(ptc)
+
+API = "https://api.example.test/"
+CALL_ID = "11111111-1111-1111-1111-111111111111"
+
+
+def call(status, **fields):
+    return {"id": CALL_ID, "status": status, "end_reason": None, **fields}
+
+
+class FakeTime:
+    """A clock that only moves when the code sleeps."""
+
+    def __init__(self):
+        self.now = 0.0
+        self.sleeps = []
+
+    def clock(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+
+def client_for(responses, seen=None):
+    """A client whose transport answers with ``responses`` in order. An
+    item that is an exception is raised instead."""
+    queue = list(responses)
+
+    def handler(request):
+        if seen is not None:
+            seen.append(request)
+        item = queue.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+    return httpx.Client(transport=httpx.MockTransport(handler))
+
+
+def wait(client, timer, **kw):
+    return ptc.wait_for_end(
+        client, API, CALL_ID, sleep=timer.sleep, clock=timer.clock, **kw
+    )
+
+
+def test_polls_until_terminal_status():
+    seen = []
+    timer = FakeTime()
+    client = client_for(
+        [
+            httpx.Response(200, json=call("dialing")),
+            httpx.Response(200, json=call("in_progress")),
+            httpx.Response(200, json=call("completed", end_reason="normal_hangup")),
+        ],
+        seen,
+    )
+    result = wait(client, timer, interval=5)
+    assert result["status"] == "completed"
+    assert timer.sleeps == [5, 5]
+    assert all(str(r.url) == f"{API}v1/calls/{CALL_ID}" for r in seen)
+
+
+def test_rate_limit_and_server_errors_are_retried():
+    timer = FakeTime()
+    client = client_for(
+        [
+            httpx.Response(429, headers={"Retry-After": "12"}),
+            httpx.Response(503),
+            httpx.ConnectError("reset"),
+            httpx.Response(200, json=call("busy", end_reason="user_rejected")),
+        ]
+    )
+    result = wait(client, timer, interval=5)
+    assert result["status"] == "busy"
+    assert timer.sleeps == [12, 5, 5]
+
+
+def test_client_error_stops_the_wait():
+    client = client_for([httpx.Response(404, json={"detail": "not found"})])
+    with pytest.raises(ptc.CallTestError, match="404"):
+        wait(client, FakeTime())
+
+
+def test_timeout_names_the_call():
+    timer = FakeTime()
+    client = client_for([httpx.Response(200, json=call("ringing"))] * 10)
+    with pytest.raises(ptc.CallTestError, match=CALL_ID):
+        wait(client, timer, timeout=20, interval=5)
+    assert timer.now <= 20
+
+
+def test_place_call_sends_the_documented_body():
+    seen = []
+    client = client_for([httpx.Response(201, json=call("queued"))], seen)
+    placed = ptc.place_call(client, API, "+14155550100", None)
+    assert placed["id"] == CALL_ID
+    request = seen[0]
+    assert request.method == "POST"
+    assert str(request.url) == f"{API}v1/calls"
+    assert request.headers["Idempotency-Key"]
+    body = json.loads(request.content)
+    assert body["to"] == "+14155550100"
+    assert body["recipient_consent"] is True
+    assert body["tools"] == ["end_call"]
+    assert "from" not in body
+
+
+def test_place_call_refusal_is_an_error():
+    client = client_for([httpx.Response(402, text="insufficient credits")])
+    with pytest.raises(ptc.CallTestError, match="402"):
+        ptc.place_call(client, API, "+14155550100", "+14155550199")
+
+
+def test_verdict_answered_with_duration():
+    answered, text = ptc.verdict(
+        call(
+            "completed",
+            end_reason="normal_hangup",
+            answered_at="2026-11-17T10:00:03Z",
+            ended_at="2026-11-17T10:00:45Z",
+        )
+    )
+    assert answered
+    assert text.startswith("ANSWERED")
+    assert "42 s" in text
+    assert "end_reason=normal_hangup" in text
+
+
+def test_verdict_not_answered_names_the_reason():
+    answered, text = ptc.verdict(
+        call(
+            "failed",
+            end_reason="sip_trunk_failure",
+            failure_message="The carrier refused the call.",
+        )
+    )
+    assert not answered
+    assert text.startswith("NOT ANSWERED")
+    assert "end_reason=sip_trunk_failure" in text
+    assert "The carrier refused the call." in text
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        [],
+        ["--i-will-call-a-customer"],
+        ["--number", "+14155550100"],
+        ["--number", "14155550100", "--i-will-call-a-customer"],
+    ],
+)
+def test_refuses_without_number_and_confirmation(argv, monkeypatch):
+    monkeypatch.setenv("HAIL_API_KEY", "hl_test")
+    with pytest.raises(SystemExit) as exc:
+        ptc.main(argv)
+    assert exc.value.code == 2
+
+
+def test_refuses_without_api_key(monkeypatch, capsys):
+    monkeypatch.delenv("HAIL_API_KEY", raising=False)
+    code = ptc.main(["--number", "+14155550100", "--i-will-call-a-customer"])
+    assert code == 2
+    assert "HAIL_API_KEY" in capsys.readouterr().err

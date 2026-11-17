@@ -1,0 +1,220 @@
+"""Place one test call to a customer's number and say if it was answered.
+
+    export HAIL_API_KEY='<API key from your own Hail workspace>'
+    uv run python scripts/ops/place_test_call.py \\
+        --number +<E.164 number> --i-will-call-a-customer
+
+The call goes out through Hail's public API from the workspace the key
+belongs to (``POST /v1/calls``), then the script polls
+``GET /v1/calls/{id}`` until the call ends. It prints one verdict line:
+ANSWERED (with how long the call lasted) or NOT ANSWERED, with the call's
+status and end reason. Exit code: 0 answered, 1 not answered, 2 the call
+could not be placed or did not end in time.
+
+The call reaches the customer's agent and shows in their call log. Remove
+it afterwards: docs/operations/call-record-deletion.md. When to run this:
+docs/operations/first-number-call-test.md.
+
+``HAIL_API_URL`` overrides the API address (default https://api.hail.so).
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import re
+import sys
+import time
+import uuid
+from collections.abc import Callable
+from datetime import datetime
+
+import httpx
+from hailhq.core.urls import join_url
+
+DEFAULT_API_URL = "https://api.hail.so"
+TERMINAL = frozenset({"completed", "failed", "busy", "no_answer", "canceled"})
+E164 = re.compile(r"^\+[1-9]\d{6,14}$")
+# Voice calls stop at 300 seconds by default; this leaves room for ringing.
+DEFAULT_TIMEOUT_SECONDS = 420
+POLL_SECONDS = 5.0
+SYSTEM_PROMPT = (
+    "This is a short line test from Hail, the phone provider. Say hello, "
+    "listen to the answer, thank them, then use end_call. Keep the call "
+    "under one minute."
+)
+FIRST_MESSAGE = "Hello, this is a short line test from Hail."
+WARNING = (
+    "This call reaches the customer's agent and shows in their call log.\n"
+    "Remove it afterwards: docs/operations/call-record-deletion.md"
+)
+
+
+class CallTestError(Exception):
+    """The call could not be placed, or did not end in time."""
+
+
+def call_body(number: str, from_number: str | None) -> dict:
+    body = {
+        "to": number,
+        "recipient_consent": True,
+        "message_type": "informational",
+        "system_prompt": SYSTEM_PROMPT,
+        "first_message": FIRST_MESSAGE,
+        "tools": ["end_call"],
+        "recording_enabled": False,
+        "metadata": {"purpose": "line_test"},
+    }
+    if from_number:
+        body["from"] = from_number
+    return body
+
+
+def place_call(
+    client: httpx.Client, api_url: str, number: str, from_number: str | None
+) -> dict:
+    response = client.post(
+        join_url(api_url, "v1/calls"),
+        json=call_body(number, from_number),
+        headers={"Idempotency-Key": str(uuid.uuid4())},
+    )
+    if response.status_code != 201:
+        raise CallTestError(
+            f"POST /v1/calls answered {response.status_code}: {response.text}"
+        )
+    return response.json()
+
+
+def wait_for_end(
+    client: httpx.Client,
+    api_url: str,
+    call_id: str,
+    *,
+    timeout: float = DEFAULT_TIMEOUT_SECONDS,
+    interval: float = POLL_SECONDS,
+    sleep: Callable[[float], None] = time.sleep,
+    clock: Callable[[], float] = time.monotonic,
+) -> dict:
+    """Poll until the call has a terminal status. A rate limit, a server
+    error or a network error waits and tries again; only the timeout or a
+    client error (4xx other than 429) stops the wait."""
+    url = join_url(api_url, f"v1/calls/{call_id}")
+    deadline = clock() + timeout
+    while True:
+        wait = interval
+        try:
+            response = client.get(url)
+        except httpx.TransportError:
+            response = None
+        if response is not None:
+            if response.status_code == 200:
+                call = response.json()
+                if call.get("status") in TERMINAL:
+                    return call
+            elif response.status_code == 429:
+                wait = max(interval, _retry_after(response))
+            elif response.status_code < 500:
+                raise CallTestError(
+                    f"GET /v1/calls/{call_id} answered "
+                    f"{response.status_code}: {response.text}"
+                )
+        if clock() + wait > deadline:
+            raise CallTestError(
+                f"call {call_id} did not end within {timeout:.0f} seconds"
+            )
+        sleep(wait)
+
+
+def _retry_after(response: httpx.Response) -> float:
+    try:
+        return float(response.headers.get("Retry-After", "0"))
+    except ValueError:
+        return 0.0
+
+
+def _seconds(start: str | None, end: str | None) -> int | None:
+    if not start or not end:
+        return None
+    return round(
+        (datetime.fromisoformat(end) - datetime.fromisoformat(start)).total_seconds()
+    )
+
+
+def verdict(call: dict) -> tuple[bool, str]:
+    """True when someone picked up. The text names the status and the end
+    reason either way, and the failure message when there is one."""
+    answered = call.get("answered_at") is not None
+    detail = f"status={call.get('status')} end_reason={call.get('end_reason')}"
+    if answered:
+        seconds = _seconds(call.get("answered_at"), call.get("ended_at"))
+        lasted = f" after {seconds} s" if seconds is not None else ""
+        return True, f"ANSWERED: the number took the call, ended{lasted}. {detail}"
+    text = f"NOT ANSWERED: {detail}"
+    if call.get("failure_message"):
+        text += f". {call['failure_message']}"
+    return False, text
+
+
+def parse_args(argv: list[str] | None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Place one test call to a number through Hail's public API.",
+        epilog=WARNING,
+    )
+    parser.add_argument(
+        "--number", required=True, help="number to call, E.164 (+<digits>)"
+    )
+    parser.add_argument(
+        "--i-will-call-a-customer",
+        dest="confirmed",
+        action="store_true",
+        help="required: confirms you know the call reaches the customer's agent",
+    )
+    parser.add_argument(
+        "--from",
+        dest="from_number",
+        help="caller ID, a number in your own workspace (default: Hail picks one)",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=DEFAULT_TIMEOUT_SECONDS,
+        help=f"seconds to wait for the call to end (default {DEFAULT_TIMEOUT_SECONDS})",
+    )
+    args = parser.parse_args(argv)
+    if not E164.match(args.number):
+        parser.error(f"--number must be E.164, like +14155550100: {args.number!r}")
+    if not args.confirmed:
+        parser.error(
+            "add --i-will-call-a-customer to place the call.\n" + WARNING,
+        )
+    return args
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    api_key = os.environ.get("HAIL_API_KEY")
+    if not api_key:
+        print(
+            "Set HAIL_API_KEY in this shell to a key from your own workspace.",
+            file=sys.stderr,
+        )
+        return 2
+    api_url = os.environ.get("HAIL_API_URL") or DEFAULT_API_URL
+    print(WARNING)
+    headers = {"Authorization": f"Bearer {api_key}"}
+    with httpx.Client(headers=headers, timeout=30) as client:
+        try:
+            call = place_call(client, api_url, args.number, args.from_number)
+            print(f"Placed call {call['id']} to {args.number}. Waiting for it to end.")
+            call = wait_for_end(client, api_url, call["id"], timeout=args.timeout)
+        except CallTestError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 2
+    answered, text = verdict(call)
+    print(text)
+    print(f"Call id (your workspace): {call['id']}")
+    return 0 if answered else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
