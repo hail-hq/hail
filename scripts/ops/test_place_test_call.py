@@ -536,11 +536,20 @@ def test_place_call_gateway_error_is_retried_until_replay():
 
 
 def test_place_call_in_flight_request_then_no_answer_may_be_live():
+    seen = []
     client = client_for(
-        [httpx.ConnectError("dns"), httpx.Response(409, json=STILL)]
-        + [httpx.ConnectError("dns")] * 100
+        [httpx.ReadTimeout("slow"), httpx.Response(409, json=STILL)]
+        + [httpx.ConnectError("dns")] * 100,
+        seen,
     )
     with pytest.raises(ptc.CallMaybeLive):
+        post(client)
+    assert len({r.headers["Idempotency-Key"] for r in seen}) == 1
+
+
+def test_place_call_pool_timeout_was_never_sent():
+    client = client_for([httpx.PoolTimeout("busy")] * 100)
+    with pytest.raises(ptc.CallTestError, match="never sent"):
         post(client)
 
 

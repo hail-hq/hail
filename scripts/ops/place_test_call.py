@@ -108,8 +108,7 @@ def place_call(
 
     A 201 or a replayed answer is final (a refusal raises CallTestError).
     At the deadline the outcome is unknown (CallMaybeLive) after a lost
-    request, a 409 still processing or a fresh 5xx (it counts as a lost
-    request and is tried again); otherwise the last refusal is final."""
+    request (see above); otherwise the last refusal is final."""
     url = join_url(api_url, "v1/calls")
     body = call_body(number, from_number)
     headers = {"Idempotency-Key": str(uuid.uuid4())}
@@ -120,9 +119,7 @@ def place_call(
             response = client.post(url, json=body, headers=headers)
         except httpx.TransportError as exc:
             response, problem = None, repr(exc)
-            lost = lost or not isinstance(
-                exc, (httpx.ConnectError, httpx.ConnectTimeout)
-            )
+            lost = lost or not isinstance(exc, NOT_SENT)
         if response is None:
             wait = POST_RETRY_SECONDS
         elif response.status_code == 201 or _replayed(response):
@@ -151,9 +148,18 @@ def place_call(
     if response.status_code == 201:
         return response.json()
     text = f"answered {response.status_code}: {response.text}"
-    if not _replayed(response) and (lost or _still_processing(response)):
+    if not _replayed(response) and lost:
         raise CallMaybeLive(text)
     raise CallTestError(f"POST /v1/calls {text}")
+
+
+# Transport errors raised before any byte of the request is sent.
+NOT_SENT = (
+    httpx.ConnectError,
+    httpx.ConnectTimeout,
+    httpx.PoolTimeout,
+    httpx.UnsupportedProtocol,
+)
 
 
 def _replayed(response: httpx.Response) -> bool:
