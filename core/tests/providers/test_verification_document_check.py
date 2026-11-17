@@ -228,8 +228,8 @@ async def test_the_prompt_asks_for_the_holder_never_the_issuer(subject_type) -> 
 
 
 async def test_an_empty_company_name_is_not_compared() -> None:
-    # A bill addressed to a person, sent for a company: no company name read,
-    # so the typed one gets no warning.
+    # A document that names no company (here an ID card), sent for a
+    # company: no company name read, so the typed one gets no warning.
     req = _req(
         subject_type="business",
         fields=(FieldSpec(name="business_name", label="Business Name"),),
