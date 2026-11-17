@@ -6,6 +6,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Added
 
+- US texting registration: a company that sends under 2,000 texts a day to T-Mobile users can pick low volume (`low_volume`). It skips brand vetting and costs less, with a lower daily limit and no trust score.
 - Rejected number registrations can be fixed and sent again for 30 days with `POST /v1/verifications/{id}/resubmit` (MCP: `resubmit_verification`).
 - `sms.received` webhooks and `received` SMS events have a new `compliance_keyword` field: `STOP`, `START` or `HELP` when the text is one of those keywords, otherwise `null`.
 - [Hail for Vercel Chat SDK](https://github.com/hail-hq/chat-sdk-adapter/releases/tag/v0.1.0): the published [`@hail-hq/chat-sdk-adapter`](https://www.npmjs.com/package/@hail-hq/chat-sdk-adapter) connects SMS webhooks and replies to Chat SDK. Hail maintains the adapter; its Vercel vendor-official listing requires separate acceptance.
