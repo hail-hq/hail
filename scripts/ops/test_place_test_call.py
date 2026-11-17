@@ -370,11 +370,38 @@ def test_place_call_replayed_server_error_is_final():
         post(client)
 
 
-def test_place_call_fresh_refusal_after_a_timeout_is_final():
-    # Hail releases the key on a 402, so the retry is refused afresh.
+def test_place_call_fresh_refusal_after_a_timeout_may_be_live():
+    # The timed-out request may still claim the key and place the call.
     client = client_for([httpx.ReadTimeout("slow"), httpx.Response(402)])
-    with pytest.raises(ptc.CallTestError, match="402"):
+    with pytest.raises(ptc.CallMaybeLive, match="402"):
         post(client)
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        httpx.Response(429),
+        httpx.Response(
+            503, json={"detail": "shared call line pool exhausted; try again"}
+        ),
+    ],
+)
+def test_place_call_retryable_refusal_after_a_timeout_may_be_live(answer):
+    client = client_for([httpx.ReadTimeout("slow")] + [answer] * 100)
+    with pytest.raises(ptc.CallMaybeLive):
+        post(client)
+
+
+def test_place_call_last_try_lands_at_the_deadline():
+    timer = FakeTime()
+    client = client_for(
+        [
+            httpx.Response(429, headers={"Retry-After": "200"}),
+            httpx.Response(201, json=call("queued")),
+        ]
+    )
+    assert post(client, timer)["id"] == CALL_ID
+    assert timer.sleeps == [ptc.POST_RETRY_WINDOW]
 
 
 def test_place_call_waits_out_a_fresh_rate_limit():

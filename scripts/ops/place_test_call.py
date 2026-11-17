@@ -42,8 +42,8 @@ E164 = re.compile(r"^\+[1-9]\d{6,14}$")
 DEFAULT_TIMEOUT_SECONDS = 420
 POLL_SECONDS = 5.0
 POST_RETRY_SECONDS = 2.0
-# Longer than the 30 s client timeout plus the 60 s rate-limit window, so
-# a timed-out first try and a fresh 429 both get another try.
+# Room for a first try that times out (30 s per client phase) and for a
+# 429 from the 60 s rate-limit window; the last try lands at the deadline.
 POST_RETRY_WINDOW = 120.0
 SYSTEM_PROMPT = (
     "This is a short line test from Hail, the phone provider. Say hello, "
@@ -96,24 +96,25 @@ def place_call(
 ) -> dict:
     """Send the call. Every try reuses one Idempotency-Key, so Hail answers
     with the first request's call (or its refusal) and never places a
-    second one. Tried again for up to ``POST_RETRY_WINDOW`` seconds: a
-    network error, a 409 "still processing", and answers that place
-    nothing and invite a retry (a fresh 429, the 503 "shared call line
-    pool exhausted").
+    second one. Tried again until ``POST_RETRY_WINDOW`` seconds have
+    passed: a network error, a 409 "still processing", and answers that
+    place nothing and invite a retry (a fresh 429, the 503 "shared call
+    line pool exhausted"). The last try lands at the deadline.
 
-    Raises CallMaybeLive when the outcome stays unknown: a try got no
-    answer and nothing later settled it, or a fresh 5xx (Hail can fail
-    after the call went out). A replayed answer, and any other refusal, is
-    final (CallTestError)."""
+    A replayed answer is final. Once any try got no answer, that request
+    may still place the call, so every later fresh refusal leaves the
+    outcome unknown: CallMaybeLive, the same as no answer at all or a
+    fresh 5xx. Without such a try, a refusal is final (CallTestError)."""
     url = join_url(api_url, "v1/calls")
     body = call_body(number, from_number)
     headers = {"Idempotency-Key": str(uuid.uuid4())}
     deadline = clock() + POST_RETRY_WINDOW
+    unanswered = False
     while True:
         try:
             response = client.post(url, json=body, headers=headers)
         except httpx.TransportError as exc:
-            response, problem = None, repr(exc)
+            response, problem, unanswered = None, repr(exc), True
         if response is None:
             wait = POST_RETRY_SECONDS
         elif _replayed(response):
@@ -124,20 +125,19 @@ def place_call(
             wait = POST_RETRY_SECONDS
         else:
             break
-        if response is not None:
-            problem = f"answered {response.status_code}: {response.text}"
-        if clock() + wait > deadline:
-            text = f"POST /v1/calls {problem}"
-            # Unknown only when no answer came, or the first request runs
-            # on. A fresh refusal shows the key was free: nothing placed.
-            if response is None or _still_processing(response):
-                raise CallMaybeLive(text)
-            raise CallTestError(text)
-        sleep(wait)
+        left = deadline - clock()
+        if left <= 0:
+            if response is None:
+                raise CallMaybeLive(f"POST /v1/calls got no answer: {problem}")
+            break
+        sleep(min(wait, left))
     if response.status_code == 201:
         return response.json()
     text = f"POST /v1/calls answered {response.status_code}: {response.text}"
-    if response.status_code >= 500 and not _replayed(response):
+    if _replayed(response):
+        raise CallTestError(text)
+    fresh_5xx = response.status_code >= 500 and not _pool_exhausted(response)
+    if unanswered or fresh_5xx or _still_processing(response):
         raise CallMaybeLive(text)
     raise CallTestError(text)
 
