@@ -14,7 +14,12 @@ from hailhq.core.providers.verification import (
     UploadedFile,
     get_verification_provider,
 )
-from hailhq.core.providers.verification.base import NOT_ACCEPTED, SubmitRefused
+from hailhq.core.providers.verification.base import (
+    NOT_ACCEPTED,
+    DiscardRefused,
+    SubmitRefused,
+    VerificationProviderError,
+)
 from hailhq.core.providers.verification.didww import DidwwVerificationProvider
 from hailhq.core.providers.voice import didww as voice_mod
 from responses import matchers
@@ -827,7 +832,8 @@ async def test_discard_deletes_created_identity_nothing_else_uses(provider):
 
 
 @responses.activate
-async def test_discard_keeps_identity_when_the_lookup_fails(provider):
+async def test_discard_keeps_identity_and_raises_when_the_lookup_fails(provider):
+    """The caller keeps the ids and tries again, so the identity is not lost."""
     for path in ("proofs/proof-1", "encrypted_files/file-1", "addresses/addr-1"):
         responses.add(responses.DELETE, f"{BASE}/{path}", status=204)
     responses.add(
@@ -836,8 +842,54 @@ async def test_discard_keeps_identity_when_the_lookup_fails(provider):
         status=500,
         json={"errors": [{"title": "x"}]},
     )
-    await provider.discard(_created_refs())
+    with pytest.raises(VerificationProviderError):
+        await provider.discard(_created_refs())
     assert "identities/id-1" not in _deleted()
+
+
+@responses.activate
+async def test_discard_runs_every_step_then_raises_on_an_outage(provider):
+    responses.add(
+        responses.DELETE,
+        f"{BASE}/proofs/proof-1",
+        status=503,
+        json={"errors": [{"title": "x"}]},
+    )
+    for path in ("encrypted_files/file-1", "addresses/addr-1"):
+        responses.add(responses.DELETE, f"{BASE}/{path}", status=204)
+    with pytest.raises(VerificationProviderError):
+        await provider.discard({**_created_refs(), "identity_created": False})
+    assert _deleted() == [
+        "proofs/proof-1",
+        "encrypted_files/file-1",
+        "addresses/addr-1",
+    ]
+
+
+@responses.activate
+async def test_discard_counts_gone_as_done(provider):
+    responses.add(
+        responses.DELETE,
+        f"{BASE}/addresses/addr-1",
+        status=404,
+        json={"errors": [{"title": "x"}]},
+    )
+    await provider.discard({"address_id": "addr-1"})
+    assert _deleted() == ["addresses/addr-1"]
+
+
+@pytest.mark.parametrize("status", [403, 409, 422])
+@responses.activate
+async def test_discard_raises_refused_on_a_refusal(provider, status):
+    """The carrier still holds the address: the caller keeps the ids."""
+    responses.add(
+        responses.DELETE,
+        f"{BASE}/addresses/addr-1",
+        status=status,
+        json={"errors": [{"title": "x"}]},
+    )
+    with pytest.raises(DiscardRefused):
+        await provider.discard({"address_id": "addr-1"})
 
 
 def test_registered_when_configured():

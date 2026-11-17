@@ -4,8 +4,9 @@ and never logs a name. Carriers are faked."""
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 
-from hailhq.core.models import CarrierVerification
+from hailhq.core.models import CarrierVerification, OrgClosure
 from hailhq.core.verification_names import backfill_subject_names
 from sqlalchemy import select
 
@@ -104,3 +105,25 @@ async def test_backfill_names_rows_from_their_carrier(async_session, caplog) -> 
     logged = " ".join(r.getMessage() for r in caplog.records).lower()
     for name in ("zelda", "quixote", "grace", "acme", "lovelace"):
         assert name not in logged
+
+
+async def test_backfill_skips_closed_orgs(async_session) -> None:
+    """A closed org's names were deleted at close: never asked back."""
+    closed = uuid.uuid4()
+    async_session.add(
+        OrgClosure(
+            organization_id=closed,
+            closed_at=datetime.now(timezone.utc),
+            source="hail_website",
+        )
+    )
+    row = _row(closed, "closed")
+    async_session.add(row)
+    await async_session.commit()
+    number = _Plugin({"closed": "Zelda Quixote"})
+
+    await backfill_subject_names(async_session, lambda name, purpose: number)
+
+    assert ("closed", "person") not in number.asked
+    await async_session.refresh(row)
+    assert row.subject_name is None

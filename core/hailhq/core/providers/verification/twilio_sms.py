@@ -18,6 +18,7 @@ from hailhq.core.providers.verification import twilio_tollfree
 from hailhq.core.providers.verification.base import (
     BRAND_REJECTED,
     SMS_REFUSED,
+    DiscardFailures,
     DraftResult,
     Problem,
     ProviderStatus,
@@ -229,7 +230,7 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
             )
         except Exception as exc:
             _log_failure("draft", exc)
-            await self.discard(refs)
+            await self.discard_draft(refs)
             if isinstance(exc, TwilioRestException):
                 logger.warning(
                     "10DLC draft failed: status=%s code=%s", exc.status, exc.code
@@ -492,7 +493,8 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
             # Recover a paid submission whose response was lost before retrying.
             if self._recover_campaign(refs):
                 return ProviderStatus(state="pending")
-            text = refs["campaign"]
+            # No text once the account closed (its answers are deleted): held.
+            text = refs.get("campaign") or {}
             if text.get("schema_version", 1) < 2:
                 refs["needs_information"] = True
                 return ProviderStatus(state="pending", reason=LEGACY_APPLICATION)
@@ -788,7 +790,8 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
     async def detach_number(self, refs, *, provider_resource_id, e164) -> bool:
         """A company's campaign covers the organization's service, which the
         number stays in. A person's number leaves the person's own service;
-        True tells the caller to set it up in the organization's again."""
+        True tells the caller to set it up in the organization's again. Not
+        in the service (404, 410) is done; any other failure raises."""
         service = refs.get("messaging_service_sid")
         if refs.get("subject_type") != "person" or not service:
             return False
@@ -799,14 +802,14 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
                 .delete
             )
         except TwilioRestException as exc:
-            if exc.status != 404:
+            if exc.status not in (404, 410):
                 logger.warning(
                     "10DLC detach failed: status=%s code=%s", exc.status, exc.code
                 )
-                return False
-        except Exception:
-            logger.warning("10DLC detach failed")
-            return False
+                raise
+        except Exception as exc:
+            logger.warning("10DLC detach failed: %s", type(exc).__name__)
+            raise
         return True
 
     def step(self, refs):
@@ -838,20 +841,21 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
 
     async def discard(self, refs) -> None:
         if refs.get("registration_kind") == "toll_free":
+            # Already gone (404) is done. A refusal raises DiscardRefused:
+            # the caller keeps the ids for a delete by hand.
+            failures = DiscardFailures("twilio toll-free")
             try:
                 await asyncio.to_thread(
                     self._client.messaging.v1.tollfree_verifications(
                         refs["tollfree_verification_sid"]
                     ).delete
                 )
-            except TwilioRestException as exc:
-                if exc.status != 404:
-                    _log_failure("tollfree_discard", exc)
-                    raise VerificationProviderError(
-                        "Could not cancel registration. Try again."
-                    ) from exc
+            except Exception as exc:
+                failures.add(exc, "tollfree_verification")
+            failures.raise_any("Could not cancel registration. Try again.")
             return
         # A brand cannot be deleted through the API; it is left behind.
+        failures = DiscardFailures("twilio 10DLC")
         ms = refs.get("messaging_service_sid")
         client = self._client
         steps = [
@@ -879,16 +883,9 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
                 continue
             try:
                 await asyncio.to_thread(step)
-            except TwilioRestException as exc:
-                if exc.status != 404:
-                    logger.warning(
-                        "10DLC discard failed: step=%s status=%s code=%s",
-                        key,
-                        exc.status,
-                        exc.code,
-                    )
-            except Exception:
-                logger.warning("10DLC discard failed: step=%s", key)
+            except Exception as exc:
+                failures.add(exc, key)
+        failures.raise_any("Could not cancel registration. Try again.")
 
 
 def _person_service_name(organization_id) -> str:

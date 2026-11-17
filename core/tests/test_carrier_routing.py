@@ -256,3 +256,158 @@ def test_each_sms_carrier_builds_its_own_client(monkeypatch) -> None:
     # One Twilio client per process.
     assert carrier_routing.sms_route(TWILIO) is twilio_sms
     assert isinstance(carrier_routing.sms_route(TELNYX), TelnyxSmsProvider)
+
+
+def _http(status: int) -> Exception:
+    from hailhq.core.providers.voice.base import CarrierRequestError
+
+    return CarrierRequestError(status)
+
+
+def _wrapped(cause: Exception) -> Exception:
+    """A plug-in error raised from ``cause``."""
+    try:
+        try:
+            raise cause
+        except Exception as exc:
+            raise RuntimeError("plug-in") from exc
+    except RuntimeError as outer:
+        return outer
+
+
+@pytest.mark.parametrize(
+    ("error", "kind"),
+    [
+        (_http(404), "gone"),
+        (_http(410), "gone"),
+        (_http(500), "outage"),
+        (_http(503), "outage"),
+        (_http(401), "outage"),
+        (_http(408), "outage"),
+        (_http(425), "outage"),
+        (_http(429), "outage"),
+        (_http(403), "refused"),
+        (_http(409), "refused"),
+        (_http(400), "final"),
+        (_http(422), "final"),
+        (_wrapped(_http(409)), "refused"),
+        (TimeoutError(), "outage"),
+        (ConnectionResetError(), "outage"),
+        (_wrapped(TimeoutError()), "outage"),
+        (CarrierNotConfigured("x"), "outage"),
+    ],
+)
+def test_failure_kind(error, kind) -> None:
+    assert carrier_routing.failure_kind(error) == kind
+
+
+def test_failure_kind_network_errors_of_each_carrier_sdk() -> None:
+    import httpx
+    import requests
+
+    request = httpx.Request("DELETE", "https://example.test")
+    for error in (
+        httpx.ConnectError("x", request=request),
+        httpx.ReadTimeout("x", request=request),
+        httpx.RemoteProtocolError("x", request=request),
+        httpx.DecodingError("x", request=request),
+        requests.ConnectionError("x"),
+        requests.Timeout("x"),
+        # A response cut off or garbled in transit: a blip, not a refusal.
+        requests.exceptions.ChunkedEncodingError("x"),
+        requests.exceptions.ContentDecodingError("x"),
+        requests.exceptions.RetryError("x"),
+    ):
+        assert carrier_routing.failure_kind(error, unknown="refused") == "outage"
+
+
+def test_failure_kind_reads_the_nearest_error_first() -> None:
+    """A lost connection while handling a 403 (its ``__context__``) is an
+    outage, bare or wrapped by a plug-in; a 403 raised while handling a
+    lost connection is a refusal."""
+    import httpx
+
+    request = httpx.Request("DELETE", "https://example.test")
+
+    def raised_during(error: Exception, handling: Exception) -> Exception:
+        try:
+            try:
+                raise handling
+            except Exception:
+                raise error
+        except Exception as exc:
+            return exc
+
+    connect = raised_during(httpx.ConnectError("x", request=request), _http(403))
+    assert connect.__context__ is not None
+    assert carrier_routing.failure_kind(connect, unknown="refused") == "outage"
+    assert carrier_routing.failure_kind(_wrapped(connect), unknown="refused") == (
+        "outage"
+    )
+    refused = raised_during(_http(403), httpx.ConnectError("x", request=request))
+    assert carrier_routing.failure_kind(refused) == "refused"
+
+
+def test_failure_kind_ignores_a_context_hidden_by_from_none() -> None:
+    """``raise ... from None`` hides the error it was raised while handling:
+    a lost connection there does not make a final error an outage."""
+    import httpx
+
+    request = httpx.Request("DELETE", "https://example.test")
+    try:
+        try:
+            raise httpx.ConnectError("x", request=request)
+        except httpx.ConnectError:
+            raise KeyError("final") from None
+    except KeyError as exc:
+        hidden = exc
+    assert hidden.__context__ is not None
+    assert carrier_routing.failure_kind(hidden, unknown="refused") == "refused"
+
+
+def test_failure_kind_of_an_error_with_no_carrier_answer() -> None:
+    """A bug (KeyError) is ``unknown``: a discard step counts it refused,
+    other callers retry it."""
+    assert carrier_routing.failure_kind(KeyError("x")) == "outage"
+    assert carrier_routing.failure_kind(KeyError("x"), unknown="refused") == "refused"
+
+
+def test_escaped_discard_error() -> None:
+    """An error a discard raised outside its steps, as discard raises it."""
+    from hailhq.core.providers.verification.base import (
+        DiscardRefused,
+        VerificationProviderError,
+        escaped_discard_error,
+    )
+
+    assert escaped_discard_error(_http(404)) is None
+    outage = escaped_discard_error(TimeoutError())
+    assert type(outage) is VerificationProviderError
+    assert isinstance(escaped_discard_error(_http(409)), DiscardRefused)
+    assert isinstance(escaped_discard_error(KeyError("x")), DiscardRefused)
+    own = VerificationProviderError("x")
+    assert escaped_discard_error(own) is own
+
+
+async def test_counted_discard() -> None:
+    """An error escaping a discard call counts as escaped_discard_error."""
+    from hailhq.core.providers.verification.base import (
+        DiscardRefused,
+        VerificationProviderError,
+        counted_discard,
+    )
+
+    async def fails(exc):
+        raise exc
+
+    async def works():
+        return {"kept_brand_id": "b"}
+
+    assert await counted_discard(works()) == {"kept_brand_id": "b"}
+    assert await counted_discard(fails(_http(404))) is None
+    with pytest.raises(DiscardRefused) as refused:
+        await counted_discard(fails(KeyError("x")))
+    assert isinstance(refused.value.__cause__, KeyError)
+    with pytest.raises(VerificationProviderError) as outage:
+        await counted_discard(fails(TimeoutError()))
+    assert not isinstance(outage.value, DiscardRefused)

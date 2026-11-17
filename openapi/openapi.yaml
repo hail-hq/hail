@@ -5599,7 +5599,9 @@ paths:
 
         held or charged, and uploads are not used up. The files are read by an
 
-        AI model (Anthropic) for this check only."
+        Anthropic AI model, on AWS (Amazon Bedrock) or Anthropic's API, for this
+
+        check only."
       operationId: check_verification_documents
       parameters:
         - name: authorization
@@ -5807,7 +5809,16 @@ paths:
 
         cancelled sooner is still charged for that many months (prices: see the
 
-        console)."
+        console).
+
+
+        When the carrier is down or rate-limits the delete, the call answers
+
+        503 and changes nothing: try again later. When the carrier refuses the
+
+        delete, the verification is cancelled in Hail all the same and Hail's
+
+        fees stop as above."
       operationId: cancel_verification
       parameters:
         - name: verification_id

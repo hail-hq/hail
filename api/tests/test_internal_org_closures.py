@@ -14,6 +14,8 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
+from fastapi import BackgroundTasks
+from hailhq.api.routes.internal import org_closures as org_closures_module
 from hailhq.api.routes.internal.auth import verify_internal_request
 from hailhq.api.routes.internal.org_closures import (
     OrgClosureIn,
@@ -23,7 +25,7 @@ from hailhq.api.routes.internal.org_closures import (
     router as org_closures_router,
 )
 from hailhq.core.config import settings
-from hailhq.core.models import OrgClosure
+from hailhq.core.models import CarrierVerification, OrgClosure
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -111,6 +113,71 @@ async def test_happy_path_inserts_row(
 
 
 @pytest.mark.asyncio
+async def test_closure_cancels_the_registration_and_deletes_its_answers(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    internal_secret_set,  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+):
+    discarded: list[dict] = []
+
+    class _Carrier:
+        async def discard(self, refs):
+            discarded.append(dict(refs))
+
+    monkeypatch.setattr(
+        org_closures_module,
+        "get_verification_provider",
+        lambda name, purpose="number": _Carrier(),
+    )
+    closed, other = uuid.uuid4(), uuid.uuid4()
+    refs = {
+        "brand_sid": "BN1",
+        "brand_reused": True,
+        "application": {"fields": {"first_name": "Ada", "tax_id": "12-3456789"}},
+        "campaign": {"contact_email": "ada@example.com"},
+    }
+    rows = [
+        CarrierVerification(
+            organization_id=org,
+            provider="twilio",
+            country_code="US",
+            number_type="local",
+            subject_type="person",
+            purpose="sms",
+            subject_name="Ada Lovelace",
+            state="approved",
+            provider_refs=dict(refs),
+            requirements_version="1",
+        )
+        for org in (closed, other)
+    ]
+    async_session.add_all(rows)
+    await async_session.commit()
+    body = json.dumps(
+        {
+            "organization_id": str(closed),
+            "closed_at": datetime.now(timezone.utc).isoformat(),
+        }
+    ).encode()
+
+    resp = await client.post(
+        "/internal/org-closures", content=body, headers=_signed(body)
+    )
+    assert resp.status_code == 200
+
+    for row in rows:
+        await async_session.refresh(row)
+    # Cancelled at the carrier (after the response), then the answers go.
+    assert [d["brand_sid"] for d in discarded] == ["BN1"]
+    assert rows[0].provider_refs == {"brand_reused": True}
+    assert rows[0].subject_name is None and rows[0].state == "cancelled"
+    assert rows[1].state == "approved"
+    assert rows[1].provider_refs == refs
+    assert rows[1].subject_name == "Ada Lovelace"
+
+
+@pytest.mark.asyncio
 async def test_repeat_notification_upserts_existing_row(
     client: httpx.AsyncClient,
     async_session: AsyncSession,
@@ -171,6 +238,7 @@ async def test_concurrent_notifications_for_same_org_do_not_race(
                     organization_id=org_id, closed_at=closed_at, source="hail_website"
                 ),
                 session,
+                BackgroundTasks(),
             )
 
     # Warm the pool with two concurrent connections first. On a cold pool,

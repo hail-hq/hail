@@ -57,3 +57,38 @@ Other carrier errors keep the discovery warning. The quote response sets
 `incomplete: true` and retains valid offers from other carriers. An empty
 result alone does not mean a carrier failed. These outcomes do not change
 search filters, prices, or country coverage in the catalog.
+
+## Release at account close
+
+When hail-website deletes an account, the org gets an `org_closures` row.
+[`close_org_carrier_items`](../../api/hailhq/api/org_close.py) releases each
+of its numbers through `release_org_number`, the same code as
+`DELETE /numbers/{id}`. It runs after `POST /internal/org-closures`
+answers, and on every verification worker pass.
+
+- A pending order is released on a later pass, once the order reconciler
+  has the carrier's answer. SMS setup is skipped for a closed org's number.
+- An outage, a timeout, a 401, 408, 425 or 429 is retried on every pass,
+  with no limit.
+- A 403 or 409 is retried for 7 days from the first one
+  (`provisioning_metadata.close_failing_since`; a release that works, or a
+  failure of another kind, clears it), then stored as a refusal.
+- Any other 4xx, or a carrier Hail cannot release through the API, is
+  stored as a refusal at once.
+- A refusal is `provisioning_metadata.release_refused` (`status`, `at`).
+  That number is not tried again: release it at the carrier by hand. The
+  registration that covers it is not cancelled either (`close_refused`
+  with its `number_id`, see
+  [carrier-verification.md](carrier-verification.md#cancel-rules)).
+- No ledger row and no audit row is written. DIDWW ends a number at the end
+  of its billing cycle and does not refund.
+
+```sql
+BEGIN READ ONLY;
+SELECT id, organization_id, provisioning_state,
+       provisioning_metadata->'release_refused' AS release_refused
+FROM phone_numbers
+WHERE organization_id IN (SELECT organization_id FROM org_closures)
+  AND provisioning_state <> 'released';
+ROLLBACK;
+```

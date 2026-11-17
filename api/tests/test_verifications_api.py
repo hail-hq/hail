@@ -13,7 +13,9 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from types import SimpleNamespace
+from unittest.mock import Mock
 
+import httpx
 import pytest
 from hailhq.api import sms_registration, verification_decisions, verification_files
 from hailhq.api.funds import BILLING_URL
@@ -30,6 +32,7 @@ from hailhq.core.models import (
     AccountCredit,
     AuditLog,
     CarrierVerification,
+    OrgClosure,
     PhoneNumber,
 )
 from hailhq.core.providers.verification import (
@@ -44,15 +47,26 @@ from hailhq.core.providers.verification import (
     SubmitRefused,
     UnsupportedSubjectType,
     VerificationProvider,
+    VerificationProviderError,
 )
 from hailhq.core.providers.verification.base import (
     BRAND_REJECTED,
     NOT_ACCEPTED,
     VALUE_NOT_ACCEPTED,
+    DiscardRefused,
     RegistrationHoldsAnotherNumber,
 )
 from hailhq.core.providers.verification.forms import display_name
+from hailhq.core.providers.verification.telnyx_sms import (
+    TelnyxSmsRegistrationProvider,
+)
+from hailhq.core.providers.verification.twilio_sms import (
+    TwilioSmsRegistrationProvider,
+)
+from hailhq.core.providers.voice.base import CarrierRequestError
+from hailhq.core.retention import REGISTRATION_ANSWER_REFS
 from sqlalchemy import select, update
+from twilio.base.exceptions import TwilioRestException
 
 from .conftest import insert_org_and_key
 
@@ -149,6 +163,8 @@ class FakeSmsCarrier(SmsRegistrationProvider):
         self.detached: list[str] = []
         # True: detach_number says the number left its messaging service.
         self.detach_leaves_service = False
+        # Raised by discard: the carrier delete must be tried again.
+        self.discard_error: Exception | None = None
 
     async def requirements(self, country_code, number_type, subject_type):
         return Requirements(
@@ -220,6 +236,8 @@ class FakeSmsCarrier(SmsRegistrationProvider):
         return {}
 
     async def discard(self, refs):
+        if self.discard_error is not None:
+            raise self.discard_error
         self.discarded.append(refs)
 
     async def attach_number(self, refs, *, provider_resource_id, e164):
@@ -1943,13 +1961,34 @@ async def test_create_keeps_waiting_when_a_refused_draft_cannot_be_discarded(
         raise SubmitRefused([Problem(field="", message=NOT_ACCEPTED)])
 
     async def boom(refs):
-        raise RuntimeError("carrier down")
+        # What a plug-in's discard raises on an outage (DiscardFailures).
+        raise VerificationProviderError("carrier down")
 
     carrier.submit, carrier.discard = refuse, boom
     resp = await _create(client, key)
     assert resp.status_code == 201, resp.text
     # Not stuck in 'submitting': the sweeper tries again.
     assert resp.json()["state"] == "awaiting_review"
+
+
+async def test_create_rejects_a_refused_draft_when_discard_escapes_with_a_bug(
+    client, org_and_key, carrier
+) -> None:
+    """An error that escapes discard outside its steps (a bug) counts as a
+    refusal, as on a customer cancel: rejected with discard_refused, not
+    left for the pass to submit and discard again on every tick."""
+    _, _, key = org_and_key
+
+    async def refuse(refs):
+        raise SubmitRefused([Problem(field="", message=NOT_ACCEPTED)])
+
+    async def bug(refs):
+        raise KeyError("address_id")
+
+    carrier.submit, carrier.discard = refuse, bug
+    resp = await _create(client, key)
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["state"] == "rejected"
 
 
 async def test_superadmin_approve_reports_a_refused_submit(
@@ -1990,7 +2029,7 @@ async def test_sweeper_submits_waiting_drafts_and_pulls_decisions(
         async_session,
         lambda name, purpose="number": carrier if name == "fake" else None,
     )
-    assert counts == {"submitted": 0, "refreshed": 0, "forgotten": 0}
+    assert counts == {"submitted": 0, "refreshed": 0, "forgotten": 0, "closed": 0}
     assert carrier.submitted == []
     await _set_state(async_session, waiting, "awaiting_review", age_s=3 * 60)
     carrier.remote_status = ProviderStatus(state="approved")
@@ -2077,14 +2116,14 @@ async def test_sweeper_keeps_a_refused_draft_when_the_discard_fails(
     carrier.check_problems = [Problem(field="", message="document unreadable")]
 
     async def boom(refs):
-        raise RuntimeError("carrier down")
+        raise VerificationProviderError("carrier down")
 
     carrier.discard = boom
     counts = await sweep_verifications(
         async_session,
         lambda name, purpose="number": carrier if name == "fake" else None,
     )
-    assert counts == {"submitted": 0, "refreshed": 0, "forgotten": 0}
+    assert counts == {"submitted": 0, "refreshed": 0, "forgotten": 0, "closed": 0}
     row = await async_session.get(CarrierVerification, uuid.UUID(vid))
     await async_session.refresh(row)
     assert row.state == "awaiting_review" and row.provider_refs == {"bundle_sid": "B1"}
@@ -2093,6 +2132,43 @@ async def test_sweeper_keeps_a_refused_draft_when_the_discard_fails(
             select(AuditLog).where(AuditLog.action == "verification.reject")
         )
     ).scalar_one_or_none() is None
+
+
+async def test_sweeper_rejects_a_refused_draft_the_carrier_will_not_delete(
+    client, org_and_key, carrier, async_session
+) -> None:
+    """A delete the carrier refuses does not keep the draft looping: the
+    row is rejected in Hail, the ids kept under ``discard_refused``."""
+    from hailhq.api.routes.verifications import sweep_verifications
+
+    _, _, key = org_and_key
+    vid = await _unsent(client, key, carrier, async_session)
+    await _set_state(async_session, vid, "awaiting_review", age_s=3 * 60)
+    carrier.check_problems = [Problem(field="", message="document unreadable")]
+
+    async def refuse(refs):
+        raise _refused(CarrierRequestError(409))
+
+    carrier.discard = refuse
+    await sweep_verifications(
+        async_session,
+        lambda name, purpose="number": carrier if name == "fake" else None,
+    )
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    assert row.state == "rejected"
+    mark = row.provider_refs[verifications_routes.DISCARD_REFUSED]
+    assert mark["status"] == 409 and mark["held"] == {"bundle_sid": "B1"}
+    assert "bundle_sid" not in row.provider_refs
+
+    # The customer dismisses it: the mark stays on the cancelled row.
+    resp = await client.delete(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.status_code == 200, resp.text
+    await async_session.refresh(row)
+    assert row.state == "cancelled"
+    assert row.provider_refs[verifications_routes.DISCARD_REFUSED]["held"] == {
+        "bundle_sid": "B1"
+    }
 
 
 async def test_a_check_that_fails_partway_keeps_only_the_ids_it_added(
@@ -2132,7 +2208,7 @@ async def test_a_discard_that_fails_partway_keeps_the_ids_it_added(
     async def discard(refs):
         refs["deleting_id"] = "D1"
         refs["bundle_sid"] = "changed"
-        raise RuntimeError("carrier down")
+        raise VerificationProviderError("carrier down")
 
     carrier.discard = discard
     await sweep_verifications(
@@ -2146,7 +2222,7 @@ async def test_a_discard_that_fails_partway_keeps_the_ids_it_added(
 
 
 @pytest.mark.parametrize(
-    "fail", [RuntimeError("carrier down"), asyncio.CancelledError()]
+    "fail", [VerificationProviderError("carrier down"), asyncio.CancelledError()]
 )
 async def test_ids_check_wrote_survive_a_failed_or_cut_discard(
     client, org_and_key, carrier, async_session, fail
@@ -2209,7 +2285,7 @@ async def test_a_refused_submit_discards_the_refs_as_they_are_now(
 
 
 @pytest.mark.parametrize(
-    "fail", [RuntimeError("carrier down"), asyncio.CancelledError()]
+    "fail", [VerificationProviderError("carrier down"), asyncio.CancelledError()]
 )
 async def test_ids_submit_wrote_survive_a_failed_or_cut_discard(
     client, org_and_key, carrier, async_session, fail
@@ -2914,6 +2990,436 @@ async def test_cancel_a_person_registration_frees_the_number_service(
     assert any("enable-sms" in r.getMessage() for r in caplog.records)
 
 
+async def test_cancel_answers_503_and_keeps_the_row_when_the_carrier_delete_fails(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 10_000)
+    number = await _us_number(async_session, org_id)
+    vid = await _approved_sms_row(client, key, async_session, sms_carrier)
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    refs_before = dict(row.provider_refs)
+    sms_carrier.discard_error = VerificationProviderError("Telnyx discard failed")
+
+    resp = await client.delete(f"/verifications/{vid}", headers=_auth(key))
+
+    assert resp.status_code == 503, resp.text
+    assert resp.json()["detail"] == "carrier unavailable; try again later"
+    await async_session.refresh(row)
+    assert row.state == "approved" and row.cancelled_at is None
+    assert row.provider_refs == refs_before
+    await async_session.refresh(number)
+    assert number.sms_registration_id == row.id
+
+    # The carrier answers again: the same cancel goes through.
+    sms_carrier.discard_error = None
+    resp = await client.delete(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["state"] == "cancelled"
+
+
+def _refused(cause: Exception) -> DiscardRefused:
+    """A ``DiscardRefused`` raised from ``cause``, as the plug-ins raise it."""
+    try:
+        try:
+            raise cause
+        except Exception as exc:
+            raise DiscardRefused("refused") from exc
+    except DiscardRefused as refused:
+        return refused
+
+
+@pytest.mark.parametrize(
+    ("cause", "status", "wrapped"),
+    [
+        (CarrierRequestError(409), 409, True),
+        (CarrierRequestError(422), 422, True),
+        (KeyError("x"), None, True),
+        # Raised by discard outside its steps: counted the same way.
+        (CarrierRequestError(403), 403, False),
+        (KeyError("y"), None, False),
+    ],
+)
+async def test_cancel_goes_through_with_a_mark_when_the_carrier_refuses(
+    client, org_and_key, sms_carrier, async_session, cause, status, wrapped
+) -> None:
+    """A carrier that refuses the delete (or a bug in the delete) does not
+    block the cancel: the row is cancelled in Hail, and the carrier ids are
+    kept under ``discard_refused`` for ops, without the customer's answers."""
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 10_000)
+    number = await _us_number(async_session, org_id)
+    vid = await _approved_sms_row(client, key, async_session, sms_carrier)
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    row.provider_refs = {**row.provider_refs, "campaign_id": "C1", "brand_id": "B1"}
+    await async_session.commit()
+    sms_carrier.discard_error = _refused(cause) if wrapped else cause
+
+    resp = await client.delete(f"/verifications/{vid}", headers=_auth(key))
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["state"] == "cancelled"
+    assert resp.json()["cancellable"] is False
+    await async_session.refresh(row)
+    assert row.state == "cancelled" and row.cancelled_at is not None
+    mark = row.provider_refs[verifications_routes.DISCARD_REFUSED]
+    assert mark["status"] == status and mark["at"]
+    assert mark["held"]["campaign_id"] == "C1" and mark["held"]["brand_id"] == "B1"
+    assert not set(mark["held"]) & set(REGISTRATION_ANSWER_REFS)
+    # Like any cancel: nothing but the mark and the kept answers at the top.
+    assert "campaign_id" not in row.provider_refs
+    await async_session.refresh(number)
+    assert number.sms_registration_id is None
+    audit = (
+        await async_session.execute(
+            select(AuditLog).where(AuditLog.action == "verification.cancel")
+        )
+    ).scalar_one()
+    assert audit.payload["state_before"] == "approved"
+
+
+def _telnyx_row(org_id) -> CarrierVerification:
+    return CarrierVerification(
+        organization_id=org_id,
+        provider="telnyx",
+        country_code="US",
+        number_type="local",
+        subject_type="business",
+        subject_name="Acme",
+        purpose="sms",
+        state="approved",
+        approved_at=datetime.now(timezone.utc),
+        provider_refs={"brand_id": "B1", "campaign_id": "C1"},
+        requirements_version="1",
+    )
+
+
+@pytest.mark.parametrize(
+    ("answer", "refused", "status"),
+    [
+        (403, True, 403),
+        (409, True, 409),
+        (400, True, 400),
+        ("bug", True, None),
+        (500, False, None),
+        (401, False, None),
+        (408, False, None),
+        (425, False, None),
+        (429, False, None),
+        ("timeout", False, None),
+    ],
+)
+async def test_cancel_with_the_real_telnyx_plugin(
+    client, org_and_key, async_session, answer, refused, status
+) -> None:
+    """The Telnyx 10DLC plug-in end to end. A refusal of the brand delete
+    (Telnyx keeps a brand for 3 months after its campaign) cancels in Hail
+    with the mark; an outage, a 401 or a rate limit answers 503 and changes
+    nothing."""
+    org_id, _, key = org_and_key
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "/10dlc/brand/" not in request.url.path:
+            return httpx.Response(200, json={})
+        if answer == "bug":
+            raise KeyError("x")
+        if answer == "timeout":
+            raise httpx.ReadTimeout("slow", request=request)
+        return httpx.Response(answer, json={"errors": []})
+
+    telnyx = TelnyxSmsRegistrationProvider(
+        api_key="k",
+        client=httpx.AsyncClient(
+            transport=httpx.MockTransport(handler),
+            base_url="https://api.telnyx.com/v2",
+        ),
+    )
+    app.dependency_overrides[get_verification_registry] = lambda: (
+        lambda name, purpose="number": telnyx if name == "telnyx" else None
+    )
+    try:
+        row = _telnyx_row(org_id)
+        async_session.add(row)
+        await async_session.commit()
+
+        resp = await client.delete(f"/verifications/{row.id}", headers=_auth(key))
+    finally:
+        app.dependency_overrides.pop(get_verification_registry, None)
+
+    await async_session.refresh(row)
+    if refused:
+        assert resp.status_code == 200, resp.text
+        assert row.state == "cancelled"
+        mark = row.provider_refs[verifications_routes.DISCARD_REFUSED]
+        assert mark["status"] == status
+        assert mark["held"]["brand_id"] == "B1"
+    else:
+        assert resp.status_code == 503, resp.text
+        assert row.state == "approved" and row.cancelled_at is None
+        assert row.provider_refs["brand_id"] == "B1"
+        assert row.provider_refs["campaign_id"] == "C1"
+        assert verifications_routes.DISCARD_REFUSED not in row.provider_refs
+
+
+@pytest.mark.parametrize(
+    ("answer", "refused", "status"),
+    [
+        (400, True, 400),
+        (403, True, 403),
+        (409, True, 409),
+        (500, False, None),
+        (429, False, None),
+        ("timeout", False, None),
+    ],
+)
+async def test_cancel_when_telnyx_refuses_a_number_unlink(
+    client, org_and_key, async_session, answer, refused, status
+) -> None:
+    """The real Telnyx plug-in, with the number unlink failing and the
+    campaign and brand deletes working. A refusal (a 400 every time) does
+    not block the cancel: it goes through with the number named in
+    ``discard_refused``. An outage answers 503 and changes nothing."""
+    org_id, _, key = org_and_key
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.path)
+        if "/10dlc/phone_number_campaigns/" not in request.url.path:
+            return httpx.Response(200, json={})
+        if answer == "timeout":
+            raise httpx.ReadTimeout("slow", request=request)
+        return httpx.Response(answer, json={"errors": []})
+
+    telnyx = TelnyxSmsRegistrationProvider(
+        api_key="k",
+        client=httpx.AsyncClient(
+            transport=httpx.MockTransport(handler),
+            base_url="https://api.telnyx.com/v2",
+        ),
+    )
+    app.dependency_overrides[get_verification_registry] = lambda: (
+        lambda name, purpose="number": telnyx if name == "telnyx" else None
+    )
+    try:
+        row = _telnyx_row(org_id)
+        async_session.add(row)
+        await async_session.commit()
+        number = await _us_number(
+            async_session, org_id, provider="telnyx", resource="TN1"
+        )
+        number.sms_registration_id = row.id
+        await async_session.commit()
+
+        resp = await client.delete(f"/verifications/{row.id}", headers=_auth(key))
+    finally:
+        app.dependency_overrides.pop(get_verification_registry, None)
+
+    await async_session.refresh(row)
+    await async_session.refresh(number)
+    if refused:
+        assert resp.status_code == 200, resp.text
+        assert row.state == "cancelled" and row.cancelled_at is not None
+        # The campaign and brand are deleted all the same.
+        assert any("/10dlc/campaign/C1" in c for c in calls)
+        mark = row.provider_refs[verifications_routes.DISCARD_REFUSED]
+        assert mark["status"] == status
+        assert mark["held"]["brand_id"] == "B1"
+        assert mark["unlinks"] == [
+            {
+                "number_id": str(number.id),
+                "provider_resource_id": "TN1",
+                "status": status,
+            }
+        ]
+        assert number.sms_registration_id is None
+    else:
+        assert resp.status_code == 503, resp.text
+        assert row.state == "approved" and row.cancelled_at is None
+        assert row.provider_refs["brand_id"] == "B1"
+        assert row.provider_refs["campaign_id"] == "C1"
+        assert verifications_routes.DISCARD_REFUSED not in row.provider_refs
+        assert number.sms_registration_id == row.id
+
+
+async def test_cancel_locked_raises_a_refused_unlink_without_mark_refused(
+    org_and_key, sms_carrier, async_session
+) -> None:
+    """Account close (``mark_refused`` False): a refused unlink raises
+    ``DiscardRefused`` with the carrier's status, after the discard ran, so
+    the close applies its retry window."""
+    from hailhq.core.carrier_routing import carrier_http_status
+
+    org_id, _, _ = org_and_key
+    row = _telnyx_row(org_id)
+    row.provider = "fake"
+    async_session.add(row)
+    await async_session.commit()
+    number = await _us_number(async_session, org_id)
+    number.sms_registration_id = row.id
+    await async_session.commit()
+
+    async def refuse(refs, *, provider_resource_id, e164):
+        raise CarrierRequestError(403)
+
+    sms_carrier.detach_number = refuse
+    with pytest.raises(DiscardRefused) as raised:
+        await verifications_routes.cancel_locked(
+            async_session, row, sms_carrier, keep_brand=False
+        )
+    assert carrier_http_status(raised.value) == 403
+    assert sms_carrier.discarded  # the discard ran first
+    await async_session.rollback()
+
+
+@pytest.mark.parametrize(
+    ("error", "refused"),
+    [
+        (TwilioRestException(400, "u", msg="x"), True),
+        (TwilioRestException(409, "u", msg="x"), True),
+        (TwilioRestException(503, "u", msg="x"), False),
+        (TwilioRestException(429, "u", msg="x"), False),
+    ],
+)
+async def test_cancel_a_toll_free_registration_twilio_refuses(
+    client, org_and_key, async_session, error, refused
+) -> None:
+    """A toll-free verification Twilio refuses to delete is cancelled in
+    Hail with the mark, not answered 503 'try again'."""
+    org_id, _, key = org_and_key
+    twilio = Mock()
+    twilio.messaging.v1.tollfree_verifications.return_value.delete.side_effect = error
+    plugin = TwilioSmsRegistrationProvider(
+        account_sid="AC1",
+        auth_token="t",
+        client=twilio,
+        primary_profile_sid="BU0",
+        sms_provider=Mock(),
+    )
+    app.dependency_overrides[get_verification_registry] = lambda: (
+        lambda name, purpose="number": plugin if name == "twilio" else None
+    )
+    try:
+        number = await _us_number(
+            async_session, org_id, e164="+18005550100", provider="twilio"
+        )
+        row = CarrierVerification(
+            organization_id=org_id,
+            provider="twilio",
+            country_code="US",
+            number_type="toll_free",
+            number_id=number.id,
+            subject_type="business",
+            subject_name="Acme",
+            purpose="sms",
+            state="approved",
+            approved_at=datetime.now(timezone.utc),
+            provider_refs={
+                "registration_kind": "toll_free",
+                "tollfree_verification_sid": "HH1",
+            },
+            requirements_version="1",
+        )
+        async_session.add(row)
+        await async_session.commit()
+
+        resp = await client.delete(f"/verifications/{row.id}", headers=_auth(key))
+    finally:
+        app.dependency_overrides.pop(get_verification_registry, None)
+
+    await async_session.refresh(row)
+    if refused:
+        assert resp.status_code == 200, resp.text
+        mark = row.provider_refs[verifications_routes.DISCARD_REFUSED]
+        assert mark["status"] == error.status
+        assert mark["held"]["tollfree_verification_sid"] == "HH1"
+        assert row.state == "cancelled"
+    else:
+        assert resp.status_code == 503, resp.text
+        assert row.state == "approved"
+        assert row.provider_refs["tollfree_verification_sid"] == "HH1"
+
+
+async def test_a_closed_org_number_is_not_set_up_for_sms_again(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+) -> None:
+    """Account close cancels the registration while its numbers are being
+    released: a number that left a person's service stays off SMS."""
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 10_000)
+    number = await _us_number(async_session, org_id)
+    vid = await _approved_sms_row(
+        client, key, async_session, sms_carrier, subject_type="person"
+    )
+    sms_carrier.detach_leaves_service = True
+    async_session.add(
+        OrgClosure(
+            organization_id=org_id,
+            closed_at=datetime.now(timezone.utc) - timedelta(minutes=1),
+            source="hail_website",
+        )
+    )
+    await async_session.commit()
+    set_up: list = []
+
+    async def ensure_sms(db, phone_number):
+        set_up.append(phone_number.id)
+
+    monkeypatch.setattr(verifications_routes.sms_setup, "ensure_sms", ensure_sms)
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+
+    await verifications_routes.cancel_locked(
+        async_session, row, sms_carrier, keep_brand=False
+    )
+    await async_session.commit()
+
+    assert sms_carrier.detached == [number.provider_resource_id]
+    assert set_up == []
+    await async_session.refresh(number)
+    assert number.sms_registration_id is None and number.messaging_service_sid is None
+
+
+async def test_cancel_locked_reads_the_close_on_the_callers_clock(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+) -> None:
+    """The account close pass passes its ``now``: an org closed by that time
+    counts as closed, even when the wall clock has not reached it."""
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 10_000)
+    await _us_number(async_session, org_id)
+    vid = await _approved_sms_row(
+        client, key, async_session, sms_carrier, subject_type="person"
+    )
+    sms_carrier.detach_leaves_service = True
+    later = datetime.now(timezone.utc) + timedelta(hours=1)
+    async_session.add(
+        OrgClosure(organization_id=org_id, closed_at=later, source="hail_website")
+    )
+    await async_session.commit()
+    set_up: list = []
+
+    async def ensure_sms(db, phone_number):
+        set_up.append(phone_number.id)
+
+    monkeypatch.setattr(verifications_routes.sms_setup, "ensure_sms", ensure_sms)
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+
+    await verifications_routes.cancel_locked(
+        async_session,
+        row,
+        sms_carrier,
+        keep_brand=False,
+        now=later + timedelta(minutes=1),
+    )
+    await async_session.commit()
+
+    assert set_up == []
+    assert row.cancelled_at == later + timedelta(minutes=1)
+
+
 async def test_an_approved_number_verification_cannot_be_cancelled(
     client, org_and_key, async_session
 ) -> None:
@@ -3230,9 +3736,11 @@ async def test_campaign_id_written_during_a_poll_is_saved(
     assert decided == []
 
 
+@pytest.mark.parametrize("unlink_error", [None, CarrierRequestError(400)])
 async def test_telnyx_release_unlinks_the_number_from_the_campaign(
-    client, org_and_key, async_session, monkeypatch
+    client, org_and_key, async_session, monkeypatch, unlink_error
 ) -> None:
+    """A failed unlink is logged and the release goes on."""
     from unittest.mock import AsyncMock, MagicMock
 
     from hailhq.api.routes import numbers as numbers_routes
@@ -3264,7 +3772,7 @@ async def test_telnyx_release_unlinks_the_number_from_the_campaign(
         "hailhq.core.providers.telnyx.TelnyxClient.release_number", release
     )
     plugin = MagicMock(spec=SmsRegistrationProvider)
-    plugin.detach_number = AsyncMock(return_value=False)
+    plugin.detach_number = AsyncMock(return_value=False, side_effect=unlink_error)
     monkeypatch.setattr(
         numbers_routes,
         "get_verification_provider",
@@ -5054,7 +5562,7 @@ async def test_a_refused_submit_keeps_a_filed_campaign_when_the_discard_fails(
         raise SubmitRefused([Problem(field="", message=NOT_ACCEPTED)])
 
     async def boom(refs):
-        raise RuntimeError("carrier down")
+        raise VerificationProviderError("carrier down")
 
     sms_carrier.submit, sms_carrier.discard = refuse, boom
     await verifications_routes.sweep_verifications(
@@ -5120,7 +5628,7 @@ async def test_admin_approve_shows_the_refusal_when_the_discard_fails(
         raise SubmitRefused([Problem(field="", message=NOT_ACCEPTED, raw="nope")])
 
     async def boom(refs):
-        raise RuntimeError("carrier down")
+        raise VerificationProviderError("carrier down")
 
     sms_carrier.submit, sms_carrier.discard = refuse, boom
     app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
@@ -6587,7 +7095,7 @@ async def test_a_superadmin_reject_whose_discard_fails_answers_502(
 
     async def boom(refs):
         refs["filed_id"] = "F1"  # half done
-        raise RuntimeError("carrier down")
+        raise VerificationProviderError("carrier down")
 
     carrier.discard = boom
     app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
@@ -6611,6 +7119,35 @@ async def test_a_superadmin_reject_whose_discard_fails_answers_502(
             select(AuditLog).where(AuditLog.action == "verification.reject")
         )
     ).scalar_one_or_none() is None
+
+
+async def test_a_superadmin_reject_the_carrier_will_not_delete_goes_through(
+    client, org_and_key, carrier, async_session
+) -> None:
+    _, _, key = org_and_key
+    vid = await _unsent(client, key, carrier, async_session)
+
+    async def refuse(refs):
+        raise _refused(KeyError("x"))
+
+    carrier.discard = refuse
+    app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
+        user_id=uuid.uuid4(), api_key_id=None, superadmin=True
+    )
+    try:
+        resp = await client.post(
+            f"/admin/verifications/{vid}/reject",
+            json={"reason": "no"},
+            headers=_auth(key),
+        )
+    finally:
+        app.dependency_overrides.pop(require_superadmin, None)
+    assert resp.status_code == 200, resp.text
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    await async_session.refresh(row)
+    assert row.state == "rejected"
+    mark = row.provider_refs[verifications_routes.DISCARD_REFUSED]
+    assert mark["status"] is None and mark["held"] == {"bundle_sid": "B1"}
 
 
 async def test_a_status_poll_that_fails_partway_keeps_only_the_ids_it_added(
@@ -6817,6 +7354,40 @@ async def test_old_ended_applications_lose_their_saved_answers(
         assert kept is (name in ("new_cancelled", "old_submitted")), name
         # Only the answers go: the billing mark stays.
         assert row.provider_refs["brand_reused"] is True
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_background_pass_deletes_answers_of_closed_orgs(
+    client, org_and_key, sms_carrier, async_session
+):
+    """The pass clears a closed org's answers even when the closure endpoint
+    did not (it failed, or a refresh wrote them back)."""
+    from datetime import datetime, timezone
+
+    from hailhq.api.routes.verifications import sweep_verifications
+    from hailhq.core.models import OrgClosure
+    from hailhq.core.retention import REGISTRATION_ANSWER_REFS
+
+    org_id, _, key = org_and_key
+    vid = (await _post_sms(client, key)).json()["id"]
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    assert "application" in row.provider_refs
+    async_session.add(
+        OrgClosure(
+            organization_id=org_id,
+            closed_at=datetime.now(timezone.utc),
+            source="hail_website",
+        )
+    )
+    await async_session.commit()
+
+    counts = await sweep_verifications(async_session, lambda *_: None)
+
+    assert counts["closed"] == 1
+    await async_session.refresh(row)
+    assert not set(REGISTRATION_ANSWER_REFS) & row.provider_refs.keys()
+    assert row.subject_name is None and row.state == "submitted"
+    assert (await sweep_verifications(async_session, lambda *_: None))["closed"] == 0
 
 
 @pytest.mark.usefixtures("us_number")

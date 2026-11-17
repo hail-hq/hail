@@ -24,7 +24,9 @@ from hailhq.core.providers.verification import twilio as twilio_mod
 from hailhq.core.providers.verification.base import (
     NOT_ACCEPTED,
     VALUE_NOT_ACCEPTED,
+    DiscardRefused,
     SubmitRefused,
+    VerificationProviderError,
 )
 from hailhq.core.providers.verification.twilio import TwilioVerificationProvider
 from twilio.base.exceptions import TwilioRestException
@@ -760,9 +762,36 @@ async def test_purchase_handle(provider) -> None:
 
 
 @responses.activate
-async def test_discard_never_raises(provider) -> None:
-    # nothing is registered, so every call fails; discard must still return
-    await provider.discard(REFS)
+async def test_discard_raises_when_twilio_is_unreachable(provider) -> None:
+    # Nothing is registered, so every call fails to connect: the caller
+    # keeps the ids and tries again.
+    with pytest.raises(VerificationProviderError) as raised:
+        await provider.discard(REFS)
+    assert not isinstance(raised.value, DiscardRefused)
+
+
+@responses.activate
+async def test_discard_counts_gone_as_done(provider) -> None:
+    responses.add(
+        responses.DELETE,
+        f"{NUMBERS}/Bundles/{REFS['bundle_sid']}",
+        status=404,
+        json={"code": 20404, "message": "x", "status": 404},
+    )
+    await provider.discard({"bundle_sid": REFS["bundle_sid"]})
+
+
+@pytest.mark.parametrize("status", [400, 403, 409])
+@responses.activate
+async def test_discard_raises_refused_on_a_refusal(provider, status) -> None:
+    responses.add(
+        responses.DELETE,
+        f"{NUMBERS}/Bundles/{REFS['bundle_sid']}",
+        status=status,
+        json={"code": 20001, "message": "x", "status": status},
+    )
+    with pytest.raises(DiscardRefused):
+        await provider.discard({"bundle_sid": REFS["bundle_sid"]})
 
 
 def test_registry_returns_plugin_when_configured(monkeypatch) -> None:
