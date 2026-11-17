@@ -20,7 +20,6 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-from hailhq.core.billing import get_ledger_cents
 from hailhq.core.models import CallBalanceHold
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
 from sqlalchemy import bindparam, case, func, null, or_, select, text
@@ -109,7 +108,7 @@ def hold_until(now: datetime, seconds: int) -> datetime:
 # A call in a final status with no end time counts from its last update.
 # A voice ref is the call id, plus an optional ':<suffix>' (the rater
 # parses it the same way); usage_events_voice_ref_idx serves the match.
-_HELD_SQL = text("""
+_HELD_QUERY = """
     SELECT COALESCE(SUM(
       CASE
         WHEN c.ended_at IS NULL AND c.status NOT IN :terminal THEN
@@ -141,7 +140,29 @@ _HELD_SQL = text("""
       AND h.call_id IS DISTINCT FROM :exclude
       -- No branch counts a hold this old; skip its usage lookup.
       AND h.hold_until > :unpriced_until
-""").bindparams(bindparam("terminal", expanding=True))
+"""
+_HELD_SQL = text(_HELD_QUERY).bindparams(bindparam("terminal", expanding=True))
+
+# The ledger and the holds in one statement, so both come from the same
+# snapshot: a debit the rater commits between two reads (it takes no org
+# lock) would otherwise be counted in neither.
+_AVAILABLE_SQL = text(
+    "SELECT (SELECT COALESCE(SUM(amount_cents), 0) FROM account_credits"
+    " WHERE organization_id = :org) - (" + _HELD_QUERY + ")"
+).bindparams(bindparam("terminal", expanding=True))
+
+
+def _held_params(
+    organization_id: uuid.UUID, exclude: uuid.UUID | None, now: datetime
+) -> dict:
+    return {
+        "org": organization_id,
+        "exclude": exclude,
+        "now": now,
+        "debit_window": now - timedelta(seconds=HOLD_GRACE_SECONDS),
+        "unpriced_until": now - timedelta(days=UNPRICED_HOLD_DAYS),
+        "terminal": sorted(TERMINAL_CALL_STATUSES),
+    }
 
 
 async def held_cents(
@@ -153,17 +174,7 @@ async def held_cents(
 ) -> Decimal:
     """What the organization's live calls have set aside, in cents."""
     now = now or datetime.now(UTC)
-    result = await db.execute(
-        _HELD_SQL,
-        {
-            "org": organization_id,
-            "exclude": exclude,
-            "now": now,
-            "debit_window": now - timedelta(seconds=HOLD_GRACE_SECONDS),
-            "unpriced_until": now - timedelta(days=UNPRICED_HOLD_DAYS),
-            "terminal": sorted(TERMINAL_CALL_STATUSES),
-        },
-    )
+    result = await db.execute(_HELD_SQL, _held_params(organization_id, exclude, now))
     return Decimal(result.scalar_one())
 
 
@@ -174,10 +185,14 @@ async def available_cents(
     exclude: uuid.UUID | None = None,
     now: datetime | None = None,
 ) -> Decimal:
-    """The balance less every live call's hold. Take ``org_lock`` first, so
-    two calls starting at once do not both spend the same money."""
-    ledger = await get_ledger_cents(db, organization_id)
-    return ledger - await held_cents(db, organization_id, exclude=exclude, now=now)
+    """The balance less every live call's hold, read in one statement. Take
+    ``org_lock`` first, so two calls starting at once do not both spend the
+    same money."""
+    now = now or datetime.now(UTC)
+    result = await db.execute(
+        _AVAILABLE_SQL, _held_params(organization_id, exclude, now)
+    )
+    return Decimal(result.scalar_one())
 
 
 async def hold(
@@ -236,18 +251,19 @@ def _kept_price(old, new):
     )
 
 
-async def forget_price(db: AsyncSession, call_id: uuid.UUID) -> None:
+async def forget_price(db: AsyncSession, call_id: uuid.UUID, until: datetime) -> None:
     """Mark the call's hold as run at an unknown price (a handover whose
     quote failed), so the full hold counts after the call ends, and count
     the approved dial, so a later handover's hold covers it. A call that
     holds nothing (inbound, or started at an unknown price) gets a 0-cent
     row, so a later priced handover keeps the prices unknown and counts
-    this dial too."""
+    this dial too. ``until`` is when the handover can end at the latest: the
+    call runs on past its own limit, so its hold must keep counting."""
     await hold(
         db,
         call_id,
         Decimal(0),
-        datetime.now(UTC),
+        until,
         cents_per_minute=None,
         cents_per_call=None,
         dial=True,

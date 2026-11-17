@@ -1110,6 +1110,51 @@ func (e SubjectOptionStatus) Valid() bool {
 	}
 }
 
+// Defines values for VerificationDocumentCautionsRequestSubjectType.
+const (
+	VerificationDocumentCautionsRequestSubjectTypeBusiness VerificationDocumentCautionsRequestSubjectType = "business"
+	VerificationDocumentCautionsRequestSubjectTypePerson   VerificationDocumentCautionsRequestSubjectType = "person"
+)
+
+// Valid indicates whether the value is a known member of the VerificationDocumentCautionsRequestSubjectType enum.
+func (e VerificationDocumentCautionsRequestSubjectType) Valid() bool {
+	switch e {
+	case VerificationDocumentCautionsRequestSubjectTypeBusiness:
+		return true
+	case VerificationDocumentCautionsRequestSubjectTypePerson:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for VerificationDocumentWarningKind.
+const (
+	DocumentType VerificationDocumentWarningKind = "document_type"
+	Expired      VerificationDocumentWarningKind = "expired"
+	Name         VerificationDocumentWarningKind = "name"
+	Rotated      VerificationDocumentWarningKind = "rotated"
+	Unreadable   VerificationDocumentWarningKind = "unreadable"
+)
+
+// Valid indicates whether the value is a known member of the VerificationDocumentWarningKind enum.
+func (e VerificationDocumentWarningKind) Valid() bool {
+	switch e {
+	case DocumentType:
+		return true
+	case Expired:
+		return true
+	case Name:
+		return true
+	case Rotated:
+		return true
+	case Unreadable:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for VerificationRequirementsSubjectType.
 const (
 	VerificationRequirementsSubjectTypeBusiness VerificationRequirementsSubjectType = "business"
@@ -1628,16 +1673,16 @@ func (e UnsubscribeV1UnsubscribePostFormdataBodyListUnsubscribe) Valid() bool {
 
 // Defines values for GetVerificationRequirementsParamsSubjectType.
 const (
-	Business GetVerificationRequirementsParamsSubjectType = "business"
-	Person   GetVerificationRequirementsParamsSubjectType = "person"
+	GetVerificationRequirementsParamsSubjectTypeBusiness GetVerificationRequirementsParamsSubjectType = "business"
+	GetVerificationRequirementsParamsSubjectTypePerson   GetVerificationRequirementsParamsSubjectType = "person"
 )
 
 // Valid indicates whether the value is a known member of the GetVerificationRequirementsParamsSubjectType enum.
 func (e GetVerificationRequirementsParamsSubjectType) Valid() bool {
 	switch e {
-	case Business:
+	case GetVerificationRequirementsParamsSubjectTypeBusiness:
 		return true
-	case Person:
+	case GetVerificationRequirementsParamsSubjectTypePerson:
 		return true
 	default:
 		return false
@@ -3510,7 +3555,7 @@ type SmsPreviewRequest struct {
 	// Fields Current registration form answers.
 	Fields map[string]string `json:"fields"`
 
-	// NumberId Owned US local number selecting the carrier, required when ambiguous.
+	// NumberId Owned US local or US/Canadian toll-free number. Required for toll-free verification or when the carrier is ambiguous.
 	NumberId *openapi_types.UUID `json:"number_id,omitempty"`
 
 	// SubjectType Sender route to preview: person or business.
@@ -3711,6 +3756,135 @@ type VerificationCheckResponse struct {
 	Ok bool `json:"ok"`
 }
 
+// VerificationDocumentCautionDocument One slot of the form: what is typed now, and its earlier read.
+type VerificationDocumentCautionDocument struct {
+	// Fields The values typed for this slot's fields, by field name.
+	Fields *map[string]string `json:"fields,omitempty"`
+
+	// Option The chosen document type key, or empty when not chosen yet.
+	Option *string `json:"option,omitempty"`
+
+	// Read The slot's `documents.<slot>` from an earlier document check, or null when it has no successful read. Only slots with a read are checked.
+	Read *VerificationDocumentCautionRead `json:"read,omitempty"`
+}
+
+// VerificationDocumentCautionRead A slot's earlier read, as `POST /verifications/document-check`
+// returned it in `documents.<slot>`. Only `option` and `printed_name` are
+// used; the other keys of that object may be sent and are ignored.
+type VerificationDocumentCautionRead struct {
+	// Option The document type the file looked like, or null.
+	Option *string `json:"option,omitempty"`
+
+	// PrintedName The name printed on the file, or null (no name check).
+	PrintedName *VerificationPrintedName `json:"printed_name,omitempty"`
+}
+
+// VerificationDocumentCautionsRequest Body of “POST /verifications/document-cautions“.
+type VerificationDocumentCautionsRequest struct {
+	// Address The typed address parts (`customer_name` is compared).
+	Address *map[string]string `json:"address,omitempty"`
+
+	// CountryCode ISO 3166-1 alpha-2 country of the number, like GB.
+	CountryCode string `json:"country_code"`
+
+	// Documents The form's document slots, by name.
+	Documents *map[string]VerificationDocumentCautionDocument `json:"documents,omitempty"`
+
+	// Fields The form's typed fields, by name.
+	Fields *map[string]string `json:"fields,omitempty"`
+
+	// NumberType The number type of the offer, like `local` or `mobile`.
+	NumberType string `json:"number_type"`
+
+	// QuoteId The `quote_id` of the number offer being verified.
+	QuoteId openapi_types.UUID `json:"quote_id"`
+
+	// SubjectType 'person' (you) or 'business' (your company).
+	SubjectType VerificationDocumentCautionsRequestSubjectType `json:"subject_type"`
+}
+
+// VerificationDocumentCautionsRequestSubjectType 'person' (you) or 'business' (your company).
+type VerificationDocumentCautionsRequestSubjectType string
+
+// VerificationDocumentCautionsResponse Returned by “POST /verifications/document-cautions“.
+type VerificationDocumentCautionsResponse struct {
+	// Warnings `name` and `document_type` warnings: the typed form against the earlier reads. Empty when nothing differs.
+	Warnings []VerificationDocumentWarning `json:"warnings"`
+}
+
+// VerificationDocumentCheckResponse Returned by “POST /verifications/document-check“.
+type VerificationDocumentCheckResponse struct {
+	// Address Address parts read from the files (`customer_name`, `street`, `city`, `region`, `postal_code`, `country_code`). Only the parts found.
+	Address map[string]string `json:"address"`
+
+	// Documents What was read from each slot that had a file, by slot name.
+	Documents map[string]VerificationDocumentRead `json:"documents"`
+
+	// Fields Values for the form's own `fields`, by field name, read from the files.
+	Fields map[string]string `json:"fields"`
+
+	// Note What the check does not cover.
+	Note string `json:"note"`
+
+	// Warnings Things the carrier may refuse. Empty when nothing was found.
+	Warnings []VerificationDocumentWarning `json:"warnings"`
+}
+
+// VerificationDocumentRead What was read from one slot's file.
+type VerificationDocumentRead struct {
+	// ExpiryDate The expiry date printed on the file (YYYY-MM-DD), or null.
+	ExpiryDate *string `json:"expiry_date"`
+
+	// Fields Values for the fields of the slot's document types, by field name, as printed on the file.
+	Fields map[string]string `json:"fields"`
+
+	// Option The slot's document type the file looks like, as an option key, or null when none fits or it was not read.
+	Option *string `json:"option"`
+
+	// PrintedName The name printed on the file, or null when not read.
+	PrintedName *VerificationPrintedName `json:"printed_name"`
+
+	// Read False when nothing was read from the file: the reader is off, the file type is not supported, the read failed or took too long (no warning), or the file is unreadable (an 'unreadable' warning). The other values are then empty.
+	Read bool `json:"read"`
+
+	// Skipped Why the file was not read, when Hail chose not to: 'daily_limit' when the workspace has used today's document reads. Null otherwise.
+	Skipped *string `json:"skipped,omitempty"`
+}
+
+// VerificationDocumentWarning Something on an uploaded document the carrier may refuse. A warning
+// only: you can still submit.
+type VerificationDocumentWarning struct {
+	// Field Where to show it: a slot name for the document itself, or the path of a typed value (`first_name`, `<slot>.<field>`, `address.customer_name`).
+	Field string `json:"field"`
+
+	// Kind 'unreadable', 'rotated' (upside down or on its side), 'expired', 'document_type' (the file does not match the chosen type), or 'name' (the typed name differs from the printed one).
+	Kind VerificationDocumentWarningKind `json:"kind"`
+
+	// Message What is wrong and how to fix it.
+	Message string `json:"message"`
+}
+
+// VerificationDocumentWarningKind 'unreadable', 'rotated' (upside down or on its side), 'expired', 'document_type' (the file does not match the chosen type), or 'name' (the typed name differs from the printed one).
+type VerificationDocumentWarningKind string
+
+// VerificationPrintedName The name printed on a document, as read. Empty strings when not printed.
+type VerificationPrintedName struct {
+	// BusinessName A company's name.
+	BusinessName string `json:"business_name"`
+
+	// GivenNames A person's given names.
+	GivenNames string `json:"given_names"`
+
+	// LatinGivenNames The given names in Latin letters as the document prints them (its machine-readable zone or a transliteration), or empty.
+	LatinGivenNames *string `json:"latin_given_names,omitempty"`
+
+	// LatinSurnames The surnames in Latin letters, the same way.
+	LatinSurnames *string `json:"latin_surnames,omitempty"`
+
+	// Surnames A person's surnames.
+	Surnames string `json:"surnames"`
+}
+
 // VerificationRequirements What the carrier needs for one (country, number type, subject type),
 // as the public API shows it: without the carrier's name.
 type VerificationRequirements struct {
@@ -3775,10 +3949,13 @@ type VerificationResponse struct {
 	// IdentityConfirmed True on a person's newest US texting registration when it is cancelled, or rejected and not yet dismissed, and the person stays confirmed: the next filing with the same first name, last name, email and mobile needs no code and has no submission fee. Dismiss a rejected registration first. Ignore it on older registrations.
 	IdentityConfirmed *bool `json:"identity_confirmed,omitempty"`
 
+	// NumberId The owned number covered by toll-free SMS verification. Null for organization-wide registrations.
+	NumberId *openapi_types.UUID `json:"number_id,omitempty"`
+
 	// NumberType Kind of number: 'local', 'mobile', 'toll_free', or 'national'.
 	NumberType string `json:"number_type"`
 
-	// Purpose 'number': permission to buy a number in this country. 'sms': registration to text US numbers from a US number.
+	// Purpose 'number': permission to buy a number in this country. 'sms': US local texting registration or per-number US/Canada toll-free texting verification.
 	Purpose string `json:"purpose"`
 
 	// RejectionReason Why it was rejected. Null unless rejected.
@@ -4244,7 +4421,7 @@ type GetNumberOptionsV1NumbersOptionsGetParams struct {
 	// CountryCode ISO alpha-2 country code, such as CH.
 	CountryCode string `form:"country_code" json:"country_code"`
 
-	// Capabilities Optional. Keep only options that do all these jobs. Without it, each number type shows its best option in this order: buy now before order by hand, then ready now, then options that do every job the type offers (even when a number that does fewer jobs costs less), then lower price, then fewer papers.
+	// Capabilities Optional. Keep only options that do all these jobs, priced and listed for these jobs only, the same as /numbers/quotes. Without it, options are priced for every job they do, and each number type shows its best option in this order: buy now before order by hand, then ready now, then options that do every job the type offers (even when a number that does fewer jobs costs less), then lower price, then fewer papers.
 	Capabilities  *[]GetNumberOptionsV1NumbersOptionsGetParamsCapabilities `form:"capabilities,omitempty" json:"capabilities,omitempty"`
 	Authorization *string                                                  `json:"authorization,omitempty"`
 }
@@ -4397,6 +4574,16 @@ type CheckVerificationParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
+// CheckVerificationDocumentCautionsParams defines parameters for CheckVerificationDocumentCautions.
+type CheckVerificationDocumentCautionsParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// CheckVerificationDocumentsParams defines parameters for CheckVerificationDocuments.
+type CheckVerificationDocumentsParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
 // GetVerificationRequirementsParams defines parameters for GetVerificationRequirements.
 type GetVerificationRequirementsParams struct {
 	CountryCode string `form:"country_code" json:"country_code"`
@@ -4412,7 +4599,7 @@ type GetVerificationRequirementsParams struct {
 	// QuoteId Required for purpose=number: quote_id of an offer from POST /numbers/quotes that needs verification. The carrier is read from it.
 	QuoteId *openapi_types.UUID `form:"quote_id,omitempty" json:"quote_id,omitempty"`
 
-	// NumberId For purpose=sms: id of one of your US numbers. The carrier is read from it. Needed when your US numbers are with more than one carrier.
+	// NumberId For purpose=sms: id of an owned US local or US/Canadian toll-free number. Required for toll-free verification. The carrier is read from it. Needed when your US numbers are with more than one carrier.
 	NumberId      *openapi_types.UUID `form:"number_id,omitempty" json:"number_id,omitempty"`
 	Authorization *string             `json:"authorization,omitempty"`
 }
@@ -4574,6 +4761,9 @@ type UnsubscribeV1UnsubscribePostFormdataRequestBody UnsubscribeV1UnsubscribePos
 
 // CreateFileUploadJSONRequestBody defines body for CreateFileUpload for application/json ContentType.
 type CreateFileUploadJSONRequestBody = FileUploadCreate
+
+// CheckVerificationDocumentCautionsJSONRequestBody defines body for CheckVerificationDocumentCautions for application/json ContentType.
+type CheckVerificationDocumentCautionsJSONRequestBody = VerificationDocumentCautionsRequest
 
 // UploadSmsEvidenceMultipartRequestBody defines body for UploadSmsEvidence for multipart/form-data ContentType.
 type UploadSmsEvidenceMultipartRequestBody UploadSmsEvidenceMultipartBody
@@ -5191,6 +5381,14 @@ type ClientInterface interface {
 
 	// CheckVerification request
 	CheckVerification(ctx context.Context, params *CheckVerificationParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CheckVerificationDocumentCautionsWithBody request with any body
+	CheckVerificationDocumentCautionsWithBody(ctx context.Context, params *CheckVerificationDocumentCautionsParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	CheckVerificationDocumentCautions(ctx context.Context, params *CheckVerificationDocumentCautionsParams, body CheckVerificationDocumentCautionsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CheckVerificationDocuments request
+	CheckVerificationDocuments(ctx context.Context, params *CheckVerificationDocumentsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetVerificationRequirements request
 	GetVerificationRequirements(ctx context.Context, params *GetVerificationRequirementsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -6261,6 +6459,42 @@ func (c *Client) CreateVerification(ctx context.Context, params *CreateVerificat
 
 func (c *Client) CheckVerification(ctx context.Context, params *CheckVerificationParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewCheckVerificationRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CheckVerificationDocumentCautionsWithBody(ctx context.Context, params *CheckVerificationDocumentCautionsParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCheckVerificationDocumentCautionsRequestWithBody(c.Server, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CheckVerificationDocumentCautions(ctx context.Context, params *CheckVerificationDocumentCautionsParams, body CheckVerificationDocumentCautionsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCheckVerificationDocumentCautionsRequest(c.Server, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CheckVerificationDocuments(ctx context.Context, params *CheckVerificationDocumentsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCheckVerificationDocumentsRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -10473,6 +10707,103 @@ func NewCheckVerificationRequest(server string, params *CheckVerificationParams)
 	return req, nil
 }
 
+// NewCheckVerificationDocumentCautionsRequest calls the generic CheckVerificationDocumentCautions builder with application/json body
+func NewCheckVerificationDocumentCautionsRequest(server string, params *CheckVerificationDocumentCautionsParams, body CheckVerificationDocumentCautionsJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCheckVerificationDocumentCautionsRequestWithBody(server, params, "application/json", bodyReader)
+}
+
+// NewCheckVerificationDocumentCautionsRequestWithBody generates requests for CheckVerificationDocumentCautions with any type of body
+func NewCheckVerificationDocumentCautionsRequestWithBody(server string, params *CheckVerificationDocumentCautionsParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/verifications/document-cautions")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewCheckVerificationDocumentsRequest generates requests for CheckVerificationDocuments
+func NewCheckVerificationDocumentsRequest(server string, params *CheckVerificationDocumentsParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/verifications/document-check")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
 // NewGetVerificationRequirementsRequest generates requests for GetVerificationRequirements
 func NewGetVerificationRequirementsRequest(server string, params *GetVerificationRequirementsParams) (*http.Request, error) {
 	var err error
@@ -11919,6 +12250,14 @@ type ClientWithResponsesInterface interface {
 
 	// CheckVerificationWithResponse request
 	CheckVerificationWithResponse(ctx context.Context, params *CheckVerificationParams, reqEditors ...RequestEditorFn) (*CheckVerificationResponse, error)
+
+	// CheckVerificationDocumentCautionsWithBodyWithResponse request with any body
+	CheckVerificationDocumentCautionsWithBodyWithResponse(ctx context.Context, params *CheckVerificationDocumentCautionsParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CheckVerificationDocumentCautionsResponse, error)
+
+	CheckVerificationDocumentCautionsWithResponse(ctx context.Context, params *CheckVerificationDocumentCautionsParams, body CheckVerificationDocumentCautionsJSONRequestBody, reqEditors ...RequestEditorFn) (*CheckVerificationDocumentCautionsResponse, error)
+
+	// CheckVerificationDocumentsWithResponse request
+	CheckVerificationDocumentsWithResponse(ctx context.Context, params *CheckVerificationDocumentsParams, reqEditors ...RequestEditorFn) (*CheckVerificationDocumentsResponse, error)
 
 	// GetVerificationRequirementsWithResponse request
 	GetVerificationRequirementsWithResponse(ctx context.Context, params *GetVerificationRequirementsParams, reqEditors ...RequestEditorFn) (*GetVerificationRequirementsResponse, error)
@@ -13472,6 +13811,52 @@ func (r CheckVerificationResponse) StatusCode() int {
 	return 0
 }
 
+type CheckVerificationDocumentCautionsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *VerificationDocumentCautionsResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r CheckVerificationDocumentCautionsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CheckVerificationDocumentCautionsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type CheckVerificationDocumentsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *VerificationDocumentCheckResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r CheckVerificationDocumentsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CheckVerificationDocumentsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type GetVerificationRequirementsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -14663,6 +15048,32 @@ func (c *ClientWithResponses) CheckVerificationWithResponse(ctx context.Context,
 		return nil, err
 	}
 	return ParseCheckVerificationResponse(rsp)
+}
+
+// CheckVerificationDocumentCautionsWithBodyWithResponse request with arbitrary body returning *CheckVerificationDocumentCautionsResponse
+func (c *ClientWithResponses) CheckVerificationDocumentCautionsWithBodyWithResponse(ctx context.Context, params *CheckVerificationDocumentCautionsParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CheckVerificationDocumentCautionsResponse, error) {
+	rsp, err := c.CheckVerificationDocumentCautionsWithBody(ctx, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCheckVerificationDocumentCautionsResponse(rsp)
+}
+
+func (c *ClientWithResponses) CheckVerificationDocumentCautionsWithResponse(ctx context.Context, params *CheckVerificationDocumentCautionsParams, body CheckVerificationDocumentCautionsJSONRequestBody, reqEditors ...RequestEditorFn) (*CheckVerificationDocumentCautionsResponse, error) {
+	rsp, err := c.CheckVerificationDocumentCautions(ctx, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCheckVerificationDocumentCautionsResponse(rsp)
+}
+
+// CheckVerificationDocumentsWithResponse request returning *CheckVerificationDocumentsResponse
+func (c *ClientWithResponses) CheckVerificationDocumentsWithResponse(ctx context.Context, params *CheckVerificationDocumentsParams, reqEditors ...RequestEditorFn) (*CheckVerificationDocumentsResponse, error) {
+	rsp, err := c.CheckVerificationDocuments(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCheckVerificationDocumentsResponse(rsp)
 }
 
 // GetVerificationRequirementsWithResponse request returning *GetVerificationRequirementsResponse
@@ -16915,6 +17326,72 @@ func ParseCheckVerificationResponse(rsp *http.Response) (*CheckVerificationRespo
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest VerificationCheckResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCheckVerificationDocumentCautionsResponse parses an HTTP response from a CheckVerificationDocumentCautionsWithResponse call
+func ParseCheckVerificationDocumentCautionsResponse(rsp *http.Response) (*CheckVerificationDocumentCautionsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CheckVerificationDocumentCautionsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest VerificationDocumentCautionsResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCheckVerificationDocumentsResponse parses an HTTP response from a CheckVerificationDocumentsWithResponse call
+func ParseCheckVerificationDocumentsResponse(rsp *http.Response) (*CheckVerificationDocumentsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CheckVerificationDocumentsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest VerificationDocumentCheckResponse
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

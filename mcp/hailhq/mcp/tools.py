@@ -42,6 +42,9 @@ Exposes the following tools to the calling agent:
   for a number type (fields, documents, address)
 * ``check_verification`` — run every check Hail can run on a verification
   form without filing anything
+* ``check_verification_documents`` — read the files of a number
+  verification form: values to fill it, and warnings (expired, upside down,
+  wrong document type, a name that differs from the printed one)
 * ``submit_verification`` — send the user's details and documents to the
   carrier (irreversible once submitted; needs ``attest_authorized=True``)
 * ``list_verifications`` — the org's verifications and their states
@@ -105,7 +108,6 @@ from hailhq.core.file_uploads import (
     VERIFICATION_FILE_TYPES,
     VERIFICATION_MAX_FILE_BYTES,
     matches_declared_type,
-    valid_content_type,
 )
 from hailhq.core.file_uploads import Purpose as UploadPurpose
 from hailhq.core.internal_webhook import fetch_organization_name
@@ -1482,6 +1484,51 @@ async def check_verification(
         return {"error": _UNEXPECTED_ERROR}
 
 
+async def check_verification_documents(
+    *,
+    client: HailClient,
+    country_code: str,
+    number_type: str,
+    fields: Any,
+    documents: Any,
+    files: Any,
+    subject_type: str | None,
+    address: Any = None,
+    quote_id: str | None = None,
+) -> dict[str, Any]:
+    error, form = _verification_request(
+        country_code=country_code,
+        number_type=number_type,
+        fields=fields,
+        documents=documents,
+        files=files,
+        subject_type=subject_type,
+        address=address,
+        quote_id=quote_id,
+        number_id=None,
+        purpose="number",
+    )
+    if error:
+        return {"error": error}
+    form.pop("purpose")
+    form.pop("number_id")
+    try:
+        return await client.check_verification_documents(**form)
+    except httpx.TransportError:
+        return {"error": _TRANSPORT_ERROR}
+    except HailAPIError as exc:
+        if exc.status == 422:
+            return {
+                "error": "the form has problems; nothing was read. Fix the "
+                "listed problems and try again.",
+                "problems": exc.problems or [],
+            }
+        return _submit_error(exc)
+    except Exception:
+        # No exception text: it could carry a request or response body.
+        return {"error": _UNEXPECTED_ERROR}
+
+
 async def create_file_upload(
     *, client: HailClient, purpose: str, filename: str, content_type: str
 ) -> dict[str, Any]:
@@ -1499,20 +1546,20 @@ async def create_file_upload(
         return _format_api_error(exc)
     except httpx.TransportError:
         return {"error": _TRANSPORT_ERROR}
-    # Both go into a shell line in single quotes: refuse anything that could
-    # end the quote (the API never sends one).
-    if not _SHELL_SAFE_URL.fullmatch(link["upload_url"]) or not valid_content_type(
-        link["content_type"]
-    ):
+    # The link goes into a shell line in single quotes: refuse anything that
+    # could end the quote (the API never sends one).
+    if not _SHELL_SAFE_URL.fullmatch(link["upload_url"]):
         return {"error": "the API returned an upload link this tool cannot use"}
     return {
         **link,
         "curl": (
-            "curl -sS -X PUT --data-binary @<path to the file> "
-            f"-H 'Content-Type: {link['content_type']}' '{link['upload_url']}'"
+            "curl --silent --show-error --globoff --upload-file 'FILE_PATH' "
+            f"'{link['upload_url']}'"
         ),
         "next": (
-            "Run the curl line from a shell, with the file's path after the @. "
+            "Replace FILE_PATH with the file's absolute path (no ~ or $HOME), "
+            "keep the single quotes, write any ' in the path as '\\'', and run "
+            "the curl line from a shell. "
             "The response has size_bytes and sha256: compare them with the "
             "local file (for example `wc -c` and `shasum -a 256`). The link "
             "works once, until expires_at."
@@ -1879,6 +1926,18 @@ _ADDRESS_SCHEMA = {k: v for k, v in Address.model_json_schema().items() if k != 
 _ADDRESS_OR_NULL = Annotated[
     Any, WithJsonSchema({"anyOf": [_ADDRESS_SCHEMA, {"type": "null"}]})
 ]
+# The same parts, each optional: a document check takes a partial address.
+_PARTIAL_ADDRESS_OR_NULL = Annotated[
+    Any,
+    WithJsonSchema(
+        {
+            "anyOf": [
+                {k: v for k, v in _ADDRESS_SCHEMA.items() if k != "required"},
+                {"type": "null"},
+            ]
+        }
+    ),
+]
 _SLOT_FIELD = {
     "type": "string",
     "pattern": f"^{_SLOT_NAME.pattern}$",
@@ -2005,6 +2064,12 @@ _VERIFICATION_FIELDS = _d(
 _VERIFICATION_DOCUMENTS = _d(
     "Map from each needed document slot to ``{option, fields}``, with the "
     "option chosen from that slot in the requirements."
+)
+_DOCUMENT_CHECK_DOCUMENTS = _d(
+    "Map from each document slot to ``{option, fields, covers}``. ``option`` "
+    "may be empty while the type is not chosen. ``covers`` lists the other "
+    "slots the same file stands for: the file is sent once, for this slot, "
+    "and one read fills all of them."
 )
 _VERIFICATION_FILES = _d(
     "The document files, one per slot named in ``documents``. Use an upload: "
@@ -2421,7 +2486,8 @@ def register_tools(
         An email attachment can be up to 25 MB. A verification document must be
         JPG, PNG or PDF, up to 10 MB, and is usable for 1 hour after the upload.
         Returns ``id``, ``upload_url``, ``expires_at`` (15 minutes), ``max_bytes``
-        and a ready ``curl`` line with a placeholder for the file's path after ``@``.
+        and a ready ``curl`` line with a ``'FILE_PATH'`` placeholder for the
+        file's absolute path.
         The link needs no key and works once. The upload response holds
         ``size_bytes`` and ``sha256`` to compare with the local file."""
         try:
@@ -3479,6 +3545,68 @@ def register_tools(
                     quote_id=quote_id,
                     number_id=number_id,
                     purpose=purpose,
+                )
+        except RuntimeError:
+            # Not the exception text: it must never carry submitted values.
+            return {"error": "could not authenticate the request"}
+
+    @mcp_app.tool(
+        name="check_verification_documents",
+        title="Read verification documents",
+        annotations=ToolAnnotations(
+            title="Read verification documents",
+            # Not read-only: each call uses the workspace's daily document reads,
+            # which cost money.
+            readOnlyHint=False,
+            destructiveHint=False,
+            # Each call uses reads of the workspace's daily quota.
+            idempotentHint=False,
+            openWorldHint=True,
+        ),
+    )
+    async def check_verification_documents_tool(
+        ctx: Context,
+        country_code: Annotated[str, _COUNTRY_CODE],
+        number_type: Annotated[str, _NUMBER_TYPE_SCHEMA, _NUMBER_TYPE],
+        fields: Annotated[_JsonObject, _VERIFICATION_FIELDS],
+        documents: Annotated[_JsonObject, _DOCUMENT_CHECK_DOCUMENTS],
+        files: Annotated[_VERIFICATION_FILES_LIST, _VERIFICATION_FILES],
+        quote_id: Annotated[str | None, _UUID_OR_NULL, _VERIFICATION_QUOTE_ID] = None,
+        subject_type: Annotated[
+            str | None, _SUBJECT_TYPE_OR_NULL, _SUBJECT_TYPE_REQUIRED
+        ] = None,
+        address: Annotated[_PARTIAL_ADDRESS_OR_NULL, _VERIFICATION_ADDRESS] = None,
+    ) -> dict[str, Any]:
+        """Read the files of a number verification form, before the form is filled or submitted.
+
+        Takes the arguments of ``check_verification``. ``fields`` and ``address``
+        may be empty or partial. An AI model reads each file.
+        Returns ``fields``, ``address`` and ``documents.<slot>.fields``: the values the
+        files show, by the form's own keys, to fill the form after the user confirms
+        them. ``documents.<slot>.option`` is the document type the file looks like.
+        ``warnings`` (``field``, ``kind``, ``message``) lists what the carrier may
+        refuse: an unreadable, upside-down or expired document, a file of another
+        type than the chosen one, or a typed name that differs from the printed one.
+        Each message names the fix. A submission with warnings is still accepted.
+        A file nothing was read from has ``read`` false; an unclear file also has an
+        ``unreadable`` warning, and a file past the daily reads has ``skipped``
+        ``daily_limit``. Only the first 3 pages of a PDF are read; a PDF of more
+        than 5 pages is not read.
+        Each file read uses one of the workspace's daily document reads (30 per day);
+        a file given for several slots uses one. Nothing is filed, saved, held or
+        charged, and uploads stay usable."""
+        try:
+            async with _client_for(ctx, mode=mode, singleton=singleton) as client:
+                return await check_verification_documents(
+                    client=client,
+                    country_code=country_code,
+                    number_type=number_type,
+                    fields=fields,
+                    documents=documents,
+                    files=files,
+                    subject_type=subject_type,
+                    address=address,
+                    quote_id=quote_id,
                 )
         except RuntimeError:
             # Not the exception text: it must never carry submitted values.
