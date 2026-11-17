@@ -43,16 +43,15 @@
   .hail-footer-social a:hover { outline: 1px solid LinkText; }
 }
 .hail-footer-column { min-width: 0; }
-.hail-footer-mobile-group { display: none; }
-.hail-footer-column > summary { list-style: none; margin-bottom: 18px; cursor: default; }
+.hail-footer-column > summary { list-style: none; margin-bottom: 18px; cursor: default; pointer-events: none; }
+/* Wide screens always show the links, even if something closes a group. */
+@media (min-width: 901px) { .hail-footer-column::details-content { content-visibility: visible; display: block; } }
 .hail-footer-column > summary::-webkit-details-marker { display: none; }
-.hail-footer-column :is(h2, .hail-footer-heading) { margin: 0; color: var(--hf-ink); font-size: 13px; font-weight: 600; line-height: 20px; letter-spacing: 0; }
-.hail-footer-desktop-group > h2 { margin-bottom: 18px; }
+.hail-footer-column h2 { margin: 0; color: var(--hf-ink); font-size: 13px; font-weight: 600; line-height: 20px; letter-spacing: 0; }
 .hail-footer-column nav { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; color: var(--hf-muted); }
 .hail-footer-column nav a { line-height: 1.6; }
 .hail-footer-plus { display: none; }
-/* Desktop groups stay outside details so older browsers show every link.
-   Phones use the same registry links inside native accordions. Both render on the server. */
+/* Each group is one open <details>. FooterAccordion.tsx closes them on phones. Without JavaScript every link shows. */
 .hail-footer-badges { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; list-style: none; margin: 0; padding: 0 0 32px; }
 .hail-footer-badges li { max-width: 100%; }
 .hail-footer-badges a { display: flex; align-items: center; gap: 12px; width: 200px; height: 64px; padding: 12px; border: 1px solid var(--hf-line); border-radius: 12px; background: transparent; line-height: 1; transition: background-color 200ms var(--ease); }
@@ -75,16 +74,14 @@
   .hail-footer-social { max-width: none; }
 }
 @media (max-width: 900px) {
-  .hail-footer-desktop-group { display: none; }
-  .hail-footer-mobile-group { display: block; }
   .hail-footer-grid { display: block; padding-block: 38px 26px; }
   .hail-footer-brand { padding-bottom: 28px; }
   .hail-footer-brand p { max-width: 380px; font-size: 13px; }
   .hail-footer-social { max-width: none; }
   .hail-footer-column { border-top: 1px solid var(--hf-line); }
   .hail-footer-column:last-child { border-bottom: 1px solid var(--hf-line); }
-  .hail-footer-column > summary { display: flex; align-items: center; justify-content: space-between; min-height: 60px; margin: 0; padding-block: 18px; cursor: pointer; }
-  .hail-footer-column :is(h2, .hail-footer-heading) { font-size: 14px; }
+  .hail-footer-column > summary { display: flex; align-items: center; justify-content: space-between; min-height: 60px; margin: 0; padding-block: 18px; cursor: pointer; pointer-events: auto; }
+  .hail-footer-column h2 { font-size: 14px; }
   .hail-footer-plus { position: relative; display: block; flex: none; width: 14px; height: 14px; }
   .hail-footer-plus::before, .hail-footer-plus::after { content: ""; position: absolute; top: 6px; left: 0; width: 14px; height: 1px; background: currentColor; }
   .hail-footer-plus::after { transform: rotate(90deg); transition: transform 200ms var(--ease); }
