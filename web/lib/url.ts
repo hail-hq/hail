@@ -17,7 +17,7 @@ export const MAX_COMPARE = 6;
 
 export function compareHref(ids: string[]): string {
   return ids.length > 0
-    ? `/costs/compare?m=${ids.join(",")}`
+    ? `/costs/compare?m=${ids.map(encodeURIComponent).join(",")}`
     : "/costs/compare";
 }
 

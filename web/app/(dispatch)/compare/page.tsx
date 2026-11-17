@@ -7,8 +7,6 @@ import { pageMetadata } from "../../../../shared/site-metadata";
 import { JsonLd } from "../../../../shared/JsonLd";
 import { collectionSchema } from "../../../../shared/structured-data";
 
-export const dynamic = "force-static";
-
 export const metadata = pageMetadata({
   title: "Compare AI model costs | hail.so",
   description:

@@ -18,14 +18,15 @@ const columns: ColumnDef<LLMRow>[] = [
         <div style={{ fontSize: 13, marginTop: 2 }}>
           {row.original.display_name}
         </div>
-        <ModelIdCell modelId={row.original.model_id} />
+        <ModelIdCell model={row.original} category="llm" />
       </div>
     ),
   },
   {
     id: "output",
     accessorFn: (row) => usdSort(row, "output_per_mtok_usd"),
-    header: ({ table }) => priceLabel(rowsOf(table), "Output $/MTok", "Output /MTok"),
+    header: ({ table }) =>
+      priceLabel(rowsOf(table), "Output $/MTok", "Output /MTok"),
     cell: ({ row }) => rowPrice(row.original, "output_per_mtok_usd", 2),
     sortingFn: "basic",
     sortUndefined: "last",
@@ -34,7 +35,8 @@ const columns: ColumnDef<LLMRow>[] = [
   {
     id: "input",
     accessorFn: (row) => usdSort(row, "input_per_mtok_usd"),
-    header: ({ table }) => priceLabel(rowsOf(table), "Input $/MTok", "Input /MTok"),
+    header: ({ table }) =>
+      priceLabel(rowsOf(table), "Input $/MTok", "Input /MTok"),
     cell: ({ row }) => rowPrice(row.original, "input_per_mtok_usd", 2),
     sortingFn: "basic",
     sortUndefined: "last",
@@ -43,7 +45,8 @@ const columns: ColumnDef<LLMRow>[] = [
   {
     id: "cached",
     accessorFn: (row) => usdSort(row, "cache_read_per_mtok_usd"),
-    header: ({ table }) => priceLabel(rowsOf(table), "Cached $/MTok", "Cached /MTok"),
+    header: ({ table }) =>
+      priceLabel(rowsOf(table), "Cached $/MTok", "Cached /MTok"),
     cell: ({ row }) => rowPrice(row.original, "cache_read_per_mtok_usd", 4),
     sortingFn: "basic",
     sortUndefined: "last",
@@ -82,13 +85,7 @@ export function LLMSection({ data }: { data: LLMRow[] }) {
       num="01"
       title="Large language models"
       count={data.length}
-      rangeLabel={rowRange(
-        data,
-        "output_per_mtok_usd",
-        2,
-        2,
-        "Mtok output",
-      )}
+      rangeLabel={rowRange(data, "output_per_mtok_usd", 2, 2, "Mtok output")}
       data={data}
       columns={columns}
       defaultSort={{ id: "output", desc: false }}

@@ -1,24 +1,33 @@
-import type { LLMRow, STTRow, TTSRow } from '@/lib/types';
-import { CopyableCode } from './copyable-code';
-import { isStale, daysSince } from '@/lib/staleness';
-import { formatCloning, langs, priceLabel, rowPrice } from '@/lib/format';
-import { compareHrefRemove } from '@/lib/url';
-import { TableWrap } from './table-wrap';
+import type { LLMRow, STTRow, TTSRow } from "@/lib/types";
+import { CopyableCode } from "./copyable-code";
+import { isStale, daysSince } from "@/lib/staleness";
+import { formatCloning, langs, priceLabel, rowPrice } from "@/lib/format";
+import { compareHrefRemove } from "@/lib/url";
+import { TableWrap } from "./table-wrap";
+import {
+  comparisonKey,
+  type ComparisonCategory,
+  type ComparisonModel,
+} from "@/lib/comparison-key";
 
 type Cell = React.ReactNode;
 type CompareRow = { label: string; cells: Cell[]; emphasis?: boolean };
 
 function StaleMaybe({ d }: { d: string }) {
-  return isStale(d) ? <span className="stale-pill">Stale {daysSince(d)}d</span> : null;
+  return isStale(d) ? (
+    <span className="stale-pill">Stale {daysSince(d)}d</span>
+  ) : null;
 }
 
 function CompareGrid({
+  category,
   models,
   currentIds,
   rows,
   removable = true,
 }: {
-  models: { provider: string; display_name: string; model_id: string }[];
+  category: ComparisonCategory;
+  models: ComparisonModel[];
   currentIds: string[];
   rows: CompareRow[];
   removable?: boolean;
@@ -30,14 +39,20 @@ function CompareGrid({
           <tr>
             <th className="compare-attr"> </th>
             {models.map((m) => (
-              <th key={m.model_id} className="compare-model-head">
+              <th
+                key={comparisonKey(category, m)}
+                className="compare-model-head"
+              >
                 <div className="compare-model-head-inner">
                   <div className="compare-model-prov">{m.provider}</div>
                   <div className="compare-model-name">{m.display_name}</div>
                   <CopyableCode value={m.model_id} />
                   {removable && (
                     <a
-                      href={compareHrefRemove(currentIds, m.model_id)}
+                      href={compareHrefRemove(
+                        currentIds,
+                        comparisonKey(category, m),
+                      )}
                       className="compare-remove"
                       rel="nofollow"
                       title={`Remove ${m.display_name}`}
@@ -53,10 +68,15 @@ function CompareGrid({
         </thead>
         <tbody>
           {rows.map((r) => (
-            <tr key={r.label} className={r.emphasis ? 'compare-row-emphasis' : undefined}>
+            <tr
+              key={r.label}
+              className={r.emphasis ? "compare-row-emphasis" : undefined}
+            >
               <th className="compare-attr-label">{r.label}</th>
               {r.cells.map((c, j) => (
-                <td key={models[j]?.model_id ?? j}>{c}</td>
+                <td key={models[j] ? comparisonKey(category, models[j]) : j}>
+                  {c}
+                </td>
               ))}
             </tr>
           ))}
@@ -77,27 +97,48 @@ export function LLMCompareTable({
 }) {
   const rows: CompareRow[] = [
     {
-      label: priceLabel(models, 'Output $/MTok', 'Output /MTok'),
-      cells: models.map((m) => rowPrice(m, 'output_per_mtok_usd', 2)),
+      label: priceLabel(models, "Output $/MTok", "Output /MTok"),
+      cells: models.map((m) => rowPrice(m, "output_per_mtok_usd", 2)),
       emphasis: true,
     },
-    { label: priceLabel(models, 'Input $/MTok', 'Input /MTok'), cells: models.map((m) => rowPrice(m, 'input_per_mtok_usd', 2)) },
     {
-      label: priceLabel(models, 'Cached input $/MTok', 'Cached input /MTok'),
-      cells: models.map((m) => rowPrice(m, 'cache_read_per_mtok_usd', 4)),
+      label: priceLabel(models, "Input $/MTok", "Input /MTok"),
+      cells: models.map((m) => rowPrice(m, "input_per_mtok_usd", 2)),
     },
-    { label: 'Context window', cells: models.map((m) => m.context_window.toLocaleString()) },
-    { label: 'Output cap', cells: models.map((m) => m.max_output_tokens.toLocaleString()) },
     {
-      label: 'Modalities',
-      cells: models.map((m) => `in: ${m.modalities.input.join(', ')} / out: ${m.modalities.output.join(', ')}`),
+      label: priceLabel(models, "Cached input $/MTok", "Cached input /MTok"),
+      cells: models.map((m) => rowPrice(m, "cache_read_per_mtok_usd", 4)),
     },
-    { label: 'Tool use', cells: models.map((m) => (m.supports_tool_use ? '✓' : '—')) },
-    { label: 'Structured output', cells: models.map((m) => (m.structured_output ? '✓' : '—')) },
-    { label: 'Family', cells: models.map((m) => m.model_family ?? '—') },
-    { label: 'Knowledge cutoff', cells: models.map((m) => m.knowledge_cutoff ?? '—') },
     {
-      label: 'Verified',
+      label: "Context window",
+      cells: models.map((m) => m.context_window.toLocaleString()),
+    },
+    {
+      label: "Output cap",
+      cells: models.map((m) => m.max_output_tokens.toLocaleString()),
+    },
+    {
+      label: "Modalities",
+      cells: models.map(
+        (m) =>
+          `in: ${m.modalities.input.join(", ")} / out: ${m.modalities.output.join(", ")}`,
+      ),
+    },
+    {
+      label: "Tool use",
+      cells: models.map((m) => (m.supports_tool_use ? "✓" : "—")),
+    },
+    {
+      label: "Structured output",
+      cells: models.map((m) => (m.structured_output ? "✓" : "—")),
+    },
+    { label: "Family", cells: models.map((m) => m.model_family ?? "—") },
+    {
+      label: "Knowledge cutoff",
+      cells: models.map((m) => m.knowledge_cutoff ?? "—"),
+    },
+    {
+      label: "Verified",
       cells: models.map((m) => (
         <span>
           <span className="compare-verified-date">{m.last_verified}</span>
@@ -106,7 +147,7 @@ export function LLMCompareTable({
       )),
     },
     {
-      label: 'Source',
+      label: "Source",
       cells: models.map((m) => (
         <a className="compare-source" href={m.source_url} rel="noopener">
           provider page ↗
@@ -114,7 +155,15 @@ export function LLMCompareTable({
       )),
     },
   ];
-  return <CompareGrid models={models} currentIds={currentIds} rows={rows} removable={removable} />;
+  return (
+    <CompareGrid
+      category="llm"
+      models={models}
+      currentIds={currentIds}
+      rows={rows}
+      removable={removable}
+    />
+  );
 }
 
 export function STTCompareTable({
@@ -128,24 +177,28 @@ export function STTCompareTable({
 }) {
   const rows: CompareRow[] = [
     {
-      label: priceLabel(models, '$/min', 'Price/min'),
-      cells: models.map((m) => rowPrice(m, 'price_per_minute_usd', 6)),
+      label: priceLabel(models, "$/min", "Price/min"),
+      cells: models.map((m) => rowPrice(m, "price_per_minute_usd", 6)),
       emphasis: true,
     },
     {
-      label: priceLabel(models, '$/min batch', 'Price/min batch'),
-      cells: models.map((m) => rowPrice(m, 'price_per_minute_batch_usd', 6)),
+      label: priceLabel(models, "$/min batch", "Price/min batch"),
+      cells: models.map((m) => rowPrice(m, "price_per_minute_batch_usd", 6)),
     },
-    { label: 'Streaming', cells: models.map((m) => (m.streaming ? '✓' : '—')) },
-    { label: 'Realtime', cells: models.map((m) => (m.realtime ? '✓' : '—')) },
-    { label: 'Languages', cells: models.map((m) => langs(m.languages)) },
-    { label: 'Diarization', cells: models.map((m) => m.diarization ?? '—') },
+    { label: "Streaming", cells: models.map((m) => (m.streaming ? "✓" : "—")) },
+    { label: "Realtime", cells: models.map((m) => (m.realtime ? "✓" : "—")) },
+    { label: "Languages", cells: models.map((m) => langs(m.languages)) },
+    { label: "Diarization", cells: models.map((m) => m.diarization ?? "—") },
     {
-      label: 'TTFW',
-      cells: models.map((m) => (m.time_to_first_word_ms !== undefined ? `${m.time_to_first_word_ms}ms` : '—')),
+      label: "TTFW",
+      cells: models.map((m) =>
+        m.time_to_first_word_ms !== undefined
+          ? `${m.time_to_first_word_ms}ms`
+          : "—",
+      ),
     },
     {
-      label: 'Verified',
+      label: "Verified",
       cells: models.map((m) => (
         <span>
           <span className="compare-verified-date">{m.last_verified}</span>
@@ -154,7 +207,7 @@ export function STTCompareTable({
       )),
     },
     {
-      label: 'Source',
+      label: "Source",
       cells: models.map((m) => (
         <a className="compare-source" href={m.source_url} rel="noopener">
           provider page ↗
@@ -162,7 +215,15 @@ export function STTCompareTable({
       )),
     },
   ];
-  return <CompareGrid models={models} currentIds={currentIds} rows={rows} removable={removable} />;
+  return (
+    <CompareGrid
+      category="stt"
+      models={models}
+      currentIds={currentIds}
+      rows={rows}
+      removable={removable}
+    />
+  );
 }
 
 export function TTSCompareTable({
@@ -176,31 +237,43 @@ export function TTSCompareTable({
 }) {
   const rows: CompareRow[] = [
     {
-      label: priceLabel(models, '$/1M chars', 'Price/1M chars'),
-      cells: models.map((m) => rowPrice(m, 'price_per_1m_chars_usd', 2)),
+      label: priceLabel(models, "$/1M chars", "Price/1M chars"),
+      cells: models.map((m) => rowPrice(m, "price_per_1m_chars_usd", 2)),
       emphasis: true,
     },
-    { label: 'Voice quality', cells: models.map((m) => m.voice_quality) },
-    { label: 'Voice cloning', cells: models.map((m) => formatCloning(m.voice_cloning, '✓ included')) },
+    { label: "Voice quality", cells: models.map((m) => m.voice_quality) },
     {
-      label: 'Voice count',
+      label: "Voice cloning",
+      cells: models.map((m) => formatCloning(m.voice_cloning, "✓ included")),
+    },
+    {
+      label: "Voice count",
       cells: models.map((m) => {
         const c = m.voices_count ?? m.voice_count;
-        return c !== undefined ? c.toLocaleString() : '—';
+        return c !== undefined ? c.toLocaleString() : "—";
       }),
     },
-    { label: 'Languages', cells: models.map((m) => langs(m.languages)) },
-    { label: 'SSML support', cells: models.map((m) => (m.ssml_supported ? '✓' : '—')) },
+    { label: "Languages", cells: models.map((m) => langs(m.languages)) },
     {
-      label: 'TTFB',
-      cells: models.map((m) => (m.time_to_first_byte_ms !== undefined ? `${m.time_to_first_byte_ms}ms` : '—')),
+      label: "SSML support",
+      cells: models.map((m) => (m.ssml_supported ? "✓" : "—")),
     },
     {
-      label: 'Output formats',
-      cells: models.map((m) => (m.output_formats ? m.output_formats.join(', ') : '—')),
+      label: "TTFB",
+      cells: models.map((m) =>
+        m.time_to_first_byte_ms !== undefined
+          ? `${m.time_to_first_byte_ms}ms`
+          : "—",
+      ),
     },
     {
-      label: 'Verified',
+      label: "Output formats",
+      cells: models.map((m) =>
+        m.output_formats ? m.output_formats.join(", ") : "—",
+      ),
+    },
+    {
+      label: "Verified",
       cells: models.map((m) => (
         <span>
           <span className="compare-verified-date">{m.last_verified}</span>
@@ -209,7 +282,7 @@ export function TTSCompareTable({
       )),
     },
     {
-      label: 'Source',
+      label: "Source",
       cells: models.map((m) => (
         <a className="compare-source" href={m.source_url} rel="noopener">
           provider page ↗
@@ -217,5 +290,13 @@ export function TTSCompareTable({
       )),
     },
   ];
-  return <CompareGrid models={models} currentIds={currentIds} rows={rows} removable={removable} />;
+  return (
+    <CompareGrid
+      category="tts"
+      models={models}
+      currentIds={currentIds}
+      rows={rows}
+      removable={removable}
+    />
+  );
 }
