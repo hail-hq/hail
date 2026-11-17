@@ -703,18 +703,39 @@ def _set_voice_in_trunk_sync(
     )
 
 
+def _channels(group: dict | None) -> int:
+    """Calls a capacity group can carry at once: pay-per-minute plus shared."""
+    attrs = (group or {}).get("attributes") or {}
+    return (attrs.get("metered_channels_count") or 0) + (
+        attrs.get("shared_channels_count") or 0
+    )
+
+
 def _capacity_group_sync(did_id: str) -> str | None:
     """The capacity group to put the DID in, or None to leave it as it is.
 
-    A DID already in a group keeps it: an operator may have given it paid
-    shared channels. Otherwise the account's group with the most
-    pay-per-minute channels (sorted by id on a tie, so the pick is stable).
-    Without one, no DIDWW number Hail sells can take a call."""
+    A DID already in a group with channels keeps it: an operator may have
+    given it paid shared channels. Otherwise the account's group with the
+    most pay-per-minute channels (sorted by id on a tie, so the pick is
+    stable). Without one, no DIDWW number Hail sells can take a call."""
     client = didww_client()
-    did = client.get(f"dids/{did_id}")["data"]
-    current = (did.get("relationships") or {}).get("shared_capacity_group") or {}
-    if current.get("data"):
-        return None
+    # DIDWW returns a relationship's data only when it is included.
+    did = client.get(f"dids/{did_id}", params={"include": "shared_capacity_group"})
+    current = (
+        (did["data"].get("relationships") or {}).get("shared_capacity_group") or {}
+    ).get("data")
+    if current:
+        group = next(
+            (
+                i
+                for i in did.get("included", [])
+                if i.get("type") == current.get("type")
+                and i.get("id") == current.get("id")
+            ),
+            None,
+        )
+        if _channels(group) > 0:
+            return None
     groups = client.get("shared_capacity_groups", params={"page[size]": 100}).get(
         "data", []
     )
