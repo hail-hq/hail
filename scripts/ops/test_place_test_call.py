@@ -319,12 +319,41 @@ def test_place_call_retries_once_with_the_same_key():
     assert seen[0].headers["Idempotency-Key"] == seen[1].headers["Idempotency-Key"]
 
 
-def test_place_call_retry_conflict_means_the_call_may_be_live():
+def test_place_call_waits_out_a_conflict_then_gets_the_call():
+    sleeps = []
     client = client_for(
         [
             httpx.ReadTimeout("slow"),
             httpx.Response(409, json={"detail": "still processing"}),
+            httpx.Response(201, json=call("queued")),
         ]
     )
+    placed = ptc.place_call(client, API, "+14155550100", None, sleep=sleeps.append)
+    assert placed["id"] == CALL_ID
+    assert sleeps == [2, 2]
+
+
+def test_place_call_conflict_that_never_clears_may_be_live():
+    client = client_for(
+        [httpx.Response(409, json={"detail": "still processing"})]
+        * (ptc.POST_RETRIES + 1)
+    )
     with pytest.raises(ptc.CallMaybeLive, match="409"):
+        ptc.place_call(client, API, "+14155550100", None, sleep=lambda s: None)
+
+
+def test_place_call_server_error_may_be_live():
+    client = client_for([httpx.Response(502, text="dispatch failed")])
+    with pytest.raises(ptc.CallMaybeLive, match="502"):
+        ptc.place_call(client, API, "+14155550100", None)
+
+
+def test_place_call_replayed_refusal_is_a_plain_error():
+    client = client_for(
+        [
+            httpx.ReadTimeout("slow"),
+            httpx.Response(402, headers={"Idempotency-Replay": "true"}),
+        ]
+    )
+    with pytest.raises(ptc.CallTestError, match="402"):
         ptc.place_call(client, API, "+14155550100", None, sleep=lambda s: None)

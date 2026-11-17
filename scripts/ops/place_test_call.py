@@ -40,6 +40,7 @@ E164 = re.compile(r"^\+[1-9]\d{6,14}$")
 # Voice calls stop at 300 seconds by default; this leaves room for ringing.
 DEFAULT_TIMEOUT_SECONDS = 420
 POLL_SECONDS = 5.0
+POST_RETRIES = 15
 SYSTEM_PROMPT = (
     "This is a short line test from Hail, the phone provider. Say hello, "
     "listen to the answer, thank them, then use end_call. Keep the call "
@@ -88,26 +89,30 @@ def place_call(
     *,
     sleep: Callable[[float], None] = time.sleep,
 ) -> dict:
+    """Send the call. Every retry reuses one Idempotency-Key, so Hail
+    answers with the first request's call (or its refusal) and never
+    places a second one. One retry after a network error; up to
+    ``POST_RETRIES`` while Hail answers 409 (the first request still
+    runs). A 5xx or a 409 that does not clear may follow a live call."""
     url = join_url(api_url, "v1/calls")
     body = call_body(number, from_number)
     headers = {"Idempotency-Key": str(uuid.uuid4())}
     try:
         response = client.post(url, json=body, headers=headers)
     except httpx.TransportError:
-        # Same key: if Hail took the first request, it answers with that
-        # call instead of placing a second one.
         sleep(2)
         response = client.post(url, json=body, headers=headers)
-        if response.status_code != 201:
-            # A 409 means the first request is still being handled.
-            raise CallMaybeLive(
-                f"retry answered {response.status_code}: {response.text}"
-            )
-    if response.status_code != 201:
-        raise CallTestError(
-            f"POST /v1/calls answered {response.status_code}: {response.text}"
-        )
-    return response.json()
+    for _ in range(POST_RETRIES):
+        if response.status_code != 409:
+            break
+        sleep(2)
+        response = client.post(url, json=body, headers=headers)
+    if response.status_code == 201:
+        return response.json()
+    text = f"POST /v1/calls answered {response.status_code}: {response.text}"
+    if response.status_code == 409 or response.status_code >= 500:
+        raise CallMaybeLive(text)
+    raise CallTestError(text)
 
 
 def wait_for_end(
@@ -280,7 +285,8 @@ def main(argv: list[str] | None = None) -> int:
             print(MAYBE_LIVE.format(exc=f"body {placed!r}"), file=sys.stderr)
             return 2
         print(f"Placed call {call_id} to {args.number}.")
-        print(f"Caller ID used: {placed.get('from_e164')}. Waiting for the end.")
+        caller = placed.get("from_e164") or "unknown (see the call in your workspace)"
+        print(f"Caller ID used: {caller}. Waiting for the call to end.")
         try:
             call = wait_for_end(client, api_url, call_id, timeout=args.timeout)
         except CallTestError as exc:

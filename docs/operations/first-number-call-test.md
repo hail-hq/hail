@@ -68,7 +68,7 @@ voicemail also picks up. Check the customer's side too: it is the row you
 delete afterwards. Pick the row whose `from_e164` is the caller ID the
 script printed and whose time matches the test, so you never pick a real
 caller's call. Some carriers change the caller ID's format (for example
-`00` instead of `+`).
+`+0044…` instead of `+44…`).
 
 ```bash
 psql "$DATABASE_URL" <<'SQL'
@@ -77,7 +77,8 @@ psql "$DATABASE_URL" <<'SQL'
 SELECT id, from_e164, requested_at, status, end_reason, answered_at
 FROM calls
 WHERE organization_id = :'org' AND direction = 'inbound' AND to_e164 = :'e164'
-ORDER BY requested_at DESC LIMIT 10;
+  AND requested_at > now() - interval '1 day'
+ORDER BY requested_at DESC;
 SQL
 ```
 
@@ -93,7 +94,8 @@ SQL
   refused the call, or Hail dropped it because the number is not an active
   number of a workspace. Check the carrier panel (call capacity, where the
   number points) and the Before query above. Also check the voicebot logs
-  for `could not open the call`.
+  for `could not open the call`, `unknown/pool number` and
+  `no SIP participant`.
 
 ## After
 
