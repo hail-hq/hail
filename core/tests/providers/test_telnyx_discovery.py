@@ -290,3 +290,136 @@ async def test_malformed_error_body_stays_a_carrier_error(body):
         discovery = TelnyxNumberDiscovery("key", client)
         with pytest.raises(httpx.HTTPStatusError):
             await discovery.search("PT", "local", ["voice", "sms"])
+
+
+@pytest.mark.parametrize(
+    "country,capabilities,code,detail,outcome",
+    [
+        (
+            "KN",
+            ["voice", "sms"],
+            "10015",
+            "No coverage found in the specified country based on the provided search parameters.",
+            "no_coverage",
+        ),
+        (
+            "KN",
+            ["sms"],
+            "10015",
+            "No coverage found in the specified country based on the provided search parameters.",
+            "no_coverage",
+        ),
+        (
+            "TT",
+            ["voice", "sms"],
+            "10015",
+            "No coverage found in the specified country based on the provided search parameters.",
+            "no_coverage",
+        ),
+        (
+            "US",
+            ["voice"],
+            "10031",
+            "No numbers found for the given filters. Please try again with best_effort=true.",
+            "no_inventory",
+        ),
+    ],
+)
+async def test_expected_empty_inventory_logs_safe_search_outcome(
+    caplog, country, capabilities, code, detail, outcome
+):
+    """Expected carrier 400s need an application outcome, not just a failed HTTP span."""
+    import logging
+
+    caplog.set_level(logging.INFO, logger="hailhq.core.providers.voice.telnyx")
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                400, json={"errors": [{"code": code, "detail": detail}]}
+            )
+        )
+    ) as client:
+        assert (
+            await TelnyxNumberDiscovery("private-key", client).search(
+                country, "toll_free", capabilities, e164="+18665550100"
+            )
+            == []
+        )
+    records = [r for r in caplog.records if hasattr(r, "number_search_outcome")]
+    assert len(records) == 1
+    record = records[0]
+    assert record.levelno == logging.INFO
+    assert record.number_search_outcome == outcome
+    assert record.number_search_country == country
+    assert record.number_search_type == "toll_free"
+    assert record.number_search_capabilities == sorted(capabilities)
+    assert record.carrier_error_codes == [code]
+    assert "private-key" not in str(record.__dict__)
+    assert "+18665550100" not in str(record.__dict__)
+    assert detail not in str(record.__dict__)
+
+
+async def test_unknown_inventory_error_does_not_log_expected_empty_outcome(caplog):
+    import logging
+
+    caplog.set_level(logging.INFO, logger="hailhq.core.providers.voice.telnyx")
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                400, json={"errors": [{"code": "10015", "detail": "Invalid filter"}]}
+            )
+        )
+    ) as client:
+        with pytest.raises(httpx.HTTPStatusError):
+            await TelnyxNumberDiscovery("key", client).search(
+                "KN", "toll_free", ["voice", "sms"]
+            )
+    assert not any(hasattr(r, "number_search_outcome") for r in caplog.records)
+
+
+async def test_normal_empty_inventory_does_not_add_a_search_log(caplog):
+    import logging
+
+    caplog.set_level(logging.INFO, logger="hailhq.core.providers.voice.telnyx")
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(200, json={"data": []})
+        )
+    ) as client:
+        assert (
+            await TelnyxNumberDiscovery("key", client).search(
+                "KN", "toll_free", ["voice", "sms"]
+            )
+            == []
+        )
+    assert not any(hasattr(r, "number_search_outcome") for r in caplog.records)
+
+
+async def test_mixed_empty_inventory_codes_are_not_called_no_coverage(caplog):
+    import logging
+
+    caplog.set_level(logging.INFO, logger="hailhq.core.providers.voice.telnyx")
+    errors = [
+        {
+            "code": "10015",
+            "detail": "No coverage found in the specified country based on the provided search parameters.",
+        },
+        {
+            "code": "10031",
+            "detail": "No numbers found for the given filters. Please try again with best_effort=true.",
+        },
+    ]
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(400, json={"errors": errors})
+        )
+    ) as client:
+        assert (
+            await TelnyxNumberDiscovery("key", client).search(
+                "US", "toll_free", ["voice"]
+            )
+            == []
+        )
+    record = next(r for r in caplog.records if hasattr(r, "number_search_outcome"))
+    assert record.number_search_outcome == "mixed"
+    assert record.carrier_error_codes == ["10015", "10031"]

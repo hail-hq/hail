@@ -33,3 +33,62 @@ The implementation is in [number_orders.py](../../api/hailhq/api/number_orders.p
 Telnyx's [number adapter](../../core/hailhq/core/providers/voice/telnyx.py)
 separates the US/Canadian destination code from subscriber digits during
 search and checks every returned number against the requested prefix.
+
+## Read number-search outcomes
+
+Inspect the trace for the quote request before counting a carrier HTTP 400 as
+an incident. The [number adapter](../../core/hailhq/core/providers/voice/telnyx.py)
+emits an INFO log for these handled responses:
+
+- `number_search_outcome: no_coverage`: Telnyx code `10015` with its explicit
+  no-coverage message. This applies to the requested filters at that time.
+  It does not prove Hail permanently lacks that country or number type.
+- `number_search_outcome: no_inventory`: code `10031` with its explicit
+  no-numbers message. The requested filters found no stock.
+- `number_search_outcome: mixed`: both codes in one response. Do not read it as
+  a coverage gap. Check the `carrier_error_codes` field.
+
+The log includes country, number type, requested capabilities and fixed error
+codes. It excludes phone numbers, place filters and raw carrier responses.
+The HTTP span keeps its original status. A normal empty HTTP 200 needs no
+additional log.
+
+Other carrier errors keep the discovery warning. The quote response sets
+`incomplete: true` and retains valid offers from other carriers. An empty
+result alone does not mean a carrier failed. These outcomes do not change
+search filters, prices, or country coverage in the catalog.
+
+## Release at account close
+
+When hail-website deletes an account, the org gets an `org_closures` row.
+[`close_org_carrier_items`](../../api/hailhq/api/org_close.py) releases each
+of its numbers through `release_org_number`, the same code as
+`DELETE /numbers/{id}`. It runs after `POST /internal/org-closures`
+answers, and on every verification worker pass.
+
+- A pending order is released on a later pass, once the order reconciler
+  has the carrier's answer. SMS setup is skipped for a closed org's number.
+- An outage, a timeout, a 401, 408, 425 or 429 is retried on every pass,
+  with no limit.
+- A 403 or 409 is retried for 7 days from the first one
+  (`provisioning_metadata.close_failing_since`; a release that works, or a
+  failure of another kind, clears it), then stored as a refusal.
+- Any other 4xx, or a carrier Hail cannot release through the API, is
+  stored as a refusal at once.
+- A refusal is `provisioning_metadata.release_refused` (`status`, `at`).
+  That number is not tried again: release it at the carrier by hand. The
+  registration that covers it is not cancelled either (`close_refused`
+  with its `number_id`, see
+  [carrier-verification.md](carrier-verification.md#cancel-rules)).
+- No ledger row and no audit row is written. DIDWW ends a number at the end
+  of its billing cycle and does not refund.
+
+```sql
+BEGIN READ ONLY;
+SELECT id, organization_id, provisioning_state,
+       provisioning_metadata->'release_refused' AS release_refused
+FROM phone_numbers
+WHERE organization_id IN (SELECT organization_id FROM org_closures)
+  AND provisioning_state <> 'released';
+ROLLBACK;
+```

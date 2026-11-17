@@ -25,7 +25,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from hailhq.core.models import CarrierVerification
+from hailhq.core.models import CarrierVerification, OrgClosure
 from hailhq.core.providers.verification import (
     VerificationProvider,
     get_verification_provider,
@@ -64,7 +64,13 @@ async def backfill_subject_names(
                 CarrierVerification.subject_type,
                 CarrierVerification.provider_refs,
             )
-            .where(CarrierVerification.subject_name.is_(None))
+            .where(
+                CarrierVerification.subject_name.is_(None),
+                # A closed org's names were deleted on purpose.
+                CarrierVerification.organization_id.not_in(
+                    select(OrgClosure.organization_id)
+                ),
+            )
             .order_by(CarrierVerification.created_at)
         )
     ).all()

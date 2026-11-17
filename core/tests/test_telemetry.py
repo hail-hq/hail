@@ -175,8 +175,7 @@ spans = memory.get_finished_spans()
 assert any(s.name == "test.operation" for s in spans)
 assert any(s.attributes.get("logfire.msg") == "Setup INFO log" for s in spans)
 assert all(s.resource.attributes["service.name"] == "hail-api" for s in spans)
-# instrument_sqlalchemy refuses the locked SQLAlchemy; the warning logs before identity_scope.
-assert any("SQLAlchemy tracing is off" in str(s.attributes.get("logfire.msg", "")) for s in spans)
+assert not any("SQLAlchemy tracing is off" in str(s.attributes.get("logfire.msg", "")) for s in spans)
 inside = [s for s in spans if s.name == "test.operation" or s.attributes.get("logfire.msg") == "Setup INFO log"]
 assert len(inside) == 2
 assert all(s.attributes.get("user_email") == "secret.member@example.org" for s in inside)
@@ -343,3 +342,127 @@ def test_upload_link_token_never_reaches_the_export():
     assert token not in exported.name
     assert exported.attributes["url.full"] == "https://api.example.org/v1/uploads/0b7c"
     assert exported.attributes["http.route"] == "/v1/uploads/{upload_id}"
+
+
+@pytest.mark.parametrize("sql_key", ["db.statement", "db.query.text"])
+def test_sql_export_keeps_operation_and_timing_without_display_or_error_content(
+    sql_key,
+):
+    original = ReadableSpan(
+        "SELECT PRIVATE-SQL-NAME",
+        attributes={
+            sql_key: "SELECT 'PRIVATE-SQL-LITERAL'",
+            "db.query.summary": "PRIVATE-SQL-SUMMARY",
+            "db.query.parameter.value": "PRIVATE-SQL-PARAMETER",
+            "db.statement.parameters": "PRIVATE-SQL-PARAMETER",
+            "db.operation": "SELECT PRIVATE-SQL-NAME",
+            "logfire.msg": "SELECT 'PRIVATE-SQL-LITERAL'",
+            "logfire.msg_template": "SELECT 'PRIVATE-SQL-LITERAL'",
+            "db.system": "postgresql",
+        },
+        status=Status(StatusCode.ERROR, "invalid input: PRIVATE-SQL-PARAMETER"),
+        start_time=1,
+        end_time=2,
+    )
+    memory = InMemorySpanExporter()
+    telemetry.PrivateSpanExporter(memory).export([original])
+    exported = memory.get_finished_spans()[0]
+    assert exported.name == "SELECT"
+    assert exported.attributes == {
+        "db.operation": "SELECT",
+        "db.system": "postgresql",
+        "logfire.msg": "SELECT",
+        "logfire.msg_template": "SELECT",
+    }
+    assert exported.status.status_code == StatusCode.ERROR
+    assert exported.status.description is None
+    assert (exported.start_time, exported.end_time) == (1, 2)
+    assert original.attributes[sql_key] == "SELECT 'PRIVATE-SQL-LITERAL'"
+
+
+def test_non_sql_spans_keep_their_db_operation():
+    original = ReadableSpan(
+        "redis GET",
+        attributes={"db.system": "redis", "db.operation": "GET"},
+        start_time=1,
+        end_time=2,
+    )
+    memory = InMemorySpanExporter()
+    telemetry.PrivateSpanExporter(memory).export([original])
+    exported = memory.get_finished_spans()[0]
+    assert exported.attributes["db.operation"] == "GET"
+
+
+@pytest.mark.parametrize(
+    "description",
+    [
+        "failed: (sqlalchemy.exc.X) [SQL: SELECT 1] PRIVATE-SQL-PARAMETER",
+        "boom [parameters: ('PRIVATE-SQL-PARAMETER',)]",
+    ],
+)
+def test_reraised_sql_error_text_is_dropped_from_parent_status(description):
+    original = ReadableSpan(
+        "POST /v1/things",
+        status=Status(StatusCode.ERROR, description),
+        start_time=1,
+        end_time=2,
+    )
+    memory = InMemorySpanExporter()
+    telemetry.PrivateSpanExporter(memory).export([original])
+    assert memory.get_finished_spans()[0].status.description is None
+
+
+def test_escaping_sql_exception_keeps_parent_status_without_query_content():
+    import os
+    import subprocess
+    import sys
+
+    script = """
+from hailhq.core import db, telemetry
+from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+from opentelemetry.trace import StatusCode
+from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
+import sqlalchemy
+memory = InMemorySpanExporter()
+telemetry.OTLPSpanExporter = lambda **kwargs: memory
+telemetry.OTLPMetricExporter = lambda **kwargs: None
+telemetry.PeriodicExportingMetricReader = lambda *args, **kwargs: InMemoryMetricReader()
+assert telemetry.configure_telemetry("hail-api")
+db._instrument_sqlalchemy()
+engine = sqlalchemy.create_engine("sqlite://")
+try:
+    with telemetry.operation("test.failed-parent"):
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 'PRIVATE-SQL-LITERAL', :value FROM missing"), {"value": "PRIVATE-SQL-PARAMETER"})
+except DBAPIError:
+    pass
+else:
+    raise AssertionError("missing table must fail")
+finally:
+    engine.dispose()
+telemetry.flush_telemetry()
+spans = memory.get_finished_spans()
+parent = next(s for s in spans if s.name == "test.failed-parent")
+assert parent.status.status_code == StatusCode.ERROR
+assert parent.status.description is None
+assert parent.events[0].attributes["exception.type"] == "sqlalchemy.exc.OperationalError"
+for span in spans:
+    assert "PRIVATE-SQL" not in str((span.name, span.attributes, span.events, span.status.description))
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        env={
+            **os.environ,
+            "HAIL_LOGFIRE_ENABLED": "true",
+            "HAIL_LOGFIRE_SAMPLE_RATE": "1",
+            "LOGFIRE_TOKEN": "test-only-placeholder",
+            "LOGFIRE_BASE_URL": "https://logfire.example.test",
+        },
+        text=True,
+        check=False,
+        capture_output=True,
+        timeout=20,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

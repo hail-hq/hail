@@ -11,6 +11,9 @@ import {
   COSTS_SITE_DESCRIPTION,
   COSTS_SITE_TITLE,
 } from "@/lib/site-copy";
+import { SITE_ORIGIN } from "@/lib/url";
+import { JsonLd } from "../../../shared/JsonLd";
+import { collectionSchema } from "../../../shared/structured-data";
 
 export const dynamic = "force-static";
 
@@ -67,6 +70,21 @@ export default function CostsPage() {
 
   return (
     <>
+      <JsonLd
+        data={collectionSchema({
+          title: COSTS_HERO_COPY.heading,
+          description: COSTS_SITE_DESCRIPTION,
+          path: "/costs",
+          origin: SITE_ORIGIN,
+          items: [
+            { name: "Language models", path: "/costs#llm" },
+            { name: "Speech recognition", path: "/costs#stt" },
+            { name: "Speech synthesis", path: "/costs#tts" },
+            { name: "Phone numbers", path: "/costs#telephony" },
+            { name: "SMS", path: "/costs#sms" },
+          ],
+        })}
+      />
       <div className="dispatch-tape">
         <div className="wrap row">
           <div className="left">

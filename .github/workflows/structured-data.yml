@@ -1,0 +1,46 @@
+name: Structured data
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths: &schema-inputs
+      - "web/**"
+      - "docs-site/**"
+      - "shared/**"
+      - "docs/public/**"
+      - "openapi/**"
+      - "costs/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "vercel.json"
+      - "scripts/structured-data*"
+      - ".github/workflows/structured-data.yml"
+  push:
+    branches: [main]
+    paths: *schema-inputs
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: structured-data-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  schema:
+    name: Rendered schema
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run check:structured-data

@@ -11,6 +11,8 @@ import {
 import { DeprecationNotice } from "@/components/deprecation-notice";
 import { SITE_ORIGIN } from "@/lib/url";
 import type { LLMRow, STTRow, TTSRow } from "@/lib/types";
+import { modelComparisonSchema } from "@/lib/model-schema";
+import { JsonLd } from "../../../../../shared/JsonLd";
 
 export const dynamic = "force-static";
 export const dynamicParams = false;
@@ -76,6 +78,14 @@ export default async function PairPage({
 
   return (
     <>
+      <JsonLd
+        data={modelComparisonSchema({
+          models: entry.models,
+          category: entry.category,
+          path: `/costs/compare/${pair}`,
+          origin: SITE_ORIGIN,
+        })}
+      />
       <div className="dispatch-tape">
         <div className="wrap row">
           <div className="left">

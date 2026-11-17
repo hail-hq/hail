@@ -1,15 +1,14 @@
 """Post-account-closure retention sweep.
 
 Founder policy: transcripts and stored email content are retained for the
-account's duration + 12 months after account closure. hail's own database
-does not own account/org lifecycle state (organizations/accounts live in
-the separate hail-website repo's Postgres, better-auth schema), so it
-cannot on its own tell whether an org is closed or when — that's what
-``org_closures`` (see ``hailhq.core.models.OrgClosure``) exists to record.
-hail-website calls ``POST /internal/org-closures`` on account close/delete
-to populate it (see
-``api/hailhq/api/routes/internal/org_closures.py`` for the receiving
-endpoint and integration note — this module does not make that call).
+account's duration + 12 months after account closure. hail does not own
+account/org lifecycle state: hail-website owns the ``organizations`` table
+(better-auth schema) in the same database and deletes the row on account
+deletion, so hail cannot tell from it whether an org is closed or when.
+That's what ``org_closures`` (see ``hailhq.core.models.OrgClosure``)
+records. hail-website's account deletion inserts the row in its own
+deletion transaction, then calls ``POST /internal/org-closures`` (see
+``api/hailhq/api/routes/internal/org_closures.py``).
 
 An org with no ``org_closures`` row, or one closed less than 12 months
 ago, is left completely untouched by this sweep.
@@ -29,6 +28,9 @@ explicit replacement for that cascade. Unlike Call/Sms/Email, contacts have
 no separate "content" field to scrub — a ``Contact`` row *is* identifying
 data (name, phone, email) — so it's deleted outright, not content-cleared.
 
+Also clears the US texting registration answers on ``carrier_verifications``
+at close, with no 12-month wait: see ``clear_closed_org_registrations``.
+
 Run as a one-shot script::
 
     cd core && uv run python -m hailhq.core.retention
@@ -45,22 +47,138 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
+from hailhq.core.config import SELF_HOSTED_ORG_ID
 from hailhq.core.file_uploads import delete_org_verification_uploads
-from hailhq.core.models import Call, Contact, Email, FileUpload, OrgClosure, Sms
+from hailhq.core.models import (
+    Call,
+    CarrierVerification,
+    Contact,
+    Email,
+    FileUpload,
+    OrgClosure,
+    Sms,
+)
 from hailhq.core.recordings import delete_recording
 from hailhq.core.sms_evidence import delete_org_evidence
-from sqlalchemy import delete, or_, select, update
+from sqlalchemy import Text, and_, case, cast, delete, exists, or_, select, update
+from sqlalchemy.dialects.postgresql import ARRAY, array
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["RETENTION_PERIOD_AFTER_CLOSURE", "PurgeSummary", "purge_expired_data"]
+__all__ = [
+    "REGISTRATION_ANSWER_REFS",
+    "RETENTION_PERIOD_AFTER_CLOSURE",
+    "PurgeSummary",
+    "clear_closed_org_registrations",
+    "closed_org_ids",
+    "org_closed",
+    "org_is_closed",
+    "purge_expired_data",
+]
 
 # "12 months" approximated as a fixed day-count. This is a compliance
 # boundary, not a billing-precision figure, so a plain timedelta avoids
 # pulling in a calendar-math dependency (e.g. dateutil.relativedelta) for
 # one constant.
 RETENTION_PERIOD_AFTER_CLOSURE = timedelta(days=365)
+
+
+# The ``provider_refs`` keys that hold what the customer typed into a US
+# texting registration, or text made from it: the answers (names, address,
+# tax ID, contacts), a hash of the last amendment, the texting program text,
+# the filed STOP/HELP replies (sender name, contact email) and the sender
+# name. Every other key is a carrier id, a flag or a time
+# (core/tests/test_retention.py checks the list).
+REGISTRATION_ANSWER_REFS = (
+    "application",
+    "application_amendment_hash",
+    "campaign",
+    "replies",
+    "subject_name",
+)
+
+
+def closed_org_ids(now: datetime, organization_id: UUID | None = None):
+    """SELECT of the organizations closed by ``now`` (one org when
+    ``organization_id`` is given). Only an ``org_closures`` row closes an
+    org: a missing ``organizations`` row does not (the self-hosted org has
+    none). The self-hosted org is never closed, even with a row: what reads
+    this releases numbers and deletes data."""
+    closed = select(OrgClosure.organization_id).where(
+        OrgClosure.closed_at <= now,
+        OrgClosure.organization_id != SELF_HOSTED_ORG_ID,
+    )
+    if organization_id is not None:
+        closed = closed.where(OrgClosure.organization_id == organization_id)
+    return closed
+
+
+def org_closed(org_column, now: datetime):
+    """SQL test: the org in ``org_column`` is closed by ``now``. NOT EXISTS
+    (``~org_closed(...)``) keeps rows whose org is NULL (pool numbers),
+    which ``NOT IN`` would drop. Never true for the self-hosted org, as in
+    ``closed_org_ids``."""
+    return exists().where(
+        OrgClosure.organization_id == org_column,
+        OrgClosure.closed_at <= now,
+        OrgClosure.organization_id != SELF_HOSTED_ORG_ID,
+    )
+
+
+async def org_is_closed(
+    session: AsyncSession, organization_id: UUID | None, now: datetime | None = None
+) -> bool:
+    """True when ``organization_id`` has an ``org_closures`` row closed by
+    ``now`` (default: the current time)."""
+    if organization_id is None:
+        return False
+    at = now or datetime.now(timezone.utc)
+    return bool(await session.scalar(select(org_closed(organization_id, at))))
+
+
+async def clear_closed_org_registrations(
+    session: AsyncSession, now: datetime, organization_id: UUID | None = None
+) -> int:
+    """Delete the registration answers of closed organizations, at close.
+
+    For every ``carrier_verifications`` row of an org in ``org_closures``
+    (``closed_at`` reached; one org when ``organization_id`` is given):
+
+    * drops ``REGISTRATION_ANSWER_REFS`` from ``provider_refs``;
+    * clears ``rejection_reason`` (a carrier's text can quote the filing);
+    * clears ``subject_name``, except on a live number verification: two
+      nameless live ones would break the
+      ``carrier_verifications_number_nameless_live_uniq`` index.
+
+    Keeps the state, timestamps, carrier ids and the billing keys
+    (``brand_reused``, the filed campaign ids). Safe to run again: a second
+    run changes nothing. Commits. Returns how many rows changed. Never logs
+    a value.
+    """
+    closed = closed_org_ids(now, organization_id)
+    keys = cast(array(REGISTRATION_ANSWER_REFS), ARRAY(Text))
+    v = CarrierVerification
+    name_goes = or_(v.purpose == "sms", v.state.in_(("cancelled", "rejected")))
+    result = await session.execute(
+        update(v)
+        .where(
+            v.organization_id.in_(closed),
+            or_(
+                v.provider_refs.has_any(keys),
+                v.rejection_reason.isnot(None),
+                and_(v.subject_name.isnot(None), name_goes),
+            ),
+        )
+        .values(
+            provider_refs=v.provider_refs.op("-")(keys),
+            rejection_reason=None,
+            subject_name=case((name_goes, None), else_=v.subject_name),
+        )
+        .execution_options(synchronize_session=False)
+    )
+    await session.commit()
+    return result.rowcount or 0
 
 
 @dataclass
@@ -113,7 +231,10 @@ async def purge_expired_data(session: AsyncSession, now: datetime) -> PurgeSumma
         row[0]
         for row in (
             await session.execute(
-                select(OrgClosure.organization_id).where(OrgClosure.closed_at < cutoff)
+                select(OrgClosure.organization_id).where(
+                    OrgClosure.closed_at < cutoff,
+                    OrgClosure.organization_id != SELF_HOSTED_ORG_ID,
+                )
             )
         ).all()
     ]

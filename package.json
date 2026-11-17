@@ -19,14 +19,20 @@
     "docs:check-urls": "node docs-site/scripts/urls.mjs --check",
     "test:site-audit": "node --test scripts/site-audit.test.mjs",
     "test:public-design": "node --test scripts/public-design.test.mjs",
+    "test:structured-data": "node --test --test-reporter=tap scripts/structured-data*.test.mjs",
+    "check:structured-data": "pnpm run docs:build && pnpm run site:build && node scripts/structured-data-check.mjs",
     "postman:test": "node --test scripts/postman/*.test.mjs",
     "postman:generate": "node scripts/postman/generate.mjs",
     "postman:publish": "node scripts/postman/publish.mjs"
   },
   "devDependencies": {
+    "@types/react": "^19.0.0",
     "husky": "^9.1.7",
     "lint-staged": "^16.1.0",
     "prettier": "^3.3.0",
     "yaml": "^2.9.1"
+  },
+  "dependencies": {
+    "react": "^19.2.0"
   }
 }

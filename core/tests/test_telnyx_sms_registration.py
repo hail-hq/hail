@@ -7,6 +7,7 @@ from hailhq.core.providers.verification import telnyx_sms
 from hailhq.core.providers.verification.base import (
     BRAND_REJECTED,
     Address,
+    DiscardRefused,
     Problem,
     RegistrationHoldsAnotherNumber,
     VerificationProviderError,
@@ -871,7 +872,47 @@ async def test_detach_not_linked_does_not_raise() -> None:
     )
 
 
-async def test_discard_order_and_never_raises() -> None:
+async def test_detach_done_on_a_2xx_with_an_unreadable_body() -> None:
+    """Telnyx answered 2xx: the link is gone, even if the body does not parse."""
+
+    def handler(req):
+        return httpx.Response(200, content=b"<html>")
+
+    assert (
+        await _provider(handler).detach_number(
+            {}, provider_resource_id="PN1", e164="+15125550100"
+        )
+        is False
+    )
+
+
+@pytest.mark.parametrize("status", [400, 403, 500])
+async def test_detach_raises_when_the_link_stays(status) -> None:
+    """The cancel counts the error (refusal or outage); a 404 is done."""
+
+    def handler(req):
+        return httpx.Response(status, json={})
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await _provider(handler).detach_number(
+            {}, provider_resource_id="PN1", e164="+15125550100"
+        )
+
+
+async def test_detach_raises_on_a_lost_connection() -> None:
+    def handler(req):
+        raise httpx.ConnectError("x", request=req)
+
+    with pytest.raises(httpx.ConnectError):
+        await _provider(handler).detach_number(
+            {}, provider_resource_id="PN1", e164="+15125550100"
+        )
+
+
+async def test_discard_order_and_raises_after_every_step_on_an_outage() -> None:
+    """A failed campaign delete is not lost: the caller keeps the ids and
+    tries again. 404 (already gone) counts as done; a refusal raises
+    ``DiscardRefused``; a 429 is an outage."""
     calls = []
     codes = {"campaign": 500}
 
@@ -882,14 +923,32 @@ async def test_discard_order_and_never_raises() -> None:
         return httpx.Response(200, json={})
 
     p = _provider(handler)
-    await p.discard({"brand_id": "B1", "campaign_id": "C1"})
+    with pytest.raises(VerificationProviderError):
+        await p.discard({"brand_id": "B1", "campaign_id": "C1"})
     assert calls == [
         ("DELETE", "/v2/10dlc/campaign/C1"),
         ("DELETE", "/v2/10dlc/brand/B1"),
     ]
     codes["campaign"] = 404
     await p.discard({"brand_id": "B1", "campaign_id": "C1"})
+    for status in (403, 409, 422):
+        codes["campaign"] = status
+        with pytest.raises(DiscardRefused):
+            await p.discard({"brand_id": "B1", "campaign_id": "C1"})
+    codes["campaign"] = 429
+    with pytest.raises(VerificationProviderError) as raised:
+        await p.discard({"campaign_id": "C1"})
+    assert not isinstance(raised.value, DiscardRefused)
     await p.discard({})
+
+
+async def test_discard_raises_on_a_timeout() -> None:
+    def handler(req):
+        raise httpx.ReadTimeout("slow", request=req)
+
+    with pytest.raises(VerificationProviderError) as raised:
+        await _provider(handler).discard({"campaign_id": "C1"})
+    assert not isinstance(raised.value, DiscardRefused)
 
 
 @pytest.mark.parametrize(
@@ -2815,7 +2874,11 @@ async def test_campaign_operational_errors_keep_the_brand_retryable(status, deta
 
 
 @pytest.mark.parametrize("subject", ["person", "business"])
-async def test_legacy_sender_waits_for_information_without_new_paid_resources(subject):
+# No text at all: deleted when the account closed.
+@pytest.mark.parametrize("saved", [{"campaign": {}}, {}])
+async def test_legacy_sender_waits_for_information_without_new_paid_resources(
+    subject, saved
+):
     calls = []
 
     def handler(req):
@@ -2823,7 +2886,7 @@ async def test_legacy_sender_waits_for_information_without_new_paid_resources(su
         return httpx.Response(200, json={"identityStatus": "VERIFIED"})
 
     provider = _provider(handler)
-    refs = {"brand_id": "B1", "subject_type": subject, "campaign": {}}
+    refs = {"brand_id": "B1", "subject_type": subject, **saved}
     assert (await provider.status(refs)).state == "pending"
     assert provider.step(refs) == "needs_information" and refs["brand_id"] == "B1"
     assert set(calls) == {"GET"}

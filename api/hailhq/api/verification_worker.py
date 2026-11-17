@@ -1,8 +1,10 @@
 """Background pass over carrier verifications.
 
-Every ``poll_interval`` seconds: submit drafts still waiting (the carrier was
-down or refused at creation), and pull the carrier's answer for submitted
-ones so a customer does not have to open the console for the state to move.
+Every ``poll_interval`` seconds: release the numbers and cancel the carrier
+registrations of closed organizations (``hailhq.api.org_close``), submit
+drafts still waiting (the carrier was down or refused at creation), and pull
+the carrier's answer for submitted ones so a customer does not have to open
+the console for the state to move.
 Same run_forever / stop contract as ``AbuseMonitorWorker``.
 """
 
@@ -10,7 +12,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 
+from hailhq.api.org_close import close_org_carrier_items
+from hailhq.api.routes.calls import get_livekit_optional
 from hailhq.api.routes.verifications import sweep_verifications
 from hailhq.core.providers.verification import get_verification_provider
 
@@ -39,6 +44,18 @@ class VerificationWorker:
 
     async def tick(self) -> dict[str, int]:
         async with self._session_factory() as session:
+            # First: the sweep below skips closed orgs and ends by clearing
+            # their answers.
+            try:
+                await close_org_carrier_items(
+                    session,
+                    datetime.now(timezone.utc),
+                    get_verification_provider,
+                    await get_livekit_optional(),
+                )
+            except Exception:
+                await session.rollback()
+                logger.exception("verification worker: account close step failed")
             counts = await sweep_verifications(session, get_verification_provider)
             if any(counts.values()):
                 logger.info("verification worker: %s", counts)

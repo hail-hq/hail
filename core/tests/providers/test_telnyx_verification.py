@@ -25,7 +25,11 @@ from hailhq.core.providers.verification import (
     VerificationProviderError,
     get_verification_provider,
 )
-from hailhq.core.providers.verification.base import NOT_ACCEPTED, VALUE_NOT_ACCEPTED
+from hailhq.core.providers.verification.base import (
+    NOT_ACCEPTED,
+    VALUE_NOT_ACCEPTED,
+    DiscardRefused,
+)
 from hailhq.core.providers.verification.telnyx import TelnyxVerificationProvider
 
 ORG = "11111111-2222-3333-4444-555555555555"
@@ -552,9 +556,11 @@ async def test_create_draft_business_address_uses_business_name() -> None:
     assert addr["business_name"] == "Svensson AB" and "first_name" not in addr
 
 
-async def test_create_draft_carrier_400_becomes_a_problem_and_deletes_the_draft() -> (
-    None
-):
+# 500: the cleanup fails, and the customer still gets the carrier's problem.
+@pytest.mark.parametrize("delete_status", [204, 500])
+async def test_create_draft_carrier_400_becomes_a_problem_and_deletes_the_draft(
+    delete_status,
+) -> None:
     fields, address, docs = _inputs("mobile")
 
     def answers(request):
@@ -573,7 +579,7 @@ async def test_create_draft_carrier_400_becomes_a_problem_and_deletes_the_draft(
                 json={"errors": [{"title": "Bad Request", "detail": "File too large"}]},
             )
         if request.method == "DELETE":
-            return httpx.Response(204)
+            return httpx.Response(delete_status)
         raise AssertionError(f"unexpected {request.method} {path}")
 
     fake = Telnyx(answers)
@@ -779,12 +785,50 @@ async def test_purchase_handle_is_the_group_id() -> None:
     }
 
 
-async def test_discard_never_raises() -> None:
+async def test_discard_runs_every_step_then_raises_on_an_outage() -> None:
     fake = Telnyx(lambda request: httpx.Response(500, text="boom"))
-    await provider(fake).discard(
-        {"group_id": GROUP, "document_ids": ["doc-1"], "address_id": "addr-1"}
-    )
+    with pytest.raises(VerificationProviderError):
+        await provider(fake).discard(
+            {"group_id": GROUP, "document_ids": ["doc-1"], "address_id": "addr-1"}
+        )
     assert [c.method for c in fake.calls] == ["DELETE"] * 3
+
+
+@pytest.mark.parametrize("status", [404, 410])
+async def test_discard_counts_gone_as_done(status) -> None:
+    fake = Telnyx(lambda request: httpx.Response(status, json={"errors": []}))
+    await provider(fake).discard({"group_id": GROUP, "address_id": "addr-1"})
+    assert [c.method for c in fake.calls] == ["DELETE"] * 2
+
+
+@pytest.mark.parametrize("status", [401, 408, 425, 429])
+async def test_discard_raises_an_outage_on_a_4xx_that_means_not_now(status) -> None:
+    fake = Telnyx(lambda request: httpx.Response(status, json={"errors": []}))
+    with pytest.raises(VerificationProviderError) as raised:
+        await provider(fake).discard({"address_id": "addr-1"})
+    assert not isinstance(raised.value, DiscardRefused)
+
+
+@pytest.mark.parametrize("status", [400, 403, 409, 422])
+async def test_discard_raises_refused_on_a_refusal(status) -> None:
+    fake = Telnyx(lambda request: httpx.Response(status, json={"errors": []}))
+    with pytest.raises(DiscardRefused):
+        await provider(fake).discard({"group_id": GROUP, "address_id": "addr-1"})
+    assert [c.method for c in fake.calls] == ["DELETE"] * 2
+
+
+async def test_discard_an_outage_wins_over_a_refusal() -> None:
+    """One step refused, another down: retried, since the outage may pass."""
+
+    def answer(request):
+        code = 409 if "/addresses/" in request.url.path else 503
+        return httpx.Response(code, json={"errors": []})
+
+    with pytest.raises(VerificationProviderError) as raised:
+        await provider(Telnyx(answer)).discard(
+            {"group_id": GROUP, "address_id": "addr-1"}
+        )
+    assert not isinstance(raised.value, DiscardRefused)
 
 
 def test_registry_returns_plugin_when_configured(monkeypatch) -> None:

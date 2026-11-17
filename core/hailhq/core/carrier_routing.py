@@ -15,16 +15,25 @@ entry here.
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import timedelta
+from typing import Literal
 from uuid import UUID
 
+import httpx
+import requests
+from didww.exceptions import DidwwApiError, DidwwClientError
 from hailhq.core.carrier_offer import Approval, CarrierOffer
 from hailhq.core.config import settings
 from hailhq.core.providers.sms import twilio as twilio_sms
 from hailhq.core.providers.sms.base import SmsProvider
 from hailhq.core.providers.sms.telnyx import TelnyxSmsProvider
 from hailhq.core.providers.voice import OrderState, didww, telnyx, twilio
-from hailhq.core.providers.voice.base import LegCosts
+from hailhq.core.providers.voice.base import (
+    CarrierNotConfigured,
+    CarrierRequestError,
+    LegCosts,
+)
 from hailhq.core.schemas import NumberType
+from twilio.base.exceptions import TwilioRestException
 
 TWILIO = "twilio"
 TELNYX = "telnyx"
@@ -256,3 +265,96 @@ def sms_status_path(provider: str) -> str:
 
 def inbound_trunk(provider: str) -> str:
     return carrier(provider).inbound_trunk()
+
+
+# What a failed carrier request means for a delete (``failure_kind``):
+#   gone     404, 410: the carrier no longer holds it; the step is done.
+#   outage   5xx; 401 (Hail's own credentials); 408, 425, 429 (timing and
+#            rate limits); a timeout, a lost connection, or the carrier not
+#            configured here. Retried with no limit.
+#   refused  403, 409: the carrier refuses this record for now (Telnyx keeps a
+#            brand for 3 months after its campaign). Account close retries
+#            it for a bounded time.
+#   final    any other 4xx (400, 422...): a retry gets the same answer.
+FailureKind = Literal["gone", "outage", "refused", "final"]
+_GONE = frozenset({404, 410})
+_NOT_NOW_4XX = frozenset({401, 408, 425, 429})
+_REFUSED_4XX = frozenset({403, 409})
+# No carrier answer, and a retry can work: the network, a timeout, a
+# response cut off or garbled in transit, or configuration an operator
+# fixes. The whole httpx and requests families: a ChunkedEncodingError or
+# a DecodingError is a blip, not a refusal.
+_NOT_NOW_ERRORS = (
+    httpx.RequestError,
+    requests.RequestException,
+    TimeoutError,
+    ConnectionError,
+    CarrierNotConfigured,
+    DidwwClientError,
+)
+
+
+def _chain(exc: BaseException):
+    """``exc`` and the errors it was raised from, five at most. A
+    ``raise ... from None`` ends the chain: the hidden context does not count."""
+    seen: BaseException | None = exc
+    for _ in range(5):
+        if seen is None:
+            return
+        yield seen
+        if seen.__cause__ is not None:
+            seen = seen.__cause__
+        elif seen.__suppress_context__:
+            return
+        else:
+            seen = seen.__context__
+
+
+def _http_status(exc: BaseException) -> int | None:
+    if isinstance(exc, (CarrierRequestError, TwilioRestException)):
+        return exc.status
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code
+    if isinstance(exc, DidwwApiError):
+        return exc.status_code
+    return None
+
+
+def carrier_http_status(exc: BaseException) -> int | None:
+    """The HTTP status of the carrier answer behind ``exc``, else None (a
+    timeout, a lost connection). Reads ``exc`` and the errors it was raised
+    from, so a plug-in error that wraps the carrier's still counts."""
+    for seen in _chain(exc):
+        status = _http_status(seen)
+        if status is not None:
+            return status
+    return None
+
+
+def failure_kind(exc: BaseException, *, unknown: FailureKind = "outage") -> FailureKind:
+    """How a failed carrier request counts (the table above). Reads ``exc``
+    and the errors it was raised from. ``unknown`` is the kind of an error
+    with no carrier answer that is not a network, timeout or configuration
+    error: a ``discard`` step passes "refused" (a bug in Hail or the
+    plug-in must not retry for good); elsewhere, such an error (a database
+    error) is retried. Never reads the carrier's text.
+
+    The error nearest ``exc`` that has a carrier status or is a network
+    error decides: a lost connection while handling a 403 is an outage,
+    and a plug-in error raised from a 409 is a refusal."""
+    status = None
+    for seen in _chain(exc):
+        status = _http_status(seen)
+        if status is not None:
+            break
+        if isinstance(seen, _NOT_NOW_ERRORS):
+            return "outage"
+    if status is None:
+        return unknown
+    if status in _GONE:
+        return "gone"
+    if not 400 <= status < 500 or status in _NOT_NOW_4XX:
+        return "outage"
+    if status in _REFUSED_4XX:
+        return "refused"
+    return "final"
