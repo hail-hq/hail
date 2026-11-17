@@ -45,6 +45,9 @@ _DEFAULT_DIR = Path(__file__).resolve().parents[3] / "costs"
 #
 # Only new quotes, purchases and verifications follow these rules. Numbers
 # already bought keep their carrier, routing, renewal and release.
+#
+# hail-website copies these two sets (NOT_SOLD and BUSINESS_ONLY in
+# lib/number-floors.ts) for its prices. Change both, this repo first.
 _NOT_SOLD = frozenset(
     {
         ("telnyx", "GB", "local"),
