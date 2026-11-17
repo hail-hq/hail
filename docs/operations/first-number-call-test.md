@@ -24,13 +24,14 @@ Run it from a repo checkout. The script is
 ## Before
 
 - The number has a live voice agent and is registered for inbound calls.
-  Both columns must be `t`. If not, see
+  `registered` and `agent_ready` must be `t`. Note the `organization_id`
+  for the queries below. If either is `f`, see
   [Routing a number by hand](didww-by-request.md#routing-a-number-by-hand).
 
   ```bash
   psql "$DATABASE_URL" <<'SQL'
   \set e164 '+<customer number>'
-  SELECT n.inbound_registered_at IS NOT NULL AS registered,
+  SELECT n.organization_id, n.inbound_registered_at IS NOT NULL AS registered,
          COALESCE(a.status = 'live' AND a.voice_enabled, false) AS agent_ready
   FROM phone_numbers n LEFT JOIN agents a ON a.id = n.voice_agent_id
   WHERE n.e164 = :'e164' AND n.provisioning_state = 'active';
@@ -49,7 +50,7 @@ Run it from a repo checkout. The script is
    `--i-will-call-a-customer`.
 3. It places the call (`POST /v1/calls`), polls `GET /v1/calls/{id}` until
    the call ends, and prints one line:
-   - `ANSWERED: the number took the call, ended after 42 s. status=completed end_reason=normal_hangup`
+   - `ANSWERED: the call was picked up, ended after 42 s. status=completed end_reason=normal_hangup`
      (a call with status `completed` counts as answered)
    - `NOT ANSWERED: status=failed end_reason=sip_trunk_failure. <message>`
 
@@ -58,8 +59,9 @@ Run it from a repo checkout. The script is
 
 ## Read the result
 
-Your outbound call only shows what your side saw. Check the customer's side
-too: it is the row you delete afterwards.
+Your outbound call only shows what your side saw. A carrier announcement or
+voicemail also picks up. Check the customer's side too: it is the row you
+delete afterwards.
 
 ```bash
 psql "$DATABASE_URL" <<'SQL'

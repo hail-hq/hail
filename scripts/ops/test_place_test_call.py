@@ -106,7 +106,28 @@ def test_timeout_names_the_call():
     client = client_for([httpx.Response(200, json=call("ringing"))] * 10)
     with pytest.raises(ptc.CallTestError, match=CALL_ID):
         wait(client, timer, timeout=20, interval=5)
-    assert timer.now <= 20
+    assert timer.now == 20
+
+
+def test_long_retry_after_still_polls_at_the_deadline():
+    timer = FakeTime()
+    client = client_for(
+        [
+            httpx.Response(429, headers={"Retry-After": "60"}),
+            httpx.Response(200, json=call("completed", end_reason="normal_hangup")),
+        ]
+    )
+    result = wait(client, timer, timeout=50, interval=5)
+    assert result["status"] == "completed"
+    assert timer.sleeps == [50]
+
+
+def test_unexpected_body_on_place_says_the_call_may_be_live(monkeypatch, capsys):
+    monkeypatch.setenv("HAIL_API_KEY", "hl_test")
+    monkeypatch.setattr(ptc, "place_call", lambda *a: {"unexpected": True})
+    code = ptc.main(["--number", "+14155550100", "--i-will-call-a-customer"])
+    assert code == 2
+    assert "may have been placed" in capsys.readouterr().err
 
 
 def test_place_call_sends_the_documented_body():

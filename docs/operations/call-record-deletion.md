@@ -71,6 +71,10 @@ Skip this when `recording_key` is empty. Wait while `recording_status` is
 `requested`, `starting`, `recording` or `processing`: the upload can still
 land after you delete it. Step 3 refuses until then.
 
+Delete the object only when step 3 will run (its conditions are listed
+there). If step 3 refuses after the object is gone, the call stays in the
+customer's call log with a recording that no longer plays.
+
 Use your operator AWS credentials. The production app's storage credentials
 may not allow deletes. The bucket is `S3_BUCKET` in the server `.env`.
 
@@ -89,11 +93,13 @@ Delete it now anyway.
 
 The script stops, and changes nothing, when:
 
-- the call is not a phone call in that organization, or has not ended;
+- the call is not a phone call in that organization, or it ended less than
+  15 minutes ago (the voicebot writes the call legs after the call ends);
 - the recording upload may still be running;
 - a usage row is not priced yet (the usage rater has not run);
-- a charge still waits for the settle step. The settle step runs once no
-  call leg cost is `pending`: usually within minutes, at most 48 hours.
+- a charge still waits for the settle step. It runs once no call leg cost
+  is `pending`, usually within minutes. A call whose leg cost never comes
+  in can wait until the step stops looking, 14 days after the charge.
   Deleting before it would leave a stray `voice_cost:` row.
 
 Run it again later when it stops for one of the last three.
@@ -110,7 +116,8 @@ SELECT count(*) = 1 AS ended,
                 NOT IN ('requested', 'starting', 'recording', 'processing')) AS recording_done
 FROM calls
 WHERE id = :'call' AND organization_id = :'org' AND transport = 'phone'
-  AND status IN ('completed', 'failed', 'busy', 'no_answer', 'canceled') \gset
+  AND status IN ('completed', 'failed', 'busy', 'no_answer', 'canceled')
+  AND COALESCE(ended_at, updated_at) < now() - interval '15 minutes' \gset
 SELECT count(*) FILTER (WHERE priced_at IS NULL) = 0 AS priced,
        count(*) FILTER (WHERE EXISTS (
          SELECT 1 FROM account_credits ac
@@ -127,7 +134,7 @@ WHERE ue.organization_id = :'org' AND ue.channel = 'voice'
   AND split_part(ue.ref, ':', 1) = :'call' \gset
 \if :ended
 \else
-  \echo 'No ended phone call with this id in this organization: nothing deleted.'
+  \echo 'No phone call with this id in this organization that ended over 15 minutes ago: nothing deleted.'
   ROLLBACK;
   \q
 \endif

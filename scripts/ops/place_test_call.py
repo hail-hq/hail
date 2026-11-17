@@ -118,11 +118,13 @@ def wait_for_end(
                     f"GET /v1/calls/{call_id} answered "
                     f"{response.status_code}: {response.text}"
                 )
-        if clock() + wait > deadline:
+        left = deadline - clock()
+        if left <= 0:
             raise CallTestError(
                 f"call {call_id} did not end within {timeout:.0f} seconds"
             )
-        sleep(wait)
+        # The last wait is cut short so one more poll lands at the deadline.
+        sleep(min(wait, left))
 
 
 def _retry_after(response: httpx.Response) -> float:
@@ -150,7 +152,7 @@ def verdict(call: dict) -> tuple[bool, str]:
     if answered:
         seconds = _seconds(call.get("answered_at"), call.get("ended_at"))
         lasted = f" after {seconds} s" if seconds is not None else ""
-        return True, f"ANSWERED: the number took the call, ended{lasted}. {detail}"
+        return True, f"ANSWERED: the call was picked up, ended{lasted}. {detail}"
     text = f"NOT ANSWERED: {detail}"
     if call.get("failure_message"):
         text += f". {call['failure_message']}"
@@ -206,11 +208,13 @@ def main(argv: list[str] | None = None) -> int:
     headers = {"Authorization": f"Bearer {api_key}"}
     with httpx.Client(headers=headers, timeout=30) as client:
         try:
-            call = place_call(client, api_url, args.number, args.from_number)
+            call_id = str(
+                place_call(client, api_url, args.number, args.from_number)["id"]
+            )
         except CallTestError as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 2
-        except (httpx.HTTPError, ValueError) as exc:
+        except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
             # The request may have reached Hail: the call can be live now.
             print(
                 f"ERROR: no clear answer from POST /v1/calls ({exc!r}). The call "
@@ -219,15 +223,22 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 2
-        print(f"Placed call {call['id']} to {args.number}. Waiting for it to end.")
+        print(f"Placed call {call_id} to {args.number}. Waiting for it to end.")
         try:
-            call = wait_for_end(client, api_url, call["id"], timeout=args.timeout)
-        except (CallTestError, ValueError) as exc:
-            print(f"ERROR: {exc}. Call id: {call['id']}", file=sys.stderr)
+            call = wait_for_end(client, api_url, call_id, timeout=args.timeout)
+        except (CallTestError, ValueError, AttributeError, TypeError) as exc:
+            print(f"ERROR: {exc}. Call id: {call_id}", file=sys.stderr)
             return 2
     answered, text = verdict(call)
     print(text)
-    print(f"Call id (your workspace): {call['id']}")
+    print(f"Call id (your workspace): {call_id}")
+    if answered:
+        # A carrier announcement or voicemail also picks up. Only the
+        # customer's inbound row shows the call reached their agent.
+        print(
+            "Confirm the customer's inbound call row: "
+            "docs/operations/first-number-call-test.md#read-the-result"
+        )
     return 0 if answered else 1
 
 
