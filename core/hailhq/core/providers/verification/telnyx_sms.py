@@ -9,6 +9,7 @@ stored or logged."""
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 from datetime import datetime, timedelta, timezone
@@ -1029,6 +1030,9 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                     "10DLC unlink failed: status=%s", exc.response.status_code
                 )
                 raise
+        except json.JSONDecodeError:
+            # A 2xx with a body that does not parse: the link is gone.
+            pass
         except (httpx.HTTPError, ValueError) as exc:
             logger.warning("10DLC unlink failed: %s", type(exc).__name__)
             raise

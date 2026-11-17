@@ -791,7 +791,7 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
         """A company's campaign covers the organization's service, which the
         number stays in. A person's number leaves the person's own service;
         True tells the caller to set it up in the organization's again. Not
-        in the service (404) is done; any other failure raises."""
+        in the service (404, 410) is done; any other failure raises."""
         service = refs.get("messaging_service_sid")
         if refs.get("subject_type") != "person" or not service:
             return False
@@ -802,7 +802,7 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
                 .delete
             )
         except TwilioRestException as exc:
-            if exc.status != 404:
+            if exc.status not in (404, 410):
                 logger.warning(
                     "10DLC detach failed: status=%s code=%s", exc.status, exc.code
                 )

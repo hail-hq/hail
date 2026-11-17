@@ -872,6 +872,20 @@ async def test_detach_not_linked_does_not_raise() -> None:
     )
 
 
+async def test_detach_done_on_a_2xx_with_an_unreadable_body() -> None:
+    """Telnyx answered 2xx: the link is gone, even if the body does not parse."""
+
+    def handler(req):
+        return httpx.Response(200, content=b"<html>")
+
+    assert (
+        await _provider(handler).detach_number(
+            {}, provider_resource_id="PN1", e164="+15125550100"
+        )
+        is False
+    )
+
+
 @pytest.mark.parametrize("status", [400, 403, 500])
 async def test_detach_raises_when_the_link_stays(status) -> None:
     """The cancel counts the error (refusal or outage); a 404 is done."""
