@@ -1265,6 +1265,7 @@ async def test_get_sms_application_uses_authenticated_same_row(
         "documents": None,
         "files": [],
         "kept_until": None,
+        "quote_id": None,
     }
     assert route.calls[0].request.headers["authorization"] == f"Bearer {_API_KEY}"
     assert len(respx.calls) == 1
