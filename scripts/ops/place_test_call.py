@@ -89,42 +89,50 @@ def place_call(
     from_number: str | None,
     *,
     sleep: Callable[[float], None] = time.sleep,
+    clock: Callable[[], float] = time.monotonic,
 ) -> dict:
-    """Send the call. Every retry reuses one Idempotency-Key, so Hail
-    answers with the first request's call (or its refusal) and never
-    places a second one.
+    """Send the call. Every try reuses one Idempotency-Key, so Hail answers
+    with the first request's call (or its refusal) and never places a
+    second one. A network error, a rate limit (429) or a 409 "still
+    processing" is tried again for up to ``POST_RETRY_WINDOW`` seconds.
 
-    After a network error the request may have reached Hail. The script
-    retries once, then keeps retrying for up to ``POST_RETRY_WINDOW``
-    seconds while Hail says the first request is still processing. A
-    refusal counts as final only when Hail replays it from that first
-    request (``Idempotency-Replay: true``). A 5xx may follow a live call."""
+    Raises CallMaybeLive when the outcome stays unknown: no answer, a 409
+    or 429 that never clears, or a fresh 5xx (Hail can fail after the call
+    went out). Any other refusal, and any replayed answer, is final."""
     url = join_url(api_url, "v1/calls")
     body = call_body(number, from_number)
     headers = {"Idempotency-Key": str(uuid.uuid4())}
-    unsure = False
-    try:
-        response = client.post(url, json=body, headers=headers)
-    except httpx.TransportError:
-        unsure = True
-        sleep(POST_RETRY_SECONDS)
-        response = client.post(url, json=body, headers=headers)
-    waited = 0.0
-    while _still_processing(response) and waited < POST_RETRY_WINDOW:
-        unsure = True
-        sleep(POST_RETRY_SECONDS)
-        waited += POST_RETRY_SECONDS
-        response = client.post(url, json=body, headers=headers)
+    deadline = clock() + POST_RETRY_WINDOW
+    while True:
+        try:
+            response = client.post(url, json=body, headers=headers)
+        except httpx.TransportError as exc:
+            response, problem = None, repr(exc)
+        if response is not None:
+            if response.status_code == 429:
+                wait = max(POST_RETRY_SECONDS, _retry_after(response))
+            elif _still_processing(response):
+                wait = POST_RETRY_SECONDS
+            else:
+                break
+            problem = f"answered {response.status_code}: {response.text}"
+        else:
+            wait = POST_RETRY_SECONDS
+        if clock() + wait > deadline:
+            raise CallMaybeLive(f"POST /v1/calls {problem}")
+        sleep(wait)
     if response.status_code == 201:
         return response.json()
     text = f"POST /v1/calls answered {response.status_code}: {response.text}"
     replayed = response.headers.get("Idempotency-Replay") == "true"
-    if response.status_code >= 500 or (unsure and not replayed):
+    if response.status_code >= 500 and not replayed:
         raise CallMaybeLive(text)
     raise CallTestError(text)
 
 
 def _still_processing(response: httpx.Response) -> bool:
+    # api/hailhq/api/idempotency.py answers this 409 while the first
+    # request with the same key still runs.
     return response.status_code == 409 and "still processing" in response.text
 
 
@@ -298,7 +306,7 @@ def main(argv: list[str] | None = None) -> int:
             print(MAYBE_LIVE.format(exc=f"body {placed!r}"), file=sys.stderr)
             return 2
         print(f"Placed call {call_id} to {args.number}.")
-        caller = placed.get("from_e164") or "unknown (see the call in your workspace)"
+        caller = placed.get("from_e164") or f"unknown (GET /v1/calls/{call_id})"
         print(f"Caller ID used: {caller}. Waiting for the call to end.")
         try:
             call = wait_for_end(client, api_url, call_id, timeout=args.timeout)
