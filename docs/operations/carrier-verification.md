@@ -260,10 +260,10 @@ curl -X POST https://api.hail.so/v1/verifications/$ID/resubmit \
 
 What Hail keeps, from the moment of `POST /verifications`:
 
-| What                                                        | Where                                                                                                                                                                                            |
-| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Typed answers (fields, address, document options, quote id) | `carrier_verifications.provider_refs.application` (the same key US texting uses).                                                                                                                |
-| Each file                                                   | Mail bucket, `verification-kept/<org>/<upload id>`, written with S3 server-side encryption (`AES256`). Row in `file_uploads` with `purpose = 'verification_kept'`, `verification_id` and `slot`. |
+| What                                                        | Where                                                                                                                                                                                                                                                                                                              |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Typed answers (fields, address, document options, quote id) | `carrier_verifications.provider_refs.application` (the same key US texting uses). Encrypted with Fernet and `HAIL_PROVIDER_SECRET_KEY` under `sealed`; only `schema_version` and `quote_id` stay readable. Without that key (self-host), stored as plain JSON. If the key changes, the answers read as gone (404). |
+| Each file                                                   | Mail bucket, `verification-kept/<org>/<upload id>`, written with S3 server-side encryption (`AES256`). Row in `file_uploads` with `purpose = 'verification_kept'`, `verification_id` and `slot`.                                                                                                                   |
 
 When it is deleted (whichever comes first):
 

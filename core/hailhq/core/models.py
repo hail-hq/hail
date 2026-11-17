@@ -2234,7 +2234,9 @@ class CarrierVerification(Base):
     """A customer's verification with a carrier, needed before buying numbers
     in some countries. Holds state, opaque carrier IDs and the name of the
     person or company it is for (``subject_name``). ``provider_refs.application``
-    keeps what the customer typed, privately, for the organization only:
+    keeps what the customer typed, privately, for the organization only
+    (a number registration's answers encrypted when
+    ``HAIL_PROVIDER_SECRET_KEY`` is set):
     for SMS until 30 days after it ends; for a number registration (fields,
     address, document options) until 30 days after submit, or sooner when it
     is approved or cancelled. Both go at account close

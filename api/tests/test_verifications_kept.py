@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 from hailhq.api.deps import get_s3_mail_optional
@@ -23,6 +24,8 @@ from hailhq.api.routes.verifications import (
     forget_kept_registrations,
     sweep_verifications,
 )
+from hailhq.api.superadmin import require_superadmin
+from hailhq.core.config import settings
 from hailhq.core.file_uploads import KEPT_PURPOSE, VERIFICATION_KEPT_PREFIX
 from hailhq.core.models import (
     CarrierVerification,
@@ -31,11 +34,13 @@ from hailhq.core.models import (
     OrgClosure,
 )
 from hailhq.core.providers.verification import Problem, ProviderStatus
+from hailhq.core.secret_cipher import generate_key
 from sqlalchemy import select, update
 
 from .test_verifications_api import (  # noqa: F401  (fixtures)
     _auth,
     _create,
+    _unsent,
     carrier,
     pinned_catalog,
 )
@@ -502,3 +507,77 @@ async def test_the_kept_quote_outlives_the_quote_purge(
     await purge_expired_quotes()
     async_session.expire_all()
     assert await async_session.get(NumberOffer, quote_id) is None
+
+
+async def test_a_superadmin_reject_keeps_the_answers(
+    client, org_and_key, carrier, store, async_session
+) -> None:
+    _, _, key = org_and_key
+    vid = await _unsent(client, key, carrier, async_session)
+    app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
+        user_id=uuid.uuid4(), api_key_id=None, superadmin=True
+    )
+    try:
+        resp = await client.post(
+            f"/admin/verifications/{vid}/reject",
+            json={"reason": "ID unreadable"},
+            headers=_auth(key),
+        )
+    finally:
+        app.dependency_overrides.pop(require_superadmin, None)
+    assert resp.status_code == 200 and resp.json()["state"] == "rejected"
+    # Answers and files stay; the admin view shows no refs.
+    assert "provider_refs" not in resp.json()
+    row = await _row(async_session, vid)
+    assert "application" in row.provider_refs
+    listed = (await client.get(f"/verifications/{vid}", headers=_auth(key))).json()
+    assert listed["resubmittable"] is True
+
+
+async def test_with_the_key_set_the_answers_are_stored_encrypted(
+    client, org_and_key, carrier, store, async_session, monkeypatch
+) -> None:
+    monkeypatch.setattr(settings, "hail_provider_secret_key", generate_key())
+    _, _, key = org_and_key
+    vid = await _rejected(client, key, carrier)
+    row = await _row(async_session, vid)
+    stored = row.provider_refs["application"]
+    assert set(stored) == {"schema_version", "quote_id", "sealed"}
+    assert "Lovelace" not in json.dumps(row.provider_refs)
+    # Read back in the clear, and filed again from them.
+    body = (
+        await client.get(f"/verifications/{vid}/application", headers=_auth(key))
+    ).json()
+    assert body["fields"]["last_name"] == "Lovelace"
+    carrier.drafts.clear()
+    resp = await client.post(
+        f"/verifications/{vid}/resubmit",
+        files={"_": (None, "1")},
+        headers=_auth(key),
+    )
+    assert resp.status_code == 201, resp.text
+    assert carrier.drafts[0]["fields"]["last_name"] == "Lovelace"
+
+
+async def test_answers_sealed_with_another_key_are_not_kept(
+    client, org_and_key, carrier, store, async_session, monkeypatch
+) -> None:
+    monkeypatch.setattr(settings, "hail_provider_secret_key", generate_key())
+    _, _, key = org_and_key
+    vid = await _rejected(client, key, carrier)
+    monkeypatch.setattr(settings, "hail_provider_secret_key", generate_key())
+    resp = await client.get(f"/verifications/{vid}/application", headers=_auth(key))
+    assert resp.status_code == 404
+
+
+async def test_an_approval_seen_in_the_list_deletes_the_files(
+    client, org_and_key, carrier, store, async_session
+) -> None:
+    _, _, key = org_and_key
+    vid = (await _create(client, key)).json()["id"]
+    carrier.remote_status = ProviderStatus(state="approved")
+    verifications_routes._last_polled.clear()
+    rows = (await client.get("/verifications", headers=_auth(key))).json()
+    assert [r["state"] for r in rows] == ["approved"]
+    assert "application" not in (await _row(async_session, vid)).provider_refs
+    assert await _kept(async_session) == [] and store.objects == {}

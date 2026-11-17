@@ -7,7 +7,9 @@ one way or the other, not both.
 
 Loading has two steps. ``collect_files`` reads the database rows and the
 request parts. ``fetch_files`` reads the uploads from the bucket. A caller
-can end its database transaction between the two. Files stay in memory only.
+can end its database transaction between the two. Files stay in memory here;
+a filed number registration keeps an encrypted copy for a resubmit
+(``verification_kept`` in ``hailhq.core.file_uploads``).
 """
 
 from __future__ import annotations

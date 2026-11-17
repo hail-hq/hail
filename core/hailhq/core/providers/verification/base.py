@@ -356,7 +356,9 @@ class Requirements(VerificationRequirements):
 
 
 class UploadedFile(BaseModel):
-    """File bytes held in memory only. Never written to disk or the database."""
+    """File bytes held in memory for the carrier call. Never written to disk
+    or the database. A number registration also keeps an encrypted copy in
+    the mail bucket for a resubmit (``hailhq.core.file_uploads``)."""
 
     model_config = ConfigDict(frozen=True, repr=False)
 

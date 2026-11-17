@@ -5,7 +5,8 @@ carrier did not take at creation.
 Number-verification files and details go to the carrier. Hail also keeps
 them so a rejected filing can be fixed and sent again
 (``POST /verifications/{id}/resubmit``): the typed answers (fields, address,
-document options) in ``provider_refs.application``, and an encrypted copy of
+document options) in ``provider_refs.application``, encrypted with
+``HAIL_PROVIDER_SECRET_KEY`` when it is set (``_seal``), and an encrypted copy of
 each file as a ``verification_kept`` upload (``core/.../file_uploads.py``).
 Both are deleted 30 days after submit, or sooner when the registration is
 approved or cancelled or the account closes (``forget_kept_registrations``,
@@ -159,6 +160,7 @@ from hailhq.core.schemas import (
     VerificationDocumentCheckResponse,
     VerificationResponse,
 )
+from hailhq.core.secret_cipher import SecretCipher
 from hailhq.core.sms_registration_gate import US_SMS_COUNTRY_CODES
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import (
@@ -867,6 +869,16 @@ async def _forget_kept_files(
     return await delete_kept_files(db, s3 or _kept_store(), list(ids))
 
 
+async def _forget_approved_files(
+    db: AsyncSession, rows: list[CarrierVerification]
+) -> None:
+    """After a poll's commit: delete the kept files of the number
+    registrations it approved (their answers went in ``_apply_status``)."""
+    approved = [r.id for r in rows if r.purpose == "number" and r.state == "approved"]
+    if approved:
+        await _forget_kept_files(db, approved)
+
+
 async def _settle_sms_approval(
     db: AsyncSession,
     row: CarrierVerification,
@@ -1491,8 +1503,7 @@ async def _refresh(
     await db.commit()  # also ends the row lock
     if not changed:
         return
-    if row.purpose == "number" and row.state == "approved":
-        await _forget_kept_files(db, [row.id])
+    await _forget_approved_files(db, [row])
     _notify_billing([row])
     if was_submitting and row.state in ("submitted", "approved", "rejected"):
         # approved_by is set only by a superadmin's approve; an automatic
@@ -1681,6 +1692,7 @@ async def refresh_number_verifications(
         if await _poll_and_apply(db, r, st, registry, b)
     ]
     await db.commit()  # saves changes and ends the row locks
+    await _forget_approved_files(db, changed)
     _notify_billing(changed)
 
 
@@ -1819,7 +1831,42 @@ def _number_application_record(
         if slot in slots
     }
     record["quote_id"] = str(quote_id) if quote_id else None
-    return record
+    return _seal(record)
+
+
+def _seal(record: dict) -> dict:
+    """A number registration's saved answers as stored: the answers
+    encrypted (Fernet, ``HAIL_PROVIDER_SECRET_KEY``) under ``sealed``, with
+    only ``schema_version`` and ``quote_id`` left readable (the quote purge
+    reads it). Without the key (a self-host that did not set it) they are
+    stored as they are."""
+    if not settings.hail_provider_secret_key:
+        return record
+    plain = {k: v for k, v in record.items() if k not in ("schema_version", "quote_id")}
+    return {
+        "schema_version": record["schema_version"],
+        "quote_id": record.get("quote_id"),
+        "sealed": SecretCipher(settings.hail_provider_secret_key).encrypt(
+            json.dumps(plain)
+        ),
+    }
+
+
+def _unseal(application: dict) -> dict | None:
+    """The saved answers in the clear, or None when they cannot be read (the
+    key changed, or was removed). Never logs a value."""
+    if "sealed" not in application:
+        return application
+    try:
+        plain = json.loads(
+            SecretCipher(settings.hail_provider_secret_key).decrypt(
+                application["sealed"]
+            )
+        )
+    except Exception as exc:
+        logger.warning("saved registration answers unreadable (%s)", type(exc).__name__)
+        return None
+    return {**application, **plain}
 
 
 async def _sms_mobile_problems(
@@ -3747,6 +3794,7 @@ async def list_verifications(
     ]
     if asked:
         await db.commit()  # saves changes and ends the row locks
+    await _forget_approved_files(db, changed)
     _notify_billing(changed)
     for row in sorted(gated, key=lambda r: r.created_at):  # oldest first
         await _refresh(db, row, registry)
@@ -3884,7 +3932,9 @@ async def _number_application(
     """A number registration's kept answers and file names, or 404."""
     if not _number_answers_kept(row, datetime.now(timezone.utc)):
         raise _no_kept_answers()
-    application = row.provider_refs["application"]
+    application = _unseal(row.provider_refs["application"])
+    if application is None:
+        raise _no_kept_answers()
     return SmsApplicationResponse.model_validate(
         {
             "schema_version": application.get("schema_version", 1),
@@ -4118,7 +4168,9 @@ async def resubmit_verification(
             raise unprocessable(
                 f"{key} cannot be changed on a resubmit", loc=["body", key]
             )
-    saved = source.provider_refs["application"]
+    saved = _unseal(source.provider_refs["application"])
+    if saved is None:
+        raise _no_kept_answers()
 
     def part(name: str, kept_value) -> str:
         value = _text_part(sent, name)
