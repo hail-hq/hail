@@ -147,6 +147,24 @@ func (e CallResponseStatus) Valid() bool {
 	}
 }
 
+// Defines values for CallTranscriptTurnRole.
+const (
+	Assistant CallTranscriptTurnRole = "assistant"
+	User      CallTranscriptTurnRole = "user"
+)
+
+// Valid indicates whether the value is a known member of the CallTranscriptTurnRole enum.
+func (e CallTranscriptTurnRole) Valid() bool {
+	switch e {
+	case Assistant:
+		return true
+	case User:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ContactEntryKind.
 const (
 	Manual ContactEntryKind = "manual"
@@ -1373,6 +1391,7 @@ func (e WebhookDeliveryResponseStatus) Valid() bool {
 
 // Defines values for WebhookEventType.
 const (
+	CallAnalyzed            WebhookEventType = "call.analyzed"
 	CallAnswered            WebhookEventType = "call.answered"
 	CallBusy                WebhookEventType = "call.busy"
 	CallCompleted           WebhookEventType = "call.completed"
@@ -1398,6 +1417,8 @@ const (
 // Valid indicates whether the value is a known member of the WebhookEventType enum.
 func (e WebhookEventType) Valid() bool {
 	switch e {
+	case CallAnalyzed:
+		return true
 	case CallAnswered:
 		return true
 	case CallBusy:
@@ -2007,6 +2028,9 @@ type CallResponse struct {
 
 	// ToE164 Recipient phone number, E.164 format.
 	ToE164 string `json:"to_e164"`
+
+	// Transcript What was said on the call, oldest turn first. Set only by GET /v1/calls/{call_id}: an empty list until someone speaks. Null in POST /v1/calls and GET /v1/calls responses.
+	Transcript *[]CallTranscriptTurn `json:"transcript,omitempty"`
 }
 
 // CallResponseDirection 'outbound' for calls Hail placed, 'inbound' for calls received.
@@ -2014,6 +2038,21 @@ type CallResponseDirection string
 
 // CallResponseStatus Current call-progress state: 'queued', 'dialing', 'ringing', 'in_progress', or one of the terminal states 'completed', 'failed', 'busy', 'no_answer', 'canceled'.
 type CallResponseStatus string
+
+// CallTranscriptTurn defines model for CallTranscriptTurn.
+type CallTranscriptTurn struct {
+	// At When Hail recorded the turn, ISO 8601.
+	At time.Time `json:"at"`
+
+	// Role 'assistant' is the Hail agent. 'user' is the person (or answering machine) on the other end of the line.
+	Role CallTranscriptTurnRole `json:"role"`
+
+	// Text What was said in this turn.
+	Text string `json:"text"`
+}
+
+// CallTranscriptTurnRole 'assistant' is the Hail agent. 'user' is the person (or answering machine) on the other end of the line.
+type CallTranscriptTurnRole string
 
 // ConfirmRequest defines model for ConfirmRequest.
 type ConfirmRequest struct {
@@ -3926,10 +3965,10 @@ type VerificationDocumentWarningKind string
 
 // VerificationPrintedName The name printed on a document, as read. Empty strings when not printed.
 type VerificationPrintedName struct {
-	// BusinessName A company's name.
+	// BusinessName The name of the company the document is about or addressed to, never the company that issued it.
 	BusinessName string `json:"business_name"`
 
-	// GivenNames A person's given names.
+	// GivenNames The given names of the person the document is about or addressed to, never a person who signs for the issuer.
 	GivenNames string `json:"given_names"`
 
 	// LatinGivenNames The given names in Latin letters as the document prints them (its machine-readable zone or a transliteration), or empty.
@@ -3938,7 +3977,7 @@ type VerificationPrintedName struct {
 	// LatinSurnames The surnames in Latin letters, the same way.
 	LatinSurnames *string `json:"latin_surnames,omitempty"`
 
-	// Surnames A person's surnames.
+	// Surnames That person's surnames.
 	Surnames string `json:"surnames"`
 }
 

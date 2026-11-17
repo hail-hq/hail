@@ -3,7 +3,7 @@
 Exposes the following tools to the calling agent:
 
 * ``place_call`` — originate an outbound phone call
-* ``get_call`` — fetch the current state of one call
+* ``get_call`` — fetch the current state and transcript of one call
 * ``list_calls`` — page through recent calls
 * ``get_events`` — page through the event stream (call-narrow or org-wide)
 * ``send_email`` — send an outbound email
@@ -2597,9 +2597,10 @@ def register_tools(
     async def get_call_tool(
         ctx: Context, call_id: Annotated[str, _CALL_ID]
     ) -> dict[str, Any]:
-        """Read a call's current status and timing by ID.
+        """Read a call's current status, timing and transcript by ID.
 
-        Returns the call record, or an error when the call is unavailable."""
+        Returns the call record with its transcript (spoken turns, oldest
+        first), or an error when the call is unavailable."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await get_call(client=client, call_id=call_id)

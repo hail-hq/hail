@@ -3,6 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -96,7 +97,25 @@ func TestCallStatus_PrefixResolution(t *testing.T) {
 		sampleCall("22222222-2222-2222-2222-222222222222", "+15550002", client.CallResponseStatusDialing),
 	}}
 
-	srv := newFakeServer(t, http.StatusOK, listBody)
+	detail := sampleCall(fullID, "+15550001", client.CallResponseStatusCompleted)
+	detail.Transcript = &[]client.CallTranscriptTurn{
+		{Role: client.Assistant, Text: "Hi, this is Acme.", At: time.Date(2026, 4, 22, 12, 0, 1, 0, time.UTC)},
+		{Role: client.User, Text: "Hello!", At: time.Date(2026, 4, 22, 12, 0, 3, 0, time.UTC)},
+	}
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/v1/calls" {
+			_ = json.NewEncoder(w).Encode(listBody)
+			return
+		}
+		if r.URL.Path != "/v1/calls/"+fullID {
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(detail)
+	}))
+	t.Cleanup(srv.Close)
 
 	stdout, _, err := runRoot(t,
 		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
@@ -105,15 +124,15 @@ func TestCallStatus_PrefixResolution(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// Single round trip — the matched record is reused from the list response.
-	if got := atomic.LoadInt32(&srv.hits); got != 1 {
-		t.Errorf("expected 1 request (list only, no follow-up GET), got %d", got)
-	}
-	if srv.lastReq.URL.Path != "/v1/calls" {
-		t.Errorf("path = %s; want /v1/calls", srv.lastReq.URL.Path)
+	// The list resolves the prefix; the GET by id brings the transcript.
+	if got := atomic.LoadInt32(&hits); got != 2 {
+		t.Errorf("expected 2 requests (list, then GET by id), got %d", got)
 	}
 	if !strings.Contains(stdout, fullID) {
 		t.Errorf("stdout missing resolved UUID:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "Agent: Hi, this is Acme.") || !strings.Contains(stdout, "Person: Hello!") {
+		t.Errorf("stdout missing transcript:\n%s", stdout)
 	}
 }
 

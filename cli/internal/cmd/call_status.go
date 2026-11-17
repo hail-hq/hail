@@ -35,12 +35,11 @@ func runCallStatus(ctx context.Context, opts *Options, idStr string) error {
 		return err
 	}
 
-	parsed, prefetched, err := resolveCallID(ctx, apiClient, idStr)
+	// A prefix resolves through the list, which carries no transcript, so
+	// the call is always read by its full id.
+	parsed, _, err := resolveCallID(ctx, apiClient, idStr)
 	if err != nil {
 		return err
-	}
-	if prefetched != nil {
-		return printCallStatus(opts, prefetched)
 	}
 
 	resp, err := apiClient.GetCallV1CallsCallIdGetWithResponse(
@@ -61,7 +60,7 @@ func runCallStatus(ctx context.Context, opts *Options, idStr string) error {
 
 // printCallStatus renders a CallResponse for the `status` subcommand. Format
 // mirrors the post-placement output (see printCall) but adds the post-call
-// fields ended/end_reason/recording when present.
+// fields ended/end_reason/recording and the transcript when present.
 func printCallStatus(opts *Options, call *client.CallResponse) error {
 	if opts.JSON {
 		return printJSON(opts.Stdout, call)
@@ -86,6 +85,16 @@ func printCallStatus(opts *Options, call *client.CallResponse) error {
 	}
 	if call.RecordingS3Key != nil && *call.RecordingS3Key != "" {
 		fmt.Fprintf(opts.Stdout, "  Recording: %s\n", *call.RecordingS3Key)
+	}
+	if call.Transcript != nil && len(*call.Transcript) > 0 {
+		fmt.Fprintln(opts.Stdout, "  Transcript:")
+		for _, turn := range *call.Transcript {
+			speaker := "Person"
+			if turn.Role == client.Assistant {
+				speaker = "Agent"
+			}
+			fmt.Fprintf(opts.Stdout, "    %s: %s\n", speaker, turn.Text)
+		}
 	}
 	return nil
 }

@@ -112,7 +112,7 @@ The catalog and subscription validation share the `WebhookEventType` registry in
 - **`sms.failed`** — the send failed (transport error or carrier rejection).
 
 **Call lifecycle** — `received` (inbound only), `answered`, `completed`,
-`failed`, `busy`, `no_answer`, `transferred` (there is no `canceled` event; it has no data source):
+`failed`, `busy`, `no_answer`, `transferred`, `analyzed` (there is no `canceled` event; it has no data source):
 
 - **`call.received`** — an inbound call reached one of your numbers and an
   agent is about to answer ([Agents](agents.md)). Fired before the answer.
@@ -129,6 +129,8 @@ The catalog and subscription validation share the `WebhookEventType` registry in
   `{"contact_id": "…", "contact_name": "Sam"}`. `contact_id` is the id
   `GET /contacts` returns: a contact's uuid, or `member:<user id>` for a
   team member. Never a phone number.
+- **`call.analyzed`** — the call's transcript and a short AI summary, sent
+  once after the call ends ([Call analyzed](#call-analyzed)).
 
 Every `call.*` payload's `data` carries `id`, `status`, `direction`
 (`inbound` or `outbound`), `from`, `to`, `agent_id` (null for calls placed
@@ -152,6 +154,67 @@ destination is disabled. Raw carrier error text is never returned.
   }
 }
 ```
+
+## Call analyzed
+
+Subscribe to `call.analyzed` to get what was said on each call and a short
+summary, about 10 seconds after the call ends:
+
+```bash
+curl -X POST "$HAIL_API_URL/v1/webhooks" \
+  -H "Authorization: Bearer $HAIL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"target_url": "https://example.com/hooks/hail", "event_types": ["call.analyzed"]}'
+```
+
+```json
+{
+  "type": "call.analyzed",
+  "data": {
+    "id": "0d9c…",
+    "status": "completed",
+    "direction": "inbound",
+    "from": "+33612345678",
+    "to": "+14155550100",
+    "agent_id": "a1b2…",
+    "end_reason": "normal_hangup",
+    "duration_seconds": 74,
+    "transcript": [
+      {
+        "role": "assistant",
+        "text": "Hi, this is an AI assistant answering on behalf of Acme.",
+        "at": "2026-11-17T12:00:02+00:00"
+      },
+      {
+        "role": "user",
+        "text": "Hi, I'd like to move my Tuesday appointment.",
+        "at": "2026-11-17T12:00:06+00:00"
+      }
+    ],
+    "summary": "The caller asked to move their Tuesday appointment. The agent moved it to Thursday at 10am."
+  }
+}
+```
+
+- `data` is built by `call_analyzed_data` in
+  [`call_analysis.py`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/call_analysis.py).
+  It has the `call.*` fields above, plus `duration_seconds`, `transcript` and `summary`.
+- `transcript` holds the same turns as `GET /v1/calls/{id}`, oldest first.
+  `assistant` is the agent; `user` is the other side. Texts the caller sends
+  during the call are not in it (they arrive as `sms.received`).
+- `duration_seconds` runs from answer to hang-up. It is null when the call was never answered.
+- `summary` comes from your workspace's own LLM when you set one (Hail's models
+  back it up only when you turned fallback on). Otherwise it comes from Hail's
+  chain, the one calls and texts use (Anthropic, then OpenAI, then Gemini). A
+  per-call `llm` from `POST /v1/calls` is not used. When the model fails,
+  `summary` is null and the event is still sent.
+- Only phone calls with at least one spoken turn are sent. A call nobody spoke on gets no event.
+- Only calls that end while the subscription is active are sent. Calls that
+  ended more than an hour earlier are never sent.
+- Once it is sent, `GET /v1/events` shows an `analyzed` call event. It holds
+  counts only (`turns`, and `summary` true or false), not the text.
+- Self-hosting: the voicebot sends this event from its text worker, which
+  runs only when `HAIL_INTERNAL_SECRET` and `HAIL_API_URL` are set.
 
 ## Payload
 
