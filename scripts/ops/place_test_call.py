@@ -34,6 +34,7 @@ from hailhq.core.schemas import TERMINAL_CALL_STATUSES
 from hailhq.core.urls import join_url
 
 DEFAULT_API_URL = "https://api.hail.so"
+LOCAL_HTTP = ("http://localhost:", "http://localhost/", "http://127.0.0.1:")
 E164 = re.compile(r"^\+[1-9]\d{6,14}$")
 # Voice calls stop at 300 seconds by default; this leaves room for ringing.
 DEFAULT_TIMEOUT_SECONDS = 420
@@ -227,9 +228,11 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
     api_url = os.environ.get("HAIL_API_URL") or DEFAULT_API_URL
-    if not api_url.startswith(("https://", "http://")):
+    # The API key goes in a header: plain http only to this machine.
+    if not api_url.startswith(LOCAL_HTTP + ("https://",)):
         print(
-            f"HAIL_API_URL must start with https:// or http://: {api_url!r}",
+            f"HAIL_API_URL must start with https:// (http:// only for "
+            f"localhost): {api_url!r}",
             file=sys.stderr,
         )
         return 2

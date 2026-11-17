@@ -266,3 +266,20 @@ def test_refuses_an_api_url_without_scheme(monkeypatch, capsys):
     code = ptc.main(["--number", "+14155550100", "--i-will-call-a-customer"])
     assert code == 2
     assert "HAIL_API_URL" in capsys.readouterr().err
+
+
+def test_a_null_status_is_not_a_call():
+    timer = FakeTime()
+    body = {"id": CALL_ID, "status": None}
+    client = client_for([httpx.Response(200, json=body)] * 10)
+    with pytest.raises(ptc.CallTestError, match="not a call"):
+        wait(client, timer, timeout=10, interval=5)
+
+
+@pytest.mark.parametrize("url", ["http://api.example.test", "http://localhost.evil"])
+def test_refuses_plain_http_to_another_host(url, monkeypatch, capsys):
+    monkeypatch.setenv("HAIL_API_KEY", "hl_test")
+    monkeypatch.setenv("HAIL_API_URL", url)
+    code = ptc.main(["--number", "+14155550100", "--i-will-call-a-customer"])
+    assert code == 2
+    assert "HAIL_API_URL" in capsys.readouterr().err
