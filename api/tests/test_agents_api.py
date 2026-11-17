@@ -1059,3 +1059,29 @@ async def test_email_enabled_defaults_on_and_can_be_changed(client, org) -> None
     )
     assert r.status_code == 200, r.text
     assert r.json()["email_enabled"] is False
+
+
+async def test_email_caller_defaults_off_and_can_be_changed(client, org) -> None:
+    _, headers = org
+    r = await client.post(
+        "/agents", json={"name": "Desk", "system_prompt": "Help."}, headers=headers
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["email_caller_enabled"] is False
+    agent_id = r.json()["id"]
+    r = await client.patch(
+        f"/agents/{agent_id}", json={"email_caller_enabled": True}, headers=headers
+    )
+    assert r.json()["email_caller_enabled"] is True
+    # Null means leave it: the column is not nullable.
+    r = await client.patch(
+        f"/agents/{agent_id}", json={"email_caller_enabled": None}, headers=headers
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["email_caller_enabled"] is True
+    r = await client.post(
+        "/agents",
+        json={"name": "Desk 2", "system_prompt": "Help.", "email_caller_enabled": True},
+        headers=headers,
+    )
+    assert r.json()["email_caller_enabled"] is True

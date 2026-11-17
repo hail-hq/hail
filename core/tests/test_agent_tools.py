@@ -745,3 +745,55 @@ async def test_thread_history_withheld_scope_reads_nothing(async_session):
         assert await tool.execute(ctx, {"source": source}) == (
             "There is nothing earlier."
         )
+
+
+def test_email_caller_is_not_in_the_registry():
+    # The one tool that takes a dictated address is opt-in per agent: a
+    # registry tool would be on for every agent whose `tools` is null.
+    from hailhq.core.agent_tools import email_caller
+
+    assert email_caller.SPEC.name not in {t.name for t in all_tools()}
+    assert email_caller.SPEC.risk_tier == "outbound_send"
+    assert "say yes" in email_caller.SPEC.description
+
+
+async def test_email_caller_posts_the_confirmed_address():
+    from hailhq.core.agent_tools import email_caller
+
+    api = FakeApi(spoken="Email sent.")
+    ctx = _ctx(api=api)
+    spoken = await email_caller.SPEC.execute(
+        ctx,
+        {
+            "to_address": " sam@example.com ",
+            "subject": "Datasheet",
+            "body_text": "Here it is: https://example.com/ds.pdf",
+        },
+    )
+    assert spoken == "Email sent."
+    path, payload = api.posts[0]
+    assert path == "/internal/agent/email-caller"
+    assert payload["call_id"] == str(ctx.call_id)
+    assert payload["to_address"] == "sam@example.com"
+    assert uuid.UUID(payload["tool_invocation_id"])
+
+
+async def test_email_caller_checks_its_input_before_posting():
+    from hailhq.core.agent_tools import email_caller
+
+    api = FakeApi(spoken="Email sent.")
+    ok = {"to_address": "sam@example.com", "subject": "s", "body_text": "b"}
+    for bad in (
+        {**ok, "to_address": "sam at example dot com"},
+        {**ok, "to_address": ""},
+        {**ok, "subject": " "},
+        {**ok, "body_text": " "},
+    ):
+        assert "need" in await email_caller.SPEC.execute(_ctx(api=api), bad)
+    assert "only during a call" in await email_caller.SPEC.execute(
+        _ctx(api=api, call_id=None), ok
+    )
+    assert "only during a call" in await email_caller.SPEC.execute(
+        _ctx(api=api, inbound_email_id=uuid.uuid4()), ok
+    )
+    assert api.posts == []

@@ -1719,6 +1719,9 @@ type AgentCreate struct {
 	// AiDisclosureLine The AI line this agent speaks. '{org}' is replaced by the organization's name. Omitted: the workspace line, else Hail's built-in line for the call's direction.
 	AiDisclosureLine *string `json:"ai_disclosure_line,omitempty"`
 
+	// EmailCallerEnabled Let the agent email the person on a call, at an address they give and confirm on the call (links and short text only, at most 2 emails per call). Off by default.
+	EmailCallerEnabled *bool `json:"email_caller_enabled,omitempty"`
+
 	// EmailEnabled Answer email on addresses that route email to this agent.
 	EmailEnabled *bool `json:"email_enabled,omitempty"`
 
@@ -1776,6 +1779,9 @@ type AgentResponse struct {
 
 	// CreatedAt ISO 8601 timestamp.
 	CreatedAt time.Time `json:"created_at"`
+
+	// EmailCallerEnabled Whether the agent may email the person on a call at an address they confirm.
+	EmailCallerEnabled *bool `json:"email_caller_enabled,omitempty"`
 
 	// EmailEnabled Whether the agent answers email.
 	EmailEnabled *bool `json:"email_enabled,omitempty"`
@@ -1838,6 +1844,9 @@ type AgentUpdate struct {
 
 	// AiDisclosureLine New AI line template ('{org}' = organization name); null returns to the workspace line.
 	AiDisclosureLine *string `json:"ai_disclosure_line,omitempty"`
+
+	// EmailCallerEnabled Whether the agent may email the person on a call at an address they confirm.
+	EmailCallerEnabled *bool `json:"email_caller_enabled,omitempty"`
 
 	// EmailEnabled Whether the agent answers email.
 	EmailEnabled *bool `json:"email_enabled,omitempty"`
@@ -3926,10 +3935,10 @@ type VerificationDocumentWarningKind string
 
 // VerificationPrintedName The name printed on a document, as read. Empty strings when not printed.
 type VerificationPrintedName struct {
-	// BusinessName A company's name.
+	// BusinessName The name of the company the document is about or addressed to, never the company that issued it.
 	BusinessName string `json:"business_name"`
 
-	// GivenNames A person's given names.
+	// GivenNames The given names of the person the document is about or addressed to, never a person who signs for the issuer.
 	GivenNames string `json:"given_names"`
 
 	// LatinGivenNames The given names in Latin letters as the document prints them (its machine-readable zone or a transliteration), or empty.
@@ -3938,7 +3947,7 @@ type VerificationPrintedName struct {
 	// LatinSurnames The surnames in Latin letters, the same way.
 	LatinSurnames *string `json:"latin_surnames,omitempty"`
 
-	// Surnames A person's surnames.
+	// Surnames That person's surnames.
 	Surnames string `json:"surnames"`
 }
 

@@ -2214,6 +2214,12 @@ _AGENT_SMS_ENABLED = _d(
 _AGENT_EMAIL_ENABLED = _d(
     "Whether this agent replies to mail on addresses routed to it."
 )
+_AGENT_EMAIL_CALLER = _d(
+    "Whether this agent may email the person on a call a link or short note, "
+    "at an address that person gives and confirms on the call. Plain text, "
+    "one address and at most 2 emails per call, billed like any email. "
+    "Off by default."
+)
 _AGENT_DURATION_RULES = _rules(AgentCreate, "max_duration_seconds")
 _AGENT_HANDOVER_RULES = _rules(AgentCreate, "handover_max_duration_seconds")
 _AGENT_UPDATE_DURATION_RULES = _rules(AgentUpdate, "max_duration_seconds")
@@ -3080,6 +3086,7 @@ def register_tools(
         voice_enabled: Annotated[bool, _AGENT_VOICE_ENABLED] = True,
         sms_enabled: Annotated[bool, _AGENT_SMS_ENABLED] = True,
         email_enabled: Annotated[bool, _AGENT_EMAIL_ENABLED] = True,
+        email_caller_enabled: Annotated[bool, _AGENT_EMAIL_CALLER] = False,
         handover_contacts: Annotated[
             list[dict] | None, _AGENT_HANDOVER_CONTACTS
         ] = None,
@@ -3115,6 +3122,8 @@ def register_tools(
             fields["max_duration_seconds"] = max_duration_seconds
         if handover_max_duration_seconds is not None:
             fields["handover_max_duration_seconds"] = handover_max_duration_seconds
+        if email_caller_enabled:
+            fields["email_caller_enabled"] = True
         if handover_contacts is not None:
             fields["handover_contacts"] = handover_contacts
         try:
@@ -4204,6 +4213,7 @@ def register_tools(
         voice_enabled: Annotated[bool | None, _AGENT_VOICE_ENABLED] = None,
         sms_enabled: Annotated[bool | None, _AGENT_SMS_ENABLED] = None,
         email_enabled: Annotated[bool | None, _AGENT_EMAIL_ENABLED] = None,
+        email_caller_enabled: Annotated[bool | None, _AGENT_EMAIL_CALLER] = None,
         status: Annotated[
             AgentStatus | None,
             _d("``paused`` stops the agent answering; ``live`` turns it back on."),
@@ -4257,6 +4267,7 @@ def register_tools(
                             "voice_enabled": voice_enabled,
                             "sms_enabled": sms_enabled,
                             "email_enabled": email_enabled,
+                            "email_caller_enabled": email_caller_enabled,
                             "status": status,
                             "handover_contacts": handover_contacts,
                         }.items()

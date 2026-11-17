@@ -301,3 +301,49 @@ async def test_connected_handover_asks_for_no_reply():
 
     spec = _spec(name="transfer_call", tier="session_control", execute=connected)
     assert await _make_handler(spec, _tctx())({}, FakeRunContext()) is None
+
+
+async def _email_caller_names(monkeypatch, meta: dict) -> list[str]:
+    import dataclasses
+
+    from hailhq.core.agent_tools import email_caller
+
+    async def _avail(_org, _session):
+        return True
+
+    monkeypatch.setattr(
+        email_caller,
+        "SPEC",
+        dataclasses.replace(email_caller.SPEC, is_available=_avail),
+    )
+    tools, api = await build_agent_tools(
+        {"organization_id": str(uuid.uuid4()), **meta},
+        call_id=uuid.uuid4(),
+        hangup=None,
+        send_dtmf=None,
+    )
+    try:
+        return [t.info.name for t in tools]
+    finally:
+        if api is not None:
+            await api.aclose()
+
+
+async def test_email_caller_is_off_unless_the_agent_opted_in(db, monkeypatch) -> None:
+    assert "email_caller" not in await _email_caller_names(monkeypatch, {})
+    assert "email_caller" not in await _email_caller_names(
+        monkeypatch, {"email_caller_enabled": "true"}
+    )
+    assert "email_caller" in await _email_caller_names(
+        monkeypatch, {"email_caller_enabled": True}
+    )
+
+
+async def test_email_caller_comes_with_any_tools_list_but_not_none(
+    db, monkeypatch
+) -> None:
+    on = {"email_caller_enabled": True}
+    assert "email_caller" in await _email_caller_names(
+        monkeypatch, {**on, "tools": ["end_call"]}
+    )
+    assert await _email_caller_names(monkeypatch, {**on, "tools": []}) == []

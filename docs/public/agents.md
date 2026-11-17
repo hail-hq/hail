@@ -99,6 +99,39 @@ MCP: `create_agent(handover_contacts=[{"contact_id": "...", "note": "..."}])` se
   contact's side has spoken and stayed on the line for 10 seconds.
 - `PATCH` with `[]` clears the list; omit the field (or send `null`) to leave it.
 
+## Email the caller
+
+Let the agent email the person on a call something they asked for, such as a
+datasheet link or a short follow-up, at an address they say on the call.
+Off by default.
+
+```bash
+curl -X PATCH "$HAIL_API_URL/v1/agents/$AGENT_ID" -H "Authorization: Bearer $HAIL_API_KEY" \
+  -H 'Content-Type: application/json' -d '{"email_caller_enabled": true}'
+```
+
+CLI: `hail agents update <id> --email-caller` (`--email-caller=false` turns it off).
+MCP: `create_agent(email_caller_enabled=true)` or `update_agent(agent_id, email_caller_enabled=true)`.
+SDK: `client.agents.update(agent_id, email_caller_enabled=True)`.
+
+- The agent gets the `email_caller` tool on phone calls. It reads the address
+  back and sends only after the person says yes. `tools: []` turns it off with
+  every other tool; a `tools` list does not need to name it.
+- One recipient, no CC or BCC. Plain text and links, up to 2,000 characters;
+  no attachments.
+- At most 2 emails per call, both to the same address.
+- Sent from the same address as the agent's other email: your verified custom
+  domain (the oldest, if you have several), else your hail-mail address.
+- The same checks as any email: suppression list, bounce and complaint rules,
+  sending limits. Billed as a normal outbound email; with no credit it is not sent.
+- Each send adds an `email_caller` event to the call (`GET /v1/events?id=call:<call id>`, or `hail tail <call id>`)
+  with `email_id`, `to`, `subject` and `status`. The email itself is in
+  `GET /v1/emails` with the agent's `agent_id`.
+- The address is whatever the person says. Hail cannot prove it is theirs.
+- Turning it off applies at once, also to calls already in progress.
+
+Code: [`email_caller.py`](../../core/hailhq/core/agent_tools/email_caller.py).
+
 ## What happens on an inbound call
 
 1. The carrier sends the call to LiveKit. LiveKit creates a room and

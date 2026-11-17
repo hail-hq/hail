@@ -181,6 +181,7 @@ async def create_agent(
         voice_enabled=body.voice_enabled,
         sms_enabled=body.sms_enabled,
         email_enabled=body.email_enabled,
+        email_caller_enabled=body.email_caller_enabled,
         status=body.status,
     )
     db.add(agent)
@@ -272,6 +273,7 @@ async def update_agent(
         "voice_enabled",
         "sms_enabled",
         "email_enabled",
+        "email_caller_enabled",
         "status",
     ):
         if field in changes and changes[field] is None:

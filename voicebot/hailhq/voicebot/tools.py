@@ -17,7 +17,7 @@ import time
 from typing import Any
 from uuid import UUID
 
-from hailhq.core.agent_tools import hail_help, transfer_call
+from hailhq.core.agent_tools import email_caller, hail_help, transfer_call
 from hailhq.core.agent_tools.client import AgentApiClient
 from hailhq.core.agent_tools.registry import all_tools
 from hailhq.core.agent_tools.spec import SPOKEN_FALLBACK, ToolContext, ToolSpec
@@ -180,6 +180,10 @@ async def build_agent_tools(
     # `tools` list names it, so every call gets it here, as cancel_transfer is.
     if allowed != []:  # `tools: []` opts out of every tool
         specs.append(hail_help.SPEC)
+        # Opt-in per agent: only an explicit true turns it on. The API checks
+        # the agent's switch again before every send.
+        if metadata.get(email_caller.METADATA_KEY) is True:
+            specs.append(email_caller.SPEC)
     if not specs:
         return [], None
 

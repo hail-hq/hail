@@ -6364,6 +6364,14 @@ components:
           title: Email Enabled
           description: Answer email on addresses that route email to this agent.
           default: true
+        email_caller_enabled:
+          type: boolean
+          title: Email Caller Enabled
+          description:
+            Let the agent email the person on a call, at an address they
+            give and confirm on the call (links and short text only, at most 2 emails
+            per call). Off by default.
+          default: false
         status:
           type: string
           enum:
@@ -6490,6 +6498,13 @@ components:
           title: Email Enabled
           description: Whether the agent answers email.
           default: true
+        email_caller_enabled:
+          type: boolean
+          title: Email Caller Enabled
+          description:
+            Whether the agent may email the person on a call at an address
+            they confirm.
+          default: false
         status:
           type: string
           enum:
@@ -6628,6 +6643,14 @@ components:
             - type: "null"
           title: Email Enabled
           description: Whether the agent answers email.
+        email_caller_enabled:
+          anyOf:
+            - type: boolean
+            - type: "null"
+          title: Email Caller Enabled
+          description:
+            Whether the agent may email the person on a call at an address
+            they confirm.
         status:
           anyOf:
             - type: string
@@ -11127,7 +11150,8 @@ components:
         given_names:
           type: string
           title: Given Names
-          description: The given names of the person the document is about or addressed
+          description:
+            The given names of the person the document is about or addressed
             to, never a person who signs for the issuer.
         surnames:
           type: string
@@ -11148,8 +11172,9 @@ components:
         business_name:
           type: string
           title: Business Name
-          description: The name of the company the document is about or addressed to,
-            never the company that issued it.
+          description:
+            The name of the company the document is about or addressed
+            to, never the company that issued it.
       type: object
       required:
         - given_names

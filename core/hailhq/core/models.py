@@ -544,6 +544,11 @@ class Agent(Base):
     email_enabled: Mapped[bool] = mapped_column(
         Boolean, server_default=text("TRUE"), nullable=False
     )
+    # The email_caller tool: on a call, email the person on the line an
+    # address they give. Off by default.
+    email_caller_enabled: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("FALSE"), nullable=False
+    )
     status: Mapped[str] = mapped_column(Text, server_default="live", nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         TS, server_default=text("now()"), nullable=False

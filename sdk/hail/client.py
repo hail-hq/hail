@@ -862,12 +862,15 @@ class _AgentsResource:
         voice_enabled: bool = True,
         sms_enabled: bool = True,
         email_enabled: bool = True,
+        email_caller_enabled: bool = False,
         status: str = "live",
     ) -> AgentResponse:
         """Save an agent. Route a number to it with ``client.numbers.route``
         or place calls with ``client.calls.create(agent_id=...)``.
         ``ai_disclosure_line`` is a template; ``{org}`` becomes the
-        organization name. ``max_duration_seconds`` is 60..3600."""
+        organization name. ``max_duration_seconds`` is 60..3600.
+        ``email_caller_enabled`` lets the agent email the person on a call
+        at an address they confirm (off by default)."""
         body: dict[str, Any] = {
             "name": name,
             "system_prompt": system_prompt,
@@ -891,6 +894,8 @@ class _AgentsResource:
             body["tools"] = tools
         if max_duration_seconds is not None:
             body["max_duration_seconds"] = max_duration_seconds
+        if email_caller_enabled:
+            body["email_caller_enabled"] = True
         data = await self._http.request("POST", "/agents", json=body)
         return AgentResponse.model_validate(data)
 
@@ -903,9 +908,9 @@ class _AgentsResource:
         return AgentResponse.model_validate(data)
 
     async def update(self, agent_id: str | UUID, **fields: Any) -> AgentResponse:
-        """``PATCH /agents/{id}``: pass only the fields to change; ``None``
-        clears first_message, ai_disclosure_line, tools or
-        max_duration_seconds."""
+        """``PATCH /agents/{id}``: pass only the fields to change, for
+        example ``email_caller_enabled=True``; ``None`` clears
+        first_message, ai_disclosure_line, tools or max_duration_seconds."""
         data = await self._http.request("PATCH", f"/agents/{agent_id}", json=fields)
         return AgentResponse.model_validate(data)
 

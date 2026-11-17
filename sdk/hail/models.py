@@ -358,6 +358,7 @@ class AgentResponse(BaseModel):
     voice_enabled: bool = True
     sms_enabled: bool = True
     email_enabled: bool = True
+    email_caller_enabled: bool = False
     status: AgentStatus = "live"
     created_at: datetime
     updated_at: datetime

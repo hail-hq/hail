@@ -977,6 +977,14 @@ class AgentCreate(BaseModel):
         default=True,
         description="Answer email on addresses that route email to this agent.",
     )
+    email_caller_enabled: bool = Field(
+        default=False,
+        description=(
+            "Let the agent email the person on a call, at an address they "
+            "give and confirm on the call (links and short text only, at most "
+            "2 emails per call). Off by default."
+        ),
+    )
     status: AgentStatus = Field(
         default="live",
         description="'paused' agents do not answer; calls to their numbers fail with end_reason 'no_agent'.",
@@ -1053,6 +1061,10 @@ class AgentUpdate(BaseModel):
     email_enabled: bool | None = Field(
         default=None, description="Whether the agent answers email."
     )
+    email_caller_enabled: bool | None = Field(
+        default=None,
+        description="Whether the agent may email the person on a call at an address they confirm.",
+    )
     status: AgentStatus | None = Field(default=None, description="'live' or 'paused'.")
     handover_contacts: list[HandoverContactIn] | None = Field(
         default=None,
@@ -1099,6 +1111,10 @@ class AgentResponse(BaseModel):
     sms_enabled: bool = Field(description="Whether the agent answers texts.")
     email_enabled: bool = Field(
         default=True, description="Whether the agent answers email."
+    )
+    email_caller_enabled: bool = Field(
+        default=False,
+        description="Whether the agent may email the person on a call at an address they confirm.",
     )
     status: AgentStatus = Field(description="'live' or 'paused'.")
     handover_contacts: list[HandoverContactOut] = Field(
