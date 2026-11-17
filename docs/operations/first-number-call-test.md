@@ -40,7 +40,6 @@ Run it from a repo checkout. The script is
     AND NOT n.is_pool;
   SQL
   ```
-
 - The call reaches the customer's agent and shows in their call log. Get
   the customer's OK before you call: the script tells Hail the recipient
   agreed to the call (`recipient_consent: true`).

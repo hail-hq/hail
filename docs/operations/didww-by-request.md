@@ -77,7 +77,7 @@ no `e164` and a `quote_id`; `POST /numbers` refuses that offer.
 6. Tell the customer the number. It shows in **Console → Numbers**. The
    monthly fee renews like any other number; releasing
    it (`DELETE /v1/numbers/{id}`) terminates the DID.
-7. Run the first call test when this is the first number of its carrier,
+6. Run the first call test when this is the first number of its carrier,
    country or type ([first-number-call-test.md](first-number-call-test.md)).
 
 ## Routing a number by hand
