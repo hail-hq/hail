@@ -1572,8 +1572,11 @@ def _out(
             provider, SmsRegistrationProvider
         ) and provider.keeps_brand(refs)
     confirmation, step = _sms_progress(row, registry)
+    # Sealed answers need the key to read them back. Not decrypted here:
+    # this runs for every row of every list.
     kept = _number_answers_kept(row, datetime.now(timezone.utc)) and (
-        _unseal(row.provider_refs["application"]) is not None
+        "sealed" not in row.provider_refs["application"]
+        or bool(settings.hail_provider_secret_key)
     )
     return model.model_validate(row).model_copy(
         update={
@@ -2088,6 +2091,9 @@ class _Prepared(NamedTuple):
     # The name of each slot's file, as the customer sent it. Kept with the
     # file's copy; never sent to the carrier, never logged.
     names: dict[str, str]
+    # Resubmit: the kept file rows sent again, by slot. They move to the new
+    # filing instead of being copied.
+    reused: dict[str, UUID]
 
 
 async def _prepare_submission(
@@ -2376,6 +2382,7 @@ async def _prepare_submission(
         uploads=uploads,
         files=files,
         names=names,
+        reused={slot: row.id for slot, row in reused.items()},
     )
 
 
@@ -2576,6 +2583,19 @@ async def _file(
             )
         if source_id is not None:
             await _take_kept_answers(db, source_id)
+            if prepared.reused:
+                # The files sent again move to the new filing in the same
+                # commit, so no storage error can lose them.
+                await db.flush()
+                await db.execute(
+                    update(FileUpload)
+                    .where(
+                        FileUpload.id.in_(list(prepared.reused.values())),
+                        FileUpload.verification_id == source_id,
+                    )
+                    .values(verification_id=row.id)
+                    .execution_options(synchronize_session=False)
+                )
         await db.commit()
     except Exception as exc:
         # The carrier record exists but the row does not: remove it, or it
@@ -2700,7 +2720,8 @@ async def _keep_files(
             data=doc.file.data,
         )
         for slot, doc in prepared.documents.items()
-        if doc.file is not None
+        # A kept file sent again already belongs to this filing (_file).
+        if doc.file is not None and slot not in prepared.reused
     ]
     if not files:
         return
@@ -3960,8 +3981,30 @@ async def _number_application(
             ],
             "kept_until": row.created_at + REGISTRATION_KEPT_FOR,
             "quote_id": application.get("quote_id"),
+            "hold_cents": await _kept_hold(db, row, application.get("quote_id")),
         }
     )
+
+
+async def _kept_hold(
+    db: AsyncSession, row: CarrierVerification, quote_id: str | None
+) -> int | None:
+    """What a resubmit with the kept quote sets aside, as create does: setup
+    and the first month, nothing for a by-request offer. None when the quote
+    is gone."""
+    if not quote_id:
+        return None
+    offer = (
+        await db.execute(
+            select(NumberOffer.offer).where(
+                NumberOffer.id == UUID(quote_id),
+                NumberOffer.organization_id == row.organization_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if offer is None or offer.get("by_request"):
+        return None
+    return int(offer.get("setup_cents", 0)) + int(offer.get("monthly_cents", 0))
 
 
 @router.patch(
@@ -4153,7 +4196,7 @@ async def resubmit_verification(
       new one for a newer price, or when that offer is no longer sold (409).
 
     The purpose, country, number type and subject type stay as filed:
-    sending one of them is a 422. The new registration goes through every check of
+    sending one of them with another value is a 422. The new registration goes through every check of
     `POST /v1/verifications` (422, 402, 409, the credit set aside) and
     answers the same way, as a new verification with its own id. Once it is
     filed, the rejected one is dismissed (as `DELETE /v1/verifications/{id}`)
@@ -4169,8 +4212,16 @@ async def resubmit_verification(
     if not _number_answers_kept(source, datetime.now(timezone.utc)):
         raise _no_kept_answers()
     sent = await _parse_form(request)
+    filed = {
+        "purpose": "number",
+        "country_code": source.country_code,
+        "number_type": source.number_type,
+        "subject_type": source.subject_type,
+        "number_id": "",
+    }
     for key in _RESUBMIT_FIXED:
-        if _text_part(sent, key):
+        value = _text_part(sent, key)
+        if value and value.upper() != filed[key].upper():
             raise unprocessable(
                 f"{key} cannot be changed on a resubmit", loc=["body", key]
             )

@@ -614,12 +614,64 @@ async def test_a_resubmit_ignores_the_deprecated_provider_part(
     assert resp.status_code == 201, resp.text
 
 
-async def test_unreadable_answers_are_not_offered_for_a_resubmit(
+async def test_answers_sealed_without_a_key_now_are_not_offered(
     client, org_and_key, carrier, store, async_session, monkeypatch
 ) -> None:
+    """The key was removed: the list says so without decrypting each row (a
+    changed key shows up as 404 on the read and the resubmit)."""
     monkeypatch.setattr(settings, "hail_provider_secret_key", generate_key())
     _, _, key = org_and_key
     vid = await _rejected(client, key, carrier)
-    monkeypatch.setattr(settings, "hail_provider_secret_key", generate_key())
+    monkeypatch.setattr(settings, "hail_provider_secret_key", "")
     body = (await client.get(f"/verifications/{vid}", headers=_auth(key))).json()
     assert body["resubmittable"] is False and body["kept_until"] is None
+
+
+async def test_a_resubmit_moves_the_reused_files_to_the_new_filing(
+    client, org_and_key, carrier, store, async_session
+) -> None:
+    """No copy, so a storage error during the resubmit cannot lose them."""
+    _, _, key = org_and_key
+    vid = await _rejected(client, key, carrier)
+    [before] = await _kept(async_session, vid)
+    store.fail_put = True
+    resp = await client.post(
+        f"/verifications/{vid}/resubmit",
+        files={"_": (None, "1")},
+        headers=_auth(key),
+    )
+    assert resp.status_code == 201, resp.text
+    [after] = await _kept(async_session, resp.json()["id"])
+    assert after.id == before.id and store.objects[after.s3_key]
+
+
+async def test_a_resubmit_accepts_the_parts_as_filed(
+    client, org_and_key, carrier, store, async_session
+) -> None:
+    _, _, key = org_and_key
+    vid = await _rejected(client, key, carrier)
+    resp = await client.post(
+        f"/verifications/{vid}/resubmit",
+        data={"country_code": "gb", "subject_type": "person", "purpose": "number"},
+        files={"_": (None, "1")},
+        headers=_auth(key),
+    )
+    assert resp.status_code == 201, resp.text
+
+
+async def test_the_saved_answers_name_the_credit_set_aside(
+    client, org_and_key, carrier, store, async_session
+) -> None:
+    _, _, key = org_and_key
+    vid = await _rejected(client, key, carrier)
+    body = (
+        await client.get(f"/verifications/{vid}/application", headers=_auth(key))
+    ).json()
+    offer = (
+        await async_session.execute(
+            select(NumberOffer.offer).where(
+                NumberOffer.id == uuid.UUID(body["quote_id"])
+            )
+        )
+    ).scalar_one()
+    assert body["hold_cents"] == offer["setup_cents"] + offer["monthly_cents"]

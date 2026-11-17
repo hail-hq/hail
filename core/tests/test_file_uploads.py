@@ -16,8 +16,9 @@ from hailhq.core.file_uploads import (
     object_key,
     valid_content_type,
 )
-from hailhq.core.models import FileUpload
+from hailhq.core.models import CarrierVerification, FileUpload
 from hailhq.core.s3_mail import S3MailClient
+from sqlalchemy import select
 
 
 @pytest.mark.parametrize(
@@ -167,3 +168,38 @@ async def test_failed_storage_write_leaves_a_tracked_unused_upload(async_session
         tracked = await other.get(FileUpload, row.id)
         assert tracked is not None and tracked.first_used_at is None
         assert tracked.uploaded_at is not None
+
+
+async def test_a_failed_keep_deletes_only_the_files_not_written() -> None:
+    """The copies already written stay kept."""
+    store = AsyncMock()
+    store.put_attachment.side_effect = [None, RuntimeError("s3 down")]
+    org = uuid4()
+    async with session_scope() as db:
+        row = CarrierVerification(
+            organization_id=org,
+            provider="twilio",
+            country_code="GB",
+            number_type="mobile",
+            subject_type="person",
+            state="rejected",
+            requirements_version="v1",
+        )
+        db.add(row)
+        await db.commit()
+        files = [
+            file_uploads.KeptFile("a", "a.jpg", "image/jpeg", b"\xff\xd8a"),
+            file_uploads.KeptFile("b", "b.jpg", "image/jpeg", b"\xff\xd8b"),
+        ]
+        with pytest.raises(RuntimeError):
+            await file_uploads.keep_verification_files(db, store, org, row.id, files)
+        kept = (
+            (
+                await db.execute(
+                    select(FileUpload.slot).where(FileUpload.verification_id == row.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert kept == ["a"]

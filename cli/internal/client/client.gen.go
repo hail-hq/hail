@@ -3530,6 +3530,9 @@ type SmsApplicationResponse struct {
 	// Files Number registration only: the files Hail keeps, by slot. A resubmit reuses each one unless you send a new file for its slot.
 	Files *[]KeptFileInfo `json:"files,omitempty"`
 
+	// HoldCents Number registration only: the credit a resubmit with that quote sets aside (its setup and first month). Null when nothing is set aside or the quote is gone.
+	HoldCents *int `json:"hold_cents,omitempty"`
+
 	// KeptUntil Number registration only: when Hail deletes these answers and files.
 	KeptUntil *time.Time `json:"kept_until,omitempty"`
 

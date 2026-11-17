@@ -267,16 +267,16 @@ What Hail keeps, from the moment of `POST /verifications`:
 
 When it is deleted (whichever comes first):
 
-| Trigger                             | Answers                                                                  | Files                                                                           |
-| ----------------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------- |
-| 30 days after submit (`created_at`) | Background pass (`forget_kept_registrations`). Reads return 404 at once. | Background pass.                                                                |
-| Carrier approves                    | At once (`_apply_status`).                                               | Right after that commit (`_refresh`); the background pass retries.              |
-| Customer cancels (`DELETE`)         | At once (`_wiped_refs`).                                                 | Right after the cancel; the background pass retries.                            |
-| Resubmit filed                      | Moved to the new row in the same commit.                                 | Old row's files deleted after the new filing; the new row keeps its own copies. |
-| Account close                       | `POST /internal/org-closures` and every pass.                            | Same.                                                                           |
-| Backstop                            | none                                                                     | S3 lifecycle rule `expire-verification-kept`: 32 days.                          |
+| Trigger                             | Answers                                                                  | Files                                                                                                                          |
+| ----------------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| 30 days after submit (`created_at`) | Background pass (`forget_kept_registrations`). Reads return 404 at once. | Background pass.                                                                                                               |
+| Carrier approves                    | At once (`_apply_status`).                                               | Right after that commit (`_refresh`); the background pass retries.                                                             |
+| Customer cancels (`DELETE`)         | At once (`_wiped_refs`).                                                 | Right after the cancel; the background pass retries.                                                                           |
+| Resubmit filed                      | Moved to the new row in the same commit.                                 | Files sent again move to the new row in the same commit (no copy). The old row's other files are deleted after the new filing. |
+| Account close                       | `POST /internal/org-closures` and every pass.                            | Same.                                                                                                                          |
+| Backstop                            | none                                                                     | S3 lifecycle rule `expire-verification-kept`: 32 days.                                                                         |
 
-A rejection (carrier, carrier refusal of the draft, or superadmin) keeps both. The background pass runs every `HAIL_VERIFICATION_POLL_SECONDS` (600 s). A failed S3 delete keeps the row and is retried on the next pass. A failed S3 write at submit only logs (`could not keep the files of verification <id>`); the filing goes ahead and the customer adds the files again on a resubmit. No value or file name is ever logged.
+A rejection (carrier, carrier refusal of the draft, or superadmin) keeps both. The background pass runs every `HAIL_VERIFICATION_POLL_SECONDS` (600 s). A failed S3 delete keeps the row and is retried on the next pass. A failed S3 write at submit only logs (`could not keep the files of verification <id>`); the files written before it stay kept, the filing goes ahead, and the customer adds the missing files again on a resubmit. No value or file name is ever logged.
 
 Resubmit rules ([`resubmit_verification`](../../api/hailhq/api/routes/verifications.py)):
 
@@ -285,7 +285,7 @@ Resubmit rules ([`resubmit_verification`](../../api/hailhq/api/routes/verificati
 - `purpose`, `country_code`, `number_type`, `subject_type`, `number_id` cannot change (422). `provider` is ignored, as on `POST /verifications`.
 - The new filing runs every check of `POST /verifications` (422, 402 credit hold, 409). Nothing changes on the old row unless the new one is saved. Then the old row is dismissed like `DELETE` (carrier draft discarded); if the carrier is down, it stays `rejected` with nothing kept.
 - Two resubmits at once: the first to commit takes the answers; the other gets 409 and its carrier draft is discarded.
-- `GET /verifications/{id}/application` returns the kept answers and file names (never the bytes), `Cache-Control: no-store`. MCP: `get_sms_application`, `resubmit_verification`.
+- `GET /verifications/{id}/application` returns the kept answers, file names (never the bytes), `quote_id` and `hold_cents` (what a resubmit sets aside), `Cache-Control: no-store`. MCP: `get_sms_application`, `resubmit_verification`.
 
 Support resubmits for a customer with the same call, using an API key of the customer's workspace (the console uses "Fix and resubmit" on the rejected row). Find kept rows:
 

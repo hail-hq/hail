@@ -173,8 +173,9 @@ async def keep_verification_files(
 
     Each row is committed first with ``uploaded_at`` null, so a crash after
     the S3 write leaves a row the worker cleans up; ``uploaded_at`` is set
-    once the object is written. A failed write deletes its row again and
-    raises: the caller decides what a failure means. Never logs a name."""
+    once the object is written. A failed write deletes its row and the rows
+    not written yet, keeps the ones written, and raises: the caller decides
+    what a failure means. Never logs a name."""
     # Here, not at the top: hailhq.core.models imports this module.
     from hailhq.core.models import FileUpload
 
@@ -211,7 +212,8 @@ async def keep_verification_files(
             kept += 1
     except Exception:
         await db.rollback()
-        await delete_kept_files(db, s3, [row.id for row, _ in rows])
+        # Only the files not written: the ones written stay kept.
+        await delete_kept_files(db, s3, [row.id for row, _ in rows[kept:]])
         raise
     return kept
 

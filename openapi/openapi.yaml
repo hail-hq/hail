@@ -6063,13 +6063,13 @@ paths:
         \ to verify for. Default: the quote of the\n  rejected filing, which Hail\
         \ keeps while the answers are kept. Pass a\n  new one for a newer price, or\
         \ when that offer is no longer sold (409).\n\nThe purpose, country, number\
-        \ type and subject type stay as filed:\nsending one of them is a 422. The\
-        \ new registration goes through every check of\n`POST /v1/verifications` (422,\
-        \ 402, 409, the credit set aside) and\nanswers the same way, as a new verification\
-        \ with its own id. Once it is\nfiled, the rejected one is dismissed (as `DELETE\
-        \ /v1/verifications/{id}`)\nand its kept answers and files are deleted. Only\
-        \ one resubmit of a\nregistration can succeed; another one sent at the same\
-        \ time is a 409."
+        \ type and subject type stay as filed:\nsending one of them with another value\
+        \ is a 422. The new registration goes through every check of\n`POST /v1/verifications`\
+        \ (422, 402, 409, the credit set aside) and\nanswers the same way, as a new\
+        \ verification with its own id. Once it is\nfiled, the rejected one is dismissed\
+        \ (as `DELETE /v1/verifications/{id}`)\nand its kept answers and files are\
+        \ deleted. Only one resubmit of a\nregistration can succeed; another one sent\
+        \ at the same time is a 409."
       operationId: resubmit_verification
       parameters:
         - name: verification_id
@@ -10324,6 +10324,15 @@ components:
             "Number registration only: the quote it was filed for. It keeps
             working with GET /v1/verifications/requirements and the resubmit while
             the answers are kept."
+        hold_cents:
+          anyOf:
+            - type: integer
+            - type: "null"
+          title: Hold Cents
+          description:
+            "Number registration only: the credit a resubmit with that
+            quote sets aside (its setup and first month). Null when nothing is set
+            aside or the quote is gone."
       type: object
       required:
         - subject_type

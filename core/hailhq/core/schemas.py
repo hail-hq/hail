@@ -3162,6 +3162,14 @@ class SmsApplicationResponse(BaseModel):
             "while the answers are kept."
         ),
     )
+    hold_cents: int | None = Field(
+        default=None,
+        description=(
+            "Number registration only: the credit a resubmit with that quote "
+            "sets aside (its setup and first month). Null when nothing is set "
+            "aside or the quote is gone."
+        ),
+    )
 
 
 class SmsApplicationAmendRequest(BaseModel):
