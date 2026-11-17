@@ -47,6 +47,8 @@ Exposes the following tools to the calling agent:
   wrong document type, a name that differs from the printed one)
 * ``submit_verification`` — send the user's details and documents to the
   carrier (irreversible once submitted; needs ``attest_authorized=True``)
+* ``resubmit_verification`` — file a rejected number registration again from
+  the answers and files Hail kept, with fixes (needs ``attest_authorized=True``)
 * ``list_verifications`` — the org's verifications and their states
 * ``get_verification`` — one verification; poll or repair its reported step
 * ``get_sms_application`` — read the saved application or recover the original sender
@@ -1436,6 +1438,86 @@ async def submit_verification(
         return {
             "error": "unexpected error; the submission may have gone through. "
             "Call list_verifications to check before submitting again."
+        }
+
+
+async def resubmit_verification(
+    *,
+    client: HailClient,
+    verification_id: str,
+    attest_authorized: bool,
+    fields: Any = None,
+    documents: Any = None,
+    files: Any = None,
+    address: Any = None,
+    quote_id: str | None = None,
+) -> dict[str, Any]:
+    verification_id_ = _as_uuid(verification_id)
+    if verification_id_ is None:
+        return _not_uuid("verification_id")
+    if attest_authorized is not True:
+        return {
+            "error": "attest_authorized must be true. Pass true only if the "
+            "person or company in these details asked to send them again and "
+            "agreed to the changes in this conversation. Nothing was sent."
+        }
+    if quote_id is not None and _as_uuid(quote_id) is None:
+        return {"error": "quote_id must be a UUID. Nothing was sent."}
+    shape_error = _verification_shape_error(
+        {} if fields is None else fields,
+        {} if documents is None else documents,
+        [] if files is None else files,
+        address,
+    )
+    if shape_error:
+        return {"error": f"{shape_error}. Nothing was sent."}
+    details_bytes = _details_bytes(fields or {}, address or {}, documents or {})
+    if details_bytes is None or details_bytes > _VERIFICATION_MAX_DETAILS_BYTES:
+        return {
+            "error": "fields, address and documents must be valid JSON text of "
+            f"at most {_VERIFICATION_MAX_DETAILS_BYTES} bytes. Nothing was sent."
+        }
+    # Without ``documents`` the kept ones name the slots, so a replaced
+    # file's slot is checked by the API. With them, each file's slot must be
+    # one of them, as in ``submit_verification``.
+    slots = (
+        {
+            entry["slot"]: {}
+            for entry in files or []
+            if isinstance(entry, dict) and isinstance(entry.get("slot"), str)
+        }
+        if documents is None
+        else {}
+    )
+    error, decoded, uploads = _check_verification_files(
+        files or [], {**slots, **(documents or {})}
+    )
+    if error:
+        return {"error": f"{error}. Nothing was sent."}
+    try:
+        return _without_carrier(
+            await client.resubmit_verification(
+                verification_id_,
+                fields=fields,
+                documents=documents,
+                files=decoded,
+                address=address,
+                quote_id=quote_id,
+                uploads=uploads,
+            )
+        )
+    except httpx.TransportError:
+        return {
+            "error": "request timed out; the resubmit may have gone through. "
+            "Call list_verifications to check before sending it again."
+        }
+    except HailAPIError as exc:
+        return _submit_error(exc)
+    except Exception:
+        # No exception text: it could carry a request or response body.
+        return {
+            "error": "unexpected error; the resubmit may have gone through. "
+            "Call list_verifications to check before sending it again."
         }
 
 
@@ -3691,6 +3773,80 @@ def register_tools(
             return {"error": "could not authenticate the request"}
 
     @mcp_app.tool(
+        name="resubmit_verification",
+        title="Fix and resubmit a verification",
+        annotations=ToolAnnotations(
+            title="Fix and resubmit a verification",
+            readOnlyHint=False,
+            destructiveHint=True,
+            idempotentHint=False,
+            openWorldHint=True,
+        ),
+    )
+    async def resubmit_verification_tool(
+        ctx: Context,
+        verification_id: Annotated[
+            str,
+            _d(
+                "ID of a rejected number registration with "
+                "``resubmittable: true``, from ``list_verifications``."
+            ),
+        ],
+        attest_authorized: Annotated[StrictBool, _ATTEST_AUTHORIZED],
+        fields: Annotated[
+            _JsonObject | None,
+            _d("All form fields, replacing the kept ones. Null keeps them."),
+        ] = None,
+        documents: Annotated[
+            _JsonObject | None,
+            _d(
+                "All document slots ``{slot: {option, fields}}``, replacing the "
+                "kept ones. Null keeps them."
+            ),
+        ] = None,
+        files: Annotated[
+            _VERIFICATION_FILES_LIST | None,
+            _d(
+                "Only the files that replace kept ones, in the "
+                "``submit_verification`` format. A slot not listed reuses its "
+                "kept file."
+            ),
+        ] = None,
+        address: Annotated[_ADDRESS_OR_NULL, _VERIFICATION_ADDRESS] = None,
+        quote_id: Annotated[
+            str | None,
+            _UUID_OR_NULL,
+            _d("A new offer, for when the kept quote is gone (404). Null reuses it."),
+        ] = None,
+    ) -> dict[str, Any]:
+        """File a rejected number registration again, with fixes, from what Hail kept.
+
+        Hail keeps a number registration's answers and files for 30 days after
+        submit (``kept_until``); ``get_sms_application`` returns the kept answers
+        and file names. Each argument given replaces its kept value; the rest
+        are reused. Country, number type and subject type stay as filed.
+
+        Irreversible once sent: it files a new registration (a new ``id``) with
+        the same credit rules as ``submit_verification``, and dismisses the
+        rejected one. Returns the new registration, or an error with
+        ``problems`` when nothing was sent."""
+        try:
+            async with _client_for(ctx, mode=mode, singleton=singleton) as client:
+                return await resubmit_verification(
+                    client=client,
+                    verification_id=verification_id,
+                    attest_authorized=attest_authorized,
+                    fields=fields,
+                    documents=documents,
+                    files=files,
+                    address=address,
+                    quote_id=quote_id,
+                )
+        except RuntimeError:
+            # Not the exception text: it must never carry submitted values.
+            return {"error": "could not authenticate the request"}
+
+    @mcp_app.tool(
         name="list_verifications",
         title="List verifications",
         annotations=ToolAnnotations(
@@ -3778,15 +3934,19 @@ def register_tools(
         verification_id: Annotated[
             str,
             _d(
-                "ID of the original SMS registration, including one needing "
-                "corrections, from ``list_verifications`` with purpose ``sms``."
+                "ID of the original registration, from ``list_verifications``: "
+                "an SMS one, including one needing corrections, or a rejected "
+                "number one."
             ),
         ],
     ) -> dict[str, Any]:
-        """Read saved answers for an existing workspace SMS registration.
+        """Read saved answers for an existing workspace registration.
 
         Returns private applicant fields, address and available sender information.
         An older application without saved answers returns 404.
+        A number registration (``purpose="number"``) returns its kept answers,
+        ``documents`` and the kept ``files`` by name (without their bytes) until
+        ``kept_until``; ``resubmit_verification`` files it again from them.
         This read can recover an existing sender's details but creates no brand and files no campaign.
         Corrections retain the existing registration and its paid identity."""
         try:

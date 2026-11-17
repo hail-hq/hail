@@ -5553,6 +5553,17 @@ paths:
 
         submitted to the carrier for its review; read it back to follow the state.
 
+
+        For a number registration Hail keeps your answers (fields, address,
+
+        document options) and an encrypted copy of each file for 30 days after
+
+        submit, so a rejected filing can be fixed and sent again
+
+        (`POST /v1/verifications/{id}/resubmit`). They are deleted sooner when
+
+        the registration is approved or cancelled, or the account closes.
+
         A `provider` part is deprecated and ignored: Hail picks the carrier.'
       operationId: create_verification
       parameters:
@@ -5802,7 +5813,9 @@ paths:
 
         held or charged, and uploads are not used up. The files are read by an
 
-        AI model (Anthropic) for this check only."
+        Anthropic AI model, on AWS (Amazon Bedrock) or Anthropic's API, for this
+
+        check only."
       operationId: check_verification_documents
       parameters:
         - name: authorization
@@ -5863,9 +5876,9 @@ paths:
 
         `documents.<slot>.read` (the `documents.<slot>` that check returned).
 
-        Only slots with a read are checked. Returns the `name` and
+        Only slots with a read are checked. Returns the `name`, `document_type`
 
-        `document_type` warnings that check would give for this form. No file is
+        and `expired` warnings that check would give for this form. No file is
 
         sent, no AI model runs, no daily read is used, and nothing is saved."
       operationId: check_verification_document_cautions
@@ -6010,7 +6023,16 @@ paths:
 
         cancelled sooner is still charged for that many months (prices: see the
 
-        console)."
+        console).
+
+
+        When the carrier is down or rate-limits the delete, the call answers
+
+        503 and changes nothing: try again later. When the carrier refuses the
+
+        delete, the verification is cancelled in Hail all the same and Hail's
+
+        fees stop as above."
       operationId: cancel_verification
       parameters:
         - name: verification_id
@@ -6068,11 +6090,29 @@ paths:
         - verifications
       summary: Get Verification Application
       description:
-        "Read your organization's saved SMS answers, including after rejection.
+        "Read your organization's saved answers, including after rejection.
 
-        Answers of a cancelled or rejected registration are kept for 30 days
 
-        after it ended; after that this returns 404.
+        A number registration (`purpose=number`) keeps its answers (fields,
+
+        address, document options) and its files for 30 days after submit, so a
+
+        rejected filing can be fixed and sent again
+
+        (`POST /v1/verifications/{id}/resubmit`). They are deleted sooner when
+
+        it is approved or cancelled, or the account closes; then this returns
+
+        404. `files` lists the kept files by name; their bytes are never
+
+        returned.
+
+
+        For US texting (`purpose=sms`): answers of a cancelled or rejected
+
+        registration are kept for 30 days after it ended; after that this
+
+        returns 404.
 
 
         Older applications may recover their verified sender identity through
@@ -6199,6 +6239,95 @@ paths:
               description: Seconds until the current window resets.
               schema:
                 type: integer
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /v1/verifications/{verification_id}/resubmit:
+    post:
+      tags:
+        - verifications
+      summary: Resubmit Verification
+      description:
+        "Fix a rejected number registration and file it again\n(multipart/form-data),\
+        \ without typing everything again.\n\nHail keeps a number registration's answers\
+        \ and files for 30 days after\nsubmit (`kept_until` on the verification; read\
+        \ them with\n`GET /v1/verifications/{id}/application`). This files a new\n\
+        registration from them, with your changes. Every part is optional:\n\n* `fields`\
+        \ (JSON object), `address` (JSON object) and `documents` (JSON\n  object:\
+        \ slot name to `{\"option\": ..., \"fields\": {...}}`) each replace\n  the\
+        \ kept value whole when sent;\n* `file.<slot>`, or `upload.<slot>` (an upload\
+        \ id, as in\n  `POST /v1/verifications`), replaces the kept file of that slot.\
+        \ A slot\n  with no new file reuses the kept one, while it keeps the document\n\
+        \  `option` it was filed with (a new option needs a new file). A kept\n  file\
+        \ whose slot is no longer in `documents` is not sent;\n* `quote_id`: the offer\
+        \ to verify for. Default: the quote of the\n  rejected filing, which Hail\
+        \ keeps while the answers are kept. Pass a\n  new one for a newer price, or\
+        \ when that offer is no longer sold (409).\n\nThe purpose, country, number\
+        \ type and subject type stay as filed:\nsending one of them with another value\
+        \ is a 422. The new registration goes through every check of\n`POST /v1/verifications`\
+        \ (422, 402, 409, the credit set aside) and\nanswers the same way, as a new\
+        \ verification with its own id. Once it is\nfiled, the rejected one is dismissed\
+        \ (as `DELETE /v1/verifications/{id}`)\nand its kept answers and files are\
+        \ deleted. Only one resubmit of a\nregistration can succeed; another one sent\
+        \ at the same time is a 409."
+      operationId: resubmit_verification
+      parameters:
+        - name: verification_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Verification Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "201":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerificationResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "402":
+          description:
+            Not enough credit for the offer's setup and first month. Nothing
+            is filed and the rejected registration is unchanged.
+        "404":
+          description: Not found, or Hail no longer keeps its answers.
+        "409":
+          description:
+            Not a rejected number registration, or it was already sent
+            again. Nothing is filed.
         "422":
           description: Validation Error
           content:
@@ -9296,6 +9425,48 @@ components:
         - phone_e164
         - note
       title: HandoverContactOut
+    KeptDocumentAnswer:
+      properties:
+        option:
+          type: string
+          title: Option
+          description: The document option chosen.
+          default: ""
+        fields:
+          additionalProperties:
+            type: string
+          type: object
+          title: Fields
+          description: The document's typed fields.
+      type: object
+      title: KeptDocumentAnswer
+      description: A document slot's saved choice on a number registration.
+    KeptFileInfo:
+      properties:
+        slot:
+          type: string
+          title: Slot
+          description: The document slot it was filed for.
+        filename:
+          type: string
+          title: Filename
+          description: The file name as it was sent.
+        content_type:
+          type: string
+          title: Content Type
+          description: "'image/jpeg', 'image/png' or 'application/pdf'."
+        size_bytes:
+          type: integer
+          title: Size Bytes
+          description: Size in bytes.
+      type: object
+      required:
+        - slot
+        - filename
+        - content_type
+        - size_bytes
+      title: KeptFileInfo
+      description: A file Hail keeps for a resubmit. The bytes are never returned.
     LLMConfig:
       properties:
         base_url:
@@ -10319,14 +10490,63 @@ components:
             - $ref: "#/components/schemas/Address"
             - type: "null"
           description: Original sender address, when available.
+        documents:
+          anyOf:
+            - additionalProperties:
+                $ref: "#/components/schemas/KeptDocumentAnswer"
+              type: object
+            - type: "null"
+          title: Documents
+          description:
+            "Number registration only: each document slot's option and
+            fields, by slot name. Null for US texting."
+        files:
+          items:
+            $ref: "#/components/schemas/KeptFileInfo"
+          type: array
+          title: Files
+          description:
+            "Number registration only: the files Hail keeps, by slot. A
+            resubmit reuses each one unless you send a new file for its slot."
+        kept_until:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: "null"
+          title: Kept Until
+          description:
+            "Number registration only: when Hail deletes these answers
+            and files."
+        quote_id:
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
+          title: Quote Id
+          description:
+            "Number registration only: the quote it was filed for. It keeps
+            working with GET /v1/verifications/requirements and the resubmit while
+            the answers are kept."
+        hold_cents:
+          anyOf:
+            - type: integer
+            - type: "null"
+          title: Hold Cents
+          description:
+            "Number registration only: the credit a resubmit with that
+            quote sets aside (its setup and first month). Null when nothing is set
+            aside or the quote is gone."
       type: object
       required:
         - subject_type
         - fields
       title: SmsApplicationResponse
       description:
-        Private submitted SMS answers, or verified sender details for an
-        old filing.
+        "Private saved answers of a registration: a US texting application
+
+        (or verified sender details for an old filing), or a number
+
+        registration kept for a resubmit."
     SmsCreate:
       properties:
         recipient_consent:
@@ -10972,14 +11192,40 @@ components:
             - $ref: "#/components/schemas/VerificationPrintedName"
             - type: "null"
           description: The name printed on the file, or null (no name check).
+        expiry_date:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Expiry Date
+          description:
+            The expiry date read from the file (YYYY-MM-DD), or null (no
+            expiry check).
+        none_of_types:
+          type: boolean
+          title: None Of Types
+          description:
+            True when the file looked like none of the slot's document
+            types.
+          default: false
+        file_slot:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: File Slot
+          description:
+            "The slot whose file this was read from. Slots with the same
+            `file_slot` get one name check per box, as in the document check. Null:
+            slots with the same printed name count as one file."
       type: object
       title: VerificationDocumentCautionRead
       description:
         "A slot's earlier read, as `POST /verifications/document-check`
 
-        returned it in `documents.<slot>`. Only `option` and `printed_name` are
+        returned it in `documents.<slot>`. Send that whole object: `option`,
 
-        used; the other keys of that object may be sent and are ignored."
+        `printed_name`, `expiry_date`, `none_of_types` and `file_slot` are used;
+
+        the other keys may be sent and are ignored."
     VerificationDocumentCautionsRequest:
       properties:
         quote_id:
@@ -11038,8 +11284,8 @@ components:
           type: array
           title: Warnings
           description:
-            "`name` and `document_type` warnings: the typed form against
-            the earlier reads. Empty when nothing differs."
+            "`name`, `document_type` and `expired` warnings: the typed
+            form and chosen types against the earlier reads. Empty when nothing differs."
       type: object
       required:
         - warnings
@@ -11134,6 +11380,22 @@ components:
           description:
             "Why the file was not read, when Hail chose not to: 'daily_limit'
             when the workspace has used today's document reads. Null otherwise."
+        none_of_types:
+          type: boolean
+          title: None Of Types
+          description:
+            True when the file was read and looks like none of the slot's
+            document types (`option` is then null).
+          default: false
+        file_slot:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: File Slot
+          description:
+            "The slot whose file this was read from: this slot, or the
+            slot whose file covers it. Slots with the same `file_slot` share one file.
+            Null when not read."
       type: object
       required:
         - read
@@ -11182,11 +11444,13 @@ components:
         given_names:
           type: string
           title: Given Names
-          description: A person's given names.
+          description:
+            The given names of the person the document is about or addressed
+            to, never a person who signs for the issuer.
         surnames:
           type: string
           title: Surnames
-          description: A person's surnames.
+          description: That person's surnames.
         latin_given_names:
           type: string
           title: Latin Given Names
@@ -11202,7 +11466,9 @@ components:
         business_name:
           type: string
           title: Business Name
-          description: A company's name.
+          description:
+            The name of the company the document is about or addressed to,
+            never the company that issued it.
       type: object
       required:
         - given_names
@@ -11405,6 +11671,25 @@ components:
           description:
             True when `DELETE /v1/verifications/{id}` accepts this verification
             now.
+          default: false
+        kept_until:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: "null"
+          title: Kept Until
+          description:
+            "For a number registration: when Hail deletes the answers and
+            files it keeps so the filing can be fixed and sent again (30 days after
+            submit). They go sooner when it is approved or cancelled, or the account
+            closes. Null when nothing is kept."
+        resubmittable:
+          type: boolean
+          title: Resubmittable
+          description:
+            "True when `POST /v1/verifications/{id}/resubmit` accepts this
+            verification now: a rejected number registration whose answers are still
+            kept (`kept_until`)."
           default: false
         identity_confirmed:
           type: boolean

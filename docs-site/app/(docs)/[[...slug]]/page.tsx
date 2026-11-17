@@ -5,6 +5,8 @@ import { notFound } from "next/navigation";
 import { getMDXComponents } from "@/mdx-components";
 import { source } from "@/lib/source";
 import { docsPath, pageMetadata } from "../../../../shared/site-metadata";
+import { JsonLd } from "../../../../shared/JsonLd";
+import { articleSchema } from "../../../../shared/structured-data";
 
 export default async function Page(props: {
   params: Promise<{ slug?: string[] }>;
@@ -16,6 +18,15 @@ export default async function Page(props: {
   const MDX = page.data.body;
   return (
     <DocsPage toc={page.data.toc} full={page.data.full}>
+      <JsonLd
+        data={articleSchema({
+          title: page.data.title,
+          description:
+            page.data.description ?? `Read the Hail guide: ${page.data.title}.`,
+          path: docsPath(page.url),
+          image: "/docs/opengraph-image",
+        })}
+      />
       {/* No DocsTitle here on purpose: every file in docs/public/ opens with
           its own `# H1`, which also has to render correctly on GitHub. Adding
           the title component would print the heading twice. */}

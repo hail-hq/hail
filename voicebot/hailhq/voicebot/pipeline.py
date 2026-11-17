@@ -58,7 +58,6 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import logging
-import re
 from collections.abc import AsyncIterable
 from typing import Any
 from uuid import UUID
@@ -75,6 +74,7 @@ from hailhq.core.languages import (
 )
 from hailhq.core.provider_config import load_org_provider_configs, provider_cipher
 from hailhq.core.providers.llm.bedrock import bedrock_client, is_bedrock_client
+from hailhq.core.providers.llm.thinking import thinking_off
 from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
 from livekit.agents import (
     AgentSession,
@@ -219,43 +219,6 @@ def decrypt_llm_metadata(llm_cfg: dict[str, Any] | None) -> dict[str, Any] | Non
     return llm_cfg
 
 
-# How each model turns thinking off. Sonnet 5.5 rejects ``disabled`` and
-# takes ``between_tools``; Opus 5.5 cannot turn it off (None leaves it on).
-# Keys are first-party ids; ``_base_model_id`` maps a Bedrock id onto them.
-_THINKING_OFF: dict[str, dict[str, str] | None] = {
-    "claude-sonnet-5-5": {"type": "between_tools"},
-    "claude-haiku-5-5": {"type": "disabled"},
-    "claude-opus-5-5": None,
-}
-
-
-def _base_model_id(model: str) -> str:
-    """``eu.anthropic.claude-sonnet-5-5-v1:0`` -> ``claude-sonnet-5-5``: drop
-    the region prefix, ``anthropic.``, a date (``-20260101``) and the
-    version suffix."""
-    base = model.rsplit("anthropic.", 1)[-1]
-    return re.sub(r"(-\d{8})?(-v\d+)?(:\d+)?$", "", base)
-
-
-_warned_models: set[str] = set()
-
-
-def _thinking_off(model: str) -> dict[str, str] | None:
-    """The model's thinking-off setting. An id missing from the table gets
-    ``disabled`` and one warning: a check must never stop the voicebot."""
-    base = _base_model_id(model)
-    if base in _THINKING_OFF:
-        return _THINKING_OFF[base]
-    if base not in _warned_models:
-        _warned_models.add(base)
-        logger.warning(
-            "model %r has no entry in _THINKING_OFF "
-            "(voicebot/hailhq/voicebot/pipeline.py); using thinking disabled",
-            model,
-        )
-    return {"type": "disabled"}
-
-
 class _FastAnthropicLLM(anthropic_plugin.LLM):
     """Thinking off where the model allows it, and low effort on every
     request: a voice turn needs the first word fast, and the call's turns
@@ -272,7 +235,7 @@ class _FastAnthropicLLM(anthropic_plugin.LLM):
 
     def chat(self, *, extra_kwargs: Any = NOT_GIVEN, **kwargs: Any) -> Any:
         extra = dict(extra_kwargs) if is_given(extra_kwargs) else {}
-        thinking = _thinking_off(self.model)
+        thinking = thinking_off(self.model)
         if thinking is not None:
             extra.setdefault("thinking", thinking)
         extra.setdefault("output_config", {"effort": "low"})

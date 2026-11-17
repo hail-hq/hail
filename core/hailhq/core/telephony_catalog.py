@@ -15,10 +15,12 @@ from functools import lru_cache
 from pathlib import Path
 
 __all__ = [
+    "business_only",
     "by_request_row",
     "capabilities",
     "effective_capabilities",
     "monthly_price",
+    "not_sold",
     "requirements",
     "rows",
     "sells_in",
@@ -31,6 +33,45 @@ __all__ = [
 _DEFAULT_DIR = Path(__file__).resolve().parents[3] / "costs"
 
 
+# Rules per (carrier, country, number type) that the carrier catalogs cannot
+# hold: the weekly sync rewrites costs/*.json from the carriers' APIs.
+#
+# UK (GB): every Telnyx GB order asks for "Company Website URL (Business
+# Use Only)", a live site that names the business, and Telnyx declines the
+# "N/A" Hail sends for a private individual. Twilio asks an individual for
+# no website or use-case text. So GB local, mobile and toll-free numbers
+# come from Twilio only. Twilio has no GB national (03) numbers: Telnyx
+# keeps those, for companies only.
+#
+# Only new quotes, purchases and verifications follow these rules. Numbers
+# already bought keep their carrier, routing, renewal and release.
+#
+# hail-website copies these two sets (NOT_SOLD and BUSINESS_ONLY in
+# lib/number-floors.ts) for its prices. Change both, this repo first.
+_NOT_SOLD = frozenset(
+    {
+        ("telnyx", "GB", "local"),
+        ("telnyx", "GB", "mobile"),
+        ("telnyx", "GB", "toll_free"),
+    }
+)
+_BUSINESS_ONLY = frozenset({("telnyx", "GB", "national")})
+
+
+def not_sold(provider: str, country_code: str | None, number_type: str | None) -> bool:
+    """True when Hail does not sell this carrier's numbers of this kind, even
+    though its catalog lists them (see ``_NOT_SOLD``)."""
+    return (provider, country_code, number_type) in _NOT_SOLD
+
+
+def business_only(
+    provider: str, country_code: str | None, number_type: str | None
+) -> bool:
+    """True when only a company may verify for and buy this carrier's numbers
+    of this kind (see ``_BUSINESS_ONLY``)."""
+    return (provider, country_code, number_type) in _BUSINESS_ONLY
+
+
 def _path(provider: str) -> Path:
     return Path(os.environ.get("HAIL_TELEPHONY_CATALOG_DIR", str(_DEFAULT_DIR))) / (
         f"{provider}.json"
@@ -39,8 +80,14 @@ def _path(provider: str) -> Path:
 
 @lru_cache(maxsize=8)
 def _load(provider: str) -> dict[tuple[str, str], dict]:
+    """The carrier's rows by (country, number type). ``_NOT_SOLD`` rows are
+    left out here, so no reader of this module can offer them."""
     raw = json.loads(_path(provider).read_text())
-    return {(n["country_code"], n["number_type"]): n for n in raw["numbers"]}
+    return {
+        (n["country_code"], n["number_type"]): n
+        for n in raw["numbers"]
+        if not not_sold(provider, n["country_code"], n["number_type"])
+    }
 
 
 @lru_cache(maxsize=8)

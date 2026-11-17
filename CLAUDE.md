@@ -83,7 +83,9 @@ Internal runbooks (not published) live in `docs/operations/`:
 [voice-rate-sync.md](docs/operations/voice-rate-sync.md) (carrier call rates in `costs/voice.json`, weekly sync),
 [call-leg-costs.md](docs/operations/call-leg-costs.md) (what each carrier charged per call leg, the `call_legs` table),
 [refresh-costs.md](docs/operations/refresh-costs.md) (weekly LLM/STT/TTS price refresh),
-[didww-by-request.md](docs/operations/didww-by-request.md) (ordering a DIDWW number a customer asked support for),
+[didww-by-request.md](docs/operations/didww-by-request.md) (ordering a DIDWW number a customer asked support for; routing a number by hand),
+[first-number-call-test.md](docs/operations/first-number-call-test.md) (one test call to the first number of a new carrier, country or type),
+[call-record-deletion.md](docs/operations/call-record-deletion.md) (deleting one call, its recording and its charges from a workspace),
 [voice-llm.md](docs/operations/voice-llm.md) (the house LLM chain, Bedrock access and model ids).
 
 ## Order of work
@@ -102,6 +104,16 @@ Some changes only work when they ship in a fixed order. Follow these every time.
 
    The copy (step 5) never ships before the rater (step 3) is live. Otherwise the site shows prices Hail does not charge.
    Decided on 2026-11-09: step 5 (copy) ships before step 4 (plain forwarding), once step 3 is live.
+
+## Public structured data
+
+Before changing costs or docs schema, read
+[docs/operations/structured-data.md](docs/operations/structured-data.md).
+Use `shared/JsonLd.tsx` and the builders in `shared/structured-data.ts`.
+Model comparisons use `web/lib/model-schema.ts` with the checked cost rows.
+Keep schema in route templates so new docs, API operations, and pairs inherit it.
+Run `pnpm run check:structured-data` for the automatic build-and-render check.
+Never invent prices, stock, reviews, images, or publication dates to clear an audit.
 
 ## Agent prompt maintenance
 

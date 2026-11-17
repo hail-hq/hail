@@ -13,6 +13,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from fastapi import HTTPException
 from hailhq.api import verification_files
 from hailhq.api.deps import get_s3_mail_optional
 from hailhq.api.main import app
@@ -35,6 +36,7 @@ from hailhq.core.providers.verification import (
     DocumentSlot,
     FieldSpec,
     Requirements,
+    UnsupportedSubjectType,
     document_check,
 )
 from PIL import Image
@@ -588,9 +590,19 @@ async def test_a_covering_file_is_sent_once_and_fills_its_slots(
 
 @pytest.fixture(autouse=True)
 def _no_cached_forms():
-    routes._caution_forms.clear()
+    for kept in (
+        routes._caution_forms,
+        routes._caution_fetches,
+        routes._caution_refusals,
+    ):
+        kept.clear()
     yield
-    routes._caution_forms.clear()
+    for kept in (
+        routes._caution_forms,
+        routes._caution_fetches,
+        routes._caution_refusals,
+    ):
+        kept.clear()
 
 
 def _two_types(carrier) -> None:
@@ -748,6 +760,178 @@ async def test_cautions_ask_the_carrier_for_its_form_once(
     monkeypatch.setattr(routes, "_CAUTION_FORM_TTL_S", 0)
     assert (await _cautions(client, key, _cautions_body())).status_code == 200
     assert len(asked) == 2
+
+
+async def test_cautions_ask_again_for_a_slot_the_kept_form_lacks(
+    client, org_and_key, carrier, monkeypatch
+) -> None:
+    """A slot the carrier added after the form was kept: one fresh fetch,
+    not a 422 for the next ten minutes. A form fetched just now is not
+    fetched again for a slot it lacks."""
+    asked: list[tuple] = []
+    base_requirements = carrier.requirements
+    added = False
+
+    async def requirements(*args):
+        asked.append(args)
+        req = await base_requirements(*args)
+        if not added:
+            return req
+        slot = req.documents[0].model_copy(update={"name": "proof_of_birth"})
+        return req.model_copy(update={"documents": (*req.documents, slot)})
+
+    carrier.requirements = requirements
+    _, _, key = org_and_key
+    assert (await _cautions(client, key, _cautions_body())).status_code == 200
+    added = True
+    with_new = _cautions_body()
+    with_new["documents"]["proof_of_birth"] = {"option": "passport"}
+    # The kept form is under _CAUTION_FORM_REFRESH_S old: still a 422.
+    assert (await _cautions(client, key, with_new)).status_code == 422
+    assert len(asked) == 1
+    monkeypatch.setattr(routes, "_CAUTION_FORM_REFRESH_S", 0)
+    resp = await _cautions(client, key, with_new)
+    assert resp.status_code == 200, resp.text
+    assert len(asked) == 2
+    # A slot that is in no form: one fetch, then the 422.
+    nope = _cautions_body(documents={"nope": {}})
+    assert (await _cautions(client, key, nope)).status_code == 422
+    assert len(asked) == 3
+
+
+def _slow_provider(started: asyncio.Event, release: asyncio.Event, outcomes: list):
+    calls: list[tuple] = []
+
+    async def requirements(*args):
+        calls.append(args)
+        started.set()
+        await release.wait()
+        outcome = outcomes.pop(0)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
+    return SimpleNamespace(requirements=requirements), calls
+
+
+async def test_cautions_share_one_carrier_call_and_survive_a_cancelled_caller(
+    carrier,
+) -> None:
+    form = await carrier.requirements("GB", "mobile", "person")
+    started, release = asyncio.Event(), asyncio.Event()
+    provider, calls = _slow_provider(started, release, [form])
+    args = ("fake", provider, "GB", "mobile", "person")
+    first = asyncio.ensure_future(routes._caution_form(*args))
+    await started.wait()
+    second = asyncio.ensure_future(routes._caution_form(*args))
+    await asyncio.sleep(0)
+    # The console drops the older call on each edit.
+    first.cancel()
+    release.set()
+    assert await second == form
+    assert len(calls) == 1
+    with pytest.raises(asyncio.CancelledError):
+        await first
+    # Kept for the next request, and the call is no longer running.
+    assert routes._caution_fetches == {}
+    assert await routes._caution_form(*args) == form
+    assert len(calls) == 1
+
+
+async def test_cautions_do_not_keep_a_failed_carrier_call(carrier) -> None:
+    form = await carrier.requirements("GB", "mobile", "person")
+    started, release = asyncio.Event(), asyncio.Event()
+    release.set()
+    provider, calls = _slow_provider(started, release, [RuntimeError("down"), form])
+    args = ("fake", provider, "GB", "mobile", "person")
+    with pytest.raises(HTTPException) as failed:
+        await routes._caution_form(*args)
+    assert failed.value.status_code == 503
+    assert routes._caution_forms == {} and routes._caution_fetches == {}
+    assert await routes._caution_form(*args) == form
+    assert len(calls) == 2
+
+
+async def test_cautions_keep_the_form_when_the_refresh_fails(
+    carrier, monkeypatch, caplog
+) -> None:
+    """A slot the kept form lacks, and the carrier down: the kept form
+    answers (the slot gets its 422), not the carrier's error. The next
+    refresh waits _CAUTION_FORM_REFRESH_S again, and the failure is one
+    warning line, without a traceback."""
+    form = await carrier.requirements("GB", "mobile", "person")
+    started, release = asyncio.Event(), asyncio.Event()
+    release.set()
+    provider, calls = _slow_provider(started, release, [form, RuntimeError("down")])
+    args = ("fake", provider, "GB", "mobile", "person")
+    assert await routes._caution_form(*args) == form
+    monkeypatch.setattr(routes, "_CAUTION_FORM_REFRESH_S", 0)
+    with caplog.at_level(logging.WARNING, logger=routes.logger.name):
+        assert await routes._caution_form(*args, slots=["nope"]) == form
+    assert len(calls) == 2
+    failures = [r for r in caplog.records if "requirements" in r.getMessage()]
+    assert len(failures) == 1 and failures[0].exc_info is None
+    assert "refresh failed (RuntimeError); kept form used" in failures[0].getMessage()
+    # Backed off: within _CAUTION_FORM_REFRESH_S of the failure, no call.
+    monkeypatch.setattr(routes, "_CAUTION_FORM_REFRESH_S", 600)
+    assert await routes._caution_form(*args, slots=["nope"]) == form
+    assert len(calls) == 2
+    # A slot the form has: no refresh either.
+    monkeypatch.setattr(routes, "_CAUTION_FORM_REFRESH_S", 0)
+    known = form.documents[0].name
+    assert await routes._caution_form(*args, slots=[known]) == form
+    assert len(calls) == 2
+
+
+async def test_cautions_drop_a_form_the_carrier_refuses(carrier, monkeypatch) -> None:
+    """A refresh the carrier refuses (a subject type it no longer takes) is
+    the 422 it is: the kept form is dropped, and the refusal answers the
+    next requests without another carrier call."""
+    form = await carrier.requirements("GB", "mobile", "person")
+    started, release = asyncio.Event(), asyncio.Event()
+    release.set()
+    refused = UnsupportedSubjectType("no persons", allowed=("business",))
+    outcomes = [form, refused]
+    provider, calls = _slow_provider(started, release, outcomes)
+    args = ("fake", provider, "GB", "mobile", "person")
+    assert await routes._caution_form(*args) == form
+    monkeypatch.setattr(routes, "_CAUTION_FORM_REFRESH_S", 0)
+    with pytest.raises(HTTPException) as failed:
+        await routes._caution_form(*args, slots=["nope"])
+    assert failed.value.status_code == 422
+    assert routes._caution_forms == {}
+    for slots in (["nope"], []):
+        with pytest.raises(HTTPException) as again:
+            await routes._caution_form(*args, slots=slots)
+        assert again.value.status_code == 422
+        assert again.value.detail == failed.value.detail
+    assert len(calls) == 2
+    # Past the time limit the carrier is asked again.
+    monkeypatch.setattr(routes, "_CAUTION_FORM_TTL_S", 0)
+    outcomes.append(form)
+    assert await routes._caution_form(*args) == form
+    assert len(calls) == 3
+
+
+async def test_each_caller_logs_its_own_outcome(carrier, caplog) -> None:
+    """A carrier outage with no kept form: every caller sharing the call
+    answers 503 and logs it with its traceback."""
+    started, release = asyncio.Event(), asyncio.Event()
+    provider, calls = _slow_provider(started, release, [RuntimeError("down")])
+    args = ("fake", provider, "GB", "mobile", "person")
+    with caplog.at_level(logging.WARNING, logger=routes.logger.name):
+        first = asyncio.ensure_future(routes._caution_form(*args))
+        await started.wait()
+        second = asyncio.ensure_future(routes._caution_form(*args))
+        await asyncio.sleep(0)
+        release.set()
+        results = await asyncio.gather(first, second, return_exceptions=True)
+    assert [r.status_code for r in results] == [503, 503]
+    assert len(calls) == 1
+    logged = [r for r in caplog.records if "lookup failed" in r.getMessage()]
+    assert len(logged) == 2 and all(r.exc_info for r in logged)
+    # An outage is never kept.
+    assert routes._caution_refusals == {} and routes._caution_forms == {}
 
 
 async def test_fetches_of_several_files_share_one_limit() -> None:

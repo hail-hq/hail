@@ -68,6 +68,89 @@ no `e164` and a `quote_id`; `POST /numbers` refuses that offer.
    the price the rater falls back to when the catalog row's price varies by
    area, as for an API purchase.
 
-5. Tell the customer the number. It shows in **Console → Numbers**. The
+5. Calls reach the number once it routes to an agent: Hail then assigns
+   the DID to the voice IN trunk and to the pay-per-minute capacity group
+   ([didww.md](../public/self-host/didww.md#inbound-calls)). Until then the
+   DIDWW panel shows it as not configured (Trunk "Voice: none", capacity 0).
+   Unrouting clears the trunk only; the number stays in the capacity group,
+   which costs nothing without calls.
+6. Tell the customer the number. It shows in **Console → Numbers**. The
    monthly fee renews like any other number; releasing
    it (`DELETE /v1/numbers/{id}`) terminates the DID.
+7. Run the first call test when this is the first number of its carrier,
+   country or type ([first-number-call-test.md](first-number-call-test.md)).
+
+## Routing a number by hand
+
+The customer normally routes the number to an agent: **Console → Numbers**,
+or `PATCH /v1/numbers/{id}` with `voice_agent_id`. That call registers the
+number for inbound calls: the carrier points it at LiveKit, and LiveKit's
+inbound trunk for that carrier accepts it
+([`inbound_routing.register`](../../core/hailhq/core/inbound_routing.py)).
+When you cannot call the API as the customer, run the same step inside the
+api container on the server, from the repo checkout there. Fill the three
+values at the top.
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml \
+  exec -T api python - <<'PY'
+import asyncio
+from datetime import datetime, timezone
+from uuid import UUID
+
+from hailhq.core import inbound_routing
+from hailhq.core.db import org_lock, session_scope
+from hailhq.core.livekit import LiveKitClient
+from hailhq.core.models import Agent, PhoneNumber
+from sqlalchemy import select
+
+ORG = UUID("<org id>")
+E164 = "+<number>"
+AGENT = UUID("<agent id>")
+
+
+async def main():
+    lk = LiveKitClient()
+    try:
+        async with session_scope() as db:
+            await org_lock(db, ORG)
+            number = (
+                await db.execute(
+                    select(PhoneNumber).where(
+                        PhoneNumber.organization_id == ORG,
+                        PhoneNumber.e164 == E164,
+                        PhoneNumber.provisioning_state == "active",
+                    )
+                )
+            ).scalar_one()
+            agent = await db.get(Agent, AGENT)
+            if not agent or agent.organization_id != ORG:
+                raise SystemExit("agent not found in this organization")
+            if agent.status != "live" or not agent.voice_enabled:
+                raise SystemExit("agent is not live or does not answer calls")
+            if "voice" not in number.capabilities:
+                raise SystemExit("number has no voice capability")
+            await inbound_routing.register(db, lk, number)
+            number.voice_agent_id = AGENT
+            number.updated_at = datetime.now(timezone.utc)
+            await db.commit()
+            print(E164, "registered at", number.inbound_registered_at)
+    finally:
+        await lk.aclose()
+
+
+asyncio.run(main())
+PY
+```
+
+- `register` only flushes, and `session_scope()` never commits: it closes
+  the session, which rolls back
+  ([`db.py`](../../core/hailhq/core/db.py)). Without `await db.commit()`,
+  the carrier and LiveKit are set up but `inbound_registered_at` and
+  `voice_agent_id` are not saved.
+- `register` does not set `voice_agent_id`; the API route sets it after.
+  A registered number with no agent refuses calls (`end_reason` `no_agent`).
+- The snippet makes the API route's checks (same organization, voice
+  capability, an agent that answers calls) and also needs a `live` agent,
+  as inbound calls do. It writes no `audit_log` row.
+- `GET /v1/numbers/{id}` then shows `inbound_registered: true`.

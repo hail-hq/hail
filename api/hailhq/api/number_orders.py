@@ -33,8 +33,10 @@ from hailhq.core.providers.voice import (
     CarrierPreOrderError,
     CarrierRequestError,
 )
+from hailhq.core.retention import org_closed, org_is_closed
 from hailhq.core.schemas import NumberAcquireRequest
-from sqlalchemy import and_, delete, or_, select, update
+from sqlalchemy import and_, case, cast, delete, or_, select, update
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -51,6 +53,10 @@ QUOTE_RETENTION = timedelta(hours=24)
 # Consumed quotes answer replays of the purchase that used them (idempotency
 # keys live 24h) and are deleted after this long.
 CONSUMED_QUOTE_RETENTION = timedelta(days=7)
+# Text Postgres reads as a uuid: 32 hex digits, optional hyphens between
+# groups of 4, in braces or not (both braces or neither).
+_UUID_HEX = r"[0-9a-f]{4}(-?[0-9a-f]{4}){7}"
+_UUID_TEXT = rf"^(\{{{_UUID_HEX}\}}|{_UUID_HEX})$"
 
 NUMBER_TAKEN_DETAIL = "This number is already held or has a pending order"
 NUMBER_SETUP_HELP_DETAIL = (
@@ -153,7 +159,12 @@ async def finish_order(
         meta["failure_reason"] = reason or "the carrier did not complete the order"
     number.provisioning_metadata = meta
     await db.commit()
-    if not failed and "sms" in number.capabilities:
+    if (
+        not failed
+        and "sms" in number.capabilities
+        # A closed org's number is released by the close step, not set up.
+        and not await org_is_closed(db, number.organization_id)
+    ):
         # The number is bought and billed; SMS setup is a separate, retried
         # step (assigning a texts agent or POST /enable-sms runs it again).
         # The commit above released the transaction-scoped org lock. Take it
@@ -544,6 +555,14 @@ async def acquire_offer(
                 f"${offer.setup_cents / 100:.2f} setup); "
                 "request a new quote"
             ),
+        )
+    # A quote made before Hail stopped selling this kind of number at this
+    # carrier (telephony_catalog.not_sold): another carrier may still sell it,
+    # so this says refresh, not "we don't offer".
+    if telephony_catalog.not_sold(offer.provider, country, kind):
+        raise HTTPException(
+            status_code=409,
+            detail="This offer is no longer available; refresh number offers",
         )
     catalog_capabilities(country, kind, offer.provider)
     if row.expires_at <= datetime.now(timezone.utc):
@@ -1037,11 +1056,23 @@ async def retry_unreleased_numbers():
 
 async def purge_expired_quotes() -> int:
     """Delete stale quotes: unused ones after QUOTE_RETENTION, consumed ones
-    after CONSUMED_QUOTE_RETENTION. Returns how many."""
+    after CONSUMED_QUOTE_RETENTION. Returns how many. A quote a number
+    registration kept for a resubmit stays while its answers are kept (30
+    days after submit at most): the resubmit and the console's form read the
+    carrier and the credit to set aside from it."""
     now = datetime.now(timezone.utc)
     async with session_scope() as db:
+        # One uncorrelated subquery: Postgres reads the kept quotes once,
+        # and the ids compare as uuids (any spelling Postgres reads as one).
+        # A value that is not a UUID is skipped, never fails the purge.
+        quote_id = CarrierVerification.provider_refs["application"]["quote_id"].astext
+        is_uuid = quote_id.op("~*")(_UUID_TEXT)
+        kept = select(cast(case((is_uuid, quote_id)), PG_UUID(as_uuid=True))).where(
+            CarrierVerification.purpose == "number", is_uuid
+        )
         result = await db.execute(
             delete(NumberOffer).where(
+                NumberOffer.id.notin_(kept),
                 or_(
                     and_(
                         NumberOffer.number_id.is_(None),
@@ -1051,7 +1082,7 @@ async def purge_expired_quotes() -> int:
                         NumberOffer.number_id.is_not(None),
                         NumberOffer.expires_at < now - CONSUMED_QUOTE_RETENTION,
                     ),
-                )
+                ),
             )
         )
         await db.commit()
@@ -1078,6 +1109,10 @@ async def sync_sms_setup() -> None:
                         PhoneNumber.provisioning_state == "active",
                         PhoneNumber.messaging_service_sid.is_(None),
                         PhoneNumber.capabilities.any("sms"),
+                        # Never set up a closed org's number: it is released.
+                        ~org_closed(
+                            PhoneNumber.organization_id, datetime.now(timezone.utc)
+                        ),
                     )
                     .limit(50)
                 )

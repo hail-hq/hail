@@ -1,4 +1,4 @@
-import { DocsBody, DocsPage } from "fumadocs-ui/page";
+import { DocsBody, DocsPage, DocsTitle } from "fumadocs-ui/page";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -8,6 +8,8 @@ import { openapi } from "@/lib/openapi";
 import { getMDXComponents } from "@/mdx-components";
 import { apiSource } from "@/lib/source";
 import { docsPath, pageMetadata } from "../../../../shared/site-metadata";
+import { JsonLd } from "../../../../shared/JsonLd";
+import { articleSchema } from "../../../../shared/structured-data";
 
 // The /docs/api root has no generated page, so render an index that lists every
 // operation. Deeper slugs render the generated OpenAPI page for one endpoint.
@@ -18,6 +20,15 @@ function ApiIndex() {
     .sort((a, b) => a.data.title.localeCompare(b.data.title));
   return (
     <DocsPage>
+      <JsonLd
+        data={articleSchema({
+          title: "API Reference",
+          description:
+            "Read Hail’s REST API reference for calls, SMS, email, and phone numbers. Find request fields, response formats, and the OpenAPI spec.",
+          path: "/docs/api",
+          image: "/docs/opengraph-image",
+        })}
+      />
       <DocsBody>
         <h1>API Reference</h1>
         <p>
@@ -83,6 +94,17 @@ export default async function Page(props: {
   const MDX = page.data.body;
   return (
     <DocsPage toc={page.data.toc} full={page.data.full}>
+      <JsonLd
+        data={articleSchema({
+          title: page.data.title,
+          description:
+            page.data.description ??
+            `Read the request fields and responses for ${page.data.title} in Hail’s REST API.`,
+          path: docsPath(page.url),
+          image: "/docs/opengraph-image",
+        })}
+      />
+      <DocsTitle>{page.data.title}</DocsTitle>
       <DocsBody>
         <MDX
           components={getMDXComponents({ OpenAPIPage: PreloadedOpenAPIPage })}

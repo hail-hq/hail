@@ -535,6 +535,8 @@ async def test_submit_returns_only_the_api_response(client: HailClient) -> None:
         "campaign_accepted",
         "runtime_ready",
         "cancellable",
+        "kept_until",
+        "resubmittable",
         "waiting_for_credit",
         "credit_needed_cents",
     }
@@ -1257,10 +1259,15 @@ async def test_get_sms_application_uses_authenticated_same_row(
     route = respx.get(f"{_BASE_URL}/verifications/{vid}/application").mock(
         return_value=httpx.Response(200, json=application)
     )
-    assert (
-        await tools.get_sms_application(client=client, verification_id=vid)
-        == application
-    )
+    # The number-registration keys come back empty for an SMS row.
+    assert await tools.get_sms_application(client=client, verification_id=vid) == {
+        **application,
+        "documents": None,
+        "files": [],
+        "kept_until": None,
+        "quote_id": None,
+        "hold_cents": None,
+    }
     assert route.calls[0].request.headers["authorization"] == f"Bearer {_API_KEY}"
     assert len(respx.calls) == 1
 
@@ -2166,6 +2173,8 @@ _DOCUMENT_CHECK_OK = {
                 "business_name": "",
             },
             "skipped": None,
+            "none_of_types": False,
+            "file_slot": "identity",
         }
     },
     "warnings": [
@@ -2209,3 +2218,64 @@ async def test_document_check_needs_a_quote(client: HailClient) -> None:
         kwargs.pop(key, None)
     result = await tools.check_verification_documents(**kwargs)
     assert "quote_id" in result["error"]
+
+
+# -- resubmit_verification ---------------------------------------------------
+
+
+async def test_resubmit_needs_the_attestation(client: HailClient) -> None:
+    result = await tools.resubmit_verification(
+        client=client, verification_id=str(uuid4()), attest_authorized=False
+    )
+    assert "attest_authorized must be true" in result["error"]
+
+
+@respx.mock
+async def test_resubmit_sends_only_what_changes(client: HailClient) -> None:
+    vid = str(uuid4())
+    route = respx.post(f"{_BASE_URL}/verifications/{vid}/resubmit").mock(
+        return_value=httpx.Response(201, json=_verification())
+    )
+    upload_id = str(uuid4())
+    result = await tools.resubmit_verification(
+        client=client,
+        verification_id=vid,
+        attest_authorized=True,
+        fields={"first_name": "Ada", "last_name": "King"},
+        files=[{"slot": "proof_of_identity", "upload_id": upload_id}],
+    )
+    assert "error" not in result and result["state"]
+    body = route.calls[0].request.content
+    assert b'name="fields"' in body and b"King" in body
+    assert b'name="upload.proof_of_identity"' in body and upload_id.encode() in body
+    for kept in (b'name="documents"', b'name="address"', b'name="quote_id"'):
+        assert kept not in body
+
+
+@respx.mock
+async def test_resubmit_with_nothing_to_change_still_sends_a_form(
+    client: HailClient,
+) -> None:
+    vid = str(uuid4())
+    route = respx.post(f"{_BASE_URL}/verifications/{vid}/resubmit").mock(
+        return_value=httpx.Response(201, json=_verification())
+    )
+    await tools.resubmit_verification(
+        client=client, verification_id=vid, attest_authorized=True
+    )
+    assert (
+        route.calls[0].request.headers["content-type"].startswith("multipart/form-data")
+    )
+
+
+async def test_resubmit_refuses_a_file_for_a_slot_not_in_documents(
+    client: HailClient,
+) -> None:
+    result = await tools.resubmit_verification(
+        client=client,
+        verification_id=str(uuid4()),
+        attest_authorized=True,
+        documents={"proof_of_address": {"option": "bill"}},
+        files=[{"slot": "proof_of_identity", "upload_id": str(uuid4())}],
+    )
+    assert "Nothing was sent" in result["error"]

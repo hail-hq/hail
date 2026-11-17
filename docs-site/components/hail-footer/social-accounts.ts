@@ -2,6 +2,7 @@ type SocialAccount = {
   label: string;
   href: string | null;
   handle?: string;
+  channelId?: string;
   publishing: "active" | "manual" | "none";
   showOnWebsite: boolean;
 };
@@ -25,6 +26,7 @@ export const SOCIAL_ACCOUNTS = {
     label: "YouTube",
     href: "https://www.youtube.com/@hail_so",
     handle: "@hail_so",
+    channelId: "UCszb5n9p_VDUplBDb5-y07A",
     publishing: "active",
     showOnWebsite: true,
   },

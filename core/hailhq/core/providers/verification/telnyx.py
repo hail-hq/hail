@@ -28,6 +28,7 @@ from hailhq.core.providers.verification.base import (
     NOT_ACCEPTED,
     VALUE_NOT_ACCEPTED,
     Address,
+    DiscardFailures,
     DocumentInput,
     DocumentOption,
     DocumentSlot,
@@ -50,6 +51,7 @@ from hailhq.core.providers.verification.forms import (
     validate_input,
 )
 from hailhq.core.providers.verification.rejections import customer_reason
+from hailhq.core.telephony_catalog import business_only
 
 logger = logging.getLogger(__name__)
 
@@ -241,6 +243,9 @@ class TelnyxVerificationProvider(VerificationProvider):
     ) -> Requirements:
         """``requirements`` for rules already fetched with :meth:`rules`."""
         allowed: tuple[SubjectType, ...] = subject_types_for(rules)  # type: ignore[assignment]
+        # Telnyx declines a person here (telephony_catalog._BUSINESS_ONLY).
+        if business_only(self.name, country_code, number_type):
+            allowed = tuple(s for s in allowed if s == "business")
         if subject_type not in allowed:
             raise UnsupportedSubjectType(
                 f"{subject_type} is not accepted for {number_type} numbers in "
@@ -368,7 +373,7 @@ class TelnyxVerificationProvider(VerificationProvider):
                 json={"regulatory_requirements": values},
             )
         except httpx.HTTPStatusError as exc:
-            await self.discard(refs)
+            await self.discard_draft(refs)
             if 400 <= exc.response.status_code < 500:
                 return DraftResult(
                     refs={},
@@ -383,18 +388,18 @@ class TelnyxVerificationProvider(VerificationProvider):
             raise VerificationProviderError("Telnyx request failed") from exc
         except httpx.HTTPError as exc:
             # Timeouts and transport failures: the carrier, not the customer.
-            await self.discard(refs)
+            await self.discard_draft(refs)
             raise VerificationProviderError("Telnyx request failed") from exc
         except Exception:
-            await self.discard(refs)
+            await self.discard_draft(refs)
             raise
         try:
             problems = await self._problems(refs)
         except httpx.HTTPError as exc:
-            await self.discard(refs)
+            await self.discard_draft(refs)
             raise VerificationProviderError("Telnyx request failed") from exc
         if problems:
-            await self.discard(refs)
+            await self.discard_draft(refs)
             return DraftResult(refs={}, problems=problems)
         return DraftResult(refs=refs)
 
@@ -615,11 +620,13 @@ class TelnyxVerificationProvider(VerificationProvider):
         paths.extend(f"/documents/{path_id(d)}" for d in refs.get("document_ids", []))
         if refs.get("address_id"):
             paths.append(f"/addresses/{path_id(refs['address_id'])}")
+        failures = DiscardFailures("telnyx")
         for path in paths:
             try:
                 await self._api.request("DELETE", path)
-            except Exception:  # best effort; a stray draft is harmless
-                logger.warning("telnyx verification cleanup step failed", exc_info=True)
+            except Exception as exc:
+                failures.add(exc, path.split("/")[1])
+        failures.raise_any("Telnyx discard failed")
 
 
 def _rejection(response: httpx.Response) -> str | None:

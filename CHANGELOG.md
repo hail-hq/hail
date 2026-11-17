@@ -7,6 +7,8 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 ### Added
 
 - US trial texting: a workspace can send up to 25 texts, ever, to its own verified phone from a Hail number, with no US registration needed. Set it up in the console under Numbers.
+- Rejected number registrations can be fixed and sent again for 30 days with `POST /v1/verifications/{id}/resubmit` (MCP: `resubmit_verification`).
+- `sms.received` webhooks and `received` SMS events have a new `compliance_keyword` field: `STOP`, `START` or `HELP` when the text is one of those keywords, otherwise `null`.
 - [Hail for Vercel Chat SDK](https://github.com/hail-hq/chat-sdk-adapter/releases/tag/v0.1.0): the published [`@hail-hq/chat-sdk-adapter`](https://www.npmjs.com/package/@hail-hq/chat-sdk-adapter) connects SMS webhooks and replies to Chat SDK. Hail maintains the adapter; its Vercel vendor-official listing requires separate acceptance.
 
 - MCP: the server now sends usage instructions, a website link and a vector icon when a client connects. Every tool input has a description.

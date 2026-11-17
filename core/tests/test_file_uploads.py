@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
@@ -16,7 +16,9 @@ from hailhq.core.file_uploads import (
     object_key,
     valid_content_type,
 )
-from hailhq.core.models import FileUpload
+from hailhq.core.models import CarrierVerification, FileUpload
+from hailhq.core.s3_mail import S3MailClient
+from sqlalchemy import select
 
 
 @pytest.mark.parametrize(
@@ -75,12 +77,42 @@ def test_valid_content_type(value: str, ok: bool) -> None:
     assert valid_content_type(value) is ok
 
 
-async def test_delete_org_verification_uploads_deletes_the_prefix() -> None:
+async def test_delete_org_verification_uploads_deletes_both_prefixes() -> None:
+    """The uploads and the copies kept for a resubmit."""
     store = AsyncMock()
     store.delete_prefix.return_value = 2
     org = uuid4()
-    assert await file_uploads.delete_org_verification_uploads(org, store) == 2
-    store.delete_prefix.assert_awaited_once_with(f"verification-uploads/{org}/")
+    assert await file_uploads.delete_org_verification_uploads(org, store) == 4
+    assert [c.args for c in store.delete_prefix.await_args_list] == [
+        (f"verification-uploads/{org}/",),
+        (f"verification-kept/{org}/",),
+    ]
+
+
+def test_kept_files_have_their_own_folder_and_limit() -> None:
+    org, upload = uuid4(), uuid4()
+    key = file_uploads.object_key(file_uploads.KEPT_PURPOSE, org, upload)
+    assert key == f"verification-kept/{org}/{upload}"
+    assert file_uploads.max_bytes(file_uploads.KEPT_PURPOSE) == 10 * 1024 * 1024
+    # Hail makes kept files itself: no client may upload one.
+    assert file_uploads.KEPT_PURPOSE not in file_uploads.PURPOSES
+
+
+@pytest.mark.parametrize(
+    ("name", "shown"),
+    [("ada.jpg", "ada.jpg"), ("C:\\scans\\id.pdf", "id.pdf"), ("", "document")],
+)
+def test_kept_filename(name: str, shown: str) -> None:
+    assert file_uploads.kept_filename(name) == shown
+
+
+async def test_put_attachment_asks_s3_to_encrypt() -> None:
+    client = MagicMock()
+    store = S3MailClient(client=client, bucket="b")
+    await store.put_attachment("k", b"x", "image/png", encrypt=True)
+    assert client.put_object.call_args.kwargs["ServerSideEncryption"] == "AES256"
+    await store.put_attachment("k", b"x", "image/png")
+    assert "ServerSideEncryption" not in client.put_object.call_args.kwargs
 
 
 def test_object_prefix_drops_the_attempt_suffix() -> None:
@@ -136,3 +168,48 @@ async def test_failed_storage_write_leaves_a_tracked_unused_upload(async_session
         tracked = await other.get(FileUpload, row.id)
         assert tracked is not None and tracked.first_used_at is None
         assert tracked.uploaded_at is not None
+
+
+async def test_a_failed_keep_deletes_only_the_files_not_written() -> None:
+    """The copies already written stay kept."""
+    store = AsyncMock()
+    store.put_attachment.side_effect = [None, RuntimeError("s3 down")]
+    org = uuid4()
+    async with session_scope() as db:
+        row = CarrierVerification(
+            organization_id=org,
+            provider="twilio",
+            country_code="GB",
+            number_type="mobile",
+            subject_type="person",
+            state="rejected",
+            requirements_version="v1",
+        )
+        db.add(row)
+        await db.commit()
+        files = [
+            file_uploads.KeptFile("a", "a.jpg", "image/jpeg", b"\xff\xd8a"),
+            file_uploads.KeptFile("b", "b.jpg", "image/jpeg", b"\xff\xd8b"),
+        ]
+        with pytest.raises(RuntimeError):
+            await file_uploads.keep_verification_files(db, store, org, row.id, files)
+        kept = (
+            (
+                await db.execute(
+                    select(FileUpload.slot).where(FileUpload.verification_id == row.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert kept == ["a"]
+
+
+async def test_touch_copies_the_object_onto_itself() -> None:
+    client = MagicMock()
+    store = S3MailClient(client=client, bucket="b")
+    await store.touch("k", "image/png", encrypt=True)
+    kwargs = client.copy_object.call_args.kwargs
+    assert kwargs["CopySource"] == {"Bucket": "b", "Key": "k"}
+    assert kwargs["MetadataDirective"] == "REPLACE"
+    assert kwargs["ServerSideEncryption"] == "AES256"

@@ -6,10 +6,10 @@ key.
 
 Built CONCURRENTLY so texts keep writing to ``sms`` while it builds. That
 cannot run in a transaction, hence the autocommit block. It is its own
-revision so a failed build cannot leave 0081's table without its stamp.
+revision so a failed build cannot leave 0082's table without its stamp.
 
-Revision ID: 0082
-Revises: 0081
+Revision ID: 0083
+Revises: 0082
 """
 
 from __future__ import annotations
@@ -17,8 +17,8 @@ from __future__ import annotations
 from alembic import op
 from sqlalchemy import text
 
-revision: str = "0082"
-down_revision: str | None = "0081"
+revision: str = "0083"
+down_revision: str | None = "0082"
 branch_labels = None
 depends_on = None
 

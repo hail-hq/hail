@@ -2433,8 +2433,13 @@ class VerificationDocumentWarning(BaseModel):
 class VerificationPrintedName(BaseModel):
     """The name printed on a document, as read. Empty strings when not printed."""
 
-    given_names: str = Field(description="A person's given names.")
-    surnames: str = Field(description="A person's surnames.")
+    given_names: str = Field(
+        description=(
+            "The given names of the person the document is about or "
+            "addressed to, never a person who signs for the issuer."
+        )
+    )
+    surnames: str = Field(description="That person's surnames.")
     latin_given_names: str = Field(
         default="",
         description=(
@@ -2445,7 +2450,12 @@ class VerificationPrintedName(BaseModel):
     latin_surnames: str = Field(
         default="", description="The surnames in Latin letters, the same way."
     )
-    business_name: str = Field(description="A company's name.")
+    business_name: str = Field(
+        description=(
+            "The name of the company the document is about or addressed "
+            "to, never the company that issued it."
+        )
+    )
 
 
 class VerificationDocumentRead(BaseModel):
@@ -2485,6 +2495,21 @@ class VerificationDocumentRead(BaseModel):
             "reads. Null otherwise."
         ),
     )
+    none_of_types: bool = Field(
+        default=False,
+        description=(
+            "True when the file was read and looks like none of the slot's "
+            "document types (`option` is then null)."
+        ),
+    )
+    file_slot: str | None = Field(
+        default=None,
+        description=(
+            "The slot whose file this was read from: this slot, or the slot "
+            "whose file covers it. Slots with the same `file_slot` share one "
+            "file. Null when not read."
+        ),
+    )
 
 
 class VerificationDocumentCheckResponse(BaseModel):
@@ -2510,8 +2535,9 @@ class VerificationDocumentCheckResponse(BaseModel):
 
 class VerificationDocumentCautionRead(BaseModel):
     """A slot's earlier read, as `POST /verifications/document-check`
-    returned it in `documents.<slot>`. Only `option` and `printed_name` are
-    used; the other keys of that object may be sent and are ignored."""
+    returned it in `documents.<slot>`. Send that whole object: `option`,
+    `printed_name`, `expiry_date`, `none_of_types` and `file_slot` are used;
+    the other keys may be sent and are ignored."""
 
     option: str | None = Field(
         default=None,
@@ -2520,6 +2546,27 @@ class VerificationDocumentCautionRead(BaseModel):
     printed_name: VerificationPrintedName | None = Field(
         default=None,
         description="The name printed on the file, or null (no name check).",
+    )
+    expiry_date: str | None = Field(
+        default=None,
+        description=(
+            "The expiry date read from the file (YYYY-MM-DD), or null (no "
+            "expiry check)."
+        ),
+    )
+    none_of_types: bool = Field(
+        default=False,
+        description=(
+            "True when the file looked like none of the slot's document types."
+        ),
+    )
+    file_slot: str | None = Field(
+        default=None,
+        description=(
+            "The slot whose file this was read from. Slots with the same "
+            "`file_slot` get one name check per box, as in the document "
+            "check. Null: slots with the same printed name count as one file."
+        ),
     )
 
 
@@ -2578,8 +2625,9 @@ class VerificationDocumentCautionsResponse(BaseModel):
 
     warnings: list[VerificationDocumentWarning] = Field(
         description=(
-            "`name` and `document_type` warnings: the typed form against the "
-            "earlier reads. Empty when nothing differs."
+            "`name`, `document_type` and `expired` warnings: the typed form "
+            "and chosen types against the earlier reads. Empty when nothing "
+            "differs."
         )
     )
 
@@ -3150,8 +3198,30 @@ class Address(BaseModel):
     country_code: str = Field(description="ISO alpha-2 address country.")
 
 
+class KeptDocumentAnswer(BaseModel):
+    """A document slot's saved choice on a number registration."""
+
+    option: str = Field(default="", description="The document option chosen.")
+    fields: dict[str, str] = Field(
+        default_factory=dict, description="The document's typed fields."
+    )
+
+
+class KeptFileInfo(BaseModel):
+    """A file Hail keeps for a resubmit. The bytes are never returned."""
+
+    slot: str = Field(description="The document slot it was filed for.")
+    filename: str = Field(description="The file name as it was sent.")
+    content_type: str = Field(
+        description="'image/jpeg', 'image/png' or 'application/pdf'."
+    )
+    size_bytes: int = Field(description="Size in bytes.")
+
+
 class SmsApplicationResponse(BaseModel):
-    """Private submitted SMS answers, or verified sender details for an old filing."""
+    """Private saved answers of a registration: a US texting application
+    (or verified sender details for an old filing), or a number
+    registration kept for a resubmit."""
 
     schema_version: int = Field(
         default=1, description="Version of this saved-answer response format."
@@ -3164,6 +3234,40 @@ class SmsApplicationResponse(BaseModel):
     )
     address: Address | None = Field(
         default=None, description="Original sender address, when available."
+    )
+    documents: dict[str, KeptDocumentAnswer] | None = Field(
+        default=None,
+        description=(
+            "Number registration only: each document slot's option and "
+            "fields, by slot name. Null for US texting."
+        ),
+    )
+    files: list[KeptFileInfo] = Field(
+        default_factory=list,
+        description=(
+            "Number registration only: the files Hail keeps, by slot. A "
+            "resubmit reuses each one unless you send a new file for its slot."
+        ),
+    )
+    kept_until: datetime | None = Field(
+        default=None,
+        description="Number registration only: when Hail deletes these answers and files.",
+    )
+    quote_id: UUID | None = Field(
+        default=None,
+        description=(
+            "Number registration only: the quote it was filed for. It keeps "
+            "working with GET /v1/verifications/requirements and the resubmit "
+            "while the answers are kept."
+        ),
+    )
+    hold_cents: int | None = Field(
+        default=None,
+        description=(
+            "Number registration only: the credit a resubmit with that quote "
+            "sets aside (its setup and first month). Null when nothing is set "
+            "aside or the quote is gone."
+        ),
     )
 
 
@@ -3268,6 +3372,23 @@ class VerificationResponse(BaseModel):
     cancellable: bool = Field(
         default=False,
         description="True when `DELETE /v1/verifications/{id}` accepts this verification now.",
+    )
+    kept_until: datetime | None = Field(
+        default=None,
+        description=(
+            "For a number registration: when Hail deletes the answers and "
+            "files it keeps so the filing can be fixed and sent again (30 "
+            "days after submit). They go sooner when it is approved or "
+            "cancelled, or the account closes. Null when nothing is kept."
+        ),
+    )
+    resubmittable: bool = Field(
+        default=False,
+        description=(
+            "True when `POST /v1/verifications/{id}/resubmit` accepts this "
+            "verification now: a rejected number registration whose answers "
+            "are still kept (`kept_until`)."
+        ),
     )
     identity_confirmed: bool = Field(
         default=False,

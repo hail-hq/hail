@@ -1,236 +1,199 @@
-/*
- * Self-contained on purpose: this header renders inside `.site` (home),
- * `.hsite` (public pages), the auth frame, and the synced docs and costs apps,
- * which do not load the Evolve tokens. Its colour variables live here, with
- * the Evolve values (docs/superpowers/specs/2026-10-25-evolve-style-and-brand-kit-design.md).
- * Desktop: a floating pill. Phone: a full screen glass overlay.
- */
+/* The website owns this bar. The sync script copies it unchanged to docs and costs. */
+:global(:root) {
+  --hail-header-h: 94px;
+}
 .header {
-  --a: #1665ff;
-  --a-text: #1665ff;
-  --bg: #f5f3ed;
-  --bg-rgb: 245, 243, 237;
-  --pill: rgba(255, 255, 255, 0.72);
-  --fg: #111111;
-  --body: #3f3f3f;
-  --muted: #686868;
-  --hairline: #dedbd3;
+  --ink: var(--public-ink, #111111);
+  --ac: var(--public-accent, #1665ff);
+  --emph-fg: #ffffff;
+  --r-pill: 999px;
   --ease: cubic-bezier(0.32, 0.72, 0, 1);
-  /* One scale for the bar: every control is --nav-control tall and the bar insets by --nav-inset.
-     The bar radius minus the inset equals half a control, so the corners stay concentric. */
-  --nav-control: 40px;
-  --nav-inset: 8px;
-  /* The header stays in view on scroll, under the promotion bar (PromoBanner sets --promo-h). */
+  --dur-color: 200ms;
+  --nav-control: 44px;
   position: sticky;
   top: var(--promo-h, 0px);
   z-index: 40;
-  padding: 16px 16px 0;
-  pointer-events: none;
-  font-family: var(--font-ui, var(--font-grotesk)), Arial, sans-serif;
+  width: 100%;
+  background: var(--public-paper, #ffffff);
+  border-bottom: 1px solid var(--public-line, #e0e2e7);
+  color: var(--ink);
+  font-family: var(--public-font-ui, var(--font-ui, Arial)), Arial, sans-serif;
   font-size: 14px;
   line-height: 20px;
   text-transform: none;
-  color: var(--fg);
 }
-@media (prefers-color-scheme: dark) {
-  :global(html:not([data-theme="light"]):not(.light)) .header {
-    --a-text: #6b98ff;
-    --bg: #181818;
-    --bg-rgb: 24, 24, 24;
-    --pill: rgba(39, 39, 39, 0.72);
-    --fg: #f2f2f2;
-    --body: #b5b5b5;
-    --muted: #8f8f8f;
-    --hairline: #313131;
-  }
+.header,
+.header * {
+  box-sizing: border-box;
 }
-:global(html[data-theme="dark"]) .header,
-:global(html.dark) .header {
-  --a-text: #6b98ff;
-  --bg: #181818;
-  --bg-rgb: 24, 24, 24;
-  --pill: rgba(39, 39, 39, 0.72);
-  --fg: #f2f2f2;
-  --body: #b5b5b5;
-  --muted: #8f8f8f;
-  --hairline: #313131;
-}
-:global(html[data-theme="light"]) .header,
-:global(html.light) .header {
-  --a-text: #1665ff;
-  --bg: #f5f3ed;
-  --bg-rgb: 245, 243, 237;
-  --pill: rgba(255, 255, 255, 0.72);
-  --fg: #111111;
-  --body: #3f3f3f;
-  --muted: #686868;
-  --hairline: #dedbd3;
-}
-.header.header {
-  font-family:
-    var(--font-ui, var(--font-grotesk)), Arial, sans-serif !important;
-  text-transform: none !important;
-}
+.header.header,
 .header.header * {
-  font-family: inherit !important;
+  font-family:
+    var(--public-font-ui, var(--font-ui, Arial)), Arial, sans-serif !important;
   text-transform: none !important;
 }
 .header a {
   color: inherit;
   text-decoration: none;
 }
-
 .shell {
-  pointer-events: auto;
-  width: max-content;
-  max-width: 100%;
+  width: min(1240px, calc(100% - var(--public-gutter, 32px) * 2));
+  min-height: calc(var(--hail-header-h) - 1px);
   margin-inline: auto;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: var(--nav-inset);
-  border: 1px solid var(--hairline);
-  border-radius: 9999px;
-  background: var(--pill);
-  -webkit-backdrop-filter: blur(12px);
-  backdrop-filter: blur(12px);
-  box-shadow: 0 8px 24px -16px rgba(60, 50, 20, 0.35);
+  gap: 28px;
 }
 .logo {
   display: inline-flex;
   align-items: center;
+  flex: none;
   gap: 8px;
   min-height: var(--nav-control);
-  padding-inline: 12px;
-  font-weight: 700;
-  font-size: 18px;
-  line-height: 28px;
-  letter-spacing: -0.02em;
+  font-size: 32px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.06em;
 }
-
+.logo > svg {
+  flex: none;
+  width: 36px;
+  height: 36px;
+}
 .nav {
   display: flex;
   align-items: center;
-  gap: 0;
+  gap: 4px;
+  margin-left: auto;
 }
 .navLink {
-  color: var(--body);
-  border: 0;
-  background: none;
-  font: inherit;
-  cursor: pointer;
-  min-height: var(--nav-control);
-  padding: 0 12px;
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  min-height: var(--nav-control);
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--public-muted, #626b79);
+  font: inherit;
   white-space: nowrap;
-  border-radius: 9999px;
-  transition:
-    color 200ms var(--ease),
-    background-color 200ms var(--ease);
+  cursor: pointer;
+  transition: color 200ms var(--ease);
 }
 .navLink:hover,
 .navLink.active {
-  color: var(--fg);
-}
-.navLink:hover {
-  background: color-mix(in srgb, var(--fg) 6%, transparent);
+  color: var(--ink);
 }
 .navLink.active {
-  background: color-mix(in srgb, var(--fg) 9%, transparent);
+  text-decoration: underline;
+  text-underline-offset: 6px;
+  text-decoration-thickness: 1px;
 }
-
 .dropdown {
   position: relative;
 }
 .panel {
   position: absolute;
-  top: calc(100% + 16px);
-  left: -16px;
-  min-width: 240px;
-  background: var(--bg);
-  border: 1px solid var(--hairline);
-  padding: 16px;
-  border-radius: 16px;
-  box-shadow: 0 24px 48px -24px rgba(60, 50, 20, 0.35);
+  top: calc(100% + 10px);
+  left: -12px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 18px;
+  min-width: 245px;
+  max-height: 65vh;
+  padding: 16px;
+  overflow-y: auto;
+  border: 1px solid var(--public-line, #e0e2e7);
+  border-radius: 16px;
+  background: var(--public-card, #ffffff);
+  box-shadow: 0 12px 30px #00000010;
 }
 .panel a {
-  display: block;
-  padding: 4px 8px;
+  display: flex;
+  align-items: center;
+  min-height: var(--nav-control);
+  padding: 8px 10px;
   border-radius: 8px;
-  color: var(--body);
-  transition:
-    color 200ms var(--ease),
-    background-color 200ms var(--ease);
+  color: var(--public-muted, #626b79);
+  font-size: 13px;
 }
 .panel a:hover {
-  color: var(--fg);
-  background: rgba(var(--bg-rgb), 0.8);
+  background: var(--public-soft, #e8efff);
+  color: var(--ink);
 }
 .panelGroup {
-  color: var(--muted);
+  margin: 0 10px 4px;
+  color: var(--public-muted, #626b79);
   font-size: 12px;
   line-height: 16px;
-  padding-inline: 8px;
-  margin-bottom: 4px;
 }
-
 .navActions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  flex: none;
+  gap: 14px;
 }
 .account {
-  color: var(--muted);
   display: inline-flex;
   align-items: center;
   min-height: var(--nav-control);
-  padding: 0 12px;
-  border-radius: 9999px;
+  color: var(--public-muted, #626b79);
   white-space: nowrap;
-  transition: color 200ms var(--ease);
 }
 .account:hover {
-  color: var(--fg);
+  color: var(--ink);
 }
 .themeButton {
   display: grid;
   place-items: center;
+  flex: none;
   width: var(--nav-control);
   height: var(--nav-control);
   padding: 0;
   border: 0;
-  border-radius: 9999px;
+  border-radius: 8px;
   background: transparent;
-  color: var(--muted);
+  color: var(--ink);
   cursor: pointer;
-  transition:
-    color 200ms var(--ease),
-    background-color 200ms var(--ease);
 }
 .themeButton:hover {
-  color: var(--fg);
-  background: rgba(var(--bg-rgb), 0.8);
+  color: var(--public-accent-text, #1665ff);
 }
-.primary {
-  composes: primary from "./BrandButton.module.css";
+/* Consumers supply their own theme button inside the same bare 44px target. */
+.themeButton > button {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
 }
 .primary.primary {
+  --h: var(--nav-control);
+  --inset: 5px;
+  --label-size: 14px;
+  --s-3: 0px;
+  --s-4: 10px;
+  --s-5: 16px;
+  display: inline-flex;
+  flex: none;
+  width: max-content;
   min-height: var(--nav-control);
-  padding: 0 14px 0 16px;
-  border-radius: 9999px;
+  max-width: none;
+  margin: 0;
+  container-type: normal;
   font-size: 14px;
-  line-height: 20px;
+  line-height: 1.25;
   white-space: nowrap;
-  box-shadow: none;
 }
-/* The shared arrow leaves empty room left of its chevron. Pull it toward the label. */
-.primary.primary::after {
-  margin-left: -0.55em;
+.primary svg {
+  width: 20px;
+  height: 20px;
 }
 .chev {
   transition: transform 200ms var(--ease);
@@ -239,12 +202,12 @@
   transform: rotate(180deg);
 }
 .header :is(a, button):focus-visible {
-  outline: 2px solid var(--a-text);
-  outline-offset: 2px;
+  outline: 2px solid var(--public-accent-text, #1665ff);
+  outline-offset: 3px;
 }
-
-/* Hamburger: three lines that turn into an X. */
-.menuToggle {
+.menuToggle,
+.menuOnly,
+.menuSignIn {
   display: none;
 }
 .menuToggle span {
@@ -255,7 +218,7 @@
   border-radius: 2px;
   background: currentColor;
   transition:
-    transform 700ms var(--ease),
+    transform 250ms var(--ease),
     opacity 200ms var(--ease);
 }
 .menuToggle span:nth-child(1) {
@@ -276,46 +239,65 @@
 .menuOpen span:nth-child(3) {
   transform: translateY(-6px) rotate(-45deg);
 }
-
-@media (max-width: 900px) {
-  .header {
-    padding: 12px 12px 0;
-  }
-  /* No backdrop filter here: it would make the fixed overlay below size to the pill. */
+@media (max-width: 1100px) {
   .shell {
-    width: 100%;
-    justify-content: space-between;
-    gap: 8px;
-    padding: 4px 4px 4px 12px;
-    background: var(--bg);
-    -webkit-backdrop-filter: none;
-    backdrop-filter: none;
+    gap: 16px;
   }
-  .menuToggle {
-    position: relative;
-    z-index: 2;
-    display: block;
-    width: 44px;
-    height: 44px;
-    border: 0;
-    border-radius: 9999px;
-    background: transparent;
-    color: var(--fg);
-    cursor: pointer;
+  .nav {
+    gap: 0;
+  }
+  .navLink {
+    padding-inline: 8px;
+  }
+  .navActions {
+    gap: 10px;
+  }
+  .logo {
+    font-size: 25px;
+    gap: 6px;
+  }
+}
+@media (max-width: 900px) {
+  :global(:root) {
+    --hail-header-h: 82px;
+  }
+  .shell {
+    justify-content: space-between;
+    gap: 12px;
   }
   .logo,
   .navActions {
     position: relative;
     z-index: 2;
   }
-  .logo {
-    padding-inline: 0;
+  .logo > svg {
+    width: 26px;
+    height: 26px;
   }
-  .themeButton {
-    width: 44px;
-    height: 44px;
+  .navActions {
+    margin-left: auto;
+    gap: 8px;
   }
-  /* Full screen glass overlay. Links slide up one after another. */
+  .navActions .account {
+    display: none;
+  }
+  .menuOnly.menuOnly,
+  .menuSignIn.menuSignIn {
+    display: flex;
+  }
+  .menuToggle {
+    position: relative;
+    display: block;
+    flex: none;
+    width: var(--nav-control);
+    height: var(--nav-control);
+    padding: 0;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--ink);
+    cursor: pointer;
+  }
   .nav {
     position: fixed;
     inset: 0;
@@ -324,186 +306,93 @@
     flex-direction: column;
     align-items: stretch;
     gap: 0;
-    padding: calc(var(--promo-h, 0px) + 96px) 24px 32px;
+    margin: 0;
+    padding: calc(var(--promo-h, 0px) + var(--hail-header-h) + 16px) 24px 32px;
     overflow-y: auto;
-    background: rgba(var(--bg-rgb), 0.8);
-    -webkit-backdrop-filter: blur(64px);
-    backdrop-filter: blur(64px);
-    opacity: 0;
+    background: var(--public-paper, #ffffff);
     visibility: hidden;
+    opacity: 0;
     transition:
-      opacity 700ms var(--ease),
-      visibility 0s linear 700ms;
+      opacity 200ms var(--ease),
+      visibility 0s linear 200ms;
   }
   .navOpen {
-    opacity: 1;
     visibility: visible;
-    transition: opacity 700ms var(--ease);
-  }
-  .nav > * {
-    opacity: 0;
-    transform: translateY(48px);
-    transition:
-      transform 700ms var(--ease),
-      opacity 700ms var(--ease);
-  }
-  .navOpen > * {
     opacity: 1;
-    transform: none;
-  }
-  .navOpen > :nth-child(1) {
-    transition-delay: 100ms;
-  }
-  .navOpen > :nth-child(2) {
-    transition-delay: 150ms;
-  }
-  .navOpen > :nth-child(3) {
-    transition-delay: 200ms;
-  }
-  .navOpen > :nth-child(4) {
-    transition-delay: 250ms;
-  }
-  .navOpen > :nth-child(5) {
-    transition-delay: 300ms;
-  }
-  .navOpen > :nth-child(6) {
-    transition-delay: 350ms;
-  }
-  .navOpen > :nth-child(7) {
-    transition-delay: 400ms;
-  }
-  .navLink,
-  .navLink:hover,
-  .navLink.active {
-    background: none;
-    border-radius: 0;
-  }
-  .navLink.active {
-    text-decoration: underline;
-    text-decoration-thickness: 2px;
-    text-underline-offset: 8px;
+    transition: opacity 200ms var(--ease);
   }
   .navLink {
     display: flex;
     width: 100%;
-    min-height: 48px;
-    padding: 12px 0;
-    font-size: 24px;
-    line-height: 32px;
-    font-weight: 600;
-    color: var(--fg);
+    min-height: var(--nav-control);
+    padding: 14px 0;
+    border-bottom: 1px solid var(--public-line, #e0e2e7);
+    border-radius: 0;
+    font-size: 18px;
+    line-height: 24px;
+    font-weight: 500;
+    color: var(--ink);
+  }
+  .navLink .chev {
+    margin-left: auto;
   }
   .panel {
     position: static;
     min-width: 0;
-    margin-bottom: 16px;
-    padding: 12px;
-    background: transparent;
+    max-height: none;
+    margin-block: 4px 12px;
+    padding: 12px 0 12px 12px;
     border: 0;
+    border-radius: 0;
+    background: transparent;
     box-shadow: none;
-    -webkit-backdrop-filter: none;
-    backdrop-filter: none;
   }
   .panel a {
-    display: flex;
-    align-items: center;
-    min-height: 44px;
-    font-size: 16px;
-    line-height: 24px;
+    font-size: 14px;
+  }
+  .primary.primary {
+    --label-size: 13px;
+    font-size: 13px;
   }
 }
-.menuSignIn,
-.menuOnly {
-  display: none;
-}
-@media (max-width: 900px) {
-  /* Links that only the phone menu shows. */
-  .menuOnly.menuOnly {
-    display: flex;
+@media (max-width: 600px) {
+  :global(:root) {
+    --hail-header-h: 72px;
+  }
+  .shell {
+    gap: 8px;
+  }
+  .logo {
+    gap: 6px;
+    font-size: 25px;
   }
 }
-@media (max-width: 480px) {
-  /* On a phone the bar shows Get started. Sign in moves into the menu. */
-  .navActions .account {
-    display: none;
+@media (max-width: 440px) {
+  .shell {
+    gap: 3px;
   }
-  .menuSignIn.menuSignIn {
-    display: flex;
+  .navActions {
+    gap: 2px;
   }
-  .navActions .primary.primary {
-    padding: 0 12px 0 14px;
+  .logo {
+    font-size: 23px;
+    gap: 4px;
+  }
+  .primary.primary {
+    --label-size: 12px;
+    --s-4: 4px;
+    --s-5: 8px;
+    font-size: 12px;
   }
 }
 @media (max-width: 359px) {
-  /* Keep the bar on one line on the narrowest phones. The theme switch stays in the footer. */
   .themeButton {
-    display: none;
-  }
-}
-@media (max-width: 360px) {
-  .shell {
-    padding-left: 12px;
-  }
-  .logo {
-    font-size: 16px;
-    gap: 6px;
-  }
-  .primary.primary {
-    padding-inline: 8px;
-  }
-  .primary::after {
     display: none;
   }
 }
 @media (prefers-reduced-motion: reduce) {
   .header *,
-  .nav,
-  .nav > * {
+  .nav {
     transition: none !important;
   }
-}
-
-/* Docked bar for the docs and costs apps (scripts/sync-site-header.mjs). */
-:global(:root) {
-  --hail-header-h: 64px;
-}
-.header {
-  position: sticky;
-  top: 0;
-  z-index: 40;
-  box-sizing: border-box;
-  height: var(--hail-header-h);
-  padding: 0;
-  pointer-events: auto;
-  background: var(--bg);
-  border-bottom: 1px solid var(--hairline);
-}
-.shell {
-  width: min(1100px, calc(100% - 40px));
-  max-width: none;
-  height: 100%;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
-}
-.navActions {
-  margin-left: auto;
-}
-
-.themeButton > button {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  height: 100%;
-  background: none;
-  border: 0;
-  border-radius: 7px;
-  padding: 0;
-  color: inherit;
-  cursor: pointer;
 }

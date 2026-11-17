@@ -3054,6 +3054,30 @@ type HandoverContactOut struct {
 	PhoneE164 *string `json:"phone_e164"`
 }
 
+// KeptDocumentAnswer A document slot's saved choice on a number registration.
+type KeptDocumentAnswer struct {
+	// Fields The document's typed fields.
+	Fields *map[string]string `json:"fields,omitempty"`
+
+	// Option The document option chosen.
+	Option *string `json:"option,omitempty"`
+}
+
+// KeptFileInfo A file Hail keeps for a resubmit. The bytes are never returned.
+type KeptFileInfo struct {
+	// ContentType 'image/jpeg', 'image/png' or 'application/pdf'.
+	ContentType string `json:"content_type"`
+
+	// Filename The file name as it was sent.
+	Filename string `json:"filename"`
+
+	// SizeBytes Size in bytes.
+	SizeBytes int `json:"size_bytes"`
+
+	// Slot The document slot it was filed for.
+	Slot string `json:"slot"`
+}
+
 // LLMConfig defines model for LLMConfig.
 type LLMConfig struct {
 	// ApiKey API key sent to the BYO LLM endpoint. Write-only — never echoed back.
@@ -3511,13 +3535,30 @@ type SmsApplicationAmendRequest struct {
 	Fields map[string]string `json:"fields"`
 }
 
-// SmsApplicationResponse Private submitted SMS answers, or verified sender details for an old filing.
+// SmsApplicationResponse Private saved answers of a registration: a US texting application
+// (or verified sender details for an old filing), or a number
+// registration kept for a resubmit.
 type SmsApplicationResponse struct {
 	// Address Original sender address, when available.
 	Address *Address `json:"address,omitempty"`
 
+	// Documents Number registration only: each document slot's option and fields, by slot name. Null for US texting.
+	Documents *map[string]KeptDocumentAnswer `json:"documents,omitempty"`
+
 	// Fields Saved application answers; legacy responses may contain only verified sender details.
 	Fields map[string]string `json:"fields"`
+
+	// Files Number registration only: the files Hail keeps, by slot. A resubmit reuses each one unless you send a new file for its slot.
+	Files *[]KeptFileInfo `json:"files,omitempty"`
+
+	// HoldCents Number registration only: the credit a resubmit with that quote sets aside (its setup and first month). Null when nothing is set aside or the quote is gone.
+	HoldCents *int `json:"hold_cents,omitempty"`
+
+	// KeptUntil Number registration only: when Hail deletes these answers and files.
+	KeptUntil *time.Time `json:"kept_until,omitempty"`
+
+	// QuoteId Number registration only: the quote it was filed for. It keeps working with GET /v1/verifications/requirements and the resubmit while the answers are kept.
+	QuoteId *openapi_types.UUID `json:"quote_id,omitempty"`
 
 	// SchemaVersion Version of this saved-answer response format.
 	SchemaVersion *int `json:"schema_version,omitempty"`
@@ -3841,9 +3882,19 @@ type VerificationDocumentCautionDocument struct {
 }
 
 // VerificationDocumentCautionRead A slot's earlier read, as `POST /verifications/document-check`
-// returned it in `documents.<slot>`. Only `option` and `printed_name` are
-// used; the other keys of that object may be sent and are ignored.
+// returned it in `documents.<slot>`. Send that whole object: `option`,
+// `printed_name`, `expiry_date`, `none_of_types` and `file_slot` are used;
+// the other keys may be sent and are ignored.
 type VerificationDocumentCautionRead struct {
+	// ExpiryDate The expiry date read from the file (YYYY-MM-DD), or null (no expiry check).
+	ExpiryDate *string `json:"expiry_date,omitempty"`
+
+	// FileSlot The slot whose file this was read from. Slots with the same `file_slot` get one name check per box, as in the document check. Null: slots with the same printed name count as one file.
+	FileSlot *string `json:"file_slot,omitempty"`
+
+	// NoneOfTypes True when the file looked like none of the slot's document types.
+	NoneOfTypes *bool `json:"none_of_types,omitempty"`
+
 	// Option The document type the file looked like, or null.
 	Option *string `json:"option,omitempty"`
 
@@ -3880,7 +3931,7 @@ type VerificationDocumentCautionsRequestSubjectType string
 
 // VerificationDocumentCautionsResponse Returned by “POST /verifications/document-cautions“.
 type VerificationDocumentCautionsResponse struct {
-	// Warnings `name` and `document_type` warnings: the typed form against the earlier reads. Empty when nothing differs.
+	// Warnings `name`, `document_type` and `expired` warnings: the typed form and chosen types against the earlier reads. Empty when nothing differs.
 	Warnings []VerificationDocumentWarning `json:"warnings"`
 }
 
@@ -3909,6 +3960,12 @@ type VerificationDocumentRead struct {
 
 	// Fields Values for the fields of the slot's document types, by field name, as printed on the file.
 	Fields map[string]string `json:"fields"`
+
+	// FileSlot The slot whose file this was read from: this slot, or the slot whose file covers it. Slots with the same `file_slot` share one file. Null when not read.
+	FileSlot *string `json:"file_slot,omitempty"`
+
+	// NoneOfTypes True when the file was read and looks like none of the slot's document types (`option` is then null).
+	NoneOfTypes *bool `json:"none_of_types,omitempty"`
 
 	// Option The slot's document type the file looks like, as an option key, or null when none fits or it was not read.
 	Option *string `json:"option"`
@@ -4021,6 +4078,9 @@ type VerificationResponse struct {
 	// IdentityConfirmed True on a person's newest US texting registration when it is cancelled, or rejected and not yet dismissed, and the person stays confirmed: the next filing with the same first name, last name, email and mobile needs no code and has no submission fee. Dismiss a rejected registration first. Ignore it on older registrations.
 	IdentityConfirmed *bool `json:"identity_confirmed,omitempty"`
 
+	// KeptUntil For a number registration: when Hail deletes the answers and files it keeps so the filing can be fixed and sent again (30 days after submit). They go sooner when it is approved or cancelled, or the account closes. Null when nothing is kept.
+	KeptUntil *time.Time `json:"kept_until,omitempty"`
+
 	// NumberId The owned number covered by toll-free SMS verification. Null for organization-wide registrations.
 	NumberId *openapi_types.UUID `json:"number_id,omitempty"`
 
@@ -4032,6 +4092,9 @@ type VerificationResponse struct {
 
 	// RejectionReason Why it was rejected. Null unless rejected.
 	RejectionReason *string `json:"rejection_reason,omitempty"`
+
+	// Resubmittable True when `POST /v1/verifications/{id}/resubmit` accepts this verification now: a rejected number registration whose answers are still kept (`kept_until`).
+	Resubmittable *bool `json:"resubmittable,omitempty"`
 
 	// RuntimeReady True when required runtime configuration was verified, false while setup retries, null when not independently tracked.
 	RuntimeReady *bool `json:"runtime_ready,omitempty"`
@@ -4737,6 +4800,11 @@ type AmendSmsApplicationParams struct {
 
 // ConfirmVerificationParams defines parameters for ConfirmVerification.
 type ConfirmVerificationParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// ResubmitVerificationParams defines parameters for ResubmitVerification.
+type ResubmitVerificationParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
@@ -5531,6 +5599,9 @@ type ClientInterface interface {
 	ConfirmVerificationWithBody(ctx context.Context, verificationId openapi_types.UUID, params *ConfirmVerificationParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	ConfirmVerification(ctx context.Context, verificationId openapi_types.UUID, params *ConfirmVerificationParams, body ConfirmVerificationJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ResubmitVerification request
+	ResubmitVerification(ctx context.Context, verificationId openapi_types.UUID, params *ResubmitVerificationParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListSubscriptionsV1WebhooksGet request
 	ListSubscriptionsV1WebhooksGet(ctx context.Context, params *ListSubscriptionsV1WebhooksGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -6817,6 +6888,18 @@ func (c *Client) ConfirmVerificationWithBody(ctx context.Context, verificationId
 
 func (c *Client) ConfirmVerification(ctx context.Context, verificationId openapi_types.UUID, params *ConfirmVerificationParams, body ConfirmVerificationJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewConfirmVerificationRequest(c.Server, verificationId, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ResubmitVerification(ctx context.Context, verificationId openapi_types.UUID, params *ResubmitVerificationParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewResubmitVerificationRequest(c.Server, verificationId, params)
 	if err != nil {
 		return nil, err
 	}
@@ -11737,6 +11820,55 @@ func NewConfirmVerificationRequestWithBody(server string, verificationId openapi
 	return req, nil
 }
 
+// NewResubmitVerificationRequest generates requests for ResubmitVerification
+func NewResubmitVerificationRequest(server string, verificationId openapi_types.UUID, params *ResubmitVerificationParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "verification_id", verificationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/verifications/%s/resubmit", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
 // NewListSubscriptionsV1WebhooksGetRequest generates requests for ListSubscriptionsV1WebhooksGet
 func NewListSubscriptionsV1WebhooksGetRequest(server string, params *ListSubscriptionsV1WebhooksGetParams) (*http.Request, error) {
 	var err error
@@ -12625,6 +12757,9 @@ type ClientWithResponsesInterface interface {
 	ConfirmVerificationWithBodyWithResponse(ctx context.Context, verificationId openapi_types.UUID, params *ConfirmVerificationParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ConfirmVerificationResponse, error)
 
 	ConfirmVerificationWithResponse(ctx context.Context, verificationId openapi_types.UUID, params *ConfirmVerificationParams, body ConfirmVerificationJSONRequestBody, reqEditors ...RequestEditorFn) (*ConfirmVerificationResponse, error)
+
+	// ResubmitVerificationWithResponse request
+	ResubmitVerificationWithResponse(ctx context.Context, verificationId openapi_types.UUID, params *ResubmitVerificationParams, reqEditors ...RequestEditorFn) (*ResubmitVerificationResponse, error)
 
 	// ListSubscriptionsV1WebhooksGetWithResponse request
 	ListSubscriptionsV1WebhooksGetWithResponse(ctx context.Context, params *ListSubscriptionsV1WebhooksGetParams, reqEditors ...RequestEditorFn) (*ListSubscriptionsV1WebhooksGetResponse, error)
@@ -14483,6 +14618,29 @@ func (r ConfirmVerificationResponse) StatusCode() int {
 	return 0
 }
 
+type ResubmitVerificationResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON201      *VerificationResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r ResubmitVerificationResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ResubmitVerificationResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type ListSubscriptionsV1WebhooksGetResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -15629,6 +15787,15 @@ func (c *ClientWithResponses) ConfirmVerificationWithResponse(ctx context.Contex
 		return nil, err
 	}
 	return ParseConfirmVerificationResponse(rsp)
+}
+
+// ResubmitVerificationWithResponse request returning *ResubmitVerificationResponse
+func (c *ClientWithResponses) ResubmitVerificationWithResponse(ctx context.Context, verificationId openapi_types.UUID, params *ResubmitVerificationParams, reqEditors ...RequestEditorFn) (*ResubmitVerificationResponse, error) {
+	rsp, err := c.ResubmitVerification(ctx, verificationId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseResubmitVerificationResponse(rsp)
 }
 
 // ListSubscriptionsV1WebhooksGetWithResponse request returning *ListSubscriptionsV1WebhooksGetResponse
@@ -18238,6 +18405,39 @@ func ParseConfirmVerificationResponse(rsp *http.Response) (*ConfirmVerificationR
 			return nil, err
 		}
 		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseResubmitVerificationResponse parses an HTTP response from a ResubmitVerificationWithResponse call
+func ParseResubmitVerificationResponse(rsp *http.Response) (*ResubmitVerificationResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ResubmitVerificationResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest VerificationResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
 		var dest HTTPValidationError

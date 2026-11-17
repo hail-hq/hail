@@ -14,15 +14,15 @@ Tables checked, and why each does not fit:
 organization_id has no FK (the website owns that table).
 A GIN index on code_send_log finds the rows holding one phone's code texts
 for the per-phone code limit.
-The index on sms that counts a workspace's trial texts is in 0082.
+The index on sms that counts a workspace's trial texts is in 0083.
 """
 
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision = "0081"
-down_revision = "0080"
+revision = "0082"
+down_revision = "0081"
 branch_labels = None
 depends_on = None
 

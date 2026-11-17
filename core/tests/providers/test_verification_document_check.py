@@ -99,6 +99,7 @@ def _answer(**over) -> dict:
         "orientation": "upright",
         "kind": "national ID card",
         "option": "id_card",
+        "none_of_types": False,
         "given_names": "MARIA ELENA",
         "surnames": "TESTER SAMPLE",
         "business_name": "",
@@ -204,9 +205,44 @@ async def test_the_prompt_lists_every_type_of_the_slot_and_the_address() -> None
     assert call["schema"]["properties"]["option"]["enum"] == [
         "passport",
         "id_card",
-        "none",
     ]
+    assert call["schema"]["properties"]["none_of_types"] == {"type": "boolean"}
     assert 0 < call["timeout_s"] <= document_check.CHECK_TIMEOUT_S
+
+
+@pytest.mark.parametrize("subject_type", ["person", "business"])
+async def test_the_prompt_asks_for_the_holder_never_the_issuer(subject_type) -> None:
+    # A bill prints the issuer's name too (the bank, phone company or
+    # utility). The printed name is the holder's; a form box never takes
+    # the issuer's name (another named person, like a director, may fill
+    # a box that asks for them).
+    reader = _reader(_answer())
+    await _check(req=_req(subject_type=subject_type), reader=reader)
+    prompt = reader.calls[0]["prompt"]
+    names = next(x for x in prompt.splitlines() if x.startswith("- given_names"))
+    assert "the person the document is about or addressed to" in names
+    assert "Never a person who signs for the issuer" in names
+    company = next(x for x in prompt.splitlines() if x.startswith("- business_name"))
+    assert "the company the document is about or addressed to" in company
+    assert "Never the company that issued the document" in company
+    values = next(x for x in prompt.splitlines() if x.startswith("- values"))
+    assert "never takes the name of the company that issued the document" in values
+    assert "holder's" not in values
+
+
+async def test_an_empty_company_name_is_not_compared() -> None:
+    # A document that names no company (here an ID card), sent for a
+    # company: no company name read, so the typed one gets no warning.
+    req = _req(
+        subject_type="business",
+        fields=(FieldSpec(name="business_name", label="Business Name"),),
+    )
+    answer = _answer(business_name="", values=[])
+    out = await _check(
+        req=req, fields={"business_name": "Example Trading Ltd"}, reader=_reader(answer)
+    )
+    assert out.warnings == []
+    assert out.fields == {}
 
 
 async def test_the_proof_of_address_fills_the_address_first() -> None:
@@ -1024,7 +1060,6 @@ async def test_one_file_for_two_slots_is_read_once() -> None:
         "passport",
         "id_card",
         "utility_bill",
-        "none",
     }
     assert out.documents["proof_of_identity"].fields == {"document_number": "XK1"}
     assert out.documents["proof_of_address"].read is True
@@ -1220,7 +1255,7 @@ async def test_the_largest_images_decode_within_the_child_memory_limit() -> None
 
 def _echo(out: VerificationDocumentCheckResponse) -> dict:
     """The reads as the console sends them back: each read slot's
-    ``documents.<slot>`` (the whole object; only two keys are used)."""
+    ``documents.<slot>`` (the whole object)."""
     return {
         slot: VerificationDocumentCautionRead.model_validate(read.model_dump())
         for slot, read in out.documents.items()
@@ -1236,7 +1271,8 @@ def _form_only(docs: dict[str, DocumentInput]) -> dict[str, DocumentInput]:
 
 
 def _name_and_type(out: VerificationDocumentCheckResponse) -> list:
-    return [w for w in out.warnings if w.kind in ("name", "document_type")]
+    """The check's warnings the cautions give again."""
+    return [w for w in out.warnings if w.kind in ("name", "document_type", "expired")]
 
 
 @pytest.mark.parametrize(
@@ -1251,7 +1287,9 @@ def _name_and_type(out: VerificationDocumentCheckResponse) -> list:
 async def test_cautions_give_the_checks_name_and_type_warnings(fields, option) -> None:
     docs = _docs(option=option)
     out = await _check(fields=fields, docs=docs)
-    cautions = document_cautions(_req(), fields, {}, _form_only(docs), _echo(out))
+    cautions = document_cautions(
+        _req(), fields, {}, _form_only(docs), _echo(out), today=TODAY
+    )
     assert cautions == _name_and_type(out)
 
 
@@ -1259,29 +1297,195 @@ async def test_cautions_follow_each_edit_without_a_new_read() -> None:
     out = await _check(fields={"first_name": "Elena", "last_name": "Maria"})
     reads = _echo(out)
     fixed = {"first_name": "Maria Elena", "last_name": "Tester Sample"}
-    assert document_cautions(_req(), fixed, {}, _form_only(_docs()), reads) == []
+    assert (
+        document_cautions(_req(), fixed, {}, _form_only(_docs()), reads, today=TODAY)
+        == []
+    )
     # The type changed to one the file does not look like.
-    wrong = document_cautions(_req(), fixed, {}, _form_only(_docs("passport")), reads)
+    wrong = document_cautions(
+        _req(), fixed, {}, _form_only(_docs("passport")), reads, today=TODAY
+    )
     assert [w.kind for w in wrong] == ["document_type"]
     assert "Change the document type to ID card." in wrong[0].message
 
 
-async def test_cautions_never_say_a_file_is_none_of_the_types() -> None:
+async def test_cautions_say_a_file_is_none_of_the_types_for_the_type_chosen_now() -> (
+    None
+):
     out = await _check(
-        docs=_docs(option="passport"), reader=_reader(_answer(option="none"))
+        docs=_docs(option="passport"), reader=_reader(_answer(none_of_types=True))
     )
     assert _kinds(out) == ["document_type"]
     reads = _echo(out)
     assert reads["proof_of_identity"].option is None
-    cautions = document_cautions(_req(), {}, {}, _form_only(_docs("passport")), reads)
-    assert cautions == []
+    assert reads["proof_of_identity"].none_of_types is True
+    cautions = document_cautions(
+        _req(), {}, {}, _form_only(_docs("passport")), reads, today=TODAY
+    )
+    assert cautions == out.warnings
+    # A type chosen after the read: the warning names it.
+    later = document_cautions(
+        _req(), {}, {}, _form_only(_docs("id_card")), reads, today=TODAY
+    )
+    assert [w.kind for w in later] == ["document_type"]
+    assert later[0].message.startswith("You chose ID card as the document type")
+    # A console that sends only option and printed_name: no such warning.
+    old = {
+        slot: VerificationDocumentCautionRead(
+            option=r.option, printed_name=r.printed_name
+        )
+        for slot, r in reads.items()
+    }
+    assert (
+        document_cautions(
+            _req(), {}, {}, _form_only(_docs("passport")), old, today=TODAY
+        )
+        == []
+    )
+
+
+async def test_no_carrier_type_key_can_mean_none_of_the_types() -> None:
+    """The enum holds carrier keys only, so a type keyed "none" (or any
+    word) is a type; "none of them" is its own answer."""
+    base = _req()
+    for key in ("none", "none_of_these"):
+        slot = base.documents[0].model_copy(
+            update={"options": (DocumentOption(key=key, label="No document"),)}
+        )
+        req = base.model_copy(update={"documents": (slot,)})
+        reader = _reader(_answer(option=key))
+        out = await check_documents(
+            req, {}, {}, _docs(option=key), today=TODAY, reader=reader
+        )
+        assert reader.calls[0]["schema"]["properties"]["option"]["enum"] == [key]
+        assert "document_type" not in _kinds(out)
+        assert out.documents["proof_of_identity"].option == key
+        assert out.documents["proof_of_identity"].none_of_types is False
+
+
+async def test_one_file_for_two_slots_says_none_for_each_slot() -> None:
+    """A file covering two slots: one answer, "none of them" for each slot,
+    whatever keys the slots share."""
+    base = _req()
+    second = base.documents[0].model_copy(
+        update={"name": "proof_of_birth", "label": "Proof of birth"}
+    )
+    req = base.model_copy(update={"documents": (base.documents[0], second)})
+    docs = {
+        **_docs(option="passport"),
+        "proof_of_birth": DocumentInput(option="passport", file=_PNG),
+    }
+    out = await check_documents(
+        req, {}, {}, docs, today=TODAY, reader=_reader(_answer(none_of_types=True))
+    )
+    assert all(d.none_of_types and d.option is None for d in out.documents.values())
+    assert [w.field for w in out.warnings] == ["proof_of_identity", "proof_of_birth"]
+
+
+def test_an_echo_says_none_from_its_flag_alone() -> None:
+    """An echo's none_of_types gives the warning even with a stale or
+    unknown option; an unread file never says it."""
+    slot = _req().documents[0]
+    for option in (None, "passport", "gone"):
+        echo = VerificationDocumentCautionRead(option=option, none_of_types=True)
+        read = document_check._Read.echoed(slot, echo)
+        assert read.says_none is True and read.option is None
+    unread = document_check._Read(
+        slot, {}, {"readable": False, "none_of_types": True}, "proof_of_identity"
+    )
+    assert unread.says_none is False
+
+
+def _mixed_address_slot() -> Requirements:
+    """A slot that takes an ID card or a utility bill (a proof of address)."""
+    base = _req()
+    slot = base.documents[0].model_copy(
+        update={
+            "options": (
+                base.documents[0].options[1],
+                DocumentOption(
+                    key="utility_bill", label="Utility bill", needs_address=True
+                ),
+            )
+        }
+    )
+    return base.model_copy(update={"documents": (slot,)})
+
+
+async def test_cautions_work_out_expired_again_for_the_type_chosen_now() -> None:
+    """A file of none of the types: whether its date is an expiry follows
+    the type chosen (a bill's date is a due date)."""
+    req = _mixed_address_slot()
+    answer = _answer(none_of_types=True, expiry_date="2020-01-01")
+    out = await check_documents(
+        req, {}, {}, _docs("id_card"), today=TODAY, reader=_reader(answer)
+    )
+    assert _kinds(out) == ["document_type", "expired"]
+    reads = _echo(out)
+    assert document_cautions(
+        req, {}, {}, _form_only(_docs("id_card")), reads, today=TODAY
+    ) == _name_and_type(out)
+    # The bill chosen: its date is a due date, no expired warning.
+    bill = document_cautions(
+        req, {}, {}, _form_only(_docs("utility_bill")), reads, today=TODAY
+    )
+    assert [w.kind for w in bill] == ["document_type"]
+    # The other way round: a bill at the check, an ID card chosen after.
+    out = await check_documents(
+        req, {}, {}, _docs("utility_bill"), today=TODAY, reader=_reader(answer)
+    )
+    assert _kinds(out) == ["document_type"]
+    later = document_cautions(
+        req, {}, {}, _form_only(_docs("id_card")), _echo(out), today=TODAY
+    )
+    assert [w.kind for w in later] == ["document_type", "expired"]
+
+
+async def test_cautions_give_one_name_warning_per_file_as_the_check_does() -> None:
+    """Two files that print the same name: one name warning each, in the
+    check and in the cautions."""
+    base = _req()
+    second = base.documents[0].model_copy(
+        update={
+            "name": "proof_of_birth",
+            "label": "Proof of birth",
+            "options": (
+                DocumentOption(key="birth_certificate", label="Birth certificate"),
+            ),
+        }
+    )
+    req = base.model_copy(update={"documents": (base.documents[0], second)})
+    docs = {
+        **_docs(option="id_card"),
+        "proof_of_birth": DocumentInput(option="birth_certificate", file=_BILL),
+    }
+    fields = {"first_name": "Someone", "last_name": "Else"}
+    out = await check_documents(
+        req,
+        fields,
+        {},
+        docs,
+        today=TODAY,
+        reader=_reader(_answer(), _answer(option="birth_certificate")),
+    )
+    assert [w.field for w in out.warnings] == ["first_name", "first_name"]
+    cautions = document_cautions(
+        req, fields, {}, _form_only(docs), _echo(out), today=TODAY
+    )
+    assert cautions == _name_and_type(out)
 
 
 def test_cautions_check_only_slots_with_a_read() -> None:
     fields = {"first_name": "Someone", "last_name": "Else"}
-    assert document_cautions(_req(), fields, {}, _form_only(_docs()), {}) == []
+    assert (
+        document_cautions(_req(), fields, {}, _form_only(_docs()), {}, today=TODAY)
+        == []
+    )
     no_name = {"proof_of_identity": VerificationDocumentCautionRead(option="id_card")}
-    assert document_cautions(_req(), fields, {}, _form_only(_docs()), no_name) == []
+    assert (
+        document_cautions(_req(), fields, {}, _form_only(_docs()), no_name, today=TODAY)
+        == []
+    )
 
 
 def test_cautions_skip_a_proof_of_address_by_its_read_type() -> None:
@@ -1293,7 +1497,7 @@ def test_cautions_skip_a_proof_of_address_by_its_read_type() -> None:
     }
     docs = {"proof_of_address": DocumentInput(option="")}
     fields = {"first_name": "Maria Elena", "last_name": "Tester Sample"}
-    assert document_cautions(_req(), fields, {}, docs, reads) == []
+    assert document_cautions(_req(), fields, {}, docs, reads, today=TODAY) == []
 
 
 async def test_cautions_give_one_name_warning_for_one_file_in_two_slots() -> None:
@@ -1314,7 +1518,9 @@ async def test_cautions_give_one_name_warning_for_one_file_in_two_slots() -> Non
     out = await check_documents(
         req, fields, {}, docs, today=TODAY, reader=_reader(_answer())
     )
-    cautions = document_cautions(req, fields, {}, _form_only(docs), _echo(out))
+    cautions = document_cautions(
+        req, fields, {}, _form_only(docs), _echo(out), today=TODAY
+    )
     assert cautions == _name_and_type(out)
     assert len([w for w in cautions if w.field == "first_name"]) == 1
 
@@ -1322,14 +1528,21 @@ async def test_cautions_give_one_name_warning_for_one_file_in_two_slots() -> Non
 # -- the reader's fallback models ---------------------------------------------
 
 
-def _api_error(status: int) -> anthropic.APIStatusError:
+def _api_error(
+    status: int, message: str = "Model eu.example-model not found"
+) -> anthropic.APIStatusError:
     response = httpx2.Response(
         status, request=httpx2.Request("POST", "https://api.example/v1/messages")
     )
-    cls = {400: anthropic.BadRequestError, 404: anthropic.NotFoundError}.get(
-        status, anthropic.InternalServerError
-    )
-    return cls("Model eu.example-model not found", response=response, body=None)
+    cls = {
+        400: anthropic.BadRequestError,
+        401: anthropic.AuthenticationError,
+        403: anthropic.PermissionDeniedError,
+        404: anthropic.NotFoundError,
+        413: anthropic.APIStatusError,
+        429: anthropic.RateLimitError,
+    }.get(status, anthropic.InternalServerError)
+    return cls(message, response=response, body=None)
 
 
 def _client_of(*outcomes, delay: float = 0.0):
@@ -1374,20 +1587,86 @@ async def test_reader_falls_back_after_a_missing_model_with_one_read(
     # The second try gets what is left of the same deadline.
     assert calls[1]["timeout"] <= calls[0]["timeout"]
     # Only the type and the try: never the message.
-    assert "NotFoundError, try 0" in caplog.text
+    assert "NotFoundError 404, try 0" in caplog.text
     assert "eu.example-model" not in caplog.text
 
 
-async def test_reader_sends_between_tools_to_the_last_model(
+async def test_reader_sends_each_model_its_own_thinking_value(
     three_models, monkeypatch
 ) -> None:
-    client, calls = _client_of(_api_error(404), _api_error(400), _response("{}"))
+    """By model, not by place: Sonnet 5.5 refuses "disabled", Opus 5.5
+    cannot turn thinking off (no thinking value at all)."""
+    monkeypatch.setattr(
+        settings, "document_reader_model", "eu.anthropic.claude-sonnet-5-5"
+    )
+    monkeypatch.setattr(
+        settings, "anthropic_backup_model", "eu.anthropic.claude-haiku-5-5"
+    )
+    monkeypatch.setattr(settings, "anthropic_model", "eu.anthropic.claude-opus-5-5")
+    client, calls = _client_of(_api_error(404), _api_error(503), _response("{}"))
     monkeypatch.setattr(document_reader, "_client", client)
     sends: list[int] = []
     assert await _read(on_send=lambda: sends.append(1)) == {}
-    assert [c["model"] for c in calls] == ["model-a", "model-b", "model-c"]
-    assert calls[2]["thinking"] == {"type": "between_tools"}
+    assert [c["model"] for c in calls] == [
+        "eu.anthropic.claude-sonnet-5-5",
+        "eu.anthropic.claude-haiku-5-5",
+        "eu.anthropic.claude-opus-5-5",
+    ]
+    assert calls[0]["thinking"] == {"type": "between_tools"}
+    assert calls[1]["thinking"] == {"type": "disabled"}
+    assert "thinking" not in calls[2]
     assert sends == [1]
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        _api_error(429, "Too many requests"),
+        _api_error(400, "The provided model identifier is invalid."),
+        _api_error(
+            400,
+            'To turn thinking off on this model, send "thinking": '
+            '{"type": "between_tools"} instead of {"type": "disabled"}.',
+        ),
+        _api_error(403, "You don't have access to the model"),
+        _api_error(400, "output_config.effort is not supported on this model"),
+        _api_error(
+            400,
+            "Invocation of model ID anthropic.claude-haiku-5-5 with on-demand "
+            "throughput isn\u2019t supported. Retry your request with the ID or "
+            "ARN of an inference profile that contains this model.",
+        ),
+        _api_error(424, "The provided model identifier is invalid."),
+    ],
+)
+async def test_reader_falls_back_when_another_model_may_help(
+    three_models, monkeypatch, error
+) -> None:
+    client, calls = _client_of(error, _response("{}"))
+    monkeypatch.setattr(document_reader, "_client", client)
+    assert await _read() == {}
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        _api_error(400, "Could not process image"),
+        _api_error(400, "The model returned the following errors: bad image"),
+        _api_error(413, "Request too large"),
+        _api_error(400, "image dimensions exceed the maximum supported by this model"),
+        _api_error(400, "thinking about it, this model cannot read that file"),
+        _api_error(424, "ModelErrorException: the model could not read the input"),
+        _api_error(401, "invalid x-api-key"),
+    ],
+)
+async def test_reader_never_sends_the_file_to_more_models_after_a_file_error(
+    three_models, monkeypatch, error
+) -> None:
+    client, calls = _client_of(error, _response("{}"))
+    monkeypatch.setattr(document_reader, "_client", client)
+    assert await _read() is None
+    assert [c["model"] for c in calls] == ["model-a"]
 
 
 async def test_reader_tries_each_model_once(three_models, monkeypatch) -> None:
