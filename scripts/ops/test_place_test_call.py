@@ -370,10 +370,34 @@ def test_place_call_replayed_server_error_is_final():
         post(client)
 
 
-def test_place_call_fresh_refusal_after_a_timeout_may_be_live():
-    # The timed-out request may still claim the key and place the call.
-    client = client_for([httpx.ReadTimeout("slow"), httpx.Response(402)])
+def test_place_call_fresh_refusal_after_a_lost_request_retries_until_replay():
+    # The lost request claims the key later; its replayed refusal is final.
+    replay = {"Idempotency-Replay": "true"}
+    seen = []
+    client = client_for(
+        [
+            httpx.ReadTimeout("slow"),
+            httpx.Response(402),
+            httpx.Response(409, json=STILL),
+            httpx.Response(403, headers=replay),
+        ],
+        seen,
+    )
+    with pytest.raises(ptc.CallTestError, match="403"):
+        post(client)
+    assert len(seen) == 4
+
+
+def test_place_call_fresh_refusal_after_a_lost_request_may_be_live():
+    client = client_for([httpx.ReadTimeout("slow")] + [httpx.Response(402)] * 100)
     with pytest.raises(ptc.CallMaybeLive, match="402"):
+        post(client)
+
+
+def test_place_call_refusal_after_a_connect_error_is_final():
+    # A connect error never sent the request, so nothing can be live.
+    client = client_for([httpx.ConnectError("dns"), httpx.Response(404)])
+    with pytest.raises(ptc.CallTestError, match="404"):
         post(client)
 
 
@@ -454,7 +478,7 @@ def test_place_call_shared_lines_that_stay_busy_are_final():
 
 def test_place_call_other_503_after_a_timeout_may_be_live():
     client = client_for(
-        [httpx.ReadTimeout("slow"), httpx.Response(503, text="no upstream")]
+        [httpx.ReadTimeout("slow")] + [httpx.Response(503, text="no upstream")] * 100
     )
     with pytest.raises(ptc.CallMaybeLive, match="503"):
         post(client)
