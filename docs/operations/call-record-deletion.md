@@ -80,9 +80,10 @@ The script stops, and changes nothing, when:
 - the recording upload may still be running;
 - a usage row is not priced yet (the usage rater has not run);
 - a charge still waits for the settle step. It runs once no call leg cost
-  is `pending`: usually within minutes, at most about 48 hours (Hail stops
-  waiting for a leg cost after 48 hours). Deleting before it would leave a
-  stray `voice_cost:` row.
+  is `pending`: usually within minutes, and within 48 hours for most calls
+  (Hail stops waiting for a leg cost then). When the step keeps failing for
+  a call, the script can refuse for up to 14 days after the charge.
+  Deleting before it would leave a stray `voice_cost:` row.
 
 Run it again later when it stops for one of the last four.
 
@@ -105,13 +106,14 @@ Delete it now anyway.
 
 ## 4. Delete the rows
 
-Same script as step 2, with `\set apply true`.
+The same script runs both times: `apply` is `false` in step 2 and `true`
+here. Any other value rolls back and deletes nothing.
 
 ```bash
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
 \set org '<org id>'
 \set call '<call id>'
-\set apply false
+\set apply '<false in step 2, true in step 4>'
 BEGIN;
 -- The workspace's billing lock, as purchases and the raters take it.
 SELECT pg_advisory_xact_lock(hashtextextended((:'org')::uuid::text, 0));
@@ -183,12 +185,11 @@ DELETE FROM calls WHERE id = :'call' AND organization_id = :'org';
 \if :apply
   COMMIT;
 \else
-  \echo 'Checks passed. Nothing deleted: apply is false.'
+  \echo 'Checks passed. Nothing deleted: apply is not true.'
   ROLLBACK;
 \endif
 SQL
 ```
 
-Each `DELETE` prints how many rows it removed. The last one must print
-`DELETE 1`. Run the two queries in step 1 again: both return no rows for
-the call.
+With `apply` true the output must end with `COMMIT`. Run the two queries
+in step 1 again: both return no rows for the call.

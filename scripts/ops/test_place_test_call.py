@@ -105,9 +105,17 @@ def test_client_error_stops_the_wait():
 def test_timeout_names_the_call():
     timer = FakeTime()
     client = client_for([httpx.Response(200, json=call("ringing"))] * 10)
-    with pytest.raises(ptc.CallTestError, match=CALL_ID):
+    with pytest.raises(ptc.CallTestError, match=CALL_ID) as exc:
         wait(client, timer, timeout=20, interval=5)
     assert timer.now == 20
+    assert "last status ringing" in str(exc.value)
+
+
+def test_timeout_names_a_body_that_is_not_a_call():
+    timer = FakeTime()
+    client = client_for([httpx.Response(200, text="<html>portal</html>")] * 10)
+    with pytest.raises(ptc.CallTestError, match="not a call"):
+        wait(client, timer, timeout=10, interval=5)
 
 
 def test_long_retry_after_still_polls_at_the_deadline():
@@ -242,3 +250,19 @@ def test_null_call_id_says_the_call_may_be_live(monkeypatch, capsys):
     code = ptc.main(["--number", "+14155550100", "--i-will-call-a-customer"])
     assert code == 2
     assert "may have been placed" in capsys.readouterr().err
+
+
+def test_place_call_body_that_is_not_json_raises_value_error():
+    # main() turns a ValueError from place_call into the call-may-be-live
+    # warning, so place_call must not swallow it.
+    client = client_for([httpx.Response(201, text="<html>ok</html>")])
+    with pytest.raises(ValueError):
+        ptc.place_call(client, API, "+14155550100", None)
+
+
+def test_refuses_an_api_url_without_scheme(monkeypatch, capsys):
+    monkeypatch.setenv("HAIL_API_KEY", "hl_test")
+    monkeypatch.setenv("HAIL_API_URL", "api.example.test")
+    code = ptc.main(["--number", "+14155550100", "--i-will-call-a-customer"])
+    assert code == 2
+    assert "HAIL_API_URL" in capsys.readouterr().err

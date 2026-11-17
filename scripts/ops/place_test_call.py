@@ -105,31 +105,37 @@ def wait_for_end(
     the wait."""
     url = join_url(api_url, f"v1/calls/{call_id}")
     deadline = clock() + timeout
+    last = "no answer yet"
     while True:
         wait = interval
         try:
             response = client.get(url)
-        except httpx.HTTPError:
+        except httpx.HTTPError as exc:
             response = None
+            last = f"last poll failed: {exc!r}"
         if response is not None:
             if response.status_code == 200:
                 call = _json(response)
-                if (
-                    isinstance(call, dict)
-                    and call.get("status") in TERMINAL_CALL_STATUSES
-                ):
+                if not isinstance(call, dict) or "status" not in call:
+                    last = f"last poll body is not a call: {response.text[:200]!r}"
+                elif call["status"] in TERMINAL_CALL_STATUSES:
                     return call
+                else:
+                    last = f"last status {call['status']}"
             elif response.status_code == 429:
                 wait = max(interval, _retry_after(response))
+                last = "last poll rate limited"
             elif response.status_code < 500:
                 raise CallTestError(
                     f"GET /v1/calls/{call_id} answered "
                     f"{response.status_code}: {response.text}"
                 )
+            else:
+                last = f"last poll answered {response.status_code}"
         left = deadline - clock()
         if left <= 0:
             raise CallTestError(
-                f"call {call_id} did not end within {timeout:.0f} seconds"
+                f"call {call_id} did not end within {timeout:.0f} seconds ({last})"
             )
         # The last wait is cut short so one more poll lands at the deadline.
         sleep(min(wait, left))
@@ -219,6 +225,9 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
     api_url = os.environ.get("HAIL_API_URL") or DEFAULT_API_URL
+    if not api_url.startswith(("https://", "http://")):
+        print(f"HAIL_API_URL must start with https://: {api_url!r}", file=sys.stderr)
+        return 2
     print(WARNING)
     headers = {"Authorization": f"Bearer {api_key}"}
     with httpx.Client(headers=headers, timeout=30) as client:
