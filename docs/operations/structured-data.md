@@ -20,6 +20,7 @@ before rendering, including text derived from Markdown or model data.
 These builders run in route templates. New published guides, generated API
 operations, and featured model pairs inherit the schema automatically.
 Keep both deployments' `ignoreCommand` watching `shared/`.
+The docs filter must also watch `openapi/` so spec changes rebuild API pages.
 
 After adding a public guide, run `pnpm run docs:urls` and `pnpm run docs:check-urls`.
 Update `DOCS` in `hail-website/lib/docs.ts` so the public docs links include it.

@@ -9,7 +9,7 @@ import {
 } from "node:fs";
 import { execFileSync, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   articleSchema,
   collectionSchema,
@@ -20,7 +20,7 @@ import {
   modelProduct,
 } from "../web/lib/model-schema.ts";
 
-test("both apps rebuild when only shared structured data changes", () => {
+function assertBuildFilters(configFiles, changedPath) {
   const directory = mkdtempSync(join(tmpdir(), "hail-structured-data-deploy-"));
   try {
     const git = (...args) =>
@@ -28,16 +28,16 @@ test("both apps rebuild when only shared structured data changes", () => {
     git("init", "--quiet", "--initial-branch=fixture");
     git("config", "user.name", "Test");
     git("config", "user.email", "test@example.com");
-    mkdirSync(join(directory, "shared"));
+    mkdirSync(join(directory, dirname(changedPath)), { recursive: true });
     mkdirSync(join(directory, "app"));
-    writeFileSync(join(directory, "shared/schema.ts"), "before");
-    git("add", "shared/schema.ts");
+    writeFileSync(join(directory, changedPath), "before");
+    git("add", changedPath);
     git("commit", "--quiet", "-m", "Initial fixture");
     const base = git("rev-parse", "HEAD").trim();
-    writeFileSync(join(directory, "shared/schema.ts"), "after");
-    git("add", "shared/schema.ts");
-    git("commit", "--quiet", "-m", "Change shared schema");
-    for (const file of ["../vercel.json", "../docs-site/vercel.json"]) {
+    writeFileSync(join(directory, changedPath), "after");
+    git("add", changedPath);
+    git("commit", "--quiet", "-m", "Change build input");
+    for (const file of configFiles) {
       const { ignoreCommand } = JSON.parse(
         readFileSync(new URL(file, import.meta.url)),
       );
@@ -49,13 +49,24 @@ test("both apps rebuild when only shared structured data changes", () => {
         assert.equal(
           run.status,
           1,
-          `${file}: shared changes must request a build from ${cwd}`,
+          `${file}: ${changedPath} must request a build from ${cwd}`,
         );
       }
     }
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+}
+
+test("both apps rebuild when only shared structured data changes", () => {
+  assertBuildFilters(
+    ["../vercel.json", "../docs-site/vercel.json"],
+    "shared/schema.ts",
+  );
+});
+
+test("docs rebuild generated API pages when only the OpenAPI spec changes", () => {
+  assertBuildFilters(["../docs-site/vercel.json"], "openapi/openapi.yaml");
 });
 
 test("Vercel build filters fit its 256 character limit", () => {
