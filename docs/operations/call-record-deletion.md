@@ -52,7 +52,7 @@ psql "$DATABASE_URL" <<'SQL'
 \set org '<org id>'
 \set call '<call id>'
 SELECT ue.id AS usage_event_id, ue.ref, ue.units, ue.priced_at,
-       ac.ref AS charge_ref, ac.amount_cents, s.settled_at, s.failures
+       ac.ref AS charge_ref, ac.amount_cents, s.settled_at, s.failures, s.review
 FROM usage_events ue
 LEFT JOIN account_credits ac ON ac.organization_id = ue.organization_id
   AND ac.ref IN ('usage_event:' || ue.id, 'voice_cost:' || ue.id)
@@ -82,10 +82,11 @@ The script stops, and changes nothing, when:
 - a charge still waits for the settle step. It runs once no call leg cost
   is `pending`: usually within minutes, and within 48 hours for most calls
   (Hail stops waiting for a leg cost then). The step tries again after a
-  failure (step 1 shows `failures`) and gives up after 3. When it skips a
-  call (for example, the website cannot load its call rate table), the
-  script can refuse for up to 14 days after the charge.
-  Deleting before it would leave a stray `voice_cost:` row.
+  failure (step 1 shows `failures`) and gives up after 3, with `review`
+  set. Look at a `review` row before you delete it: its price difference
+  is lost with it. When it skips a call (for example, the website cannot
+  load its call rate table), the script can refuse for up to 14 days after
+  the charge. Deleting before it would leave a stray `voice_cost:` row.
 
 Run it again later when it stops for one of the last four.
 
@@ -200,6 +201,6 @@ SELECT :'mode' = 'delete' AS apply \gset
 SQL
 ```
 
-With `delete`, the last `DELETE` prints `DELETE 1` and the output must end
-with `COMMIT` (a check run ends with `ROLLBACK`). Run the two queries in step 1 again: both return no rows
+With `delete`, the last `DELETE` prints `DELETE 1` and the output must
+end with `COMMIT`. Any other end means nothing was deleted. Run the two queries in step 1 again: both return no rows
 for the call.

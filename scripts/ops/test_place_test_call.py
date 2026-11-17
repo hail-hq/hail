@@ -276,10 +276,32 @@ def test_a_null_status_is_not_a_call():
         wait(client, timer, timeout=10, interval=5)
 
 
-@pytest.mark.parametrize("url", ["http://api.example.test", "http://localhost.evil"])
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://api.example.test",
+        "http://localhost.evil",
+        "http://localhost:pw@evil.example.test/",
+        "ftp://localhost",
+    ],
+)
 def test_refuses_plain_http_to_another_host(url, monkeypatch, capsys):
     monkeypatch.setenv("HAIL_API_KEY", "hl_test")
     monkeypatch.setenv("HAIL_API_URL", url)
     code = ptc.main(["--number", "+14155550100", "--i-will-call-a-customer"])
     assert code == 2
     assert "HAIL_API_URL" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://api.hail.so",
+        "HTTPS://api.hail.so",
+        "http://localhost:8080",
+        "http://127.0.0.1/",
+        "http://[::1]:8080",
+    ],
+)
+def test_accepts_https_and_local_http(url):
+    assert ptc.safe_api_url(url)

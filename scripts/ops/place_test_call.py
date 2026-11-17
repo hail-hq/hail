@@ -28,13 +28,14 @@ import time
 import uuid
 from collections.abc import Callable
 from datetime import datetime
+from urllib.parse import urlsplit
 
 import httpx
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
 from hailhq.core.urls import join_url
 
 DEFAULT_API_URL = "https://api.hail.so"
-LOCAL_HTTP = ("http://localhost:", "http://localhost/", "http://127.0.0.1:")
+LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 E164 = re.compile(r"^\+[1-9]\d{6,14}$")
 # Voice calls stop at 300 seconds by default; this leaves room for ringing.
 DEFAULT_TIMEOUT_SECONDS = 420
@@ -183,6 +184,14 @@ def verdict(call: dict) -> tuple[bool, str]:
     return False, text
 
 
+def safe_api_url(url: str) -> bool:
+    """The API key goes in a header: https, or plain http to this machine."""
+    parts = urlsplit(url)
+    if parts.scheme == "https":
+        return bool(parts.hostname)
+    return parts.scheme == "http" and parts.hostname in LOCAL_HOSTS
+
+
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Place one test call to a number through Hail's public API.",
@@ -228,8 +237,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
     api_url = os.environ.get("HAIL_API_URL") or DEFAULT_API_URL
-    # The API key goes in a header: plain http only to this machine.
-    if not api_url.startswith(LOCAL_HTTP + ("https://",)):
+    if not safe_api_url(api_url):
         print(
             f"HAIL_API_URL must start with https:// (http:// only for "
             f"localhost): {api_url!r}",
