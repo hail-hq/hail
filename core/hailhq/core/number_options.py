@@ -134,7 +134,13 @@ def paperwork_from_block(
 def offer_paperwork(
     country_code: str, number_type: str, provider: str, subject: str, needs: bool
 ) -> SubjectPapers:
-    """The papers one subject must give for one carrier row."""
+    """The papers one subject must give for one carrier row. A person is
+    not accepted where only a company may buy
+    (``telephony_catalog.business_only``), whatever the catalog block says."""
+    if subject == "person" and telephony_catalog.business_only(
+        provider, country_code, number_type
+    ):
+        return SubjectPapers([], True, False)
     block = (
         telephony_catalog.requirements(country_code, number_type, provider)
         if needs
@@ -201,11 +207,6 @@ def _candidates(
                 or not toll_free_sms_ok(provider, country_code, nt, capabilities)
             ):
                 continue
-            block = (
-                telephony_catalog.requirements(country_code, nt, provider)
-                if needs
-                else None
-            )
             # Like /quotes: a filter prices and shows only the asked jobs, so
             # a calls-only search pays no SMS fee. No filter: every job.
             priced = [c for c in caps if c in capabilities] if capabilities else caps
@@ -215,7 +216,7 @@ def _candidates(
             setup = cents(row.get("setup_usd") or 0)
             found = verifications.get((provider, country_code, nt), [])
             for subject in SUBJECTS:
-                papers = paperwork_from_block(block, subject, needs)
+                papers = offer_paperwork(country_code, nt, provider, subject, needs)
                 if not papers.accepted:
                     continue
                 status, v = option_status(needs, by_request, subject, found)

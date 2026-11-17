@@ -79,8 +79,14 @@ def _path(provider: str) -> Path:
 
 @lru_cache(maxsize=8)
 def _load(provider: str) -> dict[tuple[str, str], dict]:
+    """The carrier's rows by (country, number type). ``_NOT_SOLD`` rows are
+    left out here, so no reader of this module can offer them."""
     raw = json.loads(_path(provider).read_text())
-    return {(n["country_code"], n["number_type"]): n for n in raw["numbers"]}
+    return {
+        (n["country_code"], n["number_type"]): n
+        for n in raw["numbers"]
+        if not not_sold(provider, n["country_code"], n["number_type"])
+    }
 
 
 @lru_cache(maxsize=8)
@@ -146,7 +152,7 @@ def capabilities(
     providers = PROVIDERS if provider == "auto" else (provider,)
     for name in providers:
         row = _load(name).get((country_code, number_type))
-        if not row or not_sold(name, country_code, number_type):
+        if not row:
             continue
         # Takes calls but cannot place them, or the carrier picks the number
         # at order time: neither can be quoted and bought here. Support
@@ -192,24 +198,18 @@ def by_request_row(country_code: str, number_type: str, provider: str) -> dict |
 def requirements(country_code: str, number_type: str, provider: str) -> dict | None:
     """The stored requirements block of ``provider``'s catalog row (who may
     buy and which paper categories each needs), or None when the row has no
-    block. Read from the catalog only; no carrier call. A person is not
-    accepted where ``business_only`` says so."""
+    block. Read from the catalog only; no carrier call."""
     row = _load(provider).get((country_code, number_type))
-    block = row.get("requirements") if row else None
-    if block is not None and business_only(provider, country_code, number_type):
-        return {**block, "person": {"accepted": False, "items": []}}
-    return block
+    return row.get("requirements") if row else None
 
 
 def rows(country_code: str, provider: str) -> list[dict]:
     """Every catalog row of ``provider`` in this country, by-request rows
-    included, receive-only rows and ``not_sold`` rows left out."""
+    included, receive-only rows left out."""
     return [
         row
-        for (cc, nt), row in _load(provider).items()
-        if cc == country_code
-        and not row.get("receive_only")
-        and not not_sold(provider, cc, nt)
+        for (cc, _), row in _load(provider).items()
+        if cc == country_code and not row.get("receive_only")
     ]
 
 

@@ -310,6 +310,10 @@ async def telnyx_offers(
         if rules and not matched:
             continue
         requirements = [r for rule in matched for r in rule["regulatory_requirements"]]
+        # No rules and no group would sell a company-only number to anyone:
+        # unknown, not an exemption.
+        if company_only and not requirements and not group:
+            continue
         labels = [
             r.get("name") or r.get("field_type") or "Verification" for r in requirements
         ]

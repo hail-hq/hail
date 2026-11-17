@@ -554,3 +554,23 @@ def test_gb_national_is_company_only_at_telnyx(catalog):
     p, b = one(r, "national"), one(r, "national", "business")
     assert p.allowed is False and p.reason == "company_only"
     assert b.allowed is True and b.how == "buy" and b.monthly_cents == 100
+
+
+def test_gb_national_person_refused_without_a_catalog_block(catalog):
+    # The rule holds even when the sync wrote no requirements block.
+    catalog(
+        telnyx=[
+            row(
+                cc="GB",
+                nt="national",
+                verification_required=True,
+                requirements=None,
+            )
+        ]
+    )
+    r = number_options("GB", {})
+    p, b = one(r, "national"), one(r, "national", "business")
+    assert p.allowed is False and p.reason == "company_only"
+    assert b.allowed is True
+    papers = mod.offer_paperwork("GB", "national", "telnyx", "person", True)
+    assert papers.accepted is False

@@ -85,9 +85,7 @@ async def discover_offers(
     asked = [
         p
         for p in PROVIDERS
-        if p in providers
-        and toll_free_sms_ok(p, country, kind, capabilities)
-        and not telephony_catalog.not_sold(p, country, kind)
+        if p in providers and toll_free_sms_ok(p, country, kind, capabilities)
     ]
     approvals = approvals or {}
     results = await asyncio.gather(
@@ -179,8 +177,17 @@ def by_request_offers(
                 requirements=(
                     ["End-user registration (identity and address)"] if needs else []
                 ),
-                # The catalog does not say who may verify: either may.
-                subject_types=["business", "person"] if needs else [],
+                # The catalog does not say who may verify: either may,
+                # unless only a company may buy here.
+                subject_types=(
+                    (
+                        ["business"]
+                        if telephony_catalog.business_only(name, country, kind)
+                        else ["business", "person"]
+                    )
+                    if needs
+                    else []
+                ),
                 by_request=True,
             )
         )

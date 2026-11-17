@@ -846,3 +846,12 @@ async def test_gb_national_business_approval_makes_offer_ready(monkeypatch):
     assert result.subject_types == ["business"]
     assert result.readiness == "ready"
     assert result.approvals == [business]
+
+
+async def test_gb_national_without_rules_or_group_is_not_offered(monkeypatch):
+    # No rules and no approved group would sell a company-only number to
+    # anyone: the result is skipped.
+    _telnyx_settings(monkeypatch)
+    org = uuid4()
+    async with httpx.AsyncClient(transport=_gb_national_transport(org, [], [])) as http:
+        assert await telnyx_offers(org, "GB", "national", ["voice"], http) == []

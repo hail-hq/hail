@@ -48,23 +48,6 @@ async def test_discover_passes_each_carrier_its_own_approvals(monkeypatch):
     assert calls["telnyx"].await_args.kwargs["approvals"] == []
 
 
-async def test_gb_local_mobile_toll_free_quote_never_asks_telnyx(monkeypatch):
-    # Telnyx declines private individuals for UK numbers: GB local, mobile
-    # and toll-free come from Twilio only. DIDWW is still asked.
-    for kind in ("local", "mobile", "toll_free"):
-        calls = _stub_carriers(monkeypatch)
-        await number_offers.discover_offers(uuid4(), "GB", kind, ["voice"])
-        calls["twilio"].assert_awaited_once()
-        calls["telnyx"].assert_not_awaited()
-        calls["didww"].assert_awaited_once()
-
-
-async def test_gb_national_quote_still_asks_telnyx(monkeypatch):
-    calls = _stub_carriers(monkeypatch)
-    await number_offers.discover_offers(uuid4(), "GB", "national", ["voice"])
-    calls["telnyx"].assert_awaited_once()
-
-
 def _stub_carriers(monkeypatch):
     calls = {name: AsyncMock(return_value=[]) for name in ("twilio", "telnyx", "didww")}
     monkeypatch.setattr(f"{VOICE}.twilio.twilio_offers", calls["twilio"])
@@ -168,3 +151,41 @@ async def test_calls_only_toll_free_offer_never_shows_sms_hail_cannot_verify(
     )
     caps = {o.provider: o.capabilities for o in offers}
     assert caps == {"twilio": ["voice", "sms"], "telnyx": ["voice"]}
+
+
+def test_by_request_gb_rows_follow_the_carrier_rules(tmp_path, monkeypatch):
+    # Telnyx declines private individuals for UK numbers. Should the sync
+    # ever mark these rows by request: no Telnyx GB local offer, and GB
+    # national for companies only.
+    import json
+
+    from hailhq.core import telephony_catalog
+
+    def row(kind):
+        return {
+            "country_code": "GB",
+            "number_type": kind,
+            "usd_per_month": "1.00",
+            "voice": True,
+            "sms": False,
+            "mms": False,
+            "verification_required": True,
+            "by_request": True,
+        }
+
+    (tmp_path / "twilio.json").write_text(json.dumps({"numbers": []}))
+    (tmp_path / "telnyx.json").write_text(
+        json.dumps({"numbers": [row("local"), row("national")]})
+    )
+    (tmp_path / "didww.json").write_text(json.dumps({"numbers": [row("local")]}))
+    monkeypatch.setenv("HAIL_TELEPHONY_CATALOG_DIR", str(tmp_path))
+    telephony_catalog._load.cache_clear()
+    try:
+        (local,) = number_offers.by_request_offers("GB", "local", ["voice"])
+        assert local.provider == "didww"
+        assert local.subject_types == ["business", "person"]
+        (national,) = number_offers.by_request_offers("GB", "national", ["voice"])
+        assert national.provider == "telnyx"
+        assert national.subject_types == ["business"]
+    finally:
+        telephony_catalog._load.cache_clear()

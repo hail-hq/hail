@@ -390,11 +390,11 @@ def test_telnyx_gb_national_is_business_only(tmp_path, monkeypatch):
         assert not telephony_catalog.business_only("twilio", "GB", "local")
         assert not telephony_catalog.business_only("telnyx", "DE", "national")
         assert telephony_catalog.capabilities("GB", "national", "telnyx") is not None
+        # The cost file keeps the carrier's own block.
         block = telephony_catalog.requirements("GB", "national", "telnyx")
-        assert block["person"]["accepted"] is False
-        assert block["business"]["accepted"] is True
-        # Twilio's GB blocks are left as the catalog says.
-        twilio = telephony_catalog.requirements("GB", "local", "twilio")
-        assert twilio["person"]["accepted"] is True
+        assert block["person"]["accepted"] is True
+        # A not-sold row is not read at all.
+        assert telephony_catalog.requirements("GB", "local", "telnyx") is None
+        assert telephony_catalog.by_request_row("GB", "local", "telnyx") is None
     finally:
         telephony_catalog._load.cache_clear()

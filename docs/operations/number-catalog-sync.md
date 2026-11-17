@@ -107,7 +107,7 @@ Each row has an optional `requirements` block: who may buy the number and which 
 
 ## Rules the sync cannot hold
 
-Some carrier rows are listed but not sold, or sold to companies only. The sync rewrites `costs/*.json` from the carriers' APIs, so these rules are in code: `_NOT_SOLD` and `_BUSINESS_ONLY` in [`core/hailhq/core/telephony_catalog.py`](../../core/hailhq/core/telephony_catalog.py). The cost files keep the carrier's real rows and prices.
+Some carrier rows are listed but not sold, or sold to companies only. The sync rewrites `costs/*.json` from the carriers' APIs, so these rules are in code: `_NOT_SOLD` and `_BUSINESS_ONLY` in [`core/hailhq/core/telephony_catalog.py`](../../core/hailhq/core/telephony_catalog.py). The cost files keep the carrier's real rows and prices. The API drops `_NOT_SOLD` rows when it reads the file, so no quote, option or purchase sees them.
 
 | Carrier, country, type | Rule | Why |
 | --- | --- | --- |
@@ -117,6 +117,7 @@ Some carrier rows are listed but not sold, or sold to companies only. The sync r
 - Numbers already bought keep their carrier, calls, routing, renewal and release. Renewal prices still come from the owning carrier's file.
 - A quote stored before a rule cannot buy (`POST /numbers` 422) or start a verification (409, quote again).
 - DIDWW by-request GB offers are not changed.
+- hail-website and the `/costs` pages read the cost files directly, so they still list the Telnyx GB rows.
 
 ## Reviewing the sync PR
 
