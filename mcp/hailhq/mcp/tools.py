@@ -2234,7 +2234,8 @@ _AGENT_HTTP_TOOLS = _d(
     "only), ``timeout_seconds`` (1 to 10, default 5) and ``wait_message`` "
     "(said on a call while waiting). The list replaces the saved one; an "
     "empty list removes it. On update, an entry without ``headers`` keeps "
-    "the saved headers of the same name. The first save returns "
+    "the saved headers of the same name while the url keeps its host; a url "
+    "on a new host needs ``headers`` again. The first save returns "
     "``http_tool_secret`` once; requests carry ``X-Hail-Signature`` signed "
     "with it."
 )

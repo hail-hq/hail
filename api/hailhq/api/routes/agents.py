@@ -37,7 +37,12 @@ from hailhq.core.handover import (
     replace_handover,
     validate_handover,
 )
-from hailhq.core.http_tools import load_http_tools, new_tool_secret, replace_http_tools
+from hailhq.core.http_tools import (
+    HttpToolHeadersNeeded,
+    load_http_tools,
+    new_tool_secret,
+    replace_http_tools,
+)
 from hailhq.core.livekit import LiveKitClient
 from hailhq.core.models import Agent, EmailDomain, PhoneNumber
 from hailhq.core.provider_config import provider_cipher
@@ -367,6 +372,11 @@ async def update_agent(
         except SecretKeyMissing as exc:
             await db.rollback()
             raise _NO_SECRET_KEY from exc
+        except HttpToolHeadersNeeded as exc:
+            await db.rollback()
+            raise unprocessable(
+                str(exc), loc=["body", "http_tools", exc.index, "headers"]
+            ) from exc
         await db.refresh(agent)
         actor_user_id, actor_kind = actor_of(principal)
         await write_audit_log(

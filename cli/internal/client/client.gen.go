@@ -3050,7 +3050,7 @@ type HttpToolIn struct {
 	// Description What the tool does and when to use it. Read by the model.
 	Description string `json:"description"`
 
-	// Headers Static headers sent with every request, e.g. an Authorization token (up to 10). Stored encrypted; responses show only the names. On PATCH, null or left out keeps the saved values of the tool with the same name; {} removes them.
+	// Headers Static headers sent with every request, e.g. an Authorization token (up to 10). Stored encrypted; responses show only the names. On PATCH, null or left out keeps the saved values of the tool with the same name while its url keeps the same scheme, host and port; a url on a new host needs the headers again. {} removes them.
 	Headers *map[string]string `json:"headers,omitempty"`
 
 	// Name Function name the model calls: a letter, then letters, digits or _ (up to 64). Unique per agent; built-in tool names are not allowed.

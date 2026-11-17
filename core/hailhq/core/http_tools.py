@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import secrets
+from urllib.parse import urlsplit
 from uuid import UUID
 
 from hailhq.core.models import Agent, AgentHttpTool
@@ -20,10 +21,32 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = [
+    "HttpToolHeadersNeeded",
     "load_http_tools",
     "new_tool_secret",
     "replace_http_tools",
 ]
+
+
+class HttpToolHeadersNeeded(ValueError):
+    """A tool moved to another origin with ``headers`` null: the saved
+    headers are not sent to a new host, so they must be given again."""
+
+    def __init__(self, index: int, name: str) -> None:
+        super().__init__(
+            f"{name}: the url points to a new host, so the saved headers are "
+            "not kept. Send headers again ({} for none)."
+        )
+        self.index = index
+
+
+def _origin(url: str) -> tuple[str, str, int]:
+    parts = urlsplit(url)
+    return (
+        parts.scheme.lower(),
+        (parts.hostname or "").lower(),
+        parts.port or (443 if parts.scheme.lower() == "https" else 80),
+    )
 
 
 def new_tool_secret() -> str:
@@ -70,8 +93,10 @@ async def replace_http_tools(
     secret when this save created it (the agent's first tools), else None.
 
     A tool with ``headers`` None keeps the saved headers of the tool with the
-    same name (none on a new tool). Raises ``SecretKeyMissing`` when tools are
-    given and HAIL_PROVIDER_SECRET_KEY is unset.
+    same name (none on a new tool), only while its URL keeps the same origin
+    (scheme, host, port); otherwise ``HttpToolHeadersNeeded``. Raises
+    ``SecretKeyMissing`` when tools are given and HAIL_PROVIDER_SECRET_KEY is
+    unset. Nothing is written before either error.
     """
     old = {
         row.name: row
@@ -91,8 +116,15 @@ async def replace_http_tools(
         for position, item in enumerate(items):
             if item.headers is None:
                 prev = old.get(item.name)
-                headers_encrypted = prev.headers_encrypted if prev else None
-                header_names = list(prev.header_names) if prev else []
+                if prev is None or prev.headers_encrypted is None:
+                    headers_encrypted, header_names = None, []
+                elif _origin(prev.url) != _origin(item.url):
+                    # Keeping them would send the saved secrets to whoever
+                    # runs the new host.
+                    raise HttpToolHeadersNeeded(position, item.name)
+                else:
+                    headers_encrypted = prev.headers_encrypted
+                    header_names = list(prev.header_names)
             elif item.headers:
                 headers_encrypted = cipher.encrypt(json.dumps(item.headers))
                 header_names = list(item.headers)

@@ -237,3 +237,58 @@ async def test_delete_removes_the_tools(client, org, public_dns, async_session):
     resp = await client.delete(f"/v1/agents/{agent['id']}", headers=headers)
     assert resp.status_code == 204
     assert await _rows(async_session, agent["id"]) == []
+
+
+async def test_saved_headers_stay_only_on_the_same_origin(
+    client, org, public_dns, async_session
+):
+    """Headers left out are kept only while scheme, host and port stay the
+    same: a new host must not receive the saved secrets."""
+    _, headers = org
+    agent = (await _create(client, headers, http_tools=[_tool()])).json()
+    url = f"/v1/agents/{agent['id']}"
+    no_headers = {k: v for k, v in _tool().items() if k != "headers"}
+
+    # Same origin, new path and port spelled out: kept.
+    same = {**no_headers, "url": "https://API.example.com:443/v2/orders"}
+    resp = await client.patch(url, headers=headers, json={"http_tools": [same]})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["http_tools"][0]["header_names"] == ["Authorization"]
+
+    # New host, headers left out: refused, nothing changes.
+    for moved_url in (
+        "https://attacker.example.net/orders",
+        "https://api.example.com:8443/orders",
+    ):
+        moved = {**no_headers, "url": moved_url}
+        resp = await client.patch(url, headers=headers, json={"http_tools": [moved]})
+        assert resp.status_code == 422, resp.text
+        assert resp.json()["detail"][0]["loc"] == ["body", "http_tools", 0, "headers"]
+        assert "Send headers again" in resp.text
+    (row,) = await _rows(async_session, agent["id"])
+    assert row.url == "https://API.example.com:443/v2/orders"
+    assert json.loads(provider_cipher().decrypt(row.headers_encrypted)) == {
+        "Authorization": "Bearer customer-token"
+    }
+
+    # New host with headers given: accepted, the new values are stored.
+    moved = {
+        **no_headers,
+        "url": "https://orders.example.org/lookup",
+        "headers": {"X-Api-Key": "new-key"},
+    }
+    resp = await client.patch(url, headers=headers, json={"http_tools": [moved]})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["http_tools"][0]["header_names"] == ["X-Api-Key"]
+    (row,) = await _rows(async_session, agent["id"])
+    assert json.loads(provider_cipher().decrypt(row.headers_encrypted)) == {
+        "X-Api-Key": "new-key"
+    }
+
+    # A tool with no saved headers may move freely.
+    plain = {**no_headers, "url": "https://orders.example.org/lookup", "headers": {}}
+    await client.patch(url, headers=headers, json={"http_tools": [plain]})
+    elsewhere = {**no_headers, "url": "https://other.example.com/x"}
+    resp = await client.patch(url, headers=headers, json={"http_tools": [elsewhere]})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["http_tools"][0]["header_names"] == []

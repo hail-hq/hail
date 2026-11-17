@@ -176,6 +176,8 @@ def verify(secret: str, signature_header: str, raw_body: bytes) -> bool:
 - `headers` are stored encrypted; responses show only `header_names`. A
   `PATCH` replaces the whole list; a tool sent without `headers` keeps the
   saved headers of the tool with the same name, and `{}` removes them.
+  Saved headers are kept only while the `url` keeps its scheme, host and
+  port; a `url` on a new host needs `headers` again (422 otherwise).
 - Answer with JSON or text. The model gets up to 4,000 characters. A non-2xx
   status, a timeout (`timeout_seconds`, 1..10, default 5) or an unreachable
   host gives the model a short error; the call goes on.

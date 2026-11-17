@@ -1069,7 +1069,9 @@ class HttpToolIn(BaseModel):
             "Static headers sent with every request, e.g. an Authorization "
             "token (up to 10). Stored encrypted; responses show only the "
             "names. On PATCH, null or left out keeps the saved values of the "
-            "tool with the same name; {} removes them."
+            "tool with the same name while its url keeps the same scheme, host "
+            "and port; a url on a new host needs the headers again. {} removes "
+            "them."
         ),
         examples=[{"Authorization": "Bearer sk_live_example"}],
     )
