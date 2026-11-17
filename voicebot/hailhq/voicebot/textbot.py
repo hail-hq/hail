@@ -53,6 +53,7 @@ from hailhq.voicebot.chat_loop import (
     LLM_TIMEOUT_SECONDS,
     MAX_TOOL_ROUNDS,
     TOOL_APOLOGY,
+    HttpToolTime,
     run_chat,
     tool_args,
 )
@@ -132,9 +133,12 @@ async def generate_reply(claimed: ClaimedReply, messages: list[dict[str, Any]]) 
     llm = build_llm(None, org_cfgs.get("llm"))
     tctx = _tool_context(claimed)
     by_name = {s.name: s for s in specs}
+    tool_time = HttpToolTime()
 
     async def run_tool(call: FunctionToolCall) -> tuple[str, bool]:
-        return await _run_tool(call, tctx, by_name)
+        return await tool_time.run(
+            by_name.get(call.name), lambda: _run_tool(call, tctx, by_name)
+        )
 
     text = await run_chat(
         llm,

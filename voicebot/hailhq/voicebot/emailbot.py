@@ -50,6 +50,7 @@ from hailhq.voicebot.attachment_reader import inspect_tool_file
 from hailhq.voicebot.chat_loop import (
     HTTP_TOOL_BUDGET_SECONDS,
     LLM_TIMEOUT_SECONDS,
+    HttpToolTime,
     run_chat,
     tool_args,
 )
@@ -122,9 +123,13 @@ async def generate_reply(
     llm = build_llm(None, org_cfgs.get("llm"))
     tctx = _tool_context(claimed, api)
     by_name = {s.name: s for s in specs}
+    tool_time = HttpToolTime()
 
     async def run_tool(call: FunctionToolCall) -> tuple[str, bool]:
-        return await _run_tool(call, by_name, tctx, model=llm)
+        return await tool_time.run(
+            by_name.get(call.name),
+            lambda: _run_tool(call, by_name, tctx, model=llm),
+        )
 
     text = await run_chat(
         llm,

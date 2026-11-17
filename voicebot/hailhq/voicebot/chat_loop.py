@@ -5,9 +5,12 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from hailhq.core.agent_tools.spec import ToolSpec
+from hailhq.core.schemas import HTTP_TOOL_TIMEOUT_MAX
 from livekit.agents.llm import (
     ChatContext,
     FunctionCall,
@@ -23,10 +26,35 @@ LLM_TIMEOUT_SECONDS = 30.0
 MAX_TOOL_ROUNDS = 3
 # Extra time per reply for the agent's HTTP tools (each waits up to 10 s).
 HTTP_TOOL_BUDGET_SECONDS = 30.0
+NO_TOOL_TIME = "There is no time left to call that tool for this reply."
 # What the model reads when a tool call fails or names a tool it does not have.
 TOOL_APOLOGY = "Sorry, the earlier messages could not be read."
 
 ToolRunner = Callable[[FunctionToolCall], Awaitable[tuple[str, bool]]]
+
+
+class HttpToolTime:
+    """The HTTP tool time one reply has left. A call starts only while a
+    whole timeout still fits, so the tools never use more than
+    ``HTTP_TOOL_BUDGET_SECONDS`` and the reply's own time limit holds."""
+
+    def __init__(self, seconds: float = HTTP_TOOL_BUDGET_SECONDS) -> None:
+        self.left = seconds
+
+    async def run(
+        self,
+        spec: ToolSpec | None,
+        run: Callable[[], Awaitable[tuple[str, bool]]],
+    ) -> tuple[str, bool]:
+        if spec is None or spec.risk_tier != "customer_api":
+            return await run()
+        if self.left < HTTP_TOOL_TIMEOUT_MAX:
+            return NO_TOOL_TIME, True
+        started = time.monotonic()
+        try:
+            return await run()
+        finally:
+            self.left -= time.monotonic() - started
 
 
 def tool_args(call: FunctionToolCall) -> dict[str, Any]:

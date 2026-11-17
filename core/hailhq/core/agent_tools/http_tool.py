@@ -238,7 +238,7 @@ def tool_spec(tool: HttpTool, conv: Conversation) -> ToolSpec:
     )
 
 
-async def load_http_tools(
+async def load_runtime_http_tools(
     session: AsyncSession, *, agent_id: uuid.UUID, organization_id: uuid.UUID
 ) -> list[HttpTool]:
     """The agent's saved tools with headers and secret decrypted. An agent of
@@ -295,7 +295,7 @@ async def load_http_tools(
 
 
 async def http_tool_specs(session: AsyncSession, conv: Conversation) -> list[ToolSpec]:
-    tools = await load_http_tools(
+    tools = await load_runtime_http_tools(
         session, agent_id=conv.agent_id, organization_id=conv.organization_id
     )
     return [tool_spec(t, conv) for t in tools]
@@ -309,7 +309,7 @@ __all__ = [
     "PublicOnlyResolver",
     "call_http_tool",
     "http_tool_specs",
-    "load_http_tools",
+    "load_runtime_http_tools",
     "request_body",
     "tool_spec",
 ]

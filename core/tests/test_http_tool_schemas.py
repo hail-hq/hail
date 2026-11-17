@@ -86,6 +86,49 @@ def test_parameters_default_is_an_empty_object() -> None:
         {"headers": {"Authorization": "a\r\nInjected: yes"}},
         {"headers": {f"H{i}": "v" for i in range(11)}},
         {"unknown": True},
+        {"parameters": {"type": "object", "additionalProperties": False}},
+        {
+            "parameters": {
+                "type": "object",
+                "properties": {"a": {"type": ["string", "null"]}},
+            }
+        },
+        {
+            "parameters": {
+                "type": "object",
+                "properties": {"a": {"type": "string", "pattern": "x"}},
+            }
+        },
+        {
+            "parameters": {
+                "type": "object",
+                "properties": {"a": {"type": "integer", "enum": [1, 2]}},
+            }
+        },
+        {
+            "parameters": {
+                "type": "object",
+                "properties": {"a": {"type": "integer", "minimum": "1"}},
+            }
+        },
+        {
+            "parameters": {
+                "type": "object",
+                "properties": {"a": {"type": "string", "maxLength": -1}},
+            }
+        },
+        {
+            "parameters": {
+                "type": "object",
+                "properties": {"a": {"type": "string", "description": 5}},
+            }
+        },
+        {
+            "parameters": {
+                "type": "object",
+                "properties": {"a": {"type": "string", "items": {"type": "string"}}},
+            }
+        },
     ],
 )
 def test_refuses_bad_input(over) -> None:
@@ -111,7 +154,7 @@ def test_accepts_nested_arrays_enums_and_headers() -> None:
                         "type": "array",
                         "items": {"type": "string", "enum": ["a", "b"]},
                     },
-                    "size": {"type": ["integer", "null"], "minimum": 1},
+                    "size": {"type": "integer", "minimum": 1, "maximum": 99},
                 },
             },
             headers={"Authorization": "Bearer sk_live_example"},
@@ -137,3 +180,8 @@ def test_agent_update_keeps_none_and_checks_names() -> None:
     assert AgentUpdate.model_validate({"http_tools": []}).http_tools == []
     with pytest.raises(ValidationError, match="two tools named"):
         AgentUpdate.model_validate({"http_tools": [_tool(), _tool()]})
+
+
+def test_uppercase_scheme_is_stored_lowercase() -> None:
+    tool = HttpToolIn.model_validate(_tool(url="HTTPS://api.example.com/Orders"))
+    assert tool.url == "https://api.example.com/Orders"

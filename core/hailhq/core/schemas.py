@@ -930,9 +930,9 @@ _RESERVED_HEADERS = frozenset(
     {"host", "content-length", "content-type", "transfer-encoding", "connection"}
 )
 _HTTP_TOOL_HEADERS_MAX = 10
-_PARAM_TYPES = frozenset(
-    {"string", "number", "integer", "boolean", "array", "object", "null"}
-)
+# One type per node, no "null" and no additionalProperties/pattern/format:
+# Gemini (in the house fallback chain) rejects those in function schemas.
+_PARAM_TYPES = frozenset({"string", "number", "integer", "boolean", "array", "object"})
 _PARAM_KEYS = frozenset(
     {
         "type",
@@ -941,17 +941,16 @@ _PARAM_KEYS = frozenset(
         "items",
         "properties",
         "required",
-        "additionalProperties",
         "minimum",
         "maximum",
         "minLength",
         "maxLength",
         "minItems",
         "maxItems",
-        "pattern",
-        "format",
     }
 )
+_PARAM_NUMBER_KEYS = ("minimum", "maximum")
+_PARAM_COUNT_KEYS = ("minLength", "maxLength", "minItems", "maxItems")
 _PARAM_NAME_RE = re.compile(r"^[a-zA-Z0-9_.-]{1,64}$")
 _PARAMS_MAX_CHARS = 8000
 _PARAMS_MAX_DEPTH = 4
@@ -968,13 +967,36 @@ def _check_param_schema(node: Any, path: str, depth: int) -> None:
     if unknown:
         raise ValueError(f"{path} has unsupported keywords: {', '.join(unknown)}")
     kind = node.get("type")
-    kinds = kind if isinstance(kind, list) else [kind]
-    if not kinds or any(k not in _PARAM_TYPES for k in kinds):
+    if not isinstance(kind, str) or kind not in _PARAM_TYPES:
         raise ValueError(
             f"{path}.type must be one of {', '.join(sorted(_PARAM_TYPES))}"
         )
-    if "enum" in node and (not isinstance(node["enum"], list) or not node["enum"]):
-        raise ValueError(f"{path}.enum must be a non-empty list")
+    if "description" in node and not isinstance(node["description"], str):
+        raise ValueError(f"{path}.description must be a string")
+    if "enum" in node:
+        enum = node["enum"]
+        if (
+            not isinstance(enum, list)
+            or not enum
+            or not all(isinstance(e, str) for e in enum)
+        ):
+            raise ValueError(f"{path}.enum must be a non-empty list of strings")
+    for key in _PARAM_NUMBER_KEYS:
+        value = node.get(key)
+        if key in node and (
+            isinstance(value, bool) or not isinstance(value, (int, float))
+        ):
+            raise ValueError(f"{path}.{key} must be a number")
+    for key in _PARAM_COUNT_KEYS:
+        value = node.get(key)
+        if key in node and (
+            isinstance(value, bool) or not isinstance(value, int) or value < 0
+        ):
+            raise ValueError(f"{path}.{key} must be a whole number of 0 or more")
+    if "items" in node and kind != "array":
+        raise ValueError(f"{path}.items is only for type array")
+    if "properties" in node and kind != "object":
+        raise ValueError(f"{path}.properties is only for type object")
     if "items" in node:
         _check_param_schema(node["items"], f"{path}.items", depth + 1)
     props = node.get("properties")
@@ -1003,10 +1025,12 @@ def _check_param_schema(node: Any, path: str, depth: int) -> None:
 
 def validate_http_tool_url(v: str) -> str:
     """Shape only (no DNS): https, a host, no credentials. The API resolves
-    the host on save and the agent again on every request."""
-    parts = urlsplit(v)
-    if parts.scheme != "https":
+    the host on save and the agent again on every request. Returns the url
+    with a lowercase scheme (the table checks ``url LIKE 'https://%'``)."""
+    if v[:8].lower() != "https://":
         raise ValueError("url must use https")
+    v = "https://" + v[8:]
+    parts = urlsplit(v)
     if not parts.hostname:
         raise ValueError("url must include a host")
     if parts.username or parts.password:
@@ -1046,9 +1070,10 @@ class HttpToolIn(BaseModel):
         default_factory=lambda: {"type": "object", "properties": {}},
         description=(
             "JSON Schema (type object) of the arguments the model fills in. "
-            "Supported keywords: type, description, enum, items, properties, "
-            "required, additionalProperties, minimum, maximum, minLength, "
-            "maxLength, minItems, maxItems, pattern, format."
+            "Supported keywords: type (one of string, number, integer, "
+            "boolean, array, object), description, enum (strings), items, "
+            "properties, required, minimum, maximum, minLength, maxLength, "
+            "minItems, maxItems."
         ),
         examples=[
             {

@@ -9356,9 +9356,9 @@ components:
           title: Parameters
           description:
             "JSON Schema (type object) of the arguments the model fills
-            in. Supported keywords: type, description, enum, items, properties, required,
-            additionalProperties, minimum, maximum, minLength, maxLength, minItems,
-            maxItems, pattern, format."
+            in. Supported keywords: type (one of string, number, integer, boolean,
+            array, object), description, enum (strings), items, properties, required,
+            minimum, maximum, minLength, maxLength, minItems, maxItems."
           examples:
             - properties:
                 order_number:

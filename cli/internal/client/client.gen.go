@@ -3056,7 +3056,7 @@ type HttpToolIn struct {
 	// Name Function name the model calls: a letter, then letters, digits or _ (up to 64). Unique per agent; built-in tool names are not allowed.
 	Name string `json:"name"`
 
-	// Parameters JSON Schema (type object) of the arguments the model fills in. Supported keywords: type, description, enum, items, properties, required, additionalProperties, minimum, maximum, minLength, maxLength, minItems, maxItems, pattern, format.
+	// Parameters JSON Schema (type object) of the arguments the model fills in. Supported keywords: type (one of string, number, integer, boolean, array, object), description, enum (strings), items, properties, required, minimum, maximum, minLength, maxLength, minItems, maxItems.
 	Parameters *map[string]interface{} `json:"parameters,omitempty"`
 
 	// TimeoutSeconds Seconds to wait for the answer (1..10). Default 5.

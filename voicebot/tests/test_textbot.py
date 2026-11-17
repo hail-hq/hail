@@ -12,7 +12,10 @@ from unittest.mock import AsyncMock
 import pytest
 from hailhq.core import db as core_db
 from hailhq.core import text_agent
-from hailhq.core.models import AccountCredit, Agent, PhoneNumber, Sms
+from hailhq.core.agent_tools import http_tool
+from hailhq.core.config import settings
+from hailhq.core.models import AccountCredit, Agent, AgentHttpTool, PhoneNumber, Sms
+from hailhq.core.secret_cipher import SecretCipher, generate_key
 from hailhq.core.sms_ingest import ingest_inbound_sms
 from hailhq.voicebot import textbot
 from hailhq.voicebot.pipeline import ProviderKeyError
@@ -287,11 +290,6 @@ async def test_text_agent_calls_an_http_tool(
     async_session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The agent's HTTP tools reach the text model, bound to this text."""
-    from hailhq.core.agent_tools import http_tool
-    from hailhq.core.config import settings
-    from hailhq.core.models import AgentHttpTool
-    from hailhq.core.secret_cipher import SecretCipher, generate_key
-
     key = generate_key()
     monkeypatch.setattr(settings, "hail_provider_secret_key", key)
     sms_id = await _seed(async_session)

@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+import dataclasses
+import json
 import uuid
 from unittest.mock import AsyncMock
 
+import hailhq.voicebot.tools as tools_mod
+from hailhq.core.config import settings
+from hailhq.core.models import Agent, AgentHttpTool
+from hailhq.core.secret_cipher import SecretCipher, generate_key
 from hailhq.voicebot.tools import (
     SPOKEN_TOOL_FAILURE,
     _make_handler,
@@ -243,8 +249,6 @@ async def test_session_tool_that_must_not_wait_runs_at_once():
 
 
 async def test_end_call_keeps_the_call_when_they_talk_over_the_goodbye():
-    import dataclasses
-
     from hailhq.voicebot.tools import STILL_TALKING
 
     hung_up = []
@@ -305,12 +309,6 @@ async def test_connected_handover_asks_for_no_reply():
 
 async def _seed_http_tool(session_factory, monkeypatch, **over):
     """An agent with one HTTP tool; returns (org_id, agent_id)."""
-    import json
-
-    from hailhq.core.config import settings
-    from hailhq.core.models import Agent, AgentHttpTool
-    from hailhq.core.secret_cipher import SecretCipher, generate_key
-
     key = generate_key()
     monkeypatch.setattr(settings, "hail_provider_secret_key", key)
     cipher = SecretCipher(key)
@@ -380,8 +378,6 @@ async def test_http_tools_of_another_org_are_not_loaded(
 
 
 async def test_http_tool_load_failure_keeps_built_in_tools(db, monkeypatch):
-    import hailhq.voicebot.tools as tools_mod
-
     async def broken(_session, _conv):
         raise RuntimeError("db down")
 

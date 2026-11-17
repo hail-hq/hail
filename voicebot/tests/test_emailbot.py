@@ -20,6 +20,7 @@ from hailhq.core.email_agent import MAX_ATTEMPTS, MAX_REPLIES_PER_THREAD
 from hailhq.core.models import (
     AccountCredit,
     Agent,
+    AgentHttpTool,
     Email,
     EmailAttachment,
     EmailDomain,
@@ -27,6 +28,7 @@ from hailhq.core.models import (
     User,
 )
 from hailhq.core.prompts import EMAIL_SENDS_TRIED_LINE
+from hailhq.core.secret_cipher import SecretCipher, generate_key
 from hailhq.voicebot import emailbot
 from hailhq.voicebot.chat_loop import run_chat
 from hailhq.voicebot.pipeline import ProviderKeyError
@@ -701,10 +703,6 @@ async def test_tools_follow_the_agent_list(async_session) -> None:
 async def test_email_run_adds_the_agents_http_tools(
     async_session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from hailhq.core.config import settings
-    from hailhq.core.models import AgentHttpTool
-    from hailhq.core.secret_cipher import SecretCipher, generate_key
-
     key = generate_key()
     monkeypatch.setattr(settings, "hail_provider_secret_key", key)
     agent = Agent(

@@ -139,20 +139,29 @@ async def _check_handover(
 
 async def _check_http_tools(items: list[HttpToolIn] | None) -> None:
     """Each URL must resolve to public addresses now; the agent checks again
-    on every request."""
-    for index, item in enumerate(items or []):
-        try:
-            await asyncio.to_thread(assert_public_https_url, item.url, field="url")
-        except UnsafeUrlError as exc:
+    on every request. The lookups run side by side."""
+    items = items or []
+    results = await asyncio.gather(
+        *(
+            asyncio.to_thread(assert_public_https_url, item.url, field="url")
+            for item in items
+        ),
+        return_exceptions=True,
+    )
+    for index, result in enumerate(results):
+        if isinstance(result, UnsafeUrlError):
             raise unprocessable(
-                str(exc), loc=["body", "http_tools", index, "url"]
-            ) from exc
+                str(result), loc=["body", "http_tools", index, "url"]
+            ) from result
+        if isinstance(result, BaseException):
+            raise result
 
 
-_NO_SECRET_KEY = HTTPException(
-    status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
-    detail="this server cannot store HTTP tools: HAIL_PROVIDER_SECRET_KEY is not set",
-)
+def _no_secret_key() -> HTTPException:
+    return HTTPException(
+        status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="this server cannot store HTTP tools: HAIL_PROVIDER_SECRET_KEY is not set",
+    )
 
 
 async def _respond(
@@ -231,7 +240,7 @@ async def create_agent(
         raise _save_conflict(exc) from exc
     except SecretKeyMissing as exc:
         await db.rollback()
-        raise _NO_SECRET_KEY from exc
+        raise _no_secret_key() from exc
     await db.refresh(agent)
     actor_user_id, actor_kind = actor_of(principal)
     await write_audit_log(
@@ -371,7 +380,7 @@ async def update_agent(
             raise _save_conflict(exc) from exc
         except SecretKeyMissing as exc:
             await db.rollback()
-            raise _NO_SECRET_KEY from exc
+            raise _no_secret_key() from exc
         except HttpToolHeadersNeeded as exc:
             await db.rollback()
             raise unprocessable(
@@ -410,7 +419,7 @@ async def rotate_tool_secret(
     try:
         agent.http_tool_secret_encrypted = provider_cipher().encrypt(secret)
     except SecretKeyMissing as exc:
-        raise _NO_SECRET_KEY from exc
+        raise _no_secret_key() from exc
     agent.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(agent)
