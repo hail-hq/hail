@@ -181,3 +181,34 @@ def test_refuses_without_api_key(monkeypatch, capsys):
     code = ptc.main(["--number", "+14155550100", "--i-will-call-a-customer"])
     assert code == 2
     assert "HAIL_API_KEY" in capsys.readouterr().err
+
+
+def test_verdict_completed_without_answered_at_counts_as_answered():
+    answered, text = ptc.verdict(call("completed", end_reason="normal_hangup"))
+    assert answered
+    assert text.startswith("ANSWERED")
+
+
+def test_network_error_on_place_says_the_call_may_be_live(monkeypatch, capsys):
+    monkeypatch.setenv("HAIL_API_KEY", "hl_test")
+
+    def boom(*args, **kwargs):
+        raise httpx.ReadTimeout("slow")
+
+    monkeypatch.setattr(ptc, "place_call", boom)
+    code = ptc.main(["--number", "+14155550100", "--i-will-call-a-customer"])
+    assert code == 2
+    assert "may have been placed" in capsys.readouterr().err
+
+
+def test_timeout_prints_the_call_id(monkeypatch, capsys):
+    monkeypatch.setenv("HAIL_API_KEY", "hl_test")
+    monkeypatch.setattr(ptc, "place_call", lambda *a: call("queued"))
+
+    def late(*args, **kwargs):
+        raise ptc.CallTestError("did not end")
+
+    monkeypatch.setattr(ptc, "wait_for_end", late)
+    code = ptc.main(["--number", "+14155550100", "--i-will-call-a-customer"])
+    assert code == 2
+    assert CALL_ID in capsys.readouterr().err

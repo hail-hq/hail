@@ -23,9 +23,19 @@ Run it from a repo checkout. The script is
 
 ## Before
 
-- The number has a voice agent: `GET /v1/numbers/{id}` as the customer shows
-  `voice_agent_id` set and `inbound_registered: true`. If not, see
+- The number has a live voice agent and is registered for inbound calls.
+  Both columns must be `t`. If not, see
   [Routing a number by hand](didww-by-request.md#routing-a-number-by-hand).
+
+  ```bash
+  psql "$DATABASE_URL" <<'SQL'
+  \set e164 '+<customer number>'
+  SELECT n.inbound_registered_at IS NOT NULL AS registered,
+         COALESCE(a.status = 'live' AND a.voice_enabled, false) AS agent_ready
+  FROM phone_numbers n LEFT JOIN agents a ON a.id = n.voice_agent_id
+  WHERE n.e164 = :'e164' AND n.provisioning_state = 'active';
+  SQL
+  ```
 - The call reaches the customer's agent and shows in their call log. Tell
   the customer before you call when you can.
 - Your own workspace pays for the outbound call. It needs credit.
@@ -40,6 +50,7 @@ Run it from a repo checkout. The script is
 3. It places the call (`POST /v1/calls`), polls `GET /v1/calls/{id}` until
    the call ends, and prints one line:
    - `ANSWERED: the number took the call, ended after 42 s. status=completed end_reason=normal_hangup`
+     (a call with status `completed` counts as answered)
    - `NOT ANSWERED: status=failed end_reason=sip_trunk_failure. <message>`
 
    Exit code: 0 answered, 1 not answered, 2 the call could not be placed or
@@ -62,11 +73,16 @@ SQL
 ```
 
 - An inbound row that was answered: the number works.
-- An inbound row with `end_reason` `no_agent` or `insufficient_funds`: Hail
-  got the call and refused it. Fix the agent or the balance.
+- An inbound row that Hail refused (`status` `failed`). The `end_reason`
+  says why ([`inbound_calls.py`](../../core/hailhq/core/inbound_calls.py)):
+  - `no_agent`: no live voice agent on the number.
+  - `insufficient_funds`: the workspace has no credit.
+  - `user_rejected`: voice is suspended for the workspace.
+  - `carrier_route_failed`: the call came in on another carrier's LiveKit
+    trunk, or the number has no voice capability.
 - No inbound row at all: the call never reached Hail. The carrier or the
   LiveKit inbound trunk refused it. Check the carrier panel (call capacity,
-  where the number points) and the number's `inbound_registered`.
+  where the number points) and the Before query above.
 
 ## After
 

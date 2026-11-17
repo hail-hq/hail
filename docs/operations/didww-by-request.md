@@ -118,8 +118,12 @@ async def main():
                 )
             ).scalar_one()
             agent = await db.get(Agent, AGENT)
-            assert agent and agent.organization_id == ORG and agent.voice_enabled
-            assert "voice" in number.capabilities
+            if not agent or agent.organization_id != ORG:
+                raise SystemExit("agent not found in this organization")
+            if agent.status != "live" or not agent.voice_enabled:
+                raise SystemExit("agent is not live or does not answer calls")
+            if "voice" not in number.capabilities:
+                raise SystemExit("number has no voice capability")
             await inbound_routing.register(db, lk, number)
             number.voice_agent_id = AGENT
             number.updated_at = datetime.now(timezone.utc)
@@ -140,7 +144,7 @@ PY
   `voice_agent_id` are not saved.
 - `register` does not set `voice_agent_id`; the API route sets it after.
   A registered number with no agent refuses calls (`end_reason` `no_agent`).
-- The snippet does what the API route checks (same organization, voice
-  capability, an agent that answers calls) with `assert`. It writes no
-  `audit_log` row.
+- The snippet makes the API route's checks (same organization, voice
+  capability, an agent that answers calls) and also needs a `live` agent,
+  as inbound calls do. It writes no `audit_log` row.
 - `GET /v1/numbers/{id}` then shows `inbound_registered: true`.

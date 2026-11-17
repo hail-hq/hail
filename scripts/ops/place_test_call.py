@@ -30,10 +30,10 @@ from collections.abc import Callable
 from datetime import datetime
 
 import httpx
+from hailhq.core.schemas import TERMINAL_CALL_STATUSES
 from hailhq.core.urls import join_url
 
 DEFAULT_API_URL = "https://api.hail.so"
-TERMINAL = frozenset({"completed", "failed", "busy", "no_answer", "canceled"})
 E164 = re.compile(r"^\+[1-9]\d{6,14}$")
 # Voice calls stop at 300 seconds by default; this leaves room for ringing.
 DEFAULT_TIMEOUT_SECONDS = 420
@@ -109,7 +109,7 @@ def wait_for_end(
         if response is not None:
             if response.status_code == 200:
                 call = response.json()
-                if call.get("status") in TERMINAL:
+                if call.get("status") in TERMINAL_CALL_STATUSES:
                     return call
             elif response.status_code == 429:
                 wait = max(interval, _retry_after(response))
@@ -141,9 +141,11 @@ def _seconds(start: str | None, end: str | None) -> int | None:
 
 
 def verdict(call: dict) -> tuple[bool, str]:
-    """True when someone picked up. The text names the status and the end
-    reason either way, and the failure message when there is one."""
-    answered = call.get("answered_at") is not None
+    """True when someone picked up: ``answered_at`` is set, or the call
+    completed (the voicebot's billing rule; ``answered_at`` can be missed).
+    The text names the status and the end reason either way, and the
+    failure message when there is one."""
+    answered = call.get("answered_at") is not None or call.get("status") == "completed"
     detail = f"status={call.get('status')} end_reason={call.get('end_reason')}"
     if answered:
         seconds = _seconds(call.get("answered_at"), call.get("ended_at"))
@@ -205,10 +207,23 @@ def main(argv: list[str] | None = None) -> int:
     with httpx.Client(headers=headers, timeout=30) as client:
         try:
             call = place_call(client, api_url, args.number, args.from_number)
-            print(f"Placed call {call['id']} to {args.number}. Waiting for it to end.")
-            call = wait_for_end(client, api_url, call["id"], timeout=args.timeout)
         except CallTestError as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
+            return 2
+        except (httpx.HTTPError, ValueError) as exc:
+            # The request may have reached Hail: the call can be live now.
+            print(
+                f"ERROR: no clear answer from POST /v1/calls ({exc!r}). The call "
+                "may have been placed: check your workspace's call log before "
+                "you run this again.",
+                file=sys.stderr,
+            )
+            return 2
+        print(f"Placed call {call['id']} to {args.number}. Waiting for it to end.")
+        try:
+            call = wait_for_end(client, api_url, call["id"], timeout=args.timeout)
+        except (CallTestError, ValueError) as exc:
+            print(f"ERROR: {exc}. Call id: {call['id']}", file=sys.stderr)
             return 2
     answered, text = verdict(call)
     print(text)

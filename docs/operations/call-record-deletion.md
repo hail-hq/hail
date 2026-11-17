@@ -4,6 +4,8 @@ Use this when a customer asks to remove one call, or to remove a test call
 ([first-number-call-test.md](first-number-call-test.md)). It deletes the
 call, its recording, its usage rows and its charges. Deleting the charge
 gives the money back: the balance is the sum of `account_credits`.
+Phone calls only: a browser voice call has other ledger refs
+(`browser:<id>`), and step 3 refuses it.
 
 What it removes, in order:
 
@@ -70,7 +72,7 @@ Skip this when `recording_key` is empty. Wait while `recording_status` is
 land after you delete it. Step 3 refuses until then.
 
 Use your operator AWS credentials. The production app's storage credentials
-may not allow deletes.
+may not allow deletes. The bucket is `S3_BUCKET` in the server `.env`.
 
 ```bash
 aws s3 rm "s3://<recordings bucket>/<recording_key>"
@@ -87,7 +89,7 @@ Delete it now anyway.
 
 The script stops, and changes nothing, when:
 
-- the call is not in that organization, or has not ended;
+- the call is not a phone call in that organization, or has not ended;
 - the recording upload may still be running;
 - a usage row is not priced yet (the usage rater has not run);
 - a charge still waits for the settle step. The settle step runs once no
@@ -102,12 +104,12 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
 \set call '<call id>'
 BEGIN;
 -- The workspace's billing lock, as purchases and the raters take it.
-SELECT pg_advisory_xact_lock(hashtextextended(:'org', 0));
+SELECT pg_advisory_xact_lock(hashtextextended((:'org')::uuid::text, 0));
 SELECT count(*) = 1 AS ended,
        bool_and(COALESCE(metadata->>'recording_status', 'disabled')
                 NOT IN ('requested', 'starting', 'recording', 'processing')) AS recording_done
 FROM calls
-WHERE id = :'call' AND organization_id = :'org'
+WHERE id = :'call' AND organization_id = :'org' AND transport = 'phone'
   AND status IN ('completed', 'failed', 'busy', 'no_answer', 'canceled') \gset
 SELECT count(*) FILTER (WHERE priced_at IS NULL) = 0 AS priced,
        count(*) FILTER (WHERE EXISTS (
@@ -125,7 +127,7 @@ WHERE ue.organization_id = :'org' AND ue.channel = 'voice'
   AND split_part(ue.ref, ':', 1) = :'call' \gset
 \if :ended
 \else
-  \echo 'Call not found in this organization, or still live: nothing deleted.'
+  \echo 'No ended phone call with this id in this organization: nothing deleted.'
   ROLLBACK;
   \q
 \endif
