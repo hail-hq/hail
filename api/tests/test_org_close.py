@@ -236,6 +236,58 @@ async def test_a_retryable_cancel_failure_is_tried_again(
     assert row.state == "cancelled"
 
 
+@pytest.mark.parametrize("status", [403, 409])
+async def test_a_refusal_a_retry_may_change_stops_after_the_retry_window(
+    async_session, voice_provider_mock, verifier, status
+) -> None:
+    """A carrier that refuses a delete on purpose with a 403 or 409 is not
+    asked again for good: after CLOSE_RETRY_FOR its answer is stored."""
+    org = uuid.uuid4()
+    await _close(async_session, org)
+    number = await _number(async_session, org)
+    row = await _verification(async_session, org, "approved", "B7", country_code="GB")
+    voice_provider_mock.release_number.side_effect = CarrierRequestError(status)
+    verifier.fail["B7"] = CarrierRequestError(status)
+    start = datetime.now(timezone.utc)
+
+    for at in (start, start + timedelta(days=6)):
+        counts = await close_org_carrier_items(
+            async_session, at, _registry(verifier), None
+        )
+        assert counts.failed == 2 and counts.refused == 0
+    await async_session.refresh(row)
+    assert row.state == "approved" and "close_refused" not in row.provider_refs
+    assert row.provider_refs["close_failing_since"] == start.isoformat()
+
+    counts = await close_org_carrier_items(
+        async_session, start + timedelta(days=7), _registry(verifier), None
+    )
+    assert counts.refused == 2 and counts.failed == 0
+    await async_session.refresh(number)
+    await async_session.refresh(row)
+    assert number.provisioning_metadata["release_refused"]["status"] == status
+    assert row.provider_refs["close_refused"]["status"] == status
+    assert row.provider_refs["bundle_sid"] == "B7"
+
+
+async def test_an_outage_does_not_start_the_retry_window(
+    async_session, voice_provider_mock, verifier
+) -> None:
+    org = uuid.uuid4()
+    await _close(async_session, org)
+    row = await _verification(async_session, org, "approved", "B8")
+    verifier.fail["B8"] = CarrierRequestError(503)
+    counts = await close_org_carrier_items(
+        async_session,
+        datetime.now(timezone.utc) + timedelta(days=30),
+        _registry(verifier),
+        None,
+    )
+    assert counts.failed == 1 and counts.refused == 0
+    await async_session.refresh(row)
+    assert "close_failing_since" not in row.provider_refs
+
+
 async def test_a_failed_campaign_delete_keeps_the_ids_and_is_retried(
     async_session, voice_provider_mock
 ) -> None:

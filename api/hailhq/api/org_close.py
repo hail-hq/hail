@@ -29,7 +29,11 @@ ids, so the next pass deletes it again. A carrier refusal a retry does not chang
 (``final_refusal``) is stored and the item is not tried again:
 ``provisioning_metadata.release_refused`` on the number,
 ``provider_refs.close_refused`` on the registration, both
-``{"status": <HTTP status>, "at": <ISO time>}``.
+``{"status": <HTTP status>, "at": <ISO time>}``. A 4xx a retry may change
+(401, 403, 408, 409, 425, 429) is retried for ``CLOSE_RETRY_FOR``: its
+first time is stored (``close_failing_since``), and a carrier that still
+answers a 4xx after that has its answer stored as a refusal, so a delete
+the carrier refuses on purpose does not retry for good.
 
 No money moves: a release writes no ledger row, the cancel does not call the
 website's fee rater (``_rate_before_wipe``, ``_notify_billing``), and the
@@ -42,13 +46,13 @@ from __future__ import annotations
 
 import logging
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from uuid import UUID
 
 from hailhq.api.number_orders import retry_release
 from hailhq.api.routes.numbers import release_org_number
 from hailhq.api.routes.verifications import Registry, cancel_locked
-from hailhq.core.carrier_routing import CARRIERS, final_refusal
+from hailhq.core.carrier_routing import CARRIERS, carrier_http_status, final_refusal
 from hailhq.core.db import org_lock
 from hailhq.core.livekit import LiveKitClient
 from hailhq.core.models import CarrierVerification, PhoneNumber
@@ -63,6 +67,11 @@ __all__ = ["CloseCounts", "close_org_carrier_items"]
 
 RELEASE_REFUSED = "release_refused"
 CLOSE_REFUSED = "close_refused"
+# When the carrier first answered a 4xx a retry may change; see the module
+# docstring. On the number's provisioning_metadata or the registration's
+# provider_refs.
+FAILING_SINCE = "close_failing_since"
+CLOSE_RETRY_FOR = timedelta(days=7)
 
 
 @dataclass
@@ -82,6 +91,37 @@ class CloseCounts:
 
 def _refusal(status: int | None, now: datetime) -> dict:
     return {"status": status, "at": now.isoformat()}
+
+
+async def _refusal_after_retries(
+    db: AsyncSession, model, item_id: UUID, column: str, exc: BaseException, now
+) -> int | None:
+    """For a failure ``final_refusal`` does not stop: the carrier's 4xx
+    when it has answered a 4xx since ``CLOSE_RETRY_FOR`` ago, so the caller
+    stores it as a refusal; else None, after storing the first such time.
+    A failure with no 4xx (an outage, a timeout) returns None and stores
+    nothing."""
+    status = carrier_http_status(exc)
+    if status is None or not 400 <= status < 500:
+        return None
+    try:
+        item = await db.get(model, item_id)
+        if item is None:
+            return None
+        await db.refresh(item, with_for_update=True)
+        data = getattr(item, column) or {}
+        since = data.get(FAILING_SINCE)
+        if since is not None:
+            await db.commit()
+            if now - datetime.fromisoformat(since) >= CLOSE_RETRY_FOR:
+                return status
+            return None
+        setattr(item, column, {**data, FAILING_SINCE: now.isoformat()})
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        logger.exception("account close: could not store a failure of %s", item_id)
+    return None
 
 
 def _unreleased(org_ids):
@@ -150,6 +190,10 @@ async def _release_numbers(
         except Exception as exc:
             await db.rollback()
             status = final_refusal(exc)
+            if status is None:
+                status = await _refusal_after_retries(
+                    db, PhoneNumber, number_id, "provisioning_metadata", exc, now
+                )
             if status is not None:
                 await _store_release_refusal(db, number_id, status, now)
                 counts.refused += 1
@@ -266,7 +310,9 @@ async def _cancel_registrations(
             if row.state == "cancelled":
                 await provider.discard({"brand_id": refs["kept_brand_id"]})
                 row.provider_refs = {
-                    k: v for k, v in refs.items() if k != "kept_brand_id"
+                    k: v
+                    for k, v in refs.items()
+                    if k not in ("kept_brand_id", FAILING_SINCE)
                 }
                 flag_modified(row, "provider_refs")
             else:
@@ -276,6 +322,10 @@ async def _cancel_registrations(
         except Exception as exc:
             await db.rollback()
             status = final_refusal(exc)
+            if status is None:
+                status = await _refusal_after_retries(
+                    db, CarrierVerification, verification_id, "provider_refs", exc, now
+                )
             if status is None:
                 counts.failed += 1
                 logger.warning(
