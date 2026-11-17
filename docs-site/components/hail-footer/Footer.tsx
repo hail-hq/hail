@@ -68,7 +68,7 @@ export function Footer({
               className="hail-footer-column hail-footer-mobile-group"
               name="hail-footer-groups"
             >
-              <summary><h2>{group.title}</h2><span className="hail-footer-plus" aria-hidden="true" /></summary>
+              <summary><span className="hail-footer-heading">{group.title}</span><span className="hail-footer-plus" aria-hidden="true" /></summary>
               <FooterLinks group={group} />
             </details>
           ))}

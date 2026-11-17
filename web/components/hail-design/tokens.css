@@ -16,6 +16,9 @@
   --public-emphasis: #111111;
   --public-on-emphasis: #ffffff;
   --public-error: #bc2020;
+  /* The slide button on an emphasis panel: sand in light mode, as before. */
+  --public-answer-bg: var(--public-section);
+  --public-answer-fg: var(--public-emphasis);
 }
 body { --public-font-ui: var(--font-geist-sans), Arial, sans-serif; }
 @media (prefers-color-scheme: dark) {
@@ -35,6 +38,8 @@ body { --public-font-ui: var(--font-geist-sans), Arial, sans-serif; }
     --public-emphasis: #202938;
     --public-on-emphasis: #f4f4f0;
     --public-error: #ff8d83;
+    --public-answer-bg: color-mix(in srgb, #f4f4f0 9%, transparent);
+    --public-answer-fg: #f4f4f0;
   }
 }
 html[data-theme="dark"], html.dark {
@@ -53,6 +58,8 @@ html[data-theme="dark"], html.dark {
   --public-emphasis: #202938;
   --public-on-emphasis: #f4f4f0;
   --public-error: #ff8d83;
+  --public-answer-bg: color-mix(in srgb, #f4f4f0 9%, transparent);
+  --public-answer-fg: #f4f4f0;
 }
 html[data-theme="light"], html.light {
   --public-ink: #111111;
@@ -70,6 +77,8 @@ html[data-theme="light"], html.light {
   --public-emphasis: #111111;
   --public-on-emphasis: #ffffff;
   --public-error: #bc2020;
+  --public-answer-bg: var(--public-section);
+  --public-answer-fg: var(--public-emphasis);
 }
 
 /* Public roles are scoped. Account and console values stay independent. */
@@ -137,8 +146,8 @@ html[data-theme="light"], html.light {
   --control-line: 1px; --control-gap: 12px; --target-min: 44px;
   --shadow-card: 0 12px 32px -24px #11111130;
   --shadow-cta: none;
-  --answer-on-emph-bg: color-mix(in srgb, var(--emph-fg) 9%, transparent);
-  --answer-on-emph-fg: var(--emph-fg);
+  --answer-on-emph-bg: var(--public-answer-bg);
+  --answer-on-emph-fg: var(--public-answer-fg);
   color: var(--ink);
   background: var(--paper);
   font-family: var(--font-ui);
