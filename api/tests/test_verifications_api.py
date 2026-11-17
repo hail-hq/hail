@@ -57,6 +57,7 @@ from hailhq.core.providers.verification.base import (
     RegistrationHoldsAnotherNumber,
 )
 from hailhq.core.providers.verification.forms import display_name
+from hailhq.core.providers.verification.sms_form import low_volume
 from hailhq.core.providers.verification.telnyx_sms import (
     TelnyxSmsRegistrationProvider,
 )
@@ -196,12 +197,12 @@ class FakeSmsCarrier(SmsRegistrationProvider):
             return DraftResult(
                 refs={}, problems=self.problems, billed_refs=self.billed_refs
             )
-        return DraftResult(
-            refs={
-                "brand_sid": f"BN{len(self.drafts)}",
-                "subject_type": kwargs["requirements"].subject_type,
-            }
-        )
+        subject_type = kwargs["requirements"].subject_type
+        refs = {"brand_sid": f"BN{len(self.drafts)}", "subject_type": subject_type}
+        # Like the real plug-ins: the marker of a company's low-volume pick.
+        if low_volume(kwargs.get("fields") or {}, subject_type):
+            refs["low_volume"] = True
+        return DraftResult(refs=refs)
 
     async def check(self, refs):
         return []
@@ -344,6 +345,13 @@ def pinned_catalog(tmp_path, monkeypatch):
                             "brand_usd": "46.00",
                             "campaign_vetting_usd": "15.00",
                             "campaign_monthly_usd": "10.00",
+                        },
+                        # Unlike any other brand price here, so a test
+                        # sees which row was used.
+                        "business_low_volume": {
+                            "brand_usd": "3.00",
+                            "campaign_vetting_usd": "15.00",
+                            "campaign_monthly_usd": "1.50",
                         },
                     }
                 ],
@@ -4241,7 +4249,7 @@ async def test_credit_needed_counts_the_rows_covered_after_a_waiting_one(
     monkeypatch.setattr(
         sms_registration_fees,
         "campaign_fee_cents",
-        lambda provider, subject_type: fees[subject_type],
+        lambda provider, subject_type, low_volume=False: fees[subject_type],
     )
     sms_carrier.campaign_key = "campaign_id"
     await _set_balance(async_session, org_id, 8)
@@ -5921,6 +5929,7 @@ _TELNYX_BUSINESS = {
     "rep_email": "ada@acme.example",
     "rep_phone": "+15125550100",
     "rep_title": "CEO",
+    "low_volume": "NO",
     "campaign_description": "Order updates and delivery notices for customers who ordered on our site.",
     "sample_1": "Acme: your order 123 shipped. Reply STOP to opt out.",
     "sample_2": "Acme: your order 123 was delivered. Reply STOP to opt out.",
@@ -7963,3 +7972,179 @@ async def test_refusal_audit_is_dropped_on_rollback(async_session):
     await db.rollback()
     await sms_registration.drain_audits()
     assert db.sync_session.info.get("sms_attach_refused_audits") is None
+
+
+# -- Low-volume company registrations --------------------------------------
+
+_LOW_VOLUME = json.dumps(
+    {"legal_name": "Acme", "campaign_description": "Order updates", "low_volume": "YES"}
+)
+
+
+def _low_volume_filing_fee() -> int:
+    return sms_registration_fees.filing_fee_cents("fake", "business", low_volume=True)
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_low_volume_company_files_on_the_low_volume_floor(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    org_id, _, key = org_and_key
+    low = _low_volume_filing_fee()
+    # 3.00 brand with no vetting + 15.00 campaign review.
+    assert low == 1800
+    await _set_balance(async_session, org_id, low - 1)
+    assert (await _post_sms(client, key, fields=_LOW_VOLUME)).status_code == 402
+    # A vetted company still needs the vetted brand's cost.
+    await _set_balance(async_session, org_id, low)
+    assert (await _post_sms(client, key)).status_code == 402
+    assert sms_carrier.drafts == []
+    resp = await _post_sms(client, key, fields=_LOW_VOLUME)
+    assert resp.status_code == 201, resp.text
+    assert (await _stored_refs(async_session, resp.json()["id"]))["low_volume"] is True
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_person_never_files_on_the_low_volume_floor(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    org_id, _, key = org_and_key
+    person = sms_registration_fees.filing_fee_cents("fake", "person")
+    assert _low_volume_filing_fee() < person
+    await _set_balance(async_session, org_id, _low_volume_filing_fee())
+    resp = await _post_sms(client, key, subject_type="person", fields=_LOW_VOLUME)
+    assert resp.status_code == 402, resp.text
+    await _set_balance(async_session, org_id, person)
+    resp = await _post_sms(client, key, subject_type="person", fields=_LOW_VOLUME)
+    assert resp.status_code == 201, resp.text
+    assert "low_volume" not in await _stored_refs(async_session, resp.json()["id"])
+
+
+async def _uncharged_company_filing(async_session, org_id, refs: dict) -> None:
+    """A company filing of the last day the rater has not charged yet."""
+    async_session.add(
+        CarrierVerification(
+            organization_id=org_id,
+            provider="fake",
+            purpose="sms",
+            country_code="US",
+            number_type="local",
+            subject_type="business",
+            state="rejected",
+            provider_refs=refs,
+            requirements_version="v1",
+        )
+    )
+    await async_session.commit()
+
+
+@pytest.mark.usefixtures("us_number")
+@pytest.mark.parametrize("earlier_low", [True, False])
+async def test_an_uncharged_filing_counts_at_its_own_price(
+    client, org_and_key, sms_carrier, async_session, earlier_low
+) -> None:
+    org_id, _, key = org_and_key
+    await _uncharged_company_filing(
+        async_session, org_id, {"low_volume": True} if earlier_low else {}
+    )
+    low = _low_volume_filing_fee()
+    earlier = sms_registration_fees.filing_fee_cents(
+        "fake", "business", low_volume=earlier_low
+    )
+    await _set_balance(async_session, org_id, low + earlier - 1)
+    assert (await _post_sms(client, key, fields=_LOW_VOLUME)).status_code == 402
+    await _set_balance(async_session, org_id, low + earlier)
+    resp = await _post_sms(client, key, fields=_LOW_VOLUME)
+    assert resp.status_code == 201, resp.text
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_an_uncharged_low_volume_brand_leaves_credit_for_its_campaign(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 10_000)
+    resp = await _post_sms(client, key, fields=_LOW_VOLUME)
+    assert resp.status_code == 201, resp.text
+    vid = resp.json()["id"]
+    sms_carrier.campaign_key = "campaign_id"
+    brand = sms_registration_fees.brand_fee_cents("fake", "business", low_volume=True)
+    campaign = sms_registration_fees.campaign_fee_cents(
+        "fake", "business", low_volume=True
+    )
+    # The balance holds the uncharged low-volume brand and the campaign
+    # review; at the vetted brand's price it would wait for credit.
+    await _set_balance(async_session, org_id, brand + campaign)
+    verifications_routes._last_polled.clear()
+    resp = await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["waiting_for_credit"] is False
+    assert sms_carrier.campaigns_created == 1
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_cancelled_low_volume_row_keeps_its_marker(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 10_000)
+    vid = (await _post_sms(client, key, fields=_LOW_VOLUME)).json()["id"]
+    await _set_refs(
+        async_session,
+        vid,
+        "awaiting_review",
+        {"brand_sid": "BN1", "subject_type": "business", "low_volume": True},
+    )
+    resp = await client.delete(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["state"] == "cancelled"
+    refs = await _stored_refs(async_session, vid)
+    assert refs["low_volume"] is True and "brand_sid" not in refs
+
+
+@pytest.mark.parametrize("rejected", [True, False])
+def test_emptied_refs_keep_the_low_volume_marker_only_when_set(rejected) -> None:
+    row = CarrierVerification(
+        purpose="sms",
+        state="submitted",
+        provider_refs={"brand_sid": "BN1", "low_volume": True},
+    )
+    assert verifications_routes._wiped_refs(row, rejected=rejected) == {
+        "low_volume": True
+    }
+    row.provider_refs = {"brand_sid": "BN1"}
+    assert verifications_routes._wiped_refs(row, rejected=rejected) == {}
+
+
+@pytest.mark.usefixtures("us_number")
+@pytest.mark.parametrize("filed_low", [True, False])
+async def test_an_amendment_cannot_change_the_volume_choice(
+    client, org_and_key, sms_carrier, async_session, monkeypatch, filed_low
+) -> None:
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 10_000)
+    vid, answers = await _needs_information_application(
+        client, key, sms_carrier, async_session, monkeypatch
+    )
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    refs = dict(row.provider_refs)
+    if filed_low:
+        refs["low_volume"] = True
+    row.provider_refs = refs
+    await async_session.commit()
+    flipped = {
+        **answers,
+        "fields": {**answers["fields"], "low_volume": "NO" if filed_low else "YES"},
+    }
+    path = f"/verifications/{vid}/application"
+    resp = await client.patch(path, headers=_auth(key), json=flipped)
+    assert resp.status_code == 422, resp.text
+    assert "low_volume" in resp.text
+    same = {
+        **answers,
+        "fields": {**answers["fields"], "low_volume": "YES" if filed_low else "NO"},
+    }
+    resp = await client.patch(path, headers=_auth(key), json=same)
+    assert resp.status_code == 200, resp.text
+    stored = await _stored_refs(async_session, vid)
+    assert stored["campaign"]["use_case"] == ("LOW_VOLUME" if filed_low else "MIXED")

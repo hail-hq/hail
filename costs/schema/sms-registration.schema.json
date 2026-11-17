@@ -50,7 +50,11 @@
         "note": { "type": "string" },
         "source_url": { "type": "string", "format": "uri" },
         "person": { "$ref": "#/$defs/fees" },
-        "business": { "$ref": "#/$defs/fees" }
+        "business": { "$ref": "#/$defs/fees" },
+        "business_low_volume": {
+          "description": "A company that chose low volume: a brand with no secondary vetting and a LOW_VOLUME campaign. Absent means the carrier has no low-volume filing.",
+          "$ref": "#/$defs/fees"
+        }
       }
     }
   }

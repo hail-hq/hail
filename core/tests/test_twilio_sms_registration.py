@@ -108,6 +108,7 @@ FIELDS = {
     "rep_email": "ada@acme.example",
     "rep_phone": "+15125550100",
     "rep_title": "CEO",
+    "low_volume": "NO",
     "campaign_description": "Order updates and delivery notices for customers who ordered on our site.",
     "sample_1": "Acme: your order 123 shipped. Reply STOP to opt out.",
     "sample_2": "Acme: your order 123 was delivered. Reply STOP to opt out.",
@@ -186,6 +187,101 @@ async def test_business_draft_creates_profile_trust_and_brand() -> None:
     # (the fixed campaign text may name the sender; the other refs are IDs)
     ids = repr({k: v for k, v in draft.refs.items() if k != "campaign"})
     assert "Acme" not in ids and "12-3456789" not in repr(draft.refs)
+
+
+async def _business_draft(p, fields):
+    req = await p.requirements("US", "local", "business")
+    return await p.create_draft(
+        organization_id="org1",
+        contact_email="ops@hail.so",
+        requirements=req,
+        fields=fields,
+        address=ADDRESS,
+        documents={},
+        messaging_service_sid="MG9",
+    )
+
+
+async def test_low_volume_company_brand_skips_secondary_vetting() -> None:
+    p = _provider()
+    draft = await _business_draft(p, {**FIELDS, "low_volume": "YES"})
+    assert draft.problems == []
+    brand = next(
+        kw for n, kw in p._client.calls if n.endswith("brand_registrations.create")
+    )
+    assert brand["skip_automatic_sec_vet"] is True
+    # A Low-Volume Standard brand is still a standard brand.
+    assert "brand_type" not in brand
+    # The marker the fee rater reads.
+    assert draft.refs["low_volume"] is True
+    assert draft.refs["campaign"]["use_case"] == "LOW_VOLUME"
+
+
+async def test_vetted_company_brand_is_unchanged() -> None:
+    p = _provider()
+    draft = await _business_draft(p, FIELDS)
+    brand = next(
+        kw for n, kw in p._client.calls if n.endswith("brand_registrations.create")
+    )
+    assert "skip_automatic_sec_vet" not in brand
+    assert "low_volume" not in draft.refs
+
+
+async def test_a_person_never_gets_the_low_volume_brand() -> None:
+    p = _provider()
+    fields = {
+        **FIELDS,
+        "has_tax_id": "NO",
+        "first_name": "Ada",
+        "last_name": "Lovelace",
+        "email": "ada@example.com",
+        "mobile_phone_number": "+15125550199",
+        "low_volume": "YES",
+    }
+    req = await p.requirements("US", "local", "person")
+    draft = await p.create_draft(
+        organization_id="org1",
+        contact_email="ops@hail.so",
+        requirements=req,
+        fields=fields,
+        address=ADDRESS,
+        documents={},
+        messaging_service_sid=None,
+    )
+    brand = next(
+        kw for n, kw in p._client.calls if n.endswith("brand_registrations.create")
+    )
+    assert brand["brand_type"] == "SOLE_PROPRIETOR"
+    assert "skip_automatic_sec_vet" not in brand
+    assert "low_volume" not in draft.refs
+    assert draft.refs["campaign"]["use_case"] == "SOLE_PROPRIETOR"
+
+
+async def test_low_volume_campaign_files_the_low_volume_use_case() -> None:
+    r = _ok_responses()
+    r["brand_registrations.fetch"] = SimpleNamespace(
+        status="APPROVED", identity_status="VERIFIED", brand_feedback=None
+    )
+    r["us_app_to_person.create"] = SimpleNamespace(
+        sid="QE1", campaign_status="PENDING", errors=[]
+    )
+    p = _provider(r)
+    refs = {
+        "brand_sid": "BN1",
+        "messaging_service_sid": "MG1",
+        "subject_type": "business",
+        "low_volume": True,
+        "campaign": _campaign("LOW_VOLUME"),
+    }
+    await p.status(refs)
+    create = next(
+        kw for n, kw in p._client.calls if n.endswith("us_app_to_person.create")
+    )
+    # Twilio's campaign takes no sub-use-cases: the use case alone.
+    assert create["us_app_to_person_usecase"] == "LOW_VOLUME"
+    assert not any(
+        "usecases" in k.lower() for k in create if k != "us_app_to_person_usecase"
+    )
 
 
 async def test_person_draft_uses_sole_proprietor_and_sends_otp() -> None:

@@ -186,6 +186,23 @@ _BUSINESS_FIELDS = (
     FieldSpec(name="rep_email", label="Contact person email", kind="email"),
     FieldSpec(name="rep_phone", label="Contact person phone", kind="phone"),
     FieldSpec(name="rep_title", label="Contact person job title"),
+    FieldSpec(
+        name="low_volume",
+        label="How many texts do you send each day?",
+        options=(
+            FieldOption(
+                key="YES",
+                label="Under 2,000 texts a day to T-Mobile users (cheaper, no vetting)",
+            ),
+            FieldOption(key="NO", label="More than that (vetted brand)"),
+        ),
+        help=(
+            "Low volume costs less because your company is not vetted. "
+            "You get these limits: at most 2,000 texts a day to T-Mobile users, "
+            "slower sending, and no trust score. "
+            "To send more later, you make a new registration and pay for it again."
+        ),
+    ),
 )
 # What the texts are about. Both routes select one to five real purposes;
 # companies with exactly one purpose file that specific use case.
@@ -933,6 +950,23 @@ class CampaignText:
     schema_version: int = 1
 
 
+def low_volume(fields: dict[str, str], subject_type: SubjectType) -> bool:
+    """True for a company that picked low volume: its brand is not vetted
+    and its campaign files the LOW_VOLUME use case. Never for a person."""
+    return subject_type == "business" and _answer(fields, "low_volume") == "YES"
+
+
+def _use_case(
+    fields: dict[str, str], subject_type: SubjectType, purposes: list[str]
+) -> str:
+    if subject_type == "person":
+        return "SOLE_PROPRIETOR"
+    if low_volume(fields, subject_type):
+        # Any mix of the picked purposes, filed as its sub-use-cases.
+        return "LOW_VOLUME"
+    return purposes[0] if len(purposes) == 1 else "MIXED"
+
+
 def campaign_text(fields: dict[str, str], subject_type: SubjectType) -> CampaignText:
     """Compile only applicant-supplied facts; reading old saved forms stays safe.
 
@@ -942,11 +976,7 @@ def campaign_text(fields: dict[str, str], subject_type: SubjectType) -> Campaign
     purposes = picked(fields.get("text_types"))
     structured = bool(_answer(fields, "consent_methods"))
     return CampaignText(
-        use_case=(
-            "SOLE_PROPRIETOR"
-            if subject_type == "person"
-            else (purposes[0] if len(purposes) == 1 else "MIXED")
-        ),
+        use_case=_use_case(fields, subject_type, purposes),
         description=fields["campaign_description"].strip(),
         message_flow=(
             _structured_flow(fields)

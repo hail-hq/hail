@@ -56,6 +56,7 @@ FIELDS = {
     "rep_email": "ada@acme.example",
     "rep_phone": "+15125550100",
     "rep_title": "CEO",
+    "low_volume": "NO",
     "campaign_description": "Order updates and delivery notices for customers who ordered on our site.",
     "sample_1": "Acme: your order 123 shipped. Reply STOP to opt out.",
     "sample_2": "Acme: your order 123 was delivered. Reply STOP to opt out.",
@@ -3022,3 +3023,173 @@ def test_same_sender_reads_a_vat_number_with_or_without_its_prefix() -> None:
     assert not same_sender(
         original, {**fields, "ein": "SE556677889902"}, address, "business"
     )
+
+
+LOW_VOLUME_FIELDS = {**FIELDS, "low_volume": "YES"}
+
+
+def _low_volume_brand(calls: list, brand_reads):
+    """Telnyx makes brand B1; each GET of it answers the next of
+    ``brand_reads`` (a status code or a JSON body), the last one repeating."""
+    reads = list(brand_reads)
+
+    def handler(req: httpx.Request):
+        calls.append((req.method, req.url.path))
+        if req.method == "POST" and req.url.path.endswith("/10dlc/brand"):
+            return httpx.Response(200, json={"brandId": "B1"})
+        if req.method == "GET" and req.url.path.endswith("/10dlc/brand/B1"):
+            answer = reads.pop(0) if len(reads) > 1 else reads[0]
+            if isinstance(answer, int):
+                return httpx.Response(answer)
+            return httpx.Response(200, json=answer)
+        if req.url.path.endswith("/externalVetting"):
+            return httpx.Response(200, json={})
+        return httpx.Response(404)
+
+    return _provider(handler)
+
+
+def _filable_campaign(use_case: str, purposes: list[str]) -> dict:
+    return {
+        **_unfiled_campaign_refs()["campaign"],
+        "use_case": use_case,
+        "text_types": purposes,
+        "has_phone": False,
+        "age_gated": False,
+        "direct_lending": False,
+    }
+
+
+def _vetting_calls(calls: list) -> list:
+    return [c for c in calls if c[1].endswith("/externalVetting")]
+
+
+async def test_low_volume_company_brand_is_never_vetted_at_filing() -> None:
+    calls: list = []
+    p = _low_volume_brand(calls, [{"status": "OK", "identityStatus": "VERIFIED"}])
+    draft = await _draft(p, fields=LOW_VOLUME_FIELDS)
+    assert draft.problems == [] and draft.refs["brand_id"] == "B1"
+    assert _vetting_calls(calls) == []
+    # The marker the fee rater reads; no vetting is owed.
+    assert draft.refs["low_volume"] is True
+    assert "vetting_requested" not in draft.refs
+    assert draft.refs["campaign"]["use_case"] == "LOW_VOLUME"
+    assert not p.in_review(draft.refs)
+
+
+async def test_low_volume_brand_still_registering_owes_no_vetting() -> None:
+    calls: list = []
+    p = _low_volume_brand(calls, [404])
+    draft = await _draft(p, fields=LOW_VOLUME_FIELDS)
+    assert draft.problems == [] and draft.refs["brand_id"] == "B1"
+    assert "vetting_requested" not in draft.refs
+    assert _vetting_calls(calls) == []
+
+
+async def test_a_failure_after_the_low_volume_brand_owes_no_vetting() -> None:
+    calls: list = []
+    # The brand read fails with an answer that is not a refusal.
+    p = _low_volume_brand(calls, [401])
+    draft = await _draft(p, fields=LOW_VOLUME_FIELDS)
+    assert draft.problems == [] and draft.refs["brand_id"] == "B1"
+    assert "vetting_requested" not in draft.refs
+    assert _vetting_calls(calls) == []
+
+
+@pytest.mark.parametrize("identity", ["SELF_DECLARED", "UNVERIFIED"])
+@pytest.mark.parametrize("owed", [False, True, None])
+async def test_no_pass_ever_vets_a_low_volume_brand(identity, owed) -> None:
+    """Whatever the row says about vetting, a low-volume row never asks."""
+    calls: list = []
+    p = _low_volume_brand(calls, [{"status": "OK", "identityStatus": identity}])
+    refs = {
+        "brand_id": "B1",
+        "subject_type": "business",
+        "low_volume": True,
+        "campaign": {},
+    }
+    if owed is not None:
+        refs["vetting_requested"] = owed
+    for _ in range(3):
+        assert (await p.status(refs)).state == "pending"
+    assert _vetting_calls(calls) == []
+    assert not any(m == "POST" for m, _ in calls)
+
+
+async def test_low_volume_campaign_files_its_purposes_as_sub_use_cases() -> None:
+    posted = []
+
+    def handler(req):
+        if req.url.path.endswith("/10dlc/brand/B1"):
+            return httpx.Response(
+                200, json={"status": "OK", "identityStatus": "VERIFIED"}
+            )
+        if req.url.path.endswith("/10dlc/campaignBuilder"):
+            posted.append(json.loads(req.content))
+            return httpx.Response(200, json={"campaignId": "C1"})
+        return httpx.Response(404)
+
+    for purposes in (["CUSTOMER_CARE"], ["CUSTOMER_CARE", "MARKETING"]):
+        posted.clear()
+        refs = {
+            **_unfiled_campaign_refs(),
+            "low_volume": True,
+            "campaign": _filable_campaign("LOW_VOLUME", purposes),
+        }
+        assert (await _provider(handler).status(refs)).state == "pending"
+        assert posted[0]["usecase"] == "LOW_VOLUME"
+        assert posted[0]["subUsecases"] == purposes
+
+
+async def test_a_single_purpose_vetted_company_files_no_sub_use_cases() -> None:
+    posted = []
+
+    def handler(req):
+        if req.url.path.endswith("/10dlc/brand/B1"):
+            return httpx.Response(200, json={"identityStatus": "VETTED_VERIFIED"})
+        if req.url.path.endswith("/10dlc/campaignBuilder"):
+            posted.append(json.loads(req.content))
+            return httpx.Response(200, json={"campaignId": "C1"})
+        return httpx.Response(404)
+
+    refs = _unfiled_campaign_refs()
+    refs["campaign"] = _filable_campaign("CUSTOMER_CARE", ["CUSTOMER_CARE"])
+    await _provider(handler).status(refs)
+    assert posted[0]["usecase"] == "CUSTOMER_CARE"
+    assert "subUsecases" not in posted[0]
+
+
+async def test_a_person_never_gets_the_low_volume_marker() -> None:
+    def handler(req: httpx.Request):
+        if req.url.path.endswith("/10dlc/brand"):
+            return httpx.Response(200, json={"brandId": "B1"})
+        if req.method == "GET":
+            return httpx.Response(200, json={"status": "OK"})
+        return httpx.Response(200, json={"referenceId": "R1"})
+
+    draft = await _draft(
+        _provider(handler),
+        subject="person",
+        fields={**PERSON_FIELDS, "low_volume": "YES"},
+    )
+    assert draft.problems == []
+    assert "low_volume" not in draft.refs
+    assert draft.refs["campaign"]["use_case"] == "SOLE_PROPRIETOR"
+
+
+async def test_a_refused_low_volume_brand_keeps_the_marker_on_its_bill() -> None:
+    """The fee rater prices a refused brand from the billed refs."""
+
+    def handler(req: httpx.Request):
+        if req.url.path.endswith("/10dlc/brand"):
+            return httpx.Response(200, json={"brandId": "B1"})
+        if req.method == "GET":
+            return httpx.Response(
+                200,
+                json={"status": "REGISTRATION_FAILED", "failureReasons": ["EIN"]},
+            )
+        return httpx.Response(204)
+
+    draft = await _draft(_provider(handler), fields=LOW_VOLUME_FIELDS)
+    assert draft.problems and draft.refs == {}
+    assert draft.billed_refs["low_volume"] is True

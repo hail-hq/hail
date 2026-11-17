@@ -35,6 +35,7 @@ from hailhq.core.providers.verification.forms import display_name, text_length
 from hailhq.core.providers.verification.sms_form import (
     NINE_DIGIT_COUNTRIES,
     campaign_text,
+    low_volume,
     sms_requirements,
     sms_subject_name,
     tax_number,
@@ -99,6 +100,9 @@ _AUTO_REPLIES = (
 # Auto-replies apply by the subscriber's country; 10DLC is US texting.
 _AUTO_REPLY_COUNTRY = "US"
 _VERIFIED = {"VERIFIED", "VETTED_VERIFIED"}
+# Use cases filed with the picked purposes as sub-use-cases. MIXED takes 2
+# to 5; LOW_VOLUME (low volume mixed) takes 1 to 5; the form allows 1 to 5.
+_SUB_USE_CASES = frozenset({"MIXED", "SOLE_PROPRIETOR", "LOW_VOLUME"})
 # Texts Telnyx sends a person: the PIN (@OTP_PIN@ is replaced by Telnyx),
 # then a notice once the PIN is confirmed.
 _PIN_SMS = "Hail: your confirmation code is @OTP_PIN@. It expires in 24 hours."
@@ -369,6 +373,11 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
             "campaign": text.__dict__,
             "messaging_profile_id": messaging_service_sid,
         }
+        if low_volume(fields, subject_type):
+            # Set before the brand is filed: no pass ever asks for this
+            # brand's vetting (``_vetted``), and the fee rater prices
+            # the row as low volume.
+            refs["low_volume"] = True
         if not messaging_service_sid:
             # The profile gets the filed STOP and HELP replies; the
             # organization's numbers find it by its name. Filing goes on
@@ -404,7 +413,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                     "10DLC step after the brand failed; brand kept: %s",
                     _failure(exc),
                 )
-                if subject_type != "person":
+                if _vetted(refs):
                     # False, not unset: rows filed before this flag existed
                     # already asked for vetting and must not ask again.
                     refs.setdefault("vetting_requested", False)
@@ -530,7 +539,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
         brand = await self._settled_brand(refs["brand_id"])
         if brand is None:
             logger.warning("10DLC brand still registering after the wait")
-            if subject_type != "person":
+            if _vetted(refs):
                 # See create_draft: False means "ask on the next pass".
                 refs["vetting_requested"] = False
             return []
@@ -541,7 +550,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
         if subject_type == "person":
             # No vetting for a sole proprietor; the PIN confirms the person.
             await self._send_pin(refs)
-        else:
+        elif _vetted(refs):
             await self._request_vetting(refs)
         return []
 
@@ -694,7 +703,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
             if not verified and not refs.get("identity_verified"):
                 if person:
                     await self._resend_pin_if_old(refs)
-                elif refs.get("vetting_requested") is False:
+                elif refs.get("vetting_requested") is False and _vetted(refs):
                     # The brand was still registering when it was filed, or
                     # the vetting call failed (Telnyx may have got it).
                     await self._request_vetting_once(refs)
@@ -722,7 +731,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                         "usecase": text["use_case"],
                         **(
                             {"subUsecases": list(text["text_types"])}
-                            if text["use_case"] in {"MIXED", "SOLE_PROPRIETOR"}
+                            if text["use_case"] in _SUB_USE_CASES
                             else {}
                         ),
                         "description": text["description"],
@@ -1220,11 +1229,21 @@ def _failure(exc: Exception) -> str:
     return type(exc).__name__
 
 
+def _vetted(refs: dict) -> bool:
+    """A company brand that gets vetting: never a person's, never a
+    low-volume company's (the customer chose no vetting)."""
+    return refs.get("subject_type") != "person" and not refs.get("low_volume")
+
+
 def _billed(refs: dict) -> dict:
-    """What Telnyx bills of a draft that failed: the brand, once made."""
+    """What Telnyx bills of a draft that failed: the brand, once made. A
+    low-volume brand keeps its marker, so it is priced as one."""
     if not refs.get("brand_id"):
         return {}
-    return {"brand_id": refs["brand_id"], "subject_type": refs.get("subject_type")}
+    billed = {"brand_id": refs["brand_id"], "subject_type": refs.get("subject_type")}
+    if refs.get("low_volume"):
+        billed["low_volume"] = True
+    return billed
 
 
 def _errors(response: httpx.Response) -> list[dict]:

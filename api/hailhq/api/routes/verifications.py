@@ -140,7 +140,7 @@ from hailhq.core.providers.verification.document_check import (
     document_cautions,
 )
 from hailhq.core.providers.verification.forms import validate_input
-from hailhq.core.providers.verification.sms_form import campaign_text
+from hailhq.core.providers.verification.sms_form import campaign_text, low_volume
 from hailhq.core.providers.verification.sms_review import same_sender
 from hailhq.core.retention import (
     REGISTRATION_ANSWER_REFS,
@@ -505,11 +505,15 @@ def _refusal_mark(
 def _wiped_refs(row: CarrierVerification, *, rejected: bool = False) -> dict:
     """``provider_refs`` once emptied. A filing that reused a brand keeps the
     mark: the fee rater reads it on every sweep, and without it would bill
-    the submission. A ``DISCARD_REFUSED`` mark stays: it names what the
+    the submission. So does a low-volume filing (``low_volume``): without it
+    the rater would bill a vetted brand. A ``DISCARD_REFUSED`` mark stays: it names what the
     carrier still holds. A number registration keeps its answers only when
     it is being ``rejected`` (for a resubmit), never on a cancel."""
     refs = row.provider_refs or {}
     kept = {"brand_reused": True} if refs.get("brand_reused") else {}
+    if refs.get("low_volume"):
+        # The rater prices a low-volume row's brand and monthly fees from it.
+        kept["low_volume"] = True
     if DISCARD_REFUSED in refs:
         kept[DISCARD_REFUSED] = copy.deepcopy(refs[DISCARD_REFUSED])
     # Expired answers are not carried over: a dismissal stamps a new
@@ -595,8 +599,8 @@ def _refs_time(key: str):
 
 async def _uncharged_sms_steps(
     db: AsyncSession, organization_id: UUID, step: str
-) -> list[tuple[str, str]]:
-    """``(provider, subject_type)`` of the organization's US texting rows
+) -> list[tuple[str, str, bool]]:
+    """``(provider, subject_type, low_volume)`` of the organization's US texting rows
     whose ``step`` ('submission' or 'review') happened in the last day with
     no ledger row yet: the website's rater charges each one shortly after.
     A step is settled by its debit (``sms_registration:<id>:<step>``), or by
@@ -616,7 +620,11 @@ async def _uncharged_sms_steps(
         happened = [filed > func.now() - text("interval '1 day'")]
     ref = func.concat("sms_registration:", cast(CarrierVerification.id, String))
     found = await db.execute(
-        select(CarrierVerification.provider, CarrierVerification.subject_type).where(
+        select(
+            CarrierVerification.provider,
+            CarrierVerification.subject_type,
+            CarrierVerification.provider_refs["low_volume"].astext == "true",
+        ).where(
             CarrierVerification.organization_id == organization_id,
             CarrierVerification.purpose == "sms",
             CarrierVerification.number_type != "toll_free",
@@ -629,13 +637,15 @@ async def _uncharged_sms_steps(
             .exists(),
         )
     )
-    return [(provider, subject_type) for provider, subject_type in found]
+    return [(provider, subject, bool(low)) for provider, subject, low in found]
 
 
-async def _unsettled_sms_filings(db: AsyncSession, organization_id: UUID) -> int:
+async def _unsettled_sms_filings(
+    db: AsyncSession, organization_id: UUID
+) -> list[tuple[str, str, bool]]:
     """US texting filings of the last day whose submission is not charged
     yet (``_uncharged_sms_steps``)."""
-    return len(await _uncharged_sms_steps(db, organization_id, "submission"))
+    return await _uncharged_sms_steps(db, organization_id, "submission")
 
 
 async def _record_billed_refusal(
@@ -1082,12 +1092,16 @@ def _campaign_gated(row: CarrierVerification | Row, registry: Registry) -> bool:
 
 
 def _carrier_fee(
-    fee: Callable[[str, str], int], provider: str, subject_type: str
+    fee: Callable[..., int],
+    provider: str,
+    subject_type: str,
+    low_volume: bool = False,
 ) -> int | None:
-    """``fee(provider, subject_type)`` from ``sms_registration_fees``; None
-    for a carrier with no SMS registration fees."""
+    """``fee(provider, subject_type, low_volume=...)`` from
+    ``sms_registration_fees``; None for a carrier with no SMS registration
+    fees."""
     try:
-        return fee(provider, subject_type)
+        return fee(provider, subject_type, low_volume=low_volume)
     except KeyError:
         return None
 
@@ -1101,8 +1115,8 @@ async def _uncharged_cents(db: AsyncSession, organization_id: UUID) -> int:
     campaigns = await _uncharged_sms_steps(db, organization_id, "review")
     brand = sms_registration_fees.brand_fee_cents
     campaign = sms_registration_fees.campaign_fee_cents
-    return sum(_carrier_fee(brand, p, t) or 0 for p, t in brands) + sum(
-        _carrier_fee(campaign, p, t) or 0 for p, t in campaigns
+    return sum(_carrier_fee(brand, p, t, low) or 0 for p, t, low in brands) + sum(
+        _carrier_fee(campaign, p, t, low) or 0 for p, t, low in campaigns
     )
 
 
@@ -1179,6 +1193,7 @@ async def _campaign_unfunded(
                 sms_registration_fees.campaign_fee_cents,
                 row.provider,
                 row.subject_type,
+                bool((row.provider_refs or {}).get("low_volume")),
             )
             if fee is None:
                 continue
@@ -2377,12 +2392,18 @@ async def _prepare_submission(
         kept_brand_id = await _kept_brand(
             db, principal.organization_id, provider_name, sub.subject_type
         )
+        # A company that chose low volume files an unvetted brand: its own,
+        # lower carrier cost.
+        low = low_volume(sub.fields, sub.subject_type)
         try:
             floor_cents = sms_registration_fees.filing_fee_cents(
-                provider_name, sub.subject_type, brand_kept=bool(kept_brand_id)
+                provider_name,
+                sub.subject_type,
+                brand_kept=bool(kept_brand_id),
+                low_volume=low,
             )
             full_cents = sms_registration_fees.filing_fee_cents(
-                provider_name, sub.subject_type
+                provider_name, sub.subject_type, low_volume=low
             )
         except KeyError:
             raise HTTPException(
@@ -2395,13 +2416,21 @@ async def _prepare_submission(
             # Filings the website has not charged yet (it charges a moment
             # later) count too, or an account could file again and again on
             # the same credit.
-            unsettled = await _unsettled_sms_filings(db, principal.organization_id)
-            if balance < floor_cents + full_cents * unsettled:
+            # Each at its own carrier cost: a low-volume filing costs less
+            # than a vetted one.
+            unsettled = sum(
+                _carrier_fee(sms_registration_fees.filing_fee_cents, p, t, lv)
+                or full_cents
+                for p, t, lv in await _unsettled_sms_filings(
+                    db, principal.organization_id
+                )
+            )
+            if balance < floor_cents + unsettled:
                 raise HTTPException(
                     status_code=http_status.HTTP_402_PAYMENT_REQUIRED,
                     detail="not enough credit to file; add credit first",
                 )
-            new_brand_funded = balance >= full_cents * (unsettled + 1)
+            new_brand_funded = balance >= full_cents + unsettled
         if kept_brand_id:
             draft_kwargs["kept_brand_id"] = kept_brand_id
             # The floor above assumes the brand is reused. Only the carrier
@@ -4195,6 +4224,15 @@ async def amend_sms_application(
     )
     if row.number_type != "toll_free":
         problems.extend(await _sms_mobile_problems(db, row.subject_type, body.fields))
+        if low_volume(body.fields, row.subject_type) != bool(refs.get("low_volume")):
+            # The brand is filed as vetted or low volume; only a new
+            # registration can change that.
+            problems.append(
+                Problem(
+                    field="low_volume",
+                    message="This cannot change after filing. Keep your first answer, or cancel this registration and file a new one.",
+                )
+            )
     if problems:
         raise _problems_422(problems, row.organization_id, row.provider)
     original = refs.get("application")

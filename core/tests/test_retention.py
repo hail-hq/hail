@@ -593,6 +593,7 @@ _NOT_ANSWER_REFS = {
     "identity_created",
     "identity_id",
     "identity_verified",
+    "low_volume",  # the fee rater prices the row from it
     "messaging_profile_id",
     "messaging_service_sid",
     "needs_information",

@@ -29,6 +29,7 @@ from hailhq.core.providers.verification.base import (
 from hailhq.core.providers.verification.forms import display_name
 from hailhq.core.providers.verification.sms_form import (
     campaign_text,
+    low_volume,
     sms_requirements,
     sms_subject_name,
     tax_number,
@@ -209,6 +210,10 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
             return DraftResult(refs={}, problems=problems)
         text = campaign_text(fields, subject_type)
         refs: dict = {"subject_type": subject_type, "campaign": text.__dict__}
+        if low_volume(fields, subject_type):
+            # Set before anything is filed: the brand skips vetting and the
+            # fee rater prices the row as low volume.
+            refs["low_volume"] = True
         person = subject_type == "person"
         try:
             # A company's campaign covers the organization's service. A
@@ -451,6 +456,10 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
         }
         if person:
             brand_kwargs["brand_type"] = "SOLE_PROPRIETOR"
+        elif refs.get("low_volume"):
+            # A Low-Volume Standard brand: no secondary vetting, so no trust
+            # score and the lowest daily limits.
+            brand_kwargs["skip_automatic_sec_vet"] = True
         brand = self._client.messaging.v1.brand_registrations.create(**brand_kwargs)
         # A person's code is texted by Twilio when the brand is approved.
         refs["brand_sid"] = brand.sid

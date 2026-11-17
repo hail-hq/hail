@@ -30,24 +30,39 @@ def providers() -> list[str]:
     return list(_load())
 
 
-def filing_fee_cents(provider: str, subject_type: str, brand_kept: bool = False) -> int:
+def _fees(provider: str, subject_type: str, low_volume: bool) -> dict:
+    """The fee row: ``business_low_volume`` for a company that chose low
+    volume (no brand vetting, LOW_VOLUME campaign), else the subject's own.
+    A person has no low-volume row. Raises KeyError for a carrier with no
+    SMS registration."""
+    row = _load()[provider]
+    if low_volume and subject_type == "business":
+        return row["business_low_volume"]
+    return row[subject_type]
+
+
+def filing_fee_cents(
+    provider: str, subject_type: str, brand_kept: bool = False, low_volume: bool = False
+) -> int:
     """The carrier's one-time cost of a filing: brand plus campaign vetting,
     or vetting alone for a filing with a kept brand. Raises KeyError for a
     carrier with no SMS registration."""
-    row = _load()[provider][subject_type]
+    row = _fees(provider, subject_type, low_volume)
     vetting = _cents(row["campaign_vetting_usd"])
     return vetting if brand_kept else _cents(row["brand_usd"]) + vetting
 
 
-def brand_fee_cents(provider: str, subject_type: str) -> int:
+def brand_fee_cents(provider: str, subject_type: str, low_volume: bool = False) -> int:
     """The carrier's one-time cost of a new brand (the submission; for a
-    company it includes the brand's vetting). Raises KeyError for a carrier
-    with no SMS registration."""
-    return _cents(_load()[provider][subject_type]["brand_usd"])
+    vetted company it includes the brand's vetting). Raises KeyError for a
+    carrier with no SMS registration."""
+    return _cents(_fees(provider, subject_type, low_volume)["brand_usd"])
 
 
-def campaign_fee_cents(provider: str, subject_type: str) -> int:
+def campaign_fee_cents(
+    provider: str, subject_type: str, low_volume: bool = False
+) -> int:
     """The carrier's one-time cost of filing the campaign (its vetting), the
     step after the brand. Raises KeyError for a carrier with no SMS
     registration."""
-    return _cents(_load()[provider][subject_type]["campaign_vetting_usd"])
+    return _cents(_fees(provider, subject_type, low_volume)["campaign_vetting_usd"])
