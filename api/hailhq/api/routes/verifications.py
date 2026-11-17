@@ -2682,7 +2682,8 @@ async def _file(
     # Built now: the dismiss below may roll back, which expires the row.
     out = _out(row, registry)
     if source_id is not None:
-        await _touch_kept(s3, moved_files)
+        if row.state != "approved":  # else the files are gone already
+            await _touch_kept(s3, moved_files)
         await _dismiss_resubmitted(db, source_id, registry, s3)
     return out
 
@@ -2780,8 +2781,14 @@ async def _keep_files(
     resubmit. Fails open: the filing is already with the carrier, so a
     storage error only logs (ids and the error type, never a name) and the
     customer adds the files again on a resubmit. No bucket: nothing kept."""
-    # Approved at once: nothing to resubmit, so nothing to keep.
-    if row.purpose != "number" or row.state == "approved" or s3 is None:
+    # Approved at once, or the answers could not be kept: nothing to
+    # resubmit, so no file is kept either.
+    if (
+        row.purpose != "number"
+        or row.state == "approved"
+        or "application" not in (row.provider_refs or {})
+        or s3 is None
+    ):
         return
     files = [
         KeptFile(

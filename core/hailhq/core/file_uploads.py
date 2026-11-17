@@ -53,7 +53,6 @@ Purpose = Literal["email_attachment", "verification_document"]
 PURPOSES: tuple[str, ...] = ("email_attachment", "verification_document")
 # Files Hail keeps itself: never a client upload.
 KEPT_PURPOSE = "verification_kept"
-STORED_PURPOSES: tuple[str, ...] = (*PURPOSES, KEPT_PURPOSE)
 
 # Carriers take these document types only.
 VERIFICATION_FILE_TYPES: tuple[str, ...] = (
@@ -311,7 +310,6 @@ __all__ = [
     "MAX_PENDING_LINKS",
     "PURPOSES",
     "REGISTRATION_KEPT_FOR",
-    "STORED_PURPOSES",
     "VERIFICATION_FILE_TYPES",
     "VERIFICATION_KEPT_PREFIX",
     "VERIFICATION_MAX_FILE_BYTES",
