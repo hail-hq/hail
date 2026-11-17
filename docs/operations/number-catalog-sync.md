@@ -115,7 +115,7 @@ Some carrier rows are listed but not sold, or sold to companies only. The sync r
 | Telnyx GB `national` (03) | Companies only: offers list `subject_types: ["business"]`, a person verification is a 422 (`UnsupportedSubjectType`). | Same Telnyx rule. Twilio has no GB national numbers. |
 
 - Numbers already bought keep their carrier, calls, routing, renewal and release. Renewal prices still come from the owning carrier's file.
-- A quote stored before a rule cannot buy (`POST /numbers` 422) or start a verification (409, quote again).
+- A quote stored before a rule cannot buy (`POST /numbers` 409) or start a verification (409). Both say to quote again.
 - DIDWW by-request GB offers are not changed.
 - hail-website and the `/costs` pages read the cost files directly, so they still list the Telnyx GB rows.
 

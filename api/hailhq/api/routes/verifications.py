@@ -252,7 +252,9 @@ async def _quote_offer(
     # A quote made before Hail stopped selling this kind of number at this
     # carrier (telephony_catalog.not_sold) must not start a verification.
     if telephony_catalog.not_sold(
-        offer.get("provider", ""), offer.get("country_code"), offer.get("number_type")
+        offer.get("provider", ""),
+        (offer.get("country_code") or "").upper(),
+        offer.get("number_type"),
     ):
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT,

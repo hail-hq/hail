@@ -124,7 +124,8 @@ async def test_stale_telnyx_gb_local_quote_cannot_be_bought(
         json={"country_code": "GB", "quote_id": str(row.id)},
         headers={"Authorization": f"Bearer {key}"},
     )
-    assert resp.status_code == 422, resp.text
+    assert resp.status_code == 409, resp.text
+    assert "refresh number offers" in resp.json()["detail"]
     discover.assert_not_awaited()
     assert await get_balance_cents(async_session, org) == 100000
 

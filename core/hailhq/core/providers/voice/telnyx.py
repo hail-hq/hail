@@ -310,10 +310,13 @@ async def telnyx_offers(
         if rules and not matched:
             continue
         requirements = [r for rule in matched for r in rule["regulatory_requirements"]]
-        # No rules and no group would sell a company-only number to anyone:
-        # unknown, not an exemption.
-        if company_only and not requirements and not group:
-            continue
+        subjects = sorted(subject_types_for(requirements))
+        if company_only:
+            subjects = [s for s in subjects if s == "business"]
+            # No rules and no group would sell a company-only number to
+            # anyone, and rules no company can meet sell it to no one.
+            if (not requirements and not group) or not subjects:
+                continue
         labels = [
             r.get("name") or r.get("field_type") or "Verification" for r in requirements
         ]
@@ -348,15 +351,7 @@ async def telnyx_offers(
                 requirements=labels,
                 # With a group passed, Telnyx may list no rules left; the
                 # number still needs that group at purchase.
-                subject_types=(
-                    (
-                        ["business"]
-                        if company_only
-                        else sorted(subject_types_for(requirements))
-                    )
-                    if requirements or group
-                    else []
-                ),
+                subject_types=subjects if requirements or group else [],
                 approvals=valid if requirements or group else [],
                 locality=q.locality,
                 region=q.region,
