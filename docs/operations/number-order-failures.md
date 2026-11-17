@@ -34,6 +34,30 @@ Telnyx's [number adapter](../../core/hailhq/core/providers/voice/telnyx.py)
 separates the US/Canadian destination code from subscriber digits during
 search and checks every returned number against the requested prefix.
 
+## Read number-search outcomes
+
+Inspect the trace for the quote request before counting a carrier HTTP 400 as
+an incident. The [number adapter](../../core/hailhq/core/providers/voice/telnyx.py)
+emits an INFO log for these handled responses:
+
+- `number_search_outcome: no_coverage`: Telnyx code `10015` with its explicit
+  no-coverage message. This applies to the requested filters at that time.
+  It does not prove Hail permanently lacks that country or number type.
+- `number_search_outcome: no_inventory`: code `10031` with its explicit
+  no-numbers message. The requested filters found no stock.
+- `number_search_outcome: mixed`: both codes in one response. Do not read it as
+  a coverage gap. Check the `carrier_error_codes` field.
+
+The log includes country, number type, requested capabilities and fixed error
+codes. It excludes phone numbers, place filters and raw carrier responses.
+The HTTP span keeps its original status. A normal empty HTTP 200 needs no
+additional log.
+
+Other carrier errors keep the discovery warning. The quote response sets
+`incomplete: true` and retains valid offers from other carriers. An empty
+result alone does not mean a carrier failed. These outcomes do not change
+search filters, prices, or country coverage in the catalog.
+
 ## Release at account close
 
 When hail-website deletes an account, the org gets an `org_closures` row.
