@@ -37,6 +37,8 @@ from hailhq.core.providers.verification import Problem, ProviderStatus
 from hailhq.core.secret_cipher import generate_key
 from sqlalchemy import delete as sql_delete
 from sqlalchemy import select, text, update
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from .test_verifications_api import (  # noqa: F401  (fixtures)
     _auth,
@@ -787,6 +789,22 @@ async def test_a_failed_upload_row_delete_still_answers_the_filing(
         )
 
     monkeypatch.setattr(verifications_routes, "delete", failing_delete)
+    # The connection is gone after the rollback: a reload fails too.
+    real_refresh = AsyncSession.refresh
+    broken = {"on": False}
+
+    async def refresh(self, instance, *args, **kwargs):
+        if broken["on"]:
+            raise OperationalError("SELECT", {}, Exception("connection lost"))
+        return await real_refresh(self, instance, *args, **kwargs)
+
+    def failing_delete_then_dead(target, *args, **kwargs):
+        if target is FileUpload:
+            broken["on"] = True
+        return failing_delete(target, *args, **kwargs)
+
+    monkeypatch.setattr(AsyncSession, "refresh", refresh)
+    monkeypatch.setattr(verifications_routes, "delete", failing_delete_then_dead)
     resp = await client.post(
         "/verifications",
         data={**_submission(), "upload.proof_of_identity": str(upload.id)},
@@ -835,20 +853,21 @@ async def test_the_kept_quote_survives_the_purge_in_any_uuid_spelling(
         .where(CarrierVerification.id == row.id)
         .values(provider_refs=refs)
     )
-    # Another registration whose quote id is not a UUID: skipped, never a
-    # failed purge.
-    async_session.add(
-        CarrierVerification(
-            organization_id=org_id,
-            provider="fake",
-            country_code="GB",
-            number_type="mobile",
-            subject_type="person",
-            state="rejected",
-            requirements_version="v1",
-            provider_refs={"application": {"quote_id": "None"}},
+    # Registrations whose quote id is not one Postgres reads as a UUID
+    # (one brace without the other too): skipped, never a failed purge.
+    for odd in ("None", "{" + quote_id, quote_id + "}"):
+        async_session.add(
+            CarrierVerification(
+                organization_id=org_id,
+                provider="fake",
+                country_code="GB",
+                number_type="mobile",
+                subject_type="person",
+                state="rejected",
+                requirements_version="v1",
+                provider_refs={"application": {"quote_id": odd}},
+            )
         )
-    )
     await async_session.execute(
         update(NumberOffer)
         .where(NumberOffer.id == uuid.UUID(quote_id))
@@ -858,3 +877,20 @@ async def test_the_kept_quote_survives_the_purge_in_any_uuid_spelling(
     await purge_expired_quotes()
     async_session.expire_all()
     assert await async_session.get(NumberOffer, uuid.UUID(quote_id)) is not None
+
+
+async def test_a_failed_reload_only_logs(
+    client, org_and_key, carrier, store, async_session, monkeypatch, caplog
+) -> None:
+    """The reload after a failed inline delete, on a connection that is
+    gone, never raises."""
+    _, _, key = org_and_key
+    vid = await _rejected(client, key, carrier)
+    row = await _row(async_session, vid)
+
+    async def broken_refresh(self, instance, *args, **kwargs):
+        raise OperationalError("SELECT", {}, Exception("connection lost"))
+
+    monkeypatch.setattr(AsyncSession, "refresh", broken_refresh)
+    await verifications_routes._reload(async_session, (row,))
+    assert "could not reload verifications" in caplog.text

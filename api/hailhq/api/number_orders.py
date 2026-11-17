@@ -54,8 +54,9 @@ QUOTE_RETENTION = timedelta(hours=24)
 # keys live 24h) and are deleted after this long.
 CONSUMED_QUOTE_RETENTION = timedelta(days=7)
 # Text Postgres reads as a uuid: 32 hex digits, optional hyphens between
-# groups of 4, optional braces.
-_UUID_TEXT = r"^\{?[0-9a-f]{4}(-?[0-9a-f]{4}){7}\}?$"
+# groups of 4, in braces or not (both braces or neither).
+_UUID_HEX = r"[0-9a-f]{4}(-?[0-9a-f]{4}){7}"
+_UUID_TEXT = rf"^(\{{{_UUID_HEX}\}}|{_UUID_HEX})$"
 
 NUMBER_TAKEN_DETAIL = "This number is already held or has a pending order"
 NUMBER_SETUP_HELP_DETAIL = (

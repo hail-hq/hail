@@ -859,9 +859,19 @@ async def _forget_kept_files(
             "verification worker tries again",
             type(exc).__name__,
         )
-        for row in loaded:
-            await db.refresh(row)
+        await _reload(db, loaded)
         return 0
+
+
+async def _reload(db: AsyncSession, rows: tuple[CarrierVerification, ...]) -> None:
+    """Reload rows a rollback expired, for a caller that still reads them.
+    Best effort: a failed reload (the connection is gone) only logs."""
+    try:
+        for row in rows:
+            await db.refresh(row)
+    except Exception as exc:
+        await db.rollback()
+        logger.warning("could not reload verifications (%s)", type(exc).__name__)
 
 
 async def _delete_kept_of(
@@ -2671,27 +2681,39 @@ async def _file(
         action="verification.submit" if source_id is None else "verification.resubmit",
         extra=None if source_id is None else {"resubmitted_from": str(source_id)},
     )
+    # The filing is with the carrier: the response is built now, from the
+    # row as it stands, so no best-effort cleanup below (each may roll back,
+    # which expires the ORM objects) can turn it into an error.
+    out = _out(row, registry)
+    keeps = _keeps_files(row)
+    row_id, purpose = row.id, row.purpose
+    used = [(upload.id, upload.s3_key) for upload in prepared.uploads]
     # Whatever the submit did: a filing the carrier refused is the one to fix.
     # A slot whose kept file did not move (it was deleted meanwhile) keeps
     # the bytes just sent.
-    await _keep_files(db, s3, row, prepared, moved={slot for slot, _, _ in moved_files})
-    await _delete_used_uploads(db, s3, prepared.uploads, loaded=(row,))
-    # One rule for what stays kept: a number registration, not approved
-    # (nothing to resubmit), with its answers stored (no answers, no files).
-    keeps = (
-        row.purpose == "number"
-        and row.state != "approved"
-        and "application" in (row.provider_refs or {})
-    )
-    if row.purpose == "number" and not keeps:
-        await _forget_kept_files(db, [row.id], s3, loaded=(row,))
-    # Built now: the dismiss below may roll back, which expires the row.
-    out = _out(row, registry)
+    if keeps:
+        await _keep_files(
+            db, s3, row, prepared, moved={slot for slot, _, _ in moved_files}
+        )
+    await _delete_used_uploads(db, s3, used)
+    if purpose == "number" and not keeps:
+        await _forget_kept_files(db, [row_id], s3)
     if source_id is not None:
         if keeps:  # else the moved files were just deleted
             await _touch_kept(s3, moved_files)
         await _dismiss_resubmitted(db, source_id, registry, s3)
     return out
+
+
+def _keeps_files(row: CarrierVerification) -> bool:
+    """The one rule for what a filing keeps for a resubmit: a number
+    registration, not approved (nothing to resubmit), with its answers
+    stored (no answers, no files)."""
+    return (
+        row.purpose == "number"
+        and row.state != "approved"
+        and "application" in (row.provider_refs or {})
+    )
 
 
 async def _touch_kept(s3: S3MailClient | None, files: list) -> None:
@@ -2787,14 +2809,7 @@ async def _keep_files(
     resubmit. Fails open: the filing is already with the carrier, so a
     storage error only logs (ids and the error type, never a name) and the
     customer adds the files again on a resubmit. No bucket: nothing kept."""
-    # Approved at once, or the answers could not be kept: nothing to
-    # resubmit, so no file is kept either.
-    if (
-        row.purpose != "number"
-        or row.state == "approved"
-        or "application" not in (row.provider_refs or {})
-        or s3 is None
-    ):
+    if not _keeps_files(row) or s3 is None:
         return
     files = [
         KeptFile(
@@ -2822,25 +2837,20 @@ async def _keep_files(
             verification_id,
             type(exc).__name__,
         )
-        # The rollback expired the rows the caller still reads.
-        for loaded in (row, *prepared.uploads):
-            await db.refresh(loaded)
+        # The caller built its response before this: nothing reads the
+        # rows the rollback expired.
 
 
 async def _delete_used_uploads(
     db: AsyncSession,
     s3: S3MailClient | None,
-    uploads: list[FileUpload],
-    *,
-    loaded: tuple[CarrierVerification, ...] = (),
+    targets: list[tuple[UUID, str]],
 ) -> None:
-    """Delete the uploads a saved verification used. Best effort: the GC
-    removes any left after ``VERIFICATION_UPLOAD_TTL``. ``loaded`` are rows
-    the caller still reads: a rollback here reloads them."""
-    if not uploads or s3 is None:
+    """Delete the uploads a saved verification used, given as plain
+    ``(id, s3_key)`` values (a rollback expires ORM objects). Best effort:
+    the GC removes any left after ``VERIFICATION_UPLOAD_TTL``."""
+    if not targets or s3 is None:
         return
-    # Plain values first: a rollback below expires the ORM objects.
-    targets = [(upload.id, upload.s3_key) for upload in uploads]
     results = await asyncio.gather(
         *(delete_upload_objects(s3, s3_key) for _, s3_key in targets),
         return_exceptions=True,
@@ -2870,8 +2880,6 @@ async def _delete_used_uploads(
             len(deleted),
             type(exc).__name__,
         )
-        for row in loaded:
-            await db.refresh(row)
 
 
 @router.post(
