@@ -1731,6 +1731,9 @@ type AgentCreate struct {
 	// HandoverMaxDurationSeconds Call limit in seconds (60..3600) once a handover contact answers, counted from the answer. Omitted: 1800 (30 minutes).
 	HandoverMaxDurationSeconds *int `json:"handover_max_duration_seconds,omitempty"`
 
+	// HttpTools Your APIs the agent may call during calls, texts and email (up to 10). Each request is signed with the agent's http_tool_secret; see docs/public/agents.md.
+	HttpTools *[]HttpToolIn `json:"http_tools,omitempty"`
+
 	// MaxDurationSeconds Soft cap per call in seconds (60..3600). Omitted: the workspace limit.
 	MaxDurationSeconds *int `json:"max_duration_seconds,omitempty"`
 
@@ -1788,6 +1791,12 @@ type AgentResponse struct {
 
 	// HandoverMaxDurationSeconds Call limit after a handover contact answers; null means 1800 (30 minutes).
 	HandoverMaxDurationSeconds *int `json:"handover_max_duration_seconds"`
+
+	// HttpToolSecret Secret that signs this agent's HTTP tool requests (X-Hail-Signature). Returned only when Hail creates it (the first save with HTTP tools) or rotates it (POST /agents/{id}/rotate-tool-secret). Store it then.
+	HttpToolSecret *string `json:"http_tool_secret,omitempty"`
+
+	// HttpTools Your APIs the agent may call.
+	HttpTools *[]HttpToolOut `json:"http_tools,omitempty"`
 
 	// Id Unique identifier for this agent.
 	Id openapi_types.UUID `json:"id"`
@@ -1850,6 +1859,9 @@ type AgentUpdate struct {
 
 	// HandoverMaxDurationSeconds New call limit after a handover contact answers; null returns to 1800 (30 minutes).
 	HandoverMaxDurationSeconds *int `json:"handover_max_duration_seconds,omitempty"`
+
+	// HttpTools New HTTP tool list; replaces the old one. [] removes all; null leaves it. A tool sent without headers keeps the saved headers of the tool with the same name.
+	HttpTools *[]HttpToolIn `json:"http_tools,omitempty"`
 
 	// MaxDurationSeconds New soft cap per call; null returns to the workspace limit.
 	MaxDurationSeconds *int `json:"max_duration_seconds,omitempty"`
@@ -3033,6 +3045,54 @@ type HandoverContactOut struct {
 	PhoneE164 *string `json:"phone_e164"`
 }
 
+// HttpToolIn One customer API the agent may call during a call, text or email.
+type HttpToolIn struct {
+	// Description What the tool does and when to use it. Read by the model.
+	Description string `json:"description"`
+
+	// Headers Static headers sent with every request, e.g. an Authorization token (up to 10). Stored encrypted; responses show only the names. On PATCH, null or left out keeps the saved values of the tool with the same name; {} removes them.
+	Headers *map[string]string `json:"headers,omitempty"`
+
+	// Name Function name the model calls: a letter, then letters, digits or _ (up to 64). Unique per agent; built-in tool names are not allowed.
+	Name string `json:"name"`
+
+	// Parameters JSON Schema (type object) of the arguments the model fills in. Supported keywords: type, description, enum, items, properties, required, additionalProperties, minimum, maximum, minLength, maxLength, minItems, maxItems, pattern, format.
+	Parameters *map[string]interface{} `json:"parameters,omitempty"`
+
+	// TimeoutSeconds Seconds to wait for the answer (1..10). Default 5.
+	TimeoutSeconds *int `json:"timeout_seconds,omitempty"`
+
+	// Url HTTPS endpoint Hail POSTs to. It must resolve to a public address; private, loopback and link-local addresses are refused.
+	Url string `json:"url"`
+
+	// WaitMessage Sentence the agent says on a call while it waits, e.g. 'One moment, let me check.' Not used for texts and email.
+	WaitMessage *string `json:"wait_message,omitempty"`
+}
+
+// HttpToolOut defines model for HttpToolOut.
+type HttpToolOut struct {
+	// Description What the tool does. Read by the model.
+	Description string `json:"description"`
+
+	// HeaderNames Names of the saved static headers. Values are never returned.
+	HeaderNames []string `json:"header_names"`
+
+	// Name Function name the model calls.
+	Name string `json:"name"`
+
+	// Parameters JSON Schema of the arguments.
+	Parameters map[string]interface{} `json:"parameters"`
+
+	// TimeoutSeconds Seconds Hail waits for the answer.
+	TimeoutSeconds int `json:"timeout_seconds"`
+
+	// Url HTTPS endpoint Hail POSTs to.
+	Url string `json:"url"`
+
+	// WaitMessage Sentence said on a call while waiting, or null.
+	WaitMessage *string `json:"wait_message"`
+}
+
 // KeptDocumentAnswer A document slot's saved choice on a number registration.
 type KeptDocumentAnswer struct {
 	// Fields The document's typed fields.
@@ -3926,10 +3986,10 @@ type VerificationDocumentWarningKind string
 
 // VerificationPrintedName The name printed on a document, as read. Empty strings when not printed.
 type VerificationPrintedName struct {
-	// BusinessName A company's name.
+	// BusinessName The name of the company the document is about or addressed to, never the company that issued it.
 	BusinessName string `json:"business_name"`
 
-	// GivenNames A person's given names.
+	// GivenNames The given names of the person the document is about or addressed to, never a person who signs for the issuer.
 	GivenNames string `json:"given_names"`
 
 	// LatinGivenNames The given names in Latin letters as the document prints them (its machine-readable zone or a transliteration), or empty.
@@ -3938,7 +3998,7 @@ type VerificationPrintedName struct {
 	// LatinSurnames The surnames in Latin letters, the same way.
 	LatinSurnames *string `json:"latin_surnames,omitempty"`
 
-	// Surnames A person's surnames.
+	// Surnames That person's surnames.
 	Surnames string `json:"surnames"`
 }
 
@@ -4269,6 +4329,11 @@ type GetAgentV1AgentsAgentIdGetParams struct {
 
 // UpdateAgentV1AgentsAgentIdPatchParams defines parameters for UpdateAgentV1AgentsAgentIdPatch.
 type UpdateAgentV1AgentsAgentIdPatchParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// RotateToolSecretV1AgentsAgentIdRotateToolSecretPostParams defines parameters for RotateToolSecretV1AgentsAgentIdRotateToolSecretPost.
+type RotateToolSecretV1AgentsAgentIdRotateToolSecretPostParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
@@ -5239,6 +5304,9 @@ type ClientInterface interface {
 
 	UpdateAgentV1AgentsAgentIdPatch(ctx context.Context, agentId openapi_types.UUID, params *UpdateAgentV1AgentsAgentIdPatchParams, body UpdateAgentV1AgentsAgentIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// RotateToolSecretV1AgentsAgentIdRotateToolSecretPost request
+	RotateToolSecretV1AgentsAgentIdRotateToolSecretPost(ctx context.Context, agentId openapi_types.UUID, params *RotateToolSecretV1AgentsAgentIdRotateToolSecretPostParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ListCallsV1CallsGet request
 	ListCallsV1CallsGet(ctx context.Context, params *ListCallsV1CallsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -5618,6 +5686,18 @@ func (c *Client) UpdateAgentV1AgentsAgentIdPatchWithBody(ctx context.Context, ag
 
 func (c *Client) UpdateAgentV1AgentsAgentIdPatch(ctx context.Context, agentId openapi_types.UUID, params *UpdateAgentV1AgentsAgentIdPatchParams, body UpdateAgentV1AgentsAgentIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewUpdateAgentV1AgentsAgentIdPatchRequest(c.Server, agentId, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) RotateToolSecretV1AgentsAgentIdRotateToolSecretPost(ctx context.Context, agentId openapi_types.UUID, params *RotateToolSecretV1AgentsAgentIdRotateToolSecretPostParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRotateToolSecretV1AgentsAgentIdRotateToolSecretPostRequest(c.Server, agentId, params)
 	if err != nil {
 		return nil, err
 	}
@@ -7153,6 +7233,55 @@ func NewUpdateAgentV1AgentsAgentIdPatchRequestWithBody(server string, agentId op
 	}
 
 	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewRotateToolSecretV1AgentsAgentIdRotateToolSecretPostRequest generates requests for RotateToolSecretV1AgentsAgentIdRotateToolSecretPost
+func NewRotateToolSecretV1AgentsAgentIdRotateToolSecretPostRequest(server string, agentId openapi_types.UUID, params *RotateToolSecretV1AgentsAgentIdRotateToolSecretPostParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "agent_id", agentId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/agents/%s/rotate-tool-secret", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
 
 	if params != nil {
 
@@ -12172,6 +12301,9 @@ type ClientWithResponsesInterface interface {
 
 	UpdateAgentV1AgentsAgentIdPatchWithResponse(ctx context.Context, agentId openapi_types.UUID, params *UpdateAgentV1AgentsAgentIdPatchParams, body UpdateAgentV1AgentsAgentIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateAgentV1AgentsAgentIdPatchResponse, error)
 
+	// RotateToolSecretV1AgentsAgentIdRotateToolSecretPostWithResponse request
+	RotateToolSecretV1AgentsAgentIdRotateToolSecretPostWithResponse(ctx context.Context, agentId openapi_types.UUID, params *RotateToolSecretV1AgentsAgentIdRotateToolSecretPostParams, reqEditors ...RequestEditorFn) (*RotateToolSecretV1AgentsAgentIdRotateToolSecretPostResponse, error)
+
 	// ListCallsV1CallsGetWithResponse request
 	ListCallsV1CallsGetWithResponse(ctx context.Context, params *ListCallsV1CallsGetParams, reqEditors ...RequestEditorFn) (*ListCallsV1CallsGetResponse, error)
 
@@ -12595,6 +12727,29 @@ func (r UpdateAgentV1AgentsAgentIdPatchResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r UpdateAgentV1AgentsAgentIdPatchResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type RotateToolSecretV1AgentsAgentIdRotateToolSecretPostResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *AgentResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r RotateToolSecretV1AgentsAgentIdRotateToolSecretPostResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RotateToolSecretV1AgentsAgentIdRotateToolSecretPostResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -14541,6 +14696,15 @@ func (c *ClientWithResponses) UpdateAgentV1AgentsAgentIdPatchWithResponse(ctx co
 	return ParseUpdateAgentV1AgentsAgentIdPatchResponse(rsp)
 }
 
+// RotateToolSecretV1AgentsAgentIdRotateToolSecretPostWithResponse request returning *RotateToolSecretV1AgentsAgentIdRotateToolSecretPostResponse
+func (c *ClientWithResponses) RotateToolSecretV1AgentsAgentIdRotateToolSecretPostWithResponse(ctx context.Context, agentId openapi_types.UUID, params *RotateToolSecretV1AgentsAgentIdRotateToolSecretPostParams, reqEditors ...RequestEditorFn) (*RotateToolSecretV1AgentsAgentIdRotateToolSecretPostResponse, error) {
+	rsp, err := c.RotateToolSecretV1AgentsAgentIdRotateToolSecretPost(ctx, agentId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRotateToolSecretV1AgentsAgentIdRotateToolSecretPostResponse(rsp)
+}
+
 // ListCallsV1CallsGetWithResponse request returning *ListCallsV1CallsGetResponse
 func (c *ClientWithResponses) ListCallsV1CallsGetWithResponse(ctx context.Context, params *ListCallsV1CallsGetParams, reqEditors ...RequestEditorFn) (*ListCallsV1CallsGetResponse, error) {
 	rsp, err := c.ListCallsV1CallsGet(ctx, params, reqEditors...)
@@ -15623,6 +15787,39 @@ func ParseUpdateAgentV1AgentsAgentIdPatchResponse(rsp *http.Response) (*UpdateAg
 	}
 
 	response := &UpdateAgentV1AgentsAgentIdPatchResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest AgentResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseRotateToolSecretV1AgentsAgentIdRotateToolSecretPostResponse parses an HTTP response from a RotateToolSecretV1AgentsAgentIdRotateToolSecretPostWithResponse call
+func ParseRotateToolSecretV1AgentsAgentIdRotateToolSecretPostResponse(rsp *http.Response) (*RotateToolSecretV1AgentsAgentIdRotateToolSecretPostResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RotateToolSecretV1AgentsAgentIdRotateToolSecretPostResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
