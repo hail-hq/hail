@@ -213,7 +213,9 @@ async def test_the_prompt_lists_every_type_of_the_slot_and_the_address() -> None
 @pytest.mark.parametrize("subject_type", ["person", "business"])
 async def test_the_prompt_asks_for_the_holder_never_the_issuer(subject_type) -> None:
     # A bill prints the issuer's name too (the bank, phone company or
-    # utility). Every name the model reads is the holder's.
+    # utility). The printed name is the holder's; a form box never takes
+    # the issuer's name (another named person, like a director, may fill
+    # a box that asks for them).
     reader = _reader(_answer())
     await _check(req=_req(subject_type=subject_type), reader=reader)
     prompt = reader.calls[0]["prompt"]
@@ -224,7 +226,8 @@ async def test_the_prompt_asks_for_the_holder_never_the_issuer(subject_type) -> 
     assert "the company the document is about or addressed to" in company
     assert "Never the company that issued the document" in company
     values = next(x for x in prompt.splitlines() if x.startswith("- values"))
-    assert "the holder's, as above, never the issuer's" in values
+    assert "never takes the name of the company that issued the document" in values
+    assert "holder's" not in values
 
 
 async def test_an_empty_company_name_is_not_compared() -> None:
