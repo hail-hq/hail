@@ -26,7 +26,7 @@ from hailhq.core.providers.voice.base import (
     gather_leg_costs,
 )
 from hailhq.core.schemas import NumberType
-from hailhq.core.telephony_catalog import monthly_price
+from hailhq.core.telephony_catalog import business_only, monthly_price
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -223,6 +223,11 @@ async def telnyx_offers(
     if not settings.telnyx_api_key:
         return []
     approvals = approvals or []
+    # Only a company may buy here (telephony_catalog._BUSINESS_ONLY): a
+    # person's approved group must not make the offer ready.
+    company_only = business_only("telnyx", country, kind)
+    if company_only:
+        approvals = [a for a in approvals if a.subject_type == "business"]
     if "voice" in capabilities and not all(
         (
             settings.telnyx_connection_id,
@@ -305,6 +310,14 @@ async def telnyx_offers(
         if rules and not matched:
             continue
         requirements = [r for rule in matched for r in rule["regulatory_requirements"]]
+        subjects = sorted(subject_types_for(requirements))
+        if company_only:
+            # subject_types_for always allows a business.
+            subjects = ["business"]
+            # No rules and no group would sell a company-only number to
+            # anyone: unknown, not an exemption.
+            if not requirements and not group:
+                continue
         labels = [
             r.get("name") or r.get("field_type") or "Verification" for r in requirements
         ]
@@ -339,11 +352,7 @@ async def telnyx_offers(
                 requirements=labels,
                 # With a group passed, Telnyx may list no rules left; the
                 # number still needs that group at purchase.
-                subject_types=(
-                    sorted(subject_types_for(requirements))
-                    if requirements or group
-                    else []
-                ),
+                subject_types=subjects if requirements or group else [],
                 approvals=valid if requirements or group else [],
                 locality=q.locality,
                 region=q.region,

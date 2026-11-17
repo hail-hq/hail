@@ -516,3 +516,61 @@ def test_filtered_options_price_only_the_asked_jobs(catalog):
     every = one(number_options("US", {}), "local")
     assert voice.monthly_cents == 100 and voice.capabilities == ["voice"]
     assert both.monthly_cents == every.monthly_cents == 110
+
+
+GB_PERSON = {"accepted": True, "items": ["id_document", "proof_of_address"]}
+GB_BUSINESS = {"accepted": True, "items": ["company_registration"]}
+
+
+def test_gb_local_options_leave_out_telnyx(catalog):
+    # Telnyx declines private individuals for UK numbers: GB local comes
+    # from Twilio only, even when Telnyx's catalog row is cheaper.
+    gb = need(person=GB_PERSON, business=GB_BUSINESS)
+    catalog(
+        twilio=[row(cc="GB", usd="1.15", **gb)],
+        telnyx=[row(cc="GB", usd="1.00", setup_usd="1.00", **gb)],
+        didww=[row(cc="GB", usd="1.20", by_request=True)],
+    )
+    r = number_options("GB", {})
+    for subject in ("person", "business"):
+        o = one(r, subject=subject)
+        assert o.how == "buy" and o.monthly_cents == 115 and o.setup_cents == 0
+        # Twilio, then DIDWW by request; no Telnyx option.
+        assert o.more_options == 1
+
+
+def test_gb_national_is_company_only_at_telnyx(catalog):
+    catalog(
+        telnyx=[
+            row(
+                cc="GB",
+                nt="national",
+                setup_usd="1.00",
+                **need(person=GB_PERSON, business=GB_BUSINESS),
+            )
+        ]
+    )
+    r = number_options("GB", {})
+    p, b = one(r, "national"), one(r, "national", "business")
+    assert p.allowed is False and p.reason == "company_only"
+    assert b.allowed is True and b.how == "buy" and b.monthly_cents == 100
+
+
+def test_gb_national_person_refused_without_a_catalog_block(catalog):
+    # The rule holds even when the sync wrote no requirements block.
+    catalog(
+        telnyx=[
+            row(
+                cc="GB",
+                nt="national",
+                verification_required=True,
+                requirements=None,
+            )
+        ]
+    )
+    r = number_options("GB", {})
+    p, b = one(r, "national"), one(r, "national", "business")
+    assert p.allowed is False and p.reason == "company_only"
+    assert b.allowed is True
+    papers = mod.offer_paperwork("GB", "national", "telnyx", "person", True)
+    assert papers.accepted is False

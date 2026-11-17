@@ -551,6 +551,14 @@ async def acquire_offer(
                 "request a new quote"
             ),
         )
+    # A quote made before Hail stopped selling this kind of number at this
+    # carrier (telephony_catalog.not_sold): another carrier may still sell it,
+    # so this says refresh, not "we don't offer".
+    if telephony_catalog.not_sold(offer.provider, country, kind):
+        raise HTTPException(
+            status_code=409,
+            detail="This offer is no longer available; refresh number offers",
+        )
     catalog_capabilities(country, kind, offer.provider)
     if row.expires_at <= datetime.now(timezone.utc):
         raise HTTPException(

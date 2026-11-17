@@ -259,6 +259,17 @@ async def _quote_offer(
             "quote_id is for a different country_code or number_type",
             loc=[where, "quote_id"],
         )
+    # A quote made before Hail stopped selling this kind of number at this
+    # carrier (telephony_catalog.not_sold) must not start a verification.
+    if telephony_catalog.not_sold(
+        offer.get("provider", ""),
+        (offer.get("country_code") or "").upper(),
+        offer.get("number_type"),
+    ):
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail="This offer is no longer available; quote again and pass the new quote_id",
+        )
     return offer
 
 
