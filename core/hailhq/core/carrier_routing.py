@@ -295,13 +295,19 @@ _NOT_NOW_ERRORS = (
 
 
 def _chain(exc: BaseException):
-    """``exc`` and the errors it was raised from, five at most."""
+    """``exc`` and the errors it was raised from, five at most. A
+    ``raise ... from None`` ends the chain: the hidden context does not count."""
     seen: BaseException | None = exc
     for _ in range(5):
         if seen is None:
             return
         yield seen
-        seen = seen.__cause__ or seen.__context__
+        if seen.__cause__ is not None:
+            seen = seen.__cause__
+        elif seen.__suppress_context__:
+            return
+        else:
+            seen = seen.__context__
 
 
 def _http_status(exc: BaseException) -> int | None:

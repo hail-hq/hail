@@ -348,6 +348,23 @@ def test_failure_kind_reads_the_nearest_error_first() -> None:
     assert carrier_routing.failure_kind(refused) == "refused"
 
 
+def test_failure_kind_ignores_a_context_hidden_by_from_none() -> None:
+    """``raise ... from None`` hides the error it was raised while handling:
+    a lost connection there does not make a final error an outage."""
+    import httpx
+
+    request = httpx.Request("DELETE", "https://example.test")
+    try:
+        try:
+            raise httpx.ConnectError("x", request=request)
+        except httpx.ConnectError:
+            raise KeyError("final") from None
+    except KeyError as exc:
+        hidden = exc
+    assert hidden.__context__ is not None
+    assert carrier_routing.failure_kind(hidden, unknown="refused") == "refused"
+
+
 def test_failure_kind_of_an_error_with_no_carrier_answer() -> None:
     """A bug (KeyError) is ``unknown``: a discard step counts it refused,
     other callers retry it."""
