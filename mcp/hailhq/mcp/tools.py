@@ -2599,8 +2599,8 @@ def register_tools(
     ) -> dict[str, Any]:
         """Read a call's current status, timing and transcript by ID.
 
-        Returns the call record with its transcript (spoken turns, oldest
-        first), or an error when the call is unavailable."""
+        Returns the call record with its transcript (spoken turns, in the
+        order they were said), or an error when the call is unavailable."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await get_call(client=client, call_id=call_id)

@@ -6,8 +6,9 @@ so the summary uses the same LLM precedence and keys as texts:
 fallback when the org turned it on, else Hail's chain). A per-call ``llm``
 from ``POST /v1/calls`` is not stored, so it is not used here.
 
-The DB side lives in ``hailhq.core.call_analysis``. No DB session is open
-while the model runs. A failed summary never blocks the event: it is sent
+The DB side lives in ``hailhq.core.call_analysis``. A call is claimed before
+the model runs, so two voicebot replicas never summarize the same call. No DB
+session is open while the model runs. A failed summary never blocks the event: it is sent
 with ``summary`` null and a warning is logged.
 """
 
@@ -24,7 +25,7 @@ import logfire
 from hailhq.core.call_analysis import (
     ANALYSIS_WINDOW,
     call_transcript,
-    next_call_to_analyze,
+    claim_call_to_analyze,
     send_call_analyzed,
 )
 from hailhq.core.db import session_scope
@@ -54,7 +55,8 @@ class _Failure:
 
 
 # Calls whose last try failed. In memory only: a restart tries such a call
-# again, while it is inside the window.
+# again, while it is inside the window. A failed call keeps its claim, so the
+# next try comes after ``CLAIM_LEASE``.
 _failures: dict[uuid.UUID, _Failure] = {}
 
 
@@ -128,7 +130,7 @@ async def analyze_once(_api: Any = None) -> bool:
     skips it."""
     with logfire.suppress_instrumentation():
         async with session_scope() as db:
-            call = await next_call_to_analyze(db, exclude=_given_up())
+            call = await claim_call_to_analyze(db, exclude=_given_up())
             if call is None:
                 return False
             call_id, org_id = call.id, call.organization_id

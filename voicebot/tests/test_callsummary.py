@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from hailhq.core import call_analysis
 from hailhq.core.models import (
     Agent,
     Call,
@@ -181,10 +183,30 @@ async def test_blank_transcript_is_marked_without_a_model_call(
     assert not await callsummary.analyze_once()
 
 
+async def test_two_workers_run_the_model_once(async_session, llm, monkeypatch) -> None:
+    call_id = await _seed(async_session)
+    real = callsummary.summarize
+
+    async def slow_summarize(*args):
+        # Both workers poll while the first one waits on the model.
+        await asyncio.sleep(0.3)
+        return await real(*args)
+
+    monkeypatch.setattr(callsummary, "summarize", slow_summarize)
+    results = await asyncio.gather(
+        callsummary.analyze_once(), callsummary.analyze_once()
+    )
+    assert sorted(results) == [False, True]
+    assert llm["built"] == 1
+    assert (await _delivery(async_session, call_id)) is not None
+
+
 async def test_failed_send_is_retried_then_given_up(
     async_session, llm, monkeypatch
 ) -> None:
     call_id = await _seed(async_session)
+    # A failed try keeps its claim until the lease ends; end it at once.
+    monkeypatch.setattr(call_analysis, "CLAIM_LEASE", timedelta(0))
 
     async def broken_send(db, cid, turns, summary):
         raise RuntimeError("db down")
@@ -204,6 +226,7 @@ async def test_failure_before_the_send_counts_too(
     async_session, llm, monkeypatch
 ) -> None:
     call_id = await _seed(async_session)
+    monkeypatch.setattr(call_analysis, "CLAIM_LEASE", timedelta(0))
 
     async def broken_transcript(db, cid):
         raise RuntimeError("bad row")

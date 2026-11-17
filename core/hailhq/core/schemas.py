@@ -375,7 +375,12 @@ class CallTranscriptTurn(BaseModel):
         )
     )
     text: str = Field(description="What was said in this turn.")
-    at: datetime = Field(description="When Hail recorded the turn, ISO 8601.")
+    at: datetime = Field(
+        description=(
+            "When the speaker started this turn, ISO 8601. When that is not "
+            "known, when Hail recorded the turn."
+        )
+    )
 
 
 class CallResponse(BaseModel):
@@ -454,7 +459,7 @@ class CallResponse(BaseModel):
     transcript: list[CallTranscriptTurn] | None = Field(
         default=None,
         description=(
-            "What was said on the call, oldest turn first. Set only by "
+            "What was said on the call, in the order it was said. Set only by "
             "GET /v1/calls/{call_id}: an empty list until someone speaks. "
             "Null in POST /v1/calls and GET /v1/calls responses."
         ),

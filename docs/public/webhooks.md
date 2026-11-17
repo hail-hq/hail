@@ -199,7 +199,8 @@ curl -X POST "$HAIL_API_URL/v1/webhooks" \
 - `data` is built by `call_analyzed_data` in
   [`call_analysis.py`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/call_analysis.py).
   It has the `call.*` fields above, plus `duration_seconds`, `transcript` and `summary`.
-- `transcript` holds the same turns as `GET /v1/calls/{id}`, oldest first.
+- `transcript` holds the same turns as `GET /v1/calls/{id}`, in the order
+  they were said. `at` is when the speaker started the turn.
   `assistant` is the agent; `user` is the other side. Texts the caller sends
   during the call are not in it (they arrive as `sms.received`).
 - `duration_seconds` runs from answer to hang-up. It is null when the call was never answered.

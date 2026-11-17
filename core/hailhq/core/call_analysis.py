@@ -5,17 +5,19 @@ A phone call's transcript is its ``user_turn`` and ``agent_turn`` rows in
 ``GET /v1/calls/{id}`` and the webhook both read it with
 :func:`call_transcript`.
 
-The voicebot's analysis worker (``hailhq.voicebot.callsummary``) polls
-:func:`next_call_to_analyze`, asks the LLM for a summary with no DB session
-open, then calls :func:`send_call_analyzed`. That last step locks the call
-row, writes one ``analyzed`` call event (the marker, so a call is sent once)
-and enqueues the ``call.analyzed`` deliveries in the same transaction. Only
-calls of an org with an active ``call.analyzed`` subscription are picked, so
-no model runs for an org that does not listen.
+The voicebot's analysis worker (``hailhq.voicebot.callsummary``) calls
+:func:`claim_call_to_analyze`, which writes an ``analyzing`` call event (the
+claim, so only one worker runs the model for a call), then asks the LLM for a
+summary with no DB session open, then calls :func:`send_call_analyzed`. That
+last step locks the call row, writes one ``analyzed`` call event (the marker,
+so a call is sent once) and enqueues the ``call.analyzed`` deliveries in the
+same transaction. Only calls of an org with an active ``call.analyzed``
+subscription are picked, so no model runs for an org that does not listen.
 """
 
 from __future__ import annotations
 
+import math
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -25,22 +27,30 @@ from hailhq.core.schemas import TERMINAL_CALL_STATUSES
 from hailhq.core.threads import spoken_text
 from hailhq.core.webhook_events import WebhookEventType
 from hailhq.core.webhook_fanout import call_event_data, fanout_call_event
-from sqlalchemy import any_, exists, literal, select
+from sqlalchemy import any_, exists, literal, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = [
     "ANALYSIS_WINDOW",
     "ANALYZED_KIND",
+    "CLAIM_KIND",
+    "CLAIM_LEASE",
     "SETTLE_DELAY",
     "call_analyzed_data",
     "call_duration_seconds",
     "call_transcript",
-    "next_call_to_analyze",
+    "claim_call_to_analyze",
     "send_call_analyzed",
 ]
 
 # ``call_events.kind`` of the marker row: the call's call.analyzed step ran.
 ANALYZED_KIND = "analyzed"
+# ``call_events.kind`` of a claim: a worker is summarizing the call. Counts
+# only while younger than ``CLAIM_LEASE``.
+CLAIM_KIND = "analyzing"
+# Longer than the model timeout (30 s) plus the config and transcript reads.
+# A worker that dies mid-summary frees the call when this runs out.
+CLAIM_LEASE = timedelta(minutes=5)
 TURN_KINDS = ("user_turn", "agent_turn")
 # A call not sent this long after its end is dropped (a backlog, or the
 # voicebot down). Old calls are also kept out by the subscription rule in
@@ -50,8 +60,29 @@ ANALYSIS_WINDOW = timedelta(hours=24)
 SETTLE_DELAY = timedelta(seconds=10)
 
 
+def _spoken_at(ev: CallEvent) -> datetime:
+    """When the turn started: LiveKit's ``started_speaking_at`` (epoch
+    seconds, set by the voicebot in ``agent.attach_event_handlers``), else
+    when the row was written.
+
+    Rows are written by async tasks, so on a barge-in the interrupted agent
+    turn and the caller's turn can be written in either order; the speech
+    start keeps them in the order they were said. Limit: a row without the
+    key falls back to the DB clock, and the speech start is the voicebot
+    host's clock, so such a row can sit a few milliseconds off."""
+    value = (ev.payload or {}).get("started_speaking_at")
+    if type(value) in (int, float) and math.isfinite(value) and value > 0:
+        try:
+            return datetime.fromtimestamp(value, tz=timezone.utc)
+        except (OverflowError, OSError, ValueError):
+            pass
+    return ev.occurred_at
+
+
 async def call_transcript(db: AsyncSession, call_id: uuid.UUID) -> list[dict[str, Any]]:
-    """The call's spoken turns, oldest first: ``{"role", "text", "at"}``.
+    """The call's spoken turns, in the order they were said:
+    ``{"role", "text", "at"}``, where ``at`` is when the turn started
+    (:func:`_spoken_at`).
 
     ``role`` is ``assistant`` for the agent and ``user`` for the other side.
     Blank turns are left out, and so are texts the caller sent during the
@@ -63,19 +94,25 @@ async def call_transcript(db: AsyncSession, call_id: uuid.UUID) -> list[dict[str
             .order_by(CallEvent.occurred_at, CallEvent.id)
         )
     ).scalars()
-    turns: list[dict[str, Any]] = []
+    turns: list[tuple[datetime, dict[str, Any]]] = []
     for ev in rows:
         text = spoken_text(ev)
         if text is None:
             continue
+        at = _spoken_at(ev)
         turns.append(
-            {
-                "role": "user" if ev.kind == "user_turn" else "assistant",
-                "text": text,
-                "at": ev.occurred_at.isoformat(),
-            }
+            (
+                at,
+                {
+                    "role": "user" if ev.kind == "user_turn" else "assistant",
+                    "text": text,
+                    "at": at.isoformat(),
+                },
+            )
         )
-    return turns
+    # Stable: equal start times keep the write order from the query.
+    turns.sort(key=lambda item: item[0])
+    return [turn for _, turn in turns]
 
 
 def call_duration_seconds(call: Call) -> int | None:
@@ -105,19 +142,35 @@ def _analyzed(call_id_col: Any) -> Any:
     )
 
 
-async def next_call_to_analyze(
+def _claimed(call_id_col: Any, now: datetime) -> Any:
+    return exists().where(
+        CallEvent.call_id == call_id_col,
+        CallEvent.kind == CLAIM_KIND,
+        CallEvent.occurred_at > now - CLAIM_LEASE,
+    )
+
+
+async def claim_call_to_analyze(
     db: AsyncSession,
     *,
     now: datetime | None = None,
     exclude: set[uuid.UUID] | None = None,
 ) -> Call | None:
-    """The oldest ended phone call that still needs its ``call.analyzed``
-    event, or None. It ended between ``ANALYSIS_WINDOW`` and
-    ``SETTLE_DELAY`` ago, has at least one turn row, has no ``analyzed``
-    marker, and its org has an active subscription to ``call.analyzed``
-    last created or changed before the call ended (so a new, edited or
-    re-enabled subscription never gets events for older calls). Takes no lock:
-    :func:`send_call_analyzed` decides who sends."""
+    """Claim the oldest ended phone call that still needs its
+    ``call.analyzed`` event, and commit. None when no call waits.
+
+    The call ended between ``ANALYSIS_WINDOW`` and ``SETTLE_DELAY`` ago, has
+    at least one turn row, has no ``analyzed`` marker and no live claim, and
+    its org has an active subscription to ``call.analyzed`` last created or
+    changed before the call ended (so a new, edited or re-enabled
+    subscription never gets events for older calls).
+
+    Only one worker gets a call, across threads and voicebot replicas: the
+    call row is locked ``FOR UPDATE SKIP LOCKED``, checked again, and an
+    ``analyzing`` row is written and committed before the slow model call.
+    A claim older than ``CLAIM_LEASE`` no longer counts, so a crashed worker
+    does not drop the event. :func:`send_call_analyzed` still checks the
+    marker, so a worker whose lease ran out cannot send a second event."""
     now = now or datetime.now(timezone.utc)
     # The subscriptions table is small: with no listener, calls is not read.
     orgs = (
@@ -160,13 +213,28 @@ async def next_call_to_analyze(
             listening,
             has_turn,
             ~_analyzed(Call.id),
+            ~_claimed(Call.id, now),
         )
         .order_by(Call.ended_at, Call.id)
         .limit(1)
+        .with_for_update(of=Call, skip_locked=True)
     )
     if exclude:
         stmt = stmt.where(Call.id.not_in(exclude))
-    return (await db.execute(stmt)).scalar_one_or_none()
+    call = (await db.execute(stmt)).scalar_one_or_none()
+    if call is None:
+        await db.rollback()
+        return None
+    # Check again in a new statement. Under READ COMMITTED the select above
+    # read a snapshot taken before it got the lock, so a claim or marker
+    # that another worker committed in between is seen only here.
+    if await db.scalar(select(or_(_analyzed(call.id), _claimed(call.id, now)))):
+        await db.rollback()
+        return None
+    # Empty payload: GET /v1/events returns this row.
+    db.add(CallEvent(call_id=call.id, kind=CLAIM_KIND, payload={}, occurred_at=now))
+    await db.commit()
+    return call
 
 
 async def send_call_analyzed(

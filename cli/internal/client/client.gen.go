@@ -2029,7 +2029,7 @@ type CallResponse struct {
 	// ToE164 Recipient phone number, E.164 format.
 	ToE164 string `json:"to_e164"`
 
-	// Transcript What was said on the call, oldest turn first. Set only by GET /v1/calls/{call_id}: an empty list until someone speaks. Null in POST /v1/calls and GET /v1/calls responses.
+	// Transcript What was said on the call, in the order it was said. Set only by GET /v1/calls/{call_id}: an empty list until someone speaks. Null in POST /v1/calls and GET /v1/calls responses.
 	Transcript *[]CallTranscriptTurn `json:"transcript,omitempty"`
 }
 
@@ -2041,7 +2041,7 @@ type CallResponseStatus string
 
 // CallTranscriptTurn defines model for CallTranscriptTurn.
 type CallTranscriptTurn struct {
-	// At When Hail recorded the turn, ISO 8601.
+	// At When the speaker started this turn, ISO 8601. When that is not known, when Hail recorded the turn.
 	At time.Time `json:"at"`
 
 	// Role 'assistant' is the Hail agent. 'user' is the person (or answering machine) on the other end of the line.

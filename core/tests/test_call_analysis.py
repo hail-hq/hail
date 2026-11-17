@@ -8,8 +8,10 @@ from datetime import datetime, timedelta, timezone
 
 from hailhq.core.call_analysis import (
     ANALYZED_KIND,
+    CLAIM_KIND,
+    CLAIM_LEASE,
     call_transcript,
-    next_call_to_analyze,
+    claim_call_to_analyze,
     send_call_analyzed,
 )
 from hailhq.core.models import (
@@ -135,15 +137,106 @@ async def test_transcript_is_ordered_and_skips_blank_and_texts(async_session) ->
     assert all(datetime.fromisoformat(t["at"]) for t in turns)
 
 
+async def test_transcript_follows_speech_start_not_write_order(
+    async_session,
+) -> None:
+    call = await _seed_call(async_session, turns=[])
+    t0 = call.ended_at - timedelta(seconds=30)
+
+    def turn(kind: str, text: str, written: float, spoken: object) -> CallEvent:
+        payload: dict = {"text": text}
+        if spoken is not None:
+            payload["started_speaking_at"] = spoken
+        return CallEvent(
+            call_id=call.id,
+            kind=kind,
+            payload=payload,
+            occurred_at=t0 + timedelta(seconds=written),
+        )
+
+    async_session.add_all(
+        [
+            # Barge-in: the caller's turn was written before the agent turn
+            # it interrupted, though the agent started speaking first.
+            turn(
+                "user_turn",
+                "Wait, Thursday.",
+                5.0,
+                (t0 + timedelta(seconds=3)).timestamp(),
+            ),
+            turn(
+                "agent_turn",
+                "Your booking is on",
+                5.01,
+                (t0 + timedelta(seconds=1)).timestamp(),
+            ),
+            # No speech start (or a bad one): falls back to the write time.
+            turn("agent_turn", "Moved to Thursday.", 8.0, None),
+            turn("user_turn", "Thanks.", 9.0, "soon"),
+        ]
+    )
+    await async_session.commit()
+    turns = await call_transcript(async_session, call.id)
+    assert [t["text"] for t in turns] == [
+        "Your booking is on",
+        "Wait, Thursday.",
+        "Moved to Thursday.",
+        "Thanks.",
+    ]
+    at = [datetime.fromisoformat(t["at"]) for t in turns]
+    assert abs(at[0] - (t0 + timedelta(seconds=1))) < timedelta(milliseconds=1)
+    assert at[2] == t0 + timedelta(seconds=8)
+
+
 async def test_event_type_is_registered() -> None:
     assert WebhookEventType("call.analyzed").channel == "Calls"
 
 
 async def test_picks_an_ended_subscribed_call(async_session) -> None:
     call = await _seed_call(async_session)
-    picked = await next_call_to_analyze(async_session)
+    assert await claim_call_to_analyze(async_session, exclude={call.id}) is None
+    picked = await claim_call_to_analyze(async_session)
     assert picked is not None and picked.id == call.id
-    assert await next_call_to_analyze(async_session, exclude={call.id}) is None
+
+
+async def test_a_live_claim_keeps_the_call_until_the_lease_ends(
+    async_session,
+) -> None:
+    call = await _seed_call(async_session)
+    call_id = call.id
+    assert (await claim_call_to_analyze(async_session)).id == call_id
+    # Claimed: no other worker gets it, so the model runs once.
+    assert await claim_call_to_analyze(async_session) is None
+    # The claimer died: after the lease the call is claimed again.
+    later = datetime.now(timezone.utc) + CLAIM_LEASE + timedelta(seconds=1)
+    assert (await claim_call_to_analyze(async_session, now=later)).id == call_id
+    claims = await async_session.scalar(
+        select(func.count())
+        .select_from(CallEvent)
+        .where(CallEvent.call_id == call_id, CallEvent.kind == CLAIM_KIND)
+    )
+    assert claims == 2
+
+
+async def test_two_workers_race_one_claim(session_factory) -> None:
+    async with session_factory() as s:
+        call = await _seed_call(s)
+
+    async def claim() -> uuid.UUID | None:
+        async with session_factory() as s:
+            picked = await claim_call_to_analyze(s)
+            return picked.id if picked is not None else None
+
+    results = await asyncio.gather(*(claim() for _ in range(4)))
+    assert [r for r in results if r is not None] == [call.id]
+    assert await asyncio.gather(claim(), claim()) == [None, None]
+    async with session_factory() as s:
+        count = await s.scalar(
+            select(func.count())
+            .select_from(CallEvent)
+            .where(CallEvent.call_id == call.id, CallEvent.kind == CLAIM_KIND)
+        )
+        assert count == 1
 
 
 async def test_skips_calls_it_must_not_analyze(async_session) -> None:
@@ -151,7 +244,7 @@ async def test_skips_calls_it_must_not_analyze(async_session) -> None:
     await _seed_call(async_session, ended_ago=timedelta(hours=25))
     await _seed_call(async_session, ended_ago=timedelta(seconds=1))
     await _seed_call(async_session, turns=[])
-    assert await next_call_to_analyze(async_session) is None
+    assert await claim_call_to_analyze(async_session) is None
 
 
 async def test_subscription_created_after_the_call_is_not_enough(
@@ -167,7 +260,7 @@ async def test_subscription_created_after_the_call_is_not_enough(
         )
     )
     await async_session.commit()
-    assert await next_call_to_analyze(async_session) is None
+    assert await claim_call_to_analyze(async_session) is None
 
 
 async def test_adding_the_event_to_an_old_subscription_does_not_replay(
@@ -188,7 +281,7 @@ async def test_adding_the_event_to_an_old_subscription_does_not_replay(
     sub.event_types = ["call.completed", "call.analyzed"]
     sub.updated_at = datetime.now(timezone.utc)
     await async_session.commit()
-    assert await next_call_to_analyze(async_session) is None
+    assert await claim_call_to_analyze(async_session) is None
 
 
 async def test_disabled_or_other_event_subscription_is_not_enough(
@@ -217,7 +310,7 @@ async def test_disabled_or_other_event_subscription_is_not_enough(
         ]
     )
     await async_session.commit()
-    assert await next_call_to_analyze(async_session) is None
+    assert await claim_call_to_analyze(async_session) is None
 
 
 async def test_send_enqueues_one_delivery_with_the_payload(async_session) -> None:
@@ -251,7 +344,9 @@ async def test_send_enqueues_one_delivery_with_the_payload(async_session) -> Non
     call_id = call.id  # the refused send rolls back, expiring ``call``
     assert not await send_call_analyzed(async_session, call_id, turns, "again")
     assert len(await _deliveries(async_session, call_id)) == 1
-    assert await next_call_to_analyze(async_session) is None
+    assert await claim_call_to_analyze(async_session) is None
+    later = datetime.now(timezone.utc) + CLAIM_LEASE + timedelta(seconds=1)
+    assert await claim_call_to_analyze(async_session, now=later) is None
 
 
 async def test_summary_null_and_unanswered_duration(async_session) -> None:
@@ -287,9 +382,10 @@ async def test_two_senders_race_one_delivery(session_factory) -> None:
 async def test_empty_after_filtering_is_marked_not_sent(async_session) -> None:
     call = await _seed_call(async_session, turns=[("user_turn", "  ")])
     call_id = call.id
-    assert (await next_call_to_analyze(async_session)).id == call_id
+    assert (await claim_call_to_analyze(async_session)).id == call_id
     turns = await call_transcript(async_session, call_id)
     assert turns == []
     assert not await send_call_analyzed(async_session, call_id, turns, None)
     assert await _deliveries(async_session, call_id) == []
-    assert await next_call_to_analyze(async_session) is None
+    later = datetime.now(timezone.utc) + CLAIM_LEASE + timedelta(seconds=1)
+    assert await claim_call_to_analyze(async_session, now=later) is None
