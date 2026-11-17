@@ -87,12 +87,13 @@ def test_rate_limit_and_server_errors_are_retried():
             httpx.Response(429, headers={"Retry-After": "12"}),
             httpx.Response(503),
             httpx.ConnectError("reset"),
+            httpx.Response(200, text="<html>bad gateway</html>"),
             httpx.Response(200, json=call("busy", end_reason="user_rejected")),
         ]
     )
     result = wait(client, timer, interval=5)
     assert result["status"] == "busy"
-    assert timer.sleeps == [12, 5, 5]
+    assert timer.sleeps == [12, 5, 5, 5]
 
 
 def test_client_error_stops_the_wait():
@@ -233,3 +234,11 @@ def test_timeout_prints_the_call_id(monkeypatch, capsys):
     code = ptc.main(["--number", "+14155550100", "--i-will-call-a-customer"])
     assert code == 2
     assert CALL_ID in capsys.readouterr().err
+
+
+def test_null_call_id_says_the_call_may_be_live(monkeypatch, capsys):
+    monkeypatch.setenv("HAIL_API_KEY", "hl_test")
+    monkeypatch.setattr(ptc, "place_call", lambda *a: {"id": None})
+    code = ptc.main(["--number", "+14155550100", "--i-will-call-a-customer"])
+    assert code == 2
+    assert "may have been placed" in capsys.readouterr().err

@@ -5,7 +5,7 @@ Use this when a customer asks to remove one call, or to remove a test call
 call, its recording, its usage rows and its charges. Deleting the charge
 gives the money back: the balance is the sum of `account_credits`.
 Phone calls only: a browser voice call has other ledger refs
-(`browser:<id>`), and step 3 refuses it.
+(`browser:<id>`), and step 4 refuses it.
 
 What it removes, in order:
 
@@ -62,21 +62,35 @@ WHERE ue.organization_id = :'org' AND ue.channel = 'voice'
 SQL
 ```
 
-No rows: the call was not billed (nobody answered). Step 3 still deletes
+No rows: the call was not billed (nobody answered). Step 4 still deletes
 the call row.
 
-## 2. Delete the recording
+## 2. Check that the rows can go
 
-Skip this when `recording_key` is empty. Wait while `recording_status` is
-`requested`, `starting`, `recording` or `processing`: the upload can still
-land after you delete it. Step 3 refuses until then.
+Run the script in step 4 with `\set apply false`. It makes every check and
+every delete, then rolls back. Go on only when it ends with
+`Checks passed`. Otherwise the recording would be gone while the call stays
+in the customer's call log.
 
-Delete the object only when step 3 will run (its conditions are listed
-there). If step 3 refuses after the object is gone, the call stays in the
-customer's call log with a recording that no longer plays.
+The script stops, and changes nothing, when:
 
-Use your operator AWS credentials. The production app's storage credentials
-may not allow deletes. The bucket is `S3_BUCKET` in the server `.env`.
+- no phone call has this id in this organization (check the ids);
+- the call is live or ended less than 15 minutes ago (the voicebot writes
+  the call legs after the call ends);
+- the recording upload may still be running;
+- a usage row is not priced yet (the usage rater has not run);
+- a charge still waits for the settle step. It runs once no call leg cost
+  is `pending`: usually within minutes, at most about 48 hours (Hail stops
+  waiting for a leg cost after 48 hours). Deleting before it would leave a
+  stray `voice_cost:` row.
+
+Run it again later when it stops for one of the last four.
+
+## 3. Delete the recording
+
+Skip this when `recording_key` is empty. Use your operator AWS credentials.
+The production app's storage credentials may not allow deletes. The bucket
+is `S3_BUCKET` in the server `.env`.
 
 ```bash
 aws s3 rm "s3://<recordings bucket>/<recording_key>"
@@ -89,35 +103,28 @@ The second command prints nothing when the object is gone. Keys under
 ([`s3_assets.tf`](../../infra/terraform/s3_assets.tf) lifecycle rules).
 Delete it now anyway.
 
-## 3. Delete the rows
+## 4. Delete the rows
 
-The script stops, and changes nothing, when:
-
-- the call is not a phone call in that organization, or it ended less than
-  15 minutes ago (the voicebot writes the call legs after the call ends);
-- the recording upload may still be running;
-- a usage row is not priced yet (the usage rater has not run);
-- a charge still waits for the settle step. It runs once no call leg cost
-  is `pending`, usually within minutes. A call whose leg cost never comes
-  in can wait until the step stops looking, 14 days after the charge.
-  Deleting before it would leave a stray `voice_cost:` row.
-
-Run it again later when it stops for one of the last three.
+Same script as step 2, with `\set apply true`.
 
 ```bash
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
 \set org '<org id>'
 \set call '<call id>'
+\set apply false
 BEGIN;
 -- The workspace's billing lock, as purchases and the raters take it.
 SELECT pg_advisory_xact_lock(hashtextextended((:'org')::uuid::text, 0));
-SELECT count(*) = 1 AS ended,
-       bool_and(COALESCE(metadata->>'recording_status', 'disabled')
-                NOT IN ('requested', 'starting', 'recording', 'processing')) AS recording_done
+SELECT count(*) = 1 AS found,
+       COALESCE(bool_and(
+         status IN ('completed', 'failed', 'busy', 'no_answer', 'canceled')
+         AND COALESCE(ended_at, updated_at) < now() - interval '15 minutes'),
+         false) AS ended,
+       COALESCE(bool_and(COALESCE(metadata->>'recording_status', 'disabled')
+         NOT IN ('requested', 'starting', 'recording', 'processing')),
+         false) AS recording_done
 FROM calls
-WHERE id = :'call' AND organization_id = :'org' AND transport = 'phone'
-  AND status IN ('completed', 'failed', 'busy', 'no_answer', 'canceled')
-  AND COALESCE(ended_at, updated_at) < now() - interval '15 minutes' \gset
+WHERE id = :'call' AND organization_id = :'org' AND transport = 'phone' \gset
 SELECT count(*) FILTER (WHERE priced_at IS NULL) = 0 AS priced,
        count(*) FILTER (WHERE EXISTS (
          SELECT 1 FROM account_credits ac
@@ -132,9 +139,15 @@ SELECT count(*) FILTER (WHERE priced_at IS NULL) = 0 AS priced,
 FROM usage_events ue
 WHERE ue.organization_id = :'org' AND ue.channel = 'voice'
   AND split_part(ue.ref, ':', 1) = :'call' \gset
+\if :found
+\else
+  \echo 'No phone call with this id in this organization: nothing deleted. Check the ids.'
+  ROLLBACK;
+  \q
+\endif
 \if :ended
 \else
-  \echo 'No phone call with this id in this organization that ended over 15 minutes ago: nothing deleted.'
+  \echo 'The call is live or ended less than 15 minutes ago: nothing deleted. Try again in 15 minutes.'
   ROLLBACK;
   \q
 \endif
@@ -167,7 +180,12 @@ WHERE organization_id = :'org'
               UNION ALL SELECT 'voice_cost:' || id FROM gone);
 DELETE FROM usage_events WHERE id IN (SELECT id FROM gone);
 DELETE FROM calls WHERE id = :'call' AND organization_id = :'org';
-COMMIT;
+\if :apply
+  COMMIT;
+\else
+  \echo 'Checks passed. Nothing deleted: apply is false.'
+  ROLLBACK;
+\endif
 SQL
 ```
 

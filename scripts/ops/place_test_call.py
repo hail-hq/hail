@@ -44,6 +44,10 @@ SYSTEM_PROMPT = (
     "under one minute."
 )
 FIRST_MESSAGE = "Hello, this is a short line test from Hail."
+MAYBE_LIVE = (
+    "ERROR: no clear answer from POST /v1/calls ({exc}). The call may have "
+    "been placed: check your workspace's call log before you run this again."
+)
 WARNING = (
     "This call reaches the customer's agent and shows in their call log.\n"
     "Remove it afterwards: docs/operations/call-record-deletion.md"
@@ -96,20 +100,24 @@ def wait_for_end(
     clock: Callable[[], float] = time.monotonic,
 ) -> dict:
     """Poll until the call has a terminal status. A rate limit, a server
-    error or a network error waits and tries again; only the timeout or a
-    client error (4xx other than 429) stops the wait."""
+    error, a network error or a body that is not a call waits and tries
+    again; only the timeout or a client error (4xx other than 429) stops
+    the wait."""
     url = join_url(api_url, f"v1/calls/{call_id}")
     deadline = clock() + timeout
     while True:
         wait = interval
         try:
             response = client.get(url)
-        except httpx.TransportError:
+        except httpx.HTTPError:
             response = None
         if response is not None:
             if response.status_code == 200:
-                call = response.json()
-                if call.get("status") in TERMINAL_CALL_STATUSES:
+                call = _json(response)
+                if (
+                    isinstance(call, dict)
+                    and call.get("status") in TERMINAL_CALL_STATUSES
+                ):
                     return call
             elif response.status_code == 429:
                 wait = max(interval, _retry_after(response))
@@ -125,6 +133,13 @@ def wait_for_end(
             )
         # The last wait is cut short so one more poll lands at the deadline.
         sleep(min(wait, left))
+
+
+def _json(response: httpx.Response) -> object:
+    try:
+        return response.json()
+    except ValueError:
+        return None
 
 
 def _retry_after(response: httpx.Response) -> float:
@@ -208,25 +223,22 @@ def main(argv: list[str] | None = None) -> int:
     headers = {"Authorization": f"Bearer {api_key}"}
     with httpx.Client(headers=headers, timeout=30) as client:
         try:
-            call_id = str(
-                place_call(client, api_url, args.number, args.from_number)["id"]
-            )
+            placed = place_call(client, api_url, args.number, args.from_number)
         except CallTestError as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 2
-        except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+        except (httpx.HTTPError, ValueError) as exc:
             # The request may have reached Hail: the call can be live now.
-            print(
-                f"ERROR: no clear answer from POST /v1/calls ({exc!r}). The call "
-                "may have been placed: check your workspace's call log before "
-                "you run this again.",
-                file=sys.stderr,
-            )
+            print(MAYBE_LIVE.format(exc=repr(exc)), file=sys.stderr)
+            return 2
+        call_id = placed.get("id") if isinstance(placed, dict) else None
+        if not isinstance(call_id, str) or not call_id:
+            print(MAYBE_LIVE.format(exc=f"body {placed!r}"), file=sys.stderr)
             return 2
         print(f"Placed call {call_id} to {args.number}. Waiting for it to end.")
         try:
             call = wait_for_end(client, api_url, call_id, timeout=args.timeout)
-        except (CallTestError, ValueError, AttributeError, TypeError) as exc:
+        except CallTestError as exc:
             print(f"ERROR: {exc}. Call id: {call_id}", file=sys.stderr)
             return 2
     answered, text = verdict(call)
