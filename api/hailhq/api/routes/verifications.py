@@ -2287,6 +2287,20 @@ async def _prepare_submission(
         # fetch_files checks the 30 MB total again on the bytes read.
         collected = collected._replace(rows={**collected.rows, **reused})
         names.update({slot: row.filename for slot, row in reused.items()})
+    if reused:
+        # A kept file whose object is gone (the bucket's backstop expired it)
+        # must be sent again: say which, never a 503 on every retry.
+        for slot, row in reused.items():
+            try:
+                present = await s3.count_prefix(row.s3_key, up_to=1)
+            except Exception:
+                present = 1  # unknown: fetch_files reports it
+            if not present:
+                raise unprocessable(
+                    f"Hail no longer has the file for {slot}; send it again "
+                    f"as file.{slot} or upload.{slot}",
+                    loc=["body", f"file.{slot}"],
+                )
     loaded = await fetch_files(collected, sub.documents, s3)
     documents: dict[str, DocumentInput] = {}
     files: list[VerificationCheckFile] = []
@@ -2639,6 +2653,9 @@ async def _file(
     # the bytes just sent.
     await _keep_files(db, s3, row, prepared, moved={slot for slot, _, _ in moved_files})
     await _delete_used_uploads(db, s3, prepared.uploads)
+    if row.purpose == "number" and row.state == "approved":
+        # Approved at once: nothing to resubmit, so nothing stays kept.
+        await _forget_kept_files(db, [row.id], s3)
     # Built now: the dismiss below may roll back, which expires the row.
     out = _out(row, registry)
     if source_id is not None:
@@ -2754,16 +2771,21 @@ async def _keep_files(
     ]
     if not files:
         return
+    verification_id = row.id
     try:
-        await keep_verification_files(db, s3, row.organization_id, row.id, files)
+        await keep_verification_files(
+            db, s3, row.organization_id, verification_id, files
+        )
     except Exception as exc:
         await db.rollback()
         logger.warning(
             "could not keep the files of verification %s (%s); the filing "
             "went ahead",
-            row.id,
+            verification_id,
             type(exc).__name__,
         )
+        # The rollback expired the row; the caller still answers with it.
+        await db.refresh(row)
 
 
 async def _delete_used_uploads(
@@ -3911,7 +3933,10 @@ async def get_verification_application(
     row = await _org_row_or_404(db, principal, verification_id)
     if row.purpose == "number":
         response.headers["Cache-Control"] = "no-store"
-        return await _number_application(db, row)
+        # An approval the carrier made since the last poll deletes the
+        # answers: never return them after it.
+        await _refresh(db, row, registry)
+        return await _number_application(db, row, principal)
     # Answers past APPLICATION_KEPT_FOR are gone, even before the background
     # pass deletes them, and are not rebuilt from the carrier either.
     expired = _application_expired(row, datetime.now(timezone.utc))
@@ -3984,7 +4009,7 @@ def _no_kept_answers() -> HTTPException:
 
 
 async def _number_application(
-    db: AsyncSession, row: CarrierVerification
+    db: AsyncSession, row: CarrierVerification, principal: Principal
 ) -> SmsApplicationResponse:
     """A number registration's kept answers and file names, or 404."""
     if not _number_answers_kept(row, datetime.now(timezone.utc)):
@@ -4010,7 +4035,12 @@ async def _number_application(
             ],
             "kept_until": row.created_at + REGISTRATION_KEPT_FOR,
             "quote_id": application.get("quote_id"),
-            "hold_cents": await _kept_hold(db, row, application.get("quote_id")),
+            # A shared key sets nothing aside, as on create.
+            "hold_cents": (
+                None
+                if principal.auth_kind == "shared"
+                else await _kept_hold(db, row, application.get("quote_id"))
+            ),
         }
     )
 

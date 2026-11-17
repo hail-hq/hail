@@ -66,6 +66,9 @@ class FakeStore:
     async def fetch_raw(self, key, *, max_bytes=None):
         return self.objects[key]
 
+    async def count_prefix(self, prefix, *, up_to):
+        return min(up_to, sum(1 for k in self.objects if k.startswith(prefix)))
+
     async def delete(self, key):
         self.objects.pop(key, None)
 
@@ -684,3 +687,38 @@ async def test_the_saved_answers_name_the_credit_set_aside(
         )
     ).scalar_one()
     assert body["hold_cents"] == offer["setup_cents"] + offer["monthly_cents"]
+
+
+async def test_a_kept_file_the_bucket_lost_is_asked_for_again(
+    client, org_and_key, carrier, store, async_session
+) -> None:
+    _, _, key = org_and_key
+    vid = await _rejected(client, key, carrier)
+    store.objects.clear()  # the lifecycle rule expired it
+    resp = await client.post(
+        f"/verifications/{vid}/resubmit",
+        files={"_": (None, "1")},
+        headers=_auth(key),
+    )
+    assert resp.status_code == 422
+    assert resp.json()["detail"][0]["loc"] == ["body", "file.proof_of_identity"]
+    # Sent again, it goes through.
+    resp = await client.post(
+        f"/verifications/{vid}/resubmit",
+        files={"file.proof_of_identity": ("new.jpg", _JPEG, "image/jpeg")},
+        headers=_auth(key),
+    )
+    assert resp.status_code == 201, resp.text
+
+
+async def test_the_saved_answers_are_gone_once_the_carrier_approved(
+    client, org_and_key, carrier, store, async_session
+) -> None:
+    """Read straight after an approval no poll has seen yet."""
+    _, _, key = org_and_key
+    vid = (await _create(client, key)).json()["id"]
+    carrier.remote_status = ProviderStatus(state="approved")
+    verifications_routes._last_polled.clear()
+    resp = await client.get(f"/verifications/{vid}/application", headers=_auth(key))
+    assert resp.status_code == 404
+    assert await _kept(async_session) == [] and store.objects == {}
