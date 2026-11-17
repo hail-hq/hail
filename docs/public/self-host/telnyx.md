@@ -95,10 +95,12 @@ can reach.
 campaign from the console (Numbers → Register for US texting) or with
 `POST /verifications` and `purpose=sms`, as a company or a person. Telnyx
 texts a person a PIN; they enter it in the console or with
-`POST /verifications/{id}/confirm`. A company that answers `low_volume=YES`
-on the form gets no external vetting and a `LOW_VOLUME` campaign: about 2,000
-texts a day to T-Mobile users and no trust score. Until an organization is
-approved, texts from its US long codes to US numbers return 422. Telnyx answers `STOP` and
+`POST /verifications/{id}/confirm`. A company that does not answer
+`daily_texts=OVER_2000` gets no external vetting and a `LOW_VOLUME` campaign:
+about 2,000 texts a day to T-Mobile users and no trust score. If Telnyx cannot
+verify that company, Hail asks for vetting when `faster_lane_ok=YES`, and
+otherwise asks the customer to turn it on. Until an organization is approved,
+texts from its US long codes to US numbers return 422. Telnyx answers `STOP` and
 `HELP` itself; Hail sets the replies on the organization's messaging profile
 to the texts filed with the campaign. Keep
 `HAIL_SMS_COMPLIANCE_REPLIES_ENABLED=false`, or subscribers get two replies.

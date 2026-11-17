@@ -57,9 +57,11 @@ campaign from the console (Numbers → Register for US texting) or with
 your approved Trust Hub primary profile (business identity ISV Reseller or
 Partner); without it, SMS registration through Twilio is off. Texts from an
 organization's US long codes to US numbers return 422 until it is approved.
-A company that answers `low_volume=YES` on the form gets a Low-Volume Standard
-brand (`skip_automatic_sec_vet`) and a `LOW_VOLUME` campaign: no secondary
-vetting, about 2,000 texts a day to T-Mobile users, and no trust score.
+A company that does not answer `daily_texts=OVER_2000` gets a Low-Volume
+Standard brand (`skip_automatic_sec_vet`) and a `LOW_VOLUME` campaign: no
+secondary vetting, about 2,000 texts a day to T-Mobile users, and no trust
+score. If Twilio cannot verify that company, the registration waits for a new
+filing with `daily_texts=OVER_2000`.
 
 **Sender ID (optional, rest-of-world).** For destinations that allow it, set a
 custom alphanumeric sender with `PATCH /sms/sender-id` (read the current value
