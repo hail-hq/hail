@@ -202,5 +202,5 @@ SQL
 ```
 
 With `delete`, the last `DELETE` prints `DELETE 1` and the output must
-end with `COMMIT`. Any other end means nothing was deleted. Run the two queries in step 1 again: both return no rows
-for the call.
+end with `COMMIT`. Any other end means nothing was deleted. Run the two
+queries in step 1 again: both return no rows for the call.
