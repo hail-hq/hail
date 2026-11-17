@@ -68,7 +68,8 @@ voicemail also picks up. Check the customer's side too: it is the row you
 delete afterwards. Pick the row whose `from_e164` is the caller ID the
 script printed and whose time matches the test, so you never pick a real
 caller's call. Some carriers change the caller ID's format (for example
-`+0044…` instead of `+44…`).
+`+0044…` instead of `+44…`). If the script printed `unknown`, read
+`from_e164` of your outbound call (`GET /v1/calls/{id}` with your key).
 
 ```bash
 psql "$DATABASE_URL" <<'SQL'

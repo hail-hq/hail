@@ -40,7 +40,8 @@ E164 = re.compile(r"^\+[1-9]\d{6,14}$")
 # Voice calls stop at 300 seconds by default; this leaves room for ringing.
 DEFAULT_TIMEOUT_SECONDS = 420
 POLL_SECONDS = 5.0
-POST_RETRIES = 15
+POST_RETRY_SECONDS = 2.0
+POST_RETRY_WINDOW = 30.0
 SYSTEM_PROMPT = (
     "This is a short line test from Hail, the phone provider. Say hello, "
     "listen to the answer, thank them, then use end_call. Keep the call "
@@ -91,28 +92,40 @@ def place_call(
 ) -> dict:
     """Send the call. Every retry reuses one Idempotency-Key, so Hail
     answers with the first request's call (or its refusal) and never
-    places a second one. One retry after a network error; up to
-    ``POST_RETRIES`` while Hail answers 409 (the first request still
-    runs). A 5xx or a 409 that does not clear may follow a live call."""
+    places a second one.
+
+    After a network error the request may have reached Hail. The script
+    retries once, then keeps retrying for up to ``POST_RETRY_WINDOW``
+    seconds while Hail says the first request is still processing. A
+    refusal counts as final only when Hail replays it from that first
+    request (``Idempotency-Replay: true``). A 5xx may follow a live call."""
     url = join_url(api_url, "v1/calls")
     body = call_body(number, from_number)
     headers = {"Idempotency-Key": str(uuid.uuid4())}
+    unsure = False
     try:
         response = client.post(url, json=body, headers=headers)
     except httpx.TransportError:
-        sleep(2)
+        unsure = True
+        sleep(POST_RETRY_SECONDS)
         response = client.post(url, json=body, headers=headers)
-    for _ in range(POST_RETRIES):
-        if response.status_code != 409:
-            break
-        sleep(2)
+    waited = 0.0
+    while _still_processing(response) and waited < POST_RETRY_WINDOW:
+        unsure = True
+        sleep(POST_RETRY_SECONDS)
+        waited += POST_RETRY_SECONDS
         response = client.post(url, json=body, headers=headers)
     if response.status_code == 201:
         return response.json()
     text = f"POST /v1/calls answered {response.status_code}: {response.text}"
-    if response.status_code == 409 or response.status_code >= 500:
+    replayed = response.headers.get("Idempotency-Replay") == "true"
+    if response.status_code >= 500 or (unsure and not replayed):
         raise CallMaybeLive(text)
     raise CallTestError(text)
+
+
+def _still_processing(response: httpx.Response) -> bool:
+    return response.status_code == 409 and "still processing" in response.text
 
 
 def wait_for_end(
