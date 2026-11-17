@@ -1477,13 +1477,18 @@ async def resubmit_verification(
             "error": "fields, address and documents must be valid JSON text of "
             f"at most {_VERIFICATION_MAX_DETAILS_BYTES} bytes. Nothing was sent."
         }
-    # A replaced file's slot need not be in ``documents``: the kept
-    # documents name it.
-    slots = {
-        entry["slot"]: {}
-        for entry in files or []
-        if isinstance(entry, dict) and isinstance(entry.get("slot"), str)
-    }
+    # Without ``documents`` the kept ones name the slots, so a replaced
+    # file's slot is checked by the API. With them, each file's slot must be
+    # one of them, as in ``submit_verification``.
+    slots = (
+        {
+            entry["slot"]: {}
+            for entry in files or []
+            if isinstance(entry, dict) and isinstance(entry.get("slot"), str)
+        }
+        if documents is None
+        else {}
+    )
     error, decoded, uploads = _check_verification_files(
         files or [], {**slots, **(documents or {})}
     )

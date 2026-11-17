@@ -6057,15 +6057,16 @@ paths:
         \ slot name to `{\"option\": ..., \"fields\": {...}}`) each replace\n  the\
         \ kept value whole when sent;\n* `file.<slot>`, or `upload.<slot>` (an upload\
         \ id, as in\n  `POST /v1/verifications`), replaces the kept file of that slot.\
-        \ A slot\n  with no new file reuses the kept one. A kept file whose slot is\
-        \ no\n  longer in `documents` is not sent;\n* `quote_id`: the offer to verify\
-        \ for. Default: the quote of the\n  rejected filing, which Hail keeps while\
-        \ the answers are kept. Pass a\n  new one for a newer price, or when that\
-        \ offer is no longer sold (409).\n\nThe purpose, country, number type and\
-        \ subject type stay as filed:\nsending one of them is a 422. The new registration\
-        \ goes through every check of\n`POST /v1/verifications` (422, 402, 409, the\
-        \ credit set aside) and\nanswers the same way, as a new verification with\
-        \ its own id. Once it is\nfiled, the rejected one is dismissed (as `DELETE\
+        \ A slot\n  with no new file reuses the kept one, while it keeps the document\n\
+        \  `option` it was filed with (a new option needs a new file). A kept\n  file\
+        \ whose slot is no longer in `documents` is not sent;\n* `quote_id`: the offer\
+        \ to verify for. Default: the quote of the\n  rejected filing, which Hail\
+        \ keeps while the answers are kept. Pass a\n  new one for a newer price, or\
+        \ when that offer is no longer sold (409).\n\nThe purpose, country, number\
+        \ type and subject type stay as filed:\nsending one of them is a 422. The\
+        \ new registration goes through every check of\n`POST /v1/verifications` (422,\
+        \ 402, 409, the credit set aside) and\nanswers the same way, as a new verification\
+        \ with its own id. Once it is\nfiled, the rejected one is dismissed (as `DELETE\
         \ /v1/verifications/{id}`)\nand its kept answers and files are deleted. Only\
         \ one resubmit of a\nregistration can succeed; another one sent at the same\
         \ time is a 409."

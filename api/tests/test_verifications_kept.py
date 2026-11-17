@@ -77,7 +77,7 @@ def store(monkeypatch):
     fake = FakeStore()
     app.dependency_overrides[get_s3_mail_optional] = lambda: fake
     # The inline deletes and the worker read the bucket themselves.
-    monkeypatch.setattr(verifications_routes, "_kept_store", lambda: fake)
+    monkeypatch.setattr(verifications_routes, "get_s3_mail_optional", lambda: fake)
     try:
         yield fake
     finally:
@@ -581,3 +581,45 @@ async def test_an_approval_seen_in_the_list_deletes_the_files(
     assert [r["state"] for r in rows] == ["approved"]
     assert "application" not in (await _row(async_session, vid)).provider_refs
     assert await _kept(async_session) == [] and store.objects == {}
+
+
+async def test_a_new_document_type_does_not_reuse_the_kept_file(
+    client, org_and_key, carrier, store, async_session
+) -> None:
+    _, _, key = org_and_key
+    vid = await _rejected(client, key, carrier)
+    carrier.drafts.clear()
+    resp = await client.post(
+        f"/verifications/{vid}/resubmit",
+        data={"documents": json.dumps({"proof_of_identity": {"option": "id_card"}})},
+        files={"_": (None, "1")},
+        headers=_auth(key),
+    )
+    assert resp.status_code == 201, resp.text
+    doc = carrier.drafts[0]["documents"]["proof_of_identity"]
+    assert doc.option == "id_card" and doc.file is None
+
+
+async def test_a_resubmit_ignores_the_deprecated_provider_part(
+    client, org_and_key, carrier, store, async_session
+) -> None:
+    _, _, key = org_and_key
+    vid = await _rejected(client, key, carrier)
+    resp = await client.post(
+        f"/verifications/{vid}/resubmit",
+        data={"provider": "fake"},
+        files={"_": (None, "1")},
+        headers=_auth(key),
+    )
+    assert resp.status_code == 201, resp.text
+
+
+async def test_unreadable_answers_are_not_offered_for_a_resubmit(
+    client, org_and_key, carrier, store, async_session, monkeypatch
+) -> None:
+    monkeypatch.setattr(settings, "hail_provider_secret_key", generate_key())
+    _, _, key = org_and_key
+    vid = await _rejected(client, key, carrier)
+    monkeypatch.setattr(settings, "hail_provider_secret_key", generate_key())
+    body = (await client.get(f"/verifications/{vid}", headers=_auth(key))).json()
+    assert body["resubmittable"] is False and body["kept_until"] is None

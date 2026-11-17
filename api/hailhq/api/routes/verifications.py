@@ -840,17 +840,27 @@ def _drop_number_answers(row: CarrierVerification) -> bool:
     return True
 
 
-def _kept_store() -> S3MailClient | None:
-    """The mail bucket holding kept registration files, or None when none
-    is configured (then no file was kept)."""
-    return get_s3_mail_optional()
-
-
 async def _forget_kept_files(
     db: AsyncSession, verification_ids: list[UUID], s3: S3MailClient | None = None
 ) -> int:
     """Delete the kept files of these verifications now. Best effort: a
-    file whose delete fails stays for the verification worker. Commits."""
+    file whose delete fails stays for the verification worker, and any
+    error only logs, so the caller's request still answers. Commits."""
+    try:
+        return await _delete_kept_of(db, verification_ids, s3)
+    except Exception as exc:
+        await db.rollback()
+        logger.warning(
+            "could not delete kept registration files now (%s); the "
+            "verification worker tries again",
+            type(exc).__name__,
+        )
+        return 0
+
+
+async def _delete_kept_of(
+    db: AsyncSession, verification_ids: list[UUID], s3: S3MailClient | None
+) -> int:
     ids = (
         (
             await db.execute(
@@ -866,7 +876,7 @@ async def _forget_kept_files(
     await db.commit()
     if not ids:
         return 0
-    return await delete_kept_files(db, s3 or _kept_store(), list(ids))
+    return await delete_kept_files(db, s3 or get_s3_mail_optional(), list(ids))
 
 
 async def _forget_approved_files(
@@ -1562,7 +1572,9 @@ def _out(
             provider, SmsRegistrationProvider
         ) and provider.keeps_brand(refs)
     confirmation, step = _sms_progress(row, registry)
-    kept = _number_answers_kept(row, datetime.now(timezone.utc))
+    kept = _number_answers_kept(row, datetime.now(timezone.utc)) and (
+        _unseal(row.provider_refs["application"]) is not None
+    )
     return model.model_validate(row).model_copy(
         update={
             "confirmation": confirmation,
@@ -2677,7 +2689,8 @@ async def _keep_files(
     resubmit. Fails open: the filing is already with the carrier, so a
     storage error only logs (ids and the error type, never a name) and the
     customer adds the files again on a resubmit. No bucket: nothing kept."""
-    if row.purpose != "number" or s3 is None:
+    # Approved at once: nothing to resubmit, so nothing to keep.
+    if row.purpose != "number" or row.state == "approved" or s3 is None:
         return
     files = [
         KeptFile(
@@ -3593,28 +3606,20 @@ async def forget_kept_registrations(
     logs a value."""
     v = CarrierVerification
     must_go = or_(_number_kept_ended(now), org_closed(v.organization_id, now))
-    answers = select(v.id).where(
-        v.purpose == "number",
-        v.provider_refs.has_key("application"),
-        must_go,
+    answers = (
+        update(v)
+        .where(
+            v.purpose == "number",
+            v.provider_refs.has_key("application"),
+            must_go,
+        )
+        .values(provider_refs=v.provider_refs.op("-")("application"))
+        .execution_options(synchronize_session=False)
     )
     if organization_id is not None:
         answers = answers.where(v.organization_id == organization_id)
-    forgotten = 0
-    for verification_id in (await db.execute(answers)).scalars().all():
-        row = await db.get(v, verification_id)
-        if row is None:
-            continue
-        await db.refresh(row, with_for_update=True)
-        # Re-checked under the lock: a resubmit may have taken them.
-        ended = row.state in ("approved", "cancelled") or (
-            row.created_at <= now - REGISTRATION_KEPT_FOR
-        )
-        if (ended or await org_is_closed(db, row.organization_id, now)) and (
-            _drop_number_answers(row)
-        ):
-            forgotten += 1
-        await db.commit()
+    forgotten = (await db.execute(answers)).rowcount or 0
+    await db.commit()
 
     f = FileUpload
     files = (
@@ -3636,7 +3641,9 @@ async def forget_kept_registrations(
         files = files.where(f.organization_id == organization_id)
     ids = list((await db.execute(files)).scalars().all())
     await db.commit()
-    deleted = await delete_kept_files(db, s3 or _kept_store(), ids) if ids else 0
+    deleted = (
+        await delete_kept_files(db, s3 or get_s3_mail_optional(), ids) if ids else 0
+    )
     return forgotten, deleted
 
 
@@ -4085,11 +4092,9 @@ async def amend_sms_application(
     return await _out_checked(db, row, registry)
 
 
-# The parts a resubmit may change, and the ones it may not (they stay as
-# filed). Other parts are ignored, as on ``POST /verifications``.
-_RESUBMIT_PARTS = ("quote_id", "fields", "address", "documents")
+# The parts a resubmit may not change: they stay as filed. Other parts are
+# ignored, as on ``POST /verifications`` (``provider`` too).
 _RESUBMIT_FIXED = (
-    "provider",
     "purpose",
     "country_code",
     "number_type",
@@ -4140,8 +4145,9 @@ async def resubmit_verification(
       the kept value whole when sent;
     * `file.<slot>`, or `upload.<slot>` (an upload id, as in
       `POST /v1/verifications`), replaces the kept file of that slot. A slot
-      with no new file reuses the kept one. A kept file whose slot is no
-      longer in `documents` is not sent;
+      with no new file reuses the kept one, while it keeps the document
+      `option` it was filed with (a new option needs a new file). A kept
+      file whose slot is no longer in `documents` is not sent;
     * `quote_id`: the offer to verify for. Default: the quote of the
       rejected filing, which Hail keeps while the answers are kept. Pass a
       new one for a newer price, or when that offer is no longer sold (409).
@@ -4189,7 +4195,25 @@ async def resubmit_verification(
     for key in sent:
         if key.startswith(("file.", "upload.")):
             form[key] = sent.get(key)
-    kept = {row.slot: row for row in await _kept_rows(db, source) if row.slot}
+    # A kept file goes again only for a slot that keeps the document type it
+    # was filed with: a new type needs a new file.
+    options = {
+        slot: (value or {}).get("option")
+        for slot, value in (saved.get("documents") or {}).items()
+    }
+    try:
+        new_options = {
+            slot: (value or {}).get("option")
+            for slot, value in json.loads(form["documents"]).items()
+            if isinstance(value, dict)
+        }
+    except (TypeError, ValueError, AttributeError):
+        new_options = {}  # _prepare_submission answers 422 for it
+    kept = {
+        row.slot: row
+        for row in await _kept_rows(db, source)
+        if row.slot and new_options.get(row.slot) == options.get(row.slot)
+    }
     source_id = source.id
     prepared = await _prepare_submission(
         request, principal, db, registry, s3, lock=True, form=form, kept=kept

@@ -2265,3 +2265,16 @@ async def test_resubmit_with_nothing_to_change_still_sends_a_form(
     assert (
         route.calls[0].request.headers["content-type"].startswith("multipart/form-data")
     )
+
+
+async def test_resubmit_refuses_a_file_for_a_slot_not_in_documents(
+    client: HailClient,
+) -> None:
+    result = await tools.resubmit_verification(
+        client=client,
+        verification_id=str(uuid4()),
+        attest_authorized=True,
+        documents={"proof_of_address": {"option": "bill"}},
+        files=[{"slot": "proof_of_identity", "upload_id": str(uuid4())}],
+    )
+    assert "Nothing was sent" in result["error"]
