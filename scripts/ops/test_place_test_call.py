@@ -377,8 +377,20 @@ def test_place_call_fresh_refusal_after_a_timeout_is_final():
         post(client)
 
 
-def test_place_call_rate_limit_on_the_first_try_is_final():
-    client = client_for([httpx.Response(429, headers={"Retry-After": "5"})])
+def test_place_call_waits_out_a_fresh_rate_limit():
+    timer = FakeTime()
+    client = client_for(
+        [
+            httpx.Response(429, headers={"Retry-After": "5"}),
+            httpx.Response(201, json=call("queued")),
+        ]
+    )
+    assert post(client, timer)["id"] == CALL_ID
+    assert timer.sleeps == [5]
+
+
+def test_place_call_rate_limit_that_never_clears_is_final():
+    client = client_for([httpx.Response(429)] * 100)
     with pytest.raises(ptc.CallTestError, match="429"):
         post(client)
 
@@ -392,15 +404,46 @@ def test_place_call_replayed_rate_limit_is_final():
         post(client)
 
 
-def test_place_call_no_free_shared_line_is_final():
-    client = client_for([httpx.Response(503, text="pool exhausted")])
+POOL = {"detail": "shared call line pool exhausted; try again shortly"}
+
+
+def test_place_call_waits_for_a_free_shared_line():
+    client = client_for(
+        [httpx.Response(503, json=POOL), httpx.Response(201, json=call("queued"))]
+    )
+    assert post(client)["id"] == CALL_ID
+
+
+def test_place_call_shared_lines_that_stay_busy_are_final():
+    client = client_for([httpx.Response(503, json=POOL)] * 100)
     with pytest.raises(ptc.CallTestError, match="503"):
         post(client)
 
 
-def test_refuses_a_timeout_of_zero(monkeypatch):
+def test_place_call_other_503_after_a_timeout_may_be_live():
+    client = client_for(
+        [httpx.ReadTimeout("slow"), httpx.Response(503, text="no upstream")]
+    )
+    with pytest.raises(ptc.CallMaybeLive, match="503"):
+        post(client)
+
+
+def test_place_call_pool_503_after_a_timeout_that_never_clears_may_be_live():
+    answers = [httpx.ReadTimeout("slow")] + [httpx.Response(503, json=POOL)] * 100
+    with pytest.raises(ptc.CallMaybeLive, match="503"):
+        post(client_for(answers))
+
+
+@pytest.mark.parametrize("timeout", ["0", "-5", "nan", "inf"])
+def test_refuses_a_bad_timeout(timeout, monkeypatch):
     monkeypatch.setenv("HAIL_API_KEY", "hl_test")
-    argv = ["--number", "+14155550100", "--i-will-call-a-customer", "--timeout", "0"]
+    argv = [
+        "--number",
+        "+14155550100",
+        "--i-will-call-a-customer",
+        "--timeout",
+        timeout,
+    ]
     with pytest.raises(SystemExit) as exc:
         ptc.main(argv)
     assert exc.value.code == 2

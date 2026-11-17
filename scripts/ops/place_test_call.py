@@ -21,6 +21,7 @@ docs/operations/first-number-call-test.md.
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import re
 import sys
@@ -93,12 +94,15 @@ def place_call(
 ) -> dict:
     """Send the call. Every try reuses one Idempotency-Key, so Hail answers
     with the first request's call (or its refusal) and never places a
-    second one. A network error, a rate limit (429) or a 409 "still
-    processing" is tried again for up to ``POST_RETRY_WINDOW`` seconds.
+    second one. Tried again for up to ``POST_RETRY_WINDOW`` seconds: a
+    network error, a 409 "still processing", and answers that place
+    nothing and invite a retry (a fresh 429, the 503 "shared call line
+    pool exhausted").
 
-    Raises CallMaybeLive when the outcome stays unknown: no answer, a 409
-    or 429 that never clears, or a fresh 5xx (Hail can fail after the call
-    went out). Any other refusal, and any replayed answer, is final."""
+    Raises CallMaybeLive when the outcome stays unknown: a try got no
+    answer and nothing later settled it, or a fresh 5xx (Hail can fail
+    after the call went out). A replayed answer, and any other refusal, is
+    final (CallTestError)."""
     url = join_url(api_url, "v1/calls")
     body = call_body(number, from_number)
     headers = {"Idempotency-Key": str(uuid.uuid4())}
@@ -109,36 +113,47 @@ def place_call(
             response = client.post(url, json=body, headers=headers)
         except httpx.TransportError as exc:
             response, problem, unsure = None, repr(exc), True
-        if response is not None:
-            replayed = response.headers.get("Idempotency-Replay") == "true"
-            # A 429 refuses this request. It says nothing about an earlier
-            # one that got no answer, so only then is it tried again.
-            if response.status_code == 429 and unsure and not replayed:
-                wait = max(POST_RETRY_SECONDS, _retry_after(response))
-            elif _still_processing(response):
-                wait = POST_RETRY_SECONDS
-            else:
-                break
-            problem = f"answered {response.status_code}: {response.text}"
-        else:
+        if response is None:
             wait = POST_RETRY_SECONDS
+        elif _replayed(response):
+            break
+        elif response.status_code == 429:
+            wait = max(POST_RETRY_SECONDS, _retry_after(response))
+        elif _still_processing(response) or _pool_exhausted(response):
+            wait = POST_RETRY_SECONDS
+        else:
+            break
+        if response is not None:
+            problem = f"answered {response.status_code}: {response.text}"
         if clock() + wait > deadline:
-            raise CallMaybeLive(f"POST /v1/calls {problem}")
+            text = f"POST /v1/calls {problem}"
+            # Still unknown when the first request may be live.
+            if unsure or _still_processing(response):
+                raise CallMaybeLive(text)
+            raise CallTestError(text)
         sleep(wait)
     if response.status_code == 201:
         return response.json()
     text = f"POST /v1/calls answered {response.status_code}: {response.text}"
-    replayed = response.headers.get("Idempotency-Replay") == "true"
-    # 503: Hail had no shared line free and placed nothing.
-    if response.status_code >= 500 and response.status_code != 503 and not replayed:
+    if response.status_code >= 500 and not _replayed(response):
         raise CallMaybeLive(text)
     raise CallTestError(text)
+
+
+def _replayed(response: httpx.Response) -> bool:
+    """Hail sent the stored answer of the first request with this key."""
+    return response.headers.get("Idempotency-Replay") == "true"
 
 
 def _still_processing(response: httpx.Response) -> bool:
     # api/hailhq/api/idempotency.py answers this 409 while the first
     # request with the same key still runs.
     return response.status_code == 409 and "still processing" in response.text
+
+
+def _pool_exhausted(response: httpx.Response) -> bool:
+    # api/hailhq/api/routes/calls.py releases the key first: nothing placed.
+    return response.status_code == 503 and "pool exhausted" in response.text
 
 
 def wait_for_end(
@@ -268,8 +283,8 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         help=f"seconds to wait for the call to end (default {DEFAULT_TIMEOUT_SECONDS})",
     )
     args = parser.parse_args(argv)
-    if args.timeout <= 0:
-        parser.error("--timeout must be more than 0 seconds")
+    if not (math.isfinite(args.timeout) and args.timeout > 0):
+        parser.error("--timeout must be a number of seconds above 0")
     if not E164.match(args.number):
         parser.error(f"--number must be E.164, like +14155550100: {args.number!r}")
     if not args.confirmed:
