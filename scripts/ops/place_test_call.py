@@ -42,7 +42,9 @@ E164 = re.compile(r"^\+[1-9]\d{6,14}$")
 DEFAULT_TIMEOUT_SECONDS = 420
 POLL_SECONDS = 5.0
 POST_RETRY_SECONDS = 2.0
-POST_RETRY_WINDOW = 30.0
+# Longer than the 30 s client timeout plus the 60 s rate-limit window, so
+# a timed-out first try and a fresh 429 both get another try.
+POST_RETRY_WINDOW = 120.0
 SYSTEM_PROMPT = (
     "This is a short line test from Hail, the phone provider. Say hello, "
     "listen to the answer, thank them, then use end_call. Keep the call "
@@ -107,12 +109,11 @@ def place_call(
     body = call_body(number, from_number)
     headers = {"Idempotency-Key": str(uuid.uuid4())}
     deadline = clock() + POST_RETRY_WINDOW
-    unsure = False
     while True:
         try:
             response = client.post(url, json=body, headers=headers)
         except httpx.TransportError as exc:
-            response, problem, unsure = None, repr(exc), True
+            response, problem = None, repr(exc)
         if response is None:
             wait = POST_RETRY_SECONDS
         elif _replayed(response):
@@ -127,8 +128,9 @@ def place_call(
             problem = f"answered {response.status_code}: {response.text}"
         if clock() + wait > deadline:
             text = f"POST /v1/calls {problem}"
-            # Still unknown when the first request may be live.
-            if unsure or _still_processing(response):
+            # Unknown only when no answer came, or the first request runs
+            # on. A fresh refusal shows the key was free: nothing placed.
+            if response is None or _still_processing(response):
                 raise CallMaybeLive(text)
             raise CallTestError(text)
         sleep(wait)
@@ -219,9 +221,10 @@ def _json(response: httpx.Response) -> object:
 
 def _retry_after(response: httpx.Response) -> float:
     try:
-        return float(response.headers.get("Retry-After", "0"))
+        seconds = float(response.headers.get("Retry-After", "0"))
     except ValueError:
         return 0.0
+    return seconds if math.isfinite(seconds) and seconds > 0 else 0.0
 
 
 def _seconds(start: str | None, end: str | None) -> int | None:

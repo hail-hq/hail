@@ -407,11 +407,16 @@ def test_place_call_replayed_rate_limit_is_final():
 POOL = {"detail": "shared call line pool exhausted; try again shortly"}
 
 
-def test_place_call_waits_for_a_free_shared_line():
+def test_place_call_waits_for_a_free_shared_line_with_one_key():
+    seen = []
+    timer = FakeTime()
     client = client_for(
-        [httpx.Response(503, json=POOL), httpx.Response(201, json=call("queued"))]
+        [httpx.Response(503, json=POOL), httpx.Response(201, json=call("queued"))],
+        seen,
     )
-    assert post(client)["id"] == CALL_ID
+    assert post(client, timer)["id"] == CALL_ID
+    assert timer.sleeps == [2]
+    assert len({r.headers["Idempotency-Key"] for r in seen}) == 1
 
 
 def test_place_call_shared_lines_that_stay_busy_are_final():
@@ -428,10 +433,26 @@ def test_place_call_other_503_after_a_timeout_may_be_live():
         post(client)
 
 
-def test_place_call_pool_503_after_a_timeout_that_never_clears_may_be_live():
-    answers = [httpx.ReadTimeout("slow")] + [httpx.Response(503, json=POOL)] * 100
-    with pytest.raises(ptc.CallMaybeLive, match="503"):
-        post(client_for(answers))
+def test_place_call_slow_first_try_still_gets_a_retry():
+    timer = FakeTime()
+    answers = [httpx.ReadTimeout("slow"), httpx.Response(201, json=call("queued"))]
+
+    def handler(request):
+        item = answers.pop(0)
+        if isinstance(item, Exception):
+            timer.now += 30  # the try used the whole client timeout
+            raise item
+        return item
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    assert post(client, timer)["id"] == CALL_ID
+
+
+def test_retry_after_ignores_bad_values():
+    for value in ["inf", "nan", "-3", "Wed, 21 Oct 2026 07:28:00 GMT"]:
+        assert (
+            ptc._retry_after(httpx.Response(429, headers={"Retry-After": value})) == 0
+        )
 
 
 @pytest.mark.parametrize("timeout", ["0", "-5", "nan", "inf"])
