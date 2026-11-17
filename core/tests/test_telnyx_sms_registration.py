@@ -872,6 +872,29 @@ async def test_detach_not_linked_does_not_raise() -> None:
     )
 
 
+@pytest.mark.parametrize("status", [400, 403, 500])
+async def test_detach_raises_when_the_link_stays(status) -> None:
+    """The cancel counts the error (refusal or outage); a 404 is done."""
+
+    def handler(req):
+        return httpx.Response(status, json={})
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await _provider(handler).detach_number(
+            {}, provider_resource_id="PN1", e164="+15125550100"
+        )
+
+
+async def test_detach_raises_on_a_lost_connection() -> None:
+    def handler(req):
+        raise httpx.ConnectError("x", request=req)
+
+    with pytest.raises(httpx.ConnectError):
+        await _provider(handler).detach_number(
+            {}, provider_resource_id="PN1", e164="+15125550100"
+        )
+
+
 async def test_discard_order_and_raises_after_every_step_on_an_outage() -> None:
     """A failed campaign delete is not lost: the caller keeps the ids and
     tries again. 404 (already gone) counts as done; a refusal raises

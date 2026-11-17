@@ -439,6 +439,71 @@ async def test_a_number_on_a_texting_registration_is_released_first(
     assert row.state == "cancelled"
 
 
+@pytest.mark.parametrize(
+    ("answer", "window"),
+    [(400, False), (403, True), (500, None)],
+)
+async def test_a_number_unlink_at_close_follows_the_close_rules(
+    async_session, voice_provider_mock, answer, window
+) -> None:
+    """A released number still linked to the registration (older rows):
+    the real Telnyx unlink fails. A 400 is ``close_refused`` at once, a 403
+    after the retry window, a 500 is retried with no limit. The carrier ids
+    stay."""
+    org = uuid.uuid4()
+    await _close(async_session, org)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "/10dlc/phone_number_campaigns/" in request.url.path:
+            return httpx.Response(answer, json={})
+        return httpx.Response(200, json={})
+
+    telnyx = TelnyxSmsRegistrationProvider(
+        api_key="k",
+        client=httpx.AsyncClient(
+            transport=httpx.MockTransport(handler),
+            base_url="https://api.telnyx.com/v2",
+        ),
+    )
+    row = CarrierVerification(
+        organization_id=org,
+        provider="telnyx",
+        country_code="US",
+        number_type="local",
+        subject_type="business",
+        subject_name="Acme",
+        purpose="sms",
+        state="approved",
+        provider_refs={"brand_id": "B1", "campaign_id": "C1"},
+        requirements_version="1",
+    )
+    async_session.add(row)
+    await async_session.commit()
+    number = await _number(
+        async_session, org, state="released", sms_registration_id=row.id
+    )
+    start = datetime.now(timezone.utc)
+
+    async def run(at):
+        return await close_org_carrier_items(async_session, at, lambda *_: telnyx, None)
+
+    counts = await run(start)
+    if window is not False:
+        assert counts.failed == 1 and counts.refused == 0
+        counts = await run(start + timedelta(days=7))
+    await async_session.refresh(row)
+    await async_session.refresh(number)
+    assert row.state == "approved" and row.provider_refs["brand_id"] == "B1"
+    assert number.sms_registration_id == row.id
+    if window is None:
+        assert counts.failed == 1 and counts.refused == 0
+        assert "close_refused" not in row.provider_refs
+        assert "close_failing_since" not in row.provider_refs
+    else:
+        assert counts.refused == 1
+        assert row.provider_refs["close_refused"]["status"] == answer
+
+
 async def test_a_failed_order_number_not_given_back_is_released_or_refused(
     async_session, voice_provider_mock, verifier
 ) -> None:

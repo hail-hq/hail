@@ -790,7 +790,8 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
     async def detach_number(self, refs, *, provider_resource_id, e164) -> bool:
         """A company's campaign covers the organization's service, which the
         number stays in. A person's number leaves the person's own service;
-        True tells the caller to set it up in the organization's again."""
+        True tells the caller to set it up in the organization's again. Not
+        in the service (404) is done; any other failure raises."""
         service = refs.get("messaging_service_sid")
         if refs.get("subject_type") != "person" or not service:
             return False
@@ -805,10 +806,10 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
                 logger.warning(
                     "10DLC detach failed: status=%s code=%s", exc.status, exc.code
                 )
-                return False
-        except Exception:
-            logger.warning("10DLC detach failed")
-            return False
+                raise
+        except Exception as exc:
+            logger.warning("10DLC detach failed: %s", type(exc).__name__)
+            raise
         return True
 
     def step(self, refs):

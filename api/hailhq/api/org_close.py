@@ -131,6 +131,10 @@ async def _counts_as_refused(
         item = await db.get(model, item_id)
         if item is None:
             return False, status
+        if kind != "refused" and FAILING_SINCE not in (getattr(item, column) or {}):
+            # Nothing to clear: skip the row lock and the commit.
+            await db.rollback()
+            return False, status
         await db.refresh(item, with_for_update=True)
         data = getattr(item, column) or {}
         since = data.get(FAILING_SINCE)

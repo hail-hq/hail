@@ -3164,6 +3164,116 @@ async def test_cancel_with_the_real_telnyx_plugin(
 
 
 @pytest.mark.parametrize(
+    ("answer", "refused", "status"),
+    [
+        (400, True, 400),
+        (403, True, 403),
+        (409, True, 409),
+        (500, False, None),
+        (429, False, None),
+        ("timeout", False, None),
+    ],
+)
+async def test_cancel_when_telnyx_refuses_a_number_unlink(
+    client, org_and_key, async_session, answer, refused, status
+) -> None:
+    """The real Telnyx plug-in, with the number unlink failing and the
+    campaign and brand deletes working. A refusal (a 400 every time) does
+    not block the cancel: it goes through with the number named in
+    ``discard_refused``. An outage answers 503 and changes nothing."""
+    org_id, _, key = org_and_key
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.path)
+        if "/10dlc/phone_number_campaigns/" not in request.url.path:
+            return httpx.Response(200, json={})
+        if answer == "timeout":
+            raise httpx.ReadTimeout("slow", request=request)
+        return httpx.Response(answer, json={"errors": []})
+
+    telnyx = TelnyxSmsRegistrationProvider(
+        api_key="k",
+        client=httpx.AsyncClient(
+            transport=httpx.MockTransport(handler),
+            base_url="https://api.telnyx.com/v2",
+        ),
+    )
+    app.dependency_overrides[get_verification_registry] = lambda: (
+        lambda name, purpose="number": telnyx if name == "telnyx" else None
+    )
+    try:
+        row = _telnyx_row(org_id)
+        async_session.add(row)
+        await async_session.commit()
+        number = await _us_number(
+            async_session, org_id, provider="telnyx", resource="TN1"
+        )
+        number.sms_registration_id = row.id
+        await async_session.commit()
+
+        resp = await client.delete(f"/verifications/{row.id}", headers=_auth(key))
+    finally:
+        app.dependency_overrides.pop(get_verification_registry, None)
+
+    await async_session.refresh(row)
+    await async_session.refresh(number)
+    if refused:
+        assert resp.status_code == 200, resp.text
+        assert row.state == "cancelled" and row.cancelled_at is not None
+        # The campaign and brand are deleted all the same.
+        assert any("/10dlc/campaign/C1" in c for c in calls)
+        mark = row.provider_refs[verifications_routes.DISCARD_REFUSED]
+        assert mark["status"] == status
+        assert mark["held"]["brand_id"] == "B1"
+        assert mark["unlinks"] == [
+            {
+                "number_id": str(number.id),
+                "provider_resource_id": "TN1",
+                "status": status,
+            }
+        ]
+        assert number.sms_registration_id is None
+    else:
+        assert resp.status_code == 503, resp.text
+        assert row.state == "approved" and row.cancelled_at is None
+        assert row.provider_refs["brand_id"] == "B1"
+        assert row.provider_refs["campaign_id"] == "C1"
+        assert verifications_routes.DISCARD_REFUSED not in row.provider_refs
+        assert number.sms_registration_id == row.id
+
+
+async def test_cancel_locked_raises_a_refused_unlink_without_mark_refused(
+    org_and_key, sms_carrier, async_session
+) -> None:
+    """Account close (``mark_refused`` False): a refused unlink raises
+    ``DiscardRefused`` with the carrier's status, after the discard ran, so
+    the close applies its retry window."""
+    from hailhq.core.carrier_routing import carrier_http_status
+
+    org_id, _, _ = org_and_key
+    row = _telnyx_row(org_id)
+    row.provider = "fake"
+    async_session.add(row)
+    await async_session.commit()
+    number = await _us_number(async_session, org_id)
+    number.sms_registration_id = row.id
+    await async_session.commit()
+
+    async def refuse(refs, *, provider_resource_id, e164):
+        raise CarrierRequestError(403)
+
+    sms_carrier.detach_number = refuse
+    with pytest.raises(DiscardRefused) as raised:
+        await verifications_routes.cancel_locked(
+            async_session, row, sms_carrier, keep_brand=False
+        )
+    assert carrier_http_status(raised.value) == 403
+    assert sms_carrier.discarded  # the discard ran first
+    await async_session.rollback()
+
+
+@pytest.mark.parametrize(
     ("error", "refused"),
     [
         (TwilioRestException(400, "u", msg="x"), True),
@@ -3626,9 +3736,11 @@ async def test_campaign_id_written_during_a_poll_is_saved(
     assert decided == []
 
 
+@pytest.mark.parametrize("unlink_error", [None, CarrierRequestError(400)])
 async def test_telnyx_release_unlinks_the_number_from_the_campaign(
-    client, org_and_key, async_session, monkeypatch
+    client, org_and_key, async_session, monkeypatch, unlink_error
 ) -> None:
+    """A failed unlink is logged and the release goes on."""
     from unittest.mock import AsyncMock, MagicMock
 
     from hailhq.api.routes import numbers as numbers_routes
@@ -3660,7 +3772,7 @@ async def test_telnyx_release_unlinks_the_number_from_the_campaign(
         "hailhq.core.providers.telnyx.TelnyxClient.release_number", release
     )
     plugin = MagicMock(spec=SmsRegistrationProvider)
-    plugin.detach_number = AsyncMock(return_value=False)
+    plugin.detach_number = AsyncMock(return_value=False, side_effect=unlink_error)
     monkeypatch.setattr(
         numbers_routes,
         "get_verification_provider",

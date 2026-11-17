@@ -573,9 +573,11 @@ class SmsRegistrationProvider(VerificationProvider):
         self, refs: dict, *, provider_resource_id: str, e164: str
     ) -> bool:
         """Take a number off the campaign (before a release, or when the
-        registration is cancelled). Best effort; never raises. True when the
-        number also left its messaging service, so the caller clears
-        ``messaging_service_sid`` and may set the number up again."""
+        registration is cancelled). Not linked (a 404) counts as done. Raises
+        the carrier's error when the link stays; a cancel counts it as a
+        ``discard`` error (``escaped_discard_error``), a release logs it.
+        True when the number also left its messaging service, so the caller
+        clears ``messaging_service_sid`` and may set the number up again."""
         return False
 
     async def confirm(self, refs: dict, code: str) -> list[Problem]:

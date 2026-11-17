@@ -404,18 +404,27 @@ def _log_carrier_refusal(
 
 
 # On a cancelled or rejected row whose carrier delete was refused
-# (``DiscardRefused``), so the row ended in Hail while the carrier still
-# holds a record: ``{"status": <HTTP status or null>, "at": <ISO time>,
-# "held": <the carrier ids>}``. Ops deletes what ``held`` names by hand
+# (``DiscardRefused``), or a number's unlink from it refused, so the row
+# ended in Hail while the carrier still holds a record: ``{"status": <HTTP
+# status or null>, "at": <ISO time>, "held": <the carrier ids>}``, plus
+# ``"unlinks": [{"number_id", "provider_resource_id", "status"}]`` for the
+# numbers the carrier kept linked. Ops deletes what it names by hand
 # (docs/operations/carrier-verification.md).
 DISCARD_REFUSED = "discard_refused"
 
 
-def _refusal_mark(row: CarrierVerification, exc: BaseException, now: datetime) -> dict:
+def _refusal_mark(
+    row: CarrierVerification,
+    exc: BaseException | None,
+    now: datetime,
+    unlinks: list[tuple[PhoneNumber, BaseException]] | None = None,
+) -> dict:
     """``{DISCARD_REFUSED: ...}`` for a row whose ``discard`` raised
-    ``exc`` (a ``DiscardRefused``). ``held`` keeps carrier ids, flags and
-    times, never what the customer typed (``REGISTRATION_ANSWER_REFS``) or
-    a poll's credit reservation. Logged with ids and the status only."""
+    ``exc`` (a ``DiscardRefused``; None when only ``unlinks`` were
+    refused). ``held`` keeps carrier ids, flags and times, never what the
+    customer typed (``REGISTRATION_ANSWER_REFS``) or a poll's credit
+    reservation. ``status`` is the discard's, else the first refused
+    unlink's. Logged with ids and the status only."""
     refs = row.provider_refs or {}
     dropped = {*REGISTRATION_ANSWER_REFS, "campaign_reserved_at", DISCARD_REFUSED}
     # A row refused before (a rejected row then dismissed) keeps what the
@@ -424,22 +433,32 @@ def _refusal_mark(row: CarrierVerification, exc: BaseException, now: datetime) -
         **(refs.get(DISCARD_REFUSED) or {}).get("held", {}),
         **{k: v for k, v in refs.items() if k not in dropped},
     }
-    status = carrier_http_status(exc)
+    refused_unlinks = [
+        {
+            "number_id": str(number.id),
+            "provider_resource_id": number.provider_resource_id,
+            "status": carrier_http_status(error),
+        }
+        for number, error in unlinks or []
+    ]
+    if exc is not None:
+        status = carrier_http_status(exc)
+    else:
+        status = refused_unlinks[0]["status"]
     logger.warning(
-        "verification %s (org %s): the carrier refused the delete (HTTP %s); "
-        "the row ends in Hail, its carrier ids are kept in %s",
+        "verification %s (org %s): the carrier refused the delete (HTTP %s, "
+        "%d number unlinks refused); the row ends in Hail, its carrier ids "
+        "are kept in %s",
         row.id,
         row.organization_id,
         status,
+        len(refused_unlinks),
         DISCARD_REFUSED,
     )
-    return {
-        DISCARD_REFUSED: {
-            "status": status,
-            "at": now.isoformat(),
-            "held": held,
-        }
-    }
+    mark = {"status": status, "at": now.isoformat(), "held": held}
+    if refused_unlinks:
+        mark["unlinks"] = refused_unlinks
+    return {DISCARD_REFUSED: mark}
 
 
 def _wiped_refs(row: CarrierVerification) -> dict:
@@ -3605,17 +3624,20 @@ async def cancel_locked(
     ``discard_rejected`` would keep too (account close). ``now`` is the
     caller's clock (default: the current time). Returns the state before.
 
-    Raises ``VerificationProviderError`` when the carrier delete must be
-    tried again (an outage; ``discard``): nothing is wiped, so the caller
-    rolls back and keeps the row and its ids. A refusal
-    (``DiscardRefused``) raises too, unless ``mark_refused``: then the row
-    is cancelled in Hail all the same, and the carrier ids are kept under
+    Raises ``VerificationProviderError`` when the carrier delete or a
+    number's unlink must be tried again (an outage; ``discard``): nothing
+    is wiped, so the caller rolls back and keeps the row and its ids. A
+    refusal of either (``DiscardRefused``) raises too, after the discard
+    ran, unless ``mark_refused``: then the row is cancelled in Hail all the
+    same, and the carrier ids and the refused unlinks are kept under
     ``DISCARD_REFUSED`` with the carrier's status."""
     now = now or datetime.now(timezone.utc)
     state_before = row.state
+    unlinks: list[tuple[PhoneNumber, BaseException]] = []
     if row.purpose == "sms" and row.state in ("approved", "submitted"):
-        await _detach_registration(db, row, provider, now)
+        unlinks = await _detach_registration(db, row, provider, now)
     kept: dict = {}
+    refused: DiscardRefused | None = None
     try:
         # An error that escaped the plug-in's steps (a bug, a raw carrier
         # error) counts as discard would have raised it.
@@ -3633,7 +3655,11 @@ async def cancel_locked(
     except DiscardRefused as exc:
         if not mark_refused:
             raise
-        kept = _refusal_mark(row, exc, now)
+        refused = exc
+    if unlinks and not mark_refused:
+        raise DiscardRefused("number unlink refused") from unlinks[0][1]
+    if refused is not None or unlinks:
+        kept = {**kept, **_refusal_mark(row, refused, now, unlinks)}
     row.state, row.provider_refs = "cancelled", {**_wiped_refs(row), **kept}
     row.updated_at = row.cancelled_at = now
     await _release_number_hold(db, row)
@@ -3645,13 +3671,16 @@ async def _detach_registration(
     row: CarrierVerification,
     provider: VerificationProvider | None,
     now: datetime,
-) -> None:
+) -> list[tuple[PhoneNumber, BaseException]]:
     """Take every number off an approved SMS registration that is being
     cancelled. A number that left the registration's own messaging service
     (a person's Twilio campaign) goes back to the organization's service,
-    unless the organization is closed: its numbers are being released."""
+    unless the organization is closed: its numbers are being released.
+    Returns the numbers whose unlink the carrier refused, with the error;
+    an outage raises (``detach_org_numbers``)."""
+    refused: list[tuple[PhoneNumber, BaseException]] = []
     if isinstance(provider, SmsRegistrationProvider):
-        moved = await detach_org_numbers(db, row, provider)
+        moved, refused = await detach_org_numbers(db, row, provider)
         if moved and await org_is_closed(db, row.organization_id, now):
             moved = []
         for number in moved:
@@ -3668,6 +3697,7 @@ async def _detach_registration(
         .where(PhoneNumber.sms_registration_id == row.id)
         .values(sms_registration_id=None)
     )
+    return refused
 
 
 class ConfirmRequest(BaseModel):

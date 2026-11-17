@@ -224,8 +224,8 @@ def _reject_if_released(number: PhoneNumber) -> None:
 
 async def _unlink_from_sms_registration(db: AsyncSession, number: PhoneNumber) -> None:
     """Take a number being released off its US SMS registration (Telnyx keeps
-    a released number linked to its campaign). Best effort: the plug-in
-    logs failures."""
+    a released number linked to its campaign). Best effort: a failure is
+    logged, and the release goes on."""
     if number.sms_registration_id is None:
         return
     row = await db.get(CarrierVerification, number.sms_registration_id)
@@ -233,7 +233,15 @@ async def _unlink_from_sms_registration(db: AsyncSession, number: PhoneNumber) -
     if row is None or not isinstance(plugin, SmsRegistrationProvider):
         number.sms_registration_id = None
         return
-    await sms_registration.detach_number(row, plugin, number)
+    try:
+        await sms_registration.detach_number(row, plugin, number)
+    except Exception as exc:
+        logger.warning(
+            "number %s: SMS registration unlink failed before release (%s)",
+            number.id,
+            type(exc).__name__,
+        )
+        number.sms_registration_id = None
 
 
 async def release_org_number(

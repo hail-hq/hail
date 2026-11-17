@@ -9,6 +9,7 @@ from hailhq.core.providers.verification.base import (
     VerificationProviderError,
 )
 from hailhq.core.providers.verification.twilio_sms import TwilioSmsRegistrationProvider
+from twilio.base.exceptions import TwilioRestException
 
 
 class _Node:
@@ -863,6 +864,19 @@ async def test_detach_person_number_leaves_the_person_service() -> None:
     assert [n for n, _ in p._client.calls] == [
         "messaging.v1.services.(MG2).phone_numbers.(PN1).delete"
     ]
+
+
+async def test_detach_person_number_raises_when_the_carrier_refuses() -> None:
+    """The cancel counts the error; only a 404 is done."""
+    r = _ok_responses()
+    r["phone_numbers.delete"] = _raise(_tw(400))
+    p = _provider(r)
+    with pytest.raises(TwilioRestException):
+        await p.detach_number(
+            {"messaging_service_sid": "MG2", "subject_type": "person"},
+            provider_resource_id="PN1",
+            e164="+15125550100",
+        )
 
 
 async def test_detach_business_number_stays_in_the_org_service() -> None:

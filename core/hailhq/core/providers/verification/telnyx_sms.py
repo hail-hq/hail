@@ -1016,16 +1016,22 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
         )
 
     async def detach_number(self, refs, *, provider_resource_id, e164) -> bool:
-        """Unlink a number from its 10DLC campaign. Never raises. The
-        number stays on the organization's messaging profile."""
+        """Unlink a number from its 10DLC campaign. Not linked (404) is
+        done; any other failure raises. The number stays on the
+        organization's messaging profile."""
         try:
             await self._api.request(
                 "DELETE", f"/10dlc/phone_number_campaigns/{path_id(e164)}"
             )
         except httpx.HTTPStatusError as exc:
-            logger.warning("10DLC unlink failed: status=%s", exc.response.status_code)
+            if exc.response.status_code != 404:
+                logger.warning(
+                    "10DLC unlink failed: status=%s", exc.response.status_code
+                )
+                raise
         except (httpx.HTTPError, ValueError) as exc:
             logger.warning("10DLC unlink failed: %s", type(exc).__name__)
+            raise
         return False
 
     async def attach_number(self, refs, *, provider_resource_id, e164) -> None:
