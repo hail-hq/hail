@@ -366,20 +366,51 @@ async def test_subscription_made_after_the_call_gets_no_delivery(
 ) -> None:
     call = await _seed_call(async_session)
     call_id = call.id
-    late = WebhookSubscription(
-        organization_id=call.organization_id,
-        target_url="https://example.com/late",
-        event_types=["call.analyzed"],
-        secret_encrypted="x",
+    [old] = (
+        await async_session.execute(
+            select(WebhookSubscription).where(
+                WebhookSubscription.organization_id == call.organization_id
+            )
+        )
+    ).scalars()
+    old_id = old.id
+    async_session.add(
+        WebhookSubscription(
+            organization_id=call.organization_id,
+            target_url="https://example.com/late",
+            event_types=["call.analyzed"],
+            secret_encrypted="x",
+        )
     )
-    async_session.add(late)
     await async_session.commit()
     turns = await call_transcript(async_session, call_id)
     assert await send_call_analyzed(async_session, call_id, turns, None)
     [delivery] = await _deliveries(async_session, call_id)
-    assert delivery.subscription_id != late.id
+    assert delivery.subscription_id == old_id
     # The same ``at`` text as GET /v1/calls/{id} (pydantic JSON).
     assert delivery.payload["data"]["transcript"][0]["at"].endswith("Z")
+
+
+async def test_a_subscription_changed_after_the_call_gets_no_delivery(
+    async_session,
+) -> None:
+    # The documented rule (webhooks.md): only calls that end after the
+    # subscription was created or last changed are sent. A change while the
+    # call waits (a PATCH, a secret rotation) drops that call's event.
+    call = await _seed_call(async_session)
+    call_id = call.id
+    sub = (
+        await async_session.execute(
+            select(WebhookSubscription).where(
+                WebhookSubscription.organization_id == call.organization_id
+            )
+        )
+    ).scalar_one()
+    sub.updated_at = datetime.now(timezone.utc)
+    await async_session.commit()
+    turns = await call_transcript(async_session, call_id)
+    assert not await send_call_analyzed(async_session, call_id, turns, None)
+    assert await _deliveries(async_session, call_id) == []
 
 
 async def test_the_database_refuses_a_second_marker(async_session) -> None:

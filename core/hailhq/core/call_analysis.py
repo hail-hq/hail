@@ -54,7 +54,7 @@ CLAIM_LEASE = timedelta(minutes=5)
 TURN_KINDS = ("user_turn", "agent_turn")
 # A call not sent this long after its end is dropped (a backlog, or the
 # voicebot down). Old calls are also kept out by the subscription rule in
-# ``next_call_to_analyze``.
+# ``claim_call_to_analyze``.
 ANALYSIS_WINDOW = timedelta(hours=24)
 # Wait this long after the end, so the last turn rows are written first.
 SETTLE_DELAY = timedelta(seconds=10)
@@ -170,13 +170,16 @@ async def claim_call_to_analyze(
     subscription never gets events for older calls).
 
     Only one worker gets a call, across threads and voicebot replicas: the
-    call row is locked ``FOR UPDATE SKIP LOCKED``, checked again, and an
+    call row is locked ``FOR NO KEY UPDATE SKIP LOCKED``, checked again, and an
     ``analyzing`` row is written and committed before the slow model call.
     A claim older than ``CLAIM_LEASE`` no longer counts, so a crashed worker
     does not drop the event. :func:`send_call_analyzed` still checks the
     marker, so a worker whose lease ran out cannot send a second event.
-    Every time here is the DB clock (``now()``), so a voicebot host's clock
-    skew moves neither the windows nor the lease."""
+    "Now" here is the DB clock (``now()``). Claims are written and aged on
+    that clock, so host clock skew does not move the lease. ``ended_at`` and
+    ``updated_at`` are written by the api and voicebot hosts, so the windows
+    still move by those hosts' skew from the DB (normally well under
+    ``SETTLE_DELAY``)."""
     now = func.now()
     # The subscriptions table is small: with no listener, calls is not read.
     orgs = (

@@ -59,7 +59,8 @@ class _Failure:
 # Calls whose last try failed. In memory only: a restart tries such a call
 # again, while it is inside the window. A failed try keeps its claim, so the
 # next try comes after ``CLAIM_LEASE``: the tries outlast a short DB outage,
-# and no other worker runs the model again meanwhile.
+# and no other worker runs the model while the claim lasts. Another replica
+# that picks the call later has no kept summary and runs the model again.
 _failures: dict[uuid.UUID, _Failure] = {}
 
 
