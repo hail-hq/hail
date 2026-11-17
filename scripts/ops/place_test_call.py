@@ -103,13 +103,17 @@ def place_call(
     body = call_body(number, from_number)
     headers = {"Idempotency-Key": str(uuid.uuid4())}
     deadline = clock() + POST_RETRY_WINDOW
+    unsure = False
     while True:
         try:
             response = client.post(url, json=body, headers=headers)
         except httpx.TransportError as exc:
-            response, problem = None, repr(exc)
+            response, problem, unsure = None, repr(exc), True
         if response is not None:
-            if response.status_code == 429:
+            replayed = response.headers.get("Idempotency-Replay") == "true"
+            # A 429 refuses this request. It says nothing about an earlier
+            # one that got no answer, so only then is it tried again.
+            if response.status_code == 429 and unsure and not replayed:
                 wait = max(POST_RETRY_SECONDS, _retry_after(response))
             elif _still_processing(response):
                 wait = POST_RETRY_SECONDS
@@ -125,7 +129,8 @@ def place_call(
         return response.json()
     text = f"POST /v1/calls answered {response.status_code}: {response.text}"
     replayed = response.headers.get("Idempotency-Replay") == "true"
-    if response.status_code >= 500 and not replayed:
+    # 503: Hail had no shared line free and placed nothing.
+    if response.status_code >= 500 and response.status_code != 503 and not replayed:
         raise CallMaybeLive(text)
     raise CallTestError(text)
 
@@ -263,6 +268,8 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         help=f"seconds to wait for the call to end (default {DEFAULT_TIMEOUT_SECONDS})",
     )
     args = parser.parse_args(argv)
+    if args.timeout <= 0:
+        parser.error("--timeout must be more than 0 seconds")
     if not E164.match(args.number):
         parser.error(f"--number must be E.164, like +14155550100: {args.number!r}")
     if not args.confirmed:

@@ -375,3 +375,32 @@ def test_place_call_fresh_refusal_after_a_timeout_is_final():
     client = client_for([httpx.ReadTimeout("slow"), httpx.Response(402)])
     with pytest.raises(ptc.CallTestError, match="402"):
         post(client)
+
+
+def test_place_call_rate_limit_on_the_first_try_is_final():
+    client = client_for([httpx.Response(429, headers={"Retry-After": "5"})])
+    with pytest.raises(ptc.CallTestError, match="429"):
+        post(client)
+
+
+def test_place_call_replayed_rate_limit_is_final():
+    replay = {"Idempotency-Replay": "true"}
+    client = client_for(
+        [httpx.ReadTimeout("slow"), httpx.Response(429, headers=replay)]
+    )
+    with pytest.raises(ptc.CallTestError, match="429"):
+        post(client)
+
+
+def test_place_call_no_free_shared_line_is_final():
+    client = client_for([httpx.Response(503, text="pool exhausted")])
+    with pytest.raises(ptc.CallTestError, match="503"):
+        post(client)
+
+
+def test_refuses_a_timeout_of_zero(monkeypatch):
+    monkeypatch.setenv("HAIL_API_KEY", "hl_test")
+    argv = ["--number", "+14155550100", "--i-will-call-a-customer", "--timeout", "0"]
+    with pytest.raises(SystemExit) as exc:
+        ptc.main(argv)
+    assert exc.value.code == 2
