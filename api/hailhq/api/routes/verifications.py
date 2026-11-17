@@ -889,13 +889,19 @@ async def _delete_kept_of(
 
 
 async def _forget_approved_files(
-    db: AsyncSession, rows: list[CarrierVerification]
+    db: AsyncSession,
+    rows: list[CarrierVerification],
+    *,
+    loaded: list[CarrierVerification] | None = None,
 ) -> None:
     """After a poll's commit: delete the kept files of the number
-    registrations it approved (their answers went in ``_apply_status``)."""
+    registrations it approved (their answers went in ``_apply_status``).
+    ``loaded``: every row the caller still reads (default: ``rows``)."""
     approved = [r for r in rows if r.purpose == "number" and r.state == "approved"]
     if approved:
-        await _forget_kept_files(db, [r.id for r in approved], loaded=tuple(rows))
+        await _forget_kept_files(
+            db, [r.id for r in approved], loaded=tuple(loaded or rows)
+        )
 
 
 async def _settle_sms_approval(
@@ -1716,7 +1722,7 @@ async def refresh_number_verifications(
         if await _poll_and_apply(db, r, st, registry, b)
     ]
     await db.commit()  # saves changes and ends the row locks
-    await _forget_approved_files(db, changed)
+    await _forget_approved_files(db, changed, loaded=rows)
     _notify_billing(changed)
 
 
@@ -2794,8 +2800,9 @@ async def _keep_files(
             verification_id,
             type(exc).__name__,
         )
-        # The rollback expired the row; the caller still answers with it.
-        await db.refresh(row)
+        # The rollback expired the rows the caller still reads.
+        for loaded in (row, *prepared.uploads):
+            await db.refresh(loaded)
 
 
 async def _delete_used_uploads(
@@ -3884,7 +3891,7 @@ async def list_verifications(
     ]
     if asked:
         await db.commit()  # saves changes and ends the row locks
-    await _forget_approved_files(db, changed)
+    await _forget_approved_files(db, changed, loaded=rows)
     _notify_billing(changed)
     for row in sorted(gated, key=lambda r: r.created_at):  # oldest first
         await _refresh(db, row, registry)
