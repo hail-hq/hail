@@ -53,9 +53,10 @@ CLAIM_KIND = "analyzing"
 CLAIM_LEASE = timedelta(minutes=5)
 TURN_KINDS = ("user_turn", "agent_turn")
 # A call not sent this long after its end is dropped (a backlog, or the
-# voicebot down). This is the only age limit; the subscription rule in
-# ``claim_call_to_analyze`` only keeps out calls that ended before a
-# subscription was created or changed.
+# voicebot down). The other limits: ``claim_call_to_analyze`` reads only
+# calls created in the last ANALYSIS_WINDOW plus a day (an index bound; no
+# call runs a day), and its subscription rule keeps out calls that ended
+# before a subscription was created or changed.
 ANALYSIS_WINDOW = timedelta(hours=24)
 # Wait this long after the end, so the last turn rows are written first.
 SETTLE_DELAY = timedelta(seconds=10)
@@ -177,12 +178,12 @@ async def claim_call_to_analyze(
     does not drop the event. :func:`send_call_analyzed` still checks the
     marker, so a worker whose lease ran out cannot send a second event.
     "Now" here is the DB clock (``now()``). Claims are written and aged on
-    that clock, so host clock skew does not move the lease. ``ended_at`` and
-    ``updated_at`` come from either clock (the api or voicebot host, or the
-    DB's ``now()`` for a sweeper-ended call or a new subscription), so the
-    windows can move by host skew. The ``updated_at <= ended_at`` check
-    compares two such values: a call that ends within the skew of a
-    subscription change can fall on either side."""
+    that clock, so host clock skew does not move the lease. A subscription's
+    ``updated_at`` is the DB clock too (create default, PATCH, rotation).
+    ``ended_at`` is the voicebot or api host clock (the DB's ``now()`` for a
+    sweeper-ended call), so the windows and the ``updated_at <= ended_at``
+    check can move by that host's skew: a call that ends within the skew of
+    a subscription change can fall on either side."""
     now = func.now()
     # The subscriptions table is small: with no listener, calls is not read.
     orgs = (

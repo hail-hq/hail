@@ -203,6 +203,7 @@ async def test_two_workers_run_the_model_once(async_session, llm, monkeypatch) -
 
 async def test_a_failed_try_keeps_its_claim(async_session, llm, monkeypatch) -> None:
     await _seed(async_session)
+    real_send = callsummary.send_call_analyzed
 
     async def broken_send(db, cid, turns, summary):
         raise RuntimeError("db down")
@@ -210,8 +211,9 @@ async def test_a_failed_try_keeps_its_claim(async_session, llm, monkeypatch) -> 
     monkeypatch.setattr(callsummary, "send_call_analyzed", broken_send)
     with pytest.raises(RuntimeError):
         await callsummary.analyze_once()
-    # Forget this process's failure, as another replica would: the DB claim
-    # alone keeps the call for the lease, so no second model run.
+    monkeypatch.setattr(callsummary, "send_call_analyzed", real_send)
+    # Drop the kept summary, as another replica has none: a re-pick would
+    # run the model again. The DB claim keeps the call for the lease.
     callsummary._failures.clear()
     assert not await callsummary.analyze_once()
     assert llm["built"] == 1

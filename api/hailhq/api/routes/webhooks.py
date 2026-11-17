@@ -46,7 +46,7 @@ from hailhq.core.schemas import (
 )
 from hailhq.core.secret_cipher import SecretCipher
 from hailhq.core.webhook_events import WebhookEventType
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(
@@ -233,7 +233,9 @@ async def patch_subscription(
         if body.status == "active":
             updates["consecutive_failures"] = 0
     if updates:
-        updates["updated_at"] = datetime.now(timezone.utc)
+        # DB clock, like the create default: call.analyzed compares it with
+        # call end times (hailhq.core.call_analysis).
+        updates["updated_at"] = func.now()
         await db.execute(
             update(WebhookSubscription)
             .where(WebhookSubscription.id == sub.id)
@@ -309,7 +311,7 @@ async def rotate_secret(
         .where(WebhookSubscription.id == sub.id)
         .values(
             secret_encrypted=cipher.encrypt(secret),
-            updated_at=datetime.now(timezone.utc),
+            updated_at=func.now(),
         )
     )
     await db.commit()
