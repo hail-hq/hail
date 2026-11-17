@@ -2344,8 +2344,13 @@ class VerificationDocumentWarning(BaseModel):
 class VerificationPrintedName(BaseModel):
     """The name printed on a document, as read. Empty strings when not printed."""
 
-    given_names: str = Field(description="A person's given names.")
-    surnames: str = Field(description="A person's surnames.")
+    given_names: str = Field(
+        description=(
+            "The given names of the person the document is about or "
+            "addressed to, never a person who signs for the issuer."
+        )
+    )
+    surnames: str = Field(description="That person's surnames.")
     latin_given_names: str = Field(
         default="",
         description=(
@@ -2356,7 +2361,12 @@ class VerificationPrintedName(BaseModel):
     latin_surnames: str = Field(
         default="", description="The surnames in Latin letters, the same way."
     )
-    business_name: str = Field(description="A company's name.")
+    business_name: str = Field(
+        description=(
+            "The name of the company the document is about or addressed "
+            "to, never the company that issued it."
+        )
+    )
 
 
 class VerificationDocumentRead(BaseModel):

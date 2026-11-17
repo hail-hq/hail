@@ -10918,11 +10918,12 @@ components:
         given_names:
           type: string
           title: Given Names
-          description: A person's given names.
+          description: The given names of the person the document is about or addressed
+            to, never a person who signs for the issuer.
         surnames:
           type: string
           title: Surnames
-          description: A person's surnames.
+          description: That person's surnames.
         latin_given_names:
           type: string
           title: Latin Given Names
@@ -10938,7 +10939,8 @@ components:
         business_name:
           type: string
           title: Business Name
-          description: A company's name.
+          description: The name of the company the document is about or addressed to,
+            never the company that issued it.
       type: object
       required:
         - given_names
