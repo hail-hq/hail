@@ -17,6 +17,7 @@ from hailhq.core.models import (
     OrgClosure,
     PhoneNumber,
 )
+from hailhq.core.providers.verification.base import DiscardRefused
 from hailhq.core.providers.verification.telnyx_sms import (
     TelnyxSmsRegistrationProvider,
 )
@@ -468,14 +469,23 @@ async def test_a_failed_order_number_not_given_back_is_released_or_refused(
     voice_provider_mock.release_number.side_effect = release
     counts = await _run(async_session, verifier)
 
-    assert counts.released == 1 and counts.refused == 1
+    # The number, then the registration it blocks.
+    assert counts.released == 1 and counts.refused == 2
     await async_session.refresh(given)
     await async_session.refresh(refused)
     await async_session.refresh(covering)
     assert "unreleased_resource_id" not in given.provisioning_metadata
     assert refused.provisioning_metadata["release_refused"]["status"] == 422
-    # The refusal is final: the registration it blocked is cancelled.
-    assert covering.state == "cancelled" and counts.waiting == 0
+    # The number still uses the registration: it is not cancelled, its ids
+    # stay for the delete by hand, and it is marked for ops.
+    assert covering.state == "approved" and verifier.discarded == []
+    assert covering.provider_refs["bundle_sid"] == "B1"
+    mark = covering.provider_refs["close_refused"]
+    assert mark["status"] is None and mark["number_id"] == str(refused.id)
+    assert counts.waiting == 0
+    voice_provider_mock.release_number.reset_mock()
+    again = await _run(async_session, verifier)
+    assert again.as_dict() == dict.fromkeys(again.as_dict(), 0)
 
 
 async def test_the_self_hosted_org_is_never_closed(
@@ -492,3 +502,176 @@ async def test_the_self_hosted_org_is_never_closed(
     await async_session.refresh(number)
     await async_session.refresh(row)
     assert number.provisioning_state == "active" and row.state == "approved"
+
+
+def _refused(cause: Exception) -> DiscardRefused:
+    """A ``DiscardRefused`` raised from ``cause``, as the plug-ins raise it."""
+    try:
+        try:
+            raise cause
+        except Exception as exc:
+            raise DiscardRefused("refused") from exc
+    except DiscardRefused as refused:
+        return refused
+
+
+async def _at(session, verifier, at):
+    return await close_org_carrier_items(session, at, _registry(verifier), None)
+
+
+@pytest.mark.parametrize("status", [401, 408, 425, 429])
+async def test_a_4xx_that_means_not_now_is_retried_with_no_limit(
+    async_session, voice_provider_mock, verifier, status
+) -> None:
+    """Hail's own credentials (401) and timing (408, 425, 429) never count
+    toward the retry window, for a number or a registration."""
+    org = uuid.uuid4()
+    await _close(async_session, org)
+    number = await _number(async_session, org)
+    row = await _verification(async_session, org, "approved", "B7", country_code="GB")
+    voice_provider_mock.release_number.side_effect = CarrierRequestError(status)
+    verifier.fail["B7"] = CarrierRequestError(status)
+    start = datetime.now(timezone.utc)
+
+    for at in (start, start + timedelta(days=8), start + timedelta(days=30)):
+        counts = await _at(async_session, verifier, at)
+        assert counts.failed == 2 and counts.refused == 0
+    await async_session.refresh(number)
+    await async_session.refresh(row)
+    assert "release_refused" not in number.provisioning_metadata
+    assert "close_failing_since" not in number.provisioning_metadata
+    assert "close_refused" not in row.provider_refs
+    assert "close_failing_since" not in row.provider_refs
+
+
+async def test_the_retry_window_only_counts_refusals_that_keep_coming(
+    async_session, voice_provider_mock, verifier
+) -> None:
+    """An outage between two refusals clears the window, and so does a
+    release that worked."""
+    org = uuid.uuid4()
+    await _close(async_session, org)
+    number = await _number(async_session, org)
+    row = await _verification(async_session, org, "approved", "B7", country_code="GB")
+    start = datetime.now(timezone.utc)
+
+    voice_provider_mock.release_number.side_effect = CarrierRequestError(403)
+    verifier.fail["B7"] = CarrierRequestError(403)
+    await _at(async_session, verifier, start)
+    await async_session.refresh(row)
+    assert row.provider_refs["close_failing_since"] == start.isoformat()
+
+    # An outage: the window starts again.
+    voice_provider_mock.release_number.side_effect = CarrierRequestError(503)
+    verifier.fail["B7"] = CarrierRequestError(503)
+    await _at(async_session, verifier, start + timedelta(days=1))
+    await async_session.refresh(number)
+    await async_session.refresh(row)
+    assert "close_failing_since" not in number.provisioning_metadata
+    assert "close_failing_since" not in row.provider_refs
+
+    # A refusal after 8 days counts from now, not from the first one.
+    later = start + timedelta(days=8)
+    voice_provider_mock.release_number.side_effect = CarrierRequestError(409)
+    verifier.fail["B7"] = CarrierRequestError(409)
+    counts = await _at(async_session, verifier, later)
+    assert counts.refused == 0 and counts.failed == 2
+    await async_session.refresh(number)
+    assert number.provisioning_metadata["close_failing_since"] == later.isoformat()
+
+    # The release works: its window is cleared.
+    voice_provider_mock.release_number.side_effect = None
+    counts = await _at(async_session, verifier, later + timedelta(days=1))
+    assert counts.released == 1
+    await async_session.refresh(number)
+    assert number.provisioning_state == "released"
+    assert "close_failing_since" not in number.provisioning_metadata
+
+
+async def test_a_bug_in_a_carrier_delete_is_retried_for_the_window_only(
+    async_session, voice_provider_mock, verifier
+) -> None:
+    """A delete step that failed with no carrier answer (DiscardRefused, a
+    bug) counts like a 403: marked after CLOSE_RETRY_FOR, status null."""
+    org = uuid.uuid4()
+    await _close(async_session, org)
+    row = await _verification(async_session, org, "approved", "B7")
+    verifier.fail["B7"] = _refused(KeyError("x"))
+    start = datetime.now(timezone.utc)
+
+    counts = await _at(async_session, verifier, start)
+    assert counts.failed == 1
+    counts = await _at(async_session, verifier, start + timedelta(days=7))
+    assert counts.refused == 1
+    await async_session.refresh(row)
+    assert row.state == "approved" and row.provider_refs["bundle_sid"] == "B7"
+    assert row.provider_refs["close_refused"]["status"] is None
+
+
+async def test_an_error_outside_a_carrier_step_is_retried_with_no_limit(
+    async_session, voice_provider_mock, verifier
+) -> None:
+    """A raw error that is not a carrier answer (a database error, say) is
+    not a refusal: no window."""
+    org = uuid.uuid4()
+    await _close(async_session, org)
+    row = await _verification(async_session, org, "approved", "B7")
+    verifier.fail["B7"] = RuntimeError("db")
+    start = datetime.now(timezone.utc)
+    for at in (start, start + timedelta(days=30)):
+        counts = await _at(async_session, verifier, at)
+        assert counts.failed == 1 and counts.refused == 0
+    await async_session.refresh(row)
+    assert "close_failing_since" not in row.provider_refs
+
+
+@pytest.mark.parametrize(("answer", "refused_at_once"), [(400, True), (403, False)])
+async def test_a_refused_brand_delete_with_the_real_telnyx_plugin(
+    async_session, voice_provider_mock, answer, refused_at_once
+) -> None:
+    """Telnyx refuses to delete a brand for 3 months after its campaign: a
+    403 is retried for the window, then marked; a 400 is marked at once.
+    The carrier ids stay either way."""
+    org = uuid.uuid4()
+    await _close(async_session, org)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "/10dlc/brand/" in request.url.path:
+            return httpx.Response(answer, json={})
+        return httpx.Response(200, json={})
+
+    telnyx = TelnyxSmsRegistrationProvider(
+        api_key="k",
+        client=httpx.AsyncClient(
+            transport=httpx.MockTransport(handler),
+            base_url="https://api.telnyx.com/v2",
+        ),
+    )
+    row = CarrierVerification(
+        organization_id=org,
+        provider="telnyx",
+        country_code="US",
+        number_type="local",
+        subject_type="business",
+        subject_name="Acme",
+        purpose="sms",
+        state="approved",
+        provider_refs={"brand_id": "B1", "campaign_id": "C1"},
+        requirements_version="1",
+    )
+    async_session.add(row)
+    await async_session.commit()
+    start = datetime.now(timezone.utc)
+
+    async def run(at):
+        return await close_org_carrier_items(async_session, at, lambda *_: telnyx, None)
+
+    counts = await run(start)
+    if not refused_at_once:
+        assert counts.failed == 1 and counts.refused == 0
+        counts = await run(start + timedelta(days=7))
+    assert counts.refused == 1
+    await async_session.refresh(row)
+    assert row.state == "approved"
+    assert row.provider_refs["close_refused"]["status"] == answer
+    assert row.provider_refs["brand_id"] == "B1"

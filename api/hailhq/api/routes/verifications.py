@@ -69,6 +69,7 @@ from hailhq.core import (
 )
 from hailhq.core.billing import get_balance_cents, get_ledger_cents
 from hailhq.core.carrier_offer import Approval
+from hailhq.core.carrier_routing import carrier_http_status
 from hailhq.core.config import SELF_HOSTED_ORG_ID, settings
 from hailhq.core.db import (
     get_session,
@@ -113,6 +114,7 @@ from hailhq.core.providers.verification import (
     get_verification_provider,
     length_problems,
 )
+from hailhq.core.providers.verification.base import DiscardRefused
 from hailhq.core.providers.verification.document_check import (
     check_documents,
     document_cautions,
@@ -121,6 +123,7 @@ from hailhq.core.providers.verification.forms import validate_input
 from hailhq.core.providers.verification.sms_form import campaign_text
 from hailhq.core.providers.verification.sms_review import same_sender
 from hailhq.core.retention import (
+    REGISTRATION_ANSWER_REFS,
     clear_closed_org_registrations,
     org_closed,
     org_is_closed,
@@ -397,12 +400,54 @@ def _log_carrier_refusal(
         )
 
 
+# On a cancelled or rejected row whose carrier delete was refused
+# (``DiscardRefused``), so the row ended in Hail while the carrier still
+# holds a record: ``{"status": <HTTP status or null>, "at": <ISO time>,
+# "held": <the carrier ids>}``. Ops deletes what ``held`` names by hand
+# (docs/operations/carrier-verification.md).
+DISCARD_REFUSED = "discard_refused"
+
+
+def _refusal_mark(row: CarrierVerification, exc: BaseException, now: datetime) -> dict:
+    """``{DISCARD_REFUSED: ...}`` for a row whose ``discard`` raised
+    ``exc`` (a ``DiscardRefused``). ``held`` keeps carrier ids, flags and
+    times, never what the customer typed (``REGISTRATION_ANSWER_REFS``) or
+    a poll's credit reservation. Logged with ids and the status only."""
+    refs = row.provider_refs or {}
+    dropped = {*REGISTRATION_ANSWER_REFS, "campaign_reserved_at", DISCARD_REFUSED}
+    # A row refused before (a rejected row then dismissed) keeps what the
+    # carrier held then.
+    held = {
+        **(refs.get(DISCARD_REFUSED) or {}).get("held", {}),
+        **{k: v for k, v in refs.items() if k not in dropped},
+    }
+    status = carrier_http_status(exc)
+    logger.warning(
+        "verification %s (org %s): the carrier refused the delete (HTTP %s); "
+        "the row ends in Hail, its carrier ids are kept in %s",
+        row.id,
+        row.organization_id,
+        status,
+        DISCARD_REFUSED,
+    )
+    return {
+        DISCARD_REFUSED: {
+            "status": status,
+            "at": now.isoformat(),
+            "held": held,
+        }
+    }
+
+
 def _wiped_refs(row: CarrierVerification) -> dict:
     """``provider_refs`` once emptied. A filing that reused a brand keeps the
     mark: the fee rater reads it on every sweep, and without it would bill
-    the submission."""
+    the submission. A ``DISCARD_REFUSED`` mark stays: it names what the
+    carrier still holds."""
     refs = row.provider_refs or {}
     kept = {"brand_reused": True} if refs.get("brand_reused") else {}
+    if DISCARD_REFUSED in refs:
+        kept[DISCARD_REFUSED] = copy.deepcopy(refs[DISCARD_REFUSED])
     # Expired answers are not carried over: a dismissal stamps a new
     # ``cancelled_at``, which would make them readable for 30 more days.
     if (
@@ -1181,7 +1226,14 @@ async def _rate_before_wipe(
 
     Commits first (True when it did), which ends any row lock. Never call
     it while holding the organization's lock (``org_lock``): the rater
-    takes the same lock."""
+    takes the same lock.
+
+    Safe before a cancel that then rolls back (a carrier outage, 503): the
+    stamp only records that a campaign was filed, which stays true, and is
+    never overwritten (``_stamp_campaign_filed``). The rater is idempotent:
+    one ledger row per registration and step, keyed on its ref, so the
+    review it charges here is owed whether or not the cancel goes through,
+    and a later ping or sweep does not charge it again."""
     if (
         row.purpose != "sms"
         or row.number_type == "toll_free"
@@ -2969,9 +3021,14 @@ async def _reject_row(
         await db.rollback()
         await db.refresh(row)
         return "moved"
+    refused: dict = {}
     try:
         async with _plugin_call(row, provider):
             await provider.discard(row.provider_refs)
+    except DiscardRefused as exc:
+        # The carrier keeps the draft: rejected in Hail all the same, so the
+        # pass does not submit and discard it again on every tick.
+        refused = _refusal_mark(row, exc, datetime.now(timezone.utc))
     except Exception:
         logger.exception("verification discard failed for %s", row.id)
         if kept_state is not None:
@@ -2981,7 +3038,7 @@ async def _reject_row(
         return "kept"
     # Wiped before the state moves: the row has not ended yet, so its
     # answers are kept however long it waited.
-    row.provider_refs = _wiped_refs(row)
+    row.provider_refs = {**_wiped_refs(row), **refused}
     row.state, row.rejection_reason = "rejected", reason
     row.approved_by = None
     row.updated_at = datetime.now(timezone.utc)
@@ -3471,7 +3528,12 @@ async def cancel_verification(
     charged through the month of the cancellation, then stops. Some carriers
     bill a minimum number of monthly fees from approval: a registration
     cancelled sooner is still charged for that many months (prices: see the
-    console)."""
+    console).
+
+    When the carrier is down or rate-limits the delete, the call answers
+    503 and changes nothing: try again later. When the carrier refuses the
+    delete, the verification is cancelled in Hail all the same and Hail's
+    fees stop as above; Hail support deletes it at the carrier."""
     row = await _org_row_or_404(db, principal, verification_id)
     await db.refresh(row, with_for_update=True)
     if not _can_cancel(row):
@@ -3496,9 +3558,10 @@ async def cancel_verification(
         )
     approved_sms = row.purpose == "sms" and row.state in ("approved", "submitted")
     try:
-        state_before = await cancel_locked(db, row, provider)
+        state_before = await cancel_locked(db, row, provider, mark_refused=True)
     except VerificationProviderError as exc:
-        # The carrier still holds the filing: keep the row and its ids.
+        # An outage: the carrier still holds the filing and may delete it on
+        # a retry. Keep the row and its ids, unchanged.
         await db.rollback()
         raise HTTPException(
             status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -3527,6 +3590,8 @@ async def cancel_locked(
     provider: VerificationProvider | None,
     *,
     keep_brand: bool = True,
+    mark_refused: bool = False,
+    now: datetime | None = None,
 ) -> str:
     """Cancel ``row`` at the carrier and in Hail: numbers leave an approved
     SMS registration, the carrier draft or filing is discarded, the refs
@@ -3534,23 +3599,33 @@ async def cancel_locked(
     goes back. The caller holds the org lock and the row lock, decides
     whether the row may be cancelled, commits, and rates, notifies and
     audits. ``keep_brand`` False discards a rejected filing whole, a brand
-    ``discard_rejected`` would keep too (account close). Returns the state
-    before. Raises ``VerificationProviderError`` when the carrier delete
-    must be tried again (``discard``): nothing is wiped, so the caller rolls
-    back and keeps the row and its ids."""
+    ``discard_rejected`` would keep too (account close). ``now`` is the
+    caller's clock (default: the current time). Returns the state before.
+
+    Raises ``VerificationProviderError`` when the carrier delete must be
+    tried again (an outage; ``discard``): nothing is wiped, so the caller
+    rolls back and keeps the row and its ids. A refusal
+    (``DiscardRefused``) raises too, unless ``mark_refused``: then the row
+    is cancelled in Hail all the same, and the carrier ids are kept under
+    ``DISCARD_REFUSED`` with the carrier's status."""
+    now = now or datetime.now(timezone.utc)
     state_before = row.state
     if row.purpose == "sms" and row.state in ("approved", "submitted"):
-        await _detach_registration(db, row, provider)
+        await _detach_registration(db, row, provider, now)
     kept: dict = {}
-    if (
-        keep_brand
-        and isinstance(provider, SmsRegistrationProvider)
-        and row.state == "rejected"
-    ):
-        kept = await provider.discard_rejected(row.provider_refs)
-    elif provider is not None:
-        await provider.discard(row.provider_refs)
-    now = datetime.now(timezone.utc)
+    try:
+        if (
+            keep_brand
+            and isinstance(provider, SmsRegistrationProvider)
+            and row.state == "rejected"
+        ):
+            kept = await provider.discard_rejected(row.provider_refs)
+        elif provider is not None:
+            await provider.discard(row.provider_refs)
+    except DiscardRefused as exc:
+        if not mark_refused:
+            raise
+        kept = _refusal_mark(row, exc, now)
     row.state, row.provider_refs = "cancelled", {**_wiped_refs(row), **kept}
     row.updated_at = row.cancelled_at = now
     await _release_number_hold(db, row)
@@ -3558,7 +3633,10 @@ async def cancel_locked(
 
 
 async def _detach_registration(
-    db: AsyncSession, row: CarrierVerification, provider: VerificationProvider | None
+    db: AsyncSession,
+    row: CarrierVerification,
+    provider: VerificationProvider | None,
+    now: datetime,
 ) -> None:
     """Take every number off an approved SMS registration that is being
     cancelled. A number that left the registration's own messaging service
@@ -3566,7 +3644,7 @@ async def _detach_registration(
     unless the organization is closed: its numbers are being released."""
     if isinstance(provider, SmsRegistrationProvider):
         moved = await detach_org_numbers(db, row, provider)
-        if moved and await org_is_closed(db, row.organization_id):
+        if moved and await org_is_closed(db, row.organization_id, now):
             moved = []
         for number in moved:
             try:
@@ -3818,11 +3896,15 @@ async def admin_reject(
             status_code=http_status.HTTP_409_CONFLICT,
             detail="this verification changed meanwhile; reload and try again",
         )
+    refused: dict = {}
     if provider is not None:
         before = _billing_view(row)
         try:
             async with _plugin_call(row, provider):
                 await provider.discard(row.provider_refs)
+        except DiscardRefused as exc:
+            # The carrier keeps the draft: rejected in Hail all the same.
+            refused = _refusal_mark(row, exc, datetime.now(timezone.utc))
         except Exception as exc:
             # The row keeps its state and its refs; reject again later.
             # Touched, so the background pass waits before it retries a
@@ -3832,7 +3914,7 @@ async def admin_reject(
             await _commit_and_notify(db, row, before)
             raise _carrier_unavailable() from exc
     # Wiped before the state moves (see _reject_row).
-    row.provider_refs = _wiped_refs(row)
+    row.provider_refs = {**_wiped_refs(row), **refused}
     row.state, row.rejection_reason = "rejected", body.reason
     row.updated_at = datetime.now(timezone.utc)
     await _release_number_hold(db, row)

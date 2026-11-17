@@ -21,6 +21,7 @@ from hailhq.core.providers.verification.base import (
     SAME_DOCUMENT,
     VALUE_NOT_ACCEPTED,
     Address,
+    DiscardFailures,
     DocumentInput,
     DocumentOption,
     DocumentSlot,
@@ -35,7 +36,6 @@ from hailhq.core.providers.verification.base import (
     UnsupportedSubjectType,
     VerificationProvider,
     VerificationProviderError,
-    discard_step_retry,
 )
 from hailhq.core.providers.verification.forms import (
     display_name,
@@ -780,15 +780,13 @@ class TwilioVerificationProvider(VerificationProvider):
             steps.append(
                 ("address", self._client.addresses(refs["address_sid"]).delete)
             )
-        retry: Exception | None = None
+        failures = DiscardFailures("twilio")
         for key, step in steps:
             try:
                 step()
             except Exception as exc:
-                if discard_step_retry(exc, carrier="twilio", step=key):
-                    retry = retry or exc
-        if retry is not None:
-            raise VerificationProviderError("Twilio discard failed") from retry
+                failures.add(exc, key)
+        failures.raise_any("Twilio discard failed")
 
     async def discard(self, refs: dict) -> None:
         await asyncio.to_thread(self._discard_sync, refs)

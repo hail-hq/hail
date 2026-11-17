@@ -2,7 +2,12 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
-from hailhq.core.providers.verification.base import Address
+import requests
+from hailhq.core.providers.verification.base import (
+    Address,
+    DiscardRefused,
+    VerificationProviderError,
+)
 from hailhq.core.providers.verification.twilio_sms import TwilioSmsRegistrationProvider
 
 
@@ -562,23 +567,64 @@ async def test_discard_order_and_404_does_not_stop_next() -> None:
     ]
 
 
-async def test_discard_raises_on_other_errors_after_every_step() -> None:
-    from hailhq.core.providers.verification.base import VerificationProviderError
-
+async def test_discard_counts_a_bug_as_a_refusal_after_every_step() -> None:
+    """An error with no carrier answer and no network error (a bug) is not
+    retried for good: it raises ``DiscardRefused``."""
     r = _ok_responses()
-    r["trust_products.delete"] = _raise(RuntimeError("x"))
+    r["trust_products.delete"] = _raise(KeyError("x"))
     r["customer_profiles.delete"] = True
     p = _provider(r)
-    with pytest.raises(VerificationProviderError):
+    with pytest.raises(DiscardRefused):
         await p.discard({"profile_sid": "BU1", "trust_sid": "BU2", "brand_sid": "BN1"})
     assert len(p._client.calls) == 2
 
 
-async def test_discard_counts_a_final_refusal_as_done() -> None:
+@pytest.mark.parametrize("error", [requests.ConnectionError("x"), TimeoutError()])
+async def test_discard_counts_a_lost_connection_as_an_outage(error) -> None:
+    r = _ok_responses()
+    r["trust_products.delete"] = _raise(error)
+    with pytest.raises(VerificationProviderError) as raised:
+        await _provider(r).discard({"trust_sid": "BU2"})
+    assert not isinstance(raised.value, DiscardRefused)
+
+
+async def test_discard_raises_refused_on_a_final_refusal() -> None:
     r = _ok_responses()
     r["us_app_to_person.delete"] = _raise(_tw(400))
     p = _provider(r)
-    await p.discard({"messaging_service_sid": "MG1", "campaign_sid": "QE1"})
+    with pytest.raises(DiscardRefused):
+        await p.discard({"messaging_service_sid": "MG1", "campaign_sid": "QE1"})
+
+
+@pytest.mark.parametrize(
+    ("error", "refused"),
+    [
+        (_tw(400), True),
+        (_tw(409), True),
+        (KeyError("x"), True),
+        (_tw(503), False),
+        (_tw(429), False),
+        (requests.ConnectionError("x"), False),
+    ],
+)
+async def test_toll_free_discard_refusal_or_outage(error, refused) -> None:
+    """A refused toll-free delete raises ``DiscardRefused`` (the caller
+    cancels in Hail and keeps the ids); an outage a plain error."""
+    r = _ok_responses()
+    r["tollfree_verifications.delete"] = _raise(error)
+    with pytest.raises(VerificationProviderError) as raised:
+        await _provider(r).discard(
+            {"registration_kind": "toll_free", "tollfree_verification_sid": "HH1"}
+        )
+    assert isinstance(raised.value, DiscardRefused) is refused
+
+
+async def test_toll_free_discard_counts_gone_as_done() -> None:
+    r = _ok_responses()
+    r["tollfree_verifications.delete"] = _raise(_tw(404))
+    await _provider(r).discard(
+        {"registration_kind": "toll_free", "tollfree_verification_sid": "HH1"}
+    )
 
 
 async def test_draft_cleans_up_on_non_twilio_error() -> None:

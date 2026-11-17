@@ -21,6 +21,7 @@ from hailhq.core.providers.verification.base import (
     BRAND_REJECTED,
     SMS_REFUSED,
     SMS_VALUE_REFUSED,
+    DiscardFailures,
     DraftResult,
     Problem,
     ProviderStatus,
@@ -28,7 +29,6 @@ from hailhq.core.providers.verification.base import (
     Requirements,
     SmsRegistrationProvider,
     VerificationProviderError,
-    discard_step_retry,
 )
 from hailhq.core.providers.verification.forms import display_name, text_length
 from hailhq.core.providers.verification.sms_form import (
@@ -1149,17 +1149,15 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
             ("campaign", refs.get("campaign_id")),
             ("brand", refs.get("brand_id")),
         )
-        retry: Exception | None = None
+        failures = DiscardFailures("telnyx 10DLC")
         for key, resource_id in steps:
             if not resource_id:
                 continue
             try:
                 await self._api.request("DELETE", f"/10dlc/{key}/{resource_id}")
             except Exception as exc:
-                if discard_step_retry(exc, carrier="telnyx 10DLC", step=key):
-                    retry = retry or exc
-        if retry is not None:
-            raise VerificationProviderError("Telnyx discard failed") from retry
+                failures.add(exc, key)
+        failures.raise_any("Telnyx discard failed")
 
 
 def _same_person(brand: dict, fields: dict) -> bool:

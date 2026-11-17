@@ -7,6 +7,7 @@ from hailhq.core.providers.verification import telnyx_sms
 from hailhq.core.providers.verification.base import (
     BRAND_REJECTED,
     Address,
+    DiscardRefused,
     Problem,
     RegistrationHoldsAnotherNumber,
     VerificationProviderError,
@@ -873,7 +874,8 @@ async def test_detach_not_linked_does_not_raise() -> None:
 
 async def test_discard_order_and_raises_after_every_step_on_an_outage() -> None:
     """A failed campaign delete is not lost: the caller keeps the ids and
-    tries again. 404 (already gone) and a final refusal count as done."""
+    tries again. 404 (already gone) counts as done; a refusal raises
+    ``DiscardRefused``; a 429 is an outage."""
     calls = []
     codes = {"campaign": 500}
 
@@ -890,13 +892,16 @@ async def test_discard_order_and_raises_after_every_step_on_an_outage() -> None:
         ("DELETE", "/v2/10dlc/campaign/C1"),
         ("DELETE", "/v2/10dlc/brand/B1"),
     ]
-    for status in (404, 422):
+    codes["campaign"] = 404
+    await p.discard({"brand_id": "B1", "campaign_id": "C1"})
+    for status in (403, 409, 422):
         codes["campaign"] = status
-        await p.discard({"brand_id": "B1", "campaign_id": "C1"})
-    for status in (429, 403):
-        codes["campaign"] = status
-        with pytest.raises(VerificationProviderError):
-            await p.discard({"campaign_id": "C1"})
+        with pytest.raises(DiscardRefused):
+            await p.discard({"brand_id": "B1", "campaign_id": "C1"})
+    codes["campaign"] = 429
+    with pytest.raises(VerificationProviderError) as raised:
+        await p.discard({"campaign_id": "C1"})
+    assert not isinstance(raised.value, DiscardRefused)
     await p.discard({})
 
 
@@ -904,8 +909,9 @@ async def test_discard_raises_on_a_timeout() -> None:
     def handler(req):
         raise httpx.ReadTimeout("slow", request=req)
 
-    with pytest.raises(VerificationProviderError):
+    with pytest.raises(VerificationProviderError) as raised:
         await _provider(handler).discard({"campaign_id": "C1"})
+    assert not isinstance(raised.value, DiscardRefused)
 
 
 @pytest.mark.parametrize(

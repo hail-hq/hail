@@ -32,6 +32,8 @@ __all__ = [
     "SMS_VALUE_REFUSED",
     "VALUE_NOT_ACCEPTED",
     "Address",
+    "DiscardFailures",
+    "DiscardRefused",
     "DocumentInput",
     "DocumentOption",
     "DocumentSlot",
@@ -59,33 +61,53 @@ class VerificationProviderError(Exception):
     """The carrier failed in a way the customer cannot fix (outage, auth)."""
 
 
-def discard_step_retry(exc: BaseException, *, carrier: str, step: str) -> bool:
-    """True when a failed ``discard`` step must be tried again: an outage,
-    a timeout, a lost connection, or a 4xx a retry can change (401, 403,
-    408, 409, 425, 429; ``carrier_routing.final_refusal``). False when the
-    step is done: the carrier no longer holds the record (404), or refused
-    to delete it for good (logged; a retry would get the same answer).
-    Logs the status only, never the carrier's text."""
-    # Imported here: carrier_routing imports the voice adapters, and the
-    # Twilio and DIDWW ones import these verification plug-ins.
-    from hailhq.core.carrier_routing import carrier_http_status, final_refusal
+class DiscardRefused(VerificationProviderError):
+    """``discard`` left a record the carrier still holds, and a retry soon
+    will not delete it: the carrier refused (a 403, a 409 or a final 4xx;
+    ``carrier_routing.failure_kind``), or a step failed with no carrier
+    answer and no network error (a bug). Raised from the first such error,
+    so ``carrier_http_status`` reads its status (None for a bug)."""
 
-    status = carrier_http_status(exc)
-    if status == 404:
-        return False
-    if final_refusal(exc) is not None:
+
+class DiscardFailures:
+    """The failed steps of one ``discard``, which runs every step and then
+    calls ``raise_any``. Logs the carrier, step, error type and status only,
+    never the carrier's text."""
+
+    def __init__(self, carrier: str) -> None:
+        self.carrier = carrier
+        self.retry: BaseException | None = None
+        self.refused: BaseException | None = None
+
+    def add(self, exc: BaseException, step: str) -> None:
+        # Imported here: carrier_routing imports the voice adapters, and the
+        # Twilio and DIDWW ones import these verification plug-ins.
+        from hailhq.core.carrier_routing import carrier_http_status, failure_kind
+
+        kind = failure_kind(exc, unknown="refused")
+        if kind == "gone":
+            return
         logger.warning(
-            "%s discard step %s refused for good: status=%s", carrier, step, status
+            "%s discard step %s failed (%s, %s, status=%s)",
+            self.carrier,
+            step,
+            kind,
+            type(exc).__name__,
+            carrier_http_status(exc),
         )
-        return False
-    logger.warning(
-        "%s discard step %s failed (%s, status=%s); retried",
-        carrier,
-        step,
-        type(exc).__name__,
-        status,
-    )
-    return True
+        if kind == "outage":
+            self.retry = self.retry or exc
+        else:
+            self.refused = self.refused or exc
+
+    def raise_any(self, message: str) -> None:
+        """Raise when a step failed: ``VerificationProviderError`` when one
+        must be tried again (an outage wins: once it passes, a retry may
+        get further), else ``DiscardRefused``."""
+        if self.retry is not None:
+            raise VerificationProviderError(message) from self.retry
+        if self.refused is not None:
+            raise DiscardRefused(message) from self.refused
 
 
 class RegistrationHoldsAnotherNumber(VerificationProviderError):
@@ -429,10 +451,11 @@ class VerificationProvider(ABC):
     @abstractmethod
     async def discard(self, refs: dict) -> None:
         """Delete the draft or filing at the carrier. Runs every step, then
-        raises ``VerificationProviderError`` when a step must be tried again
-        (``discard_step_retry``): the caller keeps the row and its ids. A
-        record the carrier no longer holds, or refused to delete for good,
-        counts as done."""
+        raises (``DiscardFailures``): ``VerificationProviderError`` when a
+        step must be tried again (an outage), ``DiscardRefused`` when the
+        carrier refused or a step failed with no carrier answer. Either way
+        the carrier still holds a record: the caller keeps its ids. A record
+        the carrier no longer holds (404) counts as done."""
 
     async def discard_draft(self, refs: dict) -> None:
         """``discard`` for a draft that failed while it was made: best

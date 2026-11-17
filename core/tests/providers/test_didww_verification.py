@@ -16,6 +16,7 @@ from hailhq.core.providers.verification import (
 )
 from hailhq.core.providers.verification.base import (
     NOT_ACCEPTED,
+    DiscardRefused,
     SubmitRefused,
     VerificationProviderError,
 )
@@ -865,17 +866,30 @@ async def test_discard_runs_every_step_then_raises_on_an_outage(provider):
     ]
 
 
-@pytest.mark.parametrize("status", [404, 422])
 @responses.activate
-async def test_discard_counts_gone_or_refused_for_good_as_done(provider, status):
+async def test_discard_counts_gone_as_done(provider):
+    responses.add(
+        responses.DELETE,
+        f"{BASE}/addresses/addr-1",
+        status=404,
+        json={"errors": [{"title": "x"}]},
+    )
+    await provider.discard({"address_id": "addr-1"})
+    assert _deleted() == ["addresses/addr-1"]
+
+
+@pytest.mark.parametrize("status", [403, 409, 422])
+@responses.activate
+async def test_discard_raises_refused_on_a_refusal(provider, status):
+    """The carrier still holds the address: the caller keeps the ids."""
     responses.add(
         responses.DELETE,
         f"{BASE}/addresses/addr-1",
         status=status,
         json={"errors": [{"title": "x"}]},
     )
-    await provider.discard({"address_id": "addr-1"})
-    assert _deleted() == ["addresses/addr-1"]
+    with pytest.raises(DiscardRefused):
+        await provider.discard({"address_id": "addr-1"})
 
 
 def test_registered_when_configured():

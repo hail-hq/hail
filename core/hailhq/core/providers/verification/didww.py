@@ -19,6 +19,7 @@ from hailhq.core.providers.verification.base import (
     NOT_ACCEPTED,
     Address,
     AddressScope,
+    DiscardFailures,
     DocumentInput,
     DocumentOption,
     DocumentSlot,
@@ -33,7 +34,6 @@ from hailhq.core.providers.verification.base import (
     VerificationProvider,
     VerificationProviderError,
     VerificationRequirements,
-    discard_step_retry,
 )
 from hailhq.core.providers.verification.forms import display_name
 from hailhq.core.providers.voice.base import CarrierNotConfigured
@@ -642,13 +642,13 @@ class DidwwVerificationProvider(VerificationProvider):
             logger.warning("didww verification draft cleanup failed")
 
     def _discard_sync(self, refs: dict) -> None:
-        retry: list[Exception] = []
+        failures = DiscardFailures("didww")
         paths = [f"proofs/{p}" for p in refs.get("proof_ids", [])]
         paths += [f"encrypted_files/{f}" for f in refs.get("file_ids", [])]
         if refs.get("address_id"):
             paths.append(f"addresses/{refs['address_id']}")
         for path in paths:
-            self._delete(path, retry)
+            self._delete(path, failures)
         if refs.get("identity_id") and refs.get("identity_created"):
             # A later registration may have reused the identity this draft
             # created. Delete it only when no address is left on it.
@@ -661,18 +661,14 @@ class DidwwVerificationProvider(VerificationProvider):
                     },
                 )["data"]
             except Exception as exc:
-                if discard_step_retry(exc, carrier="didww", step="identities"):
-                    retry.append(exc)
+                failures.add(exc, "identities")
             else:
                 if not in_use:
-                    self._delete(f"identities/{refs['identity_id']}", retry)
-        if retry:
-            raise VerificationProviderError("DIDWW discard failed") from retry[0]
+                    self._delete(f"identities/{refs['identity_id']}", failures)
+        failures.raise_any("DIDWW discard failed")
 
-    def _delete(self, path: str, retry: list[Exception]) -> None:
+    def _delete(self, path: str, failures: DiscardFailures) -> None:
         try:
             self._client.delete(path)
         except Exception as exc:
-            step = path.split("/")[0]
-            if discard_step_retry(exc, carrier="didww", step=step):
-                retry.append(exc)
+            failures.add(exc, path.split("/")[0])

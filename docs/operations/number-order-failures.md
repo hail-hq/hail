@@ -44,11 +44,18 @@ answers, and on every verification worker pass.
 
 - A pending order is released on a later pass, once the order reconciler
   has the carrier's answer. SMS setup is skipped for a closed org's number.
-- A failed release is retried on the next pass.
-- A 4xx a retry does not change (not 401, 403, 404, 408, 409, 425, 429), or
-  a carrier Hail cannot release through the API, is stored as
-  `provisioning_metadata.release_refused` (`status`, `at`). That number is
-  not tried again: release it at the carrier by hand.
+- An outage, a timeout, a 401, 408, 425 or 429 is retried on every pass,
+  with no limit.
+- A 403 or 409 is retried for 7 days from the first one
+  (`provisioning_metadata.close_failing_since`; a release that works, or a
+  failure of another kind, clears it), then stored as a refusal.
+- Any other 4xx, or a carrier Hail cannot release through the API, is
+  stored as a refusal at once.
+- A refusal is `provisioning_metadata.release_refused` (`status`, `at`).
+  That number is not tried again: release it at the carrier by hand. The
+  registration that covers it is not cancelled either (`close_refused`
+  with its `number_id`, see
+  [carrier-verification.md](carrier-verification.md#cancel-rules)).
 - No ledger row and no audit row is written. DIDWW ends a number at the end
   of its billing cycle and does not refund.
 

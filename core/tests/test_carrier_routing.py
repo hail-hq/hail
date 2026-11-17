@@ -256,3 +256,67 @@ def test_each_sms_carrier_builds_its_own_client(monkeypatch) -> None:
     # One Twilio client per process.
     assert carrier_routing.sms_route(TWILIO) is twilio_sms
     assert isinstance(carrier_routing.sms_route(TELNYX), TelnyxSmsProvider)
+
+
+def _http(status: int) -> Exception:
+    from hailhq.core.providers.voice.base import CarrierRequestError
+
+    return CarrierRequestError(status)
+
+
+def _wrapped(cause: Exception) -> Exception:
+    """A plug-in error raised from ``cause``."""
+    try:
+        try:
+            raise cause
+        except Exception as exc:
+            raise RuntimeError("plug-in") from exc
+    except RuntimeError as outer:
+        return outer
+
+
+@pytest.mark.parametrize(
+    ("error", "kind"),
+    [
+        (_http(404), "gone"),
+        (_http(410), "gone"),
+        (_http(500), "outage"),
+        (_http(503), "outage"),
+        (_http(401), "outage"),
+        (_http(408), "outage"),
+        (_http(425), "outage"),
+        (_http(429), "outage"),
+        (_http(403), "refused"),
+        (_http(409), "refused"),
+        (_http(400), "final"),
+        (_http(422), "final"),
+        (_wrapped(_http(409)), "refused"),
+        (TimeoutError(), "outage"),
+        (ConnectionResetError(), "outage"),
+        (_wrapped(TimeoutError()), "outage"),
+        (CarrierNotConfigured("x"), "outage"),
+    ],
+)
+def test_failure_kind(error, kind) -> None:
+    assert carrier_routing.failure_kind(error) == kind
+
+
+def test_failure_kind_network_errors_of_each_carrier_sdk() -> None:
+    import httpx
+    import requests
+
+    request = httpx.Request("DELETE", "https://example.test")
+    for error in (
+        httpx.ConnectError("x", request=request),
+        httpx.ReadTimeout("x", request=request),
+        requests.ConnectionError("x"),
+        requests.Timeout("x"),
+    ):
+        assert carrier_routing.failure_kind(error, unknown="refused") == "outage"
+
+
+def test_failure_kind_of_an_error_with_no_carrier_answer() -> None:
+    """A bug (KeyError) is ``unknown``: a discard step counts it refused,
+    other callers retry it."""
+    assert carrier_routing.failure_kind(KeyError("x")) == "outage"
+    assert carrier_routing.failure_kind(KeyError("x"), unknown="refused") == "refused"

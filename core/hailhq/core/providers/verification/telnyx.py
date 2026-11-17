@@ -28,6 +28,7 @@ from hailhq.core.providers.verification.base import (
     NOT_ACCEPTED,
     VALUE_NOT_ACCEPTED,
     Address,
+    DiscardFailures,
     DocumentInput,
     DocumentOption,
     DocumentSlot,
@@ -42,7 +43,6 @@ from hailhq.core.providers.verification.base import (
     UnsupportedSubjectType,
     VerificationProvider,
     VerificationProviderError,
-    discard_step_retry,
 )
 from hailhq.core.providers.verification.forms import (
     address_complete,
@@ -616,16 +616,13 @@ class TelnyxVerificationProvider(VerificationProvider):
         paths.extend(f"/documents/{path_id(d)}" for d in refs.get("document_ids", []))
         if refs.get("address_id"):
             paths.append(f"/addresses/{path_id(refs['address_id'])}")
-        retry: Exception | None = None
+        failures = DiscardFailures("telnyx")
         for path in paths:
             try:
                 await self._api.request("DELETE", path)
             except Exception as exc:
-                step = path.split("/")[1]
-                if discard_step_retry(exc, carrier="telnyx", step=step):
-                    retry = retry or exc
-        if retry is not None:
-            raise VerificationProviderError("Telnyx discard failed") from retry
+                failures.add(exc, path.split("/")[1])
+        failures.raise_any("Telnyx discard failed")
 
 
 def _rejection(response: httpx.Response) -> str | None:

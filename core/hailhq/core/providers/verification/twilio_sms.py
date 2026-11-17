@@ -18,13 +18,13 @@ from hailhq.core.providers.verification import twilio_tollfree
 from hailhq.core.providers.verification.base import (
     BRAND_REJECTED,
     SMS_REFUSED,
+    DiscardFailures,
     DraftResult,
     Problem,
     ProviderStatus,
     Requirements,
     SmsRegistrationProvider,
     VerificationProviderError,
-    discard_step_retry,
 )
 from hailhq.core.providers.verification.forms import display_name
 from hailhq.core.providers.verification.sms_form import (
@@ -840,23 +840,21 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
 
     async def discard(self, refs) -> None:
         if refs.get("registration_kind") == "toll_free":
+            # Already gone (404) is done. A refusal raises DiscardRefused:
+            # the caller keeps the ids for a delete by hand.
+            failures = DiscardFailures("twilio toll-free")
             try:
                 await asyncio.to_thread(
                     self._client.messaging.v1.tollfree_verifications(
                         refs["tollfree_verification_sid"]
                     ).delete
                 )
-            except _TWILIO_ERRORS as exc:
-                # Already gone (404) is done. Any other answer raises, a
-                # final refusal too: account close stores it (close_refused)
-                # and keeps the ids for a delete by hand.
-                if not isinstance(exc, TwilioRestException) or exc.status != 404:
-                    _log_failure("tollfree_discard", exc)
-                    raise VerificationProviderError(
-                        "Could not cancel registration. Try again."
-                    ) from exc
+            except Exception as exc:
+                failures.add(exc, "tollfree_verification")
+            failures.raise_any("Could not cancel registration. Try again.")
             return
         # A brand cannot be deleted through the API; it is left behind.
+        failures = DiscardFailures("twilio 10DLC")
         ms = refs.get("messaging_service_sid")
         client = self._client
         steps = [
@@ -879,19 +877,14 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
                 ).delete(),
             ),
         ]
-        retry: Exception | None = None
         for key, step in steps:
             if not refs.get(key) or (key == "campaign_sid" and not ms):
                 continue
             try:
                 await asyncio.to_thread(step)
             except Exception as exc:
-                if discard_step_retry(exc, carrier="twilio 10DLC", step=key):
-                    retry = retry or exc
-        if retry is not None:
-            raise VerificationProviderError(
-                "Could not cancel registration. Try again."
-            ) from retry
+                failures.add(exc, key)
+        failures.raise_any("Could not cancel registration. Try again.")
 
 
 def _person_service_name(organization_id) -> str:

@@ -9,31 +9,40 @@ step:
    dunning release). A pending order is left to the order reconciler and
    released on a later pass, once the carrier answered. A failed order
    whose carrier number was not given back (``unreleased_resource_id``) is
-   given back here too (``retry_release``), so a final refusal is stored
-   and the registrations it blocks do not wait for good.
+   given back here too (``retry_release``), so a final refusal is stored.
 2. cancels each carrier registration (number verifications, US texting
    brands and campaigns, toll-free verifications) through ``cancel_locked``
    (the same code as ``DELETE /verifications/{id}``), in any state, with
    the whole filing discarded (no brand kept for a next filing). A
    registration waits while a number it covers is not released: the carrier
    refuses to delete a bundle or address a live number uses, and the cancel
-   wipes the ids the number's release needs.
+   wipes the ids the number's release needs. When the carrier refused that
+   number's release, the registration is not cancelled either: it is marked
+   ``close_refused`` with the ``number_id``, its ids kept for ops.
 
 Run by ``POST /internal/org-closures`` (that org, after the response) and by
 every verification worker pass (every closed org), before
 ``clear_closed_org_registrations``. Safe to run again: released numbers and
-cancelled rows are skipped. One item's failure never stops the others; it is
-tried again on the next pass. A carrier delete that failed (``discard``
-raised: an outage, a timeout, a 429) keeps the registration and its carrier
-ids, so the next pass deletes it again. A carrier refusal a retry does not change
-(``final_refusal``) is stored and the item is not tried again:
-``provisioning_metadata.release_refused`` on the number,
-``provider_refs.close_refused`` on the registration, both
-``{"status": <HTTP status>, "at": <ISO time>}``. A 4xx a retry may change
-(401, 403, 408, 409, 425, 429) is retried for ``CLOSE_RETRY_FOR``: its
-first time is stored (``close_failing_since``), and a carrier that still
-answers a 4xx after that has its answer stored as a refusal, so a delete
-the carrier refuses on purpose does not retry for good.
+cancelled rows are skipped. One item's failure never stops the others.
+
+A failed release or cancel keeps the number or registration and its carrier
+ids. How it counts (``carrier_routing.failure_kind``):
+
+* an outage, a timeout, a lost connection, a 401 (Hail's credentials), a
+  408, 425 or 429, or a database error: tried again on the next pass, with
+  no limit;
+* a 403 or 409 (the carrier refuses this record for now), or a carrier
+  step that failed with no carrier answer (``DiscardRefused``, a bug):
+  tried again for ``CLOSE_RETRY_FOR`` from the first such failure
+  (``close_failing_since``), then stored as a refusal;
+* any other 4xx: stored as a refusal at once.
+
+A refusal is stored as ``provisioning_metadata.release_refused`` on the
+number and ``provider_refs.close_refused`` on the registration, both
+``{"status": <HTTP status or null>, "at": <ISO time>}``, and the item is not
+tried again. ``close_failing_since`` is cleared by a success and by any
+failure that does not count, so the window only measures refusals that keep
+coming.
 
 No money moves: a release writes no ledger row, the cancel does not call the
 website's fee rater (``_rate_before_wipe``, ``_notify_billing``), and the
@@ -52,10 +61,11 @@ from uuid import UUID
 from hailhq.api.number_orders import retry_release
 from hailhq.api.routes.numbers import release_org_number
 from hailhq.api.routes.verifications import Registry, cancel_locked
-from hailhq.core.carrier_routing import CARRIERS, carrier_http_status, final_refusal
+from hailhq.core.carrier_routing import CARRIERS, carrier_http_status, failure_kind
 from hailhq.core.db import org_lock
 from hailhq.core.livekit import LiveKitClient
 from hailhq.core.models import CarrierVerification, PhoneNumber
+from hailhq.core.providers.verification.base import DiscardRefused
 from hailhq.core.retention import closed_org_ids
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -93,48 +103,72 @@ def _refusal(status: int | None, now: datetime) -> dict:
     return {"status": status, "at": now.isoformat()}
 
 
-async def _refusal_after_retries(
+async def _counts_as_refused(
     db: AsyncSession, model, item_id: UUID, column: str, exc: BaseException, now
-) -> int | None:
-    """For a failure ``final_refusal`` does not stop: the carrier's 4xx
-    when it has answered a 4xx since ``CLOSE_RETRY_FOR`` ago, so the caller
-    stores it as a refusal; else None, after storing the first such time.
-    A failure with no 4xx (an outage, a timeout) returns None and stores
-    nothing."""
+) -> tuple[bool, int | None]:
+    """``(refused, status)`` for a failed release or cancel: refused True
+    when the item is marked and not tried again. ``status`` is the
+    carrier's HTTP status (None for none). See the module docstring:
+
+    * a final 4xx: refused at once;
+    * a 403 or 409, or a carrier step that failed with no carrier answer
+      (``DiscardRefused``, a bug): refused once such failures have kept
+      coming for ``CLOSE_RETRY_FOR``; the first one's time is stored
+      (``FAILING_SINCE``);
+    * anything else (an outage, a 401, 408, 425 or 429, a database error):
+      retried with no limit, and ``FAILING_SINCE`` is cleared, so the window
+      only measures refusals that keep coming."""
     status = carrier_http_status(exc)
-    if status is None or not 400 <= status < 500:
-        return None
+    kind = failure_kind(
+        exc, unknown="refused" if isinstance(exc, DiscardRefused) else "outage"
+    )
+    if kind == "final":
+        return True, status
     try:
         item = await db.get(model, item_id)
         if item is None:
-            return None
+            return False, status
         await db.refresh(item, with_for_update=True)
         data = getattr(item, column) or {}
         since = data.get(FAILING_SINCE)
-        if since is not None:
-            await db.commit()
-            if now - datetime.fromisoformat(since) >= CLOSE_RETRY_FOR:
-                return status
-            return None
-        setattr(item, column, {**data, FAILING_SINCE: now.isoformat()})
+        refused = False
+        if kind != "refused":
+            if since is not None:
+                setattr(item, column, _without_since(data))
+        elif since is None:
+            setattr(item, column, {**data, FAILING_SINCE: now.isoformat()})
+        else:
+            refused = now - datetime.fromisoformat(since) >= CLOSE_RETRY_FOR
         await db.commit()
+        return refused, status
     except Exception:
         await db.rollback()
         logger.exception("account close: could not store a failure of %s", item_id)
-    return None
+    return False, status
+
+
+def _without_since(data: dict) -> dict:
+    return {k: v for k, v in data.items() if k != FAILING_SINCE}
+
+
+async def _clear_since(db: AsyncSession, number: PhoneNumber) -> None:
+    """After a release that worked: drop ``FAILING_SINCE``."""
+    data = number.provisioning_metadata or {}
+    if FAILING_SINCE in data:
+        number.provisioning_metadata = _without_since(data)
+        await db.commit()
 
 
 def _unreleased(org_ids):
     """Numbers of the closed orgs a carrier may still hold: active, pending,
-    or failed with a carrier number not given back yet. A number refused
-    for good counts as done."""
+    or failed with a carrier number not given back yet, a number whose
+    release was refused too."""
     return and_(
         PhoneNumber.organization_id.in_(org_ids),
         or_(
             PhoneNumber.provisioning_state.in_(("active", "pending")),
             PhoneNumber.provisioning_metadata.has_key("unreleased_resource_id"),
         ),
-        ~PhoneNumber.provisioning_metadata.has_key(RELEASE_REFUSED),
     )
 
 
@@ -186,15 +220,14 @@ async def _release_numbers(
                 # Gives the carrier number back; a refusal is stored below.
                 await retry_release(db, number)
             await release_org_number(db, number, lk)
+            await _clear_since(db, number)
             counts.released += 1
         except Exception as exc:
             await db.rollback()
-            status = final_refusal(exc)
-            if status is None:
-                status = await _refusal_after_retries(
-                    db, PhoneNumber, number_id, "provisioning_metadata", exc, now
-                )
-            if status is not None:
+            refused, status = await _counts_as_refused(
+                db, PhoneNumber, number_id, "provisioning_metadata", exc, now
+            )
+            if refused:
                 await _store_release_refusal(db, number_id, status, now)
                 counts.refused += 1
                 logger.warning(
@@ -233,11 +266,15 @@ async def _store_release_refusal(
         logger.exception("account close: could not store refusal of %s", number_id)
 
 
-async def _waits_for_a_number(db: AsyncSession, row: CarrierVerification) -> bool:
-    """True while a number this registration covers is not released. A
-    number verification covers the org's numbers of its carrier, country
-    and type (older numbers do not name the verification they used); an
-    SMS registration covers the numbers on it and its toll-free number."""
+async def _blocking_number(
+    db: AsyncSession, row: CarrierVerification
+) -> tuple[UUID, bool] | None:
+    """``(number id, refused)`` for a number this registration covers that
+    is not released, a number whose release was refused first (refused
+    True), else None. A number verification covers the org's numbers of
+    its carrier, country and type (older numbers do not name the
+    verification they used); an SMS registration covers the numbers on it
+    and its toll-free number."""
     live = _unreleased([row.organization_id])
     if row.purpose == "number":
         tie = and_(
@@ -252,8 +289,16 @@ async def _waits_for_a_number(db: AsyncSession, row: CarrierVerification) -> boo
             PhoneNumber.provisioning_metadata["offer"]["verification_row_id"].astext
             == str(row.id),
         )
-    found = await db.scalar(select(PhoneNumber.id).where(live, tie).limit(1))
-    return found is not None
+    refused = PhoneNumber.provisioning_metadata.has_key(RELEASE_REFUSED)
+    found = (
+        await db.execute(
+            select(PhoneNumber.id, refused)
+            .where(live, tie)
+            .order_by(refused.desc())
+            .limit(1)
+        )
+    ).first()
+    return None if found is None else (found[0], bool(found[1]))
 
 
 async def _cancel_registrations(
@@ -290,7 +335,28 @@ async def _cancel_registrations(
             ):
                 await db.commit()
                 continue
-            if await _waits_for_a_number(db, row):
+            blocking = await _blocking_number(db, row)
+            if blocking is not None and blocking[1]:
+                # The carrier refused to release a number this registration
+                # covers: the number still uses the registration, and its
+                # delete by hand needs these ids. Marked for ops, kept.
+                row.provider_refs = {
+                    **_without_since(refs),
+                    CLOSE_REFUSED: {
+                        **_refusal(None, now),
+                        "number_id": str(blocking[0]),
+                    },
+                }
+                await db.commit()
+                counts.refused += 1
+                logger.warning(
+                    "account close: verification %s kept, number %s it covers "
+                    "was refused a release",
+                    row.id,
+                    blocking[0],
+                )
+                continue
+            if blocking is not None:
                 await db.commit()
                 counts.waiting += 1
                 continue
@@ -316,17 +382,15 @@ async def _cancel_registrations(
                 }
                 flag_modified(row, "provider_refs")
             else:
-                await cancel_locked(db, row, provider, keep_brand=False)
+                await cancel_locked(db, row, provider, keep_brand=False, now=now)
             await db.commit()
             counts.cancelled += 1
         except Exception as exc:
             await db.rollback()
-            status = final_refusal(exc)
-            if status is None:
-                status = await _refusal_after_retries(
-                    db, CarrierVerification, verification_id, "provider_refs", exc, now
-                )
-            if status is None:
+            refused, status = await _counts_as_refused(
+                db, CarrierVerification, verification_id, "provider_refs", exc, now
+            )
+            if not refused:
                 counts.failed += 1
                 logger.warning(
                     "account close: cancel of verification %s failed (%s); "
