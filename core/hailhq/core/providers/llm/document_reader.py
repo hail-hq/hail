@@ -4,19 +4,27 @@ JSON the caller's schema asks for.
 The models are tried in this order, each id once (``_models``):
 
 1. ``DOCUMENT_READER_MODEL``, by default ``ANTHROPIC_BACKUP_MODEL`` (Haiku
-   5.5: cheap and fast, and it reads images and PDFs), with thinking
-   "disabled".
-2. ``ANTHROPIC_BACKUP_MODEL``, with thinking "disabled".
-3. ``ANTHROPIC_MODEL``, with thinking "between_tools": Sonnet 5.5 refuses
-   "disabled" with a 400. Probed on 2026-11-16 on Bedrock eu-central-1:
-   ``eu.anthropic.claude-haiku-5-5`` reads a PNG and a PDF with "disabled";
-   ``eu.anthropic.claude-sonnet-5-5`` refuses "disabled" and reads both with
-   "between_tools".
+   5.5: cheap and fast, and it reads images and PDFs).
+2. ``ANTHROPIC_BACKUP_MODEL``.
+3. ``ANTHROPIC_MODEL``.
+
+Each model gets its own thinking-off value (``thinking_off`` in
+``thinking.py``): Haiku 5.5 "disabled", Sonnet 5.5 "between_tools" (it
+refuses "disabled" with a 400), Opus 5.5 none at all (it cannot turn
+thinking off). Probed on 2026-11-16 on Bedrock eu-central-1:
+``eu.anthropic.claude-haiku-5-5`` reads a PNG and a PDF with "disabled";
+``eu.anthropic.claude-sonnet-5-5`` refuses "disabled" and reads both with
+"between_tools".
 
 Every model also needs image and PDF input and structured output (effort
-"low", a JSON schema). The next model is tried only when the call before it
-raised an API error (a refusal of the request, a missing model, a server or
-connection error), never after a timeout, and only while ``_MIN_SEND_S`` is
+"low", a JSON schema). The next model is tried only when another model can
+help (``_next_model_may_help``): a 403 or 404 (a missing model or one
+without access), a 429 (rate limits are set per model), a 5xx, a connection
+error, or a 400 or 424 whose text holds one of the probed phrases in
+``_MODEL_ERRORS`` (an unknown id, a base id that needs an inference profile,
+a refused thinking value, a parameter not supported on this model). Never
+after a timeout, and never after any other 400 or 424, or a 413: those are
+about the file, and the document is not sent to more models. Only while ``_MIN_SEND_S`` is
 left of the same deadline. One read is used for all the tries. A model that
 cannot take the request is harmless: its try fails and the read fails open.
 They run on Amazon Bedrock when ``ANTHROPIC_BEDROCK_REGION`` is set (then
@@ -44,6 +52,7 @@ import anthropic
 from hailhq.core.config import settings
 from hailhq.core.isolated_process import run_isolated
 from hailhq.core.providers.llm.bedrock import bedrock_client
+from hailhq.core.providers.llm.thinking import thinking_off
 
 __all__ = ["READABLE_TYPES", "document_reader_configured", "read_document"]
 
@@ -79,29 +88,54 @@ _decode_slots: weakref.WeakKeyDictionary[
 
 _client: anthropic.AsyncAnthropic | anthropic.AsyncAnthropicBedrock | None = None
 
-# Thinking off. Sonnet 5.5 takes only "between_tools" for that.
-_NO_THINKING = {"type": "disabled"}
-_BETWEEN_TOOLS = {"type": "between_tools"}
-
 
 def document_reader_model() -> str:
     """``DOCUMENT_READER_MODEL``, else ``ANTHROPIC_BACKUP_MODEL``."""
     return settings.document_reader_model or settings.anthropic_backup_model
 
 
-def _models() -> list[tuple[str, dict[str, str]]]:
-    """The models to try, in order, each with the thinking value it takes:
-    see the module docstring. Each id once, at its first place."""
+def _models() -> list[tuple[str, dict[str, str] | None]]:
+    """The models to try, in order, each with its thinking-off value (None:
+    the model cannot turn thinking off, so none is sent). Each id once, at
+    its first place."""
     chain = [
-        (document_reader_model(), _NO_THINKING),
-        (settings.anthropic_backup_model, _NO_THINKING),
-        (settings.anthropic_model, _BETWEEN_TOOLS),
+        document_reader_model(),
+        settings.anthropic_backup_model,
+        settings.anthropic_model,
     ]
-    out: list[tuple[str, dict[str, str]]] = []
-    for model, thinking in chain:
+    out: list[tuple[str, dict[str, str] | None]] = []
+    for model in chain:
         if model and model not in {m for m, _ in out}:
-            out.append((model, thinking))
+            out.append((model, thinking_off(model)))
     return out
+
+
+# Phrases of a 400 or 424 that is about the model, not the file. Probed on
+# Bedrock eu-central-1 on 2026-11-17 (text only, no document): an unknown
+# id, a base id that needs an inference profile, and Sonnet 5.5 refusing
+# thinking "disabled". "not supported on this model" is the API's wording
+# for a parameter a model does not take (not probed). Whole phrases only:
+# "... supported by this model" can be about the file (its size).
+_MODEL_ERRORS = (
+    "the provided model identifier is invalid",
+    "with on-demand throughput",
+    "to turn thinking off on this model",
+    "not supported on this model",
+)
+
+
+def _next_model_may_help(exc: anthropic.APIStatusError) -> bool:
+    """True when the error is about this model, not about the request: the
+    next model may then answer. Rate limits are set per model (Bedrock and
+    Anthropic's API). A 400, or Bedrock's 424 (a model error, also given
+    when the model fails on the file), is about the model only with a
+    phrase in ``_MODEL_ERRORS``. Any other 400 or 424, and a 413, is about
+    the file or the request: the document goes to no other model."""
+    status = exc.status_code
+    if status in (403, 404, 429) or status >= 500:
+        return True
+    text = str(exc.message).lower()
+    return status in (400, 424) and any(p in text for p in _MODEL_ERRORS)
 
 
 def document_reader_configured() -> bool:
@@ -197,8 +231,8 @@ async def read_document(
         # the request and its time.
         client = _get_client()
         models = _models()
-        # Thinking off (each model's own value, in ``models``): fast, and the
-        # task is reading, not reasoning.
+        # Thinking off where the model allows it (each model's own value, in
+        # ``models``): fast, and the task is reading, not reasoning.
         request = {
             "max_tokens": _MAX_TOKENS,
             "output_config": {
@@ -236,19 +270,30 @@ async def read_document(
                 logger.warning("document read: no time left for try %d", index)
                 return None
         try:
+            extra = {"thinking": thinking} if thinking is not None else {}
             response = await client.messages.create(
-                **request, model=model, thinking=thinking, timeout=left
+                **request, **extra, model=model, timeout=left
             )
             break
         except (anthropic.APITimeoutError, TimeoutError):
             # A slow model: another one would not finish in time either.
             logger.warning("document read timed out (try %d)", index)
             return None
-        except (anthropic.APIStatusError, anthropic.APIConnectionError) as exc:
-            # A refused request, a missing or broken model: the next one.
+        except anthropic.APIConnectionError as exc:
+            # The model could not be reached: the next one.
             logger.warning(
                 "document read failed (%s, try %d)", type(exc).__name__, index
             )
+        except anthropic.APIStatusError as exc:
+            logger.warning(
+                "document read failed (%s %d, try %d)",
+                type(exc).__name__,
+                exc.status_code,
+                index,
+            )
+            if not _next_model_may_help(exc):
+                # The file or the request: no other model gets the document.
+                return None
         except Exception as exc:
             logger.warning(
                 "document read failed (%s, try %d)", type(exc).__name__, index

@@ -3769,9 +3769,19 @@ type VerificationDocumentCautionDocument struct {
 }
 
 // VerificationDocumentCautionRead A slot's earlier read, as `POST /verifications/document-check`
-// returned it in `documents.<slot>`. Only `option` and `printed_name` are
-// used; the other keys of that object may be sent and are ignored.
+// returned it in `documents.<slot>`. Send that whole object: `option`,
+// `printed_name`, `expiry_date`, `none_of_types` and `file_slot` are used;
+// the other keys may be sent and are ignored.
 type VerificationDocumentCautionRead struct {
+	// ExpiryDate The expiry date read from the file (YYYY-MM-DD), or null (no expiry check).
+	ExpiryDate *string `json:"expiry_date,omitempty"`
+
+	// FileSlot The slot whose file this was read from. Slots with the same `file_slot` get one name check per box, as in the document check. Null: slots with the same printed name count as one file.
+	FileSlot *string `json:"file_slot,omitempty"`
+
+	// NoneOfTypes True when the file looked like none of the slot's document types.
+	NoneOfTypes *bool `json:"none_of_types,omitempty"`
+
 	// Option The document type the file looked like, or null.
 	Option *string `json:"option,omitempty"`
 
@@ -3808,7 +3818,7 @@ type VerificationDocumentCautionsRequestSubjectType string
 
 // VerificationDocumentCautionsResponse Returned by “POST /verifications/document-cautions“.
 type VerificationDocumentCautionsResponse struct {
-	// Warnings `name` and `document_type` warnings: the typed form against the earlier reads. Empty when nothing differs.
+	// Warnings `name`, `document_type` and `expired` warnings: the typed form and chosen types against the earlier reads. Empty when nothing differs.
 	Warnings []VerificationDocumentWarning `json:"warnings"`
 }
 
@@ -3837,6 +3847,12 @@ type VerificationDocumentRead struct {
 
 	// Fields Values for the fields of the slot's document types, by field name, as printed on the file.
 	Fields map[string]string `json:"fields"`
+
+	// FileSlot The slot whose file this was read from: this slot, or the slot whose file covers it. Slots with the same `file_slot` share one file. Null when not read.
+	FileSlot *string `json:"file_slot,omitempty"`
+
+	// NoneOfTypes True when the file was read and looks like none of the slot's document types (`option` is then null).
+	NoneOfTypes *bool `json:"none_of_types,omitempty"`
 
 	// Option The slot's document type the file looks like, as an option key, or null when none fits or it was not read.
 	Option *string `json:"option"`

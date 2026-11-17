@@ -32,7 +32,7 @@ import json
 import logging
 import math
 import time
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Collection
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
@@ -179,7 +179,17 @@ _last_polled: dict[UUID, float] = {}
 # POST /verifications/document-cautions only: the console calls it after
 # each edit, and the carrier's form API is not cached. Successes only.
 _CAUTION_FORM_TTL_S = 600
-_caution_forms: dict[tuple[str, str, str, str], tuple[float, Requirements]] = {}
+# A cached form older than this is fetched again when a request names a slot
+# it does not have: the carrier may have added the slot since.
+_CAUTION_FORM_REFRESH_S = 30
+# Each kept form with when it was fetched and when it was last checked (a
+# fetch, or a refresh that failed: the next refresh waits as long again).
+_caution_forms: dict[tuple[str, str, str, str], tuple[float, float, Requirements]] = {}
+# The carrier call running for each key: requests that miss at once share it.
+_caution_fetches: dict[tuple[str, str, str, str], asyncio.Task[Requirements]] = {}
+# Each carrier refusal (a 4xx: it no longer serves this form), with when it
+# came, kept as long as a form: the console asks after every edit.
+_caution_refusals: dict[tuple[str, str, str, str], tuple[float, HTTPException]] = {}
 
 PURPOSES = {"number", "sms"}
 
@@ -643,8 +653,10 @@ async def _requirements(
     number_type: str,
     subject_type: SubjectType,
     where: str = "query",
+    log: bool = True,
 ) -> Requirements:
-    """``where`` names the request part the inputs came from, for error paths."""
+    """``where`` names the request part the inputs came from, for error paths.
+    ``log=False`` leaves logging a carrier failure to the caller."""
     if number_type not in NUMBER_TYPES:
         raise unprocessable("unknown number_type", loc=[where, "number_type"])
     try:
@@ -656,7 +668,8 @@ async def _requirements(
         error.detail[0]["ctx"] = {"subject_types": list(exc.allowed)}
         raise error from exc
     except Exception as exc:
-        logger.exception("verification requirements lookup failed")
+        if log:
+            logger.exception("verification requirements lookup failed")
         raise HTTPException(
             status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="carrier unavailable; try again later",
@@ -2711,28 +2724,103 @@ async def check_verification_documents(
                 )
 
 
+def _refusal(exc: HTTPException) -> HTTPException:
+    """A fresh copy of a kept refusal, so no request changes the kept one."""
+    return HTTPException(
+        status_code=exc.status_code,
+        detail=copy.deepcopy(exc.detail),
+        headers=exc.headers,
+    )
+
+
 async def _caution_form(
     provider_name: str,
     provider: VerificationProvider,
     country_code: str,
     number_type: str,
     subject_type: SubjectType,
+    slots: Collection[str] = (),
 ) -> Requirements:
-    """``_requirements``, kept ``_CAUTION_FORM_TTL_S`` in this process."""
+    """``_requirements``, kept ``_CAUTION_FORM_TTL_S`` in this process. A
+    kept form that lacks one of ``slots`` and was checked
+    ``_CAUTION_FORM_REFRESH_S`` ago or more is fetched again (the carrier
+    may have added the slot). When the carrier is down for that refresh,
+    the kept form answers and the next refresh waits as long again. When
+    the carrier refuses (a 4xx), the kept form is dropped and the refusal is
+    kept instead, as long as a form. An outage is never kept. Requests that
+    miss at once share one carrier call; a request that is cancelled does
+    not stop it for the others. Each request logs its own outcome."""
     key = (provider_name, country_code.upper(), number_type, subject_type)
     now = time.monotonic()
-    hit = _caution_forms.get(key)
-    if hit is not None and now - hit[0] < _CAUTION_FORM_TTL_S:
-        return hit[1]
-    requirements = await _requirements(
-        provider, country_code, number_type, subject_type, where="body"
-    )
-    for old in [
-        k for k, (at, _) in _caution_forms.items() if now - at >= _CAUTION_FORM_TTL_S
-    ]:
-        del _caution_forms[old]
-    _caution_forms[key] = (now, requirements)
-    return requirements
+    refused = _caution_refusals.get(key)
+    if refused is not None:
+        if now - refused[0] < _CAUTION_FORM_TTL_S:
+            raise _refusal(refused[1])
+        del _caution_refusals[key]
+    kept = _caution_forms.get(key)
+    if kept is not None and now - kept[0] >= _CAUTION_FORM_TTL_S:
+        kept = None
+    if kept is not None:
+        _, checked_at, form = kept
+        if now - checked_at < _CAUTION_FORM_REFRESH_S:
+            return form
+        names = {s.name for s in form.documents}
+        if all(s in names for s in slots):
+            return form
+    task = _caution_fetches.get(key)
+    if task is None:
+
+        async def fetch() -> Requirements:
+            try:
+                # Logged by each caller below, by what it answers.
+                requirements = await _requirements(
+                    provider,
+                    country_code,
+                    number_type,
+                    subject_type,
+                    where="body",
+                    log=False,
+                )
+            except HTTPException as exc:
+                at = time.monotonic()
+                held = _caution_forms.get(key)
+                if exc.status_code < 500:
+                    _caution_forms.pop(key, None)
+                    _caution_refusals[key] = (at, _refusal(exc))
+                elif held is not None:
+                    _caution_forms[key] = (held[0], at, held[2])
+                raise
+            finally:
+                _caution_fetches.pop(key, None)
+            at = time.monotonic()
+            for old in [
+                k
+                for k, (fetched, _, _) in _caution_forms.items()
+                if at - fetched >= _CAUTION_FORM_TTL_S
+            ]:
+                del _caution_forms[old]
+            _caution_forms[key] = (at, at, requirements)
+            return requirements
+
+        task = _caution_fetches[key] = asyncio.ensure_future(fetch())
+        # Read its outcome even when every caller has gone.
+        task.add_done_callback(lambda t: t.cancelled() or t.exception())
+    try:
+        return await asyncio.shield(task)
+    except HTTPException as exc:
+        if exc.status_code < 500:
+            raise
+        cause = type(exc.__cause__).__name__
+        if kept is not None:
+            # The carrier is down: the kept form answers (a missing slot
+            # then gets its 422).
+            logger.warning(
+                "verification requirements refresh failed (%s); kept form used",
+                cause,
+            )
+            return kept[2]
+        logger.exception("verification requirements lookup failed")
+        raise
 
 
 @router.post(
@@ -2751,8 +2839,8 @@ async def check_verification_document_cautions(
 
     Send the form as it is now, with each slot's earlier read in
     `documents.<slot>.read` (the `documents.<slot>` that check returned).
-    Only slots with a read are checked. Returns the `name` and
-    `document_type` warnings that check would give for this form. No file is
+    Only slots with a read are checked. Returns the `name`, `document_type`
+    and `expired` warnings that check would give for this form. No file is
     sent, no AI model runs, no daily read is used, and nothing is saved.
     """
     offer = await _quote_offer(
@@ -2772,6 +2860,7 @@ async def check_verification_document_cautions(
         body.country_code,
         body.number_type,
         body.subject_type,
+        slots=body.documents,
     )
     slots = {s.name for s in requirements.documents}
     for slot in body.documents:
@@ -2793,6 +2882,7 @@ async def check_verification_document_cautions(
                 for slot, doc in body.documents.items()
                 if doc.read is not None
             },
+            today=datetime.now(timezone.utc).date(),
         )
     )
 

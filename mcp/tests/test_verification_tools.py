@@ -2166,6 +2166,8 @@ _DOCUMENT_CHECK_OK = {
                 "business_name": "",
             },
             "skipped": None,
+            "none_of_types": False,
+            "file_slot": "identity",
         }
     },
     "warnings": [

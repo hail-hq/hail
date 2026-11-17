@@ -191,41 +191,6 @@ def test_build_llm_mode_a_with_no_keys_raises(monkeypatch) -> None:
         build_llm(None)
 
 
-def test_thinking_off_per_model() -> None:
-    from hailhq.voicebot.pipeline import _thinking_off
-
-    assert _thinking_off("claude-sonnet-5-5") == {"type": "between_tools"}
-    assert _thinking_off("eu.anthropic.claude-sonnet-5-5") == {"type": "between_tools"}
-    assert _thinking_off("eu.anthropic.claude-haiku-5-5") == {"type": "disabled"}
-    assert _thinking_off("global.anthropic.claude-haiku-5-5-v1:0") == {
-        "type": "disabled"
-    }
-    assert _thinking_off("claude-opus-5-5") is None
-    # Anthropic API ids can carry a date.
-    assert _thinking_off("claude-sonnet-5-5-20261001") == {"type": "between_tools"}
-    assert _thinking_off("eu.anthropic.claude-sonnet-5-5-20261001-v1:0") == {
-        "type": "between_tools"
-    }
-
-
-def test_thinking_off_unknown_model_warns_and_disables(caplog) -> None:
-    """An unknown id never stops the voicebot: thinking disabled, one warning."""
-    from hailhq.voicebot import pipeline
-
-    pipeline._warned_models.clear()
-    with caplog.at_level("WARNING", logger="hailhq.voicebot"):
-        # Not a near match: "sonnet-5-5" inside a longer id does not count.
-        assert pipeline._thinking_off("eu.anthropic.claude-sonnet-5-5-mini") == {
-            "type": "disabled"
-        }
-        assert pipeline._thinking_off("claude-sonnet-4-6") == {"type": "disabled"}
-        assert pipeline._thinking_off("claude-sonnet-4-6") == {"type": "disabled"}
-    warnings = [r.getMessage() for r in caplog.records]
-    assert len(warnings) == 2
-    assert "claude-sonnet-5-5-mini" in warnings[0]
-    assert "claude-sonnet-4-6" in warnings[1]
-
-
 def test_stt_takes_keyterms_only_on_nova_3(monkeypatch) -> None:
     from hailhq.core.config import settings
     from hailhq.voicebot.pipeline import stt_takes_keyterms
