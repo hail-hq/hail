@@ -117,6 +117,17 @@ async def _age_claims(session, call_id) -> None:
     await session.commit()
 
 
+async def _subscription(session, org) -> WebhookSubscription:
+    """The org's only subscription (the one ``_seed_call`` made)."""
+    return (
+        await session.execute(
+            select(WebhookSubscription).where(
+                WebhookSubscription.organization_id == org
+            )
+        )
+    ).scalar_one()
+
+
 async def _deliveries(session, call_id) -> list[WebhookDelivery]:
     return list(
         (
@@ -366,14 +377,7 @@ async def test_subscription_made_after_the_call_gets_no_delivery(
 ) -> None:
     call = await _seed_call(async_session)
     call_id = call.id
-    [old] = (
-        await async_session.execute(
-            select(WebhookSubscription).where(
-                WebhookSubscription.organization_id == call.organization_id
-            )
-        )
-    ).scalars()
-    old_id = old.id
+    old_id = (await _subscription(async_session, call.organization_id)).id
     async_session.add(
         WebhookSubscription(
             organization_id=call.organization_id,
@@ -399,13 +403,7 @@ async def test_a_subscription_changed_after_the_call_gets_no_delivery(
     # call waits (a PATCH, a secret rotation) drops that call's event.
     call = await _seed_call(async_session)
     call_id = call.id
-    sub = (
-        await async_session.execute(
-            select(WebhookSubscription).where(
-                WebhookSubscription.organization_id == call.organization_id
-            )
-        )
-    ).scalar_one()
+    sub = await _subscription(async_session, call.organization_id)
     sub.updated_at = datetime.now(timezone.utc)
     await async_session.commit()
     turns = await call_transcript(async_session, call_id)
