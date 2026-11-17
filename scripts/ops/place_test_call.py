@@ -79,11 +79,15 @@ def call_body(number: str, from_number: str | None) -> dict:
 def place_call(
     client: httpx.Client, api_url: str, number: str, from_number: str | None
 ) -> dict:
-    response = client.post(
-        join_url(api_url, "v1/calls"),
-        json=call_body(number, from_number),
-        headers={"Idempotency-Key": str(uuid.uuid4())},
-    )
+    url = join_url(api_url, "v1/calls")
+    body = call_body(number, from_number)
+    headers = {"Idempotency-Key": str(uuid.uuid4())}
+    try:
+        response = client.post(url, json=body, headers=headers)
+    except httpx.TransportError:
+        # Same key: if Hail took the first request, it answers with that
+        # call instead of placing a second one.
+        response = client.post(url, json=body, headers=headers)
     if response.status_code != 201:
         raise CallTestError(
             f"POST /v1/calls answered {response.status_code}: {response.text}"
@@ -269,6 +273,7 @@ def main(argv: list[str] | None = None) -> int:
     answered, text = verdict(call)
     print(text)
     print(f"Call id (your workspace): {call_id}")
+    print(f"Caller ID used: {call.get('from_e164')}")
     if answered:
         # A carrier announcement or voicemail also picks up. Only the
         # customer's inbound row shows the call reached their agent.

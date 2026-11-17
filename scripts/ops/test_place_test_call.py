@@ -305,3 +305,14 @@ def test_refuses_plain_http_to_another_host(url, monkeypatch, capsys):
 )
 def test_accepts_https_and_local_http(url):
     assert ptc.safe_api_url(url)
+
+
+def test_place_call_retries_once_with_the_same_key():
+    seen = []
+    client = client_for(
+        [httpx.ConnectError("reset"), httpx.Response(201, json=call("queued"))],
+        seen,
+    )
+    assert ptc.place_call(client, API, "+14155550100", None)["id"] == CALL_ID
+    assert len(seen) == 2
+    assert seen[0].headers["Idempotency-Key"] == seen[1].headers["Idempotency-Key"]

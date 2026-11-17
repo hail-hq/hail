@@ -58,7 +58,7 @@ LEFT JOIN account_credits ac ON ac.organization_id = ue.organization_id
   AND ac.ref IN ('usage_event:' || ue.id, 'voice_cost:' || ue.id)
 LEFT JOIN voice_cost_settlements s ON s.usage_event_id = ue.id
 WHERE ue.organization_id = :'org' AND ue.channel = 'voice'
-  AND split_part(ue.ref, ':', 1) = :'call';
+  AND split_part(ue.ref, ':', 1) = (:'call')::uuid::text;
 SQL
 ```
 
@@ -149,7 +149,7 @@ SELECT count(*) FILTER (WHERE priced_at IS NULL) = 0 AS priced,
              AND (s.settled_at IS NOT NULL OR s.failures >= 3))) = 0 AS settled
 FROM usage_events ue
 WHERE ue.organization_id = :'org' AND ue.channel = 'voice'
-  AND split_part(ue.ref, ':', 1) = :'call' \gset
+  AND split_part(ue.ref, ':', 1) = (:'call')::uuid::text \gset
 \if :found
 \else
   \echo 'No phone call with this id in this organization: nothing deleted. Check the ids.'
@@ -183,7 +183,7 @@ WHERE ue.organization_id = :'org' AND ue.channel = 'voice'
 CREATE TEMP TABLE gone ON COMMIT DROP AS
 SELECT id FROM usage_events
 WHERE organization_id = :'org' AND channel = 'voice'
-  AND split_part(ref, ':', 1) = :'call';
+  AND split_part(ref, ':', 1) = (:'call')::uuid::text;
 DELETE FROM voice_cost_settlements WHERE usage_event_id IN (SELECT id FROM gone);
 DELETE FROM account_credits
 WHERE organization_id = :'org'

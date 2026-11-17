@@ -27,6 +27,8 @@ Run it from a repo checkout. The script is
   `registered` and `agent_ready` must be `t`. Note the `organization_id`
   for the queries below. If either is `f`, see
   [Routing a number by hand](didww-by-request.md#routing-a-number-by-hand).
+  No row: the number is not active in any workspace (still pending,
+  released, or a typo). Do not call: Hail would drop the call.
 
   ```bash
   psql "$DATABASE_URL" <<'SQL'
@@ -37,8 +39,9 @@ Run it from a repo checkout. The script is
   WHERE n.e164 = :'e164' AND n.provisioning_state = 'active';
   SQL
   ```
-- The call reaches the customer's agent and shows in their call log. Tell
-  the customer before you call when you can.
+- The call reaches the customer's agent and shows in their call log. Get
+  the customer's OK before you call: the script tells Hail the recipient
+  agreed to the call (`recipient_consent: true`).
 - Your own workspace pays for the outbound call. It needs credit.
 
 ## Run
@@ -61,16 +64,20 @@ Run it from a repo checkout. The script is
 
 Your outbound call only shows what your side saw. A carrier announcement or
 voicemail also picks up. Check the customer's side too: it is the row you
-delete afterwards.
+delete afterwards. Match it by the caller ID the script printed, so you
+never pick a real caller's call.
 
 ```bash
 psql "$DATABASE_URL" <<'SQL'
 \set org '<org id>'
 \set e164 '+<customer number>'
+\set caller '+<caller ID the script printed>'
 SELECT id, status, end_reason, answered_at, ended_at
 FROM calls
-WHERE organization_id = :'org' AND direction = 'inbound' AND to_e164 = :'e164'
-ORDER BY requested_at DESC LIMIT 3;
+WHERE organization_id = :'org' AND direction = 'inbound'
+  AND to_e164 = :'e164' AND from_e164 = :'caller'
+  AND requested_at > now() - interval '1 hour'
+ORDER BY requested_at DESC;
 SQL
 ```
 
@@ -82,9 +89,10 @@ SQL
   - `user_rejected`: voice is suspended for the workspace.
   - `carrier_route_failed`: the call came in on another carrier's LiveKit
     trunk, or the number has no voice capability.
-- No inbound row at all: the call never reached Hail. The carrier or the
-  LiveKit inbound trunk refused it. Check the carrier panel (call capacity,
-  where the number points) and the Before query above.
+- No inbound row at all: the carrier or the LiveKit inbound trunk refused
+  the call, or Hail dropped it because the number is not an active number
+  of a workspace. Check the carrier panel (call capacity, where the number
+  points) and the Before query above.
 
 ## After
 
