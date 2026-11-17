@@ -442,16 +442,22 @@ class _Read:
         slot: DocumentSlot,
         echo: VerificationDocumentCautionRead,
     ) -> _Read:
-        """An earlier read as the console sends it back: its type and printed
-        name only. Named by the printed name: the slots of one file share it,
-        so they get one name check per box, as in ``check_documents``."""
+        """An earlier read as the console sends it back: its type, printed
+        name and expiry date. Named by its file (``file_slot``), as in
+        ``check_documents``: the slots of one file get one name check per
+        box. An echo without ``file_slot`` is named by its printed name."""
         printed = echo.printed_name
-        answer = {"option": echo.option, **(printed.model_dump() if printed else {})}
-        key = "|".join(printed.model_dump().values()) if printed else slot.name
-        read = cls(slot, {}, answer, f"printed:{key}")
-        # The echo cannot tell "none of the types" from not read.
-        read.says_none = False
-        return read
+        answer = {
+            "option": "none" if echo.none_of_types else echo.option,
+            "expiry_date": echo.expiry_date,
+            **(printed.model_dump() if printed else {}),
+        }
+        if echo.file_slot:
+            key = echo.file_slot
+        else:
+            name = "|".join(printed.model_dump().values()) if printed else slot.name
+            key = f"printed:{name}"
+        return cls(slot, {}, answer, key)
 
     def own_fields(self) -> dict[str, str]:
         prefix = f"{self.slot.name}."
@@ -490,31 +496,39 @@ def _document_warnings(
             )
         )
     warnings += _type_warnings(read, chosen)
-    # A bill or statement has no expiry: a date it prints is a due date.
-    if (
-        read.expiry is not None
-        and read.expiry < today
-        and not _proves_address(read.slot, read.option or chosen)
-    ):
-        warnings.append(
-            VerificationDocumentWarning(
-                field=slot,
-                kind="expired",
-                message=(
-                    f"This document expired on {read.expiry.day} "
-                    f"{read.expiry:%B %Y}. "
-                    "Upload one that is still valid."
-                ),
-            )
-        )
+    warnings += _expired_warnings(read, chosen, today)
     return warnings
+
+
+def _expired_warnings(
+    read: _Read, chosen: str | None, today: date
+) -> list[VerificationDocumentWarning]:
+    """The file expired. A bill or statement has no expiry: a date it prints
+    is a due date. Whether it is one can follow the type chosen."""
+    if (
+        read.expiry is None
+        or read.expiry >= today
+        or _proves_address(read.slot, read.option or chosen)
+    ):
+        return []
+    return [
+        VerificationDocumentWarning(
+            field=read.slot.name,
+            kind="expired",
+            message=(
+                f"This document expired on {read.expiry.day} "
+                f"{read.expiry:%B %Y}. "
+                "Upload one that is still valid."
+            ),
+        )
+    ]
 
 
 def _type_warnings(
     read: _Read, chosen: str | None
 ) -> list[VerificationDocumentWarning]:
-    """The file looks like another type than the one chosen, or (a fresh
-    read only) like none of them."""
+    """The file looks like another type than the one chosen, or like none
+    of them."""
     slot = read.slot.name
     warnings: list[VerificationDocumentWarning] = []
     chosen_label = _option_label(read.slot, chosen)
@@ -686,12 +700,13 @@ def document_cautions(
     address: dict[str, str],
     documents: dict[str, DocumentInput],
     reads: dict[str, VerificationDocumentCautionRead],
+    *,
+    today: date,
 ) -> list[VerificationDocumentWarning]:
-    """The name and document type warnings of ``check_documents``, worked
-    out again from earlier reads (``reads``, by slot) and what is typed now,
-    with no file and no model. Only slots with a read and an entry in
-    ``documents`` are checked. The "looks like none of the types" warning
-    needs a fresh read, so it is not given here."""
+    """The name, document type and expiry warnings of ``check_documents``,
+    worked out again from earlier reads (``reads``, by slot) and what is
+    typed and chosen now, with no file and no model. Only slots with a read
+    and an entry in ``documents`` are checked."""
     warnings: list[VerificationDocumentWarning] = []
     named: set[tuple[str, str]] = set()
     for slot in requirements.documents:
@@ -699,7 +714,9 @@ def document_cautions(
         if echo is None or slot.name not in documents:
             continue
         read = _Read.echoed(slot, echo)
-        warnings += _type_warnings(read, documents[slot.name].option or None)
+        chosen = documents[slot.name].option or None
+        warnings += _type_warnings(read, chosen)
+        warnings += _expired_warnings(read, chosen, today)
         warnings += _file_name_warnings(
             read, requirements, fields, address, documents, named
         )
@@ -864,6 +881,8 @@ async def check_documents(
             fields=read.own_fields(),
             expiry_date=read.expiry.isoformat() if read.expiry else None,
             printed_name=read.printed if read.readable else None,
+            none_of_types=read.says_none,
+            file_slot=read.file_key if read.readable else None,
         )
 
     unique = _unique(warnings)

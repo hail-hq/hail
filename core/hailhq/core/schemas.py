@@ -2396,6 +2396,21 @@ class VerificationDocumentRead(BaseModel):
             "reads. Null otherwise."
         ),
     )
+    none_of_types: bool = Field(
+        default=False,
+        description=(
+            "True when the file was read and looks like none of the slot's "
+            "document types (`option` is then null)."
+        ),
+    )
+    file_slot: str | None = Field(
+        default=None,
+        description=(
+            "The slot whose file this was read from: this slot, or the slot "
+            "whose file covers it. Slots with the same `file_slot` share one "
+            "file. Null when not read."
+        ),
+    )
 
 
 class VerificationDocumentCheckResponse(BaseModel):
@@ -2421,8 +2436,9 @@ class VerificationDocumentCheckResponse(BaseModel):
 
 class VerificationDocumentCautionRead(BaseModel):
     """A slot's earlier read, as `POST /verifications/document-check`
-    returned it in `documents.<slot>`. Only `option` and `printed_name` are
-    used; the other keys of that object may be sent and are ignored."""
+    returned it in `documents.<slot>`. Send that whole object: `option`,
+    `printed_name`, `expiry_date`, `none_of_types` and `file_slot` are used;
+    the other keys may be sent and are ignored."""
 
     option: str | None = Field(
         default=None,
@@ -2431,6 +2447,27 @@ class VerificationDocumentCautionRead(BaseModel):
     printed_name: VerificationPrintedName | None = Field(
         default=None,
         description="The name printed on the file, or null (no name check).",
+    )
+    expiry_date: str | None = Field(
+        default=None,
+        description=(
+            "The expiry date read from the file (YYYY-MM-DD), or null (no "
+            "expiry check)."
+        ),
+    )
+    none_of_types: bool = Field(
+        default=False,
+        description=(
+            "True when the file looked like none of the slot's document types."
+        ),
+    )
+    file_slot: str | None = Field(
+        default=None,
+        description=(
+            "The slot whose file this was read from. Slots with the same "
+            "`file_slot` get one name check per box, as in the document "
+            "check. Null: slots with the same printed name count as one file."
+        ),
     )
 
 
@@ -2489,8 +2526,9 @@ class VerificationDocumentCautionsResponse(BaseModel):
 
     warnings: list[VerificationDocumentWarning] = Field(
         description=(
-            "`name` and `document_type` warnings: the typed form against the "
-            "earlier reads. Empty when nothing differs."
+            "`name`, `document_type` and `expired` warnings: the typed form "
+            "and chosen types against the earlier reads. Empty when nothing "
+            "differs."
         )
     )
 

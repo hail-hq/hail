@@ -168,7 +168,12 @@ _last_polled: dict[UUID, float] = {}
 # POST /verifications/document-cautions only: the console calls it after
 # each edit, and the carrier's form API is not cached. Successes only.
 _CAUTION_FORM_TTL_S = 600
+# A cached form older than this is fetched again when a request names a slot
+# it does not have: the carrier may have added the slot since.
+_CAUTION_FORM_REFRESH_S = 30
 _caution_forms: dict[tuple[str, str, str, str], tuple[float, Requirements]] = {}
+# The carrier call running for each key: requests that miss at once share it.
+_caution_fetches: dict[tuple[str, str, str, str], asyncio.Task[Requirements]] = {}
 
 PURPOSES = {"number", "sms"}
 
@@ -2637,22 +2642,43 @@ async def _caution_form(
     country_code: str,
     number_type: str,
     subject_type: SubjectType,
-) -> Requirements:
-    """``_requirements``, kept ``_CAUTION_FORM_TTL_S`` in this process."""
+    max_age_s: float = _CAUTION_FORM_TTL_S,
+) -> tuple[Requirements, float]:
+    """``_requirements``, kept ``_CAUTION_FORM_TTL_S`` in this process, and
+    its age in seconds. A form older than ``max_age_s`` is fetched again.
+    Requests that miss at once share one carrier call; a request that is
+    cancelled does not stop it for the others. Only a form is kept, never
+    an error."""
     key = (provider_name, country_code.upper(), number_type, subject_type)
-    now = time.monotonic()
     hit = _caution_forms.get(key)
-    if hit is not None and now - hit[0] < _CAUTION_FORM_TTL_S:
-        return hit[1]
-    requirements = await _requirements(
-        provider, country_code, number_type, subject_type, where="body"
-    )
-    for old in [
-        k for k, (at, _) in _caution_forms.items() if now - at >= _CAUTION_FORM_TTL_S
-    ]:
-        del _caution_forms[old]
-    _caution_forms[key] = (now, requirements)
-    return requirements
+    if hit is not None:
+        age = time.monotonic() - hit[0]
+        if age < min(max_age_s, _CAUTION_FORM_TTL_S):
+            return hit[1], age
+    task = _caution_fetches.get(key)
+    if task is None:
+
+        async def fetch() -> Requirements:
+            try:
+                requirements = await _requirements(
+                    provider, country_code, number_type, subject_type, where="body"
+                )
+                now = time.monotonic()
+                for old in [
+                    k
+                    for k, (at, _) in _caution_forms.items()
+                    if now - at >= _CAUTION_FORM_TTL_S
+                ]:
+                    del _caution_forms[old]
+                _caution_forms[key] = (now, requirements)
+                return requirements
+            finally:
+                _caution_fetches.pop(key, None)
+
+        task = _caution_fetches[key] = asyncio.ensure_future(fetch())
+        # Read its outcome even when every caller has gone.
+        task.add_done_callback(lambda t: t.cancelled() or t.exception())
+    return await asyncio.shield(task), 0.0
 
 
 @router.post(
@@ -2671,8 +2697,8 @@ async def check_verification_document_cautions(
 
     Send the form as it is now, with each slot's earlier read in
     `documents.<slot>.read` (the `documents.<slot>` that check returned).
-    Only slots with a read are checked. Returns the `name` and
-    `document_type` warnings that check would give for this form. No file is
+    Only slots with a read are checked. Returns the `name`, `document_type`
+    and `expired` warnings that check would give for this form. No file is
     sent, no AI model runs, no daily read is used, and nothing is saved.
     """
     offer = await _quote_offer(
@@ -2686,14 +2712,19 @@ async def check_verification_document_cautions(
     provider = _provider_or_404(registry, offer["provider"], "number")
     # Nothing is written. End the read transaction before any carrier call.
     await db.rollback()
-    requirements = await _caution_form(
+    form = (
         offer["provider"],
         provider,
         body.country_code,
         body.number_type,
         body.subject_type,
     )
+    requirements, age = await _caution_form(*form)
     slots = {s.name for s in requirements.documents}
+    if age >= _CAUTION_FORM_REFRESH_S and any(s not in slots for s in body.documents):
+        # The carrier may have added the slot since the form was kept.
+        requirements, _ = await _caution_form(*form, max_age_s=_CAUTION_FORM_REFRESH_S)
+        slots = {s.name for s in requirements.documents}
     for slot in body.documents:
         if slot not in slots:
             raise unprocessable(
@@ -2713,6 +2744,7 @@ async def check_verification_document_cautions(
                 for slot, doc in body.documents.items()
                 if doc.read is not None
             },
+            today=datetime.now(timezone.utc).date(),
         )
     )
 

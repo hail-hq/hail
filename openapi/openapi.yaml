@@ -5660,9 +5660,9 @@ paths:
 
         `documents.<slot>.read` (the `documents.<slot>` that check returned).
 
-        Only slots with a read are checked. Returns the `name` and
+        Only slots with a read are checked. Returns the `name`, `document_type`
 
-        `document_type` warnings that check would give for this form. No file is
+        and `expired` warnings that check would give for this form. No file is
 
         sent, no AI model runs, no daily read is used, and nothing is saved."
       operationId: check_verification_document_cautions
@@ -10655,14 +10655,40 @@ components:
             - $ref: "#/components/schemas/VerificationPrintedName"
             - type: "null"
           description: The name printed on the file, or null (no name check).
+        expiry_date:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Expiry Date
+          description:
+            The expiry date read from the file (YYYY-MM-DD), or null (no
+            expiry check).
+        none_of_types:
+          type: boolean
+          title: None Of Types
+          description:
+            True when the file looked like none of the slot's document
+            types.
+          default: false
+        file_slot:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: File Slot
+          description:
+            "The slot whose file this was read from. Slots with the same
+            `file_slot` get one name check per box, as in the document check. Null:
+            slots with the same printed name count as one file."
       type: object
       title: VerificationDocumentCautionRead
       description:
         "A slot's earlier read, as `POST /verifications/document-check`
 
-        returned it in `documents.<slot>`. Only `option` and `printed_name` are
+        returned it in `documents.<slot>`. Send that whole object: `option`,
 
-        used; the other keys of that object may be sent and are ignored."
+        `printed_name`, `expiry_date`, `none_of_types` and `file_slot` are used;
+
+        the other keys may be sent and are ignored."
     VerificationDocumentCautionsRequest:
       properties:
         quote_id:
@@ -10721,8 +10747,8 @@ components:
           type: array
           title: Warnings
           description:
-            "`name` and `document_type` warnings: the typed form against
-            the earlier reads. Empty when nothing differs."
+            "`name`, `document_type` and `expired` warnings: the typed
+            form and chosen types against the earlier reads. Empty when nothing differs."
       type: object
       required:
         - warnings
@@ -10817,6 +10843,22 @@ components:
           description:
             "Why the file was not read, when Hail chose not to: 'daily_limit'
             when the workspace has used today's document reads. Null otherwise."
+        none_of_types:
+          type: boolean
+          title: None Of Types
+          description:
+            True when the file was read and looks like none of the slot's
+            document types (`option` is then null).
+          default: false
+        file_slot:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: File Slot
+          description:
+            "The slot whose file this was read from: this slot, or the
+            slot whose file covers it. Slots with the same `file_slot` share one file.
+            Null when not read."
       type: object
       required:
         - read

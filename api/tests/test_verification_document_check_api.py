@@ -13,6 +13,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from fastapi import HTTPException
 from hailhq.api import verification_files
 from hailhq.api.deps import get_s3_mail_optional
 from hailhq.api.main import app
@@ -589,8 +590,10 @@ async def test_a_covering_file_is_sent_once_and_fills_its_slots(
 @pytest.fixture(autouse=True)
 def _no_cached_forms():
     routes._caution_forms.clear()
+    routes._caution_fetches.clear()
     yield
     routes._caution_forms.clear()
+    routes._caution_fetches.clear()
 
 
 def _two_types(carrier) -> None:
@@ -748,6 +751,97 @@ async def test_cautions_ask_the_carrier_for_its_form_once(
     monkeypatch.setattr(routes, "_CAUTION_FORM_TTL_S", 0)
     assert (await _cautions(client, key, _cautions_body())).status_code == 200
     assert len(asked) == 2
+
+
+async def test_cautions_ask_again_for_a_slot_the_kept_form_lacks(
+    client, org_and_key, carrier, monkeypatch
+) -> None:
+    """A slot the carrier added after the form was kept: one fresh fetch,
+    not a 422 for the next ten minutes. A form fetched just now is not
+    fetched again for a slot it lacks."""
+    asked: list[tuple] = []
+    base_requirements = carrier.requirements
+    added = False
+
+    async def requirements(*args):
+        asked.append(args)
+        req = await base_requirements(*args)
+        if not added:
+            return req
+        slot = req.documents[0].model_copy(update={"name": "proof_of_birth"})
+        return req.model_copy(update={"documents": (*req.documents, slot)})
+
+    carrier.requirements = requirements
+    _, _, key = org_and_key
+    assert (await _cautions(client, key, _cautions_body())).status_code == 200
+    added = True
+    with_new = _cautions_body()
+    with_new["documents"]["proof_of_birth"] = {"option": "passport"}
+    # The kept form is under _CAUTION_FORM_REFRESH_S old: still a 422.
+    assert (await _cautions(client, key, with_new)).status_code == 422
+    assert len(asked) == 1
+    monkeypatch.setattr(routes, "_CAUTION_FORM_REFRESH_S", 0)
+    resp = await _cautions(client, key, with_new)
+    assert resp.status_code == 200, resp.text
+    assert len(asked) == 2
+    # A slot that is in no form: one fetch, then the 422.
+    nope = _cautions_body(documents={"nope": {}})
+    assert (await _cautions(client, key, nope)).status_code == 422
+    assert len(asked) == 3
+
+
+def _slow_provider(started: asyncio.Event, release: asyncio.Event, outcomes: list):
+    calls: list[tuple] = []
+
+    async def requirements(*args):
+        calls.append(args)
+        started.set()
+        await release.wait()
+        outcome = outcomes.pop(0)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
+    return SimpleNamespace(requirements=requirements), calls
+
+
+async def test_cautions_share_one_carrier_call_and_survive_a_cancelled_caller(
+    carrier,
+) -> None:
+    form = await carrier.requirements("GB", "mobile", "person")
+    started, release = asyncio.Event(), asyncio.Event()
+    provider, calls = _slow_provider(started, release, [form])
+    args = ("fake", provider, "GB", "mobile", "person")
+    first = asyncio.ensure_future(routes._caution_form(*args))
+    await started.wait()
+    second = asyncio.ensure_future(routes._caution_form(*args))
+    await asyncio.sleep(0)
+    # The console drops the older call on each edit.
+    first.cancel()
+    release.set()
+    got, age = await second
+    assert got == form and age == 0.0
+    assert len(calls) == 1
+    with pytest.raises(asyncio.CancelledError):
+        await first
+    # Kept for the next request, and the call is no longer running.
+    assert routes._caution_fetches == {}
+    assert (await routes._caution_form(*args))[0] == form
+    assert len(calls) == 1
+
+
+async def test_cautions_do_not_keep_a_failed_carrier_call(carrier) -> None:
+    form = await carrier.requirements("GB", "mobile", "person")
+    started, release = asyncio.Event(), asyncio.Event()
+    release.set()
+    provider, calls = _slow_provider(started, release, [RuntimeError("down"), form])
+    args = ("fake", provider, "GB", "mobile", "person")
+    with pytest.raises(HTTPException) as failed:
+        await routes._caution_form(*args)
+    assert failed.value.status_code == 503
+    assert routes._caution_forms == {} and routes._caution_fetches == {}
+    assert (await routes._caution_form(*args))[0] == form
+    assert len(calls) == 2
 
 
 async def test_fetches_of_several_files_share_one_limit() -> None:
