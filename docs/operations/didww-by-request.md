@@ -68,6 +68,10 @@ no `e164` and a `quote_id`; `POST /numbers` refuses that offer.
    the price the rater falls back to when the catalog row's price varies by
    area, as for an API purchase.
 
-5. Tell the customer the number. It shows in **Console → Numbers**. The
+5. Calls reach the number once it routes to an agent: Hail then assigns
+   the DID to the voice IN trunk and to the pay-per-minute capacity group
+   ([didww.md](../public/self-host/didww.md#inbound-calls)). Until then the
+   DIDWW panel shows it as not configured (Trunk "Voice: none", capacity 0).
+6. Tell the customer the number. It shows in **Console → Numbers**. The
    monthly fee renews like any other number; releasing
    it (`DELETE /v1/numbers/{id}`) terminates the DID.

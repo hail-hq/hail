@@ -663,6 +663,11 @@ async def revoke(offer: CarrierOffer, org: UUID) -> str | None:
 # (docs/public/self-host/didww.md). ``DIDWW_VOICE_IN_TRUNK_ID`` is created once
 # by the operator; Hail assigns a DID to it when the number routes calls to an
 # agent and clears it when the agent is removed.
+#
+# A DID needs call capacity too: Hail buys the 0-channel (metered) plan, and
+# DIDWW rejects every call to a DID with no capacity. Attaching also puts the
+# DID in the account's capacity group with pay-per-minute channels (made once
+# by the operator in the DIDWW panel, no monthly fee).
 
 
 class _NoSuchDid(Exception):
@@ -683,17 +688,30 @@ def _did_id_sync(resource_id: str | None, e164: str) -> str:
     raise _NoSuchDid(f"{e164} is not a DID on this DIDWW account")
 
 
-def _set_voice_in_trunk_sync(did_id: str, trunk_id: str | None) -> None:
+def _set_voice_in_trunk_sync(
+    did_id: str, trunk_id: str | None, capacity_group_id: str | None = None
+) -> None:
     data = {"type": "voice_in_trunks", "id": trunk_id} if trunk_id else None
+    relationships: dict = {"voice_in_trunk": {"data": data}}
+    if capacity_group_id:
+        relationships["shared_capacity_group"] = {
+            "data": {"type": "shared_capacity_groups", "id": capacity_group_id}
+        }
     didww_client().patch(
         f"dids/{did_id}",
-        {
-            "data": {
-                "id": did_id,
-                "type": "dids",
-                "relationships": {"voice_in_trunk": {"data": data}},
-            }
-        },
+        {"data": {"id": did_id, "type": "dids", "relationships": relationships}},
+    )
+
+
+def _metered_group_sync() -> str:
+    """The account's capacity group with pay-per-minute channels. Without
+    one, no DIDWW number Hail sells can take a call."""
+    groups = didww_client().get("shared_capacity_groups").get("data", [])
+    for group in groups:
+        if (group.get("attributes") or {}).get("metered_channels_count", 0) > 0:
+            return group["id"]
+    raise CarrierNotConfigured(
+        "DIDWW has no capacity group with pay-per-minute channels"
     )
 
 
@@ -703,7 +721,9 @@ async def attach_inbound_number(resource_id: str | None, e164: str) -> None:
 
     def attach() -> None:
         did_id = _did_id_sync(resource_id, e164)
-        _set_voice_in_trunk_sync(did_id, settings.didww_voice_in_trunk_id)
+        _set_voice_in_trunk_sync(
+            did_id, settings.didww_voice_in_trunk_id, _metered_group_sync()
+        )
 
     try:
         await asyncio.to_thread(attach)

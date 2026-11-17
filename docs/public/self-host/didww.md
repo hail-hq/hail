@@ -223,9 +223,19 @@ the DID when it routes calls to an agent; you create the trunk once.
 2. Create the LiveKit inbound trunk and dispatch rule
    ([LiveKit Cloud §4](./livekit-cloud.md#4-inbound-calls)) and set
    `LIVEKIT_SIP_INBOUND_TRUNK_ID`.
+3. Give numbers call capacity. Hail buys the plan with no included
+   channels, and DIDWW rejects calls to a number with no capacity.
+   **Phone Numbers → Capacity → Standard → Create Capacity Group**: any
+   name, a number of pay-per-minute (metered) channels, for example 100.
+   Pay-per-minute channels have no setup or monthly fee
+   ([DIDWW capacity](https://doc.didww.com/phone-numbers/capacity/how-capacity-works.html)).
+   Hail puts each number it routes in the first group with pay-per-minute
+   channels; with none, routing a number fails with a setup error.
 
 `PATCH /v1/numbers/{id}` with `voice_agent_id` then assigns the DID to the
-trunk (`PATCH /v3/dids/{id}`, relationship `voice_in_trunk`) and lists the
-number on the LiveKit trunk; `null` clears both ([Agents](../agents.md)).
+trunk and the capacity group (`PATCH /v3/dids/{id}`, relationships
+`voice_in_trunk` and `shared_capacity_group`) and lists the number on the
+LiveKit trunk; `null` clears the trunk and the LiveKit entry
+([Agents](../agents.md)).
 A DID added by hand without a stored DID id is looked up by number.
 Reference: DIDWW [voice IN trunks](https://doc.didww.com/voice/inbound-trunks/index.html).

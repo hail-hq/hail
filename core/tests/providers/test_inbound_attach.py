@@ -83,6 +83,13 @@ async def test_didww_attach_sets_voice_in_trunk(
 
     def fake_get(path, params=None, **kwargs):
         calls.append(("GET", path, params))
+        if path == "shared_capacity_groups":
+            return {
+                "data": [
+                    {"id": "grp-0", "attributes": {"metered_channels_count": 0}},
+                    {"id": "grp-1", "attributes": {"metered_channels_count": 100}},
+                ]
+            }
         return {"data": [{"id": "did-9", "attributes": {"number": "351300509184"}}]}
 
     def fake_patch(path, body, **kwargs):
@@ -95,15 +102,44 @@ async def test_didww_attach_sets_voice_in_trunk(
     # No stored id: looked up by number.
     await didww.attach_inbound_number(None, "+351300509184")
     assert calls[0][:2] == ("GET", "dids")
-    method, path, body = calls[1]
+    method, path, body = calls[-1]
     assert (method, path) == ("PATCH", "dids/did-9")
     assert body["data"]["relationships"]["voice_in_trunk"]["data"] == {
         "type": "voice_in_trunks",
         "id": "trunk-1",
     }
-    # Detach nulls the relationship.
+    # The 0-channel plan takes calls only with capacity: the first group
+    # with pay-per-minute channels.
+    assert body["data"]["relationships"]["shared_capacity_group"]["data"] == {
+        "type": "shared_capacity_groups",
+        "id": "grp-1",
+    }
+    # Detach nulls the trunk only.
     await didww.detach_inbound_number("did-9", "+351300509184")
-    assert calls[-1][2]["data"]["relationships"]["voice_in_trunk"]["data"] is None
+    relationships = calls[-1][2]["data"]["relationships"]
+    assert relationships["voice_in_trunk"]["data"] is None
+    assert "shared_capacity_group" not in relationships
+
+
+async def test_didww_attach_needs_a_pay_per_minute_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No capacity group: the number could not take a call, so routing fails
+    as a setup problem instead of looking done."""
+    monkeypatch.setattr(settings, "didww_api_key", "key")
+    monkeypatch.setattr(settings, "didww_voice_in_trunk_id", "trunk-1")
+    client = MagicMock()
+
+    def fake_get(path, params=None, **kwargs):
+        if path == "shared_capacity_groups":
+            return {"data": [{"id": "g", "attributes": {"metered_channels_count": 0}}]}
+        return {"data": [{"id": "did-9", "attributes": {"number": "351300509184"}}]}
+
+    client.get.side_effect = fake_get
+    monkeypatch.setattr(didww, "didww_client", lambda: client)
+    with pytest.raises(CarrierNotConfigured, match="pay-per-minute"):
+        await didww.attach_inbound_number(None, "+351300509184")
+    client.patch.assert_not_called()
 
 
 async def test_didww_requires_trunk(monkeypatch: pytest.MonkeyPatch) -> None:
