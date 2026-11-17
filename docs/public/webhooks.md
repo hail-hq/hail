@@ -209,8 +209,8 @@ curl -X POST "$HAIL_API_URL/v1/webhooks" \
   per-call `llm` from `POST /v1/calls` is not used. When the model fails,
   `summary` is null and the event is still sent.
 - Only phone calls with at least one spoken turn are sent. A call nobody spoke on gets no event.
-- Only calls that end while the subscription is active are sent. Calls that
-  ended more than an hour earlier are never sent.
+- Only calls that end after your `call.analyzed` subscription was created
+  are sent. A call not sent within 24 hours of its end is dropped.
 - Once it is sent, `GET /v1/events` shows an `analyzed` call event. It holds
   counts only (`turns`, and `summary` true or false), not the text.
 - Self-hosting: the voicebot sends this event from its text worker, which

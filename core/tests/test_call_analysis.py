@@ -95,6 +95,7 @@ async def _seed_call(
                 target_url="https://example.com/hook",
                 event_types=[WebhookEventType.CALL_ANALYZED.value],
                 secret_encrypted="x",
+                created_at=ended_at - timedelta(hours=1),
             )
         )
     await session.commit()
@@ -146,9 +147,25 @@ async def test_picks_an_ended_subscribed_call(async_session) -> None:
 
 async def test_skips_calls_it_must_not_analyze(async_session) -> None:
     await _seed_call(async_session, subscribe=False)
-    await _seed_call(async_session, ended_ago=timedelta(hours=2))
+    await _seed_call(async_session, ended_ago=timedelta(hours=25))
     await _seed_call(async_session, ended_ago=timedelta(seconds=1))
     await _seed_call(async_session, turns=[])
+    assert await next_call_to_analyze(async_session) is None
+
+
+async def test_subscription_created_after_the_call_is_not_enough(
+    async_session,
+) -> None:
+    call = await _seed_call(async_session, subscribe=False)
+    async_session.add(
+        WebhookSubscription(
+            organization_id=call.organization_id,
+            target_url="https://example.com/late",
+            event_types=["call.analyzed"],
+            secret_encrypted="x",
+        )
+    )
+    await async_session.commit()
     assert await next_call_to_analyze(async_session) is None
 
 
@@ -163,6 +180,7 @@ async def test_disabled_or_other_event_subscription_is_not_enough(
                 target_url="https://example.com/a",
                 event_types=["call.completed"],
                 secret_encrypted="x",
+                created_at=call.ended_at - timedelta(hours=1),
             ),
             WebhookSubscription(
                 organization_id=call.organization_id,
@@ -170,6 +188,7 @@ async def test_disabled_or_other_event_subscription_is_not_enough(
                 event_types=["call.analyzed"],
                 secret_encrypted="x",
                 status="disabled",
+                created_at=call.ended_at - timedelta(hours=1),
             ),
         ]
     )
@@ -179,7 +198,8 @@ async def test_disabled_or_other_event_subscription_is_not_enough(
 
 async def test_send_enqueues_one_delivery_with_the_payload(async_session) -> None:
     call = await _seed_call(async_session)
-    assert await send_call_analyzed(async_session, call.id, "Moved to Thursday.")
+    turns = await call_transcript(async_session, call.id)
+    assert await send_call_analyzed(async_session, call.id, turns, "Moved to Thursday.")
     [delivery] = await _deliveries(async_session, call.id)
     data = delivery.payload["data"]
     assert data["id"] == str(call.id)
@@ -205,14 +225,15 @@ async def test_send_enqueues_one_delivery_with_the_payload(async_session) -> Non
     assert marker.payload == {"turns": 2, "summary": True}
     # Sent once: no second delivery, and the call is not picked again.
     call_id = call.id  # the refused send rolls back, expiring ``call``
-    assert not await send_call_analyzed(async_session, call_id, "again")
+    assert not await send_call_analyzed(async_session, call_id, turns, "again")
     assert len(await _deliveries(async_session, call_id)) == 1
     assert await next_call_to_analyze(async_session) is None
 
 
 async def test_summary_null_and_unanswered_duration(async_session) -> None:
     call = await _seed_call(async_session, answered=False)
-    assert await send_call_analyzed(async_session, call.id, None)
+    turns = await call_transcript(async_session, call.id)
+    assert await send_call_analyzed(async_session, call.id, turns, None)
     [delivery] = await _deliveries(async_session, call.id)
     assert delivery.payload["data"]["summary"] is None
     assert delivery.payload["data"]["duration_seconds"] is None
@@ -224,7 +245,8 @@ async def test_two_senders_race_one_delivery(session_factory) -> None:
 
     async def send() -> bool:
         async with session_factory() as s:
-            return await send_call_analyzed(s, call.id, "Summary.")
+            turns = await call_transcript(s, call.id)
+            return await send_call_analyzed(s, call.id, turns, "Summary.")
 
     results = await asyncio.gather(send(), send())
     assert sorted(results) == [False, True]
@@ -242,6 +264,8 @@ async def test_empty_after_filtering_is_marked_not_sent(async_session) -> None:
     call = await _seed_call(async_session, turns=[("user_turn", "  ")])
     call_id = call.id
     assert (await next_call_to_analyze(async_session)).id == call_id
-    assert not await send_call_analyzed(async_session, call_id, None)
+    turns = await call_transcript(async_session, call_id)
+    assert turns == []
+    assert not await send_call_analyzed(async_session, call_id, turns, None)
     assert await _deliveries(async_session, call_id) == []
     assert await next_call_to_analyze(async_session) is None

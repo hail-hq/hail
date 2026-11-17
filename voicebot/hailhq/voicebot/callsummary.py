@@ -17,6 +17,7 @@ import asyncio
 import logging
 import time
 import uuid
+from dataclasses import dataclass
 from typing import Any
 
 import logfire
@@ -37,17 +38,32 @@ logger = logging.getLogger("hailhq.voicebot.callsummary")
 __all__ = ["MAX_SEND_ATTEMPTS", "MAX_SUMMARY_CHARS", "analyze_once", "summarize"]
 
 MAX_SUMMARY_CHARS = 1000
-# Failed sends (a DB error) per call before this process stops trying it.
+# The model reads at most this much of a long call: its start and its end.
+MAX_PROMPT_CHARS = 60_000
+# Failed tries (a DB error) per call before this process stops trying it.
 MAX_SEND_ATTEMPTS = 3
 _ROLE_LABELS = {"assistant": "Agent", "user": "Person"}
 
-# call id -> (failed sends, monotonic time of the first failure). In memory
-# only: a restart tries such a call again, while it is inside the window.
-_failures: dict[uuid.UUID, tuple[int, float]] = {}
+
+@dataclass
+class _Failure:
+    count: int
+    first: float  # monotonic time of the first failure
+    summary: str | None = None  # kept, so a retry does not run the model again
+    summarized: bool = False
+
+
+# Calls whose last try failed. In memory only: a restart tries such a call
+# again, while it is inside the window.
+_failures: dict[uuid.UUID, _Failure] = {}
 
 
 def _transcript_text(turns: list[dict[str, Any]]) -> str:
-    return "\n".join(f"{_ROLE_LABELS[t['role']]}: {t['text']}" for t in turns)
+    text = "\n".join(f"{_ROLE_LABELS[t['role']]}: {t['text']}" for t in turns)
+    if len(text) <= MAX_PROMPT_CHARS:
+        return text
+    half = MAX_PROMPT_CHARS // 2
+    return f"{text[:half]}\n[...]\n{text[-half:]}"
 
 
 async def _no_tools(call: FunctionToolCall) -> tuple[str, bool]:
@@ -97,30 +113,42 @@ def _given_up() -> set[uuid.UUID]:
     """Calls this process stopped trying. Forgets entries older than the
     window (those calls are no longer picked anyway)."""
     cutoff = time.monotonic() - ANALYSIS_WINDOW.total_seconds()
-    for call_id, (_, first) in list(_failures.items()):
-        if first < cutoff:
+    for call_id, failure in list(_failures.items()):
+        if failure.first < cutoff:
             del _failures[call_id]
-    return {cid for cid, (n, _) in _failures.items() if n >= MAX_SEND_ATTEMPTS}
+    return {cid for cid, f in _failures.items() if f.count >= MAX_SEND_ATTEMPTS}
 
 
 async def analyze_once(_api: Any = None) -> bool:
     """Send ``call.analyzed`` for one call. Returns False when none waited.
-    ``_api`` is unused: the poller hands every worker the API client."""
+    ``_api`` is unused: the poller hands every worker the API client.
+
+    Any error after a call is picked counts against that call, so one bad
+    call cannot hold the queue: after ``MAX_SEND_ATTEMPTS`` this process
+    skips it."""
     with logfire.suppress_instrumentation():
         async with session_scope() as db:
             call = await next_call_to_analyze(db, exclude=_given_up())
             if call is None:
                 return False
             call_id, org_id = call.id, call.organization_id
-            turns = await call_transcript(db, call_id)
-    # Empty after filtering: no model call; the marker alone is written.
-    summary = await summarize(org_id, call_id, turns) if turns else None
+    failure = _failures.get(call_id)
+    summarized = failure is not None and failure.summarized
+    summary = failure.summary if failure is not None else None
     try:
         async with session_scope() as db:
-            await send_call_analyzed(db, call_id, summary)
+            turns = await call_transcript(db, call_id)
+        if not summarized:
+            # Empty after filtering: no model call; the marker alone is written.
+            summary = await summarize(org_id, call_id, turns) if turns else None
+            summarized = True
+        async with session_scope() as db:
+            await send_call_analyzed(db, call_id, turns, summary)
     except Exception:
-        count, first = _failures.get(call_id, (0, time.monotonic()))
-        _failures[call_id] = (count + 1, first)
+        if failure is None:
+            failure = _failures[call_id] = _Failure(0, time.monotonic())
+        failure.count += 1
+        failure.summary, failure.summarized = summary, summarized
         raise
     _failures.pop(call_id, None)
     return True

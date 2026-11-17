@@ -78,6 +78,7 @@ async def _seed(session, *, subscribe=True, turns=None) -> uuid.UUID:
                 target_url="https://example.com/hook",
                 event_types=["call.analyzed"],
                 secret_encrypted="x",
+                created_at=ended_at - timedelta(hours=1),
             )
         )
     await session.commit()
@@ -184,13 +185,40 @@ async def test_failed_send_is_retried_then_given_up(
 ) -> None:
     call_id = await _seed(async_session)
 
-    async def broken_send(db, cid, summary):
+    async def broken_send(db, cid, turns, summary):
         raise RuntimeError("db down")
 
     monkeypatch.setattr(callsummary, "send_call_analyzed", broken_send)
     for _ in range(callsummary.MAX_SEND_ATTEMPTS):
         with pytest.raises(RuntimeError):
             await callsummary.analyze_once()
-    assert callsummary._failures[call_id][0] == callsummary.MAX_SEND_ATTEMPTS
+    assert callsummary._failures[call_id].count == callsummary.MAX_SEND_ATTEMPTS
+    # The model ran once: retries reuse its summary.
+    assert llm["built"] == 1
     # Given up in this process: the call is no longer picked.
     assert not await callsummary.analyze_once()
+
+
+async def test_failure_before_the_send_counts_too(
+    async_session, llm, monkeypatch
+) -> None:
+    call_id = await _seed(async_session)
+
+    async def broken_transcript(db, cid):
+        raise RuntimeError("bad row")
+
+    monkeypatch.setattr(callsummary, "call_transcript", broken_transcript)
+    for _ in range(callsummary.MAX_SEND_ATTEMPTS):
+        with pytest.raises(RuntimeError):
+            await callsummary.analyze_once()
+    assert call_id in callsummary._given_up()
+    assert not await callsummary.analyze_once()
+
+
+def test_long_transcript_keeps_start_and_end() -> None:
+    turns = [{"role": "user", "text": "x" * 1000} for _ in range(200)]
+    turns[0]["text"] = "START"
+    turns[-1]["text"] = "END"
+    text = callsummary._transcript_text(turns)
+    assert len(text) <= callsummary.MAX_PROMPT_CHARS + 10
+    assert text.startswith("Person: START") and text.endswith("Person: END")

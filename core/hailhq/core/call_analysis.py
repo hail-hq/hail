@@ -22,7 +22,7 @@ from typing import Any
 
 from hailhq.core.models import Call, CallEvent, WebhookSubscription
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
-from hailhq.core.threads import TEXT_MARKER
+from hailhq.core.threads import spoken_text
 from hailhq.core.webhook_events import WebhookEventType
 from hailhq.core.webhook_fanout import call_event_data, fanout_call_event
 from sqlalchemy import any_, exists, literal, select
@@ -42,9 +42,10 @@ __all__ = [
 # ``call_events.kind`` of the marker row: the call's call.analyzed step ran.
 ANALYZED_KIND = "analyzed"
 TURN_KINDS = ("user_turn", "agent_turn")
-# Only calls that ended this recently are analyzed: a new subscription (or
-# the first deploy) never sends events for old calls.
-ANALYSIS_WINDOW = timedelta(hours=1)
+# A call not sent this long after its end is dropped (a backlog, or the
+# voicebot down). Old calls are also kept out by the subscription rule in
+# ``next_call_to_analyze``.
+ANALYSIS_WINDOW = timedelta(hours=24)
 # Wait this long after the end, so the last turn rows are written first.
 SETTLE_DELAY = timedelta(seconds=10)
 
@@ -54,7 +55,7 @@ async def call_transcript(db: AsyncSession, call_id: uuid.UUID) -> list[dict[str
 
     ``role`` is ``assistant`` for the agent and ``user`` for the other side.
     Blank turns are left out, and so are texts the caller sent during the
-    call (they are SMS rows already, see ``threads.TEXT_MARKER``)."""
+    call (they are SMS rows already, see ``threads.spoken_text``)."""
     rows = (
         await db.execute(
             select(CallEvent)
@@ -64,10 +65,8 @@ async def call_transcript(db: AsyncSession, call_id: uuid.UUID) -> list[dict[str
     ).scalars()
     turns: list[dict[str, Any]] = []
     for ev in rows:
-        text = str((ev.payload or {}).get("text") or "")
-        if not text.strip():
-            continue
-        if ev.kind == "user_turn" and text.startswith(TEXT_MARKER):
+        text = spoken_text(ev)
+        if text is None:
             continue
         turns.append(
             {
@@ -115,8 +114,10 @@ async def next_call_to_analyze(
     """The oldest ended phone call that still needs its ``call.analyzed``
     event, or None. It ended between ``ANALYSIS_WINDOW`` and
     ``SETTLE_DELAY`` ago, has at least one turn row, has no ``analyzed``
-    marker, and its org has an active subscription to ``call.analyzed``.
-    Takes no lock: :func:`send_call_analyzed` decides who sends."""
+    marker, and its org has an active subscription to ``call.analyzed``
+    created before the call ended (so a new subscription never gets events
+    for calls that ended before it). Takes no lock:
+    :func:`send_call_analyzed` decides who sends."""
     now = now or datetime.now(timezone.utc)
     # The subscriptions table is small: with no listener, calls is not read.
     orgs = (
@@ -132,6 +133,13 @@ async def next_call_to_analyze(
     ).all()
     if not orgs:
         return None
+    listening = exists().where(
+        WebhookSubscription.organization_id == Call.organization_id,
+        WebhookSubscription.status == "active",
+        WebhookSubscription.created_at <= Call.ended_at,
+        literal(WebhookEventType.CALL_ANALYZED.value)
+        == any_(WebhookSubscription.event_types),
+    )
     has_turn = exists().where(
         CallEvent.call_id == Call.id, CallEvent.kind.in_(TURN_KINDS)
     )
@@ -146,6 +154,7 @@ async def next_call_to_analyze(
             Call.status.in_(TERMINAL_CALL_STATUSES),
             Call.ended_at >= now - ANALYSIS_WINDOW,
             Call.ended_at <= now - SETTLE_DELAY,
+            listening,
             has_turn,
             ~_analyzed(Call.id),
         )
@@ -158,20 +167,23 @@ async def next_call_to_analyze(
 
 
 async def send_call_analyzed(
-    db: AsyncSession, call_id: uuid.UUID, summary: str | None
+    db: AsyncSession,
+    call_id: uuid.UUID,
+    transcript: list[dict[str, Any]],
+    summary: str | None,
 ) -> bool:
     """Write the ``analyzed`` marker and enqueue the ``call.analyzed``
-    deliveries, once per call, then commit. Returns True when deliveries
-    were enqueued. A call already marked, or one whose transcript is empty
-    after filtering, gets no event (the latter still gets the marker, so it
-    is not picked again)."""
+    deliveries, once per call, then commit. ``transcript`` is the one the
+    summary was written from (:func:`call_transcript`). Returns True when
+    deliveries were enqueued. A call already marked, or one with an empty
+    transcript, gets no event (the latter still gets the marker, so it is
+    not picked again)."""
     call = (
         await db.execute(select(Call).where(Call.id == call_id).with_for_update())
     ).scalar_one_or_none()
     if call is None or await db.scalar(select(_analyzed(call_id))):
         await db.rollback()
         return False
-    transcript = await call_transcript(db, call_id)
     db.add(
         CallEvent(
             call_id=call_id,
