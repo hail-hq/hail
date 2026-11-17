@@ -55,6 +55,9 @@ _VERTICALS = (
     ("COMMUNICATION", "Communication"),
 )
 _YES_NO = (FieldOption(key="YES", label="Yes"), FieldOption(key="NO", label="No"))
+# The daily_texts answer that files a vetted brand. Blank, "not sure" and
+# "up to 2,000" file low volume.
+_OVER_2000 = "OVER_2000"
 # Carrier maximums, in characters: campaign description and each sample.
 _DESCRIPTION_MAX = 4096
 _SAMPLE_MAX = 1024
@@ -187,20 +190,33 @@ _BUSINESS_FIELDS = (
     FieldSpec(name="rep_phone", label="Contact person phone", kind="phone"),
     FieldSpec(name="rep_title", label="Contact person job title"),
     FieldSpec(
-        name="low_volume",
-        label="How many texts do you send each day?",
+        name="daily_texts",
+        label="How many texts do you expect to send each day?",
+        required=False,
         options=(
-            FieldOption(
-                key="YES",
-                label="Under 2,000 texts a day to T-Mobile users (cheaper, no vetting)",
-            ),
-            FieldOption(key="NO", label="More than that (vetted brand)"),
+            FieldOption(key="NOT_SURE", label="Not sure yet"),
+            FieldOption(key="UP_TO_2000", label="Up to 2,000"),
+            FieldOption(key=_OVER_2000, label="More than 2,000"),
         ),
         help=(
-            "Low volume costs less because your company is not vetted. "
-            "You get these limits: at most 2,000 texts a day to T-Mobile users, "
-            "slower sending, and no trust score. "
-            "To send more later, you make a new registration and pay for it again."
+            "Up to 2,000 a day costs less and starts with a quick setup. "
+            "It has a daily limit and sends a little slower. "
+            "Sending more later needs a carrier check."
+        ),
+    ),
+    FieldSpec(
+        name="faster_lane_ok",
+        label=(
+            "Move me to the faster lane automatically if the networks need "
+            "more details about my company."
+        ),
+        kind="choices",
+        required=False,
+        options=(FieldOption(key="YES", label="Yes"),),
+        max_choices=1,
+        help=(
+            "For up to 2,000 texts a day. If the networks ask, we send the "
+            "extra details for you. This step has its own fee."
         ),
     ),
 )
@@ -951,9 +967,18 @@ class CampaignText:
 
 
 def low_volume(fields: dict[str, str], subject_type: SubjectType) -> bool:
-    """True for a company that picked low volume: its brand is not vetted
-    and its campaign files the LOW_VOLUME use case. Never for a person."""
-    return subject_type == "business" and _answer(fields, "low_volume") == "YES"
+    """True for a company that did not say it sends more than 2,000 texts a
+    day (blank, "not sure" or "up to 2,000"): its brand is not vetted and
+    its campaign files the LOW_VOLUME use case. Never for a person."""
+    return subject_type == "business" and _answer(fields, "daily_texts") != _OVER_2000
+
+
+def faster_lane_ok(fields: dict[str, str], subject_type: SubjectType) -> bool:
+    """True for a low-volume company that ticked the faster lane: Hail asks
+    for the brand's vetting when the carrier cannot verify it."""
+    return (
+        low_volume(fields, subject_type) and _answer(fields, "faster_lane_ok") == "YES"
+    )
 
 
 def _use_case(

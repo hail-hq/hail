@@ -67,7 +67,7 @@ BUSINESS = {
     "rep_email": "ada@acme.org",
     "rep_phone": "+15125550199",
     "rep_title": "Owner",
-    "low_volume": "NO",
+    "daily_texts": "OVER_2000",
 }
 
 
@@ -516,6 +516,8 @@ def test_legacy_saved_application_compiles_without_invented_claims():
         "has_links": "NO",
         "privacy_policy_url": "https://acme.example/privacy",
         "terms_url": "https://acme.example/terms",
+        # A vetted filing: an amend keeps the filed answer (blank is low volume).
+        "daily_texts": "OVER_2000",
     }
     text = campaign_text(data, "business")
     assert text.schema_version == 1
@@ -738,44 +740,74 @@ def test_tax_number_help_names_the_vat_countries():
 
 
 @pytest.mark.parametrize("provider", [TELNYX, TWILIO])
-def test_companies_pick_low_volume_and_persons_never_see_it(provider):
+def test_companies_say_their_daily_texts_and_persons_never_see_it(provider):
     specs = {f.name: f for f in sms_requirements(provider, "business").fields}
-    spec = specs["low_volume"]
-    assert spec.required
-    assert [(o.key, o.label) for o in spec.options] == [
-        ("YES", "Under 2,000 texts a day to T-Mobile users (cheaper, no vetting)"),
-        ("NO", "More than that (vetted brand)"),
+    daily = specs["daily_texts"]
+    assert not daily.required
+    assert daily.label == "How many texts do you expect to send each day?"
+    assert [(o.key, o.label) for o in daily.options] == [
+        ("NOT_SURE", "Not sure yet"),
+        ("UP_TO_2000", "Up to 2,000"),
+        ("OVER_2000", "More than 2,000"),
     ]
-    # The help names what the customer gives up.
-    for words in ("2,000", "slower", "trust score", "new registration"):
-        assert words in spec.help
+    lane = specs["faster_lane_ok"]
+    assert not lane.required and lane.kind == "choices"
+    assert lane.label == (
+        "Move me to the faster lane automatically if the networks need more "
+        "details about my company."
+    )
+    assert [o.key for o in lane.options] == ["YES"] and lane.max_choices == 1
+    # Friendly, carrier-neutral help with no prices.
+    for spec in (daily, lane):
+        assert "$" not in spec.help
+        for carrier in ("Twilio", "Telnyx", "TCR", "T-Mobile"):
+            assert carrier not in spec.help
+    assert "Sending more later needs a carrier check." in daily.help
     person = {f.name for f in sms_requirements(provider, "person").fields}
-    assert "low_volume" not in person
+    assert not {"daily_texts", "faster_lane_ok"} & person
 
 
-def test_low_volume_is_required_and_checked_for_companies_only():
-    missing = {k: v for k, v in BUSINESS.items() if k != "low_volume"}
-    assert "low_volume" in error_fields(missing, "business")
-    assert "low_volume" in error_fields({**BUSINESS, "low_volume": "MAYBE"}, "business")
-    assert not errors({**BUSINESS, "low_volume": "YES"}, "business")
-    # A person's form has no such field: an answer there is ignored.
-    assert not errors({**GOOD, "low_volume": "YES"})
+def test_daily_texts_and_faster_lane_are_optional_but_checked():
+    blank = {
+        k: v for k, v in BUSINESS.items() if k not in ("daily_texts", "faster_lane_ok")
+    }
+    assert not errors(blank, "business")
+    assert "daily_texts" in error_fields(
+        {**BUSINESS, "daily_texts": "MAYBE"}, "business"
+    )
+    assert "faster_lane_ok" in error_fields(
+        {**BUSINESS, "faster_lane_ok": "NO"}, "business"
+    )
+    assert not errors({**BUSINESS, "faster_lane_ok": "YES"}, "business")
+    # A person's form has neither field: an answer there is ignored.
+    assert not errors({**GOOD, "daily_texts": "MAYBE", "faster_lane_ok": "YES"})
 
 
-def test_low_volume_files_the_low_volume_use_case_with_every_purpose():
-    from hailhq.core.providers.verification.sms_form import low_volume
+@pytest.mark.parametrize("answer", [None, "", "NOT_SURE", "UP_TO_2000"])
+def test_blank_not_sure_and_up_to_2000_are_low_volume(answer):
+    from hailhq.core.providers.verification.sms_form import faster_lane_ok, low_volume
 
-    low = {**BUSINESS, "low_volume": "YES"}
-    assert low_volume(low, "business") is True
-    one = campaign_text(low, "business")
+    fields = {k: v for k, v in BUSINESS.items() if k != "daily_texts"}
+    if answer is not None:
+        fields["daily_texts"] = answer
+    assert low_volume(fields, "business") is True
+    one = campaign_text(fields, "business")
     assert one.use_case == "LOW_VOLUME" and one.text_types == ["CUSTOMER_CARE"]
-    two = campaign_text({**low, "text_types": "CUSTOMER_CARE,MARKETING"}, "business")
+    two = campaign_text({**fields, "text_types": "CUSTOMER_CARE,MARKETING"}, "business")
     assert two.use_case == "LOW_VOLUME"
     assert two.text_types == ["CUSTOMER_CARE", "MARKETING"]
-    # Persons and vetted companies are unchanged.
-    assert low_volume({**GOOD, "low_volume": "YES"}, "person") is False
-    assert campaign_text({**GOOD, "low_volume": "YES"}, "person").use_case == (
-        "SOLE_PROPRIETOR"
-    )
+    assert faster_lane_ok(fields, "business") is False
+    assert faster_lane_ok({**fields, "faster_lane_ok": "YES"}, "business") is True
+
+
+def test_over_2000_and_persons_are_never_low_volume():
+    from hailhq.core.providers.verification.sms_form import faster_lane_ok, low_volume
+
     assert low_volume(BUSINESS, "business") is False
     assert campaign_text(BUSINESS, "business").use_case == "CUSTOMER_CARE"
+    # The box means nothing on the vetted path.
+    assert faster_lane_ok({**BUSINESS, "faster_lane_ok": "YES"}, "business") is False
+    person = {**GOOD, "daily_texts": "UP_TO_2000", "faster_lane_ok": "YES"}
+    assert low_volume(person, "person") is False
+    assert faster_lane_ok(person, "person") is False
+    assert campaign_text(person, "person").use_case == "SOLE_PROPRIETOR"

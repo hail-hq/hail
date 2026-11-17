@@ -42,17 +42,29 @@ def _fees(provider: str, subject_type: str, low_volume: bool) -> dict:
 
 
 def filing_fee_cents(
-    provider: str, subject_type: str, brand_kept: bool = False, low_volume: bool = False
+    provider: str,
+    subject_type: str,
+    brand_kept: bool = False,
+    *,
+    low_volume: bool = False,
+    faster_lane: bool = False,
 ) -> int:
     """The carrier's one-time cost of a filing: brand plus campaign vetting,
-    or vetting alone for a filing with a kept brand. Raises KeyError for a
-    carrier with no SMS registration."""
+    or vetting alone for a filing with a kept brand. ``faster_lane``: a
+    low-volume company that allowed it, so the worst case adds the brand
+    vetting (``faster_lane_fee_cents``) where the carrier has one. Raises
+    KeyError for a carrier with no SMS registration."""
     row = _fees(provider, subject_type, low_volume)
     vetting = _cents(row["campaign_vetting_usd"])
-    return vetting if brand_kept else _cents(row["brand_usd"]) + vetting
+    total = vetting if brand_kept else _cents(row["brand_usd"]) + vetting
+    if faster_lane and low_volume and subject_type == "business":
+        total += _cents(row.get("faster_lane_usd", "0"))
+    return total
 
 
-def brand_fee_cents(provider: str, subject_type: str, low_volume: bool = False) -> int:
+def brand_fee_cents(
+    provider: str, subject_type: str, *, low_volume: bool = False
+) -> int:
     """The carrier's one-time cost of a new brand (the submission; for a
     vetted company it includes the brand's vetting). Raises KeyError for a
     carrier with no SMS registration."""
@@ -60,9 +72,16 @@ def brand_fee_cents(provider: str, subject_type: str, low_volume: bool = False) 
 
 
 def campaign_fee_cents(
-    provider: str, subject_type: str, low_volume: bool = False
+    provider: str, subject_type: str, *, low_volume: bool = False
 ) -> int:
     """The carrier's one-time cost of filing the campaign (its vetting), the
     step after the brand. Raises KeyError for a carrier with no SMS
     registration."""
     return _cents(_fees(provider, subject_type, low_volume)["campaign_vetting_usd"])
+
+
+def faster_lane_fee_cents(provider: str) -> int:
+    """The carrier's cost of the faster lane: vetting a low-volume company
+    brand it could not verify. Raises KeyError for a carrier with no faster
+    lane (no ``faster_lane_usd``) or no SMS registration."""
+    return _cents(_load()[provider]["business_low_volume"]["faster_lane_usd"])

@@ -59,7 +59,34 @@ def test_low_volume_never_changes_a_persons_fees() -> None:
 def test_low_volume_rows_in_the_costs_file() -> None:
     rows = {r: fees._load()[r]["business_low_volume"] for r in ("twilio", "telnyx")}
     assert all(row["campaign_monthly_usd"] == "1.50" for row in rows.values())
+    # Not yet checked against an invoice, on either carrier.
+    assert all(row["verification_method"] == "unverified" for row in rows.values())
     # Telnyx bills its campaign fees three months up front.
     assert rows["telnyx"]["minimum_months"] == 3
     with pytest.raises(KeyError):
         fees.filing_fee_cents("didww", "business", low_volume=True)
+
+
+def test_the_faster_lane_is_its_own_step() -> None:
+    # Telnyx's standard vetting, asked for when the brand is not verified.
+    assert fees.faster_lane_fee_cents("telnyx") == 4150
+    # Twilio's API cannot add it: no faster lane fee.
+    with pytest.raises(KeyError):
+        fees.faster_lane_fee_cents("twilio")
+    with pytest.raises(KeyError):
+        fees.faster_lane_fee_cents("didww")
+
+
+def test_a_ticked_faster_lane_raises_the_filing_floor_to_the_worst_case() -> None:
+    low = fees.filing_fee_cents("telnyx", "business", low_volume=True)
+    assert (
+        fees.filing_fee_cents("telnyx", "business", low_volume=True, faster_lane=True)
+        == low + 4150
+    )
+    # Nothing to add where the carrier has no faster lane, or no low volume.
+    assert fees.filing_fee_cents(
+        "twilio", "business", low_volume=True, faster_lane=True
+    ) == fees.filing_fee_cents("twilio", "business", low_volume=True)
+    assert fees.filing_fee_cents(
+        "telnyx", "business", faster_lane=True
+    ) == fees.filing_fee_cents("telnyx", "business")

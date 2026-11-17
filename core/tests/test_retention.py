@@ -589,6 +589,8 @@ _NOT_ANSWER_REFS = {
     "e164",  # the Hail number on a toll-free registration
     "end_user_sid",
     "file_ids",
+    "faster_lane_at",  # the fee rater charges the brand's vetting from it
+    "faster_lane_ok",  # the company allowed that vetting; not personal data
     "group_id",
     "identity_created",
     "identity_id",

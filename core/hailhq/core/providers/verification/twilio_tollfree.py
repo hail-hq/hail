@@ -77,8 +77,8 @@ _AUTHORITIES = tuple(
 
 
 # Questions of the local (10DLC) form that toll-free does not ask: it has
-# no brand to vet, so no low-volume choice.
-_LOCAL_ONLY = frozenset({"low_volume"})
+# no brand to vet, so no daily volume or faster lane.
+_LOCAL_ONLY = frozenset({"daily_texts", "faster_lane_ok"})
 
 
 def requirements(provider, country_code, subject_type) -> Requirements:

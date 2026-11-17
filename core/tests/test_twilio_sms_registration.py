@@ -108,7 +108,7 @@ FIELDS = {
     "rep_email": "ada@acme.example",
     "rep_phone": "+15125550100",
     "rep_title": "CEO",
-    "low_volume": "NO",
+    "daily_texts": "OVER_2000",
     "campaign_description": "Order updates and delivery notices for customers who ordered on our site.",
     "sample_1": "Acme: your order 123 shipped. Reply STOP to opt out.",
     "sample_2": "Acme: your order 123 was delivered. Reply STOP to opt out.",
@@ -189,7 +189,7 @@ async def test_business_draft_creates_profile_trust_and_brand() -> None:
     assert "Acme" not in ids and "12-3456789" not in repr(draft.refs)
 
 
-async def _business_draft(p, fields):
+async def _business_draft(p, fields, **kwargs):
     req = await p.requirements("US", "local", "business")
     return await p.create_draft(
         organization_id="org1",
@@ -199,32 +199,34 @@ async def _business_draft(p, fields):
         address=ADDRESS,
         documents={},
         messaging_service_sid="MG9",
+        **kwargs,
+    )
+
+
+def _brand_call(p) -> dict:
+    return next(
+        kw for n, kw in p._client.calls if n.endswith("brand_registrations.create")
     )
 
 
 async def test_low_volume_company_brand_skips_secondary_vetting() -> None:
     p = _provider()
-    draft = await _business_draft(p, {**FIELDS, "low_volume": "YES"})
+    fields = {**FIELDS, "daily_texts": "UP_TO_2000"}
+    draft = await _business_draft(p, fields, low_volume=True)
     assert draft.problems == []
-    brand = next(
-        kw for n, kw in p._client.calls if n.endswith("brand_registrations.create")
-    )
+    brand = _brand_call(p)
     assert brand["skip_automatic_sec_vet"] is True
     # A Low-Volume Standard brand is still a standard brand.
     assert "brand_type" not in brand
-    # The marker the fee rater reads.
-    assert draft.refs["low_volume"] is True
     assert draft.refs["campaign"]["use_case"] == "LOW_VOLUME"
+    # The API writes the fee marker, from the decision it priced.
+    assert "low_volume" not in draft.refs
 
 
 async def test_vetted_company_brand_is_unchanged() -> None:
     p = _provider()
-    draft = await _business_draft(p, FIELDS)
-    brand = next(
-        kw for n, kw in p._client.calls if n.endswith("brand_registrations.create")
-    )
-    assert "skip_automatic_sec_vet" not in brand
-    assert "low_volume" not in draft.refs
+    await _business_draft(p, FIELDS)
+    assert "skip_automatic_sec_vet" not in _brand_call(p)
 
 
 async def test_a_person_never_gets_the_low_volume_brand() -> None:
@@ -236,7 +238,7 @@ async def test_a_person_never_gets_the_low_volume_brand() -> None:
         "last_name": "Lovelace",
         "email": "ada@example.com",
         "mobile_phone_number": "+15125550199",
-        "low_volume": "YES",
+        "daily_texts": "UP_TO_2000",
     }
     req = await p.requirements("US", "local", "person")
     draft = await p.create_draft(
@@ -247,13 +249,11 @@ async def test_a_person_never_gets_the_low_volume_brand() -> None:
         address=ADDRESS,
         documents={},
         messaging_service_sid=None,
+        low_volume=True,
     )
-    brand = next(
-        kw for n, kw in p._client.calls if n.endswith("brand_registrations.create")
-    )
+    brand = _brand_call(p)
     assert brand["brand_type"] == "SOLE_PROPRIETOR"
     assert "skip_automatic_sec_vet" not in brand
-    assert "low_volume" not in draft.refs
     assert draft.refs["campaign"]["use_case"] == "SOLE_PROPRIETOR"
 
 
@@ -282,6 +282,57 @@ async def test_low_volume_campaign_files_the_low_volume_use_case() -> None:
     assert not any(
         "usecases" in k.lower() for k in create if k != "us_app_to_person_usecase"
     )
+
+
+@pytest.mark.parametrize("faster_lane_ok", [False, True])
+async def test_an_unverified_low_volume_brand_waits_for_a_new_filing(
+    faster_lane_ok,
+) -> None:
+    """Twilio's API cannot add vetting to a Low-Volume Standard brand: the
+    row waits for the customer, ticked box or not, and nothing is filed."""
+    from hailhq.core.providers.verification.sms_review import (
+        LOW_VOLUME_NEEDS_NEW_FILING,
+    )
+
+    r = _ok_responses()
+    r["brand_registrations.fetch"] = SimpleNamespace(
+        status="APPROVED", identity_status="UNVERIFIED", brand_feedback=None
+    )
+    p = _provider(r)
+    refs = {
+        "brand_sid": "BN1",
+        "messaging_service_sid": "MG1",
+        "subject_type": "business",
+        "low_volume": True,
+        "campaign": _campaign("LOW_VOLUME"),
+    }
+    if faster_lane_ok:
+        refs["faster_lane_ok"] = True
+    st = await p.status(refs)
+    assert st.state == "pending" and st.reason == LOW_VOLUME_NEEDS_NEW_FILING
+    assert refs["needs_information"] is True
+    assert "faster_lane_at" not in refs and "campaign_sid" not in refs
+    assert not _calls(p, "us_app_to_person.create")
+    assert not _calls(p, "vettings.create")
+
+
+async def test_an_unverified_vetted_brand_is_not_held_as_low_volume() -> None:
+    r = _ok_responses()
+    r["brand_registrations.fetch"] = SimpleNamespace(
+        status="APPROVED", identity_status="UNVERIFIED", brand_feedback=None
+    )
+    r["us_app_to_person.create"] = SimpleNamespace(
+        sid="QE1", campaign_status="PENDING", errors=[]
+    )
+    p = _provider(r)
+    refs = {
+        "brand_sid": "BN1",
+        "messaging_service_sid": "MG1",
+        "subject_type": "business",
+        "campaign": _campaign(),
+    }
+    await p.status(refs)
+    assert "needs_information" not in refs and refs["campaign_sid"] == "QE1"
 
 
 async def test_person_draft_uses_sole_proprietor_and_sends_otp() -> None:

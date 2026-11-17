@@ -47,7 +47,7 @@ from collections.abc import AsyncIterator, Callable, Collection
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
-from typing import Annotated, Literal, NamedTuple
+from typing import Annotated, Literal, NamedTuple, Protocol
 from uuid import UUID
 
 import phonenumbers
@@ -140,7 +140,11 @@ from hailhq.core.providers.verification.document_check import (
     document_cautions,
 )
 from hailhq.core.providers.verification.forms import validate_input
-from hailhq.core.providers.verification.sms_form import campaign_text, low_volume
+from hailhq.core.providers.verification.sms_form import (
+    campaign_text,
+    faster_lane_ok,
+    low_volume,
+)
 from hailhq.core.providers.verification.sms_review import same_sender
 from hailhq.core.retention import (
     REGISTRATION_ANSWER_REFS,
@@ -505,8 +509,9 @@ def _refusal_mark(
 def _wiped_refs(row: CarrierVerification, *, rejected: bool = False) -> dict:
     """``provider_refs`` once emptied. A filing that reused a brand keeps the
     mark: the fee rater reads it on every sweep, and without it would bill
-    the submission. So does a low-volume filing (``low_volume``): without it
-    the rater would bill a vetted brand. A ``DISCARD_REFUSED`` mark stays: it names what the
+    the submission. So do a low-volume filing (``low_volume``; without it
+    the rater would bill a vetted brand) and its faster lane
+    (``faster_lane_at``). A ``DISCARD_REFUSED`` mark stays: it names what the
     carrier still holds. A number registration keeps its answers only when
     it is being ``rejected`` (for a resubmit), never on a cancel."""
     refs = row.provider_refs or {}
@@ -514,6 +519,9 @@ def _wiped_refs(row: CarrierVerification, *, rejected: bool = False) -> dict:
     if refs.get("low_volume"):
         # The rater prices a low-volume row's brand and monthly fees from it.
         kept["low_volume"] = True
+    if refs.get("faster_lane_at"):
+        # And charges its faster lane (the brand's vetting) from this one.
+        kept["faster_lane_at"] = refs["faster_lane_at"]
     if DISCARD_REFUSED in refs:
         kept[DISCARD_REFUSED] = copy.deepcopy(refs[DISCARD_REFUSED])
     # Expired answers are not carried over: a dismissal stamps a new
@@ -608,7 +616,10 @@ async def _uncharged_sms_steps(
     A submission happens at filing, except for a filing that reused a brand
     (never charged one); a review once the campaign is filed. Exact refs,
     so the ledger's (organization, ref) index is used."""
-    if step == "submission":
+    if step == "faster_lane":
+        lane = _refs_time("faster_lane_at")
+        happened = [lane > func.now() - text("interval '1 day'")]
+    elif step == "submission":
         happened = [
             CarrierVerification.created_at > func.now() - text("interval '1 day'"),
             CarrierVerification.provider_refs["brand_reused"].astext.is_distinct_from(
@@ -637,7 +648,7 @@ async def _uncharged_sms_steps(
             .exists(),
         )
     )
-    return [(provider, subject, bool(low)) for provider, subject, low in found]
+    return [(str(p), str(t), bool(low)) for p, t, low in found]
 
 
 async def _unsettled_sms_filings(
@@ -1091,8 +1102,17 @@ def _campaign_gated(row: CarrierVerification | Row, registry: Registry) -> bool:
     )
 
 
+class _FeeLookup(Protocol):
+    """A carrier fee from ``sms_registration_fees``, by carrier, subject and
+    the company's low-volume choice."""
+
+    def __call__(
+        self, provider: str, subject_type: str, *, low_volume: bool = ...
+    ) -> int: ...
+
+
 def _carrier_fee(
-    fee: Callable[..., int],
+    fee: _FeeLookup,
     provider: str,
     subject_type: str,
     low_volume: bool = False,
@@ -1113,11 +1133,29 @@ async def _uncharged_cents(db: AsyncSession, organization_id: UUID) -> int:
     does not pay for two steps."""
     brands = await _uncharged_sms_steps(db, organization_id, "submission")
     campaigns = await _uncharged_sms_steps(db, organization_id, "review")
+    lanes = await _uncharged_sms_steps(db, organization_id, "faster_lane")
     brand = sms_registration_fees.brand_fee_cents
     campaign = sms_registration_fees.campaign_fee_cents
-    return sum(_carrier_fee(brand, p, t, low) or 0 for p, t, low in brands) + sum(
-        _carrier_fee(campaign, p, t, low) or 0 for p, t, low in campaigns
+    return (
+        sum(_carrier_fee(brand, p, t, low) or 0 for p, t, low in brands)
+        + sum(_carrier_fee(campaign, p, t, low) or 0 for p, t, low in campaigns)
+        + sum(_faster_lane_fee(p) for p, _, _ in lanes)
     )
+
+
+def _filed_daily_texts(refs: dict) -> str:
+    """The daily volume answer a filed row stands for: low volume, or more
+    than 2,000 a day (a vetted brand, and every row filed before the
+    question existed)."""
+    return "UP_TO_2000" if refs.get("low_volume") else "OVER_2000"
+
+
+def _faster_lane_fee(provider: str) -> int:
+    """The carrier's faster lane fee; 0 for a carrier with none."""
+    try:
+        return sms_registration_fees.faster_lane_fee_cents(provider)
+    except KeyError:
+        return 0
 
 
 # What _campaign_gated and _campaign_unfunded read of a row.
@@ -2141,6 +2179,9 @@ class _Prepared(NamedTuple):
     # Resubmit: the kept file rows sent again, by slot. They move to the new
     # filing instead of being copied.
     reused: dict[str, UUID]
+    # US local texting: the markers the fee rater reads, from the same
+    # decision the credit check priced (``low_volume``, ``faster_lane_ok``).
+    sms_refs: dict
 
 
 async def _prepare_submission(
@@ -2374,6 +2415,7 @@ async def _prepare_submission(
             )
 
     draft_kwargs: dict = {}
+    sms_refs: dict = {}
     if sub.purpose == "sms" and sub.number_type == "toll_free":
         # Free TFV rows must never reach an older website's 10DLC sweep.
         if not await tollfree_verification_supported():
@@ -2392,18 +2434,27 @@ async def _prepare_submission(
         kept_brand_id = await _kept_brand(
             db, principal.organization_id, provider_name, sub.subject_type
         )
-        # A company that chose low volume files an unvetted brand: its own,
-        # lower carrier cost.
+        # A low-volume company files an unvetted brand: its own, lower
+        # carrier cost. With the faster lane allowed, the worst case adds
+        # the brand's vetting. One decision: it prices the filing, goes to
+        # the plug-in, and is written to the row (``sms_refs``).
         low = low_volume(sub.fields, sub.subject_type)
+        lane = faster_lane_ok(sub.fields, sub.subject_type)
+        if low:
+            sms_refs["low_volume"] = True
+            draft_kwargs["low_volume"] = True
+        if lane:
+            sms_refs["faster_lane_ok"] = True
         try:
             floor_cents = sms_registration_fees.filing_fee_cents(
                 provider_name,
                 sub.subject_type,
                 brand_kept=bool(kept_brand_id),
                 low_volume=low,
+                faster_lane=lane,
             )
             full_cents = sms_registration_fees.filing_fee_cents(
-                provider_name, sub.subject_type, low_volume=low
+                provider_name, sub.subject_type, low_volume=low, faster_lane=lane
             )
         except KeyError:
             raise HTTPException(
@@ -2423,6 +2474,11 @@ async def _prepare_submission(
                 or full_cents
                 for p, t, lv in await _unsettled_sms_filings(
                     db, principal.organization_id
+                )
+            ) + sum(
+                _faster_lane_fee(p)
+                for p, _, _ in await _uncharged_sms_steps(
+                    db, principal.organization_id, "faster_lane"
                 )
             )
             if balance < floor_cents + unsettled:
@@ -2457,6 +2513,7 @@ async def _prepare_submission(
         files=files,
         names=names,
         reused={slot: row.id for slot, row in reused.items()},
+        sms_refs=sms_refs,
     )
 
 
@@ -2597,6 +2654,10 @@ async def _file(
         if record is not None:
             draft.refs["application"] = record
 
+    # The rater's markers (a refused brand is billed too).
+    draft.refs.update(prepared.sms_refs)
+    if draft.billed_refs:
+        draft.billed_refs.update(prepared.sms_refs)
     _stamp_campaign_filed(prepared.provider, draft.refs)
     if draft.billed_refs:
         if prepared.sub.purpose == "sms":
@@ -4218,23 +4279,53 @@ async def amend_sms_application(
     requirements = await _requirements(
         provider, row.country_code, row.number_type, row.subject_type, where="body"
     )
+    local = row.number_type != "toll_free"
+    if (
+        local
+        and row.subject_type == "business"
+        and not (body.fields.get("daily_texts") or "").strip()
+    ):
+        # No answer keeps the filed one (blank alone would mean low volume).
+        body = body.model_copy(
+            update={"fields": {**body.fields, "daily_texts": _filed_daily_texts(refs)}}
+        )
     problems = length_problems(requirements, body.fields, {})
     problems.extend(
         provider.validate_application(body.fields, body.address, row.subject_type)
     )
-    if row.number_type != "toll_free":
+    if local:
         problems.extend(await _sms_mobile_problems(db, row.subject_type, body.fields))
-        if low_volume(body.fields, row.subject_type) != bool(refs.get("low_volume")):
+        if not any(p.field == "daily_texts" for p in problems) and low_volume(
+            body.fields, row.subject_type
+        ) != bool(refs.get("low_volume")):
             # The brand is filed as vetted or low volume; only a new
             # registration can change that.
             problems.append(
                 Problem(
-                    field="low_volume",
-                    message="This cannot change after filing. Keep your first answer, or cancel this registration and file a new one.",
+                    field="daily_texts",
+                    message="This cannot change after filing. Keep your first answer, or cancel this registration and register again.",
                 )
             )
     if problems:
         raise _problems_422(problems, row.organization_id, row.provider)
+    lane = local and faster_lane_ok(body.fields, row.subject_type)
+    if (
+        lane
+        and not refs.get("faster_lane_ok")
+        and not refs.get("faster_lane_at")
+        and principal.auth_kind != "shared"
+    ):
+        # Turning the faster lane on may start a paid step: the brand's
+        # vetting, on the next pass. The credit must cover it, as at filing.
+        fee = _faster_lane_fee(row.provider)
+        balance = await get_balance_cents(db, principal.organization_id)
+        if fee and balance < fee + await _uncharged_cents(
+            db, principal.organization_id
+        ):
+            raise HTTPException(
+                status_code=http_status.HTTP_402_PAYMENT_REQUIRED,
+                detail="not enough credit for the faster lane; add credit first",
+            )
     original = refs.get("application")
     try:
         if not isinstance(original, dict):
@@ -4275,6 +4366,11 @@ async def amend_sms_application(
             raise _carrier_unavailable() from exc
     else:
         refs["campaign"] = asdict(campaign_text(body.fields, row.subject_type))
+        if lane:
+            # The next pass asks for the vetting if the brand still needs it.
+            refs["faster_lane_ok"] = True
+        else:
+            refs.pop("faster_lane_ok", None)
     refs["application"] = _application_record(
         row.subject_type, requirements, body.fields, body.address
     )

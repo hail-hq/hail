@@ -35,13 +35,13 @@ from hailhq.core.providers.verification.forms import display_name, text_length
 from hailhq.core.providers.verification.sms_form import (
     NINE_DIGIT_COUNTRIES,
     campaign_text,
-    low_volume,
     sms_requirements,
     sms_subject_name,
     tax_number,
 )
 from hailhq.core.providers.verification.sms_review import (
     LEGACY_APPLICATION,
+    LOW_VOLUME_FASTER_LANE,
     application_validation_error,
     campaign_repair_reason,
 )
@@ -357,8 +357,14 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
         messaging_service_sid=None,
         kept_brand_id=None,
         new_brand_funded=False,
+        low_volume=False,
     ) -> DraftResult:
+        """``low_volume``: the API's choice for a company (no vetting). The
+        API writes ``provider_refs.low_volume`` itself; the background pass
+        reads it from there."""
         subject_type = requirements.subject_type
+        # A company brand that gets vetting at filing.
+        vetted = subject_type != "person" and not low_volume
         problems = self.validate_application(fields, address, subject_type)
         if problems:
             return DraftResult(refs={}, problems=problems)
@@ -373,11 +379,6 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
             "campaign": text.__dict__,
             "messaging_profile_id": messaging_service_sid,
         }
-        if low_volume(fields, subject_type):
-            # Set before the brand is filed: no pass ever asks for this
-            # brand's vetting (``_vetted``), and the fee rater prices
-            # the row as low volume.
-            refs["low_volume"] = True
         if not messaging_service_sid:
             # The profile gets the filed STOP and HELP replies; the
             # organization's numbers find it by its name. Filing goes on
@@ -401,7 +402,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
             # Telnyx bills a new brand once made, so stop before _build.
             if kept_brand_id and not new_brand_funded:
                 return DraftResult(refs={}, needs_new_brand_credit=True)
-            problems = await self._build(refs, fields, address, subject_type)
+            problems = await self._build(refs, fields, address, subject_type, vetted)
         except Exception as exc:
             refused = _refused(exc)
             if refs.get("brand_id") and not refused:
@@ -413,7 +414,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                     "10DLC step after the brand failed; brand kept: %s",
                     _failure(exc),
                 )
-                if _vetted(refs):
+                if vetted:
                     # False, not unset: rows filed before this flag existed
                     # already asked for vetting and must not ask again.
                     refs.setdefault("vetting_requested", False)
@@ -496,7 +497,9 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
         refs["brand_reused"] = True
         return True
 
-    async def _build(self, refs, fields, address, subject_type) -> list[Problem]:
+    async def _build(
+        self, refs, fields, address, subject_type, vetted=True
+    ) -> list[Problem]:
         """File the brand, wait for Telnyx to register it, then send the
         person's PIN or ask for the company's vetting. Returns the problems
         of a refused brand. A brand still registering after the wait is
@@ -539,7 +542,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
         brand = await self._settled_brand(refs["brand_id"])
         if brand is None:
             logger.warning("10DLC brand still registering after the wait")
-            if _vetted(refs):
+            if vetted:
                 # See create_draft: False means "ask on the next pass".
                 refs["vetting_requested"] = False
             return []
@@ -550,7 +553,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
         if subject_type == "person":
             # No vetting for a sole proprietor; the PIN confirms the person.
             await self._send_pin(refs)
-        elif _vetted(refs):
+        elif vetted:
             await self._request_vetting(refs)
         return []
 
@@ -703,6 +706,21 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
             if not verified and not refs.get("identity_verified"):
                 if person:
                     await self._resend_pin_if_old(refs)
+                elif _faster_lane_owed(refs, brand):
+                    if not refs.get("faster_lane_ok"):
+                        # Held: the customer turns on the faster lane with
+                        # an amendment, and the next pass asks for vetting.
+                        refs["needs_information"] = True
+                        return ProviderStatus(
+                            state="pending", reason=LOW_VOLUME_FASTER_LANE
+                        )
+                    # The fee rater charges the vetting from this mark. Both
+                    # new keys outlive a failed request (the API keeps added
+                    # keys), so the next pass asks again, once
+                    # (``vetting_requested`` False, as for a vetted filing).
+                    refs["faster_lane_at"] = datetime.now(timezone.utc).isoformat()
+                    refs["vetting_requested"] = False
+                    await self._request_vetting_once(refs)
                 elif refs.get("vetting_requested") is False and _vetted(refs):
                     # The brand was still registering when it was filed, or
                     # the vetting call failed (Telnyx may have got it).
@@ -1230,20 +1248,29 @@ def _failure(exc: Exception) -> str:
 
 
 def _vetted(refs: dict) -> bool:
-    """A company brand that gets vetting: never a person's, never a
-    low-volume company's (the customer chose no vetting)."""
-    return refs.get("subject_type") != "person" and not refs.get("low_volume")
+    """A company brand that gets vetting: never a person's, and a
+    low-volume company's only once its faster lane asked for it."""
+    return refs.get("subject_type") != "person" and (
+        not refs.get("low_volume") or bool(refs.get("faster_lane_at"))
+    )
+
+
+def _faster_lane_owed(refs: dict, brand: dict) -> bool:
+    """A low-volume company brand Telnyx could not verify, with no faster
+    lane asked yet. A brand still being checked (``SELF_DECLARED``) waits."""
+    return (
+        refs.get("subject_type") != "person"
+        and bool(refs.get("low_volume"))
+        and not refs.get("faster_lane_at")
+        and brand.get("identityStatus") == "UNVERIFIED"
+    )
 
 
 def _billed(refs: dict) -> dict:
-    """What Telnyx bills of a draft that failed: the brand, once made. A
-    low-volume brand keeps its marker, so it is priced as one."""
+    """What Telnyx bills of a draft that failed: the brand, once made."""
     if not refs.get("brand_id"):
         return {}
-    billed = {"brand_id": refs["brand_id"], "subject_type": refs.get("subject_type")}
-    if refs.get("low_volume"):
-        billed["low_volume"] = True
-    return billed
+    return {"brand_id": refs["brand_id"], "subject_type": refs.get("subject_type")}
 
 
 def _errors(response: httpx.Response) -> list[dict]:
