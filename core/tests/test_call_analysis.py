@@ -6,6 +6,7 @@ import asyncio
 import uuid
 from datetime import datetime, timedelta, timezone
 
+import pytest
 from hailhq.core.call_analysis import (
     ANALYZED_KIND,
     CLAIM_KIND,
@@ -25,6 +26,7 @@ from hailhq.core.models import (
 from hailhq.core.threads import TEXT_MARKER
 from hailhq.core.webhook_events import WebhookEventType
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 
 ORG_NUMBER = "+14155550100"
 PERSON = "+33612345678"
@@ -347,6 +349,35 @@ async def test_send_enqueues_one_delivery_with_the_payload(async_session) -> Non
     assert await claim_call_to_analyze(async_session) is None
     later = datetime.now(timezone.utc) + CLAIM_LEASE + timedelta(seconds=1)
     assert await claim_call_to_analyze(async_session, now=later) is None
+
+
+async def test_subscription_made_after_the_call_gets_no_delivery(
+    async_session,
+) -> None:
+    call = await _seed_call(async_session)
+    call_id = call.id
+    late = WebhookSubscription(
+        organization_id=call.organization_id,
+        target_url="https://example.com/late",
+        event_types=["call.analyzed"],
+        secret_encrypted="x",
+    )
+    async_session.add(late)
+    await async_session.commit()
+    turns = await call_transcript(async_session, call_id)
+    assert await send_call_analyzed(async_session, call_id, turns, None)
+    [delivery] = await _deliveries(async_session, call_id)
+    assert delivery.subscription_id != late.id
+    # The same ``at`` text as GET /v1/calls/{id} (pydantic JSON).
+    assert delivery.payload["data"]["transcript"][0]["at"].endswith("Z")
+
+
+async def test_the_database_refuses_a_second_marker(async_session) -> None:
+    call = await _seed_call(async_session)
+    for _ in range(2):
+        async_session.add(CallEvent(call_id=call.id, kind=ANALYZED_KIND, payload={}))
+    with pytest.raises(IntegrityError):
+        await async_session.commit()
 
 
 async def test_summary_null_and_unanswered_duration(async_session) -> None:

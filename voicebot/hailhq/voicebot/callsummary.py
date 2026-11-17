@@ -52,6 +52,8 @@ class _Failure:
     first: float  # monotonic time of the first failure
     summary: str | None = None  # kept, so a retry does not run the model again
     summarized: bool = False
+    # The turns the summary was written from, sent with it on a retry.
+    turns: list[dict[str, Any]] | None = None
 
 
 # Calls whose last try failed. In memory only: a restart tries such a call
@@ -137,9 +139,11 @@ async def analyze_once(_api: Any = None) -> bool:
     failure = _failures.get(call_id)
     summarized = failure is not None and failure.summarized
     summary = failure.summary if failure is not None else None
+    turns = failure.turns if summarized and failure is not None else None
     try:
-        async with session_scope() as db:
-            turns = await call_transcript(db, call_id)
+        if turns is None:
+            async with session_scope() as db:
+                turns = await call_transcript(db, call_id)
         if not summarized:
             # Empty after filtering: no model call; the marker alone is written.
             summary = await summarize(org_id, call_id, turns) if turns else None
@@ -151,6 +155,7 @@ async def analyze_once(_api: Any = None) -> bool:
             failure = _failures[call_id] = _Failure(0, time.monotonic())
         failure.count += 1
         failure.summary, failure.summarized = summary, summarized
+        failure.turns = turns if summarized else None
         raise
     _failures.pop(call_id, None)
     return True

@@ -37,7 +37,7 @@ func runCallStatus(ctx context.Context, opts *Options, idStr string) error {
 
 	// A prefix resolves through the list, which carries no transcript, so
 	// the call is always read by its full id.
-	parsed, _, err := resolveCallID(ctx, apiClient, idStr)
+	parsed, err := resolveCallID(ctx, apiClient, idStr)
 	if err != nil {
 		return err
 	}

@@ -282,8 +282,9 @@ async def run_forever(stop: threading.Event | None = None) -> None:
         await asyncio.gather(
             *(_poll_loop(api, stop) for _ in range(n)),
             *(_email_poll_loop(api, stop) for _ in range(n)),
-            # One is enough: a call is summarized once, after it ends.
-            _analysis_poll_loop(api, stop),
+            # Each call is claimed first, so parallel loops never summarize
+            # the same call twice.
+            *(_analysis_poll_loop(api, stop) for _ in range(n)),
         )
     finally:
         try:

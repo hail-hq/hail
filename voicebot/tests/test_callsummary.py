@@ -208,13 +208,24 @@ async def test_failed_send_is_retried_then_given_up(
     # A failed try keeps its claim until the lease ends; end it at once.
     monkeypatch.setattr(call_analysis, "CLAIM_LEASE", timedelta(0))
 
+    sent_turns: list = []
+
     async def broken_send(db, cid, turns, summary):
+        sent_turns.append(turns)
         raise RuntimeError("db down")
 
     monkeypatch.setattr(callsummary, "send_call_analyzed", broken_send)
     for _ in range(callsummary.MAX_SEND_ATTEMPTS):
         with pytest.raises(RuntimeError):
             await callsummary.analyze_once()
+        # A turn row written late does not change what a retry sends: the
+        # summary was written from the first transcript.
+        async_session.add(
+            CallEvent(call_id=call_id, kind="user_turn", payload={"text": "Late."})
+        )
+        await async_session.commit()
+    assert all(t == sent_turns[0] for t in sent_turns)
+    assert len(sent_turns[0]) == 2
     assert callsummary._failures[call_id].count == callsummary.MAX_SEND_ATTEMPTS
     # The model ran once: retries reuse its summary.
     assert llm["built"] == 1

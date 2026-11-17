@@ -23,7 +23,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from hailhq.core.models import Call, CallEvent, WebhookSubscription
-from hailhq.core.schemas import TERMINAL_CALL_STATUSES
+from hailhq.core.schemas import TERMINAL_CALL_STATUSES, CallTranscriptTurn
 from hailhq.core.threads import spoken_text
 from hailhq.core.webhook_events import WebhookEventType
 from hailhq.core.webhook_fanout import call_event_data, fanout_call_event
@@ -94,25 +94,22 @@ async def call_transcript(db: AsyncSession, call_id: uuid.UUID) -> list[dict[str
             .order_by(CallEvent.occurred_at, CallEvent.id)
         )
     ).scalars()
-    turns: list[tuple[datetime, dict[str, Any]]] = []
+    turns: list[CallTranscriptTurn] = []
     for ev in rows:
         text = spoken_text(ev)
         if text is None:
             continue
-        at = _spoken_at(ev)
         turns.append(
-            (
-                at,
-                {
-                    "role": "user" if ev.kind == "user_turn" else "assistant",
-                    "text": text,
-                    "at": at.isoformat(),
-                },
+            CallTranscriptTurn(
+                role="user" if ev.kind == "user_turn" else "assistant",
+                text=text,
+                at=_spoken_at(ev),
             )
         )
     # Stable: equal start times keep the write order from the query.
-    turns.sort(key=lambda item: item[0])
-    return [turn for _, turn in turns]
+    turns.sort(key=lambda turn: turn.at)
+    # JSON form, so the webhook and GET /v1/calls/{id} print ``at`` alike.
+    return [turn.model_dump(mode="json") for turn in turns]
 
 
 def call_duration_seconds(call: Call) -> int | None:
@@ -275,6 +272,9 @@ async def send_call_analyzed(
             event_type=WebhookEventType.CALL_ANALYZED.value,
             event_id=call.id,
             data=call_analyzed_data(call, transcript, summary),
+            # The same rule as the pick: a subscription made or changed
+            # after the call ended gets no event for it.
+            changed_before=call.ended_at,
         )
     await db.commit()
     return sent > 0

@@ -183,12 +183,12 @@ curl -X POST "$HAIL_API_URL/v1/webhooks" \
       {
         "role": "assistant",
         "text": "Hi, this is an AI assistant answering on behalf of Acme.",
-        "at": "2026-11-17T12:00:02+00:00"
+        "at": "2026-11-17T12:00:02Z"
       },
       {
         "role": "user",
         "text": "Hi, I'd like to move my Tuesday appointment.",
-        "at": "2026-11-17T12:00:06+00:00"
+        "at": "2026-11-17T12:00:06Z"
       }
     ],
     "summary": "The caller asked to move their Tuesday appointment. The agent moved it to Thursday at 10am."
