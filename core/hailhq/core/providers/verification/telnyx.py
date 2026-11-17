@@ -51,6 +51,7 @@ from hailhq.core.providers.verification.forms import (
     validate_input,
 )
 from hailhq.core.providers.verification.rejections import customer_reason
+from hailhq.core.telephony_catalog import business_only
 
 logger = logging.getLogger(__name__)
 
@@ -242,6 +243,9 @@ class TelnyxVerificationProvider(VerificationProvider):
     ) -> Requirements:
         """``requirements`` for rules already fetched with :meth:`rules`."""
         allowed: tuple[SubjectType, ...] = subject_types_for(rules)  # type: ignore[assignment]
+        # Telnyx declines a person here (telephony_catalog._BUSINESS_ONLY).
+        if business_only(self.name, country_code, number_type):
+            allowed = ("business",)
         if subject_type not in allowed:
             raise UnsupportedSubjectType(
                 f"{subject_type} is not accepted for {number_type} numbers in "

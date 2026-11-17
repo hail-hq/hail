@@ -743,3 +743,106 @@ async def test_telnyx_quote_prices_selected_sms_separately(
     assert result[0].base_monthly_cents == 100
     assert result[0].capability_monthly_cents == monthly - 100
     assert result[0].monthly_price_version == 2
+
+
+def _gb_national_transport(org, group_ids, rules):
+    """Telnyx answers for one GB national number, the org's approved groups
+    ``group_ids`` and the rules left (``rules``)."""
+
+    def respond(request):
+        if request.url.path.endswith("available_phone_numbers"):
+            data = [
+                {
+                    "phone_number": "+443301234567",
+                    "features": [{"name": "voice"}],
+                    "cost_information": {
+                        "currency": "USD",
+                        "monthly_cost": "1.00",
+                        "upfront_cost": "1.00",
+                    },
+                }
+            ]
+        elif request.url.path.endswith("requirement_groups"):
+            data = [
+                {
+                    "id": gid,
+                    "country_code": "GB",
+                    "phone_number_type": "national",
+                    "action": "ordering",
+                    "status": "approved",
+                    "customer_reference": f"hail-{org}",
+                }
+                for gid in group_ids
+            ]
+        else:
+            data = [
+                {
+                    "country_code": "GB",
+                    "phone_number_type": "national",
+                    "action": "ordering",
+                    "regulatory_requirements": rules,
+                }
+            ]
+        return httpx.Response(200, json={"data": data})
+
+    return httpx.MockTransport(respond)
+
+
+def _telnyx_settings(monkeypatch):
+    monkeypatch.setattr(settings, "telnyx_api_key", "secret")
+    monkeypatch.setattr(settings, "telnyx_connection_id", "connection")
+    monkeypatch.setattr(settings, "telnyx_sip_username", "sip-user")
+    monkeypatch.setattr(settings, "livekit_telnyx_sip_outbound_trunk_id", "ST_telnyx")
+
+
+async def test_gb_national_offer_is_for_companies_only(monkeypatch):
+    # Telnyx declines private individuals for UK numbers, even when its
+    # rules list nothing a person cannot give.
+    _telnyx_settings(monkeypatch)
+    org = uuid4()
+    rules = [{"name": "Proof of address", "field_type": "document"}]
+    async with httpx.AsyncClient(
+        transport=_gb_national_transport(org, [], rules)
+    ) as http:
+        (result,) = await telnyx_offers(org, "GB", "national", ["voice"], http)
+    assert result.subject_types == ["business"]
+    assert result.readiness == "verification_required"
+
+
+async def test_gb_national_person_approval_does_not_make_offer_ready(monkeypatch):
+    # An approved person group (from before this rule) must not let a
+    # purchase go out without a company verification.
+    _telnyx_settings(monkeypatch)
+    org = uuid4()
+    person_group = str(uuid4())
+    person = Approval(
+        row_id=uuid4(), subject_type="person", verification_id=person_group
+    )
+    rules = [{"name": "Proof of address", "field_type": "document"}]
+    async with httpx.AsyncClient(
+        transport=_gb_national_transport(org, [person_group], rules)
+    ) as http:
+        (result,) = await telnyx_offers(
+            org, "GB", "national", ["voice"], http, approvals=[person]
+        )
+    assert result.subject_types == ["business"]
+    assert result.readiness == "verification_required"
+    assert result.approvals == []
+
+
+async def test_gb_national_business_approval_makes_offer_ready(monkeypatch):
+    # With an approved group passed, Telnyx lists no rules left: the offer is
+    # still for companies only.
+    _telnyx_settings(monkeypatch)
+    org = uuid4()
+    group = str(uuid4())
+    business = Approval(row_id=uuid4(), subject_type="business", verification_id=group)
+    async with httpx.AsyncClient(
+        transport=_gb_national_transport(org, [group], [])
+    ) as http:
+        (result,) = await telnyx_offers(
+            org, "GB", "national", ["voice"], http, approvals=[business]
+        )
+    assert result.subject_types == ["business"]
+    assert result.readiness == "ready"
+    assert result.approvals == [business]

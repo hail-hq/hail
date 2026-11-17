@@ -42,10 +42,27 @@ async def test_discover_passes_each_carrier_its_own_approvals(monkeypatch):
     monkeypatch.setattr(f"{VOICE}.didww.didww_offers", calls["didww"])
     person = Approval(row_id=uuid4(), subject_type="person", verification_id="BU1")
     await number_offers.discover_offers(
-        uuid4(), "GB", "mobile", ["voice"], approvals={"twilio": [person]}
+        uuid4(), "DE", "mobile", ["voice"], approvals={"twilio": [person]}
     )
     assert calls["twilio"].await_args.kwargs["approvals"] == [person]
     assert calls["telnyx"].await_args.kwargs["approvals"] == []
+
+
+async def test_gb_local_mobile_toll_free_quote_never_asks_telnyx(monkeypatch):
+    # Telnyx declines private individuals for UK numbers: GB local, mobile
+    # and toll-free come from Twilio only. DIDWW is still asked.
+    for kind in ("local", "mobile", "toll_free"):
+        calls = _stub_carriers(monkeypatch)
+        await number_offers.discover_offers(uuid4(), "GB", kind, ["voice"])
+        calls["twilio"].assert_awaited_once()
+        calls["telnyx"].assert_not_awaited()
+        calls["didww"].assert_awaited_once()
+
+
+async def test_gb_national_quote_still_asks_telnyx(monkeypatch):
+    calls = _stub_carriers(monkeypatch)
+    await number_offers.discover_offers(uuid4(), "GB", "national", ["voice"])
+    calls["telnyx"].assert_awaited_once()
 
 
 def _stub_carriers(monkeypatch):

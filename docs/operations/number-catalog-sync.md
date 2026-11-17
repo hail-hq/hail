@@ -105,6 +105,19 @@ Each row has an optional `requirements` block: who may buy the number and which 
 - Rows the carrier still sells but the sync did not see this run (listed under "Not observed" with a skip reason) with `verification_required: true` get a fresh block too, since papers do not depend on stock. Rows the carrier dropped and countries the sync could not look at are not fetched. Nothing else on a kept row changes, and a changed block is listed under **changed**.
 - Hand-verified rows (`manual-confirmed`) keep every other field. Their block is refreshed when the fetch succeeds and returns a block; otherwise the old block stays. A block change is listed under **changed** as `CC:type (hand-verified row, only requirements refreshed): person <papers> | business <papers> -> person <papers> | business <papers>`. If the carrier no longer lists verification for the row, the **kept** line ends with `(hand-verified requirements block kept)`.
 
+## Rules the sync cannot hold
+
+Some carrier rows are listed but not sold, or sold to companies only. The sync rewrites `costs/*.json` from the carriers' APIs, so these rules are in code: `_NOT_SOLD` and `_BUSINESS_ONLY` in [`core/hailhq/core/telephony_catalog.py`](../../core/hailhq/core/telephony_catalog.py). The cost files keep the carrier's real rows and prices.
+
+| Carrier, country, type | Rule | Why |
+| --- | --- | --- |
+| Telnyx GB `local`, `mobile`, `toll_free` | Not sold: no quote, option, purchase or new verification. Twilio sells them. | Telnyx declines private individuals for UK numbers. Every Telnyx GB order asks for "Company Website URL (Business Use Only)", and Telnyx declined the "N/A" Hail sends for a person (0 of 3 person filings approved). Twilio approved its person filing and asks a person for no website or use-case text. Twilio costs a little more ($1.15 a month for local, against $1.00 plus $1.00 setup). |
+| Telnyx GB `national` (03) | Companies only: offers list `subject_types: ["business"]`, a person verification is a 422 (`UnsupportedSubjectType`). | Same Telnyx rule. Twilio has no GB national numbers. |
+
+- Numbers already bought keep their carrier, calls, routing, renewal and release. Renewal prices still come from the owning carrier's file.
+- A quote stored before a rule cannot buy (`POST /numbers` 422) or start a verification (409, quote again).
+- DIDWW by-request GB offers are not changed.
+
 ## Reviewing the sync PR
 
 1. Read the summary sections per carrier: **added**, **changed**, **vanished**, **kept**, **unobserved**, **Skipped by the sync**.

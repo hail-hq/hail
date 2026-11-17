@@ -369,6 +369,22 @@ def test_gb_mobile_unchanged() -> None:
     assert sorted(got) == ["business", "person"]
 
 
+def test_gb_national_refuses_a_person() -> None:
+    # Telnyx declines private individuals for UK numbers (its website rule
+    # is on every GB order). Twilio has no GB national numbers, so Telnyx
+    # keeps them, for companies only. The GB rules alone allow a person.
+    rules = _live("GB-mobile")
+    p = TelnyxVerificationProvider("secret")
+    with pytest.raises(UnsupportedSubjectType) as refused:
+        p.requirements_from_rules("GB", "national", "person", rules)
+    assert refused.value.allowed == ("business",)
+    business = p.requirements_from_rules("GB", "national", "business", rules)
+    assert business.subject_types == ("business",)
+    # Other GB types and other countries keep what the rules say.
+    person = p.requirements_from_rules("GB", "mobile", "person", rules)
+    assert sorted(person.subject_types) == ["business", "person"]
+
+
 async def test_person_form_for_company_only_raises() -> None:
     payload = json.loads((FIXTURES / "telnyx-regulatory-CH-local.json").read_text())
     fake = Telnyx(lambda request: httpx.Response(200, json=payload))

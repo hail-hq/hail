@@ -15,10 +15,12 @@ from functools import lru_cache
 from pathlib import Path
 
 __all__ = [
+    "business_only",
     "by_request_row",
     "capabilities",
     "effective_capabilities",
     "monthly_price",
+    "not_sold",
     "requirements",
     "rows",
     "sells_in",
@@ -29,6 +31,44 @@ __all__ = [
 # the module sits at core/hailhq/core/ so parents[3] is the repo root. An env
 # var overrides both (tests, alternate layouts).
 _DEFAULT_DIR = Path(__file__).resolve().parents[3] / "costs"
+
+
+# Rules per (carrier, country, number type) that the carrier catalogs cannot
+# hold: the weekly sync rewrites costs/*.json from the carriers' APIs.
+#
+# UK (GB): Telnyx declines private individuals. Every Telnyx GB order asks
+# for "Company Website URL (Business Use Only)", and Telnyx declined the
+# "N/A" Hail sends for a person (0 of 3 person filings approved). Twilio
+# approved its person filing and asks a person for no website or use-case
+# text. Twilio costs a little more ($1.15 a month for local, against
+# Telnyx's $1.00 plus $1.00 setup). So GB local, mobile and toll-free
+# numbers come from Twilio only. Twilio has no GB national (03) numbers:
+# Telnyx keeps those, for companies only.
+#
+# Only new quotes, purchases and verifications follow these rules. Numbers
+# already bought keep their carrier, routing, renewal and release.
+_NOT_SOLD = frozenset(
+    {
+        ("telnyx", "GB", "local"),
+        ("telnyx", "GB", "mobile"),
+        ("telnyx", "GB", "toll_free"),
+    }
+)
+_BUSINESS_ONLY = frozenset({("telnyx", "GB", "national")})
+
+
+def not_sold(provider: str, country_code: str | None, number_type: str | None) -> bool:
+    """True when Hail does not sell this carrier's numbers of this kind, even
+    though its catalog lists them (see ``_NOT_SOLD``)."""
+    return (provider, country_code, number_type) in _NOT_SOLD
+
+
+def business_only(
+    provider: str, country_code: str | None, number_type: str | None
+) -> bool:
+    """True when only a company may verify for and buy this carrier's numbers
+    of this kind (see ``_BUSINESS_ONLY``)."""
+    return (provider, country_code, number_type) in _BUSINESS_ONLY
 
 
 def _path(provider: str) -> Path:
@@ -106,7 +146,7 @@ def capabilities(
     providers = PROVIDERS if provider == "auto" else (provider,)
     for name in providers:
         row = _load(name).get((country_code, number_type))
-        if not row:
+        if not row or not_sold(name, country_code, number_type):
             continue
         # Takes calls but cannot place them, or the carrier picks the number
         # at order time: neither can be quoted and bought here. Support
@@ -152,18 +192,24 @@ def by_request_row(country_code: str, number_type: str, provider: str) -> dict |
 def requirements(country_code: str, number_type: str, provider: str) -> dict | None:
     """The stored requirements block of ``provider``'s catalog row (who may
     buy and which paper categories each needs), or None when the row has no
-    block. Read from the catalog only; no carrier call."""
+    block. Read from the catalog only; no carrier call. A person is not
+    accepted where ``business_only`` says so."""
     row = _load(provider).get((country_code, number_type))
-    return row.get("requirements") if row else None
+    block = row.get("requirements") if row else None
+    if block is not None and business_only(provider, country_code, number_type):
+        return {**block, "person": {"accepted": False, "items": []}}
+    return block
 
 
 def rows(country_code: str, provider: str) -> list[dict]:
     """Every catalog row of ``provider`` in this country, by-request rows
-    included, receive-only rows left out."""
+    included, receive-only rows and ``not_sold`` rows left out."""
     return [
         row
-        for (cc, _), row in _load(provider).items()
-        if cc == country_code and not row.get("receive_only")
+        for (cc, nt), row in _load(provider).items()
+        if cc == country_code
+        and not row.get("receive_only")
+        and not not_sold(provider, cc, nt)
     ]
 
 

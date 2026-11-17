@@ -85,7 +85,9 @@ async def discover_offers(
     asked = [
         p
         for p in PROVIDERS
-        if p in providers and toll_free_sms_ok(p, country, kind, capabilities)
+        if p in providers
+        and toll_free_sms_ok(p, country, kind, capabilities)
+        and not telephony_catalog.not_sold(p, country, kind)
     ]
     approvals = approvals or {}
     results = await asyncio.gather(
