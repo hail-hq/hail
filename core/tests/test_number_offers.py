@@ -1,7 +1,8 @@
+import json
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
-from hailhq.core import number_offers
+from hailhq.core import number_offers, telephony_catalog
 
 VOICE = "hailhq.core.providers.voice"
 
@@ -156,10 +157,6 @@ async def test_calls_only_toll_free_offer_never_shows_sms_hail_cannot_verify(
 def test_by_request_never_offers_a_not_sold_row(tmp_path, monkeypatch):
     # Telnyx declines private individuals for UK numbers. Should the sync
     # ever mark a Telnyx GB local row by request, it is still not offered.
-    import json
-
-    from hailhq.core import telephony_catalog
-
     row = {
         "country_code": "GB",
         "number_type": "local",
