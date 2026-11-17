@@ -73,6 +73,10 @@ jobs:
         run: uv run --frozen pytest tests -v --durations=20
         env:
           DATABASE_URL: postgresql+psycopg://hail:hail@localhost:5432/hail
+      # Operator scripts (scripts/ops) import hailhq.core, so they run with core.
+      - name: Run ops script tests
+        if: matrix.package == 'core'
+        run: uv run --frozen pytest scripts/ops -v
 
   # One check that sums up every Python suite (none is required on main today).
   test:

@@ -83,7 +83,9 @@ Internal runbooks (not published) live in `docs/operations/`:
 [voice-rate-sync.md](docs/operations/voice-rate-sync.md) (carrier call rates in `costs/voice.json`, weekly sync),
 [call-leg-costs.md](docs/operations/call-leg-costs.md) (what each carrier charged per call leg, the `call_legs` table),
 [refresh-costs.md](docs/operations/refresh-costs.md) (weekly LLM/STT/TTS price refresh),
-[didww-by-request.md](docs/operations/didww-by-request.md) (ordering a DIDWW number a customer asked support for),
+[didww-by-request.md](docs/operations/didww-by-request.md) (ordering a DIDWW number a customer asked support for; routing a number by hand),
+[first-number-call-test.md](docs/operations/first-number-call-test.md) (one test call to the first number of a new carrier, country or type),
+[call-record-deletion.md](docs/operations/call-record-deletion.md) (deleting one call, its recording and its charges from a workspace),
 [voice-llm.md](docs/operations/voice-llm.md) (the house LLM chain, Bedrock access and model ids).
 
 ## Order of work
