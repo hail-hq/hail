@@ -14,9 +14,9 @@ import hashlib
 import json
 import logging
 from abc import ABC, abstractmethod
-from collections.abc import Mapping
+from collections.abc import Awaitable, Mapping
 from types import MappingProxyType
-from typing import Literal
+from typing import Literal, TypeVar
 
 from hailhq.core.schemas import Address
 from pydantic import BaseModel, ConfigDict, Field, computed_field
@@ -51,6 +51,7 @@ __all__ = [
     "VerificationProvider",
     "VerificationProviderError",
     "VerificationRequirements",
+    "counted_discard",
     "escaped_discard_error",
 ]
 
@@ -128,6 +129,25 @@ def escaped_discard_error(exc: BaseException) -> VerificationProviderError | Non
     if kind == "outage":
         return VerificationProviderError("discard failed")
     return DiscardRefused("discard refused")
+
+
+_T = TypeVar("_T")
+
+
+async def counted_discard(call: Awaitable[_T]) -> _T | None:
+    """Await a ``discard`` (or ``discard_rejected``) call, counting an error
+    that escapes its steps as ``escaped_discard_error`` does: None when the
+    carrier no longer holds the record, else ``VerificationProviderError``
+    (an outage) or ``DiscardRefused``."""
+    try:
+        return await call
+    except Exception as exc:
+        error = escaped_discard_error(exc)
+        if error is exc:
+            raise
+        if error is not None:
+            raise error from exc
+        return None
 
 
 class RegistrationHoldsAnotherNumber(VerificationProviderError):

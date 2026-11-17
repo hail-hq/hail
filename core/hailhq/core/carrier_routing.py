@@ -280,12 +280,13 @@ FailureKind = Literal["gone", "outage", "refused", "final"]
 _GONE = frozenset({404, 410})
 _NOT_NOW_4XX = frozenset({401, 408, 425, 429})
 _REFUSED_4XX = frozenset({403, 409})
-# No carrier answer, and a retry can work: the network, a timeout, or
-# configuration an operator fixes.
+# No carrier answer, and a retry can work: the network, a timeout, a
+# response cut off or garbled in transit, or configuration an operator
+# fixes. The whole httpx and requests families: a ChunkedEncodingError or
+# a DecodingError is a blip, not a refusal.
 _NOT_NOW_ERRORS = (
-    httpx.TransportError,
-    requests.ConnectionError,
-    requests.Timeout,
+    httpx.RequestError,
+    requests.RequestException,
     TimeoutError,
     ConnectionError,
     CarrierNotConfigured,

@@ -116,7 +116,7 @@ from hailhq.core.providers.verification import (
 )
 from hailhq.core.providers.verification.base import (
     DiscardRefused,
-    escaped_discard_error,
+    counted_discard,
 )
 from hailhq.core.providers.verification.document_check import (
     check_documents,
@@ -3027,7 +3027,7 @@ async def _reject_row(
     refused: dict = {}
     try:
         async with _plugin_call(row, provider):
-            await provider.discard(row.provider_refs)
+            await counted_discard(provider.discard(row.provider_refs))
     except DiscardRefused as exc:
         # The carrier keeps the draft: rejected in Hail all the same, so the
         # pass does not submit and discard it again on every tick.
@@ -3617,23 +3617,19 @@ async def cancel_locked(
         await _detach_registration(db, row, provider, now)
     kept: dict = {}
     try:
-        try:
-            if (
-                keep_brand
-                and isinstance(provider, SmsRegistrationProvider)
-                and row.state == "rejected"
-            ):
-                kept = await provider.discard_rejected(row.provider_refs)
-            elif provider is not None:
-                await provider.discard(row.provider_refs)
-        except Exception as exc:
-            # One that escaped the plug-in's steps (a bug, a raw carrier
-            # error) counts as discard would have raised it.
-            error = escaped_discard_error(exc)
-            if error is exc:
-                raise
-            if error is not None:
-                raise error from exc
+        # An error that escaped the plug-in's steps (a bug, a raw carrier
+        # error) counts as discard would have raised it.
+        if (
+            keep_brand
+            and isinstance(provider, SmsRegistrationProvider)
+            and row.state == "rejected"
+        ):
+            kept = (
+                await counted_discard(provider.discard_rejected(row.provider_refs))
+                or {}
+            )
+        elif provider is not None:
+            await counted_discard(provider.discard(row.provider_refs))
     except DiscardRefused as exc:
         if not mark_refused:
             raise
@@ -3913,7 +3909,7 @@ async def admin_reject(
         before = _billing_view(row)
         try:
             async with _plugin_call(row, provider):
-                await provider.discard(row.provider_refs)
+                await counted_discard(provider.discard(row.provider_refs))
         except DiscardRefused as exc:
             # The carrier keeps the draft: rejected in Hail all the same.
             refused = _refusal_mark(row, exc, datetime.now(timezone.utc))

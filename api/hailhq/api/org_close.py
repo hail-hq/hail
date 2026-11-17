@@ -67,7 +67,7 @@ from hailhq.core.livekit import LiveKitClient
 from hailhq.core.models import CarrierVerification, PhoneNumber
 from hailhq.core.providers.verification.base import (
     DiscardRefused,
-    escaped_discard_error,
+    counted_discard,
 )
 from hailhq.core.retention import closed_org_ids
 from sqlalchemy import and_, or_, select
@@ -260,7 +260,7 @@ async def _store_release_refusal(
             return
         await db.refresh(number)
         number.provisioning_metadata = {
-            **(number.provisioning_metadata or {}),
+            **_without_since(number.provisioning_metadata or {}),
             RELEASE_REFUSED: _refusal(status, now),
         }
         await db.commit()
@@ -377,14 +377,9 @@ async def _cancel_registrations(
                 )
                 continue
             if row.state == "cancelled":
-                try:
-                    await provider.discard({"brand_id": refs["kept_brand_id"]})
-                except Exception as exc:
-                    error = escaped_discard_error(exc)
-                    if error is exc:
-                        raise
-                    if error is not None:
-                        raise error from exc
+                await counted_discard(
+                    provider.discard({"brand_id": refs["kept_brand_id"]})
+                )
                 row.provider_refs = {
                     k: v
                     for k, v in refs.items()
@@ -421,7 +416,7 @@ async def _cancel_registrations(
                 if row is not None:
                     await db.refresh(row, with_for_update=True)
                     row.provider_refs = {
-                        **(row.provider_refs or {}),
+                        **_without_since(row.provider_refs or {}),
                         CLOSE_REFUSED: _refusal(status, now),
                     }
                     await db.commit()

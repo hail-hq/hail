@@ -309,8 +309,14 @@ def test_failure_kind_network_errors_of_each_carrier_sdk() -> None:
     for error in (
         httpx.ConnectError("x", request=request),
         httpx.ReadTimeout("x", request=request),
+        httpx.RemoteProtocolError("x", request=request),
+        httpx.DecodingError("x", request=request),
         requests.ConnectionError("x"),
         requests.Timeout("x"),
+        # A response cut off or garbled in transit: a blip, not a refusal.
+        requests.exceptions.ChunkedEncodingError("x"),
+        requests.exceptions.ContentDecodingError("x"),
+        requests.exceptions.RetryError("x"),
     ):
         assert carrier_routing.failure_kind(error, unknown="refused") == "outage"
 
@@ -337,3 +343,27 @@ def test_escaped_discard_error() -> None:
     assert isinstance(escaped_discard_error(KeyError("x")), DiscardRefused)
     own = VerificationProviderError("x")
     assert escaped_discard_error(own) is own
+
+
+async def test_counted_discard() -> None:
+    """An error escaping a discard call counts as escaped_discard_error."""
+    from hailhq.core.providers.verification.base import (
+        DiscardRefused,
+        VerificationProviderError,
+        counted_discard,
+    )
+
+    async def fails(exc):
+        raise exc
+
+    async def works():
+        return {"kept_brand_id": "b"}
+
+    assert await counted_discard(works()) == {"kept_brand_id": "b"}
+    assert await counted_discard(fails(_http(404))) is None
+    with pytest.raises(DiscardRefused) as refused:
+        await counted_discard(fails(KeyError("x")))
+    assert isinstance(refused.value.__cause__, KeyError)
+    with pytest.raises(VerificationProviderError) as outage:
+        await counted_discard(fails(TimeoutError()))
+    assert not isinstance(outage.value, DiscardRefused)

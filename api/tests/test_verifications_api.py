@@ -1961,13 +1961,34 @@ async def test_create_keeps_waiting_when_a_refused_draft_cannot_be_discarded(
         raise SubmitRefused([Problem(field="", message=NOT_ACCEPTED)])
 
     async def boom(refs):
-        raise RuntimeError("carrier down")
+        # What a plug-in's discard raises on an outage (DiscardFailures).
+        raise VerificationProviderError("carrier down")
 
     carrier.submit, carrier.discard = refuse, boom
     resp = await _create(client, key)
     assert resp.status_code == 201, resp.text
     # Not stuck in 'submitting': the sweeper tries again.
     assert resp.json()["state"] == "awaiting_review"
+
+
+async def test_create_rejects_a_refused_draft_when_discard_escapes_with_a_bug(
+    client, org_and_key, carrier
+) -> None:
+    """An error that escapes discard outside its steps (a bug) counts as a
+    refusal, as on a customer cancel: rejected with discard_refused, not
+    left for the pass to submit and discard again on every tick."""
+    _, _, key = org_and_key
+
+    async def refuse(refs):
+        raise SubmitRefused([Problem(field="", message=NOT_ACCEPTED)])
+
+    async def bug(refs):
+        raise KeyError("address_id")
+
+    carrier.submit, carrier.discard = refuse, bug
+    resp = await _create(client, key)
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["state"] == "rejected"
 
 
 async def test_superadmin_approve_reports_a_refused_submit(
@@ -2095,7 +2116,7 @@ async def test_sweeper_keeps_a_refused_draft_when_the_discard_fails(
     carrier.check_problems = [Problem(field="", message="document unreadable")]
 
     async def boom(refs):
-        raise RuntimeError("carrier down")
+        raise VerificationProviderError("carrier down")
 
     carrier.discard = boom
     counts = await sweep_verifications(
@@ -2187,7 +2208,7 @@ async def test_a_discard_that_fails_partway_keeps_the_ids_it_added(
     async def discard(refs):
         refs["deleting_id"] = "D1"
         refs["bundle_sid"] = "changed"
-        raise RuntimeError("carrier down")
+        raise VerificationProviderError("carrier down")
 
     carrier.discard = discard
     await sweep_verifications(
@@ -2201,7 +2222,7 @@ async def test_a_discard_that_fails_partway_keeps_the_ids_it_added(
 
 
 @pytest.mark.parametrize(
-    "fail", [RuntimeError("carrier down"), asyncio.CancelledError()]
+    "fail", [VerificationProviderError("carrier down"), asyncio.CancelledError()]
 )
 async def test_ids_check_wrote_survive_a_failed_or_cut_discard(
     client, org_and_key, carrier, async_session, fail
@@ -2264,7 +2285,7 @@ async def test_a_refused_submit_discards_the_refs_as_they_are_now(
 
 
 @pytest.mark.parametrize(
-    "fail", [RuntimeError("carrier down"), asyncio.CancelledError()]
+    "fail", [VerificationProviderError("carrier down"), asyncio.CancelledError()]
 )
 async def test_ids_submit_wrote_survive_a_failed_or_cut_discard(
     client, org_and_key, carrier, async_session, fail
@@ -5429,7 +5450,7 @@ async def test_a_refused_submit_keeps_a_filed_campaign_when_the_discard_fails(
         raise SubmitRefused([Problem(field="", message=NOT_ACCEPTED)])
 
     async def boom(refs):
-        raise RuntimeError("carrier down")
+        raise VerificationProviderError("carrier down")
 
     sms_carrier.submit, sms_carrier.discard = refuse, boom
     await verifications_routes.sweep_verifications(
@@ -5495,7 +5516,7 @@ async def test_admin_approve_shows_the_refusal_when_the_discard_fails(
         raise SubmitRefused([Problem(field="", message=NOT_ACCEPTED, raw="nope")])
 
     async def boom(refs):
-        raise RuntimeError("carrier down")
+        raise VerificationProviderError("carrier down")
 
     sms_carrier.submit, sms_carrier.discard = refuse, boom
     app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
@@ -6962,7 +6983,7 @@ async def test_a_superadmin_reject_whose_discard_fails_answers_502(
 
     async def boom(refs):
         refs["filed_id"] = "F1"  # half done
-        raise RuntimeError("carrier down")
+        raise VerificationProviderError("carrier down")
 
     carrier.discard = boom
     app.dependency_overrides[require_superadmin] = lambda: SimpleNamespace(
