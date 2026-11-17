@@ -1,0 +1,193 @@
+/* Slide to answer. Same states as the video end card (marketing/studio/src/EndCard.tsx):
+   the blue fill follows the knob, the colors swap, and the phone turns as it arrives.
+   --drag is how far the knob is across, from 0 to 1. A pointer sets it. The tease stops short of 1, because the end opens the link. */
+.track {
+  --drag: 0;
+  --tease: 0.92;
+  --h: 56px;
+  --inset: 6px;
+  /* Keep in step with SLIDE_MS in AnswerButton.tsx. */
+  --slide: 900ms;
+  --track-bg: color-mix(in srgb, var(--ink) 7%, transparent);
+  --track-fg: var(--ink);
+  --on-blue: var(--emph-fg);
+  /* The phone keeps the button blue on the white knob. It is an icon, so --ac-text does not apply. */
+  --phone-blue: var(--ac);
+  position: relative;
+  isolation: isolate;
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--h);
+  max-width: 100%;
+  overflow: hidden;
+  border-radius: var(--r-pill);
+  background: var(--track-bg);
+  color: var(--track-fg);
+  font-size: var(--fs-base);
+  font-weight: 600;
+  line-height: var(--lh-base);
+  text-decoration: none;
+  /* A sideways finger moves the knob. An up or down finger still scrolls the page. */
+  touch-action: pan-y;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.track[data-tone="ink"] {
+  --track-bg: var(--answer-on-emph-bg);
+  --track-fg: var(--answer-on-emph-fg);
+}
+/* One standard: the track hugs its text, or it fills the width at a taller height.
+   Full width is the phone default. The text grows with the track, and the cap stops a wide empty bar. */
+.block {
+  --h: 64px;
+  --label-size: clamp(15px, 5.1cqi, var(--fs-lg));
+  container-type: inline-size;
+  display: flex;
+  width: 100%;
+  max-width: 420px;
+  margin-inline: auto;
+}
+@media (max-width: 640px) {
+  .track {
+    --h: 64px;
+    --label-size: clamp(15px, 5.1cqi, var(--fs-lg));
+    container-type: inline-size;
+    display: flex;
+    width: 100%;
+    max-width: 420px;
+    margin-inline: auto;
+  }
+}
+/* The home page underlines each hovered link. This link has no underline. */
+.track.track:hover {
+  text-decoration: none;
+}
+.track:focus-visible {
+  outline: 3px solid var(--ac);
+  outline-offset: 2px;
+}
+
+.fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  z-index: -1;
+  width: calc(var(--h) + var(--drag) * (100% - var(--h)));
+  border-radius: inherit;
+  background: var(--ac);
+  transition: width var(--slide) var(--ease);
+}
+
+.knob {
+  position: absolute;
+  top: var(--inset);
+  left: calc(var(--inset) + var(--drag) * (100% - var(--h)));
+  display: grid;
+  place-items: center;
+  width: calc(var(--h) - 2 * var(--inset));
+  height: calc(var(--h) - 2 * var(--inset));
+  border-radius: 50%;
+  background: var(--ac);
+  color: var(--on-blue);
+  transition:
+    left var(--slide) var(--ease),
+    background-color var(--slide) var(--ease),
+    color var(--slide) var(--ease);
+}
+
+.phone,
+.spinner {
+  grid-area: 1 / 1;
+  display: block;
+}
+.phone {
+  rotate: calc(var(--drag) * -90deg);
+  transition:
+    rotate var(--slide) var(--ease),
+    opacity var(--dur-color) var(--ease);
+}
+.spinner {
+  opacity: 0;
+  transition: opacity var(--dur-color) var(--ease);
+}
+
+.label {
+  flex: 1;
+  padding: var(--s-3) var(--s-5) var(--s-3) calc(var(--h) + var(--s-4));
+  font-size: var(--label-size, inherit);
+  line-height: 1.25;
+  text-align: center;
+  transition:
+    padding var(--slide) var(--ease),
+    color var(--slide) var(--ease),
+    opacity var(--dur-color) var(--ease);
+}
+
+/* The finger leads, so the knob, the fill and the phone do not lag behind it. */
+.track[data-dragging] .fill {
+  transition: none;
+}
+.track[data-dragging] .knob {
+  transition:
+    background-color var(--slide) var(--ease),
+    color var(--slide) var(--ease);
+}
+.track[data-dragging] .phone {
+  transition: none;
+}
+/* The knob runs over the label, so the label fades as the finger moves. It comes back at the mark, on the left. */
+.track[data-dragging]:not([data-on]) .label {
+  opacity: calc(1 - var(--drag) * 3);
+  transition: none;
+}
+
+/* The tease, on hover, on page load, and on keyboard focus. */
+.track:is(:focus-visible, [data-tease]) {
+  --drag: var(--tease);
+}
+.track:is(:focus-visible, [data-tease], [data-on]) .knob {
+  background: var(--on-blue);
+  color: var(--phone-blue);
+}
+.track:is(:focus-visible, [data-tease], [data-on]) .label {
+  padding: var(--s-3) calc(var(--h) + var(--s-4)) var(--s-3) var(--s-5);
+  color: var(--on-blue);
+}
+
+/* The action is accepted: the knob finishes fast, and the dots turn until the next page opens. */
+.track[data-loading] {
+  --slide: 360ms;
+  cursor: progress;
+}
+.track[data-loading] .phone {
+  opacity: 0;
+}
+.track[data-loading] .spinner {
+  opacity: 1;
+  animation: answer-spin 960ms steps(8) infinite;
+}
+
+@keyframes answer-spin {
+  to {
+    rotate: 360deg;
+  }
+}
+@keyframes answer-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fill,
+  .knob,
+  .phone,
+  .label,
+  .track[data-dragging] .knob {
+    transition: none;
+  }
+  .track[data-loading] .spinner {
+    animation: answer-pulse 1.6s var(--ease) infinite;
+  }
+}

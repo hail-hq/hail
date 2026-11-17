@@ -1,0 +1,220 @@
+/* Fumadocs is the layout and behavior owner. Map its semantic colors onto
+   the portable public design, without changing its sidebar or API markup. */
+.hail-docs {
+  --hail-paper: var(--paper);
+  --hail-ink: var(--ink);
+  --hail-muted: var(--m2);
+  --hail-blue: var(--ac-text);
+  --hail-blue-wash: var(--ac-soft);
+  --color-fd-background: var(--paper);
+  --color-fd-foreground: var(--ink);
+  --color-fd-primary: var(--ac-text);
+  --color-fd-primary-foreground: var(--paper);
+  --color-fd-muted: var(--section-alt);
+  --color-fd-muted-foreground: var(--m2);
+  --color-fd-secondary: var(--section-alt);
+  --color-fd-secondary-foreground: var(--ink);
+  --color-fd-accent: var(--ac-soft);
+  --color-fd-accent-foreground: var(--ink);
+  --color-fd-card: var(--card);
+  --color-fd-card-foreground: var(--ink);
+  --color-fd-popover: var(--card);
+  --color-fd-popover-foreground: var(--ink);
+  --color-fd-border: var(--lline);
+  --color-fd-ring: var(--ac-text);
+  --fd-banner-height: var(--hail-header-h, 0px);
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-ui), Arial, sans-serif;
+  letter-spacing: 0;
+}
+
+.hail-docs :focus-visible {
+  outline: 2px solid var(--ac-text);
+  outline-offset: 3px;
+}
+
+.hail-docs #nd-page {
+  min-width: 0;
+  max-width: 1040px;
+  padding-top: var(--s-8);
+  padding-bottom: var(--s-10);
+}
+
+.hail-docs #nd-sidebar,
+.hail-docs #nd-subnav {
+  border-color: var(--lline);
+  background: var(--card);
+  box-shadow: none;
+}
+
+.hail-docs #nd-sidebar a[data-active="true"],
+.hail-docs #nd-sidebar a[aria-current="page"] {
+  color: var(--ac-text);
+  background: var(--ac-soft);
+}
+
+.hail-docs #nd-sidebar a,
+.hail-docs #nd-sidebar button,
+.hail-docs #nd-subnav button,
+.hail-docs #nd-toc a {
+  font-family: var(--font-ui), Arial, sans-serif;
+}
+
+.hail-docs #nd-page .prose {
+  min-width: 0;
+  font-size: var(--fs-body);
+  line-height: 1.75;
+}
+
+.hail-docs #nd-page .prose :is(h1, h2, h3, h4),
+.hail-docs #nd-page > h1 {
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-weight: 600;
+  text-wrap: pretty;
+}
+
+.hail-docs #nd-page .prose h1,
+.hail-docs #nd-page > h1 {
+  max-width: 26ch;
+  margin-bottom: var(--s-6);
+  font-size: clamp(2rem, 3.4vw, 2.75rem);
+  line-height: 1.12;
+  letter-spacing: -0.04em;
+}
+
+.hail-docs #nd-page .prose h2 {
+  display: block;
+  margin-top: var(--s-9);
+  margin-bottom: var(--s-4);
+  font-size: clamp(1.5rem, 2.3vw, 1.875rem);
+  line-height: 1.2;
+  letter-spacing: -0.025em;
+}
+
+.hail-docs #nd-page .prose h3 {
+  margin-top: var(--s-7);
+  font-size: 1.25rem;
+  line-height: 1.3;
+  letter-spacing: -0.02em;
+}
+
+.hail-docs #nd-page .prose h4 {
+  font-size: 1.0625rem;
+  line-height: 1.4;
+  letter-spacing: -0.01em;
+}
+
+.hail-docs #nd-page .prose :is(h1, h2, h3, h4) a {
+  color: inherit;
+}
+
+.hail-docs #nd-page .prose :is(p, ul, ol, blockquote) {
+  max-width: 76ch;
+}
+
+.hail-docs #nd-page .prose :is(p, li) {
+  overflow-wrap: anywhere;
+}
+
+.hail-docs #nd-page .prose a:not([data-card]) {
+  text-underline-offset: 0.2em;
+  text-decoration-color: color-mix(in srgb, var(--ac-text) 45%, transparent);
+}
+
+.hail-docs #nd-page .prose a:not([data-card]):hover {
+  text-decoration-color: currentColor;
+}
+
+.hail-docs :is(pre, code, kbd, samp) {
+  font-family: var(--font-mono), var(--font-code), monospace;
+}
+
+.hail-docs #nd-page .prose :not(pre) > code {
+  border: 1px solid var(--lline);
+  border-radius: var(--r-sm);
+  background: var(--section-alt);
+  padding: 0.12em 0.35em;
+  color: var(--ink);
+  font-size: 0.85em;
+  font-weight: 500;
+}
+
+.hail-docs #nd-page .prose blockquote {
+  border-inline-start: 3px solid var(--ac-text);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  background: var(--ac-soft);
+  padding: var(--s-4) var(--s-5);
+  color: var(--ink);
+  font-style: normal;
+}
+
+.hail-docs #nd-page .prose table {
+  width: 100%;
+  font-size: var(--fs-small);
+}
+
+.hail-docs #nd-page .prose th {
+  background: var(--section-alt);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.hail-docs #nd-page .prose :is(th, td) {
+  border-color: var(--lline);
+  padding: var(--s-3) var(--s-4);
+}
+
+.hail-docs #nd-page .prose hr {
+  border-color: var(--lline);
+}
+
+/* Keep Shiki's paired light/dark palettes. Its own scroll viewport contains
+   long examples, while the page column remains free to shrink. */
+.hail-docs #nd-page :is(figure, pre, [role="tabpanel"]) {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.hail-docs #nd-page :is(.shiki, [data-card="true"], [role="tabpanel"]) {
+  border-color: var(--lline);
+  box-shadow: none;
+}
+
+.hail-docs #nd-page pre {
+  overflow-x: auto;
+}
+
+.hail-docs #nd-page [data-card="true"] {
+  border-radius: var(--r-lg);
+  background: var(--card);
+  transition: border-color var(--dur-color) var(--ease);
+}
+
+.hail-docs #nd-page a[data-card="true"]:hover {
+  border-color: var(--ac-text);
+}
+
+.hail-docs #nd-page button,
+.hail-docs #nd-page [role="button"] {
+  text-decoration: none;
+}
+
+@media (max-width: 767px) {
+  .hail-docs #nd-page {
+    padding-top: var(--s-7);
+    padding-inline: var(--s-5);
+  }
+
+  .hail-docs #nd-page .prose h1,
+  .hail-docs #nd-page > h1 {
+    font-size: clamp(1.875rem, 8vw, 2.375rem);
+  }
+}
+
+@media (max-width: 359px) {
+  .hail-docs #nd-page {
+    padding-inline: var(--s-4);
+  }
+}

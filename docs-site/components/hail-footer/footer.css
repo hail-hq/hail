@@ -1,90 +1,36 @@
 .hail-footer {
-  --hf-bg: #f5f3ed;
-  --hf-ink: #111111;
-  --hf-muted: #686868;
-  --hf-line: #dedbd3;
-  --hf-ac: #1665ff;
+  --ease: cubic-bezier(.32, .72, 0, 1);
+  --hf-bg: var(--public-footer, #e8efff);
+  --hf-card: var(--public-card, #ffffff);
+  --hf-ink: var(--public-ink, #111111);
+  --hf-muted: var(--public-muted, #626b79);
+  --hf-line: color-mix(in srgb, var(--hf-ink) 17%, transparent);
+  --hf-ac: var(--public-accent-text, #1665ff);
+  width: 100%;
   background: var(--hf-bg);
   color: var(--hf-ink);
-  border-top: 1px solid var(--hf-line);
-  font-family: var(--font-ui, var(--font-grotesk, Arial)), Arial, sans-serif;
+  font-family: var(--public-font-ui, var(--font-ui, Arial)), Arial, sans-serif;
+  font-size: 12px;
   font-weight: 400;
+  line-height: 1.65;
   letter-spacing: 0;
-  font-size: 14px;
-  line-height: 20px;
   text-transform: none;
-  width: 100%;
 }
-.hail-footer * {
-  box-sizing: border-box;
-}
-.hail-footer-inner {
-  width: min(100% - 48px, 1100px);
-  margin-inline: auto;
-}
-.hail-footer-grid {
-  display: grid;
-  grid-template-columns: 1.2fr repeat(5, 1fr);
-  gap: 28px;
-  padding-block: 56px 40px;
-}
-.hail-footer a {
-  color: inherit;
-  text-decoration: none;
-  overflow-wrap: anywhere;
-}
-.hail-footer a:hover {
-  color: var(--hf-ac);
-  text-decoration: underline;
-  text-underline-offset: 4px;
-}
-.hail-footer :is(a, button):focus-visible {
-  outline: 2px solid var(--hf-ac);
-  outline-offset: 5px;
-}
-.hail-footer .hail-footer-mark {
-  font-size: 24px;
-  font-weight: 700;
-  letter-spacing: -0.045em;
-}
-.hail-footer-brand p {
-  margin: 18px 0;
-  color: var(--hf-muted);
-  max-width: 30ch;
-}
-.hail-footer-social {
-  display: grid;
-  grid-template-columns: repeat(7, 32px);
-  gap: 2px;
-  width: fit-content;
-}
-.hail-footer-social a {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 44px;
-  border-radius: 6px;
-  line-height: 0;
-}
-.hail-footer-social a:hover {
-  color: inherit;
-  background-color: var(--hf-line, #dedbd3);
-  text-decoration: none;
-}
-.hail-footer-social a:focus-visible {
-  outline: 2px solid var(--hf-ac, #1665ff);
-  outline-offset: 2px;
-}
-.hail-social-icon {
-  display: block;
-  width: 22px;
-  height: 22px;
-  background-color: currentColor;
-  mask-position: center;
-  mask-repeat: no-repeat;
-  mask-size: contain;
-}
+.hail-footer, .hail-footer * { box-sizing: border-box; }
+.hail-footer.hail-footer, .hail-footer.hail-footer * { font-family: var(--public-font-ui, var(--font-ui, Arial)), Arial, sans-serif !important; text-transform: none !important; }
+.hail-footer-inner { width: min(1240px, calc(100% - var(--public-gutter, 32px) * 2)); margin-inline: auto; }
+.hail-footer-grid { display: grid; grid-template-columns: 1.15fr repeat(5, minmax(0, 1fr)); gap: 30px; padding-block: 62px 38px; }
+.hail-footer a { color: inherit; text-decoration: none; overflow-wrap: anywhere; }
+.hail-footer a:hover { color: var(--hf-ac); text-decoration: underline; text-underline-offset: 4px; }
+.hail-footer :is(a, button, summary):focus-visible { outline: 2px solid var(--hf-ac); outline-offset: 4px; }
+.hail-footer .hail-footer-mark { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; width: fit-content; font-size: 28px; font-weight: 600; line-height: 1; letter-spacing: -.06em; }
+.hail-footer-mascot { flex: none; }
+.hail-footer-brand p { max-width: 250px; margin: 18px 0 12px; color: var(--hf-muted); font-size: 12px; line-height: 1.7; }
+.hail-footer-social { display: flex; flex-wrap: wrap; gap: 0; width: fit-content; max-width: 200px; }
+.hail-footer-social a { display: grid; place-items: center; flex: none; width: 44px; height: 44px; border-radius: 8px; line-height: 0; }
+.hail-footer-social a:hover { color: inherit; background: color-mix(in srgb, var(--hf-ink) 5%, transparent); text-decoration: none; }
+.hail-footer-social a:focus-visible { outline-offset: 0; }
+.hail-social-icon { display: block; width: 20px; height: 20px; background-color: currentColor; mask-position: center; mask-repeat: no-repeat; mask-size: contain; }
 .hail-social-github { mask-image: url("data:image/svg+xml,%3Csvg%20role%3D%22img%22%20viewBox%3D%220%200%2024%2024%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3Ctitle%3EGitHub%3C%2Ftitle%3E%3Cpath%20d%3D%22M12%20.297c-6.63%200-12%205.373-12%2012%200%205.303%203.438%209.8%208.205%2011.385.6.113.82-.258.82-.577%200-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422%2018.07%203.633%2017.7%203.633%2017.7c-1.087-.744.084-.729.084-.729%201.205.084%201.838%201.236%201.838%201.236%201.07%201.835%202.809%201.305%203.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93%200-1.31.465-2.38%201.235-3.22-.135-.303-.54-1.523.105-3.176%200%200%201.005-.322%203.3%201.23.96-.267%201.98-.399%203-.405%201.02.006%202.04.138%203%20.405%202.28-1.552%203.285-1.23%203.285-1.23.645%201.653.24%202.873.12%203.176.765.84%201.23%201.91%201.23%203.22%200%204.61-2.805%205.625-5.475%205.92.42.36.81%201.096.81%202.22%200%201.606-.015%202.896-.015%203.286%200%20.315.21.69.825.57C20.565%2022.092%2024%2017.592%2024%2012.297c0-6.627-5.373-12-12-12%22%2F%3E%3C%2Fsvg%3E%0A"); }
 .hail-social-x { mask-image: url("data:image/svg+xml,%3Csvg%20role%3D%22img%22%20viewBox%3D%220%200%2024%2024%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3Ctitle%3EX%3C%2Ftitle%3E%3Cpath%20d%3D%22M14.234%2010.162%2022.977%200h-2.072l-7.591%208.824L7.251%200H.258l9.168%2013.343L.258%2024H2.33l8.016-9.318L16.749%2024h6.993zm-2.837%203.299-.929-1.329L3.076%201.56h3.182l5.965%208.532.929%201.329%207.754%2011.09h-3.182z%22%2F%3E%3C%2Fsvg%3E%0A"); }
 .hail-social-youtube { mask-image: url("data:image/svg+xml,%3Csvg%20role%3D%22img%22%20viewBox%3D%220%200%2024%2024%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3Ctitle%3EYouTube%3C%2Ftitle%3E%3Cpath%20d%3D%22M23.498%206.186a3.016%203.016%200%200%200-2.122-2.136C19.505%203.545%2012%203.545%2012%203.545s-7.505%200-9.377.505A3.017%203.017%200%200%200%20.502%206.186C0%208.07%200%2012%200%2012s0%203.93.502%205.814a3.016%203.016%200%200%200%202.122%202.136c1.871.505%209.376.505%209.376.505s7.505%200%209.377-.505a3.015%203.015%200%200%200%202.122-2.136C24%2015.93%2024%2012%2024%2012s0-3.93-.502-5.814zM9.545%2015.568V8.432L15.818%2012l-6.273%203.568z%22%2F%3E%3C%2Fsvg%3E%0A"); }
@@ -93,204 +39,70 @@
 .hail-social-facebook { mask-image: url("data:image/svg+xml,%3Csvg%20role%3D%22img%22%20viewBox%3D%220%200%2024%2024%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3Ctitle%3EFacebook%3C%2Ftitle%3E%3Cpath%20d%3D%22M9.101%2023.691v-7.98H6.627v-3.667h2.474v-1.58c0-4.085%201.848-5.978%205.858-5.978.401%200%20.955.042%201.468.103a8.68%208.68%200%200%201%201.141.195v3.325a8.623%208.623%200%200%200-.653-.036%2026.805%2026.805%200%200%200-.733-.009c-.707%200-1.259.096-1.675.309a1.686%201.686%200%200%200-.679.622c-.258.42-.374.995-.374%201.752v1.297h3.919l-.386%202.103-.287%201.564h-3.246v8.245C19.396%2023.238%2024%2018.179%2024%2012.044c0-6.627-5.373-12-12-12s-12%205.373-12%2012c0%205.628%203.874%2010.35%209.101%2011.647Z%22%2F%3E%3C%2Fsvg%3E%0A"); }
 .hail-social-linkedin { mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%224%204%2056%2056%22%3E%3Ctitle%3ELinkedIn%3C%2Ftitle%3E%3Cpath%20d%3D%22M55.92%204H8.08C6.99792%204%205.96015%204.42986%205.195%205.195C4.42986%205.96015%204%206.99792%204%208.08V55.92C4%2057.0021%204.42986%2058.0398%205.195%2058.805C5.96015%2059.5701%206.99792%2060%208.08%2060H55.92C57.0021%2060%2058.0398%2059.5701%2058.805%2058.805C59.5701%2058.0398%2060%2057.0021%2060%2055.92V8.08C60%206.99792%2059.5701%205.96015%2058.805%205.195C58.0398%204.42986%2057.0021%204%2055.92%204V4ZM20%2052H12V25H20V52ZM16%2020.7C14.7535%2020.7%2013.558%2020.2048%2012.6766%2019.3234C11.7952%2018.442%2011.3%2017.2465%2011.3%2016C11.3%2014.7535%2011.7952%2013.558%2012.6766%2012.6766C13.558%2011.7952%2014.7535%2011.3%2016%2011.3V11.3C17.2465%2011.3%2018.442%2011.7952%2019.3234%2012.6766C20.2048%2013.558%2020.7%2014.7535%2020.7%2016C20.7%2017.2465%2020.2048%2018.442%2019.3234%2019.3234C18.442%2020.2048%2017.2465%2020.7%2016%2020.7ZM52%2052H44V37.81C44%2033.5%2041.27%2031.7%2039%2031.7C38.1867%2031.673%2037.3769%2031.8168%2036.6226%2032.1221C35.8684%2032.4275%2035.1866%2032.8876%2034.6212%2033.4728C34.0558%2034.058%2033.6194%2034.7552%2033.3401%2035.5195C33.0609%2036.2838%2032.945%2037.0982%2033%2037.91V52H25V25H32.53V28.79H32.64C33.44%2027.15%2037.08%2024.42%2041.77%2024.42C46.46%2024.42%2052%2027.59%2052%2035.76V52Z%22%2F%3E%3C%2Fsvg%3E%0A"); }
 @media (forced-colors: active) {
-  .hail-social-icon {
-    /* Preserve the mask's foreground while using the user's high-contrast link color. */
-    background-color: LinkText;
-    forced-color-adjust: none;
-  }
+  .hail-social-icon { background-color: LinkText; forced-color-adjust: none; }
   .hail-footer-social a:hover { outline: 1px solid LinkText; }
 }
-.hail-footer-column {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 10px;
-  min-width: 0;
-}
-.hail-footer-column h2 {
-  color: var(--hf-muted);
-  font-size: 12px;
-  font-weight: 500;
-  letter-spacing: 0;
-  margin: 0 0 8px;
-}
-.hail-footer-badges {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 16px;
-  list-style: none;
-  margin: 0;
-  padding: 0 0 32px;
-}
-.hail-footer-badges a {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 200px;
-  height: 64px;
-  padding: 12px;
-  border: 1px solid var(--hf-line);
-  border-radius: 10px;
-  background: var(--hf-bg);
-  line-height: 1;
-}
-.hail-footer-badges li {
-  max-width: 100%;
-}
-.hail-footer-badges a:hover {
-  text-decoration: none;
-}
-.hail-footer-badges img {
-  display: block;
-  flex: 0 0 36px;
-  width: 36px;
-  height: 36px;
-  object-fit: contain;
-}
-.hail-footer-badge-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
-.hail-footer-badge-label {
-  color: var(--hf-muted);
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 1px;
-}
-.hail-footer-badge-name {
-  font-size: 18px;
-  font-weight: 700;
-  line-height: 20px;
-}
-.hail-footer-end {
-  border-top: 1px solid var(--hf-ink);
-  padding-block: 22px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 20px;
-  color: var(--hf-muted);
-  font-size: 12px;
-}
-.hail-footer .theme-toggle {
-  display: flex;
-  gap: 14px;
-}
-.hail-footer .theme-toggle button {
-  border: 0;
-  padding: 0;
-  background: none;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-}
-.hail-footer .theme-toggle button[aria-pressed="true"] {
-  color: var(--hf-ac);
-  text-decoration: none;
+.hail-footer-column { min-width: 0; }
+.hail-footer-mobile-group { display: none; }
+.hail-footer-column > summary { list-style: none; margin-bottom: 18px; cursor: default; }
+.hail-footer-column > summary::-webkit-details-marker { display: none; }
+.hail-footer-column :is(h2, .hail-footer-heading) { margin: 0; color: var(--hf-ink); font-size: 13px; font-weight: 600; line-height: 20px; letter-spacing: 0; }
+.hail-footer-desktop-group > h2 { margin-bottom: 18px; }
+.hail-footer-column nav { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; color: var(--hf-muted); }
+.hail-footer-column nav a { line-height: 1.6; }
+.hail-footer-plus { display: none; }
+/* Desktop groups stay outside details so older browsers show every link.
+   Phones use the same registry links inside native accordions. Both render on the server. */
+.hail-footer-badges { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; list-style: none; margin: 0; padding: 0 0 32px; }
+.hail-footer-badges li { max-width: 100%; }
+.hail-footer-badges a { display: flex; align-items: center; gap: 12px; width: 200px; height: 64px; padding: 12px; border: 1px solid var(--hf-line); border-radius: 12px; background: transparent; line-height: 1; transition: background-color 200ms var(--ease); }
+.hail-footer-badges a:hover { color: inherit; background: var(--hf-card); text-decoration: none; }
+.hail-footer-badges img { display: block; flex: 0 0 36px; width: 36px; height: 36px; object-fit: contain; }
+.hail-footer-badge-copy { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.hail-footer-badge-label { color: var(--hf-muted); font-size: 9px; font-weight: 400; }
+.hail-footer-badge-name { font-size: 16px; font-weight: 600; line-height: 20px; }
+.hail-footer-end { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 20px; padding-block: 22px 28px; border-top: 1px solid var(--hf-line); color: var(--hf-muted); font-size: 11px; }
+.hail-footer-theme > div > b { display: none; }
+.hail-footer .theme-toggle { display: inline-flex; gap: 3px; padding: 3px; border: 1px solid var(--hf-line); border-radius: 999px; }
+.hail-footer .theme-toggle button { min-width: 44px; min-height: 38px; padding: 6px 10px; border: 0; border-radius: 999px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.hail-footer .theme-toggle button[aria-pressed="true"] { background: var(--hf-card); color: var(--hf-ink); text-decoration: none; }
+.hail-footer-art { position: relative; width: 100%; height: 165px; overflow: hidden; }
+.hail-footer-scene { position: absolute; bottom: 0; left: 0; display: block; width: 100%; height: 165px; color: var(--public-accent, #1665ff); }
+@media (max-width: 1100px) and (min-width: 901px) {
+  .hail-footer-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 38px; }
+  .hail-footer-brand { grid-column: 1 / -1; }
+  .hail-footer-brand p { max-width: 380px; }
+  .hail-footer-social { max-width: none; }
 }
 @media (max-width: 900px) {
-  .hail-footer-social { grid-template-columns: repeat(7, 44px); gap: 0; }
-  .hail-footer-social a { width: 44px; }
-  .hail-footer-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 32px 24px;
-  }
-  .hail-footer-brand {
-    grid-column: 1/-1;
-  }
+  .hail-footer-desktop-group { display: none; }
+  .hail-footer-mobile-group { display: block; }
+  .hail-footer-grid { display: block; padding-block: 38px 26px; }
+  .hail-footer-brand { padding-bottom: 28px; }
+  .hail-footer-brand p { max-width: 380px; font-size: 13px; }
+  .hail-footer-social { max-width: none; }
+  .hail-footer-column { border-top: 1px solid var(--hf-line); }
+  .hail-footer-column:last-child { border-bottom: 1px solid var(--hf-line); }
+  .hail-footer-column > summary { display: flex; align-items: center; justify-content: space-between; min-height: 60px; margin: 0; padding-block: 18px; cursor: pointer; }
+  .hail-footer-column :is(h2, .hail-footer-heading) { font-size: 14px; }
+  .hail-footer-plus { position: relative; display: block; flex: none; width: 14px; height: 14px; }
+  .hail-footer-plus::before, .hail-footer-plus::after { content: ""; position: absolute; top: 6px; left: 0; width: 14px; height: 1px; background: currentColor; }
+  .hail-footer-plus::after { transform: rotate(90deg); transition: transform 200ms var(--ease); }
+  .hail-footer-column[open] .hail-footer-plus::after { transform: rotate(0); }
+  .hail-footer-column nav { gap: 0; padding-bottom: 18px; font-size: 13px; }
+  .hail-footer-column nav a { display: flex; align-items: center; min-height: 44px; width: 100%; }
+  .hail-footer-end { gap: 16px; padding-bottom: 24px; }
+  .hail-footer-end > span { width: 100%; }
+  .hail-footer-art { height: 115px; }
+  .hail-footer-scene { left: 50%; width: 900px; height: 120px; max-width: none; transform: translateX(-50%); }
 }
 @media (max-width: 767px) {
-  .hail-footer-badges {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 8px;
-  }
-  .hail-footer-badges a {
-    width: 168px;
-    height: 48px;
-    padding: 8px;
-    gap: 8px;
-    border-radius: 8px;
-  }
-  .hail-footer-badges img {
-    flex-basis: 28px;
-    width: 28px;
-    height: 28px;
-  }
-  .hail-footer-badge-copy {
-    gap: 2px;
-  }
-  .hail-footer-badge-label {
-    font-size: 8px;
-    letter-spacing: 0.8px;
-  }
-  .hail-footer-badge-name {
-    font-size: 15px;
-    line-height: 18px;
-  }
+  .hail-footer-badges { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .hail-footer-badges a { gap: 8px; width: 168px; height: 48px; padding: 8px; border-radius: 8px; }
+  .hail-footer-badges img { flex-basis: 28px; width: 28px; height: 28px; }
+  .hail-footer-badge-copy { gap: 2px; }
+  .hail-footer-badge-label { font-size: 8px; }
+  .hail-footer-badge-name { font-size: 15px; line-height: 18px; }
 }
-@media (max-width: 480px) {
-  .hail-footer-inner {
-    width: calc(100% - 32px);
-  }
-  .hail-footer-grid {
-    padding-top: 36px;
-  }
-  .hail-footer-end {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-}
-@media (prefers-color-scheme: dark) {
-  html:not([data-theme="light"]):not(.light) .hail-footer {
-    --hf-bg: #181818;
-    --hf-ink: #f2f2f2;
-    --hf-muted: #8f8f8f;
-    --hf-line: #313131;
-    --hf-ac: #4b82ff;
-  }
-}
-html[data-theme="dark"] .hail-footer,
-html.dark .hail-footer {
-  --hf-bg: #181818;
-  --hf-ink: #f2f2f2;
-  --hf-muted: #8f8f8f;
-  --hf-line: #313131;
-  --hf-ac: #4b82ff;
-}
-
-.hail-footer.hail-footer,
-.hail-footer.hail-footer * {
-  font-family: var(--font-ui, var(--font-grotesk, Arial)), Arial, sans-serif !important;
-  text-transform: none !important;
-}
-.hail-footer .hail-footer-mark {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 14px;
-  width: fit-content;
-  font-family: var(--font-code, var(--font-mono)), monospace !important;
-}
-
-/* Compact brand block and touch targets on phones. Shared by all three apps. */
-@media (max-width: 640px) {
-  .hail-footer-grid { gap: 32px 20px; padding-block: 32px; }
-  .hail-footer-brand { padding-bottom: 24px; border-bottom: 1px solid var(--hf-line); }
-  .hail-footer .hail-footer-mark { flex-direction: row; align-items: center; gap: 12px; }
-  .hail-footer-mascot { flex: none; width: 40px; height: 40px; }
-  .hail-footer-brand p { max-width: 42ch; margin-block: 16px; font-size: 14px; line-height: 22px; }
-  .hail-footer-social { gap: 0; }
-  .hail-footer-social a { display: inline-flex; align-items: center; min-height: 44px; }
-  .hail-footer-column { gap: 0; }
-  .hail-footer-column a { display: flex; align-items: center; min-height: 44px; }
-}
-
-@media (max-width: 359px), (min-width: 901px) and (pointer: coarse) {
-  .hail-footer-social { grid-template-columns: repeat(4, 44px); gap: 4px 8px; }
-  .hail-footer-social a { width: 44px; }
-}
+@media (max-width: 359px) { .hail-footer-social { display: grid; grid-template-columns: repeat(4, 44px); gap: 4px 8px; } }
+@media (prefers-reduced-motion: reduce) { .hail-footer * { transition: none !important; } }

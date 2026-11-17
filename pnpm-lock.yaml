@@ -29,10 +29,10 @@ importers:
 
   docs-site:
     dependencies:
-      "@fontsource-variable/jetbrains-mono":
+      "@fontsource-variable/bricolage-grotesque":
         specifier: ^5.3.0
         version: 5.3.0
-      "@fontsource-variable/space-grotesk":
+      "@fontsource-variable/jetbrains-mono":
         specifier: ^5.3.0
         version: 5.3.0
       fumadocs-core:
@@ -96,10 +96,10 @@ importers:
 
   web:
     dependencies:
-      "@fontsource-variable/jetbrains-mono":
+      "@fontsource-variable/bricolage-grotesque":
         specifier: ^5.3.0
         version: 5.3.0
-      "@fontsource-variable/space-grotesk":
+      "@fontsource-variable/jetbrains-mono":
         specifier: ^5.3.0
         version: 5.3.0
       "@tanstack/react-table":
@@ -458,16 +458,16 @@ packages:
         integrity: sha512-HpCo8tmWzLVad5s2d19EhAz5zqrrQ6s69qd6moPMQvkOuSwDT1YgRfWSVuc4ennqrgv3OHppiOGMQ7oC13yIww==,
       }
 
+  "@fontsource-variable/bricolage-grotesque@5.3.0":
+    resolution:
+      {
+        integrity: sha512-TLi9Q4hJjS2UvoTMRSS2nHu6c4R56lAw60NR9QYtVRCHn0XtsFpiEhNffZ8Glsoxu6wEEwLKBP8lb94J52PNBA==,
+      }
+
   "@fontsource-variable/jetbrains-mono@5.3.0":
     resolution:
       {
         integrity: sha512-F32xpS2NsGYoQi2ADSkKTgpJj7ozajsGgDJ8woTnqjmIB+dxDIqImjl4pXZVEExu8UFZ2ndhmX18EBS/hdz3Lw==,
-      }
-
-  "@fontsource-variable/space-grotesk@5.3.0":
-    resolution:
-      {
-        integrity: sha512-2IxmvfB08i9vnGB3Ym/AXvhRE+8XOjWMXIyDum03c+tPwH0FUoMNQfGpU8NXPxjbws0Vvss3AH0Zqt4oJBBAdw==,
       }
 
   "@fuma-translate/react@1.0.2":
@@ -3907,9 +3907,9 @@ snapshots:
 
   "@floating-ui/utils@0.2.12": {}
 
-  "@fontsource-variable/jetbrains-mono@5.3.0": {}
+  "@fontsource-variable/bricolage-grotesque@5.3.0": {}
 
-  "@fontsource-variable/space-grotesk@5.3.0": {}
+  "@fontsource-variable/jetbrains-mono@5.3.0": {}
 
   "@fuma-translate/react@1.0.2(@types/react@19.2.14)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)":
     dependencies:

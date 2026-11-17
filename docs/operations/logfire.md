@@ -37,14 +37,14 @@ attributes. Child spans (Hail and native LiveKit) and logs get them from the
 scope, set with `tag_context()` in
 [`telemetry_identity.py`](../../core/hailhq/core/telemetry_identity.py).
 
-| Attribute | Values |
-| --- | --- |
-| `hail.channel` | `voice`, `sms`, `email`, `mcp`, `api` |
-| `hail.direction` | `inbound`, `outbound` |
-| `hail.call_id`, `hail.sms_id`, `hail.email_id`, `hail.agent_id` | record ids |
-| `hail.from`, `hail.to` | the two parties |
-| `mcp.tool.name` | the MCP tool called |
-| `organization_id`, `organization_name` | the organization |
+| Attribute                                                       | Values                                |
+| --------------------------------------------------------------- | ------------------------------------- |
+| `hail.channel`                                                  | `voice`, `sms`, `email`, `mcp`, `api` |
+| `hail.direction`                                                | `inbound`, `outbound`                 |
+| `hail.call_id`, `hail.sms_id`, `hail.email_id`, `hail.agent_id` | record ids                            |
+| `hail.from`, `hail.to`                                          | the two parties                       |
+| `mcp.tool.name`                                                 | the MCP tool called                   |
+| `organization_id`, `organization_name`                          | the organization                      |
 
 The Hail side (`hail.from` on outbound, `hail.to` on inbound) is the full
 number or address. The other party is masked: a phone keeps its country code

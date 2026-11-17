@@ -94,12 +94,7 @@ export default function CostsPage() {
         </div>
       </div>
 
-      <header
-        style={{
-          padding: "clamp(72px,9vw,120px) 0 clamp(52px,7vw,88px)",
-          borderBottom: "1px solid var(--color-ink)",
-        }}
-      >
+      <header className="costs-hero">
         <div className="wrap">
           <div className="hero-grid">
             <div className="costs-hero-copy">
@@ -122,10 +117,7 @@ export default function CostsPage() {
                 <dd>CC-BY-4.0</dd>
                 <dt>Source</dt>
                 <dd>
-                  <a
-                    href="https://github.com/hail-hq/hail/tree/main/costs"
-                    style={{ textDecoration: "underline" }}
-                  >
+                  <a href="https://github.com/hail-hq/hail/tree/main/costs">
                     github / hail-hq
                   </a>
                 </dd>
@@ -217,65 +209,30 @@ export default function CostsPage() {
       <TelephonySection data={numbers} />
       <SmsSection data={sms.providers} />
 
-      <section
-        style={{
-          padding: "36px 0",
-          borderBottom: "2px solid var(--color-ink)",
-          background: "var(--color-paper)",
-        }}
-      >
+      <section className="costs-data">
         <div className="wrap">
-          <h3
-            style={{
-              fontSize: 15,
-              fontWeight: 600,
-              color: "var(--color-mute)",
-              margin: "0 0 14px",
-            }}
-          >
-            Programmatic access
-          </h3>
-          <p style={{ maxWidth: "60ch", margin: "0 0 18px", fontSize: 15 }}>
+          <h2>Programmatic access</h2>
+          <p>
             The full dataset is published as JSON and Markdown. Agents and
             scripts should fetch directly:
           </p>
-          <ul
-            style={{
-              listStyle: "none",
-              padding: 0,
-              margin: 0,
-              fontFamily: "var(--font-mono)",
-              fontSize: 13,
-              lineHeight: 1.9,
-            }}
-          >
+          <ul>
             <li>
-              <a href="/costs/costs.md" style={{ textDecoration: "underline" }}>
-                /costs.md
-              </a>{" "}
-              · markdown view (this page)
+              <a href="/costs/costs.md">/costs.md</a> · markdown view (this
+              page)
             </li>
             <li>
-              <a
-                href="https://raw.githubusercontent.com/hail-hq/hail/main/costs/llm.json"
-                style={{ textDecoration: "underline" }}
-              >
+              <a href="https://raw.githubusercontent.com/hail-hq/hail/main/costs/llm.json">
                 raw / costs/llm.json
               </a>
             </li>
             <li>
-              <a
-                href="https://raw.githubusercontent.com/hail-hq/hail/main/costs/stt.json"
-                style={{ textDecoration: "underline" }}
-              >
+              <a href="https://raw.githubusercontent.com/hail-hq/hail/main/costs/stt.json">
                 raw / costs/stt.json
               </a>
             </li>
             <li>
-              <a
-                href="https://raw.githubusercontent.com/hail-hq/hail/main/costs/tts.json"
-                style={{ textDecoration: "underline" }}
-              >
+              <a href="https://raw.githubusercontent.com/hail-hq/hail/main/costs/tts.json">
                 raw / costs/tts.json
               </a>
             </li>
@@ -294,19 +251,13 @@ export default function CostsPage() {
               </code>
             </li>
           </ul>
-          <p style={{ maxWidth: "60ch", margin: "18px 0 0", fontSize: 15 }}>
+          <p>
             See this data applied:{" "}
-            <a
-              href="https://hail.so/tools/voice-agent-cost-calculator"
-              style={{ textDecoration: "underline" }}
-            >
+            <a href="https://hail.so/tools/voice-agent-cost-calculator">
               AI voice agent cost calculator
             </a>{" "}
             ·{" "}
-            <a
-              href="https://hail.so/tools/sms-length-calculator"
-              style={{ textDecoration: "underline" }}
-            >
+            <a href="https://hail.so/tools/sms-length-calculator">
               SMS length &amp; segment calculator
             </a>
             {" — free tools built on these numbers."}

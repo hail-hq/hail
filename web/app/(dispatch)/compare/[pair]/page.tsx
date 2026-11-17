@@ -98,12 +98,7 @@ export default async function PairPage({
         </div>
       </div>
 
-      <header
-        style={{
-          padding: "40px 0 28px",
-          borderBottom: "2px solid var(--color-ink)",
-        }}
-      >
+      <header className="costs-hero costs-hero--compact">
         <div className="wrap">
           <h1 className="dispatch-h1">
             {a.display_name} vs {b.display_name}
