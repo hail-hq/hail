@@ -255,7 +255,7 @@ async def _quote_offer(
         offer.get("provider", ""), offer.get("country_code"), offer.get("number_type")
     ):
         raise HTTPException(
-            status_code=409,
+            status_code=http_status.HTTP_409_CONFLICT,
             detail="This offer is no longer available; quote again and pass the new quote_id",
         )
     return offer

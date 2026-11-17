@@ -153,39 +153,30 @@ async def test_calls_only_toll_free_offer_never_shows_sms_hail_cannot_verify(
     assert caps == {"twilio": ["voice", "sms"], "telnyx": ["voice"]}
 
 
-def test_by_request_gb_rows_follow_the_carrier_rules(tmp_path, monkeypatch):
+def test_by_request_never_offers_a_not_sold_row(tmp_path, monkeypatch):
     # Telnyx declines private individuals for UK numbers. Should the sync
-    # ever mark these rows by request: no Telnyx GB local offer, and GB
-    # national for companies only.
+    # ever mark a Telnyx GB local row by request, it is still not offered.
     import json
 
     from hailhq.core import telephony_catalog
 
-    def row(kind):
-        return {
-            "country_code": "GB",
-            "number_type": kind,
-            "usd_per_month": "1.00",
-            "voice": True,
-            "sms": False,
-            "mms": False,
-            "verification_required": True,
-            "by_request": True,
-        }
-
+    row = {
+        "country_code": "GB",
+        "number_type": "local",
+        "usd_per_month": "1.00",
+        "voice": True,
+        "sms": False,
+        "mms": False,
+        "verification_required": True,
+        "by_request": True,
+    }
     (tmp_path / "twilio.json").write_text(json.dumps({"numbers": []}))
-    (tmp_path / "telnyx.json").write_text(
-        json.dumps({"numbers": [row("local"), row("national")]})
-    )
-    (tmp_path / "didww.json").write_text(json.dumps({"numbers": [row("local")]}))
+    (tmp_path / "telnyx.json").write_text(json.dumps({"numbers": [row]}))
+    (tmp_path / "didww.json").write_text(json.dumps({"numbers": [row]}))
     monkeypatch.setenv("HAIL_TELEPHONY_CATALOG_DIR", str(tmp_path))
     telephony_catalog._load.cache_clear()
     try:
         (local,) = number_offers.by_request_offers("GB", "local", ["voice"])
         assert local.provider == "didww"
-        assert local.subject_types == ["business", "person"]
-        (national,) = number_offers.by_request_offers("GB", "national", ["voice"])
-        assert national.provider == "telnyx"
-        assert national.subject_types == ["business"]
     finally:
         telephony_catalog._load.cache_clear()

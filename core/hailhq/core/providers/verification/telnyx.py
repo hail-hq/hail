@@ -245,7 +245,7 @@ class TelnyxVerificationProvider(VerificationProvider):
         allowed: tuple[SubjectType, ...] = subject_types_for(rules)  # type: ignore[assignment]
         # Telnyx declines a person here (telephony_catalog._BUSINESS_ONLY).
         if business_only(self.name, country_code, number_type):
-            allowed = ("business",)
+            allowed = tuple(s for s in allowed if s == "business")
         if subject_type not in allowed:
             raise UnsupportedSubjectType(
                 f"{subject_type} is not accepted for {number_type} numbers in "

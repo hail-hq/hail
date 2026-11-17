@@ -177,17 +177,8 @@ def by_request_offers(
                 requirements=(
                     ["End-user registration (identity and address)"] if needs else []
                 ),
-                # The catalog does not say who may verify: either may,
-                # unless only a company may buy here.
-                subject_types=(
-                    (
-                        ["business"]
-                        if telephony_catalog.business_only(name, country, kind)
-                        else ["business", "person"]
-                    )
-                    if needs
-                    else []
-                ),
+                # The catalog does not say who may verify: either may.
+                subject_types=["business", "person"] if needs else [],
                 by_request=True,
             )
         )
