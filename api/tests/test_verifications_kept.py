@@ -753,3 +753,15 @@ async def test_a_file_still_being_written_is_left_to_the_worker(
     await async_session.commit()
     await forget_kept_registrations(async_session, datetime.now(timezone.utc))
     assert await _kept(async_session, vid) == []
+
+
+async def test_an_unusable_key_keeps_nothing_and_files_all_the_same(
+    client, org_and_key, carrier, store, async_session, monkeypatch
+) -> None:
+    monkeypatch.setattr(settings, "hail_provider_secret_key", "not-a-fernet-key")
+    _, _, key = org_and_key
+    resp = await _create(client, key)
+    assert resp.status_code == 201, resp.text
+    row = await _row(async_session, resp.json()["id"])
+    assert "application" not in row.provider_refs
+    assert "Lovelace" not in json.dumps(row.provider_refs)

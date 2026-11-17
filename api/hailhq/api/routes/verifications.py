@@ -1846,7 +1846,7 @@ def _application_record(
 
 def _number_application_record(
     sub: _Submission, requirements: Requirements, quote_id: UUID | None
-) -> dict:
+) -> dict | None:
     """The private saved answers of a number registration
     (``provider_refs.application``), for a resubmit: the form's fields, the
     address, each slot's document option and fields, and the quote it was
@@ -1864,7 +1864,7 @@ def _number_application_record(
     return _seal(record)
 
 
-def _seal(record: dict) -> dict:
+def _seal(record: dict) -> dict | None:
     """A number registration's saved answers as stored: the answers
     encrypted (Fernet, ``HAIL_PROVIDER_SECRET_KEY``) under ``sealed``, with
     only ``schema_version`` and ``quote_id`` left readable (the quote purge
@@ -1873,12 +1873,19 @@ def _seal(record: dict) -> dict:
     if not settings.hail_provider_secret_key:
         return record
     plain = {k: v for k, v in record.items() if k not in ("schema_version", "quote_id")}
+    try:
+        sealed = SecretCipher(settings.hail_provider_secret_key).encrypt(
+            json.dumps(plain)
+        )
+    except Exception as exc:
+        # A key that is set but unusable: keep nothing rather than block the
+        # filing or store the answers in the clear.
+        logger.warning("could not seal registration answers (%s)", type(exc).__name__)
+        return None
     return {
         "schema_version": record["schema_version"],
         "quote_id": record.get("quote_id"),
-        "sealed": SecretCipher(settings.hail_provider_secret_key).encrypt(
-            json.dumps(plain)
-        ),
+        "sealed": sealed,
     }
 
 
@@ -2545,9 +2552,11 @@ async def _file(
         )
     else:
         # Kept privately for a resubmit (30 days, see _number_answers_kept).
-        draft.refs["application"] = _number_application_record(
+        record = _number_application_record(
             prepared.sub, prepared.requirements, prepared.sub.quote_id
         )
+        if record is not None:
+            draft.refs["application"] = record
 
     _stamp_campaign_filed(prepared.provider, draft.refs)
     if draft.billed_refs:
@@ -3712,7 +3721,7 @@ async def forget_kept_registrations(
 
     f = FileUpload
     files = (
-        select(f.id)
+        select(f.id, f.verification_id)
         .join(v, v.id == f.verification_id)
         .where(
             f.purpose == KEPT_PURPOSE,
@@ -3729,10 +3738,18 @@ async def forget_kept_registrations(
     )
     if organization_id is not None:
         files = files.where(f.organization_id == organization_id)
-    ids = list((await db.execute(files)).scalars().all())
+    picked = (await db.execute(files)).all()
     await db.commit()
     deleted = (
-        await delete_kept_files(db, s3 or get_s3_mail_optional(), ids) if ids else 0
+        await delete_kept_files(
+            db,
+            s3 or get_s3_mail_optional(),
+            [file_id for file_id, _ in picked],
+            # A resubmit may have moved one to its new filing meanwhile.
+            verification_ids=list({vid for _, vid in picked}),
+        )
+        if picked
+        else 0
     )
     return forgotten, deleted
 

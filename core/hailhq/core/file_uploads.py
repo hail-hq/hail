@@ -219,24 +219,28 @@ async def keep_verification_files(
 
 
 async def delete_kept_files(
-    db: AsyncSession, s3: S3MailClient | None, upload_ids: list[UUID]
+    db: AsyncSession,
+    s3: S3MailClient | None,
+    upload_ids: list[UUID],
+    *,
+    verification_ids: list[UUID] | None = None,
 ) -> int:
     """Delete kept files (object, then row) one at a time; returns how many.
     A failed object delete keeps its row, so the worker tries again. With
-    no bucket configured only the rows go: there is no object."""
+    no bucket configured only the rows go: there is no object. With
+    ``verification_ids``, only files still linked to one of them go."""
     # Here, not at the top: hailhq.core.models imports this module.
     from hailhq.core.models import FileUpload
 
     if not upload_ids:
         return 0
-    rows = (
-        await db.execute(
-            select(FileUpload.id, FileUpload.s3_key).where(
-                FileUpload.id.in_(upload_ids),
-                FileUpload.purpose == KEPT_PURPOSE,
-            )
-        )
-    ).all()
+    query = select(FileUpload.id, FileUpload.s3_key).where(
+        FileUpload.id.in_(upload_ids),
+        FileUpload.purpose == KEPT_PURPOSE,
+    )
+    if verification_ids is not None:
+        query = query.where(FileUpload.verification_id.in_(verification_ids))
+    rows = (await db.execute(query)).all()
     await db.commit()
     deleted = 0
     for row_id, s3_key in rows:
