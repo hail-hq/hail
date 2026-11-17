@@ -48,6 +48,7 @@ from hailhq.core.telemetry_identity import (
 )
 from hailhq.voicebot.attachment_reader import inspect_tool_file
 from hailhq.voicebot.chat_loop import (
+    HTTP_TOOL_BUDGET_SECONDS,
     LLM_TIMEOUT_SECONDS,
     run_chat,
     tool_args,
@@ -160,7 +161,13 @@ async def _prepare(
         # A send from an earlier attempt: no tools, so a reworded message cannot
         # go out twice. The model still writes the reply.
         sent = await tool_sends_for_reply(db, email)
-        specs = [] if sent else await email_run_tools(claimed.agent, db, trust=trust)
+        specs = (
+            []
+            if sent
+            else await email_run_tools(
+                claimed.agent, db, trust=trust, email_id=email.id
+            )
+        )
         can_read = any(spec.name == "read_email" for spec in specs)
         # Keep context compact when history can be fetched on demand. Tool-free
         # retries and agents without retrieval still need their scoped thread.
@@ -293,7 +300,8 @@ async def _reply_claimed(
                 messages, specs = prepared
                 text = await asyncio.wait_for(
                     generate_reply(claimed, messages, specs, api),
-                    timeout=LLM_TIMEOUT_SECONDS * EMAIL_TOOL_ROUNDS,
+                    timeout=LLM_TIMEOUT_SECONDS * EMAIL_TOOL_ROUNDS
+                    + HTTP_TOOL_BUDGET_SECONDS,
                 )
                 if not text:
                     logger.info("email_id=%s wrote nothing; skipped", email.id)

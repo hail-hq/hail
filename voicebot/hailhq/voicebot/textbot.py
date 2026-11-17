@@ -25,7 +25,8 @@ from typing import Any
 
 import logfire
 from hailhq.core.agent_tools.client import AgentApiClient
-from hailhq.core.agent_tools.spec import ToolContext
+from hailhq.core.agent_tools.http_tool import Conversation, http_tool_specs
+from hailhq.core.agent_tools.spec import ToolContext, ToolSpec
 from hailhq.core.agent_tools.thread_history import SPEC as THREAD_HISTORY
 from hailhq.core.config import settings
 from hailhq.core.db import dispose_engine, session_scope
@@ -48,6 +49,7 @@ from hailhq.core.text_agent import (
 from hailhq.core.threads import ThreadScope
 from hailhq.voicebot import emailbot
 from hailhq.voicebot.chat_loop import (
+    HTTP_TOOL_BUDGET_SECONDS,
     LLM_TIMEOUT_SECONDS,
     MAX_TOOL_ROUNDS,
     TOOL_APOLOGY,
@@ -74,8 +76,8 @@ __all__ = [
 
 
 def _tool_context(claimed: ClaimedReply) -> ToolContext:
-    """The text agent's only tool reads this caller's thread, fixed by the
-    inbound text, never by the model's arguments."""
+    """``thread_history`` reads this caller's thread, fixed by the inbound
+    text, never by the model's arguments."""
     org = claimed.agent.organization_id
     sms = claimed.sms
     return ToolContext(
@@ -88,32 +90,56 @@ def _tool_context(claimed: ClaimedReply) -> ToolContext:
     )
 
 
-async def _run_tool(call: FunctionToolCall, tctx: ToolContext) -> tuple[str, bool]:
+async def _run_tool(
+    call: FunctionToolCall,
+    tctx: ToolContext,
+    specs: dict[str, ToolSpec] | None = None,
+) -> tuple[str, bool]:
     """``(output, is_error)`` for one tool call. Never raises."""
-    if call.name != THREAD_HISTORY.name:
+    spec = (specs or {THREAD_HISTORY.name: THREAD_HISTORY}).get(call.name)
+    if spec is None:
         return TOOL_APOLOGY, True
     try:
-        return await THREAD_HISTORY.execute(tctx, tool_args(call)), False
+        return str(await spec.execute(tctx, tool_args(call)) or ""), False
     except Exception:
         logger.exception("text agent tool %s failed", call.name)
         return TOOL_APOLOGY, True
 
 
+async def _http_tools(claimed: ClaimedReply) -> list[ToolSpec]:
+    """The agent's HTTP tools for this text. A failure loses only these."""
+    conv = Conversation(
+        channel="sms",
+        id=claimed.sms.id,
+        agent_id=claimed.agent.id,
+        organization_id=claimed.agent.organization_id,
+    )
+    try:
+        async with session_scope() as db:
+            return await http_tool_specs(db, conv)
+    except Exception:
+        logger.exception("sms_id=%s http tools failed to load", claimed.sms.id)
+        return []
+
+
 async def generate_reply(claimed: ClaimedReply, messages: list[dict[str, Any]]) -> str:
     """The model's reply over the chat, trimmed to the SMS cap. The model may
-    call ``thread_history``; each call's result goes back into the chat and
-    the model is asked again, for at most ``MAX_TOOL_ROUNDS`` model calls."""
+    call ``thread_history`` and the agent's HTTP tools; each call's result
+    goes back into the chat and the model is asked again, for at most
+    ``MAX_TOOL_ROUNDS`` model calls."""
+    specs = [THREAD_HISTORY, *await _http_tools(claimed)]
     org_cfgs = await resolve_org_configs(claimed.agent.organization_id)
     llm = build_llm(None, org_cfgs.get("llm"))
     tctx = _tool_context(claimed)
+    by_name = {s.name: s for s in specs}
 
     async def run_tool(call: FunctionToolCall) -> tuple[str, bool]:
-        return await _run_tool(call, tctx)
+        return await _run_tool(call, tctx, by_name)
 
     text = await run_chat(
         llm,
         messages,
-        [wrap_tool(THREAD_HISTORY, tctx)],
+        [wrap_tool(s, tctx) for s in specs],
         run_tool,
         max_rounds=MAX_TOOL_ROUNDS,
         log_label=f"sms_id={claimed.sms.id}",
@@ -187,7 +213,7 @@ async def _reply_claimed(api: AgentApiClient, claimed: ClaimedReply, span=None) 
         messages = await _prepare(claimed)
         text = await asyncio.wait_for(
             generate_reply(claimed, messages),
-            timeout=LLM_TIMEOUT_SECONDS * MAX_TOOL_ROUNDS,
+            timeout=LLM_TIMEOUT_SECONDS * MAX_TOOL_ROUNDS + HTTP_TOOL_BUDGET_SECONDS,
         )
     except ProviderKeyError as exc:
         if span is not None:

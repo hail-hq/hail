@@ -1,4 +1,5 @@
-"""SSRF guard for customer-supplied URLs (BYO openai-compatible base_url).
+"""SSRF guard for customer-supplied URLs (BYO openai-compatible base_url,
+agent HTTP tool urls).
 
 A BYO LLM base_url is fetched by the hail server both at validation time
 (``provider_validation``) and at call time (voicebot LLM build). Without a
@@ -17,7 +18,7 @@ from urllib.parse import urlsplit
 
 from hailhq.core.urls import canonical_url
 
-__all__ = ["UnsafeUrlError", "assert_public_https_url"]
+__all__ = ["UnsafeUrlError", "assert_public_https_url", "ip_is_public"]
 
 
 class UnsafeUrlError(ValueError):
@@ -31,7 +32,8 @@ class UnsafeUrlError(ValueError):
 _CGNAT_V4 = ipaddress.ip_network("100.64.0.0/10")
 
 
-def _ip_is_public(ip: str) -> bool:
+def ip_is_public(ip: str) -> bool:
+    """False for any private, loopback, link-local, reserved or CGNAT address."""
     addr = ipaddress.ip_address(ip)
     # Judge IPv4-mapped IPv6 (::ffff:a.b.c.d) on the embedded IPv4 address:
     # whether CPython's is_* checks see through the mapping is patch-level
@@ -51,34 +53,35 @@ def _ip_is_public(ip: str) -> bool:
     )
 
 
-def assert_public_https_url(url: str) -> str:
+def assert_public_https_url(url: str, *, field: str = "base_url") -> str:
     """Return the canonicalized URL if it is a public HTTPS endpoint.
 
     Raises UnsafeUrlError for non-https schemes, missing hosts, unresolvable
     hosts, or any host that resolves to a private/loopback/link-local/
     reserved/unspecified address (every resolved address must be public).
+    ``field`` names the input in the error messages.
     """
     parts = urlsplit(url)
     if parts.scheme != "https":
-        raise UnsafeUrlError(f"base_url must use https, got '{parts.scheme or url}'")
+        raise UnsafeUrlError(f"{field} must use https, got '{parts.scheme or url}'")
     host = parts.hostname
     if not host:
-        raise UnsafeUrlError("base_url has no host")
+        raise UnsafeUrlError(f"{field} has no host")
 
     try:
         port = parts.port or 443
     except ValueError as exc:
-        raise UnsafeUrlError(f"base_url has an invalid port: {exc}") from exc
+        raise UnsafeUrlError(f"{field} has an invalid port: {exc}") from exc
 
     try:
         infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
     except socket.gaierror as exc:
-        raise UnsafeUrlError(f"base_url host does not resolve: {host}") from exc
+        raise UnsafeUrlError(f"{field} host does not resolve: {host}") from exc
 
     for info in infos:
         ip = info[4][0]
-        if not _ip_is_public(ip):
+        if not ip_is_public(ip):
             raise UnsafeUrlError(
-                f"base_url host {host} resolves to non-public address {ip}"
+                f"{field} host {host} resolves to non-public address {ip}"
             )
     return canonical_url(url)

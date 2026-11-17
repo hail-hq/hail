@@ -21,6 +21,8 @@ logger = logging.getLogger("hailhq.voicebot.chat_loop")
 LLM_TIMEOUT_SECONDS = 30.0
 # Model calls per reply. The last one may not call a tool, so it writes text.
 MAX_TOOL_ROUNDS = 3
+# Extra time per reply for the agent's HTTP tools (each waits up to 10 s).
+HTTP_TOOL_BUDGET_SECONDS = 30.0
 # What the model reads when a tool call fails or names a tool it does not have.
 TOOL_APOLOGY = "Sorry, the earlier messages could not be read."
 

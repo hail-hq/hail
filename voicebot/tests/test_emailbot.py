@@ -698,6 +698,42 @@ async def test_tools_follow_the_agent_list(async_session) -> None:
     assert await email_run_tools(agent, async_session) == []
 
 
+async def test_email_run_adds_the_agents_http_tools(
+    async_session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from hailhq.core.config import settings
+    from hailhq.core.models import AgentHttpTool
+    from hailhq.core.secret_cipher import SecretCipher, generate_key
+
+    key = generate_key()
+    monkeypatch.setattr(settings, "hail_provider_secret_key", key)
+    agent = Agent(
+        organization_id=uuid.uuid4(),
+        name="A",
+        system_prompt="x",
+        tools=[],
+        http_tool_secret_encrypted=SecretCipher(key).encrypt("hts_x"),
+    )
+    async_session.add(agent)
+    await async_session.flush()
+    async_session.add(
+        AgentHttpTool(
+            agent_id=agent.id,
+            position=0,
+            name="lookup_order",
+            description="Find an order.",
+            url="https://api.example.com/orders",
+            parameters={"type": "object", "properties": {}},
+            timeout_seconds=5,
+        )
+    )
+    await async_session.commit()
+    # Without the email being answered there is nothing to bind them to.
+    assert await email_run_tools(agent, async_session) == []
+    specs = await email_run_tools(agent, async_session, email_id=uuid.uuid4())
+    assert [s.name for s in specs] == ["lookup_order"]
+
+
 async def test_outside_sender_gets_no_contact_list(async_session) -> None:
     agent = Agent(organization_id=uuid.uuid4(), name="A", system_prompt="x", tools=None)
     names = {
