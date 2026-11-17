@@ -36,6 +36,7 @@ from hailhq.core.providers.verification import (
     DocumentSlot,
     FieldSpec,
     Requirements,
+    UnsupportedSubjectType,
     document_check,
 )
 from PIL import Image
@@ -844,10 +845,12 @@ async def test_cautions_do_not_keep_a_failed_carrier_call(carrier) -> None:
 
 
 async def test_cautions_keep_the_form_when_the_refresh_fails(
-    carrier, monkeypatch
+    carrier, monkeypatch, caplog
 ) -> None:
     """A slot the kept form lacks, and the carrier down: the kept form
-    answers (the slot gets its 422), not the carrier's error."""
+    answers (the slot gets its 422), not the carrier's error. The next
+    refresh waits _CAUTION_FORM_REFRESH_S again, and the failure is one
+    warning line, without a traceback."""
     form = await carrier.requirements("GB", "mobile", "person")
     started, release = asyncio.Event(), asyncio.Event()
     release.set()
@@ -855,11 +858,36 @@ async def test_cautions_keep_the_form_when_the_refresh_fails(
     args = ("fake", provider, "GB", "mobile", "person")
     assert await routes._caution_form(*args) == form
     monkeypatch.setattr(routes, "_CAUTION_FORM_REFRESH_S", 0)
+    with caplog.at_level(logging.WARNING, logger=routes.logger.name):
+        assert await routes._caution_form(*args, slots=["nope"]) == form
+    assert len(calls) == 2
+    failures = [r for r in caplog.records if "lookup failed" in r.getMessage()]
+    assert len(failures) == 1 and failures[0].exc_info is None
+    # Backed off: within _CAUTION_FORM_REFRESH_S of the failure, no call.
+    monkeypatch.setattr(routes, "_CAUTION_FORM_REFRESH_S", 600)
     assert await routes._caution_form(*args, slots=["nope"]) == form
     assert len(calls) == 2
-    # A slot the form has: no refresh.
+    # A slot the form has: no refresh either.
+    monkeypatch.setattr(routes, "_CAUTION_FORM_REFRESH_S", 0)
     known = form.documents[0].name
     assert await routes._caution_form(*args, slots=[known]) == form
+    assert len(calls) == 2
+
+
+async def test_cautions_never_hide_a_refused_refresh(carrier, monkeypatch) -> None:
+    """A refresh the carrier refuses (a subject type it no longer takes) is
+    the 422 it is, not the kept form."""
+    form = await carrier.requirements("GB", "mobile", "person")
+    started, release = asyncio.Event(), asyncio.Event()
+    release.set()
+    refused = UnsupportedSubjectType("no persons", allowed=("business",))
+    provider, calls = _slow_provider(started, release, [form, refused])
+    args = ("fake", provider, "GB", "mobile", "person")
+    assert await routes._caution_form(*args) == form
+    monkeypatch.setattr(routes, "_CAUTION_FORM_REFRESH_S", 0)
+    with pytest.raises(HTTPException) as failed:
+        await routes._caution_form(*args, slots=["nope"])
+    assert failed.value.status_code == 422
     assert len(calls) == 2
 
 

@@ -171,7 +171,9 @@ _CAUTION_FORM_TTL_S = 600
 # A cached form older than this is fetched again when a request names a slot
 # it does not have: the carrier may have added the slot since.
 _CAUTION_FORM_REFRESH_S = 30
-_caution_forms: dict[tuple[str, str, str, str], tuple[float, Requirements]] = {}
+# Each kept form with when it was fetched and when it was last checked (a
+# fetch, or a refresh that failed: the next refresh waits as long again).
+_caution_forms: dict[tuple[str, str, str, str], tuple[float, float, Requirements]] = {}
 # The carrier call running for each key: requests that miss at once share it.
 _caution_fetches: dict[tuple[str, str, str, str], asyncio.Task[Requirements]] = {}
 
@@ -576,8 +578,11 @@ async def _requirements(
     number_type: str,
     subject_type: SubjectType,
     where: str = "query",
+    quiet: bool = False,
 ) -> Requirements:
-    """``where`` names the request part the inputs came from, for error paths."""
+    """``where`` names the request part the inputs came from, for error paths.
+    ``quiet`` logs a carrier failure as one warning line, without the
+    traceback."""
     if number_type not in NUMBER_TYPES:
         raise unprocessable("unknown number_type", loc=[where, "number_type"])
     try:
@@ -589,7 +594,12 @@ async def _requirements(
         error.detail[0]["ctx"] = {"subject_types": list(exc.allowed)}
         raise error from exc
     except Exception as exc:
-        logger.exception("verification requirements lookup failed")
+        if quiet:
+            logger.warning(
+                "verification requirements lookup failed (%s)", type(exc).__name__
+            )
+        else:
+            logger.exception("verification requirements lookup failed")
         raise HTTPException(
             status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="carrier unavailable; try again later",
@@ -2645,51 +2655,67 @@ async def _caution_form(
     slots: Collection[str] = (),
 ) -> Requirements:
     """``_requirements``, kept ``_CAUTION_FORM_TTL_S`` in this process. A
-    kept form that lacks one of ``slots`` and is ``_CAUTION_FORM_REFRESH_S``
-    or older is fetched again (the carrier may have added the slot); when
-    that fetch fails, the kept form is used. Requests that miss at once
-    share one carrier call; a request that is cancelled does not stop it
-    for the others. Only a form is kept, never an error."""
+    kept form that lacks one of ``slots`` and was checked
+    ``_CAUTION_FORM_REFRESH_S`` ago or more is fetched again (the carrier
+    may have added the slot). When the carrier is down for that refresh,
+    the kept form answers and the next refresh waits as long again; a
+    refused request (a 4xx) is not hidden. Requests that miss at once share
+    one carrier call; a request that is cancelled does not stop it for the
+    others. Only a form is kept, never an error."""
     key = (provider_name, country_code.upper(), number_type, subject_type)
-    hit = _caution_forms.get(key)
-    if hit is not None:
-        at, kept = hit
-        age = time.monotonic() - at
-        names = {s.name for s in kept.documents}
-        if age < _CAUTION_FORM_TTL_S and (
-            age < _CAUTION_FORM_REFRESH_S or all(s in names for s in slots)
-        ):
-            return kept
+    now = time.monotonic()
+    kept = _caution_forms.get(key)
+    if kept is not None and now - kept[0] >= _CAUTION_FORM_TTL_S:
+        kept = None
+    if kept is not None:
+        _, checked_at, form = kept
+        if now - checked_at < _CAUTION_FORM_REFRESH_S:
+            return form
+        names = {s.name for s in form.documents}
+        if all(s in names for s in slots):
+            return form
     task = _caution_fetches.get(key)
     if task is None:
+        # A refresh logs a carrier failure as one line: the kept form answers.
+        refresh = kept is not None
 
         async def fetch() -> Requirements:
             try:
                 requirements = await _requirements(
-                    provider, country_code, number_type, subject_type, where="body"
+                    provider,
+                    country_code,
+                    number_type,
+                    subject_type,
+                    where="body",
+                    quiet=refresh,
                 )
-                now = time.monotonic()
-                for old in [
-                    k
-                    for k, (at, _) in _caution_forms.items()
-                    if now - at >= _CAUTION_FORM_TTL_S
-                ]:
-                    del _caution_forms[old]
-                _caution_forms[key] = (now, requirements)
-                return requirements
+            except HTTPException as exc:
+                held = _caution_forms.get(key)
+                if refresh and held is not None and exc.status_code >= 500:
+                    _caution_forms[key] = (held[0], time.monotonic(), held[2])
+                raise
             finally:
                 _caution_fetches.pop(key, None)
+            at = time.monotonic()
+            for old in [
+                k
+                for k, (fetched, _, _) in _caution_forms.items()
+                if at - fetched >= _CAUTION_FORM_TTL_S
+            ]:
+                del _caution_forms[old]
+            _caution_forms[key] = (at, at, requirements)
+            return requirements
 
         task = _caution_fetches[key] = asyncio.ensure_future(fetch())
         # Read its outcome even when every caller has gone.
         task.add_done_callback(lambda t: t.cancelled() or t.exception())
     try:
         return await asyncio.shield(task)
-    except HTTPException:
-        if hit is not None and time.monotonic() - hit[0] < _CAUTION_FORM_TTL_S:
-            # A refresh for a missing slot failed: the kept form answers
-            # (the slot then gets its 422).
-            return hit[1]
+    except HTTPException as exc:
+        if kept is not None and exc.status_code >= 500:
+            # The carrier is down: the kept form answers (a missing slot
+            # then gets its 422).
+            return kept[2]
         raise
 
 

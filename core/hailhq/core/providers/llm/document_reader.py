@@ -108,32 +108,32 @@ def _models() -> list[tuple[str, dict[str, str] | None]]:
     return out
 
 
-# Words of a 400 that is about the model, not the file: an unknown id
-# (Bedrock: "The provided model identifier is invalid.", probed on
-# 2026-11-17), a thinking value or a feature the model refuses ("... on this
-# model"), a Bedrock id that needs an inference profile.
-_MODEL_400 = (
-    "model identifier",
-    "thinking",
-    "this model",
-    "inference profile",
-    "on-demand throughput",
+# Phrases of a 400 or 424 that is about the model, not the file. Probed on
+# Bedrock eu-central-1 on 2026-11-17 (text only, no document): an unknown
+# id, a base id that needs an inference profile, and Sonnet 5.5 refusing
+# thinking "disabled". "not supported on this model" is the API's wording
+# for a parameter a model does not take (not probed). Whole phrases only:
+# "... supported by this model" can be about the file (its size).
+_MODEL_ERRORS = (
+    "the provided model identifier is invalid",
+    "with on-demand throughput",
+    "to turn thinking off on this model",
+    "not supported on this model",
 )
 
 
 def _next_model_may_help(exc: anthropic.APIStatusError) -> bool:
     """True when the error is about this model, not about the request: the
     next model may then answer. Rate limits are set per model (Bedrock and
-    Anthropic's API); 424 is Bedrock's model error. A 400 is about the model
-    only with the words in ``_MODEL_400``. Any other 400, and a 413, is
-    about the file or the request: every model would refuse it too. Bedrock
-    words some file errors "The model returned the following errors", so
-    "model" alone does not count."""
+    Anthropic's API). A 400, or Bedrock's 424 (a model error, also given
+    when the model fails on the file), is about the model only with a
+    phrase in ``_MODEL_ERRORS``. Any other 400 or 424, and a 413, is about
+    the file or the request: the document goes to no other model."""
     status = exc.status_code
-    if status in (403, 404, 424, 429) or status >= 500:
+    if status in (403, 404, 429) or status >= 500:
         return True
     text = str(exc.message).lower()
-    return status == 400 and any(words in text for words in _MODEL_400)
+    return status in (400, 424) and any(p in text for p in _MODEL_ERRORS)
 
 
 def document_reader_configured() -> bool:

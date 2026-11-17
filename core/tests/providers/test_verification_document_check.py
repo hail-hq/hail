@@ -204,7 +204,7 @@ async def test_the_prompt_lists_every_type_of_the_slot_and_the_address() -> None
     assert call["schema"]["properties"]["option"]["enum"] == [
         "passport",
         "id_card",
-        "none",
+        "none_of_these",
     ]
     assert 0 < call["timeout_s"] <= document_check.CHECK_TIMEOUT_S
 
@@ -1024,7 +1024,7 @@ async def test_one_file_for_two_slots_is_read_once() -> None:
         "passport",
         "id_card",
         "utility_bill",
-        "none",
+        "none_of_these",
     }
     assert out.documents["proof_of_identity"].fields == {"document_number": "XK1"}
     assert out.documents["proof_of_address"].read is True
@@ -1278,7 +1278,7 @@ async def test_cautions_say_a_file_is_none_of_the_types_for_the_type_chosen_now(
     None
 ):
     out = await _check(
-        docs=_docs(option="passport"), reader=_reader(_answer(option="none"))
+        docs=_docs(option="passport"), reader=_reader(_answer(option="none_of_these"))
     )
     assert _kinds(out) == ["document_type"]
     reads = _echo(out)
@@ -1321,6 +1321,41 @@ async def test_cautions_say_a_file_is_none_of_the_types_for_the_type_chosen_now(
     )
 
 
+async def test_a_carrier_type_keyed_none_is_a_type_not_none_of_the_types() -> None:
+    """A carrier type may be keyed "none" (or even the sentinel): picked and
+    read as that type, it gives no "does not look like one" warning."""
+    base = _req()
+    for key in ("none", "none_of_these"):
+        slot = base.documents[0].model_copy(
+            update={"options": (DocumentOption(key=key, label="No document"),)}
+        )
+        req = base.model_copy(update={"documents": (slot,)})
+        reader = _reader(_answer(option=key))
+        out = await check_documents(
+            req, {}, {}, _docs(option=key), today=TODAY, reader=reader
+        )
+        enum = reader.calls[0]["schema"]["properties"]["option"]["enum"]
+        assert len(enum) == len(set(enum))
+        assert "document_type" not in _kinds(out)
+        assert out.documents["proof_of_identity"].option == key
+        assert out.documents["proof_of_identity"].none_of_types is False
+
+
+def test_an_unreadable_echo_never_says_none_of_the_types() -> None:
+    """The "none" answer goes through the same constructor as a fresh read,
+    so an unread file can never give that warning."""
+    echo = VerificationDocumentCautionRead(none_of_types=True)
+    read = document_check._Read.echoed(_req().documents[0], echo)
+    assert read.says_none is True
+    unread = document_check._Read(
+        _req().documents[0],
+        {},
+        {"readable": False, "option": document_check._NO_TYPE},
+        "proof_of_identity",
+    )
+    assert unread.says_none is False
+
+
 def _mixed_address_slot() -> Requirements:
     """A slot that takes an ID card or a utility bill (a proof of address)."""
     base = _req()
@@ -1341,7 +1376,7 @@ async def test_cautions_work_out_expired_again_for_the_type_chosen_now() -> None
     """A file of none of the types: whether its date is an expiry follows
     the type chosen (a bill's date is a due date)."""
     req = _mixed_address_slot()
-    answer = _answer(option="none", expiry_date="2020-01-01")
+    answer = _answer(option="none_of_these", expiry_date="2020-01-01")
     out = await check_documents(
         req, {}, {}, _docs("id_card"), today=TODAY, reader=_reader(answer)
     )
@@ -1548,11 +1583,20 @@ async def test_reader_sends_each_model_its_own_thinking_value(
     [
         _api_error(429, "Too many requests"),
         _api_error(400, "The provided model identifier is invalid."),
-        _api_error(400, 'To turn thinking off on this model, send "thinking"'),
+        _api_error(
+            400,
+            'To turn thinking off on this model, send "thinking": '
+            '{"type": "between_tools"} instead of {"type": "disabled"}.',
+        ),
         _api_error(403, "You don't have access to the model"),
-        _api_error(424, "ModelErrorException"),
         _api_error(400, "output_config.effort is not supported on this model"),
-        _api_error(400, "Invocation with on-demand throughput isn't supported."),
+        _api_error(
+            400,
+            "Invocation of model ID anthropic.claude-haiku-5-5 with on-demand "
+            "throughput isn\u2019t supported. Retry your request with the ID or "
+            "ARN of an inference profile that contains this model.",
+        ),
+        _api_error(424, "The provided model identifier is invalid."),
     ],
 )
 async def test_reader_falls_back_when_another_model_may_help(
@@ -1570,6 +1614,9 @@ async def test_reader_falls_back_when_another_model_may_help(
         _api_error(400, "Could not process image"),
         _api_error(400, "The model returned the following errors: bad image"),
         _api_error(413, "Request too large"),
+        _api_error(400, "image dimensions exceed the maximum supported by this model"),
+        _api_error(400, "thinking about it, this model cannot read that file"),
+        _api_error(424, "ModelErrorException: the model could not read the input"),
         _api_error(401, "invalid x-api-key"),
     ],
 )
