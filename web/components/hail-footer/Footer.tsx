@@ -3,6 +3,7 @@ import { Mascot } from "./Mascot";
 import { PRODUCT_COPY, PRODUCT_SHORT_DESCRIPTION } from "./product-copy";
 import { SocialLinks } from "./SocialLinks";
 import { FooterScene } from "./FooterScene";
+import { FooterAccordion } from "./FooterAccordion";
 import "./footer.css";
 
 export type FooterGroup = {
@@ -57,21 +58,12 @@ export function Footer({
             <SocialLinks />
           </div>
           {groups.map((group) => (
-            <section key={group.title} className="hail-footer-column hail-footer-desktop-group">
-              <h2>{group.title}</h2>
-              <FooterLinks group={group} />
-            </section>
-          ))}
-          {groups.map((group) => (
-            <details
-              key={group.title}
-              className="hail-footer-column hail-footer-mobile-group"
-              name="hail-footer-groups"
-            >
-              <summary><span className="hail-footer-heading">{group.title}</span><span className="hail-footer-plus" aria-hidden="true" /></summary>
+            <details key={group.title} className="hail-footer-column" open>
+              <summary><h2>{group.title}</h2><span className="hail-footer-plus" aria-hidden="true" /></summary>
               <FooterLinks group={group} />
             </details>
           ))}
+          <FooterAccordion />
         </div>
         {badges.length > 0 && (
           <ul id="footer-badges" className="hail-footer-badges" aria-label="Featured on">
