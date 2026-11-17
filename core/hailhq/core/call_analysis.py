@@ -118,25 +118,36 @@ async def next_call_to_analyze(
     marker, and its org has an active subscription to ``call.analyzed``.
     Takes no lock: :func:`send_call_analyzed` decides who sends."""
     now = now or datetime.now(timezone.utc)
-    subscribed = exists().where(
-        WebhookSubscription.organization_id == Call.organization_id,
-        WebhookSubscription.status == "active",
-        literal(WebhookEventType.CALL_ANALYZED.value)
-        == any_(WebhookSubscription.event_types),
-    )
+    # The subscriptions table is small: with no listener, calls is not read.
+    orgs = (
+        await db.scalars(
+            select(WebhookSubscription.organization_id)
+            .where(
+                WebhookSubscription.status == "active",
+                literal(WebhookEventType.CALL_ANALYZED.value)
+                == any_(WebhookSubscription.event_types),
+            )
+            .distinct()
+        )
+    ).all()
+    if not orgs:
+        return None
     has_turn = exists().where(
         CallEvent.call_id == Call.id, CallEvent.kind.in_(TURN_KINDS)
     )
     stmt = (
         select(Call)
         .where(
+            Call.organization_id.in_(orgs),
+            # No call runs a day, so this bound only lets the (org, created)
+            # index skip older rows.
+            Call.created_at >= now - ANALYSIS_WINDOW - timedelta(days=1),
             Call.transport == "phone",
             Call.status.in_(TERMINAL_CALL_STATUSES),
             Call.ended_at >= now - ANALYSIS_WINDOW,
             Call.ended_at <= now - SETTLE_DELAY,
             has_turn,
             ~_analyzed(Call.id),
-            subscribed,
         )
         .order_by(Call.ended_at, Call.id)
         .limit(1)
