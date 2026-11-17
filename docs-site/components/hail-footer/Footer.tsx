@@ -58,7 +58,7 @@ export function Footer({
             <SocialLinks />
           </div>
           {groups.map((group) => (
-            <details key={group.title} className="hail-footer-column" open>
+            <details key={group.title} className="hail-footer-column">
               <summary><h2>{group.title}</h2><span className="hail-footer-plus" aria-hidden="true" /></summary>
               <FooterLinks group={group} />
             </details>
