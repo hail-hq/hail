@@ -119,11 +119,16 @@ class WebhookWorker:
     async def _claim_batch(self, db: AsyncSession) -> list[UUID]:
         stmt = (
             select(WebhookDelivery)
+            .join(
+                WebhookSubscription,
+                WebhookSubscription.id == WebhookDelivery.subscription_id,
+            )
+            .where(WebhookSubscription.status == "active")
             .where(WebhookDelivery.status == "pending")
             .where(WebhookDelivery.next_attempt_at <= datetime.now(timezone.utc))
             .order_by(WebhookDelivery.next_attempt_at.asc())
             .limit(POLL_BATCH)
-            .with_for_update(skip_locked=True)
+            .with_for_update(skip_locked=True, of=WebhookDelivery)
         )
         rows = list((await db.execute(stmt)).scalars().all())
         if not rows:
@@ -172,7 +177,9 @@ class WebhookWorker:
                             )
                 resolved = await self._resolve_target_url(session, row)
                 if resolved is None:
-                    await self._record_failure(session, row, None, "no target url")
+                    # A subscription can be paused after we claim its delivery.
+                    # No HTTP attempt happened: preserve the last response and
+                    # retry budget so the pending event can resume later.
                     return
                 target_url, secret_encrypted = resolved
 
