@@ -8,7 +8,6 @@ classifiers = ["Private :: Do Not Upload"]
 dependencies = [
     "hailhq-core",
     "asyncpg>=0.30",
-    "numpy>=1.26",
     "sqlalchemy[asyncio]>=2.0",
     # google-auth needs post-quantum TLS support from grpcio 1.83 (April 2027).
     "grpcio>=1.83",
@@ -28,11 +27,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Non-default LiveKit Cloud input filters (HAIL_AUDIO_FILTER), large native wheels.
-filters = [
-    "livekit-plugins-krisp>=0.4.8",
-    "livekit-plugins-ai-coustics>=0.2.12",
-]
 dev = [
     "pytest",
     "pytest-asyncio>=0.23",
