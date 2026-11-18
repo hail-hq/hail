@@ -156,3 +156,21 @@ def test_control_characters_rejected_without_lookup(
 def test_malformed_host_or_port_rejected(url: str) -> None:
     with pytest.raises(UnsafeUrlError):
         assert_public_https_url(url)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://faß.example/v1",
+        "https://FAß.Example/v1",
+        "https://βόλος.example/v1",
+        "https://bücher.example/v1",
+        "https://api.openai.com/v1",
+        "https://[::ffff:10.0.0.1]/v1",
+    ],
+)
+def test_httpx2_connects_to_the_same_host(url: str) -> None:
+    # The openai SDK sends BYO LLM requests with httpx2, a separate package
+    # from the httpx the guard parses with. Fail if their hosts ever differ.
+    httpx2 = pytest.importorskip("httpx2")
+    assert guard.httpx_url(url).raw_host == httpx2.URL(url).raw_host

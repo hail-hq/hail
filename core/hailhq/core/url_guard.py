@@ -13,8 +13,8 @@ resolves exactly the host httpx (and httpx2, used by the openai SDK; same
 parser) will connect to. The stdlib ``urlsplit`` + ``getaddrinfo`` pair
 converts non-ASCII names with IDNA 2003, which maps ``faß.example`` to
 ``fass.example``; httpx uses IDNA 2008 (``xn--fa-hia.example``), a
-different host. Control characters are refused before parsing, because
-``urlsplit`` silently strips tab, CR and LF.
+different host. Control characters (C0, DEL and C1) are refused before
+parsing: httpx itself refuses only the ASCII ones.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ import unicodedata
 import httpx
 from hailhq.core.urls import canonical_url
 
-__all__ = ["UnsafeUrlError", "assert_public_https_url", "httpx_url"]
+__all__ = ["UnsafeUrlError", "assert_public_https_url", "httpx_url", "ip_is_public"]
 
 
 class UnsafeUrlError(ValueError):
@@ -58,7 +58,7 @@ def httpx_url(url: str) -> httpx.URL:
         raise UnsafeUrlError(f"URL is not valid: {exc}") from exc
 
 
-def _ip_is_public(ip: str) -> bool:
+def ip_is_public(ip: str | ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     addr = ipaddress.ip_address(ip)
     # Judge IPv4-mapped IPv6 (::ffff:a.b.c.d) on the embedded IPv4 address:
     # whether CPython's is_* checks see through the mapping is patch-level
@@ -107,7 +107,7 @@ def assert_public_https_url(url: str) -> str:
 
     for info in infos:
         ip = info[4][0]
-        if not _ip_is_public(ip):
+        if not ip_is_public(ip):
             raise UnsafeUrlError(
                 f"base_url host {host} resolves to non-public address {ip}"
             )

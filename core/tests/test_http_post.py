@@ -193,3 +193,18 @@ def test_control_characters_refused(url):
         validate_webhook_target(url, allow_private_networks=False)
     with pytest.raises(ValueError, match="control character"):
         validate_webhook_target(url, allow_private_networks=True)
+
+
+def test_cgnat_and_multicast_are_private():
+    # Same classifier as the BYO base_url guard: 100.100.100.200 is a cloud
+    # metadata address inside CGNAT space.
+    assert is_private_url("https://100.100.100.200/latest/meta-data")
+    assert is_private_url("https://224.0.0.1/hook")
+    with pytest.raises(ValueError, match="private"):
+        validate_webhook_target(
+            "https://100.100.100.200/x", allow_private_networks=False
+        )
+
+
+def test_is_private_url_without_host_fails_closed():
+    assert is_private_url("https:///x.com")

@@ -12,7 +12,7 @@ import ipaddress
 import socket
 
 import httpx
-from hailhq.core.url_guard import UnsafeUrlError, httpx_url
+from hailhq.core.url_guard import UnsafeUrlError, httpx_url, ip_is_public
 
 __all__ = [
     "PrivateNetworkBlockedError",
@@ -27,7 +27,9 @@ class PrivateNetworkBlockedError(RuntimeError):
 
 
 def _ip_is_private(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
-    return ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
+    # One classifier for both guards: also blocks CGNAT (100.64.0.0/10),
+    # multicast, unspecified and IPv4-mapped private addresses.
+    return not ip_is_public(ip)
 
 
 def _resolve_all(host: str) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
@@ -68,7 +70,7 @@ def is_private_url(url: str) -> bool:
         # Fail closed: a URL httpx would not send is never a safe target.
         return True
     if not host:
-        return False
+        return True
     return _is_private_host(host)
 
 
