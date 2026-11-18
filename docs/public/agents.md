@@ -173,6 +173,8 @@ def verify(secret: str, signature_header: str, raw_body: bytes) -> bool:
 - `url` must be `https` and resolve to public addresses. Private, loopback,
   link-local and carrier-NAT addresses are refused on save and checked again
   on every request, at connect time. Redirects are not followed.
+  A `url` whose host is private or does not resolve gets a 422 on save with
+  the same text either way: `URL host is private or could not be resolved`.
 - `headers` are stored encrypted; responses show only `header_names`. A
   `PATCH` replaces the whole list; a tool sent without `headers` keeps the
   saved headers of the tool with the same name, and `{}` removes them.

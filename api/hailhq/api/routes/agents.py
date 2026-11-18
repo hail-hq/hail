@@ -142,10 +142,7 @@ async def _check_http_tools(items: list[HttpToolIn] | None) -> None:
     on every request. The lookups run side by side."""
     items = items or []
     results = await asyncio.gather(
-        *(
-            asyncio.to_thread(assert_public_https_url, item.url, field="url")
-            for item in items
-        ),
+        *(asyncio.to_thread(assert_public_https_url, item.url) for item in items),
         return_exceptions=True,
     )
     for index, result in enumerate(results):

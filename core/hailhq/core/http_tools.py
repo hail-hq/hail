@@ -11,12 +11,12 @@ from __future__ import annotations
 
 import json
 import secrets
-from urllib.parse import urlsplit
 from uuid import UUID
 
 from hailhq.core.models import Agent, AgentHttpTool
 from hailhq.core.provider_config import provider_cipher
 from hailhq.core.schemas import HttpToolIn, HttpToolOut
+from hailhq.core.url_guard import UnsafeUrlError, connect_target
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -40,13 +40,16 @@ class HttpToolHeadersNeeded(ValueError):
         self.index = index
 
 
-def _origin(url: str) -> tuple[str, str, int]:
-    parts = urlsplit(url)
-    return (
-        parts.scheme.lower(),
-        (parts.hostname or "").lower(),
-        parts.port or (443 if parts.scheme.lower() == "https" else 80),
-    )
+def _origin(url: str) -> tuple[str, str, int] | None:
+    """``(scheme, host, port)`` with the canonical ASCII (IDNA 2008) host and
+    the default port filled in, so ``faß.example`` and
+    ``xn--fa-hia.example:443`` are one origin. None for a url that cannot
+    be parsed."""
+    try:
+        parsed, host, port = connect_target(url)
+    except UnsafeUrlError:
+        return None
+    return parsed.scheme, host, port
 
 
 def new_tool_secret() -> str:
@@ -124,7 +127,9 @@ async def replace_http_tools(
                 prev = old.get(item.name)
                 if prev is None or prev.headers_encrypted is None:
                     headers_encrypted, header_names = None, []
-                elif _origin(prev.url) != _origin(item.url):
+                elif (origin := _origin(prev.url)) is None or origin != _origin(
+                    item.url
+                ):
                     # Keeping them would send the saved secrets to whoever
                     # runs the new host.
                     raise HttpToolHeadersNeeded(position, item.name)

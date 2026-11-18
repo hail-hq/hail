@@ -35,7 +35,7 @@ def public_dns(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     """Treat every host as public; record the URLs the route checked."""
     checked: list[str] = []
 
-    def fake(url: str, *, field: str = "base_url") -> str:
+    def fake(url: str) -> str:
         checked.append(url)
         return url
 
@@ -294,6 +294,24 @@ async def test_saved_headers_stay_only_on_the_same_origin(
     resp = await client.patch(url, headers=headers, json={"http_tools": [elsewhere]})
     assert resp.status_code == 200, resp.text
     assert resp.json()["http_tools"][0]["header_names"] == []
+
+
+async def test_an_idna_host_and_its_ascii_form_are_one_origin(client, org, public_dns):
+    """faß.example and xn--fa-hia.example are the same server: the saved
+    headers stay."""
+    _, headers = org
+    agent = (
+        await _create(
+            client, headers, http_tools=[_tool(url="https://faß.example/orders")]
+        )
+    ).json()
+    no_headers = {k: v for k, v in _tool().items() if k != "headers"}
+    same = {**no_headers, "url": "https://xn--fa-hia.example:443/orders"}
+    resp = await client.patch(
+        f"/v1/agents/{agent['id']}", headers=headers, json={"http_tools": [same]}
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["http_tools"][0]["header_names"] == ["Authorization"]
 
 
 async def test_unresolvable_host_is_a_422(client, org):

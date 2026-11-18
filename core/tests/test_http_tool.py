@@ -215,6 +215,20 @@ async def test_resolver_refuses_any_private_answer(monkeypatch) -> None:
     await resolver.close()
 
 
+async def test_an_unreadable_resolved_address_is_blocked(monkeypatch, caplog) -> None:
+    """An address ipaddress cannot read counts as not public, as in the
+    save check (url_guard.assert_public_host)."""
+
+    async def fake_resolve(self, host, port=0, family=0):
+        return [{"hostname": host, "host": "not-an-ip", "port": port}]
+
+    monkeypatch.setattr(http_tool.DefaultResolver, "resolve", fake_resolve)
+    with caplog.at_level("WARNING", logger="hailhq.core.agent_tools"):
+        out = await call_http_tool(_tool("https://odd.example/x"), _conv(), {})
+    assert out == BLOCKED
+    assert "unreadable address 'not-an-ip'" in caplog.text
+
+
 async def test_spec_carries_the_wait_message_and_never_raises(monkeypatch) -> None:
     spec = tool_spec(_tool("https://127.0.0.1/x", wait_message="One moment."), _conv())
     assert spec.name == "lookup_order"

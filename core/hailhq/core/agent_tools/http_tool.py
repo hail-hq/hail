@@ -83,6 +83,16 @@ class BlockedAddressError(OSError):
     """The host resolves to a private, loopback, or link-local address."""
 
 
+def _is_public(ip: str) -> bool:
+    """``ip_is_public``, but an address ipaddress cannot read counts as not
+    public (fail closed), as in ``url_guard.assert_public_host``."""
+    try:
+        return ip_is_public(ip)
+    except ValueError:
+        logger.warning("http tool: unreadable address %r counts as not public", ip)
+        return False
+
+
 class PublicOnlyResolver(AbstractResolver):
     """Resolves like aiohttp's default, then refuses a host when any of its
     addresses is not public."""
@@ -95,7 +105,7 @@ class PublicOnlyResolver(AbstractResolver):
     ) -> list[ResolveResult]:
         infos = await self._inner.resolve(host, port, family)
         for info in infos:
-            if not ip_is_public(info["host"]):
+            if not _is_public(info["host"]):
                 raise BlockedAddressError(
                     f"{host} resolves to non-public address {info['host']}"
                 )
@@ -116,7 +126,7 @@ def _ip_literal_blocked(url: str) -> bool:
         infos = socket.getaddrinfo(host, None, flags=socket.AI_NUMERICHOST)
     except OSError:
         return True
-    return any(not ip_is_public(info[4][0]) for info in infos)
+    return any(not _is_public(info[4][0]) for info in infos)
 
 
 def _clip(text: str, cap: int) -> str:
