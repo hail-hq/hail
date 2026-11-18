@@ -69,8 +69,6 @@ def test_any_private_resolved_address_rejects(monkeypatch) -> None:
     "url",
     [
         "https://example.com\x00.internal/v1",  # getaddrinfo stops at NUL
-        "https://exa\tmple.com/v1",  # urlsplit drops tab, CR and LF
-        "https://api.example.com\n/v1",
         "https://a\x85b.com/v1",  # C1 control
         "https://a\u00a0b.com/v1",  # no-break space
     ],
@@ -78,3 +76,14 @@ def test_any_private_resolved_address_rejects(monkeypatch) -> None:
 def test_space_or_control_character_is_refused(url: str) -> None:
     with pytest.raises(UnsafeUrlError, match="space or control character"):
         assert_public_https_url(url)
+
+
+def test_a_resolver_system_error_is_an_unsafe_url(monkeypatch) -> None:
+    import hailhq.core.url_guard as guard
+
+    def fake_getaddrinfo(host, *args, **kwargs):
+        raise OSError(24, "Too many open files")
+
+    monkeypatch.setattr(guard.socket, "getaddrinfo", fake_getaddrinfo)
+    with pytest.raises(UnsafeUrlError):
+        assert_public_https_url("https://api.example.com/v1")

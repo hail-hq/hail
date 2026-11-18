@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import ipaddress
 import socket
+import unicodedata
 from urllib.parse import urlsplit
 
 from hailhq.core.urls import canonical_url
@@ -61,17 +62,17 @@ def assert_public_https_url(url: str, *, field: str = "base_url") -> str:
     reserved/unspecified address (every resolved address must be public).
     ``field`` names the input in the error messages.
     """
-    if not url.isprintable() or any(c.isspace() for c in url):
-        # Checked on the raw url: urlsplit drops tab, CR and LF, and
-        # getaddrinfo stops at a NUL byte, so either would check another host
-        # than the one saved.
-        raise UnsafeUrlError(f"{field} has a space or control character")
     parts = urlsplit(url)
     if parts.scheme != "https":
         raise UnsafeUrlError(f"{field} must use https, got '{parts.scheme or url}'")
     host = parts.hostname
     if not host:
         raise UnsafeUrlError(f"{field} has no host")
+    if any(c.isspace() or unicodedata.category(c) == "Cc" for c in host):
+        # getaddrinfo stops at a NUL byte, so it would check another host
+        # than the one saved. (urlsplit already drops tab, CR and LF, like
+        # the HTTP clients do.)
+        raise UnsafeUrlError(f"{field} host has a space or control character")
 
     try:
         port = parts.port or 443
@@ -80,8 +81,10 @@ def assert_public_https_url(url: str, *, field: str = "base_url") -> str:
 
     try:
         infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
-    except (socket.gaierror, ValueError) as exc:
-        # ValueError covers a host the lookup cannot encode (label too long).
+    except (OSError, ValueError) as exc:
+        # OSError: gaierror, or a plain OSError for a resolver system error;
+        # callers handle only UnsafeUrlError. ValueError: a host the lookup
+        # cannot encode (label too long).
         raise UnsafeUrlError(f"{field} host does not resolve: {host}") from exc
 
     for info in infos:
