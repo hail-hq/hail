@@ -29,7 +29,6 @@ def test_public_https_passes() -> None:
         "https://[::ffff:169.254.169.254]/v1",  # ipv4-mapped metadata
         "https:///v1",  # no host
         "https://" + "a" * 64 + ".com/v1",  # label too long to look up
-        "https://localhost\x00.example.com/v1",  # NUL: lookup stops early
         "not-a-url",
     ],
 )
@@ -64,3 +63,18 @@ def test_any_private_resolved_address_rejects(monkeypatch) -> None:
     monkeypatch.setattr(guard.socket, "getaddrinfo", fake_getaddrinfo)
     with pytest.raises(UnsafeUrlError):
         assert_public_https_url("https://dual.example.com/v1")
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://example.com\x00.internal/v1",  # getaddrinfo stops at NUL
+        "https://exa\tmple.com/v1",  # urlsplit drops tab, CR and LF
+        "https://api.example.com\n/v1",
+        "https://a\x85b.com/v1",  # C1 control
+        "https://a\u00a0b.com/v1",  # no-break space
+    ],
+)
+def test_space_or_control_character_is_refused(url: str) -> None:
+    with pytest.raises(UnsafeUrlError, match="space or control character"):
+        assert_public_https_url(url)

@@ -61,15 +61,17 @@ def assert_public_https_url(url: str, *, field: str = "base_url") -> str:
     reserved/unspecified address (every resolved address must be public).
     ``field`` names the input in the error messages.
     """
+    if not url.isprintable() or any(c.isspace() for c in url):
+        # Checked on the raw url: urlsplit drops tab, CR and LF, and
+        # getaddrinfo stops at a NUL byte, so either would check another host
+        # than the one saved.
+        raise UnsafeUrlError(f"{field} has a space or control character")
     parts = urlsplit(url)
     if parts.scheme != "https":
         raise UnsafeUrlError(f"{field} must use https, got '{parts.scheme or url}'")
     host = parts.hostname
     if not host:
         raise UnsafeUrlError(f"{field} has no host")
-    if any(ord(c) < 0x21 or ord(c) == 0x7F for c in host):
-        # getaddrinfo stops at a NUL byte, so it would check another host.
-        raise UnsafeUrlError(f"{field} host has a space or control character")
 
     try:
         port = parts.port or 443
@@ -78,7 +80,7 @@ def assert_public_https_url(url: str, *, field: str = "base_url") -> str:
 
     try:
         infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
-    except (OSError, ValueError) as exc:
+    except (socket.gaierror, ValueError) as exc:
         # ValueError covers a host the lookup cannot encode (label too long).
         raise UnsafeUrlError(f"{field} host does not resolve: {host}") from exc
 
