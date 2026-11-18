@@ -2214,6 +2214,7 @@ def _agent_response(agent_id: str | None = None, name: str = "Front desk") -> di
         "system_prompt": "Answer politely.",
         "first_message": "Hello",
         "ai_disclosure": True,
+        "steady_speech": False,
         "ai_disclosure_line": None,
         "voice_config": {},
         "tools": None,

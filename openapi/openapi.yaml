@@ -6462,7 +6462,6 @@ components:
           type: boolean
           title: Steady Speech
           description: Whether the agent finishes each reply before it listens again.
-          default: false
         ai_disclosure_line:
           anyOf:
             - type: string
@@ -6540,6 +6539,7 @@ components:
         - system_prompt
         - first_message
         - ai_disclosure
+        - steady_speech
         - ai_disclosure_line
         - voice_config
         - tools

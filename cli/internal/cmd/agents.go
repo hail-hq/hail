@@ -111,7 +111,7 @@ type agentFlags struct {
 	firstMessage    string
 	aiLine          string
 	noAILine        bool
-	noSteadySpeech  bool
+	steadySpeech    bool
 	voiceID         string
 	language        string
 	maxMinutes      int
@@ -131,7 +131,7 @@ func (f *agentFlags) bind(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&f.firstMessage, "first-message", "", "Opening line after the AI line ('' = wait for the other side)")
 	cmd.Flags().StringVar(&f.aiLine, "ai-line", "", "AI line template; {org} becomes the organization name ('' = workspace line)")
 	cmd.Flags().BoolVar(&f.noAILine, "no-ai-line", false, "Do not speak the AI line (you verified it is not required)")
-	cmd.Flags().BoolVar(&f.noSteadySpeech, "no-steady-speech", false, "Let callers interrupt the agent mid-reply (steady speech off)")
+	cmd.Flags().BoolVar(&f.steadySpeech, "steady-speech", true, "Finish each reply before listening; --steady-speech=false lets callers interrupt")
 	cmd.Flags().StringVar(&f.voiceID, "voice", "", "TTS voice id")
 	cmd.Flags().StringVar(&f.language, "language", "", "Spoken language, ISO 639-1 (e.g. fr)")
 	cmd.Flags().IntVar(&f.maxMinutes, "max-minutes", 0, "Soft cap per call, 1..60 minutes (0 = workspace limit)")
@@ -203,8 +203,8 @@ func (f *agentFlags) body(cmd *cobra.Command, create bool, voice map[string]any)
 	if changed("no-ai-line") {
 		b["ai_disclosure"] = !f.noAILine
 	}
-	if changed("no-steady-speech") {
-		b["steady_speech"] = !f.noSteadySpeech
+	if changed("steady-speech") {
+		b["steady_speech"] = f.steadySpeech
 	}
 	if changed("no-sms") {
 		b["sms_enabled"] = !f.noSms
@@ -521,7 +521,7 @@ func printAgent(opts *Options, a *client.AgentResponse, banner bool) error {
 	}
 	fmt.Fprintf(opts.Stdout, "  Status:        %s\n", a.Status)
 	fmt.Fprintf(opts.Stdout, "  AI line:       %s\n", describeAILine(a))
-	fmt.Fprintf(opts.Stdout, "  Steady speech: %s\n", onOff(a.SteadySpeech != nil && *a.SteadySpeech))
+	fmt.Fprintf(opts.Stdout, "  Steady speech: %s\n", onOff(a.SteadySpeech))
 	if a.FirstMessage != nil && *a.FirstMessage != "" {
 		fmt.Fprintf(opts.Stdout, "  First message: %s\n", *a.FirstMessage)
 	} else {

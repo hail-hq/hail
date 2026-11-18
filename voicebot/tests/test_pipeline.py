@@ -11,6 +11,8 @@ made because we never invoke ``.chat()``.
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import pytest
 from hailhq.voicebot.pipeline import (
     ResolvedLayer,
@@ -827,8 +829,6 @@ def test_elevenlabs_tagalog_sends_the_filipino_code() -> None:
 
 
 def test_one_word_interrupts_the_agent_by_default() -> None:
-    from unittest.mock import MagicMock
-
     assert interruption_options(False) == {"min_words": 1}
     session = build_session(None, MagicMock())
     assert session.options.interruption["enabled"] is True
@@ -836,8 +836,6 @@ def test_one_word_interrupts_the_agent_by_default() -> None:
 
 
 def test_steady_speech_turns_interruptions_off() -> None:
-    from unittest.mock import MagicMock
-
-    assert interruption_options(True) == {"enabled": False}
+    assert interruption_options(True) == {"enabled": False, "min_words": 1}
     session = build_session(None, MagicMock(), steady_speech=True)
     assert session.options.interruption["enabled"] is False

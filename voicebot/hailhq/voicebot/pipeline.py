@@ -814,11 +814,14 @@ def interruption_options(steady_speech: bool) -> dict[str, Any]:
 
     Default: a transcribed word, not VAD energy alone, interrupts the agent
     (the only setting that differs from the SDK defaults). With steady speech
-    nothing does: the SDK drops the other party's audio while the agent speaks,
-    so background talk and short words cannot cut a reply.
+    nothing does: the SDK drops the other party's audio from the moment a reply
+    starts being prepared until it has been spoken, so background talk and
+    short words cannot cut a reply.
     """
     if steady_speech:
-        return {"enabled": False}
+        # min_words stays: a line spoken with interruptions allowed must still
+        # need a transcribed word, not noise alone, to be cut.
+        return {"enabled": False, "min_words": 1}
     return {"min_words": 1}
 
 

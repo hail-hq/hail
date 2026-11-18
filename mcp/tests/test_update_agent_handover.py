@@ -33,6 +33,7 @@ def _agent(aid: str) -> dict:
         "system_prompt": "Answer politely.",
         "first_message": None,
         "ai_disclosure": True,
+        "steady_speech": False,
         "ai_disclosure_line": None,
         "voice_config": {},
         "tools": None,

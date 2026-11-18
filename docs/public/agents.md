@@ -137,12 +137,15 @@ as written.
 ## Steady speech
 
 ```bash
+# Turn steady speech on for an agent that existed before the setting.
+hail agents update <agent-id> --steady-speech
 # Let callers interrupt this agent mid-reply (steady speech off).
-hail agents update <agent-id> --no-steady-speech
+hail agents update <agent-id> --steady-speech=false
 ```
 
 With `steady_speech: true` the agent finishes each reply before it listens
-again. Background talk, a TV, or a short "okay" from the caller cannot cut the
+again: from the moment it starts preparing a reply until the reply has been
+spoken, it does not hear the caller. Background talk, a TV, or a short "okay" from the caller cannot cut the
 reply off. The cost: the caller cannot interrupt mid-reply, so keep replies
 short. New agents have it on; set `steady_speech: false` to let callers
 interrupt. A call placed without `agent_id` has it off unless the request

@@ -99,6 +99,7 @@ class _CallsResource:
         first_message: str | None = None,
         language: str | None = None,
         ai_disclosure: bool = True,
+        steady_speech: bool | None = None,
         recording_enabled: bool | None = None,
         metadata: dict[str, Any] | None = None,
         consent_source: str | None = None,
@@ -137,6 +138,8 @@ class _CallsResource:
             body["recording_enabled"] = recording_enabled
         if not ai_disclosure:
             body["ai_disclosure"] = False
+        if steady_speech is not None:
+            body["steady_speech"] = steady_speech
         if language is not None:
             body["voice_config"] = {"language": language}
         if metadata is not None:
@@ -875,13 +878,16 @@ class _AgentsResource:
             "name": name,
             "system_prompt": system_prompt,
             "ai_disclosure": ai_disclosure,
-            "steady_speech": steady_speech,
             "recording_enabled": recording_enabled,
             "voice_enabled": voice_enabled,
             "sms_enabled": sms_enabled,
             "email_enabled": email_enabled,
             "status": status,
         }
+        if not steady_speech:
+            # Sent only when off: the API default is on, and an older API
+            # rejects a field it does not know.
+            body["steady_speech"] = False
         if first_message is not None:
             body["first_message"] = first_message
         if ai_disclosure_line is not None:

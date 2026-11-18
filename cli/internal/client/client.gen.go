@@ -1835,7 +1835,7 @@ type AgentResponse struct {
 	Status AgentResponseStatus `json:"status"`
 
 	// SteadySpeech Whether the agent finishes each reply before it listens again.
-	SteadySpeech *bool `json:"steady_speech,omitempty"`
+	SteadySpeech bool `json:"steady_speech"`
 
 	// SystemPrompt Task instructions.
 	SystemPrompt string `json:"system_prompt"`

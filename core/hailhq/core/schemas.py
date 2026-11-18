@@ -1132,8 +1132,7 @@ class AgentResponse(BaseModel):
     )
     ai_disclosure: bool = Field(description="Whether the AI line is spoken first.")
     steady_speech: bool = Field(
-        default=False,
-        description="Whether the agent finishes each reply before it listens again.",
+        description="Whether the agent finishes each reply before it listens again."
     )
     ai_disclosure_line: str | None = Field(
         description="This agent's AI line template, or null for the workspace line."

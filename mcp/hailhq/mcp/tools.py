@@ -224,6 +224,7 @@ async def place_call(
     first_message: str | None = None,
     language: str | None = None,
     ai_disclosure: bool = True,
+    steady_speech: bool | None = None,
     recording_enabled: bool | None = None,
     metadata: dict[str, Any] | None = None,
     tools: list[str] | None = None,
@@ -245,6 +246,7 @@ async def place_call(
             first_message=first_message,
             language=language,
             ai_disclosure=ai_disclosure,
+            steady_speech=steady_speech,
             recording_enabled=recording_enabled,
             metadata=metadata,
             tools=tools,
@@ -2358,6 +2360,14 @@ def register_tools(
         ai_disclosure: Annotated[
             bool, _d("Speak an AI notice at the start of the call. ``false`` skips it.")
         ] = True,
+        steady_speech: Annotated[
+            bool | None,
+            _d(
+                "Steady speech for this call: the agent finishes each reply before "
+                "it listens again. Omitted: the saved agent's setting, or off "
+                "without ``agent_id``."
+            ),
+        ] = None,
         recording_enabled: Annotated[
             bool | None,
             _d("Recording for this call, overriding the agent and workspace settings."),
@@ -2409,6 +2419,7 @@ def register_tools(
                     first_message=first_message,
                     language=language,
                     ai_disclosure=ai_disclosure,
+                    steady_speech=steady_speech,
                     recording_enabled=recording_enabled,
                     metadata=metadata,
                     tools=tools,
@@ -3149,11 +3160,14 @@ def register_tools(
             "name": name,
             "system_prompt": system_prompt,
             "ai_disclosure": ai_disclosure,
-            "steady_speech": steady_speech,
             "voice_enabled": voice_enabled,
             "sms_enabled": sms_enabled,
             "email_enabled": email_enabled,
         }
+        if not steady_speech:
+            # Sent only when off: the API default is on, and an older API
+            # rejects a field it does not know.
+            fields["steady_speech"] = False
         if recording_enabled is not None:
             fields["recording_enabled"] = recording_enabled
         if first_message is not None:

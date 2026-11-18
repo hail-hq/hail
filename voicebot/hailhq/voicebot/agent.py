@@ -1064,6 +1064,8 @@ async def speak_greeting(
         else None
     )
     first_message = metadata.get("first_message")
+    # Steady speech: the opening lines are finished like every other reply.
+    steady = metadata.get("steady_speech") is True
     inbound = metadata.get("direction") == "inbound"
     if generate_opening and not inbound:
         # The turn detector can wait up to max_delay (2.5 s) on a bare pickup
@@ -1109,10 +1111,12 @@ async def speak_greeting(
                 interruptible = False
             else:
                 greeting = f"{disclosure} {first_message}"
-            await session.say(greeting, allow_interruptions=interruptible)
+            await session.say(
+                greeting, allow_interruptions=interruptible and not steady
+            )
             return
         if disclosure:
-            await session.say(disclosure, allow_interruptions=True)
+            await session.say(disclosure, allow_interruptions=not steady)
     finally:
         # Release even when say fails, so the agent is never left unable to reply.
         heard = on_opened() if on_opened is not None else None
@@ -2540,7 +2544,14 @@ async def _run_call(
             language=language,
             watch=lambda identity: _contact_spoke(ctx, session, identity),
         ),
-        spoke_since=lambda t: speech.talked_since(t, time.monotonic()),
+        # With steady speech the words spoken over a goodbye are dropped, so
+        # there is nothing to answer: the still-talking check would only
+        # block the hang-up on background talk.
+        spoke_since=(
+            None
+            if metadata.get("steady_speech") is True
+            else lambda t: speech.talked_since(t, time.monotonic())
+        ),
         cancel_bridge=make_bridge_cancel(ctx, call_id, bridge_state),
         prompt=lambda text: _prompt_agent(session, bridge_state, text),
     )
