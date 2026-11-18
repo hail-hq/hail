@@ -133,7 +133,8 @@ SDK: `client.agents.update(agent_id, email_caller_enabled=True)`.
   - 3 emails to one address in any 24 hours, from any caller;
   - 100 emails per organization in any 24 hours.
 
-  Each check takes the stricter reading. The per-address cap counts inboxes:
+  Each check takes the stricter reading. The per-address cap counts email
+  inboxes:
   `+tags` are ignored, and Gmail dots too (`n.ame+1@gmail.com` is
   `name@gmail.com`). The per-call and per-number address rules count
   spellings: `a+x@example.com` and `a@example.com` are two addresses. An
@@ -158,8 +159,9 @@ SDK: `client.agents.update(agent_id, email_caller_enabled=True)`.
   events: `GET /v1/events?id=email:<email_id>`.
 - The address is whatever the person says. Hail cannot prove it is theirs.
   It must be one plain ASCII mailbox (no quotes, brackets or spaces).
-- The call event and the tool record do not copy the address or the text.
-  The call's transcript still holds what was said aloud.
+- The call event and the tool record do not copy the address or the body.
+  They keep the subject, which the caller may have dictated. The call's
+  transcript still holds what was said aloud.
 - Turning it on applies from the next call. Turning it off, or pausing the
   agent, stops emails at once, also on a call in progress.
 

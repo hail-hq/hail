@@ -933,3 +933,7 @@ def test_email_caller_usable_address():
     assert not email_caller.usable_address("+news@example.com")
     assert not email_caller.usable_address("..@gmail.com")
     assert not email_caller.usable_address("sam@example")
+
+
+def test_email_caller_accepts_punycode_top_level_domains():
+    assert email_caller.usable_address("ivan@example.xn--p1ai")

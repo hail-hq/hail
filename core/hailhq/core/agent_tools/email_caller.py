@@ -48,7 +48,10 @@ MAX_ORG_NAME_CHARS = 80
 # One plain mailbox, ASCII only: no quotes, brackets, commas, spaces or
 # invisible characters that make two addresses look the same. The route
 # uses the same pattern.
-ADDRESS_PATTERN = r"^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$"
+ADDRESS_PATTERN = (
+    r"^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*"
+    r"\.(?:[A-Za-z]{2,}|xn--[A-Za-z0-9-]+)$"
+)
 _ADDRESS = re.compile(ADDRESS_PATTERN)
 
 # The dispatch metadata key that turns the tool on for a call.

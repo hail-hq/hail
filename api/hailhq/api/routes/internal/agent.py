@@ -25,7 +25,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 from math import ceil
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, NamedTuple
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -300,6 +300,20 @@ async def _record_browser_outcome(db, call_id, invocation_id, message):
     ]
     call.metadata_ = meta
     await db.commit()
+
+
+def _email_replay(prior: Email) -> AgentSendResponse:
+    """The answer to a retried email send, from the row the first try wrote.
+    queued: in flight, never send again. failed or bounced: not delivered."""
+    ok = prior.status not in ("failed", "bounced")
+    return AgentSendResponse(
+        ok=ok,
+        spoken=(
+            "The email is still being submitted. Do not send it again."
+            if prior.status == "queued"
+            else _SPOKEN_EMAIL_SENT if ok else _SPOKEN_EMAIL_FAILED
+        ),
+    )
 
 
 def _ambiguous_recipient(name: str) -> AgentSendResponse:
@@ -1435,15 +1449,7 @@ async def agent_send_email(
         # bounce means the message didn't reach the recipient. "complained"
         # stays ok: the send itself succeeded, the recipient just flagged it
         # afterward. Mirrors the SMS path's failed/undelivered exclusion.
-        ok = prior.status not in ("failed", "bounced")
-        return AgentSendResponse(
-            ok=ok,
-            spoken=(
-                "The email is still being submitted. Do not send it again."
-                if prior.status == "queued"
-                else _SPOKEN_EMAIL_SENT if ok else _SPOKEN_EMAIL_FAILED
-            ),
-        )
+        return _email_replay(prior)
 
     if call.status != "in_progress":
         return AgentSendResponse(ok=False, spoken=_SPOKEN_CALL_UNAVAILABLE)
@@ -1729,8 +1735,17 @@ async def _record_caller_email(
     await db.commit()
 
 
+class _CallerEmailRow(NamedTuple):
+    """One caller email of the last 24 hours, as the caps read it."""
+
+    address: str  # lowercased
+    status: str
+    call_id: str | None
+    caller_e164: str | None
+
+
 def _caller_cap_denial(
-    rows: list[tuple[str, str, str | None, str | None]],
+    rows: list[_CallerEmailRow],
     *,
     call_id: UUID,
     caller: str,
@@ -1739,8 +1754,7 @@ def _caller_cap_denial(
     """``(spoken, audit_reason)`` when a cap stops this send, else None.
 
     ``rows`` are the org's caller emails of the last 24 hours that may have
-    gone out: ``(address, status, call_id, caller_e164)``, addresses
-    lowercased. Each check uses the stricter comparison: an address is new
+    gone out. Each check uses the stricter comparison: an address is new
     to a call or a caller when its lowercased form is new (so ``a+x@`` and
     ``a@``, maybe two inboxes, are two addresses); the per-address cap
     counts by ``mailbox_key`` (so ``+tags`` and Gmail dots are one inbox). A
@@ -1749,18 +1763,18 @@ def _caller_cap_denial(
     if len(rows) >= email_caller.MAX_EMAILS_PER_ORG_PER_DAY:
         return "I can't send more emails right now.", "org_daily_cap"
     # This call's own rules first, so the refusal names the rule it broke.
-    this_call = [r for r in rows if r[2] == str(call_id)]
+    this_call = [r for r in rows if r.call_id == str(call_id)]
     if len(this_call) >= email_caller.MAX_EMAILS_PER_CALL:
         return "That is the limit of emails for one call.", "call_cap"
-    if any(r[0] != recipient for r in this_call if r[1] != "bounced"):
+    if any(r.address != recipient for r in this_call if r.status != "bounced"):
         return (
             "I can only email the address I already used on this call.",
             "one_address",
         )
-    mine = [r for r in rows if r[3] == caller]
+    mine = [r for r in rows if r.caller_e164 == caller]
     if len(mine) >= email_caller.MAX_EMAILS_PER_CALLER_PER_DAY:
         return "I can't send you more emails today.", "caller_daily_cap"
-    addresses = {r[0] for r in mine if r[1] != "bounced"} | {recipient}
+    addresses = {r.address for r in mine if r.status != "bounced"} | {recipient}
     if len(addresses) > email_caller.MAX_ADDRESSES_PER_CALLER_PER_DAY:
         return (
             "I can't email another address today.",
@@ -1769,7 +1783,7 @@ def _caller_cap_denial(
     # Caller ID can be faked, so the per-number caps alone do not protect
     # one inbox from many calls.
     inbox = email_caller.mailbox_key(recipient)
-    to_inbox = [r for r in rows if email_caller.mailbox_key(r[0]) == inbox]
+    to_inbox = [r for r in rows if email_caller.mailbox_key(r.address) == inbox]
     if len(to_inbox) >= email_caller.MAX_EMAILS_PER_ADDRESS_PER_DAY:
         return "I can't send more emails to that address today.", "address_daily_cap"
     return None
@@ -1802,15 +1816,7 @@ async def agent_email_caller(
         if prior.status != "queued":
             # The original may have stopped before writing the call event.
             await _record_caller_email(db, call.id, body.tool_invocation_id, prior)
-        ok = prior.status not in ("failed", "bounced")
-        return AgentSendResponse(
-            ok=ok,
-            spoken=(
-                "The email is still being submitted. Do not send it again."
-                if prior.status == "queued"
-                else _SPOKEN_EMAIL_SENT if ok else _SPOKEN_EMAIL_FAILED
-            ),
-        )
+        return _email_replay(prior)
 
     if call.status != "in_progress":
         return AgentSendResponse(ok=False, spoken=_SPOKEN_CALL_UNAVAILABLE)
@@ -1864,13 +1870,22 @@ async def agent_email_caller(
         )
         denial = _caller_cap_denial(
             [
-                ((to[0] if to else "").strip().lower(), st, c, e)
+                _CallerEmailRow((to[0] if to else "").strip().lower(), st, c, e)
                 for to, st, c, e in rows
             ],
             call_id=call.id,
             caller=caller,
             recipient=body.to_address.strip().lower(),
         )
+    if denial is None:
+        # The send's own gate checks the address as given. Also check its
+        # inbox key, so a +tag or Gmail-dot spelling cannot reach an inbox
+        # that opted out.
+        key = email_caller.mailbox_key(body.to_address)
+        if key != normalize_recipient(body.to_address):
+            gate = await check_email_allowed(db, org, [key])
+            if not gate.allowed:
+                denial = _SPOKEN_NOT_ALLOWED, gate.reason or "suppressed"
     if denial is not None:
         spoken, reason = denial
         return await _deny(

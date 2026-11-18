@@ -75,5 +75,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     with op.get_context().autocommit_block():
         for name, table, *_ in _INDEXES:
-            op.drop_index(name, table_name=table, postgresql_concurrently=True)
+            op.drop_index(
+                name, table_name=table, postgresql_concurrently=True, if_exists=True
+            )
     op.drop_column("agents", "email_caller_enabled")

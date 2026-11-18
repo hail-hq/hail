@@ -679,3 +679,22 @@ async def test_an_address_with_no_inbox_is_refused(
     data = await _post(client, call, to=address)
     assert data["ok"] is False
     assert await _emails(async_session) == []
+
+
+async def test_a_suppressed_inbox_is_refused_under_another_spelling(
+    client, async_session, email_mock, add_phone_number
+):
+    call = await _call(async_session, add_phone_number)
+    await add_suppression(
+        async_session,
+        organization_id=call.organization_id,
+        recipient="victim@gmail.com",
+        channel="email",
+        reason="complaint",
+        source="unsubscribe_link",
+    )
+    await async_session.commit()
+    data = await _post(client, call, to="V.ictim+1@gmail.com")
+    assert data["ok"] is False
+    assert await _emails(async_session) == []
+    email_mock.send_email.assert_not_awaited()
