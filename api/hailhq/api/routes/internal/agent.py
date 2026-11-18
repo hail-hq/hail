@@ -1739,7 +1739,9 @@ def _caller_cap_denial(
     """``(spoken, audit_reason)`` when a cap stops this send, else None.
 
     ``rows`` are the org's caller emails of the last 24 hours that may have
-    gone out: ``(address, status, call_id, caller_e164)``. A bounced email
+    gone out: ``(mailbox key, status, call_id, caller_e164)``; ``recipient``
+    is a mailbox key too (``email_caller.mailbox_key``), so ``+tags`` and
+    Gmail dots cannot dodge the caps. A bounced email
     counts toward the totals but does not hold its address. One address per
     call: the agent reads it back and gets a yes before the first send."""
     if len(rows) >= email_caller.MAX_EMAILS_PER_ORG_PER_DAY:
@@ -1831,7 +1833,6 @@ async def agent_email_caller(
             ok=False,
             spoken="I need a subject and a message before I can send the email.",
         )
-    recipient = normalize_recipient(body.to_address)
     meta = {**_meta(body), CALLER_EMAIL_MARK: True, "caller_e164": caller}
     denial = await _shared_denial(db, call)
     if denial is None:
@@ -1856,12 +1857,12 @@ async def agent_email_caller(
         )
         denial = _caller_cap_denial(
             [
-                (normalize_recipient(to[0] if to else ""), st, c, e)
+                (email_caller.mailbox_key(to[0] if to else ""), st, c, e)
                 for to, st, c, e in rows
             ],
             call_id=call.id,
             caller=caller,
-            recipient=recipient,
+            recipient=email_caller.mailbox_key(body.to_address),
         )
     if denial is not None:
         spoken, reason = denial

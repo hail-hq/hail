@@ -626,3 +626,39 @@ async def test_a_second_address_names_the_per_call_rule(
     data = await _post(client, second, to="b@example.com")
     assert data["ok"] is False
     assert "already used" in data["spoken"]
+
+
+async def test_plus_tags_and_gmail_dots_count_as_one_inbox(
+    client, async_session, email_mock, add_phone_number
+):
+    first = await _call(async_session, add_phone_number, to_e164="+14155550101")
+    variants = ["victim+1@gmail.com", "v.ictim@googlemail.com", "Vic.tim+x@Gmail.com"]
+    for n, address in enumerate(variants, start=1):
+        call = (
+            first
+            if n == 1
+            else await _call(
+                async_session, add_phone_number, like=first, to_e164=f"+1415555010{n}"
+            )
+        )
+        assert (await _post(client, call, to=address))["ok"] is True
+    fourth = await _call(
+        async_session, add_phone_number, like=first, to_e164="+14155550109"
+    )
+    assert (await _post(client, fourth, to="victim@gmail.com"))["ok"] is False
+    # Each email went to the address as given.
+    assert sorted(e.to_addresses[0] for e in await _emails(async_session)) == sorted(
+        variants
+    )
+
+
+async def test_tag_variants_do_not_add_caller_addresses(
+    client, async_session, email_mock, add_phone_number
+):
+    first = await _call(async_session, add_phone_number)
+    assert (await _post(client, first, to="sam+a@example.com"))["ok"] is True
+    second = await _call(async_session, add_phone_number, like=first)
+    # Same inbox as the first: not a second address, and allowed.
+    assert (await _post(client, second, to="SAM+b@example.com"))["ok"] is True
+    # The per-call rule sees one inbox too.
+    assert (await _post(client, second, to="sam@example.com"))["ok"] is True

@@ -66,6 +66,19 @@ def _call_with(org_name: str | None) -> str:
     return f"a phone call with {name}" if name else "a phone call"
 
 
+def mailbox_key(address: str) -> str:
+    """The inbox an address reaches, for counting caps: lowercase, without a
+    ``+tag``, and for Gmail without dots (googlemail.com is gmail.com).
+    ``name+1@gmail.com`` and ``n.ame@gmail.com`` are one inbox. Only the
+    counting uses this; the email goes to the address as given."""
+    local, _, domain = address.strip().lower().rpartition("@")
+    local = local.split("+", 1)[0]
+    if domain in ("gmail.com", "googlemail.com"):
+        domain = "gmail.com"
+        local = local.replace(".", "")
+    return f"{local}@{domain}"
+
+
 def clean_subject(subject: str) -> str:
     """The dictated subject on one line, with control and format characters
     (newlines, bidi overrides, zero-width marks) removed: in a Subject header
@@ -208,4 +221,5 @@ __all__ = [
     "clean_subject",
     "framed_body",
     "framed_subject",
+    "mailbox_key",
 ]

@@ -919,3 +919,10 @@ def test_email_caller_keeps_private_use_and_new_characters():
 def test_email_caller_cuts_a_long_org_name_before_posting():
     tool = email_caller.SPEC.bind({"org_name": "A" * 600})
     assert len(tool.execute.keywords["org_name"]) == 500
+
+
+def test_email_caller_mailbox_key():
+    key = email_caller.mailbox_key
+    assert key("Sam+news@Example.com") == "sam@example.com"
+    assert key("s.a.m@example.com") == "s.a.m@example.com"  # dots matter here
+    assert key("S.am+x@googlemail.com") == key("sam@gmail.com") == "sam@gmail.com"

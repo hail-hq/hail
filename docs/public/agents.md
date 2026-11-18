@@ -133,7 +133,10 @@ SDK: `client.agents.update(agent_id, email_caller_enabled=True)`.
   - 3 emails to one address in any 24 hours, from any caller;
   - 100 emails per organization in any 24 hours.
 
-  A bounced email still counts, but its address can be replaced. A send
+  The caps count inboxes, not spellings: `+tags` are ignored, and Gmail
+  dots too (`n.ame+1@gmail.com` is `name@gmail.com`). The email still goes
+  to the address as given. A bounced email still counts, but its address
+  can be replaced. A send
   that may have reached the provider counts even if it failed. A caller
   with a hidden number gets no email. Caller ID can be faked, so the
   per-number caps slow one person down but do not stop a determined one; the
