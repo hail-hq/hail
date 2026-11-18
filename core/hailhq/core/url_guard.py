@@ -10,10 +10,9 @@ loopback or internal hosts and turn the server into an SSRF proxy.
 address is public. Not public (``ip_is_public``): private (RFC 1918,
 IPv6 ULA fc00::/7), loopback, link-local (incl. 169.254.169.254),
 CGNAT 100.64.0.0/10 (Tailscale), IPv6 site-local fec0::/10, multicast,
-reserved and unspecified, and local-use NAT64 64:ff9b:1::/48. IPv4-mapped
-and well-known NAT64 (64:ff9b::/96) addresses are judged on the IPv4
-address they wrap; a 6to4 address is refused if the IPv4 it wraps is not
-public.
+reserved and unspecified, 6to4 2002::/16 and local-use NAT64
+64:ff9b:1::/48. IPv4-mapped and well-known NAT64 (64:ff9b::/96) addresses
+are judged on the IPv4 address they wrap.
 A host that does not resolve is refused too, and so are ``localhost`` and
 ``*.localhost`` (RFC 6761), before any lookup. No operator allowlist for
 ``base_url`` (decision 2026-07-08); webhooks have
@@ -72,6 +71,9 @@ class UnsafeUrlError(ValueError):
 _CGNAT_V4 = ipaddress.ip_network("100.64.0.0/10")
 # RFC 6052 well-known NAT64 prefix: the IPv4 address is the low 32 bits.
 _NAT64_WKP_V6 = ipaddress.ip_network("64:ff9b::/96")
+# 6to4 (2002::/16): its gateway forwards to any host behind it, and CPython
+# lists it as private only from 3.11.10 / 3.12.4, so refuse it ourselves.
+_SIXTOFOUR_V6 = ipaddress.ip_network("2002::/16")
 # RFC 8215 local-use NAT64: the IPv4 position depends on the operator's
 # prefix length, which we cannot know, so the whole range is refused.
 _NAT64_LOCAL_V6 = ipaddress.ip_network("64:ff9b:1::/48")
@@ -130,10 +132,7 @@ def ip_is_public(ip: str | ipaddress.IPv4Address | ipaddress.IPv6Address) -> boo
             # ipaddress calls this range reserved, which also refuses public
             # targets: judge the embedded IPv4 address instead.
             return ip_is_public(ipaddress.IPv4Address(int(addr) & 0xFFFFFFFF))
-        # 6to4 (2002::/16): refuse when the wrapped IPv4 is not public. The
-        # address itself is still judged below (current CPython already
-        # counts all of 2002::/16 as private), so this never loosens.
-        if addr.sixtofour is not None and not ip_is_public(addr.sixtofour):
+        if addr in _SIXTOFOUR_V6:
             return False
     if isinstance(addr, ipaddress.IPv4Address) and addr in _CGNAT_V4:
         return False

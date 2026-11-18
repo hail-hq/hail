@@ -268,3 +268,16 @@ def test_wrapped_public_address_allowed(ip: str) -> None:
 def test_localhost_check_ignores_case() -> None:
     with pytest.raises(UnsafeUrlError):
         guard.assert_public_host("Foo.LocalHost.", 443)
+
+
+@pytest.mark.parametrize(
+    "ip",
+    [
+        "2002:5db8:d822::",  # 6to4 wrapping public 93.184.216.34
+        "64:ff9b:1::5db8:d822",  # local-use NAT64 with a public low 32 bits
+    ],
+)
+def test_refused_even_when_wrapping_a_public_ipv4(ip: str) -> None:
+    # Fixed rules, not CPython's private list (which lacks these ranges
+    # before 3.11.10 / 3.12.4).
+    assert not guard.ip_is_public(ip)
