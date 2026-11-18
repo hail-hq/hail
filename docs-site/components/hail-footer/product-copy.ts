@@ -1,8 +1,10 @@
 /** Plain product copy shared by the website, directory listings, and footer snapshots. */
 export const PRODUCT_COPY = {
-  heading: "Give apps and AI agents a phone number and email inbox.",
-  actions: "Make or take calls, send or answer texts and email.",
-  assistant: "Let your AI assistant make and receive calls, send texts, and manage email.",
+  heading: "Give your AI a real phone number and email inbox.",
+  actions: "Run a receptionist or answering service, and handle communication with MCP, API, and webhooks.",
+  // The footer line. The home page closing heading says the same words, with links.
+  tagline: "Phone numbers and email inboxes for AI. In minutes, not days.",
+  assistant: "Let your AI assistant handle calls, texts, and email.",
   context: "Keep track of conversations across calls and texts.",
   numbers: "Get phone numbers in 120+ countries.",
   voice: "Choose a voice or bring your own.",

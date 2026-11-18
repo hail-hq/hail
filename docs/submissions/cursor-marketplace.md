@@ -44,7 +44,8 @@ It is not the community site `cursor.directory` (see `cursor-directory-community
 
 ## Notes
 
-- Checked against <https://cursor.com/docs/reference/plugins> on 2026-11-16.
+- Checked against <https://cursor.com/docs/reference/plugins> and <https://cursor.com/docs/plugins> on 2026-11-18. The docs say only: "Go to cursor.com/marketplace/publish and submit your repository link." "All plugins must be open source." Every update is reviewed again before it is published.
+- The publish form does not render for a script (checked 2026-11-18), so its fields and limits are not verified. Fill it from **Content**.
   - Required manifest field: `name` (lowercase kebab-case). Ours: `hail`.
   - `displayName` is not in the docs field table, but Cursor's plugin template uses it.
   - Cursor also loads `skills/`, `rules/`, `agents/`, `commands/` and `hooks/hooks.json` at the plugin root by default. This repo has none of them, so the plugin contains only the MCP server.

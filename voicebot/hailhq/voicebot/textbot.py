@@ -1,6 +1,6 @@
 """Text worker: the agent answers inbound SMS. Inbound email runs on its own
 polling tasks here, through ``hailhq.voicebot.emailbot``, and so does the
-``call.analyzed`` webhook, through ``hailhq.voicebot.callsummary``.
+``call.summarized`` webhook, through ``hailhq.voicebot.callsummary``.
 
 Runs inside the voicebot process (``main.py`` starts it in a daemon thread
 with its own event loop) so text replies use the same LLM precedence and

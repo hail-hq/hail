@@ -219,7 +219,7 @@ def verify(secret: str, signature_header: str, raw_body: bytes) -> bool:
    the rest. `call.answered` and
    `call.completed` follow as on outbound calls. Each answered minute costs
    the same as an outbound minute. After the call,
-   [`call.analyzed`](webhooks.md#call-analyzed) sends the transcript and a
+   [`call.summarized`](webhooks.md#call-summarized) sends the transcript and a
    short summary, and `GET /v1/calls/{id}` returns the transcript.
 
 The AI line on inbound calls defaults to

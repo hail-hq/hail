@@ -325,7 +325,7 @@ async def create_call(
     The call is placed asynchronously — this returns as soon as the call is
     queued, not when it completes. Poll GET /v1/calls/{call_id} for the final
     status and the transcript, or subscribe to webhooks: call.completed (and
-    the other call.* events) for the status, call.analyzed for the transcript
+    the other call.* events) for the status, call.summarized for the transcript
     and a short summary. Requires recipient_consent=true on the request body;
     Hail does not verify lawful basis to contact the recipient, the caller
     warrants it.

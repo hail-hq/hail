@@ -973,12 +973,12 @@ class CallBalanceHold(Base):
 class CallEvent(Base):
     __tablename__ = "call_events"
     __table_args__ = (
-        # One call.analyzed marker per call (hailhq.core.call_analysis).
+        # One call.summarized marker per call (hailhq.core.call_analysis).
         Index(
-            "call_events_analyzed_uniq",
+            "call_events_summarized_uniq",
             "call_id",
             unique=True,
-            postgresql_where=text("kind = 'analyzed'"),
+            postgresql_where=text("kind = 'summarized'"),
         ),
     )
 
