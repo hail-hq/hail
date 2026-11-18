@@ -149,7 +149,7 @@ from hailhq.core.text_agent import (
 from hailhq.core.threads import is_e164
 from hailhq.core.webhook_fanout import call_event_data, fanout_call_event
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field
-from sqlalchemy import and_, select, text, update
+from sqlalchemy import and_, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -578,13 +578,6 @@ async def _send_email_row(
         )
         return AgentSendResponse(ok=False, spoken=_SPOKEN_EMAIL_FAILED), email
     return AgentSendResponse(ok=True, spoken=_SPOKEN_EMAIL_SENT), email
-
-
-async def _send_email_to(
-    db: AsyncSession, email_provider: EmailProvider, org: UUID, **kwargs: Any
-) -> AgentSendResponse:
-    """``_send_email_row`` for callers that need only the answer."""
-    return (await _send_email_row(db, email_provider, org, **kwargs))[0]
 
 
 async def _shared_denial(db: AsyncSession, call: Call) -> tuple[str, str] | None:
@@ -1350,7 +1343,7 @@ async def agent_email_run_send_email(
 
     if await tool_sends_for_reply(db, inbound) >= MAX_TOOL_SENDS:
         return AgentSendResponse(ok=False, spoken=_SPOKEN_RUN_LIMIT)
-    return await _send_email_to(
+    response, _ = await _send_email_row(
         db,
         email_provider,
         org,
@@ -1368,6 +1361,7 @@ async def agent_email_run_send_email(
         ),
         attachment_rows=files,
     )
+    return response
 
 
 @router.post("/email-run/send-sms", response_model=AgentSendResponse)
@@ -1499,7 +1493,7 @@ async def agent_send_email(
             recipient = await _member_email(db, org, body.recipient_name)
             if isinstance(recipient, AgentSendResponse):
                 return recipient
-        return await _send_email_to(
+        response, _ = await _send_email_row(
             db,
             email_provider,
             org,
@@ -1512,6 +1506,7 @@ async def agent_send_email(
             reply_parent=parent,
             attachment_rows=files,
         )
+        return response
 
     if call.transport == "browser":
         if not await email_provider_ready():
@@ -1750,9 +1745,10 @@ def _caller_cap_denial(
     """``(spoken, audit_reason)`` when a cap stops this send, else None.
 
     ``rows`` are the org's caller emails of the last 24 hours that may have
-    gone out: ``(address, status, call_id, caller_e164)``. A bounced
-    email counts toward the totals but does not hold its address, so a
-    misheard address can be corrected."""
+    gone out: ``(address, status, call_id, caller_e164)``. A bounced email
+    counts toward the totals but not toward the caller's addresses. A
+    second address on one call (a misheard first one) is allowed within the
+    caller's address cap."""
     if len(rows) >= email_caller.MAX_EMAILS_PER_ORG_PER_DAY:
         return "I can't send more emails right now.", "org_daily_cap"
     mine = [r for r in rows if r[3] == caller]
@@ -1767,11 +1763,6 @@ def _caller_cap_denial(
     this_call = [r for r in rows if r[2] == str(call_id)]
     if len(this_call) >= email_caller.MAX_EMAILS_PER_CALL:
         return "That is the limit of emails for one call.", "call_cap"
-    if any(r[0] != recipient for r in this_call if r[1] != "bounced"):
-        return (
-            "I can only email the address I already used on this call.",
-            "one_address",
-        )
     return None
 
 
@@ -1789,12 +1780,20 @@ async def agent_email_caller(
     The send itself is the directory send's path: suppression, velocity and
     agent caps, the org's sending domain, and normal email billing.
     """
-    # The name goes in the fixed lines. Looked up before any lock: it opens
-    # its own session and may ask hail.so.
-    org_hint = await db.scalar(
-        select(Call.organization_id).where(Call.id == body.call_id)
+    # The name goes in the fixed lines. Looked up before any lock (it opens
+    # its own session and may ask hail.so), and only when the send can go.
+    hint = (
+        await db.execute(
+            select(Call.organization_id, Call.status, Agent.email_caller_enabled)
+            .join(Agent, Agent.id == Call.agent_id)
+            .where(Call.id == body.call_id)
+        )
+    ).first()
+    org_name = (
+        await organization_name(hint[0])
+        if hint is not None and hint[1] == "in_progress" and hint[2]
+        else None
     )
-    org_name = await organization_name(org_hint) if org_hint else None
     call = await _load_call_for_update(db, body.call_id)
     await _tag_call(db, call)
     if call is None:
@@ -1856,7 +1855,7 @@ async def agent_email_caller(
                 # SES may have sent it, so it counts.
                 ~and_(
                     Email.status == "failed",
-                    Email.end_reason.in_(SES_NOT_ACCEPTED_FAILURES),
+                    func.coalesce(Email.end_reason, "").in_(SES_NOT_ACCEPTED_FAILURES),
                 ),
             )
         )

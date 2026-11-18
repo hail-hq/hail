@@ -205,16 +205,30 @@ async def test_two_emails_per_call_then_refused(
     assert len(await _emails(async_session)) == email_caller.MAX_EMAILS_PER_CALL
 
 
-async def test_a_second_address_is_refused(
+async def test_a_misheard_address_can_be_fixed_on_the_call(
+    client, async_session, email_mock, add_phone_number
+):
+    call = await _call(async_session, add_phone_number)
+    assert (await _post(client, call, to="sam@exmple.com"))["ok"] is True
+    # Still "sent": no bounce yet. The caller's address cap (2) allows it.
+    assert (await _post(client, call, to="sam@example.com"))["ok"] is True
+    assert sorted(e.to_addresses[0] for e in await _emails(async_session)) == [
+        "sam@example.com",
+        "sam@exmple.com",
+    ]
+
+
+async def test_a_failed_send_with_no_reason_counts(
     client, async_session, email_mock, add_phone_number
 ):
     call = await _call(async_session, add_phone_number)
     assert (await _post(client, call))["ok"] is True
-    other = await _post(client, call, to="someone.else@example.com")
-    assert other["ok"] is False
-    assert [e.to_addresses for e in await _emails(async_session)] == [
-        ["sam@example.com"]
-    ]
+    (row,) = await _emails(async_session)
+    row.status = "failed"
+    row.end_reason = None
+    await async_session.commit()
+    assert (await _post(client, call))["ok"] is True
+    assert (await _post(client, call))["ok"] is False
 
 
 async def test_a_failed_send_does_not_count(

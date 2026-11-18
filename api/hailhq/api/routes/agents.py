@@ -106,10 +106,11 @@ def _with_handover_tool(
 def _with_email_caller_tool(tools: list[str] | None, enabled: bool) -> list[str] | None:
     """Keep ``email_caller`` in an explicit tools list exactly when the agent's
     switch is on, as ``transfer_call`` follows handover contacts. ``None``
-    (every tool) is left alone: the switch alone decides then. A call's own
+    (every tool) and ``[]`` (no tools) are left alone. A call's own
     ``tools`` list (POST /calls) can still leave it out."""
-    if tools is None:
-        return None
+    if not tools:
+        # None: the switch alone decides. []: the owner chose no tools.
+        return tools
     name = email_caller.SPEC.name
     rest = [t for t in tools if t != name]
     return [*rest, name] if enabled else rest

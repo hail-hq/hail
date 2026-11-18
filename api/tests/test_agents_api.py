@@ -1118,6 +1118,13 @@ async def test_an_explicit_tools_list_follows_the_email_caller_switch(
         headers=headers,
     )
     assert r.json()["tools"] == []
+    # [] (no tools) stays empty.
+    r = await client.patch(
+        f"/agents/{agent_id}",
+        json={"email_caller_enabled": True, "tools": []},
+        headers=headers,
+    )
+    assert r.json()["tools"] == []
     # Null (every tool) stays null.
     r = await client.patch(
         f"/agents/{agent_id}",

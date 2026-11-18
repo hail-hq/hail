@@ -25,7 +25,7 @@ from hailhq.core.schemas import EMAIL_ADDR
 # The internal route (AgentEmailCallerRequest) imports these as its caps.
 MAX_ADDRESS_CHARS = 254
 MAX_BODY_CHARS = 2000
-# Emails to the person on one call. Each goes to the same address.
+# Emails to the person on one call.
 MAX_EMAILS_PER_CALL = 2
 # Per caller phone number, over any 24 hours, across all calls.
 MAX_EMAILS_PER_CALLER_PER_DAY = 3
@@ -51,7 +51,9 @@ def _call_with(org_name: str | None) -> str:
 def framed_subject(subject: str, org_name: str | None) -> str:
     """The subject as sent: fixed words first, so the inbox list shows that
     the caller asked for it before any dictated words."""
-    return f"From {_call_with(org_name)}: {subject.strip()}"
+    # One line: a newline in a Subject header breaks it or gets the send
+    # refused.
+    return f"From {_call_with(org_name)}: {' '.join(subject.split())}"
 
 
 def framed_body(body_text: str, org_name: str | None) -> str:
@@ -107,9 +109,8 @@ SPEC = ToolSpec(
         "link or a short follow-up, at an address they give you. Before you "
         "send, read the address back letter by letter where it is unclear, "
         "and send only after they say yes. Never guess or complete an "
-        "address. Plain text and links only; you cannot attach files. One "
-        "address per call, and at most "
-        f"{MAX_EMAILS_PER_CALL} emails per call. Hail adds a short line "
+        "address. Plain text and links only; you cannot attach files. At "
+        f"most {MAX_EMAILS_PER_CALL} emails per call. Hail adds a short line "
         "saying it was asked for on this call. Then say it is sent."
     ),
     parameters={

@@ -822,8 +822,8 @@ def test_email_caller_frames_every_email():
     nameless = email_caller.framed_body("Hi.", None)
     assert nameless.startswith("You asked for this during a phone call.\n\n")
     assert (
-        email_caller.framed_subject(" Datasheet ", "Acme Dental")
-        == "From a phone call with Acme Dental: Datasheet"
+        email_caller.framed_subject(" Data\nsheet ", "Acme Dental")
+        == "From a phone call with Acme Dental: Data sheet"
     )
 
 
