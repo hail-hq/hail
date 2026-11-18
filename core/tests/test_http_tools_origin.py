@@ -27,11 +27,10 @@ def test_a_url_that_cannot_be_parsed_is_never_the_same_origin() -> None:
     assert not http_tools._same_origin(url, url)
 
 
-def test_a_host_only_yarl_accepts_is_a_new_origin() -> None:
-    # yarl reads a fullwidth "a" (U+FF41) as "a"; httpx refuses the host.
-    assert not http_tools._same_origin(
-        "https://api.example.com/", "https://\uff41pi.example.com/"
-    )
+def test_hosts_httpx_reads_alike_but_yarl_does_not_are_two_origins() -> None:
+    # httpx reads both hosts as "a%20b.com"; yarl, which aiohttp connects
+    # with, reads "a b.com" and "a%20b.com".
+    assert not http_tools._same_origin("https://a b.com/", "https://a%20b.com/")
 
 
 def test_yarl_must_agree_too(monkeypatch) -> None:
