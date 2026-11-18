@@ -7,10 +7,8 @@ the captured ``$mcp_tool_call`` carries metadata only.
 
 from __future__ import annotations
 
-import hashlib
 import importlib
 import json
-import time
 
 import httpx
 import pytest
@@ -23,6 +21,8 @@ _SECRET = "+14155550123 secret body"
 _AUTH = {"Authorization": "Bearer user.jwt.token"}
 _ORG = "00000000-0000-0000-0000-0000000000aa"
 _USER = "00000000-0000-0000-0000-0000000000bb"
+_EMAIL = "actor@example.org"
+_NAME = "Example Actor"
 _MODEL = "claude-test"
 
 
@@ -61,6 +61,9 @@ async def _session(
     protocol: str,
     fail: bool,
     call: dict | None = None,
+    actor: dict | None = None,
+    auth: dict | None = None,
+    lookup_fails: bool = False,
 ) -> tuple[list, list]:
     monkeypatch.setattr("hailhq.core.config.settings.mcp_resource_url", "https://m.t")
     monkeypatch.setattr(
@@ -73,6 +76,7 @@ async def _session(
     monkeypatch.setattr("hailhq.core.config.settings.next_public_posthog_key", token)
     # The reload below sets this flag; monkeypatch puts it back after the test.
     monkeypatch.setattr("hailhq.mcp.tools._analytics_actor", False)
+    monkeypatch.setattr("hailhq.mcp.tools.telemetry_enabled", lambda: False)
     # A capture that escapes the patch below goes nowhere.
     monkeypatch.setattr(
         "hailhq.core.config.settings.next_public_posthog_host", "http://127.0.0.1:9"
@@ -94,12 +98,28 @@ async def _session(
     monkeypatch.setattr(
         "hailhq.mcp.hail_client.HailClient.list_number_regions", regions
     )
-    auth = _AUTH if oauth else {}
-    # What _actor_for caches for this bearer.
-    key = hashlib.sha256(b"user.jwt.token").hexdigest()
-    actor = {"organization_id": _ORG, "user_id": _USER, "user_email": _SECRET}
-    cache = {key: (time.monotonic() + 300, actor)}
-    monkeypatch.setattr("hailhq.mcp.tools._actor_cache", cache)
+    auth = (_AUTH if oauth else {}) if auth is None else auth
+    actor = (
+        actor
+        if actor is not None
+        else {
+            "auth_kind": "jwt",
+            "organization_id": _ORG,
+            "user_id": _USER,
+            "email": _EMAIL,
+            "name": _NAME,
+        }
+    )
+    lookups = []
+
+    async def whoami(client):
+        lookups.append(client._api_key)
+        if lookup_fails:
+            raise httpx.ConnectError("identity API unavailable")
+        return actor
+
+    monkeypatch.setattr("hailhq.mcp.hail_client.HailClient.whoami", whoami)
+    monkeypatch.setattr("hailhq.mcp.tools._actor_cache", {})
     # Analytics adds an optional llm_model input; the agent fills it.
     args = {"llm_model": _MODEL} if token else {}
     call = call or {"name": "list_number_regions", "arguments": args}
@@ -153,6 +173,11 @@ async def _session(
                     headers,
                     {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": call},
                 )
+    if token and oauth and auth:
+        # Initialize, list, and call must share the verified actor lookup.
+        assert lookups == [next(iter(auth.values())).split(" ", 1)[1]]
+    else:
+        assert lookups == []
     return seen, captured
 
 
@@ -195,7 +220,13 @@ async def test_analytics_keeps_responses_unchanged(monkeypatch, oauth, protocol,
     if oauth:
         assert calls[0]["distinct_id"] == _USER
         assert props["$groups"] == {"organization": _ORG}
-        assert props["$process_person_profile"] is True
+        # PostHog omits the flag for identified users; processing defaults on.
+        assert props.get("$process_person_profile", True) is True
+        assert props["$set"] == {"email": _EMAIL, "name": _NAME}
+        for name, event in events:
+            if name in {"$mcp_initialize", "$mcp_tools_list"}:
+                assert event["distinct_id"] == _USER
+                assert event["properties"]["$set"] == {"email": _EMAIL, "name": _NAME}
     else:
         assert "$groups" not in props
         assert props["$process_person_profile"] is False
@@ -217,20 +248,76 @@ def test_keep_metadata_drops_content():
     }
 
 
-def test_keep_metadata_org_without_user():
+def test_keep_metadata_limits_person_properties():
     event = {
-        "distinct_id": "ses_1",
+        "distinct_id": _USER,
         "properties": {
-            analytics._ORG_PROPERTY: _ORG,
-            "$process_person_profile": False,
+            "$set": {"email": _EMAIL, "name": _NAME, "body": _SECRET},
+            "$mcp_parameters": {"email": _SECRET},
         },
     }
     kept = analytics._keep_metadata(event)
-    assert kept["distinct_id"] == _ORG
-    assert kept["properties"] == {
-        "$process_person_profile": False,
-        "$groups": {"organization": _ORG},
-    }
+    assert kept["distinct_id"] == _USER
+    assert kept["properties"] == {"$set": {"email": _EMAIL, "name": _NAME}}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("protocol", [_LEGACY, _MODERN])
+@pytest.mark.parametrize("lookup_fails", [False, True])
+async def test_unresolved_user_stays_personless(monkeypatch, protocol, lookup_fails):
+    _, events = await _session(
+        monkeypatch,
+        "phc_test",
+        oauth=True,
+        protocol=protocol,
+        fail=False,
+        actor={"organization_id": _ORG, "user_id": None, "email": None, "name": None},
+        lookup_fails=lookup_fails,
+    )
+    for _, event in events:
+        assert event["distinct_id"] not in {_USER, _ORG}
+        assert event["properties"]["$process_person_profile"] is False
+        assert "$set" not in event["properties"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("protocol", [_LEGACY, _MODERN])
+async def test_anonymous_discovery_does_not_resolve_a_user(monkeypatch, protocol):
+    _, events = await _session(
+        monkeypatch, "phc_test", oauth=True, protocol=protocol, fail=False, auth={}
+    )
+    assert events
+    for _, event in events:
+        assert event["properties"]["$process_person_profile"] is False
+        assert "$set" not in event["properties"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "profile", [{"email": _EMAIL, "name": _NAME}, {"email": None, "name": None}]
+)
+async def test_api_key_owner_is_identified(monkeypatch, profile):
+    _, events = await _session(
+        monkeypatch,
+        "phc_test",
+        oauth=True,
+        protocol=_MODERN,
+        fail=False,
+        auth={"Authorization": "Bearer hl_live_owner"},
+        actor={
+            "auth_kind": "apikey",
+            "organization_id": _ORG,
+            "user_id": _USER,
+            **profile,
+        },
+    )
+    calls = [event for name, event in events if name == "$mcp_tool_call"]
+    assert calls[0]["distinct_id"] == _USER
+    assert calls[0]["properties"].get("$process_person_profile", True) is True
+    if profile["email"]:
+        assert calls[0]["properties"]["$set"] == {"email": _EMAIL, "name": _NAME}
+    else:
+        assert "$set" not in calls[0]["properties"]
 
 
 @pytest.mark.asyncio

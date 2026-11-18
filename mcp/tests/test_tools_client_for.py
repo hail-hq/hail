@@ -8,6 +8,7 @@ closing.
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -113,10 +114,15 @@ async def test_analytics_fills_actor_cache_without_logfire(monkeypatch, cache_ke
     monkeypatch.setattr(tools, "fetch_organization_name", org_name)
     whoami = AsyncMock(return_value={"organization_id": "org-id", "user_id": "user-id"})
     async with tools._actor_for(SimpleNamespace(whoami=whoami), cache_key=cache_key):
-        pass
+        if cache_key:
+            assert get_identity()["organization_id"] == "org-id"
+            assert get_identity()["user_id"] == "user-id"
     org_name.assert_not_awaited()
     if cache_key:
-        assert tools.cached_actor_ids(cache_key) == ("org-id", "user-id")
+        assert (await tools.resolve_actor(SimpleNamespace(whoami=whoami), cache_key))[
+            "user_id"
+        ] == "user-id"
+        assert whoami.await_count == 1
     else:
         # Static-key mode has no per-bearer cache for analytics to read.
         whoami.assert_not_awaited()
@@ -131,9 +137,8 @@ async def test_failed_actor_lookup_is_not_retried_every_call(monkeypatch):
     client = SimpleNamespace(whoami=whoami)
     for _ in range(3):
         async with tools._actor_for(client, cache_key="user.jwt"):
-            pass
+            assert get_identity() == {}
     assert whoami.await_count == 1
-    assert tools.cached_actor_ids("user.jwt") == (None, None)
 
 
 @pytest.mark.asyncio
@@ -156,4 +161,55 @@ async def test_org_name_failure_keeps_actor_ids(monkeypatch):
     whoami = AsyncMock(return_value={"organization_id": "org-id", "user_id": "user-id"})
     async with tools._actor_for(SimpleNamespace(whoami=whoami), cache_key="user.jwt"):
         assert get_identity()["user_id"] == "user-id"
-    assert tools.cached_actor_ids("user.jwt") == ("org-id", "user-id")
+    assert (await tools.resolve_actor(SimpleNamespace(whoami=whoami), "user.jwt"))[
+        "user_id"
+    ] == "user-id"
+    assert whoami.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_slow_actor_lookup_is_bounded_and_failure_is_cached(monkeypatch):
+    monkeypatch.setattr(tools, "telemetry_enabled", lambda: False)
+    monkeypatch.setattr(tools, "_analytics_actor", True)
+    monkeypatch.setattr(tools, "_actor_cache", {})
+    monkeypatch.setattr(tools, "_ACTOR_LOOKUP_SECONDS", 0.01)
+
+    async def slow_whoami():
+        await asyncio.Event().wait()
+
+    whoami = AsyncMock(side_effect=slow_whoami)
+    client = SimpleNamespace(whoami=whoami)
+    for _ in range(2):
+        actor = await asyncio.wait_for(tools.resolve_actor(client, "slow.jwt"), 0.2)
+        assert actor == {}
+    assert whoami.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_actor_cache_separates_bearers_and_refreshes_expired_profiles(
+    monkeypatch,
+):
+    monkeypatch.setattr(tools, "telemetry_enabled", lambda: False)
+    monkeypatch.setattr(tools, "_analytics_actor", True)
+    monkeypatch.setattr(tools, "_actor_cache", {})
+    clock = [100.0]
+    monkeypatch.setattr(tools.time, "monotonic", lambda: clock[0])
+    whoami = AsyncMock(
+        side_effect=[
+            {"user_id": "user-a", "email": "a@example.org", "name": "User A"},
+            {"user_id": "user-b", "email": "b@example.org", "name": "User B"},
+            {"user_id": "user-a", "email": "new@example.org", "name": "New Name"},
+        ]
+    )
+    client = SimpleNamespace(whoami=whoami)
+    assert (await tools.resolve_actor(client, "token-a"))[
+        "user_email"
+    ] == "a@example.org"
+    assert (await tools.resolve_actor(client, "token-b"))["user_name"] == "User B"
+    assert (await tools.resolve_actor(client, "token-a"))["user_name"] == "User A"
+    assert whoami.await_count == 2
+    clock[0] += 301
+    refreshed = await tools.resolve_actor(client, "token-a")
+    assert refreshed["user_email"] == "new@example.org"
+    assert refreshed["user_name"] == "New Name"
+    assert whoami.await_count == 3

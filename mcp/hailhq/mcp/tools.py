@@ -90,6 +90,7 @@ MCPServer ``Context`` (auto-injected on dispatch) and uses the
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
 import contextlib
@@ -1877,6 +1878,8 @@ def _argument_errors(exc: ValidationError) -> str:
 _ACTOR_TTL_SECONDS = 300
 # A failed lookup is retried after this, not on every tool call.
 _ACTOR_FAILURE_TTL_SECONDS = 30
+# Bound optional telemetry lookups, including when the identity API is down.
+_ACTOR_LOOKUP_SECONDS = 2
 # Set by analytics.instrument_analytics once PostHog instrumentation succeeded.
 _analytics_actor = False
 
@@ -1896,21 +1899,11 @@ def _actor_cache_key(bearer: str) -> str:
     return hashlib.sha256(bearer.encode()).hexdigest()
 
 
-def cached_actor_ids(bearer: str) -> tuple[str | None, str | None]:
-    """``(organization_id, user_id)`` that ``_actor_for`` already resolved for
-    ``bearer``. Never calls the API."""
-    hit = _actor_cache.get(_actor_cache_key(bearer))
-    if not hit or hit[0] <= time.monotonic():
-        return None, None
-    org_id, user_id = hit[1].get("organization_id"), hit[1].get("user_id")
-    return (str(org_id) if org_id else None, str(user_id) if user_id else None)
-
-
-@contextlib.asynccontextmanager
-async def _actor_for(client: HailClient, cache_key: str | None = None):
+async def resolve_actor(
+    client: HailClient, cache_key: str | None = None
+) -> dict[str, Any]:
+    """Verified actor shared by tool traces and the PostHog identify callback."""
     identity: dict[str, Any] = {}
-    # Logfire tags spans with the actor. PostHog analytics reads the cache
-    # (``cached_actor_ids``), which exists only for per-bearer clients.
     tracing = telemetry_enabled()
     if tracing or (cache_key and _analytics_actor):
         key = _actor_cache_key(cache_key) if cache_key else None
@@ -1920,15 +1913,15 @@ async def _actor_for(client: HailClient, cache_key: str | None = None):
         else:
             try:
                 # Resolve the actor only through the API that verifies the bearer.
-                actor = await client.whoami()
+                actor = await asyncio.wait_for(client.whoami(), _ACTOR_LOOKUP_SECONDS)
                 identity = {
                     "organization_id": actor.get("organization_id"),
                     "user_id": actor.get("user_id"),
+                    "user_email": actor.get("email"),
+                    "user_name": actor.get("name"),
                 }
                 org_id = actor.get("organization_id")
                 if tracing:
-                    # Analytics alone needs only the two ids.
-                    identity["user_email"] = actor.get("email")
                     identity["auth_kind"] = actor.get("auth_kind")
                     identity["actor_kind"] = actor.get("auth_kind")
                     if org_id:
@@ -1944,7 +1937,12 @@ async def _actor_for(client: HailClient, cache_key: str | None = None):
                 if len(_actor_cache) >= _ACTOR_CACHE_MAX:
                     _actor_cache.clear()
                 _actor_cache[key] = (time.monotonic() + ttl, dict(identity))
-    with identity_scope(identity):
+    return identity
+
+
+@contextlib.asynccontextmanager
+async def _actor_for(client: HailClient, cache_key: str | None = None):
+    with identity_scope(await resolve_actor(client, cache_key)):
         yield
 
 

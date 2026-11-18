@@ -1,12 +1,14 @@
 """Optional PostHog MCP analytics for the HTTP server.
 
 Off unless ``NEXT_PUBLIC_POSTHOG_KEY`` is set. Events carry tool names,
-timings, outcomes, client names and the calling model only. Argument values, results, error
+timings, outcomes, client names and the calling model. Argument values, results, error
 messages and agent intent never leave the process: ``_keep_metadata`` drops
 every property not on ``_KEPT_PROPERTIES``. In oauth-rs mode the caller's
 user id (OAuth token or API key owner) becomes ``distinct_id``, the same
 person id the website identifies, and the org id becomes the ``organization``
-group. Both come from the actor cache tool calls fill. The only schema change
+group. The identify callback resolves the verified actor before the first event
+and sets only their email and name on the person profile. The lookup shares the
+tool-call actor cache. The only schema change
 is the SDK's optional ``llm_model`` argument, which the SDK removes before the
 tool runs. Tool results stay unchanged.
 Any setup or capture failure logs a warning and the server keeps serving.
@@ -20,14 +22,19 @@ import re
 from typing import Any
 
 from hailhq.core.config import settings
-from hailhq.mcp.tools import cached_actor_ids, resolve_actor_for_analytics
+from hailhq.mcp.hail_client import HailClient
+from hailhq.mcp.tools import resolve_actor, resolve_actor_for_analytics
 
 logger = logging.getLogger(__name__)
 
 try:
     from posthog import Posthog
     from posthog.mcp import get_request_headers, instrument
-    from posthog.mcp.types import MCPAnalyticsModelOptions, MCPAnalyticsOptions
+    from posthog.mcp.types import (
+        MCPAnalyticsModelOptions,
+        MCPAnalyticsOptions,
+        UserIdentity,
+    )
 except ImportError:  # analytics must never block startup
     logger.warning("PostHog SDK import failed; MCP analytics is off", exc_info=True)
     Posthog = None
@@ -38,6 +45,7 @@ _KEPT_PROPERTIES = frozenset(
         "$session_id",
         "$process_person_profile",
         "$groups",
+        "$set",
         "$mcp_interface",
         "$mcp_source",
         "$mcp_server_name",
@@ -73,40 +81,56 @@ _MODEL_DESCRIPTION = (
 _MODEL_ID = re.compile(r"(?=[^@\s]*[A-Za-z])[A-Za-z0-9][A-Za-z0-9._:/+-]{0,99}")
 _MODEL_PROPERTIES = ("$mcp_llm_model", "$mcp_llm_model_source")
 
-_ORG_PROPERTY = "hail_organization_id"
-_USER_PROPERTY = "hail_user_id"
 
-
-def _actor(_request: Any, extra: Any) -> dict[str, str] | None:
+async def _identify(_request: Any, extra: Any) -> UserIdentity | None:
+    # Static-key mode has no per-request user; never identify an inbound header
+    # as the operator of the server's shared key.
+    if not settings.hail_auth_url:
+        return None
     scheme, _, bearer = (
         (get_request_headers(extra) or {}).get("authorization") or ""
     ).partition(" ")
     if scheme.lower() != "bearer" or not bearer.strip():
         return None
-    org_id, user_id = cached_actor_ids(bearer.strip())
-    ids = {_ORG_PROPERTY: org_id, _USER_PROPERTY: user_id}
-    return {k: v for k, v in ids.items() if v} or None
+    # DiscoveryAuthMiddleware injects this placeholder for public discovery.
+    if bearer.strip() == "anonymous-discovery":
+        return None
+    async with HailClient(api_key=bearer.strip()) as client:
+        actor = await resolve_actor(client, cache_key=bearer.strip())
+    user_id = actor.get("user_id")
+    if not user_id:
+        return None
+    properties = {
+        key: value
+        for key, value in {
+            "email": actor.get("user_email"),
+            "name": actor.get("user_name"),
+        }.items()
+        if isinstance(value, str) and value
+    }
+    org_id = actor.get("organization_id")
+    return UserIdentity(
+        distinct_id=str(user_id),
+        properties=properties,
+        groups={"organization": str(org_id)} if org_id else None,
+    )
 
 
 def _keep_metadata(event: dict[str, Any]) -> dict[str, Any]:
     properties = event.get("properties") or {}
-    org_id = properties.get(_ORG_PROPERTY)
-    user_id = properties.get(_USER_PROPERTY)
     event["properties"] = {k: v for k, v in properties.items() if k in _KEPT_PROPERTIES}
+    if "$set" in event["properties"]:
+        event["properties"]["$set"] = {
+            k: v
+            for k, v in event["properties"]["$set"].items()
+            if k in {"email", "name"} and isinstance(v, str) and v
+        }
     model = event["properties"].get("$mcp_llm_model")
     if model is not None and not (
         isinstance(model, str) and _MODEL_ID.fullmatch(model)
     ):
         for key in _MODEL_PROPERTIES:
             event["properties"].pop(key, None)
-    if user_id or org_id:
-        event["distinct_id"] = user_id or org_id
-    if org_id:
-        event["properties"]["$groups"] = {"organization": org_id}
-    if user_id:
-        # The website identifies the same user id with email and name, so the
-        # event joins that person. Nothing personal is set from here.
-        event["properties"]["$process_person_profile"] = True
     return event
 
 
@@ -143,7 +167,7 @@ def instrument_analytics(server: Any) -> Analytics | None:
             enable_exception_autocapture=False,
             capture_model=MCPAnalyticsModelOptions(description=_MODEL_DESCRIPTION),
             before_send=_keep_metadata,
-            event_properties=_actor,
+            identify=_identify,
             server_build=settings.logfire_service_version or None,
         )
         handle = instrument(server, client, options)
