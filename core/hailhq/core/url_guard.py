@@ -38,6 +38,7 @@ import httpx
 from hailhq.core.urls import canonical_url
 
 __all__ = [
+    "NOT_PUBLIC",
     "UnsafeUrlError",
     "assert_public_host",
     "assert_public_https_url",
@@ -45,6 +46,14 @@ __all__ = [
     "httpx_url",
     "ip_is_public",
 ]
+
+
+logger = logging.getLogger(__name__)
+
+# The one customer-facing text for a refused host. It never says which case
+# applied (localhost, private, unresolvable), so a customer cannot learn what
+# our resolver answers for internal names. Details go to the server log.
+NOT_PUBLIC = "URL host is private or could not be resolved"
 
 
 class UnsafeUrlError(ValueError):
@@ -55,8 +64,6 @@ class UnsafeUrlError(ValueError):
 # unspecified per ipaddress's own classification, but not internet-routable
 # either — the same kind of provider-internal address the metadata/RFC1918
 # checks below exist to block.
-logger = logging.getLogger(__name__)
-
 _CGNAT_V4 = ipaddress.ip_network("100.64.0.0/10")
 
 
@@ -76,11 +83,6 @@ def httpx_url(url: str) -> httpx.URL:
         return httpx.URL(url)
     except httpx.InvalidURL as exc:
         raise UnsafeUrlError(f"URL is not valid: {exc}") from exc
-
-
-# Fixed customer-facing texts: never include the resolved address.
-_PRIVATE = "URL host resolves to a private address"
-_UNRESOLVED = "URL host could not be resolved"
 
 
 def connect_target(url: str) -> tuple[httpx.URL, str, int]:
@@ -134,16 +136,18 @@ def assert_public_host(host: str, port: int) -> None:
     call it off the event loop.
     """
     if host == "localhost":
-        raise UnsafeUrlError(_PRIVATE)
+        logger.info("url guard: refused localhost")
+        raise UnsafeUrlError(NOT_PUBLIC)
     try:
         infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
     except (socket.gaierror, UnicodeError) as exc:
         # UnicodeError: the stdlib idna codec refuses an empty or too-long
         # label (``a..b.com``) before any DNS lookup.
         logger.info("url guard: %s does not resolve: %s", host, exc)
-        raise UnsafeUrlError(_UNRESOLVED) from exc
+        raise UnsafeUrlError(NOT_PUBLIC) from exc
     if not infos:
-        raise UnsafeUrlError(_UNRESOLVED)
+        logger.info("url guard: %s resolved to no addresses", host)
+        raise UnsafeUrlError(NOT_PUBLIC)
     # Check EVERY resolved address (A + AAAA): one private address is enough
     # to refuse.
     for info in infos:
@@ -156,7 +160,7 @@ def assert_public_host(host: str, port: int) -> None:
             # The address stays in the server log: customer-facing errors
             # must not reveal what our resolver answers for internal names.
             logger.info("url guard: %s resolves to non-public %s", host, ip)
-            raise UnsafeUrlError(_PRIVATE)
+            raise UnsafeUrlError(NOT_PUBLIC)
 
 
 def assert_public_https_url(url: str) -> str:

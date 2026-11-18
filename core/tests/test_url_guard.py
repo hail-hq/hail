@@ -7,7 +7,7 @@ import socket
 import hailhq.core.url_guard as guard
 import httpx2
 import pytest
-from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
+from hailhq.core.url_guard import NOT_PUBLIC, UnsafeUrlError, assert_public_https_url
 
 
 def test_public_https_passes() -> None:
@@ -108,7 +108,7 @@ def split_dns(monkeypatch) -> list[str]:
 def test_idna_2008_host_is_the_one_checked(
     split_dns: list[str], url: str, httpx_host: str
 ) -> None:
-    with pytest.raises(UnsafeUrlError, match="private address"):
+    with pytest.raises(UnsafeUrlError, match=NOT_PUBLIC):
         assert_public_https_url(url)
     assert split_dns == [httpx_host]
 
@@ -185,7 +185,7 @@ def test_error_text_never_shows_the_resolved_address(split_dns: list[str]) -> No
     with pytest.raises(UnsafeUrlError) as excinfo:
         assert_public_https_url("https://faß.example/v1")
     assert "10.1.2.3" not in str(excinfo.value)
-    assert str(excinfo.value) == "URL host resolves to a private address"
+    assert str(excinfo.value) == NOT_PUBLIC
 
 
 def test_port_zero_rejected() -> None:
@@ -198,5 +198,5 @@ def test_unreadable_resolved_address_fails_closed(monkeypatch) -> None:
         return [(None, None, None, "", ("not-an-ip", 0))]
 
     monkeypatch.setattr(guard.socket, "getaddrinfo", fake_getaddrinfo)
-    with pytest.raises(UnsafeUrlError, match="private address"):
+    with pytest.raises(UnsafeUrlError, match=NOT_PUBLIC):
         assert_public_https_url("https://odd.example.com/v1")

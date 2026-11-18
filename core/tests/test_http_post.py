@@ -6,7 +6,7 @@ from hailhq.core.http_post import (
     httpx_post,
     validate_webhook_target,
 )
-from hailhq.core.url_guard import UnsafeUrlError
+from hailhq.core.url_guard import NOT_PUBLIC, UnsafeUrlError
 
 
 def _blocked(url: str) -> bool:
@@ -243,7 +243,7 @@ def test_unresolvable_host_is_blocked(monkeypatch):
         raise socket.gaierror(socket.EAI_AGAIN, "temporary failure")
 
     monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
-    with pytest.raises(ValueError, match="could not be resolved"):
+    with pytest.raises(ValueError, match=NOT_PUBLIC):
         validate_webhook_target(
             "https://flaky.example.com/hook", allow_private_networks=False
         )
@@ -255,7 +255,7 @@ async def test_httpx_post_blocks_unresolvable_host(monkeypatch):
         raise socket.gaierror(socket.EAI_AGAIN, "temporary failure")
 
     monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
-    with pytest.raises(PrivateNetworkBlockedError, match="could not be resolved"):
+    with pytest.raises(PrivateNetworkBlockedError, match=NOT_PUBLIC):
         await httpx_post(
             "https://flaky.example.com/hook",
             b"{}",
@@ -277,4 +277,4 @@ async def test_errors_never_show_the_resolved_address(monkeypatch):
         await httpx_post(url, b"{}", {}, allow_private_networks=False)
     for err in (write_err.value, send_err.value):
         assert "10.4.2.7" not in str(err)
-        assert "private address" in str(err)
+        assert NOT_PUBLIC in str(err)
