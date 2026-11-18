@@ -113,8 +113,8 @@ async def create_subscription(
     secret = _new_secret()
     cipher = SecretCipher(settings.hail_webhook_secret_key)
     # The INSERT's own time, not the column default now(): now() is the
-    # transaction start, which comes before the target URL check when an
-    # earlier statement on the request session (auth, telemetry) left the
+    # transaction start, which usually comes before the target URL check:
+    # auth and telemetry statements on the request session often leave the
     # transaction open. call.analyzed compares updated_at with call end
     # times (hailhq.core.call_analysis). statement_timestamp() is one value
     # for the whole statement, so both columns get the same time.

@@ -113,6 +113,7 @@ async def test_rotate_secret_returns_new_value(
         },
         headers=auth_headers,
     )
+    assert create.status_code == 201, create.text
     sub_id = create.json()["id"]
     first_secret = create.json()["secret"]
 
@@ -142,6 +143,7 @@ async def test_patch_disables(client: httpx.AsyncClient, auth_headers: dict[str,
         },
         headers=auth_headers,
     )
+    assert create.status_code == 201, create.text
     sub_id = create.json()["id"]
     p = await client.patch(
         f"/webhooks/{sub_id}",
@@ -159,8 +161,9 @@ async def test_create_stamps_created_and_updated_at_alike(
     async_session: AsyncSession,
 ):
     """A new subscription has updated_at == created_at. It catches one stamp
-    going missing only when now() and the INSERT's time differ (here by the
-    BEGIN round trip); it cannot tell them apart when both are missing."""
+    going missing only when now() and the INSERT's time differ (by the
+    auth statements or at least the BEGIN round trip); it cannot tell them
+    apart when both are missing."""
     create = await client.post(
         "/webhooks",
         json={"target_url": "https://example.com/h", "event_types": ["call.analyzed"]},
@@ -192,6 +195,7 @@ async def test_patch_and_rotation_bump_updated_at(
         json={"target_url": "https://example.com/h", "event_types": ["call.completed"]},
         headers=auth_headers,
     )
+    assert create.status_code == 201, create.text
     sub_id = create.json()["id"]
     for change in (
         lambda: client.patch(
@@ -232,6 +236,7 @@ async def test_delete_removes(client: httpx.AsyncClient, auth_headers: dict[str,
         },
         headers=auth_headers,
     )
+    assert create.status_code == 201, create.text
     sub_id = create.json()["id"]
     d = await client.delete(f"/webhooks/{sub_id}", headers=auth_headers)
     assert d.status_code == 204
@@ -256,6 +261,7 @@ async def test_cross_org_isolation(
         },
         headers=auth_headers,
     )
+    assert create.status_code == 201, create.text
     sub_id = create.json()["id"]
 
     _, _, plain_b = await insert_org_and_key(async_session)
@@ -277,6 +283,7 @@ async def test_deliveries_empty_on_fresh_subscription(
         },
         headers=auth_headers,
     )
+    assert create.status_code == 201, create.text
     sub_id = create.json()["id"]
     d = await client.get(f"/webhooks/{sub_id}/deliveries", headers=auth_headers)
     assert d.status_code == 200
@@ -324,6 +331,7 @@ async def test_patch_rejects_non_https_target_url(
         json={"target_url": "https://example.com/h", "event_types": ["email.received"]},
         headers=auth_headers,
     )
+    assert create.status_code == 201, create.text
     sub_id = create.json()["id"]
     resp = await client.patch(
         f"/webhooks/{sub_id}",
