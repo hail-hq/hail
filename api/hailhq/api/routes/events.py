@@ -68,7 +68,7 @@ def _call_select(kind: str | None):
         CallEvent.payload.label("payload"),
         CallEvent.occurred_at.label("occurred_at"),
     )
-    # Claim rows are the call.analyzed worker's job state, not call events.
+    # Claim rows are the call.summarized worker's job state, not call events.
     stmt = stmt.where(CallEvent.kind != CLAIM_KIND)
     if kind is not None:
         stmt = stmt.where(CallEvent.kind == kind)
