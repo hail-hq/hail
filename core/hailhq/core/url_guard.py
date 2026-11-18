@@ -136,6 +136,13 @@ def assert_public_host(host: str, port: int) -> None:
     ``host`` is the ASCII host from ``connect_target``. Blocking (DNS):
     call it off the event loop.
     """
+    # RFC 6761: localhost and *.localhost are loopback by definition. Refuse
+    # them before DNS, so the result never depends on /etc/hosts or search
+    # domains. Strip trailing dots so ``localhost.`` is caught too.
+    name = host.rstrip(".")
+    if name == "localhost" or name.endswith(".localhost"):
+        logger.info("url guard: refused %s (localhost)", host)
+        raise UnsafeUrlError(NOT_PUBLIC)
     try:
         infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
     except (socket.gaierror, UnicodeError) as exc:

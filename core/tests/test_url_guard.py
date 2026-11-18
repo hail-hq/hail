@@ -203,18 +203,45 @@ def test_unreadable_resolved_address_fails_closed(monkeypatch) -> None:
         assert_public_https_url("https://odd.example.com/v1")
 
 
+def _refusal_text(monkeypatch, getaddrinfo) -> str:
+    monkeypatch.setattr(guard.socket, "getaddrinfo", getaddrinfo)
+    with pytest.raises(UnsafeUrlError) as excinfo:
+        assert_public_https_url("https://odd.example.com/v1")
+    return str(excinfo.value)
+
+
+def test_every_refusal_uses_the_same_text(monkeypatch) -> None:
+    def no_answer(host, *args, **kwargs):
+        return []
+
+    def loopback(host, *args, **kwargs):
+        return [(None, None, None, "", ("127.0.0.1", 0))]
+
+    def unreadable(host, *args, **kwargs):
+        return [(None, None, None, "", ("not-an-ip", 0))]
+
+    def dns_error(host, *args, **kwargs):
+        raise socket.gaierror(socket.EAI_AGAIN, "resolver at 10.9.9.9 timed out")
+
+    def idna_error(host, *args, **kwargs):
+        raise UnicodeError("label empty or too long")
+
+    for fake in (no_answer, loopback, unreadable, dns_error, idna_error):
+        assert _refusal_text(monkeypatch, fake) == NOT_PUBLIC, fake.__name__
+
+
 @pytest.mark.parametrize(
-    "answer",
+    "url",
     [
-        [],  # resolver gave no addresses
-        [(None, None, None, "", ("127.0.0.1", 0))],  # localhost / loopback
+        "https://localhost/v1",
+        "https://LOCALHOST/v1",
+        "https://localhost./v1",
+        "https://foo.localhost/v1",
+        "https://foo.localhost./v1",
     ],
 )
-def test_every_refusal_uses_the_same_text(monkeypatch, answer) -> None:
-    def fake_getaddrinfo(host, *args, **kwargs):
-        return answer
-
-    monkeypatch.setattr(guard.socket, "getaddrinfo", fake_getaddrinfo)
+def test_localhost_names_refused_without_lookup(split_dns: list[str], url: str) -> None:
     with pytest.raises(UnsafeUrlError) as excinfo:
-        assert_public_https_url("https://localhost/v1")
+        assert_public_https_url(url)
     assert str(excinfo.value) == NOT_PUBLIC
+    assert split_dns == []

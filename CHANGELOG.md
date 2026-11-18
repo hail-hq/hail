@@ -27,7 +27,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 ### Changed
 
 - Webhooks to CGNAT addresses (`100.64.0.0/10`, used by Tailscale), multicast, IPv6 site-local, or hosts that do not resolve are now refused, and existing ones fail on delivery. Self-hosters can allow them with `HAIL_WEBHOOK_ALLOW_PRIVATE_NETWORKS=true`.
-- A refused webhook `target_url` or BYO LLM `base_url` now gets one error text: `URL host is private or could not be resolved`.
+- A webhook `target_url` or BYO LLM `base_url` whose host is private or does not resolve is refused with one error text, which ends in `URL host is private or could not be resolved`.
 
 ### Fixed
 
