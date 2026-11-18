@@ -70,8 +70,8 @@ def assert_public_https_url(url: str, *, field: str = "base_url") -> str:
         raise UnsafeUrlError(f"{field} has no host")
     if any(c.isspace() or unicodedata.category(c) == "Cc" for c in host):
         # getaddrinfo stops at a NUL byte, so it would check another host
-        # than the one saved. (urlsplit already drops tab, CR and LF, like
-        # the HTTP clients do.)
+        # than the one saved. (urlsplit drops tab, CR and LF before this
+        # check; aiohttp drops them too, httpx refuses the url.)
         raise UnsafeUrlError(f"{field} host has a space or control character")
 
     try:

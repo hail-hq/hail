@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hailhq.core.url_guard as guard
 import pytest
 from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
 
@@ -79,8 +80,6 @@ def test_space_or_control_character_is_refused(url: str) -> None:
 
 
 def test_a_resolver_system_error_is_an_unsafe_url(monkeypatch) -> None:
-    import hailhq.core.url_guard as guard
-
     def fake_getaddrinfo(host, *args, **kwargs):
         raise OSError(24, "Too many open files")
 
