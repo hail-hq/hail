@@ -33,11 +33,12 @@ from hailhq.core.email_mime import (
 )
 from hailhq.core.forward_targets import normalize_address
 from hailhq.core.jsonb import merge_object
-from hailhq.core.models import Agent, Email, EmailDomain, Sms
+from hailhq.core.models import Agent, Email, EmailDomain, PhoneNumber, Sms
 from hailhq.core.prompts import (
     TEAM_EMAIL_LABEL,
     SenderTrust,
     build_email_instructions,
+    clock_section,
 )
 from hailhq.core.providers.email.ses import SES_NOT_ACCEPTED_FAILURES
 from hailhq.core.text_agent import (
@@ -74,6 +75,7 @@ __all__ = [
     "ReplyDecision",
     "answers_emails",
     "build_chat_messages",
+    "reply_clock",
     "claim_pending_reply",
     "email_history_filter",
     "email_thread",
@@ -788,12 +790,41 @@ def _plain_body(email: Email) -> str:
     return (body or "").strip()[:MAX_EMAIL_CHARS]
 
 
+async def reply_clock(db: AsyncSession, agent: Agent) -> str | None:
+    """The date and time section for an email reply. An email has no phone
+    number, so the business's time zone comes from the oldest active number
+    the agent answers calls or texts on; without one the model gets UTC. A
+    failure leaves the section out instead of failing the reply."""
+    try:
+        number = (
+            await db.execute(
+                select(PhoneNumber.e164)
+                .where(
+                    or_(
+                        PhoneNumber.voice_agent_id == agent.id,
+                        PhoneNumber.sms_agent_id == agent.id,
+                    ),
+                    PhoneNumber.provisioning_state == "active",
+                )
+                .order_by(PhoneNumber.created_at)
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        return clock_section(
+            datetime.now(timezone.utc), channel="email", business_number=number
+        )
+    except Exception:
+        logger.exception("could not build the reply's date and time section")
+        return None
+
+
 def build_chat_messages(
     agent: Agent,
     thread: list[Email],
     *,
     trust: SenderTrust,
     sends_tried: bool = False,
+    clock: str | None = None,
 ) -> list[dict[str, Any]]:
     """OpenAI-style messages: the system message, then the thread. Mail from
     people is ``user``, labeled so the model reads it as mail, and only an
@@ -803,7 +834,7 @@ def build_chat_messages(
         {
             "role": "system",
             "content": build_email_instructions(
-                agent.system_prompt, trust=trust, sends_tried=sends_tried
+                agent.system_prompt, trust=trust, sends_tried=sends_tried, clock=clock
             ),
         }
     ]

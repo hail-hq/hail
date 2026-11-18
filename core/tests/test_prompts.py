@@ -267,3 +267,33 @@ def test_clock_skips_a_national_caller_id() -> None:
     )
     assert "- For the caller: unknown." in out
     assert "The caller's phone number" not in out
+
+
+def test_text_clock_names_the_person_texting() -> None:
+    out = prompts.clock_section(
+        _EVENING,
+        channel="text",
+        business_number="+442079460000",
+        other_number="+12125550100",
+    )
+    assert "It is now:" in out and "This call started" not in out
+    assert "- For the person texting: Wednesday, 18 November 2026, 15:05" in out
+    assert "The person texting is using +1 212-555-0100." in out
+    assert "long call" not in out
+
+
+def test_email_clock_has_no_other_party() -> None:
+    out = prompts.clock_section(
+        _EVENING, channel="email", business_number="+442079460000"
+    )
+    assert "(GMT, UTC+00:00, Europe/London)." in out
+    assert "For the" not in out and "phone number is +" not in out
+
+
+def test_reply_instructions_put_the_clock_before_the_reminder() -> None:
+    for out in (
+        prompts.build_text_instructions("Be kind.", clock="# Date and time"),
+        prompts.build_email_instructions("Be kind.", clock="# Date and time"),
+    ):
+        assert out.index("Be kind.") < out.index("# Date and time")
+        assert out.endswith(prompts.PRIVACY_REMINDER)

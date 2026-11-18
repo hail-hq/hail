@@ -16,6 +16,7 @@ from hailhq.core.models import (
     Email,
     EmailDomain,
     OrganizationMember,
+    PhoneNumber,
     Sms,
     User,
 )
@@ -1582,3 +1583,33 @@ def test_thread_does_not_match_unrelated_or_malformed_ses_references(reference):
     )
     reply = Email(id=uuid.uuid4(), in_reply_to=reference)
     assert not email_agent.same_thread(original, reply)
+
+
+@pytest.mark.asyncio
+async def test_an_email_reply_gets_the_time_where_the_agent_answers_calls(
+    async_session,
+):
+    org, agent, _ = await _seed(async_session)
+    assert "- Where this business's phone number is: unknown. Go by UTC" in (
+        await email_agent.reply_clock(async_session, agent)
+    )
+    async_session.add(
+        PhoneNumber(
+            organization_id=org,
+            e164="+442079460000",
+            country_code="GB",
+            number_type="local",
+            provisioning_state="active",
+            provider_resource_id="PN",
+            voice_agent_id=agent.id,
+        )
+    )
+    await async_session.commit()
+    clock = await email_agent.reply_clock(async_session, agent)
+    assert clock is not None and "It is now:" in clock
+    assert "Europe/London)." in clock
+    assert "person texting" not in clock and "caller" not in clock
+    system = email_agent.build_chat_messages(agent, [], trust="member", clock=clock)[0][
+        "content"
+    ]
+    assert system.index("Help the team.") < system.index("# Date and time")

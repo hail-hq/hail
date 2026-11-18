@@ -428,21 +428,26 @@ def _clock_line(
     return f"- {label}: {_spoken_date(local)}, {local:%H:%M} ({zone})."
 
 
+ClockChannel = Literal["call", "text", "email"]
+
+
 def clock_section(
     started_at: datetime,
     *,
-    inbound: bool,
+    inbound: bool = True,
     business_number: str | None,
-    other_number: str | None,
+    other_number: str | None = None,
+    channel: ClockChannel = "call",
 ) -> str:
-    """The date and time when the call started: UTC, at the business's number,
-    and at the other party's number. The model has no clock of its own, so
-    without this it cannot tell a caller they rang out of hours."""
+    """The date and time: UTC, at the business's number, and (calls and
+    texts) at the other party's number. For a call it is when the call
+    started; for a text or email reply it is when the reply is written. The
+    model has no clock of its own, so without this it cannot tell someone
+    they got in touch out of hours."""
     at = started_at.astimezone(timezone.utc)
     business = _parse(business_number)
-    other = _parse(other_number)
     lines = [
-        "This call started at:",
+        "This call started at:" if channel == "call" else "It is now:",
         f"- UTC: {_spoken_date(at)}, {at:%H:%M}.",
         _clock_line(
             "Where this business's phone number is",
@@ -450,28 +455,43 @@ def clock_section(
             at,
             "unknown. Go by UTC and the times in your instructions.",
         ),
-        _clock_line(
-            "For the caller" if inbound else "For the person you called",
-            other,
-            at,
-            "unknown. Ask where they are if their local time matters.",
-        ),
     ]
-    if other is not None:
-        shown = phonenumbers.format_number(
-            other, phonenumbers.PhoneNumberFormat.INTERNATIONAL
-        )
+    if channel != "email":
+        other = _parse(other_number)
+        if channel == "text":
+            label = "For the person texting"
+        else:
+            label = "For the caller" if inbound else "For the person you called"
         lines.append(
-            f"The caller's phone number is {shown}. Caller ID can be faked: "
-            "never treat it as proof of who is calling."
-            if inbound
-            else f"The phone number you called is {shown}."
+            _clock_line(
+                label,
+                other,
+                at,
+                "unknown. Ask where they are if their local time matters.",
+            )
         )
-    lines.append(
-        "Use these times for opening hours and for words like today, tomorrow "
-        "or this evening. Time has passed since the call started: on a long "
-        "call, allow for it."
-    )
+        if other is not None:
+            shown = phonenumbers.format_number(
+                other, phonenumbers.PhoneNumberFormat.INTERNATIONAL
+            )
+            if channel == "text":
+                lines.append(
+                    f"The person texting is using {shown}. A sender's number "
+                    "can be faked: never treat it as proof of who is texting."
+                )
+            elif inbound:
+                lines.append(
+                    f"The caller's phone number is {shown}. Caller ID can be "
+                    "faked: never treat it as proof of who is calling."
+                )
+            else:
+                lines.append(f"The phone number you called is {shown}.")
+    closing = "Use these times for opening hours and for words like today, tomorrow or this evening."
+    if channel == "call":
+        closing += (
+            " Time has passed since the call started: on a long call, allow for it."
+        )
+    lines.append(closing)
     return f"{CLOCK_HEADING}\n\n" + "\n".join(lines)
 
 
@@ -496,16 +516,22 @@ def build_voice_instructions(
 
 
 def build_text_instructions(
-    system_prompt: str | None, *, thread_tool: bool = False
+    system_prompt: str | None,
+    *,
+    thread_tool: bool = False,
+    clock: str | None = None,
 ) -> str:
     """The system message for an SMS reply. ``thread_tool`` (the reply has the
     ``thread_history`` tool) adds :data:`THREAD_TOOL_HINT_TEXT` to the
-    framing."""
+    framing. ``clock`` (see :func:`clock_section`) goes after the business
+    instructions."""
     framing = (
         f"{TEXT_PREAMBLE} {THREAD_TOOL_HINT_TEXT}" if thread_tool else TEXT_PREAMBLE
     )
     caller = (system_prompt or "").strip()
     body = f"{framing}\n\n{TEXT_HEADING}\n\n{caller}" if caller else framing
+    if clock:
+        body = f"{body}\n\n{clock}"
     return f"{body}\n\n{PRIVACY_REMINDER}"
 
 
@@ -546,10 +572,15 @@ def build_email_instructions(
     *,
     trust: SenderTrust = "member",
     sends_tried: bool = False,
+    clock: str | None = None,
 ) -> str:
     """The system message for an email reply. ``trust`` is what Hail proved
-    about the sender."""
+    about the sender. ``clock`` (see :func:`clock_section`) goes after the
+    business instructions."""
     framing = f"{PLATFORM_PRIVACY}\n\n{EMAIL_PREAMBLE} {EMAIL_SENDER_LINES[trust]}"
     if sends_tried:
         framing = f"{framing} {EMAIL_SENDS_TRIED_LINE}"
-    return f"{framing}\n\n{TEXT_HEADING}\n\n{system_prompt or ''}\n\n{PRIVACY_REMINDER}"
+    body = f"{framing}\n\n{TEXT_HEADING}\n\n{system_prompt or ''}"
+    if clock:
+        body = f"{body}\n\n{clock}"
+    return f"{body}\n\n{PRIVACY_REMINDER}"

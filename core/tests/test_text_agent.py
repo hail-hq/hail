@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 from hailhq.core import text_agent, threads
 from hailhq.core.models import AccountCredit, Agent, Call, CallEvent, PhoneNumber, Sms
-from hailhq.core.prompts import THREAD_TOOL_HINT_TEXT
+from hailhq.core.prompts import PRIVACY_REMINDER, THREAD_TOOL_HINT_TEXT
 from hailhq.core.sms_ingest import ingest_inbound_sms
 from sqlalchemy import literal_column, select, update
 
@@ -760,3 +760,24 @@ async def test_api_sent_text_is_in_text_agent_history_only(async_session) -> Non
 
     voice = await threads.thread_items(async_session, org, agent.id, PERSON)
     assert [i.text for i in voice if i.kind.startswith("text")] == ["now?"]
+
+
+async def test_a_reply_gets_the_date_and_time(async_session) -> None:
+    _, agent, _ = await _seed(async_session)
+    result = await _ingest(async_session, "Are you open now?", "SMclock")
+    row = await async_session.get(Sms, result.sms_id)
+    clock = text_agent.reply_clock(row)
+    assert clock is not None and clock.startswith("# Date and time")
+    assert "It is now:" in clock
+    assert "America/Los_Angeles" in clock  # the texted number, in California
+    assert "For the person texting: " in clock and "Europe/Paris" in clock
+    assert "The person texting is using +33 6 12 34 56 78." in clock
+    system = text_agent.build_chat_messages(agent, [], clock=clock)[0]["content"]
+    assert system.index("Book appointments.") < system.index("# Date and time")
+    assert system.endswith(PRIVACY_REMINDER)
+
+
+def test_a_broken_number_never_fails_a_reply() -> None:
+    sms = Sms(from_e164=None, to_e164="not a number")
+    clock = text_agent.reply_clock(sms)
+    assert clock is not None and "- For the person texting: unknown." in clock

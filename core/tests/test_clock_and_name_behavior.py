@@ -85,3 +85,47 @@ async def test_no_comma_before_the_callers_name(attempt) -> None:
     )
     assert "Sam" in speech, speech
     assert not re.search(r",\s+Sam\b", speech), speech
+
+
+@pytest.mark.parametrize(
+    "channel,at,is_open",
+    [
+        pytest.param("text", datetime(2026, 11, 18, 20, 5, tzinfo=timezone.utc), False),
+        pytest.param("text", datetime(2026, 11, 18, 10, 0, tzinfo=timezone.utc), True),
+        pytest.param(
+            "email", datetime(2026, 11, 18, 20, 5, tzinfo=timezone.utc), False
+        ),
+        pytest.param("email", datetime(2026, 11, 18, 10, 0, tzinfo=timezone.utc), True),
+    ],
+)
+async def test_a_reply_knows_whether_the_office_is_open(channel, at, is_open) -> None:
+    clock = prompts.clock_section(
+        at,
+        channel=channel,
+        business_number="+442079460000",
+        other_number="+447911123456",
+    )
+    build = (
+        prompts.build_text_instructions
+        if channel == "text"
+        else prompts.build_email_instructions
+    )
+    async with anthropic.AsyncAnthropicBedrock(
+        aws_region=os.environ["ANTHROPIC_BEDROCK_REGION"], max_retries=0
+    ) as client:
+        response = await client.messages.create(
+            model=os.environ["ANTHROPIC_MODEL"],
+            max_tokens=300,
+            system=build(FRONT_DESK, clock=clock),
+            messages=[
+                {
+                    "role": "user",
+                    "content": "Is the office open right now? "
+                    "Start your answer with yes or no.",
+                }
+            ],
+        )
+    text = " ".join(block.text for block in response.content if block.type == "text")
+    answer = re.search(r"\b(yes|no)\b", text, re.IGNORECASE)
+    assert answer is not None, text
+    assert (answer.group(1).lower() == "yes") == is_open, text
