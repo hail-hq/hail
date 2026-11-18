@@ -162,8 +162,8 @@ async def call_http_tool(
     """POST one signed request and return text for the model. Never raises."""
     try:
         blocked = _ip_literal_blocked(tool.url)
-    except ValueError:
-        logger.info("http tool %s has a url that cannot be parsed", tool.name)
+    except Exception:
+        logger.warning("http tool %s has a url that cannot be parsed", tool.name)
         return UNREACHABLE
     if blocked:
         logger.warning("http tool %s refused: non-public address", tool.name)

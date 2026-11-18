@@ -99,14 +99,11 @@ async def replace_http_tools(
     unset. Nothing is written before either error.
     """
     if items:
-        # Lock the agent row first, then read the secret and the saved tools:
-        # two saves at once must not each make (and return) a different
-        # secret, or carry headers over from a list the other one replaced.
-        agent.http_tool_secret_encrypted = await db.scalar(
-            select(Agent.http_tool_secret_encrypted)
-            .where(Agent.id == agent.id)
-            .with_for_update()
-        )
+        # Lock the agent row (a no-op if this transaction already updated
+        # it), then read the secret and the saved tools: two saves at once
+        # must not each make (and return) a different secret, or carry
+        # headers over from a list the other one replaced.
+        await db.refresh(agent, ["http_tool_secret_encrypted"], with_for_update=True)
     old = {
         row.name: row
         for row in (

@@ -187,7 +187,8 @@ def verify(secret: str, signature_header: str, raw_body: bytes) -> bool:
 - A request can repeat when a text or email reply is retried, with a new
   `id`, and the arguments can differ the second time. Make lookups safe to
   run twice. For a tool that changes something, check on your side whether
-  the change was already made for that `sms_id` or `email_id`.
+  that change (for example, the same order number) was already made for that
+  `sms_id` or `email_id`.
 - `http_tool_secret` is returned once: on the first save with HTTP tools, and
   by `POST /v1/agents/{id}/rotate-tool-secret`. Live calls keep the secret
   they started with.

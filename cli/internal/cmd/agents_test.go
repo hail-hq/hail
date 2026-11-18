@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -354,6 +355,9 @@ func TestAgentsCreate_HTTPToolsFileMustBeAnArray(t *testing.T) {
 				t.Fatalf("%s %s must fail", command[1], content)
 			}
 		}
+	}
+	if hits := atomic.LoadInt32(&srv.hits); hits != 0 {
+		t.Errorf("a bad tools file must fail before any request, got %d", hits)
 	}
 }
 

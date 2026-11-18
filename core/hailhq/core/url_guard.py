@@ -67,6 +67,9 @@ def assert_public_https_url(url: str, *, field: str = "base_url") -> str:
     host = parts.hostname
     if not host:
         raise UnsafeUrlError(f"{field} has no host")
+    if any(ord(c) < 0x21 or ord(c) == 0x7F for c in host):
+        # getaddrinfo stops at a NUL byte, so it would check another host.
+        raise UnsafeUrlError(f"{field} host has a space or control character")
 
     try:
         port = parts.port or 443
@@ -75,8 +78,8 @@ def assert_public_https_url(url: str, *, field: str = "base_url") -> str:
 
     try:
         infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
-    except (socket.gaierror, UnicodeError) as exc:
-        # UnicodeError: a host name the lookup cannot encode (label too long).
+    except (OSError, ValueError) as exc:
+        # ValueError covers a host the lookup cannot encode (label too long).
         raise UnsafeUrlError(f"{field} host does not resolve: {host}") from exc
 
     for info in infos:
