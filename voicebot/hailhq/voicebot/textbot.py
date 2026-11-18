@@ -1,5 +1,6 @@
 """Text worker: the agent answers inbound SMS. Inbound email runs on its own
-polling tasks here, through ``hailhq.voicebot.emailbot``.
+polling tasks here, through ``hailhq.voicebot.emailbot``, and so does the
+``call.analyzed`` webhook, through ``hailhq.voicebot.callsummary``.
 
 Runs inside the voicebot process (``main.py`` starts it in a daemon thread
 with its own event loop) so text replies use the same LLM precedence and
@@ -46,7 +47,7 @@ from hailhq.core.text_agent import (
     thread_history_for_reply,
 )
 from hailhq.core.threads import ThreadScope
-from hailhq.voicebot import emailbot
+from hailhq.voicebot import callsummary, emailbot
 from hailhq.voicebot.chat_loop import (
     LLM_TIMEOUT_SECONDS,
     MAX_TOOL_ROUNDS,
@@ -266,6 +267,12 @@ async def _email_poll_loop(api: AgentApiClient, stop: threading.Event | None) ->
     await _poll("email", emailbot.reply_once, api, stop)
 
 
+async def _analysis_poll_loop(
+    api: AgentApiClient, stop: threading.Event | None
+) -> None:
+    await _poll("call analysis", callsummary.analyze_once, api, stop)
+
+
 async def run_forever(stop: threading.Event | None = None) -> None:
     api = AgentApiClient(settings.hail_api_url, settings.hail_internal_secret)
     n = settings.hail_text_reply_concurrency
@@ -275,6 +282,9 @@ async def run_forever(stop: threading.Event | None = None) -> None:
         await asyncio.gather(
             *(_poll_loop(api, stop) for _ in range(n)),
             *(_email_poll_loop(api, stop) for _ in range(n)),
+            # Each call is claimed first, so parallel loops never summarize
+            # the same call twice.
+            *(_analysis_poll_loop(api, stop) for _ in range(n)),
         )
     finally:
         try:

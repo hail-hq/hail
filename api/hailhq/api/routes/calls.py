@@ -49,6 +49,7 @@ from hailhq.core.call_allowance import (
     minutes_affordable,
     paid_minutes,
 )
+from hailhq.core.call_analysis import call_transcript
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.carrier_routing import voice_route
 from hailhq.core.compliance_gate import check_call_allowed
@@ -82,6 +83,7 @@ from hailhq.core.schemas import (
     CallListResponse,
     CallResponse,
     CallStatus,
+    CallTranscriptTurn,
     VoiceConfig,
 )
 from hailhq.core.secret_cipher import SecretKeyMissing
@@ -321,10 +323,12 @@ async def create_call(
     """Place an outbound AI voice call.
 
     The call is placed asynchronously — this returns as soon as the call is
-    queued, not when it completes. Poll GET /v1/calls/{call_id} or configure a
-    webhook to get the final status and transcript. Requires
-    recipient_consent=true on the request body; Hail does not verify lawful
-    basis to contact the recipient, the caller warrants it.
+    queued, not when it completes. Poll GET /v1/calls/{call_id} for the final
+    status and the transcript, or subscribe to webhooks: call.completed (and
+    the other call.* events) for the status, call.analyzed for the transcript
+    and a short summary. Requires recipient_consent=true on the request body;
+    Hail does not verify lawful basis to contact the recipient, the caller
+    warrants it.
     """
     # Replay before any DB or LiveKit work, a retry must not re-dispatch.
     if idem is not None and idem.is_replay:
@@ -875,11 +879,13 @@ async def get_call(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> CallResponse:
-    """Fetch one call by id, including its current status and end reason.
+    """Fetch one call by id, including its current status, end reason and
+    transcript.
 
     Org-scoped: returns 404 for a call belonging to a different organization
     (not 403, to avoid confirming the id exists). Use this to poll for the
-    final outcome of a call placed with POST /v1/calls.
+    final outcome of a call placed with POST /v1/calls. The transcript grows
+    while the call runs.
     """
     stmt = select(Call).where(
         Call.transport == "phone",
@@ -892,7 +898,12 @@ async def get_call(
             status_code=http_status.HTTP_404_NOT_FOUND,
             detail="call not found",
         )
-    return CallResponse.model_validate(call)
+    response = CallResponse.model_validate(call)
+    response.transcript = [
+        CallTranscriptTurn.model_validate(turn)
+        for turn in await call_transcript(db, call.id)
+    ]
+    return response
 
 
 # --------------------------------------------------------------------------- #

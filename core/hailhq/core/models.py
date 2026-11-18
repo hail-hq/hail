@@ -918,6 +918,15 @@ class CallBalanceHold(Base):
 
 class CallEvent(Base):
     __tablename__ = "call_events"
+    __table_args__ = (
+        # One call.analyzed marker per call (hailhq.core.call_analysis).
+        Index(
+            "call_events_analyzed_uniq",
+            "call_id",
+            unique=True,
+            postgresql_where=text("kind = 'analyzed'"),
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
