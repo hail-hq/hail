@@ -78,4 +78,7 @@ def downgrade() -> None:
             op.drop_index(
                 name, table_name=table, postgresql_concurrently=True, if_exists=True
             )
+    # The block committed env.py's guarded transaction; guard the ALTER again.
+    op.execute("SET LOCAL statement_timeout = '120s'")
+    op.execute("SET LOCAL lock_timeout = '5s'")
     op.drop_column("agents", "email_caller_enabled")

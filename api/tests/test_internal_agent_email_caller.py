@@ -11,6 +11,7 @@ import uuid
 
 import pytest
 from botocore.exceptions import ConnectTimeoutError, ReadTimeoutError
+from hailhq.api.routes.internal import agent as agent_routes
 from hailhq.core import hmac_signing
 from hailhq.core.agent_tools import email_caller
 from hailhq.core.billing import CALL_META_BILLED
@@ -698,3 +699,40 @@ async def test_a_suppressed_inbox_is_refused_under_another_spelling(
     assert data["ok"] is False
     assert await _emails(async_session) == []
     email_mock.send_email.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("suppressed", "asked"),
+    [
+        ("victim+1@example.com", "victim+2@example.com"),
+        ("v.ictim@gmail.com", "victim@googlemail.com"),
+        ("victim@example.com", "Victim+x@example.com"),
+    ],
+)
+async def test_suppression_matches_the_email_inbox_both_ways(
+    client, async_session, email_mock, add_phone_number, suppressed, asked
+):
+    call = await _call(async_session, add_phone_number)
+    await add_suppression(
+        async_session,
+        organization_id=call.organization_id,
+        recipient=suppressed,
+        channel="email",
+        reason="complaint",
+        source="unsubscribe_link",
+    )
+    await async_session.commit()
+    assert (await _post(client, call, to=asked))["ok"] is False
+    assert await _emails(async_session) == []
+
+
+async def test_a_failed_event_write_still_reports_the_send(
+    client, async_session, email_mock, add_phone_number, monkeypatch
+):
+    async def broken(*_args, **_kwargs):
+        raise RuntimeError("db blip")
+
+    monkeypatch.setattr(agent_routes, "_record_caller_email", broken)
+    call = await _call(async_session, add_phone_number)
+    assert (await _post(client, call))["ok"] is True
+    assert len(await _emails(async_session)) == 1

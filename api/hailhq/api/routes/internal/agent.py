@@ -80,6 +80,8 @@ from hailhq.core.compliance_gate import (
     check_email_allowed,
     check_handover_allowed,
     check_sms_allowed,
+    inbox_suppressed,
+    mailbox_key,
     normalize_recipient,
 )
 from hailhq.core.contact_ids import normalize_contact_id, parse_contact_id
@@ -1782,8 +1784,8 @@ def _caller_cap_denial(
         )
     # Caller ID can be faked, so the per-number caps alone do not protect
     # one inbox from many calls.
-    inbox = email_caller.mailbox_key(recipient)
-    to_inbox = [r for r in rows if email_caller.mailbox_key(r.address) == inbox]
+    inbox = mailbox_key(recipient)
+    to_inbox = [r for r in rows if mailbox_key(r.address) == inbox]
     if len(to_inbox) >= email_caller.MAX_EMAILS_PER_ADDRESS_PER_DAY:
         return "I can't send more emails to that address today.", "address_daily_cap"
     return None
@@ -1870,22 +1872,18 @@ async def agent_email_caller(
         )
         denial = _caller_cap_denial(
             [
-                _CallerEmailRow((to[0] if to else "").strip().lower(), st, c, e)
+                _CallerEmailRow(normalize_recipient(to[0] if to else ""), st, c, e)
                 for to, st, c, e in rows
             ],
             call_id=call.id,
             caller=caller,
-            recipient=body.to_address.strip().lower(),
+            recipient=normalize_recipient(body.to_address),
         )
-    if denial is None:
-        # The send's own gate checks the address as given. Also check its
-        # inbox key, so a +tag or Gmail-dot spelling cannot reach an inbox
-        # that opted out.
-        key = email_caller.mailbox_key(body.to_address)
-        if key != normalize_recipient(body.to_address):
-            gate = await check_email_allowed(db, org, [key])
-            if not gate.allowed:
-                denial = _SPOKEN_NOT_ALLOWED, gate.reason or "suppressed"
+    if denial is None and await inbox_suppressed(db, org, body.to_address):
+        # The send's own gate matches the exact spelling. This one matches
+        # the email inbox on both sides, so a +tag or Gmail-dot spelling of
+        # a suppressed address (either way round) is refused too.
+        denial = _SPOKEN_NOT_ALLOWED, "suppressed_inbox"
     if denial is not None:
         spoken, reason = denial
         return await _deny(
@@ -1916,8 +1914,16 @@ async def agent_email_caller(
         consent_source="voice_call",
     )
     if row is not None:
-        # Shows the send in the call's activity next to the transcript.
-        await _record_caller_email(db, call.id, body.tool_invocation_id, row)
+        # Shows the send in the call's activity next to the transcript. The
+        # email is already handed over: a failure here must not tell the
+        # agent it failed (it would send again).
+        try:
+            await _record_caller_email(db, call.id, body.tool_invocation_id, row)
+        except Exception:
+            logger.warning(
+                "email_caller event not written for call_id=%s", call.id, exc_info=True
+            )
+            await db.rollback()
     return result
 
 

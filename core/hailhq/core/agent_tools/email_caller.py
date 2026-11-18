@@ -25,6 +25,7 @@ from typing import Any
 from hailhq.core.agent_tools.send_email import MAX_SUBJECT_CHARS
 from hailhq.core.agent_tools.send_email import _is_available as _email_available
 from hailhq.core.agent_tools.spec import NO_CALL, SPOKEN_FALLBACK, ToolContext, ToolSpec
+from hailhq.core.compliance_gate import mailbox_key
 
 # The internal route (AgentEmailCallerRequest) imports these as its caps.
 MAX_ADDRESS_CHARS = 254
@@ -67,20 +68,6 @@ def _call_with(org_name: str | None) -> str:
     # fixed words.
     name = clean_subject(org_name or "")[:MAX_ORG_NAME_CHARS]
     return f"a phone call with {name}" if name else "a phone call"
-
-
-def mailbox_key(address: str) -> str:
-    """The inbox an address may reach: lowercase, without a ``+tag``, and for
-    Gmail without dots (googlemail.com is gmail.com). Used only where it
-    makes a cap stricter (the per-address count): on other domains
-    ``a+x@`` and ``a@`` may be different inboxes. The email goes to the
-    address as given."""
-    local, _, domain = address.strip().lower().rpartition("@")
-    local = local.split("+", 1)[0]
-    if domain in ("gmail.com", "googlemail.com"):
-        domain = "gmail.com"
-        local = local.replace(".", "")
-    return f"{local}@{domain}"
 
 
 def usable_address(address: str) -> bool:
