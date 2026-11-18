@@ -445,7 +445,7 @@ async def test_caller_number_gets_three_emails_a_day_across_calls(
     other = await _call(
         async_session, add_phone_number, like=first, to_e164="+14155550199"
     )
-    assert (await _post(client, other))["ok"] is True
+    assert (await _post(client, other, to="other@example.com"))["ok"] is True
 
 
 async def test_caller_number_gets_two_addresses_a_day(
@@ -581,3 +581,48 @@ async def test_org_name_falls_back_to_the_organizations_table(
     assert resp.json()["ok"] is True
     (row,) = await _emails(async_session)
     assert row.subject == "From a phone call with Acme Dental: Datasheet"
+
+
+async def test_one_address_gets_three_emails_a_day_from_any_caller(
+    client, async_session, email_mock, add_phone_number
+):
+    first = await _call(async_session, add_phone_number, to_e164="+14155550101")
+    assert (await _post(client, first, to="victim@example.com"))["ok"] is True
+    for n in (2, 3):
+        call = await _call(
+            async_session, add_phone_number, like=first, to_e164=f"+1415555010{n}"
+        )
+        assert (await _post(client, call, to="victim@example.com"))["ok"] is True
+    spoofed = await _call(
+        async_session, add_phone_number, like=first, to_e164="+14155550104"
+    )
+    data = await _post(client, spoofed, to="victim@example.com")
+    assert data["ok"] is False
+    assert len(await _emails(async_session)) == 3
+    reasons = (
+        (
+            await async_session.execute(
+                select(AuditLog.payload["reason"].astext).where(
+                    AuditLog.organization_id == first.organization_id,
+                    AuditLog.action == "agent.email.blocked",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert reasons == ["address_daily_cap"]
+
+
+async def test_a_second_address_names_the_per_call_rule(
+    client, async_session, email_mock, add_phone_number
+):
+    """Yesterday's address plus this call's makes two; a third on this call
+    breaks the per-call rule first, and the refusal says so."""
+    first = await _call(async_session, add_phone_number)
+    assert (await _post(client, first, to="c@example.com"))["ok"] is True
+    second = await _call(async_session, add_phone_number, like=first)
+    assert (await _post(client, second, to="a@example.com"))["ok"] is True
+    data = await _post(client, second, to="b@example.com")
+    assert data["ok"] is False
+    assert "already used" in data["spoken"]

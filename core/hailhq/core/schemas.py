@@ -986,7 +986,8 @@ class AgentCreate(BaseModel):
             "call. Anyone who can call the number can ask for an email to any "
             "address, so Hail caps it: 2 per call to one address, 3 per "
             "caller number and at most 2 addresses per caller number in 24 "
-            "hours, 100 per organization in 24 hours. The `tools` list does "
+            "hours, 3 per recipient address and 100 per organization in 24 "
+            "hours. The `tools` list does "
             "not affect it. Off by default."
         ),
     )

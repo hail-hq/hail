@@ -1744,6 +1744,15 @@ def _caller_cap_denial(
     call: the agent reads it back and gets a yes before the first send."""
     if len(rows) >= email_caller.MAX_EMAILS_PER_ORG_PER_DAY:
         return "I can't send more emails right now.", "org_daily_cap"
+    # This call's own rules first, so the refusal names the rule it broke.
+    this_call = [r for r in rows if r[2] == str(call_id)]
+    if len(this_call) >= email_caller.MAX_EMAILS_PER_CALL:
+        return "That is the limit of emails for one call.", "call_cap"
+    if any(r[0] != recipient for r in this_call if r[1] != "bounced"):
+        return (
+            "I can only email the address I already used on this call.",
+            "one_address",
+        )
     mine = [r for r in rows if r[3] == caller]
     if len(mine) >= email_caller.MAX_EMAILS_PER_CALLER_PER_DAY:
         return "I can't send you more emails today.", "caller_daily_cap"
@@ -1753,14 +1762,11 @@ def _caller_cap_denial(
             "I can't email another address today.",
             "caller_daily_addresses",
         )
-    this_call = [r for r in rows if r[2] == str(call_id)]
-    if len(this_call) >= email_caller.MAX_EMAILS_PER_CALL:
-        return "That is the limit of emails for one call.", "call_cap"
-    if any(r[0] != recipient for r in this_call if r[1] != "bounced"):
-        return (
-            "I can only email the address I already used on this call.",
-            "one_address",
-        )
+    # Caller ID can be faked, so the per-number caps alone do not protect
+    # one recipient from many calls.
+    to_recipient = [r for r in rows if r[0] == recipient]
+    if len(to_recipient) >= email_caller.MAX_EMAILS_PER_ADDRESS_PER_DAY:
+        return "I can't send more emails to that address today.", "address_daily_cap"
     return None
 
 

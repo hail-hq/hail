@@ -130,13 +130,14 @@ SDK: `client.agents.update(agent_id, email_caller_enabled=True)`.
     the send: the agent reads it back first;
   - 3 emails and 2 addresses per phone number of the other person, in any
     24 hours, across calls;
+  - 3 emails to one address in any 24 hours, from any caller;
   - 100 emails per organization in any 24 hours.
 
   A bounced email still counts, but its address can be replaced. A send
   that may have reached the provider counts even if it failed. A caller
   with a hidden number gets no email. Caller ID can be faked, so the
   per-number caps slow one person down but do not stop a determined one; the
-  organization cap is the hard limit.
+  per-address and organization caps still hold.
 
 - The agent's later threads leave these emails out: their text came from the
   caller, so they are never quoted back as your team's mail.

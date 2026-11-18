@@ -34,8 +34,14 @@ MAX_EMAILS_PER_CALL = 2
 # Per caller phone number, over any 24 hours, across all calls.
 MAX_EMAILS_PER_CALLER_PER_DAY = 3
 MAX_ADDRESSES_PER_CALLER_PER_DAY = 2
+# Per recipient address, over any 24 hours, across all callers: caller ID
+# can be faked, so the per-number caps alone do not protect one inbox.
+MAX_EMAILS_PER_ADDRESS_PER_DAY = 3
 # Per organization, over any 24 hours.
 MAX_EMAILS_PER_ORG_PER_DAY = 100
+# Control, format and surrogate characters: they break headers or hide
+# text. Unassigned and private-use characters (newer emoji) stay.
+_HIDDEN = frozenset({"Cc", "Cf", "Cs"})
 # Longest organization name shown in the fixed lines.
 MAX_ORG_NAME_CHARS = 80
 
@@ -67,7 +73,7 @@ def clean_subject(subject: str) -> str:
     kept = "".join(
         " " if c.isspace() else c
         for c in subject
-        if c.isspace() or not unicodedata.category(c).startswith("C")
+        if c.isspace() or unicodedata.category(c) not in _HIDDEN
     )
     return " ".join(kept.split())
 
@@ -83,9 +89,7 @@ def clean_body(body_text: str) -> str:
     overrides, zero-width marks) that could disguise its text. Newlines and
     tabs stay."""
     return "".join(
-        c
-        for c in body_text
-        if c in "\n\t" or not unicodedata.category(c).startswith("C")
+        c for c in body_text if c in "\n\t" or unicodedata.category(c) not in _HIDDEN
     ).strip()
 
 
@@ -145,7 +149,7 @@ def _bind(metadata: dict[str, Any]) -> ToolSpec:
     name = metadata.get("org_name")
     # Blank or not text: send none, so the API reads its own copy.
     # _call_with cleans and cuts it.
-    name = name if isinstance(name, str) and name.strip() else None
+    name = name[:500] if isinstance(name, str) and name.strip() else None
     return dataclasses.replace(
         SPEC, execute=functools.partial(_execute, org_name=name), bind=None
     )
@@ -193,6 +197,7 @@ __all__ = [
     "MAX_ADDRESSES_PER_CALLER_PER_DAY",
     "MAX_ADDRESS_CHARS",
     "MAX_BODY_CHARS",
+    "MAX_EMAILS_PER_ADDRESS_PER_DAY",
     "MAX_EMAILS_PER_CALL",
     "MAX_EMAILS_PER_CALLER_PER_DAY",
     "MAX_EMAILS_PER_ORG_PER_DAY",

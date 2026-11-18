@@ -909,3 +909,13 @@ async def test_email_caller_takes_one_plain_mailbox_only():
 def test_email_caller_cleans_the_org_name_in_the_fixed_words():
     subject = email_caller.framed_subject("Datasheet", "Acme\u202e\u200b Dental")
     assert subject == "From a phone call with Acme Dental: Datasheet"
+
+
+def test_email_caller_keeps_private_use_and_new_characters():
+    assert email_caller.clean_subject("Hi \ue000") == "Hi \ue000"
+    assert email_caller.clean_body("Hi \ue000") == "Hi \ue000"
+
+
+def test_email_caller_cuts_a_long_org_name_before_posting():
+    tool = email_caller.SPEC.bind({"org_name": "A" * 600})
+    assert len(tool.execute.keywords["org_name"]) == 500
