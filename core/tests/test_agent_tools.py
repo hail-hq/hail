@@ -8,6 +8,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from hailhq.core.agent_tools import email_caller
 from hailhq.core.agent_tools.registry import all_tools
 from hailhq.core.agent_tools.spec import ToolContext
 from hailhq.core.config import settings
@@ -20,6 +21,7 @@ from hailhq.core.models import (
     RetiredHailMailAddress,
     Sms,
 )
+from hailhq.core.schemas import EmailCreate
 from hailhq.core.threads import ThreadScope
 from sqlalchemy import select
 
@@ -750,16 +752,12 @@ async def test_thread_history_withheld_scope_reads_nothing(async_session):
 def test_email_caller_is_not_in_the_registry():
     # The one tool that takes a dictated address is opt-in per agent: a
     # registry tool would be on for every agent whose `tools` is null.
-    from hailhq.core.agent_tools import email_caller
-
     assert email_caller.SPEC.name not in {t.name for t in all_tools()}
     assert email_caller.SPEC.risk_tier == "outbound_send"
     assert "say yes" in email_caller.SPEC.description
 
 
 async def test_email_caller_posts_the_confirmed_address():
-    from hailhq.core.agent_tools import email_caller
-
     api = FakeApi(spoken="Email sent.")
     ctx = _ctx(api=api)
     spoken = await email_caller.SPEC.execute(
@@ -779,8 +777,6 @@ async def test_email_caller_posts_the_confirmed_address():
 
 
 async def test_email_caller_checks_its_input_before_posting():
-    from hailhq.core.agent_tools import email_caller
-
     api = FakeApi(spoken="Email sent.")
     ok = {"to_address": "sam@example.com", "subject": "s", "body_text": "b"}
     for bad in (
@@ -800,8 +796,6 @@ async def test_email_caller_checks_its_input_before_posting():
 
 
 async def test_email_caller_refuses_too_long_input_instead_of_cutting_it():
-    from hailhq.core.agent_tools import email_caller
-
     api = FakeApi(spoken="Email sent.")
     ok = {"to_address": "sam@example.com", "subject": "s", "body_text": "b"}
     long_body = "x" * email_caller.MAX_BODY_CHARS + " https://example.com"
@@ -819,8 +813,6 @@ async def test_email_caller_refuses_too_long_input_instead_of_cutting_it():
 
 
 def test_email_caller_frames_every_email():
-    from hailhq.core.agent_tools import email_caller
-
     body = email_caller.framed_body("  Link: https://example.com  ", "Acme\nDental")
     assert body.startswith(
         "You asked for this during a phone call with Acme Dental.\n\n"
@@ -833,3 +825,17 @@ def test_email_caller_frames_every_email():
         email_caller.framed_subject(" Datasheet ", "Acme Dental")
         == "From a phone call with Acme Dental: Datasheet"
     )
+
+
+def test_public_sends_cannot_plant_the_caller_email_marks():
+    # The caps count marked rows and history hides them: a forged mark could
+    # use up the caps or hide mail from history.
+    for key in ("email_caller", "caller_e164"):
+        with pytest.raises(ValueError, match="reserved"):
+            EmailCreate(
+                to=["a@example.com"],
+                subject="s",
+                body_text="b",
+                recipient_consent=True,
+                metadata={key: True},
+            )

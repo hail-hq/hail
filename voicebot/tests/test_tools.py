@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import dataclasses
 import uuid
 from unittest.mock import AsyncMock
 
+from hailhq.core.agent_tools import email_caller
 from hailhq.voicebot.tools import (
     SPOKEN_TOOL_FAILURE,
     _make_handler,
@@ -304,10 +306,6 @@ async def test_connected_handover_asks_for_no_reply():
 
 
 async def _email_caller_names(monkeypatch, meta: dict) -> list[str]:
-    import dataclasses
-
-    from hailhq.core.agent_tools import email_caller
-
     async def _avail(_org, _session):
         return True
 

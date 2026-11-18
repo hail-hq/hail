@@ -1414,6 +1414,11 @@ RESERVED_EMAIL_METADATA_KEYS = frozenset(
         "reply_to_email_id",
         "inbound_email_id",
         "thread_sender",
+        # The email_caller tool's caps count rows with these keys, and thread
+        # history leaves them out: a forged key could use up the caps or hide
+        # mail from history.
+        "email_caller",
+        "caller_e164",
     }
 )
 
@@ -1864,8 +1869,9 @@ class EmailCreate(ConsentAttestationMixin):
             "Free-form JSON object attached to the email and echoed back on "
             "reads. Not interpreted by Hail. The keys 'forwarded_from', "
             "'forward_headers', 'system_kind', 'reply_to_email_id', "
-            "'inbound_email_id' and 'thread_sender' are reserved for Hail's own "
-            "bookkeeping and are rejected."
+            "'inbound_email_id', 'thread_sender', 'email_caller' and "
+            "'caller_e164' are reserved for Hail's own bookkeeping and are "
+            "rejected."
         ),
     )
     attachment_ids: list[UUID] | None = Field(

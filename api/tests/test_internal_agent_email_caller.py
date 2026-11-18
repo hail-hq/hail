@@ -161,7 +161,7 @@ async def test_on_sends_to_the_caller_from_the_verified_domain(
     assert row.bcc_addresses in (None, [])
     assert row.from_address == "noreply@mail.a.test"
     assert row.subject == "From a phone call with Acme Dental: Datasheet"
-    # None, as for other call sends, so thread history shows it later.
+    # None, as for other call sends. History leaves it out by its mark.
     assert row.agent_id is None
     assert row.metadata_["call_id"] == str(call.id)
     assert row.metadata_["email_caller"] is True
@@ -298,6 +298,19 @@ async def test_replay_sends_once(client, async_session, email_mock, add_phone_nu
     assert (await _post(client, call, invocation=invocation))["ok"] is True
     assert len(await _emails(async_session)) == 1
     email_mock.send_email.assert_awaited_once()
+    events = (
+        (
+            await async_session.execute(
+                select(CallEvent.id).where(
+                    CallEvent.call_id == call.id,
+                    CallEvent.kind == email_caller.EVENT_KIND,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(events) == 1  # the retry does not write a second event
 
 
 async def test_call_without_an_agent_is_refused(

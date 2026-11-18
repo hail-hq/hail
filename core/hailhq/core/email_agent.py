@@ -32,7 +32,7 @@ from hailhq.core.email_mime import (
     reply_subject,
 )
 from hailhq.core.forward_targets import normalize_address
-from hailhq.core.models import Agent, Email, EmailDomain, Sms
+from hailhq.core.models import CALLER_EMAIL_MARK, Agent, Email, EmailDomain, Sms
 from hailhq.core.prompts import (
     TEAM_EMAIL_LABEL,
     SenderTrust,
@@ -121,14 +121,7 @@ _NO_REPLY_LOCAL = re.compile(
 # Why a stored row stays out of the chat: nothing proved who wrote it, or it was
 # never meant for the agent.
 _AGENT_SEND_KEYS = ("reply_to_email_id", "inbound_email_id", "thread_sender")
-_NOT_TEAM_SEND_KEYS = (
-    "forwarded_from",
-    "system_kind",
-    "call_id",
-    "tool_invocation_id",
-    # The email_caller tool: text a caller dictated, never team mail.
-    "email_caller",
-)
+_NOT_TEAM_SEND_KEYS = ("forwarded_from", "system_kind", "call_id", "tool_invocation_id")
 _UNTRUSTED_SKIPS = (
     "auto_generated",
     "sender_blocked",
@@ -687,7 +680,7 @@ def email_history_filter(sender: str, *, allow_call_mail: bool = False):
                 ~has_key("system_kind"),
                 # A caller email holds text the caller dictated: history
                 # must not quote it back as the team's own mail.
-                ~has_key("email_caller"),
+                ~has_key(CALLER_EMAIL_MARK),
             ),
         )
     return and_(

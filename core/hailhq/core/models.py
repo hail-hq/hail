@@ -1596,6 +1596,14 @@ class EmailForwardTarget(Base):
     )
 
 
+# Emails the email_caller tool sent (``metadata.email_caller = true``). Its
+# caps count these rows through ``emails_caller_email_idx``, whose predicate
+# must stay this exact SQL for the planner to use it; thread history leaves
+# them out.
+CALLER_EMAIL_MARK = "email_caller"
+CALLER_EMAIL_ROWS_SQL = f"(metadata ->> '{CALLER_EMAIL_MARK}') = 'true'"
+
+
 class Email(Base):
     """A single email message, outbound or inbound.
 
@@ -1715,13 +1723,13 @@ class Email(Base):
             "agent_id",
             postgresql_where=text("agent_id IS NOT NULL"),
         ),
-        # Caller emails (the email_caller tool): its per-call, per-caller and
-        # per-org caps count these rows of the last 24 hours.
+        # Caller emails (CALLER_EMAIL_MARK): the email_caller caps count
+        # these rows of the last 24 hours.
         Index(
             "emails_caller_email_idx",
             "organization_id",
             "requested_at",
-            postgresql_where=text("(metadata ->> 'email_caller') = 'true'"),
+            postgresql_where=text(CALLER_EMAIL_ROWS_SQL),
         ),
         CheckConstraint(
             "status IN ('queued','sent','delivered','failed','bounced',"

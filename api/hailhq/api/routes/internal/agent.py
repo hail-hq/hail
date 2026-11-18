@@ -120,6 +120,8 @@ from hailhq.core.handover import (
 from hailhq.core.inbound_calls import organization_name
 from hailhq.core.internal_webhook import quote_call_price, quotes_enabled
 from hailhq.core.models import (
+    CALLER_EMAIL_MARK,
+    CALLER_EMAIL_ROWS_SQL,
     Agent,
     AgentHandoverContact,
     Call,
@@ -1697,12 +1699,45 @@ class AgentEmailCallerRequest(AgentSendBase):
     body_text: str = Field(min_length=1, max_length=email_caller.MAX_BODY_CHARS)
 
 
-# Marks an email the agent sent to the person on the call. The caps count
-# these rows; the partial index ``emails_caller_email_idx`` (same predicate,
-# written out so the planner can match it) keeps the count cheap.
-_CALLER_EMAIL_META = "email_caller"
-CALLER_EMAIL_ROWS = text("(emails.metadata ->> 'email_caller') = 'true'")
+# The caps count marked rows; the predicate is the partial index's own SQL
+# (models.CALLER_EMAIL_ROWS_SQL) so the planner uses the index.
 _CAP_WINDOW = timedelta(hours=24)
+
+
+async def _record_caller_email(
+    db: AsyncSession, call_id: UUID, invocation: UUID, row: Email
+) -> None:
+    """Write the call's ``email_caller`` event for this send, once. Under the
+    call row lock, so the original request and a retry never both write it."""
+    call = await _load_call_for_update(db, call_id)
+    if call is None:
+        return
+    exists = await db.scalar(
+        select(CallEvent.id)
+        .where(
+            CallEvent.call_id == call_id,
+            CallEvent.kind == email_caller.EVENT_KIND,
+            CallEvent.payload["tool_invocation_id"].astext == str(invocation),
+        )
+        .limit(1)
+    )
+    if exists is None:
+        # ``status`` is the status right after the send; the email's own
+        # events carry what happens later.
+        db.add(
+            CallEvent(
+                call_id=call_id,
+                kind=email_caller.EVENT_KIND,
+                payload={
+                    "tool_invocation_id": str(invocation),
+                    "email_id": str(row.id),
+                    "to": row.to_addresses[0],
+                    "subject": row.subject,
+                    "status": row.status,
+                },
+            )
+        )
+    await db.commit()
 
 
 def _caller_cap_denial(
@@ -1754,6 +1789,12 @@ async def agent_email_caller(
     The send itself is the directory send's path: suppression, velocity and
     agent caps, the org's sending domain, and normal email billing.
     """
+    # The name goes in the fixed lines. Looked up before any lock: it opens
+    # its own session and may ask hail.so.
+    org_hint = await db.scalar(
+        select(Call.organization_id).where(Call.id == body.call_id)
+    )
+    org_name = await organization_name(org_hint) if org_hint else None
     call = await _load_call_for_update(db, body.call_id)
     await _tag_call(db, call)
     if call is None:
@@ -1764,6 +1805,9 @@ async def agent_email_caller(
     # sending when the call ends.
     prior = await _prior_send(db, Email, org, body.tool_invocation_id)
     if prior is not None:
+        if prior.status != "queued":
+            # The original may have stopped before writing the call event.
+            await _record_caller_email(db, call.id, body.tool_invocation_id, prior)
         ok = prior.status not in ("failed", "bounced")
         return AgentSendResponse(
             ok=ok,
@@ -1791,12 +1835,9 @@ async def agent_email_caller(
         return AgentSendResponse(ok=False, spoken=_SPOKEN_NOT_ALLOWED)
 
     recipient = normalize_recipient(body.to_address)
-    meta = {**_meta(body), _CALLER_EMAIL_META: True, "caller_e164": caller}
+    meta = {**_meta(body), CALLER_EMAIL_MARK: True, "caller_e164": caller}
     denial = await _shared_denial(db, call)
-    org_name = None
     if denial is None:
-        # Before the org-wide lock below: the lookup may leave the database.
-        org_name = await organization_name(org)
         # Serializes caller emails across this org's calls until the row is
         # committed, so two calls cannot both pass a cap with one slot left.
         # Its own key: org_lock is held through slow carrier work.
@@ -1809,7 +1850,7 @@ async def agent_email_caller(
                 Email.metadata_["caller_e164"].astext,
             ).where(
                 Email.organization_id == org,
-                CALLER_EMAIL_ROWS,
+                text(CALLER_EMAIL_ROWS_SQL),
                 Email.requested_at >= datetime.now(timezone.utc) - _CAP_WINDOW,
                 # Only a send SES surely never took is free. After a timeout
                 # SES may have sent it, so it counts.
@@ -1846,30 +1887,15 @@ async def agent_email_caller(
         subject=email_caller.framed_subject(body.subject, org_name),
         body_text=email_caller.framed_body(body.body_text, org_name),
         meta=meta,
-        # None, as on /send-email. Thread history leaves these rows out
-        # (``email_caller`` in email_agent._NOT_TEAM_SEND_KEYS): the text is
-        # the caller's, so it is never quoted back as the team's mail.
+        # None, as on /send-email. Thread history leaves these rows out by
+        # their mark (email_agent.email_history_filter): the text is the
+        # caller's, so it is never quoted back as the team's mail.
         agent_id=None,
         consent_source="voice_call",
     )
     if row is not None:
         # Shows the send in the call's activity next to the transcript.
-        # ``status`` is the status right after the send; the email's own
-        # events carry what happens later.
-        db.add(
-            CallEvent(
-                call_id=call.id,
-                kind=email_caller.EVENT_KIND,
-                payload={
-                    "tool_invocation_id": str(body.tool_invocation_id),
-                    "email_id": str(row.id),
-                    "to": body.to_address,
-                    "subject": row.subject,
-                    "status": row.status,
-                },
-            )
-        )
-        await db.commit()
+        await _record_caller_email(db, call.id, body.tool_invocation_id, row)
     return result
 
 

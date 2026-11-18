@@ -27,6 +27,18 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # Index first, then the column: if the slow build fails, nothing is
+    # committed that a rerun would trip on. IF NOT EXISTS covers a rerun
+    # after a column failure.
+    with op.get_context().autocommit_block():
+        op.create_index(
+            "emails_caller_email_idx",
+            "emails",
+            ["organization_id", "requested_at"],
+            postgresql_where=sa.text("(metadata ->> 'email_caller') = 'true'"),
+            postgresql_concurrently=True,
+            if_not_exists=True,
+        )
     op.add_column(
         "agents",
         sa.Column(
@@ -36,14 +48,6 @@ def upgrade() -> None:
             nullable=False,
         ),
     )
-    with op.get_context().autocommit_block():
-        op.create_index(
-            "emails_caller_email_idx",
-            "emails",
-            ["organization_id", "requested_at"],
-            postgresql_where=sa.text("(metadata ->> 'email_caller') = 'true'"),
-            postgresql_concurrently=True,
-        )
 
 
 def downgrade() -> None:
