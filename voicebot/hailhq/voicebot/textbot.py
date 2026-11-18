@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 import threading
 from pathlib import Path
 from typing import Any
@@ -40,6 +39,7 @@ from hailhq.core.telemetry_identity import (
 from hailhq.core.text_agent import (
     EMPTY_REPLY_SKIP,
     MAX_REPLY_CHARS,
+    SKIP_REASONS,
     ClaimedReply,
     ReplyState,
     build_chat_messages,
@@ -62,9 +62,6 @@ from hailhq.voicebot.tools import wrap_tool
 from livekit.agents.llm import FunctionToolCall
 
 logger = logging.getLogger("hailhq.voicebot.textbot")
-
-# A skip reason code from reply-sms ("thread_cap", "sms_registration").
-_REASON_CODE = re.compile(r"[a-z][a-z0-9_]{1,40}")
 
 POLL_SECONDS = 2.0
 
@@ -250,11 +247,9 @@ async def _reply_claimed(api: AgentApiClient, claimed: ClaimedReply, span=None) 
         state = "failed"
     reason = result.get("reason")
     detail = result.get("detail")
-    # Codes only: an older API sent a sentence here (a rolling deploy can
-    # pair this worker with it). Such a sentence is not stored.
-    code = (
-        reason if isinstance(reason, str) and _REASON_CODE.fullmatch(reason) else None
-    )
+    # Known codes only: an older API sent a sentence or a carrier code here (a
+    # rolling deploy can pair this worker with it). Those are not stored.
+    code = reason if isinstance(reason, str) and reason in SKIP_REASONS else None
     if state != "done":
         # An older API's sentence can hold the recipient's number: not logged.
         logger.info(

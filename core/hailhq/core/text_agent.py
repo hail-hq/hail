@@ -53,6 +53,7 @@ __all__ = [
     "REPLY_FAILED_SKIP",
     "RETRY_BACKOFF",
     "SEND_BLOCKED_SKIP",
+    "SKIP_REASONS",
     "SMS_REGISTRATION_SKIP",
     "TEXT_PREAMBLE",
     "THREAD_CAP_SKIP",
@@ -108,6 +109,22 @@ CARRIER_REJECTED_SKIP = "carrier_rejected"
 # Any other failed reply: model errors past ``MAX_ATTEMPTS``, a missing model
 # key, or an older API that sent no code.
 REPLY_FAILED_SKIP = "reply_failed"
+# Every code above: the worker stores only these from reply-sms.
+SKIP_REASONS = frozenset(
+    {
+        INSUFFICIENT_FUNDS_SKIP,
+        NO_AGENT_SKIP,
+        EXPIRED_SKIP,
+        EMPTY_REPLY_SKIP,
+        THREAD_CAP_SKIP,
+        SEND_BLOCKED_SKIP,
+        SMS_REGISTRATION_SKIP,
+        AGENT_CAPS_SKIP,
+        PROVIDER_ERROR_SKIP,
+        CARRIER_REJECTED_SKIP,
+        REPLY_FAILED_SKIP,
+    }
+)
 
 ReplyState = Literal["done", "skipped", "failed"]
 
@@ -256,12 +273,7 @@ async def claim_pending_reply(db: AsyncSession) -> ClaimedReply | None:
             # reply-sms would refuse the send: skip before the model runs.
             unfunded.add(org)
             logger.info("sms_id=%s reply skipped: %s", sms.id, INSUFFICIENT_FUNDS_SKIP)
-            sms.agent_reply_state = "skipped"
-            sms.metadata_ = {
-                **(sms.metadata_ or {}),
-                "skipped_reason": INSUFFICIENT_FUNDS_SKIP,
-            }
-            await db.commit()
+            await finish_reply(db, sms, "skipped", reason=INSUFFICIENT_FUNDS_SKIP)
             continue
         sms.agent_reply_state = "processing"
         sms.agent_reply_attempts += 1
