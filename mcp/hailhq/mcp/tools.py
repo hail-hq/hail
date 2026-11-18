@@ -1892,6 +1892,8 @@ def resolve_actor_for_analytics(enabled: bool) -> None:
 
 _ACTOR_CACHE_MAX = 1024
 _actor_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+# In-flight lookups by cache key, so parallel calls share one whoami.
+_actor_lookups: dict[str, asyncio.Future[dict[str, Any]]] = {}
 
 
 def _actor_cache_key(bearer: str) -> str:
@@ -1925,34 +1927,57 @@ async def _lookup_actor(
             identity["organization_name"] = await fetch_organization_name(str(org_id))
 
 
+async def _resolve_and_cache(
+    client: HailClient, cache_key: str | None, tracing: bool
+) -> dict[str, Any]:
+    identity: dict[str, Any] = {}
+    try:
+        # One bound for whoami and the org-name lookup together.
+        await asyncio.wait_for(
+            _lookup_actor(client, identity, tracing), _ACTOR_LOOKUP_SECONDS
+        )
+        ttl = _ACTOR_TTL_SECONDS
+    except Exception:
+        # Metadata enrichment never decides whether the tool is authorized.
+        # Keep the ids whoami already returned; retry sooner.
+        ttl = _ACTOR_FAILURE_TTL_SECONDS
+    if cache_key:
+        if len(_actor_cache) >= _ACTOR_CACHE_MAX:
+            _actor_cache.clear()
+        _actor_cache[_actor_cache_key(cache_key)] = (
+            time.monotonic() + ttl,
+            dict(identity),
+        )
+    return identity
+
+
 async def resolve_actor(
     client: HailClient, cache_key: str | None = None
 ) -> dict[str, Any]:
-    """Verified actor shared by tool traces and the PostHog identify callback."""
-    identity: dict[str, Any] = {}
+    """Verified actor for tool traces and analytics. Concurrent lookups for
+    one bearer share a single ``whoami``."""
     tracing = telemetry_enabled()
-    if tracing or (cache_key and _analytics_actor):
-        cached = cached_actor(cache_key) if cache_key else None
-        if cached is not None:
-            return cached
-        try:
-            # One bound for whoami and the org-name lookup together.
-            await asyncio.wait_for(
-                _lookup_actor(client, identity, tracing), _ACTOR_LOOKUP_SECONDS
+    if not (tracing or (cache_key and _analytics_actor)):
+        return {}
+    if not cache_key:
+        return await _resolve_and_cache(client, None, tracing)
+    cached = cached_actor(cache_key)
+    if cached is not None:
+        return cached
+    key = _actor_cache_key(cache_key)
+    lookup = _actor_lookups.get(key)
+    if lookup is None:
+        lookup = asyncio.ensure_future(_resolve_and_cache(client, cache_key, tracing))
+        _actor_lookups[key] = lookup
+        lookup.add_done_callback(
+            lambda done: (
+                _actor_lookups.pop(key, None)
+                if _actor_lookups.get(key) is done
+                else None
             )
-            ttl = _ACTOR_TTL_SECONDS
-        except Exception:
-            # Metadata enrichment never decides whether the tool is authorized.
-            # Keep the ids whoami already returned; retry sooner.
-            ttl = _ACTOR_FAILURE_TTL_SECONDS
-        if cache_key:
-            if len(_actor_cache) >= _ACTOR_CACHE_MAX:
-                _actor_cache.clear()
-            _actor_cache[_actor_cache_key(cache_key)] = (
-                time.monotonic() + ttl,
-                dict(identity),
-            )
-    return identity
+        )
+    # Shielded: one cancelled caller must not cancel the others' lookup.
+    return dict(await asyncio.shield(lookup))
 
 
 @contextlib.asynccontextmanager

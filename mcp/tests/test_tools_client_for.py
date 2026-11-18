@@ -231,3 +231,26 @@ async def test_slow_org_name_shares_the_lookup_bound_and_keeps_ids(monkeypatch):
     )
     assert actor["user_id"] == "user-id"
     assert "organization_name" not in actor
+
+
+@pytest.mark.asyncio
+async def test_parallel_calls_share_one_actor_lookup(monkeypatch):
+    monkeypatch.setattr(tools, "telemetry_enabled", lambda: False)
+    monkeypatch.setattr(tools, "_analytics_actor", True)
+    monkeypatch.setattr(tools, "_actor_cache", {})
+    monkeypatch.setattr(tools, "_actor_lookups", {})
+    release = asyncio.Event()
+
+    async def slow_whoami():
+        await release.wait()
+        return {"organization_id": "org-id", "user_id": "user-id"}
+
+    whoami = AsyncMock(side_effect=slow_whoami)
+    client = SimpleNamespace(whoami=whoami)
+    lookups = [asyncio.create_task(tools.resolve_actor(client, "u")) for _ in range(3)]
+    await asyncio.sleep(0)
+    release.set()
+    actors = await asyncio.gather(*lookups)
+    assert [a["user_id"] for a in actors] == ["user-id"] * 3
+    assert whoami.await_count == 1
+    assert tools._actor_lookups == {}

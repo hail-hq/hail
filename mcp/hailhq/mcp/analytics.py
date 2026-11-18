@@ -6,9 +6,9 @@ messages and agent intent never leave the process: ``_keep_metadata`` drops
 every property not on ``_KEPT_PROPERTIES``. In oauth-rs mode the caller's
 user id (OAuth token or API key owner) becomes ``distinct_id``, the same
 person id the website identifies, and the org id becomes the ``organization``
-group. The identify callback resolves the verified actor before the first event
-and sets only their email and name on the person profile. The lookup shares the
-tool-call actor cache. The only schema change
+group. Only tool calls look the actor up (through the verified ``/whoami``);
+analytics reads that cache and sets only email and name on the person profile.
+Events before a bearer's first tool call stay anonymous. The only schema change
 is the SDK's optional ``llm_model`` argument, which the SDK removes before the
 tool runs. Tool results stay unchanged.
 Any setup or capture failure logs a warning and the server keeps serving.
@@ -24,8 +24,7 @@ from typing import Any
 from hailhq.core.config import settings
 from hailhq.mcp.auth import AuthMode
 from hailhq.mcp.discovery_auth import DISCOVERY_BEARER
-from hailhq.mcp.hail_client import HailClient
-from hailhq.mcp.tools import cached_actor, resolve_actor, resolve_actor_for_analytics
+from hailhq.mcp.tools import cached_actor, resolve_actor_for_analytics
 
 logger = logging.getLogger(__name__)
 
@@ -98,10 +97,9 @@ async def _identify(_request: Any, extra: Any) -> UserIdentity | None:
     bearer = bearer.strip()
     if scheme.lower() != "bearer" or not bearer or bearer == DISCOVERY_BEARER:
         return None
-    actor = cached_actor(bearer)
-    if actor is None:
-        async with HailClient(api_key=bearer) as client:
-            actor = await resolve_actor(client, cache_key=bearer)
+    # Cache only: a tool call resolves the actor before its event is built.
+    # Handshake and list requests never wait on, or trigger, an API lookup.
+    actor = cached_actor(bearer) or {}
     user_id = actor.get("user_id")
     if not user_id:
         return None
@@ -124,7 +122,7 @@ async def _identify(_request: Any, extra: Any) -> UserIdentity | None:
 async def _event_identity(request: Any, extra: Any) -> dict[str, Any]:
     # Modern MCP has no transport session. The SDK can reuse one fallback
     # session across callers and merge their profiles. Stamp a fresh snapshot
-    # on each event, using the same verified cache as identify (no extra HTTP).
+    # on each event, read from the verified actor cache (no HTTP).
     identity = await _identify(request, extra)
     return {
         _REQUEST_IDENTITY: (

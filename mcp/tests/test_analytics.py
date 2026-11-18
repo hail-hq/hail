@@ -197,13 +197,12 @@ async def _session(
                     if next_actor is not None:
                         actor = next_actor
                         auth = {"Authorization": f"Bearer followup-{i}"}
-                        expected_lookups.append(f"followup-{i}")
                     await post(*_modern("tools/list", 10 + i))
             finally:
                 release.set()
                 if pending:
                     await pending
-    # Initialize, list, and call must share each verified bearer lookup.
+    # Only the tool call looks the bearer up; handshake and lists never do.
     assert lookups == expected_lookups
     return seen, captured
 
@@ -250,10 +249,12 @@ async def test_analytics_keeps_responses_unchanged(monkeypatch, oauth, protocol,
         # PostHog omits the flag for identified users; processing defaults on.
         assert props.get("$process_person_profile", True) is True
         assert props["$set"] == {"email": _EMAIL, "name": _NAME}
+        # Before the bearer's first tool call nothing is cached: anonymous.
         for name, event in events:
             if name in {"$mcp_initialize", "$mcp_tools_list"}:
-                assert event["distinct_id"] == _USER
-                assert event["properties"]["$set"] == {"email": _EMAIL, "name": _NAME}
+                assert event["distinct_id"] != _USER
+                assert event["properties"]["$process_person_profile"] is False
+                assert "$set" not in event["properties"]
     else:
         assert "$groups" not in props
         assert props["$process_person_profile"] is False
@@ -390,14 +391,13 @@ async def test_stateless_requests_do_not_share_person_profiles(monkeypatch):
     )
     lists = [event for name, event in events if name == "$mcp_tools_list"]
     assert len(lists) == 3
-    assert lists[0]["distinct_id"] == _USER
-    assert lists[0]["properties"]["$set"] == {"email": _EMAIL, "name": _NAME}
-    assert lists[1]["distinct_id"] == other_user
-    assert "$set" not in lists[1]["properties"]
-    assert "$groups" not in lists[1]["properties"]
-    assert lists[2]["distinct_id"] not in {_USER, other_user}
-    assert lists[2]["properties"]["$process_person_profile"] is False
-    assert "$set" not in lists[2]["properties"]
+    # A's list ran before A's first tool call; B never called a tool. Neither
+    # may pick up A's sticky SDK profile while A's call is still running.
+    for event in lists:
+        assert event["distinct_id"] not in {_USER, other_user}
+        assert event["properties"]["$process_person_profile"] is False
+        assert "$set" not in event["properties"]
+        assert "$groups" not in event["properties"]
     calls = [event for name, event in events if name == "$mcp_tool_call"]
     assert len(calls) == 2
     for event in calls:
