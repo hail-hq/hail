@@ -1,7 +1,8 @@
 """Bounded recovery when noise or a lost transcript stalls a live conversation.
 
-VAD activity is deliberately not progress: otherwise continuous noise would
-keep resetting the timer. Interim STT protects legitimate long utterances.
+Quiet calls get a check-in after six seconds. VAD defers that early prompt,
+but cannot reset the twenty-second no-transcript backstop indefinitely.
+Interim STT protects legitimate long utterances.
 https://docs.livekit.io/reference/agents/events/
 """
 
@@ -36,6 +37,7 @@ class ConversationRecovery:
         self._clock = clock
         self._call_id = call_id
         self._last_progress = clock()
+        self._last_user_activity = self._last_progress
         self._attempted = False
         self._finished = False
         self._task: asyncio.Task | None = None
@@ -48,6 +50,13 @@ class ConversationRecovery:
                 # become a usable turn. Only final speech earns another prompt.
                 if event.is_final:
                     self._attempted = False
+
+        @session.on("user_state_changed")
+        def on_user_state(event) -> None:
+            if event.new_state in ("speaking", "listening"):
+                # Protect speech from the early check-in, without letting
+                # continuous noise postpone the original recovery forever.
+                self._last_user_activity = clock()
 
         @session.on("agent_state_changed")
         def on_agent_state(event) -> None:
@@ -75,8 +84,19 @@ class ConversationRecovery:
         ):
             self._last_progress = self._clock()
             return
-        if self._clock() - self._last_progress < self._timeout:
-            return
+        quiet_for = self._clock() - self._last_progress
+        if quiet_for < self._timeout:
+            # After the one prompt, retain the full hangup wait. Before it,
+            # quiet callers need not sit in twenty seconds of dead air.
+            if self._attempted:
+                return
+            early_delay = min(6.0, self._timeout)
+            if (
+                self._session.user_state == "speaking"
+                or quiet_for < early_delay
+                or self._clock() - self._last_user_activity < early_delay
+            ):
+                return
         self._last_progress = self._clock()
         if self._attempted:
             self._finished = True
