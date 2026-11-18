@@ -36,7 +36,7 @@ Nothing to paste into a PulseMCP-specific field — there is none. The listing i
 
 <!-- copy:short -->
 
-> A real phone number and email inbox for your AI agent. Calls, texts, and email in one place.
+> Run your AI assistant with real phone numbers and email inboxes. Handle calls, texts, and email.
 
 <!-- /copy -->
 
@@ -44,7 +44,7 @@ Nothing to paste into a PulseMCP-specific field — there is none. The listing i
 
 <!-- copy:short -->
 
-> A real phone number and email inbox for your AI agent. Calls, texts, and email in one place.
+> Run your AI assistant with real phone numbers and email inboxes. Handle calls, texts, and email.
 
 <!-- /copy -->
 

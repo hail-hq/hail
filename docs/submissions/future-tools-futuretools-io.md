@@ -43,7 +43,7 @@ status: drafted
 
 <!-- copy:medium -->
 
-Hail gives your AI agent its own phone number and email inbox. It handles calls, texts, and email like an AI receptionist, and remembers each person. Get a number in 120+ countries. Works with Claude, ChatGPT, and Cursor.
+Give your AI assistant a real phone number and an email inbox. Run a support receptionist, answering service, or your assistant on one account. Get a number in 120+ countries and email on your own domain, with MCP, API, and webhook support for your app.
 
 <!-- /copy -->
 
@@ -51,17 +51,15 @@ Hail gives your AI agent its own phone number and email inbox. It handles calls,
 
 <!-- copy:long -->
 
-Hail gives your AI agent a real phone number and an email inbox. Your agent can do any work people do on the phone and in email.
+Hail gives your AI assistant a real phone number and an email inbox. Your agent can do any work people do on the phone and in email.
 
-Use it as an AI phone agent or an AI answering service. It handles calls, texts (SMS), and email day and night, and passes urgent calls to a person.
+Run a support receptionist, answering service, or your own assistant on one account. It handles calls, texts, and email day and night, and passes calls to your phone when needed.
 
-Hail keeps the whole conversation. When someone calls after an email, your agent already knows what was said.
+Get a local or toll-free number in 120+ countries, even where you have no office. Hail helps with the paperwork some countries need. Send and receive email on your own domain.
 
-Get a local or toll-free number in 120+ countries. Hail helps with the paperwork some countries need, such as US A2P 10DLC registration for texts.
+Webhooks send every call, text, and email to your app, so your own tools stay up to date.
 
-Connect Hail to Claude, ChatGPT, Cursor, or another MCP client in minutes, with nothing to install. Or build it into your app with the API, CLI, or Python SDK.
-
-Hail is open source. Use Hail Cloud, or host it yourself.
+Connect Claude, ChatGPT, or Cursor over MCP in minutes, or build with the API. Hail is open source.
 
 <!-- /copy -->
 

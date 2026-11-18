@@ -54,7 +54,7 @@ status: submitted
 
 <!-- copy:tagline -->
 
-Give your AI a phone number and an email inbox.
+Give your AI a real phone number and an email inbox.
 
 <!-- /copy -->
 

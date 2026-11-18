@@ -26,7 +26,7 @@ status: drafted
 2. If prompted, create an account or log in — Toolify's submission flow is typically gated behind a free account.
 3. Enter the tool's website URL: `https://hail.so`.
 4. Fill in **Tool Name**: `Hail`.
-5. Fill in **Tagline / short description** with the one-liner from Content below: `Give your AI a phone number and an email inbox.`
+5. Fill in **Tagline / short description** with the one-liner from Content below: `Give your AI a real phone number and an email inbox.`
 6. Fill in **Full description** with the long copy from Content below (paste as-is; it is about 210 words, inside the 200 to 400 word range).
 7. Select **Category** — pick the closest match Toolify exposes (likely something under "Developer Tools," "AI Agent," or "Communication" / "API" — there is no single canonical "AI Directory" category on their taxonomy, choose whichever reads closest to an agent-facing communications API).
 8. Fill in **Tags/Keywords** with the list from Content below, comma-separated or one-per-box depending on the widget.
@@ -51,7 +51,7 @@ status: drafted
 
 <!-- copy:tagline -->
 
-Give your AI a phone number and an email inbox.
+Give your AI a real phone number and an email inbox.
 
 <!-- /copy -->
 
@@ -59,23 +59,21 @@ Give your AI a phone number and an email inbox.
 
 <!-- copy:long -->
 
-Hail gives your AI agent a real phone number and an email inbox. Your agent can do any work people do on the phone and in email.
+Hail gives your AI assistant a real phone number and an email inbox. Your agent can do any work people do on the phone and in email.
 
-Use it as an AI phone agent or an AI answering service. It handles calls, texts (SMS), and email day and night, and passes urgent calls to a person.
+Run a support receptionist, answering service, or your own assistant on one account. It handles calls, texts, and email day and night, and passes calls to your phone when needed.
 
-Hail keeps the whole conversation. When someone calls after an email, your agent already knows what was said.
+Get a local or toll-free number in 120+ countries, even where you have no office. Hail helps with the paperwork some countries need. Send and receive email on your own domain.
 
-Get a local or toll-free number in 120+ countries. Hail helps with the paperwork some countries need, such as US A2P 10DLC registration for texts.
+Webhooks send every call, text, and email to your app, so your own tools stay up to date.
 
-Connect Hail to Claude, ChatGPT, Cursor, or another MCP client in minutes, with nothing to install. Or build it into your app with the API, CLI, or Python SDK.
-
-Hail is open source. Use Hail Cloud, or host it yourself.
+Connect Claude, ChatGPT, or Cursor over MCP in minutes, or build with the API. Hail is open source.
 
 <!-- /copy -->
 
 Common uses: answer calls after hours, confirm appointments by text, follow up on new leads by phone and email, and send delivery updates. Every call, text, and email is saved, so you can review the history before you follow up.
 
-Pick a built-in voice or bring your own. Choose the AI model that runs the conversation, or use the default. Set it all up in the Hail console, or from your AI assistant.
+Pick a built-in voice or bring your own. Choose the AI model that runs the conversation, or use the default. Set it all up in the Hail console, or from your AI assistant. It keeps the whole conversation, so callers do not have to repeat themselves.
 
 **Category:** ai-directory (map to Toolify's closest taxonomy match at submission time — see Steps step 7)
 

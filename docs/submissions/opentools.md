@@ -38,7 +38,7 @@ status: drafted
 
 <!-- copy:tagline -->
 
-Give your AI a phone number and an email inbox.
+Give your AI a real phone number and an email inbox.
 
 <!-- /copy -->
 
@@ -46,7 +46,7 @@ Give your AI a phone number and an email inbox.
 
 <!-- copy:medium -->
 
-Hail gives your AI agent its own phone number and email inbox. It handles calls, texts, and email like an AI receptionist, and remembers each person. Get a number in 120+ countries. Works with Claude, ChatGPT, and Cursor.
+Give your AI assistant a real phone number and an email inbox. Run a support receptionist, answering service, or your assistant on one account. Get a number in 120+ countries and email on your own domain, with MCP, API, and webhook support for your app.
 
 <!-- /copy -->
 

@@ -81,7 +81,7 @@ Full setup guides: [self-hosting](docs/public/self-host/README.md) · [Webhooks]
 
 ## Cursor plugin
 
-Give your AI a phone number and an email inbox.
+Give your AI a real phone number and an email inbox.
 
 Let your assistant handle calls, texts, and email. Building an app? Add AI
 calls, email and SMS with one API.

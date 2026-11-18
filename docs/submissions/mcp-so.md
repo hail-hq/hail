@@ -71,7 +71,7 @@ https://github.com/hail-hq/hail (open source, AGPLv3). The MCP server is in the 
 
 ### Description
 
-Give your AI a phone number and an email inbox. One remote MCP server covers phone calls, text messages (SMS), and email.
+Give your AI a real phone number and an email inbox. One remote MCP server covers phone calls, text messages (SMS), and email.
 
 Your agent can:
 
