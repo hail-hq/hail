@@ -521,6 +521,11 @@ class Agent(Base):
     )
     # NULL = the workspace line (organization_call_settings) or the built-in.
     ai_disclosure_line: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The agent finishes each reply before it listens again. New rows default
+    # to TRUE; rows that existed before the column were backfilled FALSE.
+    steady_speech: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("TRUE"), nullable=False
+    )
     # Same shape as schemas.VoiceConfig.
     voice_config: Mapped[dict] = mapped_column(
         JSONB, server_default=text("'{}'::jsonb"), nullable=False

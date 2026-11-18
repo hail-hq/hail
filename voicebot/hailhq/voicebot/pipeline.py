@@ -809,14 +809,31 @@ def startup_capability_warnings() -> list[str]:
     return warnings
 
 
+def interruption_options(steady_speech: bool) -> dict[str, Any]:
+    """When the other party can stop the agent mid-reply.
+
+    Default: a transcribed word, not VAD energy alone, interrupts the agent
+    (the only setting that differs from the SDK defaults). With steady speech
+    nothing does: the SDK drops the other party's audio while the agent speaks,
+    so background talk and short words cannot cut a reply.
+    """
+    if steady_speech:
+        return {"enabled": False}
+    return {"min_words": 1}
+
+
 def build_session(
     llm_cfg: dict[str, Any] | None,
     vad: agents_vad.VAD,
     org_cfgs: dict[str, ResolvedLayer] | None = None,
     voice_id_override: str | None = None,
     language: str | None = None,
+    steady_speech: bool = False,
 ) -> AgentSession:
     """Build the :class:`AgentSession` for one job.
+
+    ``steady_speech`` is the agent's setting: the agent finishes each reply
+    before it listens again (see :func:`interruption_options`).
 
     ``vad`` is the per-process Silero instance loaded once in
     :func:`hailhq.voicebot.agent.prewarm`. ``org_cfgs`` is the org's resolved
@@ -905,8 +922,6 @@ def build_session(
         llm=build_llm(llm_cfg, org_cfgs.get("llm"), retry_on_chunk_sent=True),
         turn_handling=TurnHandlingOptions(
             turn_detection=turn_detection,
-            # Only the setting that differs from the SDK defaults: a transcribed
-            # word, not VAD energy alone, is needed to interrupt the agent.
-            interruption={"min_words": 1},
+            interruption=interruption_options(steady_speech),
         ),
     )

@@ -252,6 +252,7 @@ async def start(
         max_duration_seconds=seconds,
         livekit_room=f"hail-{body.request_id}",
         metadata_={
+            "steady_speech": agent.steady_speech,
             "browser_trial": trial,
             "browser_contacts": {
                 "email": caps["emailRecipient"],

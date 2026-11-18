@@ -25,6 +25,7 @@ def test_agent_columns():
         "first_message",
         "ai_disclosure",
         "ai_disclosure_line",
+        "steady_speech",
         "voice_config",
         "tools",
         "max_duration_seconds",

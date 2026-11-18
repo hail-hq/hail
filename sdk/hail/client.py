@@ -853,6 +853,7 @@ class _AgentsResource:
         system_prompt: str,
         first_message: str | None = None,
         ai_disclosure: bool = True,
+        steady_speech: bool = True,
         recording_enabled: bool | None = None,
         ai_disclosure_line: str | None = None,
         language: str | None = None,
@@ -867,11 +868,14 @@ class _AgentsResource:
         """Save an agent. Route a number to it with ``client.numbers.route``
         or place calls with ``client.calls.create(agent_id=...)``.
         ``ai_disclosure_line`` is a template; ``{org}`` becomes the
-        organization name. ``max_duration_seconds`` is 60..3600."""
+        organization name. ``max_duration_seconds`` is 60..3600.
+        ``steady_speech`` makes the agent finish each reply before it
+        listens again (the caller cannot interrupt mid-reply)."""
         body: dict[str, Any] = {
             "name": name,
             "system_prompt": system_prompt,
             "ai_disclosure": ai_disclosure,
+            "steady_speech": steady_speech,
             "recording_enabled": recording_enabled,
             "voice_enabled": voice_enabled,
             "sms_enabled": sms_enabled,

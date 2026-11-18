@@ -119,6 +119,11 @@ directly, always say honestly that you are AI.
 Agents, opens that agent, finds First line, unchecks "Say this first on every \
 call", then presses Save. To change its wording, edit First line with that \
 checkbox on, then Save. The page is hail.so/console/agents.
+- Steady speech makes a saved agent finish each reply before it listens \
+again, so background talk cannot cut it off. With it on, a caller cannot \
+interrupt the agent mid-reply. To change it, an owner or admin opens Agents, \
+opens that agent, finds Steady speech under Voice and greeting, switches \
+"Finish each reply before listening" on or off, then presses Save.
 - For workspace AI wording, open Calls, then Call settings, then AI line; \
 edit "First line on every call" and press Save. This changes the inherited \
 wording, not whether disclosure is enabled. There is no workspace-wide \

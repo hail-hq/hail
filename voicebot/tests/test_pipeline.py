@@ -12,7 +12,13 @@ made because we never invoke ``.chat()``.
 from __future__ import annotations
 
 import pytest
-from hailhq.voicebot.pipeline import ResolvedLayer, build_llm, build_session, build_stt
+from hailhq.voicebot.pipeline import (
+    ResolvedLayer,
+    build_llm,
+    build_session,
+    build_stt,
+    interruption_options,
+)
 from livekit.agents import AgentSession
 from livekit.agents.llm import FallbackAdapter
 from livekit.agents.stt import FallbackAdapter as stt_fallback
@@ -818,3 +824,20 @@ def test_elevenlabs_tagalog_sends_the_filipino_code() -> None:
     ]
     assert len(eleven) == 2
     assert {inst._opts.language.language for inst in eleven} == {"fil"}
+
+
+def test_one_word_interrupts_the_agent_by_default() -> None:
+    from unittest.mock import MagicMock
+
+    assert interruption_options(False) == {"min_words": 1}
+    session = build_session(None, MagicMock())
+    assert session.options.interruption["enabled"] is True
+    assert session.options.interruption["min_words"] == 1
+
+
+def test_steady_speech_turns_interruptions_off() -> None:
+    from unittest.mock import MagicMock
+
+    assert interruption_options(True) == {"enabled": False}
+    session = build_session(None, MagicMock(), steady_speech=True)
+    assert session.options.interruption["enabled"] is False

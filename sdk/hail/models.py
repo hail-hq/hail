@@ -363,6 +363,7 @@ class AgentResponse(BaseModel):
     first_message: str | None = None
     recording_enabled: bool | None = None
     ai_disclosure: bool = True
+    steady_speech: bool = False
     ai_disclosure_line: str | None = None
     voice_config: dict[str, Any] = Field(default_factory=dict)
     tools: list[str] | None = None

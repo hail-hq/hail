@@ -104,6 +104,7 @@ _AGENT_FIELDS = (
     "system_prompt",
     "first_message",
     "ai_disclosure",
+    "steady_speech",
     "recording_enabled",
     "voice_config",
     "tools",
@@ -726,6 +727,7 @@ async def create_call(
                 "first_message": body.first_message,
                 "ai_disclosure": body.ai_disclosure,
                 "ai_disclosure_line": ai_disclosure_line,
+                "steady_speech": body.steady_speech,
                 "tools": body.tools,
                 "handover_targets": await handover_targets(
                     db, agent.id if agent else None, call.to_e164

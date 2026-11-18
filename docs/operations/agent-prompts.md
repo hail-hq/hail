@@ -124,6 +124,7 @@ If asked directly, it still identifies honestly as AI.
 - Agents → open agent → First line → uncheck “Say this first on every call” → Save.
 - Calls → Call settings → AI line → edit “First line on every call” → Save edits inherited wording; it has no workspace-wide off switch.
 - A connected assistant can set `ai_disclosure=false` for a one-off call.
+- Agents → open agent → Voice and greeting → Steady speech → switch “Finish each reply before listening” → Save.
 
 Empty workspace wording restores the default; it does not disable disclosure.
 These are product controls, not a determination of which laws apply. The

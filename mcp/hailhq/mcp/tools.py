@@ -2226,6 +2226,10 @@ _AGENT_FIRST_MESSAGE = _d(
     "waits for the caller."
 )
 _AGENT_AI_DISCLOSURE = _d("Speak the AI disclosure line first on every call.")
+_AGENT_STEADY_SPEECH = _d(
+    "Steady speech: the agent finishes each reply before it listens again, so "
+    "background talk cannot cut it off and the caller cannot interrupt mid-reply."
+)
 _AGENT_RECORDING = _d(
     "Recording for this agent's calls. ``true`` or ``false`` overrides the "
     "workspace setting."
@@ -3117,6 +3121,7 @@ def register_tools(
         system_prompt: Annotated[str, _AGENT_PROMPT],
         first_message: Annotated[str | None, _AGENT_FIRST_MESSAGE] = None,
         ai_disclosure: Annotated[bool, _AGENT_AI_DISCLOSURE] = True,
+        steady_speech: Annotated[bool, _AGENT_STEADY_SPEECH] = True,
         recording_enabled: Annotated[bool | None, _AGENT_RECORDING] = None,
         ai_disclosure_line: Annotated[str | None, _AGENT_DISCLOSURE_LINE] = None,
         language: Annotated[Language | None, _AGENT_LANGUAGE] = None,
@@ -3144,6 +3149,7 @@ def register_tools(
             "name": name,
             "system_prompt": system_prompt,
             "ai_disclosure": ai_disclosure,
+            "steady_speech": steady_speech,
             "voice_enabled": voice_enabled,
             "sms_enabled": sms_enabled,
             "email_enabled": email_enabled,
@@ -4241,6 +4247,7 @@ def register_tools(
         system_prompt: Annotated[str | None, _AGENT_PROMPT] = None,
         first_message: Annotated[str | None, _AGENT_FIRST_MESSAGE] = None,
         ai_disclosure: Annotated[bool | None, _AGENT_AI_DISCLOSURE] = None,
+        steady_speech: Annotated[bool | None, _AGENT_STEADY_SPEECH] = None,
         recording_enabled: Annotated[bool | None, _AGENT_RECORDING] = None,
         ai_disclosure_line: Annotated[str | None, _AGENT_DISCLOSURE_LINE] = None,
         language: Annotated[Language | None, _AGENT_LANGUAGE] = None,
@@ -4298,6 +4305,7 @@ def register_tools(
                             "system_prompt": system_prompt,
                             "first_message": first_message,
                             "ai_disclosure": ai_disclosure,
+                            "steady_speech": steady_speech,
                             "recording_enabled": recording_enabled,
                             "ai_disclosure_line": ai_disclosure_line,
                             "language": language,

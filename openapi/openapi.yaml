@@ -6312,6 +6312,14 @@ components:
             64.1200(b)(1) and several AI bot-disclosure laws). Hail does not verify
             this for you.
           default: true
+        steady_speech:
+          type: boolean
+          title: Steady Speech
+          description:
+            "Steady speech: the agent finishes each reply before it listens
+            again. Speech and background talk on the caller's side during a reply
+            are ignored, so the caller cannot interrupt mid-reply. Enabled by default."
+          default: true
         ai_disclosure_line:
           anyOf:
             - type: string
@@ -6450,6 +6458,11 @@ components:
           type: boolean
           title: Ai Disclosure
           description: Whether the AI line is spoken first.
+        steady_speech:
+          type: boolean
+          title: Steady Speech
+          description: Whether the agent finishes each reply before it listens again.
+          default: false
         ai_disclosure_line:
           anyOf:
             - type: string
@@ -6576,6 +6589,12 @@ components:
             - type: "null"
           title: Ai Disclosure
           description: Whether the AI line is spoken first.
+        steady_speech:
+          anyOf:
+            - type: boolean
+            - type: "null"
+          title: Steady Speech
+          description: Whether the agent finishes each reply before it listens again.
         ai_disclosure_line:
           anyOf:
             - type: string
@@ -6773,6 +6792,16 @@ components:
             \ jurisdictions have AI bot-disclosure laws. Hail does not verify this\
             \ for you. The agent still identifies itself as an AI if asked."
           default: true
+        steady_speech:
+          type: boolean
+          title: Steady Speech
+          description:
+            "Steady speech: the agent finishes each reply before it listens
+            again. Speech and background talk on the other side during a reply are
+            ignored, so the other party cannot interrupt mid-reply. Off by default
+            for a call without agent_id; with agent_id, the agent's setting applies
+            unless you send this field."
+          default: false
         voice_config:
           $ref: "#/components/schemas/VoiceConfig"
           description:
@@ -6994,9 +7023,9 @@ components:
             - type: "null"
           title: Transcript
           description:
-            "What was said on the call, in the order it was said. Set only by
-            GET /v1/calls/{call_id}: an empty list until someone speaks. Null in POST
-            /v1/calls and GET /v1/calls responses."
+            "What was said on the call, in the order it was said. Set only
+            by GET /v1/calls/{call_id}: an empty list until someone speaks. Null in
+            POST /v1/calls and GET /v1/calls responses."
       type: object
       required:
         - id
@@ -7033,7 +7062,9 @@ components:
           type: string
           format: date-time
           title: At
-          description: When the speaker started this turn, ISO 8601. When that is not known, when Hail recorded the turn.
+          description:
+            When the speaker started this turn, ISO 8601. When that is
+            not known, when Hail recorded the turn.
       type: object
       required:
         - role

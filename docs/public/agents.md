@@ -134,6 +134,20 @@ The built-in lines are spoken in the call's language (`voice_config.language`,
 else the workspace voice's language). A custom `ai_disclosure_line` is spoken
 as written.
 
+## Steady speech
+
+```bash
+# Let callers interrupt this agent mid-reply (steady speech off).
+hail agents update <agent-id> --no-steady-speech
+```
+
+With `steady_speech: true` the agent finishes each reply before it listens
+again. Background talk, a TV, or a short "okay" from the caller cannot cut the
+reply off. The cost: the caller cannot interrupt mid-reply, so keep replies
+short. New agents have it on; set `steady_speech: false` to let callers
+interrupt. A call placed without `agent_id` has it off unless the request
+sends `steady_speech: true`.
+
 ## What happens on an inbound text
 
 1. Hail stores the text and sends `sms.received` as before.

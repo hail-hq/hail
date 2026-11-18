@@ -273,6 +273,16 @@ class CallCreate(ConsentAttestationMixin):
             "itself as an AI if asked."
         ),
     )
+    steady_speech: bool = Field(
+        default=False,
+        description=(
+            "Steady speech: the agent finishes each reply before it listens "
+            "again. Speech and background talk on the other side during a "
+            "reply are ignored, so the other party cannot interrupt "
+            "mid-reply. Off by default for a call without agent_id; with "
+            "agent_id, the agent's setting applies unless you send this field."
+        ),
+    )
     voice_config: VoiceConfig = Field(
         default_factory=VoiceConfig,
         description=(
@@ -957,6 +967,15 @@ class AgentCreate(BaseModel):
             "does not verify this for you."
         ),
     )
+    steady_speech: bool = Field(
+        default=True,
+        description=(
+            "Steady speech: the agent finishes each reply before it listens "
+            "again. Speech and background talk on the caller's side during a "
+            "reply are ignored, so the caller cannot interrupt mid-reply. "
+            "Enabled by default."
+        ),
+    )
     ai_disclosure_line: str | None = Field(
         default=None,
         max_length=_AGENT_LINE_MAX,
@@ -1045,6 +1064,10 @@ class AgentUpdate(BaseModel):
     ai_disclosure: bool | None = Field(
         default=None, description="Whether the AI line is spoken first."
     )
+    steady_speech: bool | None = Field(
+        default=None,
+        description="Whether the agent finishes each reply before it listens again.",
+    )
     ai_disclosure_line: str | None = Field(
         default=None,
         max_length=_AGENT_LINE_MAX,
@@ -1108,6 +1131,10 @@ class AgentResponse(BaseModel):
         description="Null inherits the workspace recording choice; true or false sets recording for this agent's calls, whatever the workspace setting.",
     )
     ai_disclosure: bool = Field(description="Whether the AI line is spoken first.")
+    steady_speech: bool = Field(
+        default=False,
+        description="Whether the agent finishes each reply before it listens again.",
+    )
     ai_disclosure_line: str | None = Field(
         description="This agent's AI line template, or null for the workspace line."
     )
