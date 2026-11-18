@@ -156,6 +156,10 @@ func (f *agentFlags) readHTTPTools() ([]any, error) {
 	if err := json.Unmarshal(data, &tools); err != nil {
 		return nil, fmt.Errorf("--http-tools-file must hold a JSON array of tools: %w", err)
 	}
+	if tools == nil {
+		// `null` would read as "leave the list"; [] clears it.
+		return nil, fmt.Errorf("--http-tools-file must hold a JSON array of tools, got null (use --no-http-tools to remove them)")
+	}
 	return tools, nil
 }
 

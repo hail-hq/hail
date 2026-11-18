@@ -19,7 +19,7 @@ from uuid import UUID
 
 from hailhq.core.agent_tools import hail_help, transfer_call
 from hailhq.core.agent_tools.client import AgentApiClient
-from hailhq.core.agent_tools.http_tool import Conversation, http_tool_specs
+from hailhq.core.agent_tools.http_tool import Conversation, load_http_tool_specs
 from hailhq.core.agent_tools.registry import all_tools
 from hailhq.core.agent_tools.spec import SPOKEN_FALLBACK, ToolContext, ToolSpec
 from hailhq.core.config import settings
@@ -141,17 +141,18 @@ async def _http_tools(
     if not raw_agent:
         return []  # a call placed with an inline prompt has no saved agent
     try:
-        conv = Conversation(
+        agent_id = UUID(str(raw_agent))
+    except ValueError:
+        logger.warning("call_id=%s malformed agent_id; no http tools", call_id)
+        return []
+    return await load_http_tool_specs(
+        Conversation(
             channel="call",
             id=call_id,
-            agent_id=UUID(str(raw_agent)),
+            agent_id=agent_id,
             organization_id=organization_id,
         )
-        async with session_scope() as session:
-            return await http_tool_specs(session, conv)
-    except Exception:
-        logger.exception("call_id=%s http tools failed to load", call_id)
-        return []
+    )
 
 
 async def build_agent_tools(

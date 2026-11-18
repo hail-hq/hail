@@ -110,6 +110,13 @@ async def replace_http_tools(
     rows: list[AgentHttpTool] = []
     if items:
         cipher = provider_cipher()
+        # Lock the agent row and read the secret again: two first saves at
+        # once must not each make (and return) a different secret.
+        agent.http_tool_secret_encrypted = await db.scalar(
+            select(Agent.http_tool_secret_encrypted)
+            .where(Agent.id == agent.id)
+            .with_for_update()
+        )
         if agent.http_tool_secret_encrypted is None:
             created = new_tool_secret()
             agent.http_tool_secret_encrypted = cipher.encrypt(created)

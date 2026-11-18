@@ -153,8 +153,12 @@ async def _check_http_tools(items: list[HttpToolIn] | None) -> None:
             raise unprocessable(
                 str(result), loc=["body", "http_tools", index, "url"]
             ) from result
-        if isinstance(result, BaseException):
-            raise result
+        if isinstance(result, Exception):
+            # e.g. a host name the DNS lookup cannot encode (label too long).
+            raise unprocessable(
+                "url host cannot be looked up",
+                loc=["body", "http_tools", index, "url"],
+            ) from result
 
 
 def _no_secret_key() -> HTTPException:

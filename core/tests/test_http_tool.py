@@ -171,6 +171,9 @@ async def test_unreachable_returns_a_sentence(allow_loopback) -> None:
         "https://[::1]/x",
         "https://[::ffff:127.0.0.1]/x",
         "https://100.64.0.1/x",
+        "https://127.1/x",
+        "https://2130706433/x",
+        "https://0x7f.1/x",
     ],
 )
 async def test_private_ip_literal_is_refused(url) -> None:

@@ -25,7 +25,7 @@ from typing import Any
 
 import logfire
 from hailhq.core.agent_tools.client import AgentApiClient
-from hailhq.core.agent_tools.http_tool import Conversation, http_tool_specs
+from hailhq.core.agent_tools.http_tool import Conversation, load_http_tool_specs
 from hailhq.core.agent_tools.spec import ToolContext, ToolSpec
 from hailhq.core.agent_tools.thread_history import SPEC as THREAD_HISTORY
 from hailhq.core.config import settings
@@ -109,18 +109,14 @@ async def _run_tool(
 
 async def _http_tools(claimed: ClaimedReply) -> list[ToolSpec]:
     """The agent's HTTP tools for this text. A failure loses only these."""
-    conv = Conversation(
-        channel="sms",
-        id=claimed.sms.id,
-        agent_id=claimed.agent.id,
-        organization_id=claimed.agent.organization_id,
+    return await load_http_tool_specs(
+        Conversation(
+            channel="sms",
+            id=claimed.sms.id,
+            agent_id=claimed.agent.id,
+            organization_id=claimed.agent.organization_id,
+        )
     )
-    try:
-        async with session_scope() as db:
-            return await http_tool_specs(db, conv)
-    except Exception:
-        logger.exception("sms_id=%s http tools failed to load", claimed.sms.id)
-        return []
 
 
 async def generate_reply(claimed: ClaimedReply, messages: list[dict[str, Any]]) -> str:

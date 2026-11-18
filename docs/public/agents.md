@@ -178,13 +178,15 @@ def verify(secret: str, signature_header: str, raw_body: bytes) -> bool:
   saved headers of the tool with the same name, and `{}` removes them.
   Saved headers are kept only while the `url` keeps its scheme, host and
   port; a `url` on a new host needs `headers` again (422 otherwise).
+  A renamed tool is a new tool: send its `headers` again.
 - Answer with JSON or text. The model gets up to 4,000 characters. A non-2xx
   status, a timeout (`timeout_seconds`, 1..10, default 5) or an unreachable
   host gives the model a short error; the call goes on.
 - `wait_message` is said on calls while Hail waits, not in texts or email.
 - HTTP tools are on whatever `tools` says; `tools` lists built-in tools only.
-- A request can repeat when a text or email reply is retried. Each request has
-  a new `id`, so make a lookup safe to run twice.
+- A request can repeat when a text or email reply is retried, with a new
+  `id`. Make lookups safe to run twice; for a tool that changes something,
+  dedupe on `sms_id` or `email_id` plus your own arguments.
 - `http_tool_secret` is returned once: on the first save with HTTP tools, and
   by `POST /v1/agents/{id}/rotate-tool-secret`. Live calls keep the secret
   they started with.

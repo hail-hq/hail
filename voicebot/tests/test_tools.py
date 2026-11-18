@@ -8,6 +8,7 @@ import uuid
 from unittest.mock import AsyncMock
 
 import hailhq.voicebot.tools as tools_mod
+from hailhq.core.agent_tools import http_tool
 from hailhq.core.config import settings
 from hailhq.core.models import Agent, AgentHttpTool
 from hailhq.core.secret_cipher import SecretCipher, generate_key
@@ -139,7 +140,6 @@ async def test_availability_failure_does_not_poison_session(db, monkeypatch):
     after the first failure, so the second check's execute() raises
     PendingRollbackError and a genuinely-available tool is silently lost.
     """
-    import hailhq.voicebot.tools as tools_mod
     from livekit.agents.llm.tool_context import get_raw_function_info
     from sqlalchemy import text
 
@@ -381,7 +381,8 @@ async def test_http_tool_load_failure_keeps_built_in_tools(db, monkeypatch):
     async def broken(_session, _conv):
         raise RuntimeError("db down")
 
-    monkeypatch.setattr(tools_mod, "http_tool_specs", broken)
+    # The loader catches the failure itself.
+    monkeypatch.setattr(http_tool, "http_tool_specs", broken)
     tools, api = await build_agent_tools(
         {"organization_id": str(uuid.uuid4()), "agent_id": str(uuid.uuid4())},
         call_id=uuid.uuid4(),

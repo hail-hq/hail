@@ -18,7 +18,6 @@ short sentence for the model, so a broken customer API never ends a call.
 from __future__ import annotations
 
 import asyncio
-import ipaddress
 import json
 import logging
 import socket
@@ -27,13 +26,14 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Literal
-from urllib.parse import urlsplit
 
 import aiohttp
 from aiohttp.abc import AbstractResolver, ResolveResult
+from aiohttp.helpers import is_ip_address
 from aiohttp.resolver import DefaultResolver
 from cryptography.fernet import InvalidToken
 from hailhq.core.agent_tools.spec import ToolContext, ToolSpec
+from hailhq.core.db import session_scope
 from hailhq.core.models import Agent, AgentHttpTool
 from hailhq.core.provider_config import provider_cipher
 from hailhq.core.secret_cipher import SecretKeyMissing
@@ -41,6 +41,7 @@ from hailhq.core.url_guard import ip_is_public
 from hailhq.core.webhooks import sign_payload
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from yarl import URL
 
 logger = logging.getLogger("hailhq.core.agent_tools")
 
@@ -105,14 +106,17 @@ class PublicOnlyResolver(AbstractResolver):
 
 
 def _ip_literal_blocked(url: str) -> bool:
-    """True for an IP-literal host that is not public (aiohttp connects to
-    an IP literal without calling the resolver)."""
-    host = urlsplit(url).hostname or ""
+    """True for a host aiohttp treats as an IP address (it then skips the
+    resolver) that is not public. Short and decimal IPv4 forms (``127.1``,
+    ``2130706433``) count: the OS reads them as addresses too."""
+    host = URL(url).raw_host or ""
+    if not is_ip_address(host):
+        return False  # a name: PublicOnlyResolver checks it at connect time
     try:
-        ipaddress.ip_address(host)
-    except ValueError:
-        return False
-    return not ip_is_public(host)
+        infos = socket.getaddrinfo(host, None, flags=socket.AI_NUMERICHOST)
+    except OSError:
+        return True
+    return any(not ip_is_public(info[4][0]) for info in infos)
 
 
 def _clip(text: str, cap: int) -> str:
@@ -301,6 +305,17 @@ async def http_tool_specs(session: AsyncSession, conv: Conversation) -> list[Too
     return [tool_spec(t, conv) for t in tools]
 
 
+async def load_http_tool_specs(conv: Conversation) -> list[ToolSpec]:
+    """``http_tool_specs`` on its own short session. Never raises: a failure
+    loses only the HTTP tools, never the conversation's other tools."""
+    try:
+        async with session_scope() as session:
+            return await http_tool_specs(session, conv)
+    except Exception:
+        logger.exception("%s %s: http tools failed to load", conv.channel, conv.id)
+        return []
+
+
 __all__ = [
     "BLOCKED",
     "UNREACHABLE",
@@ -309,6 +324,7 @@ __all__ = [
     "PublicOnlyResolver",
     "call_http_tool",
     "http_tool_specs",
+    "load_http_tool_specs",
     "load_runtime_http_tools",
     "request_body",
     "tool_spec",

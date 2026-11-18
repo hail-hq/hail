@@ -927,7 +927,14 @@ _HTTP_TOOL_NAME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_]{0,63}$")
 _HEADER_NAME_RE = re.compile(r"^[A-Za-z0-9-]{1,64}$")
 # Headers Hail sets itself, or that would break the request.
 _RESERVED_HEADERS = frozenset(
-    {"host", "content-length", "content-type", "transfer-encoding", "connection"}
+    {
+        "host",
+        "content-length",
+        "content-type",
+        "transfer-encoding",
+        "connection",
+        "user-agent",
+    }
 )
 _HTTP_TOOL_HEADERS_MAX = 10
 # One type per node, no "null" and no additionalProperties/pattern/format:

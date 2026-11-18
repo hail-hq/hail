@@ -194,6 +194,7 @@ async def test_rotate_tool_secret(client, org, public_dns, async_session):
         "https://169.254.169.254/latest/meta-data/",
         "https://10.0.0.8/orders",
         "https://[::1]/orders",
+        "https://127.1/orders",
     ],
 )
 async def test_private_url_is_refused_on_save(client, org, url):
@@ -292,3 +293,12 @@ async def test_saved_headers_stay_only_on_the_same_origin(
     resp = await client.patch(url, headers=headers, json={"http_tools": [elsewhere]})
     assert resp.status_code == 200, resp.text
     assert resp.json()["http_tools"][0]["header_names"] == []
+
+
+async def test_unresolvable_host_is_a_422(client, org):
+    _, headers = org
+    resp = await _create(
+        client, headers, http_tools=[_tool(url="https://" + "a" * 64 + ".com/x")]
+    )
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"][0]["loc"] == ["body", "http_tools", 0, "url"]

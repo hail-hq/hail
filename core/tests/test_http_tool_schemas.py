@@ -82,6 +82,7 @@ def test_parameters_default_is_an_empty_object() -> None:
         {"headers": {"X-Hail-Signature": "forged"}},
         {"headers": {"Host": "evil"}},
         {"headers": {"Content-Type": "text/plain"}},
+        {"headers": {"user-agent": "acme"}},
         {"headers": {"Bad Name": "x"}},
         {"headers": {"Authorization": "a\r\nInjected: yes"}},
         {"headers": {f"H{i}": "v" for i in range(11)}},
