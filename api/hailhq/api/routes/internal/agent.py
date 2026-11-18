@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from math import ceil
 from typing import Annotated, Any, Literal
@@ -151,6 +152,9 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
+
+# A phone number inside a gate sentence, hidden before it is logged.
+_PHONE_IN_TEXT = re.compile(r"\+?\d[\d\s().-]{6,}\d")
 
 router = APIRouter(
     prefix="/internal/agent",
@@ -875,8 +879,13 @@ async def agent_reply_sms(
         )
     gate = await check_sms_allowed(db, org, inbound.from_e164)
     if not gate.allowed:
-        # The gate's sentence can hold the recipient's number: log it only.
-        logger.info("sms_id=%s agent reply blocked: %s", inbound.id, gate.reason)
+        # The gate's sentence can hold the recipient's number: it is not
+        # returned or stored, and the log shows it with the number hidden.
+        logger.info(
+            "sms_id=%s agent reply blocked: %s",
+            inbound.id,
+            _PHONE_IN_TEXT.sub("[number]", gate.reason or ""),
+        )
         return AgentReplySmsResponse(
             ok=False, state="skipped", reason=SEND_BLOCKED_SKIP
         )
