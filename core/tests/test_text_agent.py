@@ -794,6 +794,6 @@ def test_the_clock_says_when_the_text_arrived() -> None:
     clock = text_agent.reply_clock(sms)
     assert clock is not None
     assert (
-        "- The text you are answering arrived at: Wednesday, 18 November 2026, 16:58 UTC."
-        in clock
+        "- The text you are answering arrived at: Wednesday, 18 November 2026, "
+        "16:58 UTC (08:58 where the business is)." in clock
     )

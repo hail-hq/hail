@@ -1,6 +1,7 @@
 import hashlib
 from datetime import datetime, timezone
 
+import pytest
 from hailhq.core import prompts
 
 
@@ -297,3 +298,30 @@ def test_reply_instructions_put_the_clock_before_the_reminder() -> None:
     ):
         assert out.index("Be kind.") < out.index("# Date and time")
         assert out.endswith(prompts.PRIVACY_REMINDER)
+
+
+def test_a_call_clock_must_say_its_direction() -> None:
+    with pytest.raises(ValueError):
+        prompts.clock_section(_EVENING, business_number=None)
+    assert prompts.safe_clock_section(started_at=_EVENING, business_number=None) is None
+
+
+def test_no_number_with_one_zone_gives_none() -> None:
+    assert prompts.number_with_one_zone(["+18005550100"], _EVENING) is None
+    assert (
+        prompts.number_with_one_zone(["+18005550100", "+442079460000"], _EVENING)
+        == "+442079460000"
+    )
+
+
+def test_email_clock_says_when_the_email_arrived() -> None:
+    out = prompts.clock_section(
+        _EVENING,
+        channel="email",
+        business_number="+442079460000",
+        received_at=datetime(2026, 11, 17, 16, 50, tzinfo=timezone.utc),
+    )
+    assert (
+        "- The email you are answering arrived at: Tuesday, 17 November 2026, "
+        "16:50 UTC (16:50 where the business is)." in out
+    )

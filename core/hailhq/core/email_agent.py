@@ -62,6 +62,7 @@ from sqlalchemy import (
     true,
     update,
 )
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -791,7 +792,9 @@ def _plain_body(email: Email) -> str:
     return (body or "").strip()[:MAX_EMAIL_CHARS]
 
 
-async def reply_clock(db: AsyncSession, agent: Agent) -> str | None:
+async def reply_clock(
+    db: AsyncSession, agent: Agent, received_at: datetime | None = None
+) -> str | None:
     """The date and time section for an email reply. An email has no phone
     number, so the business's time zone comes from the active numbers the
     agent answers calls or texts on, oldest first, skipping one with several
@@ -810,19 +813,23 @@ async def reply_clock(db: AsyncSession, agent: Agent) -> str | None:
                                 PhoneNumber.voice_agent_id == agent.id,
                                 PhoneNumber.sms_agent_id == agent.id,
                             ),
+                            PhoneNumber.organization_id == agent.organization_id,
                             PhoneNumber.provisioning_state == "active",
                         )
                         .order_by(PhoneNumber.created_at)
                     )
                 ).scalars()
             )
-    except Exception:
+    except DBAPIError as exc:
+        if exc.connection_invalidated:
+            raise  # the session is gone: let the reply fail here, clearly
         logger.exception("could not look up the agent's numbers for the clock")
         numbers = []
     return safe_clock_section(
         started_at=now,
         channel="email",
         business_number=number_with_one_zone(numbers, now),
+        received_at=received_at,
     )
 
 

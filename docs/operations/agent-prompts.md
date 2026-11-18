@@ -94,11 +94,12 @@ reminder (`reply_clock` in `core/hailhq/core/text_agent.py` and
 `core/hailhq/core/email_agent.py`):
 
 - A text reply: the texted number is the business, the sender's number is the
-  other party, with a note that a sender's number can be faked. It also says
-  when the text being answered arrived, since a retried reply is written later.
+  other party, with a note that a sender's number can be faked.
 - An email reply: no other party. The business's zone comes from the active
   numbers the agent answers calls or texts on, oldest first, skipping a number
   with several zones; without one, UTC only.
+- Both say when the message being answered arrived (UTC and business time),
+  since a retried reply is written later.
 
 `safe_clock_section` builds the section for calls, texts and emails; any
 failure leaves it out.

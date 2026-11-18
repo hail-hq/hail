@@ -439,7 +439,7 @@ ClockChannel = Literal["call", "text", "email"]
 def clock_section(
     started_at: datetime,
     *,
-    inbound: bool = True,
+    inbound: bool | None = None,
     business_number: str | None,
     other_number: str | None = None,
     channel: ClockChannel = "call",
@@ -449,20 +449,27 @@ def clock_section(
     texts) at the other party's number. For a call it is when the call
     started; for a text or email reply it is when the reply is written. The
     model has no clock of its own, so without this it cannot tell someone
-    they got in touch out of hours. ``received_at`` (texts) is when the text
-    being answered arrived: a retried reply can be written later."""
+    they got in touch out of hours. ``received_at`` (texts and emails) is
+    when the message being answered arrived: a retried reply can be written
+    later. A call must say whether it is ``inbound``."""
+    if channel == "call" and inbound is None:
+        raise ValueError("a call's clock needs inbound=True or inbound=False")
     at = started_at.astimezone(timezone.utc)
     business = _parse(business_number)
     lines = [
         "This call started at:" if channel == "call" else "It is now:",
         f"- UTC: {_spoken_date(at)}, {at:%H:%M}.",
     ]
-    if channel == "text" and received_at is not None:
+    if channel != "call" and received_at is not None:
         got = received_at.astimezone(timezone.utc)
-        lines.append(
-            f"- The text you are answering arrived at: {_spoken_date(got)}, "
-            f"{got:%H:%M} UTC."
+        line = (
+            f"- The {'text' if channel == 'text' else 'email'} you are "
+            f"answering arrived at: {_spoken_date(got)}, {got:%H:%M} UTC"
         )
+        local = _local_time(business, got)
+        if local is not None:
+            line += f" ({local[0]:%H:%M} where the business is)"
+        lines.append(line + ".")
     lines += [
         _clock_line(
             (
@@ -516,11 +523,11 @@ def clock_section(
 
 def number_with_one_zone(numbers: list[str], at: datetime) -> str | None:
     """The first of ``numbers`` whose time zone is known at ``at`` (a US
-    toll-free number is not), else the first one."""
+    toll-free number's is not), or None."""
     for number in numbers:
         if _local_time(_parse(number), at) is not None:
             return number
-    return numbers[0] if numbers else None
+    return None
 
 
 def safe_clock_section(**kwargs: Any) -> str | None:

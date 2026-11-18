@@ -87,6 +87,12 @@ async def test_no_comma_before_the_callers_name(attempt) -> None:
     assert not re.search(r",\s+Sam\b", speech), speech
 
 
+OFFICE = (
+    "You answer messages for Northgate Dental. We are open 9am to 5pm, "
+    "London time, Monday to Friday."
+)
+
+
 @pytest.mark.parametrize(
     "channel,at,is_open",
     [
@@ -116,7 +122,7 @@ async def test_a_reply_knows_whether_the_office_is_open(channel, at, is_open) ->
         response = await client.messages.create(
             model=os.environ["ANTHROPIC_MODEL"],
             max_tokens=300,
-            system=build(FRONT_DESK, clock=clock),
+            system=build(OFFICE, clock=clock),
             messages=[
                 {
                     "role": "user",
