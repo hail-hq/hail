@@ -714,6 +714,8 @@ async def create_call(
                 "direction": "outbound",
                 "from_e164": call.from_e164,
                 "to_e164": call.to_e164,
+                # A shared pool number says nothing about where the business is.
+                CALL_META_FROM_POOL: pool_number is not None,
                 "await_agent_ready": True,
                 "agent_id": str(agent.id) if agent else None,
                 "max_duration_seconds": call.max_duration_seconds,
