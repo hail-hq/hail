@@ -4,7 +4,7 @@ slug: hermes-mcp-catalog
 category: mcp-registry
 url: "https://github.com/NousResearch/hermes-agent/tree/main/optional-mcps"
 score: 7
-status: drafted
+status: submitted
 ---
 
 # Hermes Agent MCP catalog (Nous Research)
@@ -16,8 +16,8 @@ The Hail skill does not need a Hermes listing. Hermes installs skills from ClawH
 ## TODO
 
 - [x] Manifest drafted (below)
-- [ ] Owner approves opening a PR in `NousResearch/hermes-agent`
-- [ ] PR opened
+- [x] Owner approved opening a PR in `NousResearch/hermes-agent` (2026-11-18)
+- [x] PR opened: <https://github.com/NousResearch/hermes-agent/pull/157513>
 - [ ] Merged: `hermes mcp install hail` works
 
 ## Steps to submit
@@ -65,7 +65,7 @@ post_install: |
   On first connection, Hermes opens a browser to sign in to Hail.
   After you sign in, restart your Hermes session so the Hail tools load.
 
-  Hail asks for consent on each call, text, and email you send.
+  Each call, text, and email you send needs a consent confirmation.
   Buying a number charges your Hail credit.
 ```
 
@@ -82,6 +82,8 @@ PR text:
 > Submitted by the Hail maintainers.
 
 ## Notes
+
+- 2026-11-18: opened <https://github.com/NousResearch/hermes-agent/pull/157513> from the fork `r13i/hermes-agent`, branch `feat/optional-mcps-hail`.
 
 - 2026-11-18: about a dozen other `feat(optional-mcps)` PRs were open and waiting for review, the oldest from 2026-11-06.
 - The manifest fields come from the `linear` and `rentahuman` entries. The repo has no published schema for them.
