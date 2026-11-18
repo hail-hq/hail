@@ -220,11 +220,13 @@ responsive instead of stalled.
 
 ## Rules and failure modes
 
-**URLs must be `https` and publicly resolvable.** Hail checks the scheme
-when you submit the call, then resolves the host and rejects hosts that do
-not resolve or resolve to a private, loopback, or link-local address. It
-checks twice: once in the API (a `422`), once again in the voicebot at call
-time. A URL that fails the second check ends the call with
+**URLs must be `https` and publicly resolvable.** Hail resolves the host
+and rejects `localhost`, hosts that do not resolve, and hosts with any
+non-public address: private, loopback, link-local, CGNAT (`100.64.0.0/10`),
+IPv6 site-local, multicast, reserved, or unspecified. A per-call `llm`
+block is checked when you submit the call (a `422`) and again in the
+voicebot at call time. An endpoint saved in the console is checked at
+call time. A URL that fails the call-time check ends the call with
 `end_reason=provider_key_error`.
 
 **There is no fallback.** You chose this brain deliberately, so Hail does

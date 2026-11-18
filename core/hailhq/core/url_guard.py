@@ -11,7 +11,8 @@ address is public. Not public (``ip_is_public``): private (RFC 1918,
 IPv6 ULA fc00::/7), loopback, link-local (incl. 169.254.169.254),
 CGNAT 100.64.0.0/10 (Tailscale), IPv6 site-local fec0::/10, multicast,
 reserved and unspecified; IPv4-mapped IPv6 is judged on its IPv4 address.
-A host that does not resolve is refused too. No operator allowlist for
+A host that does not resolve is refused too, and so are ``localhost`` and
+``*.localhost`` (RFC 6761), before any lookup. No operator allowlist for
 ``base_url`` (decision 2026-07-08); webhooks have
 ``HAIL_WEBHOOK_ALLOW_PRIVATE_NETWORKS``.
 
@@ -133,13 +134,16 @@ def ip_is_public(ip: str | ipaddress.IPv4Address | ipaddress.IPv6Address) -> boo
 def assert_public_host(host: str, port: int) -> None:
     """Raise UnsafeUrlError unless ``host`` resolves and every address is public.
 
+    ``localhost`` and ``*.localhost`` are refused before any lookup.
     ``host`` is the ASCII host from ``connect_target``. Blocking (DNS):
     call it off the event loop.
     """
     # RFC 6761: localhost and *.localhost are loopback by definition. Refuse
-    # them before DNS, so the result never depends on /etc/hosts or search
-    # domains. Strip trailing dots so ``localhost.`` is caught too.
-    name = host.rstrip(".")
+    # them before DNS, so for these names the result does not depend on
+    # /etc/hosts or search domains. Other names (``ip6-localhost``) go to DNS
+    # and the address check below. Strip trailing dots so ``localhost.`` is
+    # caught too.
+    name = host.rstrip(".").lower()
     if name == "localhost" or name.endswith(".localhost"):
         logger.info("url guard: refused %s (localhost)", host)
         raise UnsafeUrlError(NOT_PUBLIC)
