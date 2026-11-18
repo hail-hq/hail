@@ -10,7 +10,7 @@ Rules:
 - Describe the work broadly ("handles calls, texts, and email"). Do not list narrow verbs ("make calls, send texts"): they read as limits.
 - Always write "email inbox", never "inbox" alone. Non-native English readers may not know the word. `validate_submission.py` fails on a bare "inbox".
 - Use one wording everywhere. Do not A/B test across directories: traffic per listing is too small to compare.
-- Each pasted copy in a submission file sits between `<!-- copy:NAME -->` and `<!-- /copy -->`. CI fails when it differs from the block with the same name below. To change the wording, edit the block here, then the marked copies.
+- Each pasted copy in a submission file sits between `<!-- copy:NAME -->` and `<!-- /copy -->`. CI fails when it differs from the block with the same name below. To change the wording, edit the block here, then the marked copies. The hail.so brand page shows the same blocks with copy buttons (`lib/brand-copy.ts` in the website repo). Change it in the same round.
 
 **Tagline** (52 characters; fits Claude's 55 and Product Hunt's 60. Use "real phone number" when it fits):
 

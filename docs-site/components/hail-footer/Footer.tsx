@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Mascot } from "./Mascot";
-import { PRODUCT_COPY, PRODUCT_SHORT_DESCRIPTION } from "./product-copy";
+import { PRODUCT_COPY } from "./product-copy";
 import { SocialLinks } from "./SocialLinks";
 import { FooterScene } from "./FooterScene";
 import { FooterAccordion } from "./FooterAccordion";
@@ -53,7 +53,7 @@ export function Footer({
               <span>hail.so</span>
             </a>
             <p>
-              {PRODUCT_SHORT_DESCRIPTION} {PRODUCT_COPY.availability}
+              {PRODUCT_COPY.tagline} {PRODUCT_COPY.availability}
             </p>
             <SocialLinks />
           </div>
