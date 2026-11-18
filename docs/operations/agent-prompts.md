@@ -66,12 +66,35 @@ model. With AWS credentials, `ANTHROPIC_MODEL`, and
 `ANTHROPIC_BEDROCK_REGION` set in the environment, run from the repo root:
 
 ```sh
-uv run --directory core pytest --run-voice-evals tests/test_call_closing_behavior.py tests/test_disclosure_behavior.py -v
+uv run --directory core pytest --run-voice-evals tests/test_call_closing_behavior.py tests/test_disclosure_behavior.py tests/test_clock_and_name_behavior.py -v
 ```
 
 These checks incur model usage, place no phone calls, and never execute tools.
 They check hangup decisions and invitations to continue, not exact wording;
 model responses can vary. Ordinary CI skips them unless explicitly enabled.
+
+## Date and time
+
+Every phone call's instructions carry a `# Date and time` section
+(browser demo sessions do not) after the
+customer's instructions and the contact line, before the language line and
+the privacy reminder (`clock_section` in `core/hailhq/core/prompts.py`, added by
+`_call_clock` in `voicebot/hailhq/voicebot/agent.py`). It gives the time the call started in
+UTC, where the business's number is, and where the other party's number is,
+plus the other party's number when it is valid. The time zone comes from the
+number (`phonenumbers`). A number whose zones have different UTC offsets right
+now (US toll-free, Australian mobiles) gets "unknown": for the business the
+model is told to go by UTC, for the other party to ask where they are. An
+outbound call from a shared pool number also gets "unknown" for the
+business, since the pool number's country says nothing about the business. Text
+and email replies do not get this section yet.
+
+## Names in speech
+
+The voice pauses at a comma, so "Thanks, Sam." sounds like a delay before
+the name. The voice framing tells the model to write "Thanks Sam". There
+is no code rewrite of the text: guessing names from capital letters also
+removed real commas (lists, weekdays, other languages).
 
 ## AI disclosure help
 

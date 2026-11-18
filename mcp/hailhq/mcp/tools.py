@@ -90,6 +90,7 @@ MCPServer ``Context`` (auto-injected on dispatch) and uses the
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
 import contextlib
@@ -1877,6 +1878,8 @@ def _argument_errors(exc: ValidationError) -> str:
 _ACTOR_TTL_SECONDS = 300
 # A failed lookup is retried after this, not on every tool call.
 _ACTOR_FAILURE_TTL_SECONDS = 30
+# Bound optional telemetry lookups, including when the identity API is down.
+_ACTOR_LOOKUP_SECONDS = 2
 # Set by analytics.instrument_analytics once PostHog instrumentation succeeded.
 _analytics_actor = False
 
@@ -1889,6 +1892,8 @@ def resolve_actor_for_analytics(enabled: bool) -> None:
 
 _ACTOR_CACHE_MAX = 1024
 _actor_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+# In-flight lookups by cache key, so parallel calls share one whoami.
+_actor_lookups: dict[str, asyncio.Future[dict[str, Any]]] = {}
 
 
 def _actor_cache_key(bearer: str) -> str:
@@ -1896,55 +1901,100 @@ def _actor_cache_key(bearer: str) -> str:
     return hashlib.sha256(bearer.encode()).hexdigest()
 
 
-def cached_actor_ids(bearer: str) -> tuple[str | None, str | None]:
-    """``(organization_id, user_id)`` that ``_actor_for`` already resolved for
-    ``bearer``. Never calls the API."""
+def cached_actor(bearer: str) -> dict[str, Any] | None:
+    """The actor ``resolve_actor`` cached for ``bearer``. Never calls the API."""
     hit = _actor_cache.get(_actor_cache_key(bearer))
-    if not hit or hit[0] <= time.monotonic():
-        return None, None
-    org_id, user_id = hit[1].get("organization_id"), hit[1].get("user_id")
-    return (str(org_id) if org_id else None, str(user_id) if user_id else None)
+    return dict(hit[1]) if hit and hit[0] > time.monotonic() else None
+
+
+async def _lookup_actor(
+    client: HailClient, identity: dict[str, Any], tracing: bool
+) -> None:
+    # Fills ``identity`` in place, so a timeout keeps the ids already read.
+    # Resolve the actor only through the API that verifies the bearer.
+    actor = await client.whoami()
+    identity.update(
+        organization_id=actor.get("organization_id"),
+        user_id=actor.get("user_id"),
+        user_email=actor.get("email"),
+        user_name=actor.get("name"),
+    )
+    org_id = actor.get("organization_id")
+    if tracing:
+        identity["auth_kind"] = actor.get("auth_kind")
+        identity["actor_kind"] = actor.get("auth_kind")
+        if org_id:
+            identity["organization_name"] = await fetch_organization_name(str(org_id))
+
+
+async def _resolve_and_cache(
+    client: HailClient, cache_key: str | None, tracing: bool
+) -> dict[str, Any]:
+    identity: dict[str, Any] = {}
+    try:
+        # One bound for whoami and the org-name lookup together.
+        await asyncio.wait_for(
+            _lookup_actor(client, identity, tracing), _ACTOR_LOOKUP_SECONDS
+        )
+        ttl = _ACTOR_TTL_SECONDS
+    except Exception:
+        # Metadata enrichment never decides whether the tool is authorized.
+        # Keep the ids whoami already returned. Retry sooner only when whoami
+        # itself failed; a slow org-name lookup alone keeps the full TTL.
+        ttl = _ACTOR_TTL_SECONDS if identity else _ACTOR_FAILURE_TTL_SECONDS
+    if cache_key:
+        if len(_actor_cache) >= _ACTOR_CACHE_MAX:
+            _actor_cache.clear()
+        _actor_cache[_actor_cache_key(cache_key)] = (
+            time.monotonic() + ttl,
+            dict(identity),
+        )
+    return identity
+
+
+def _forget_lookup(key: str, lookup: asyncio.Future[dict[str, Any]]) -> None:
+    if _actor_lookups.get(key) is lookup:
+        del _actor_lookups[key]
+
+
+async def resolve_actor(
+    client: HailClient, cache_key: str | None = None
+) -> dict[str, Any]:
+    """Verified actor for tool traces and analytics. Concurrent lookups for
+    one bearer share a single ``whoami``."""
+    tracing = telemetry_enabled()
+    if not (tracing or (cache_key and _analytics_actor)):
+        return {}
+    if not cache_key:
+        return await _resolve_and_cache(client, None, tracing)
+    cached = cached_actor(cache_key)
+    if cached is not None:
+        return cached
+    key = _actor_cache_key(cache_key)
+    lookup = _actor_lookups.get(key)
+    if lookup is None:
+        lookup = asyncio.ensure_future(_resolve_and_cache(client, cache_key, tracing))
+        _actor_lookups[key] = lookup
+        lookup.add_done_callback(lambda done: _forget_lookup(key, done))
+        # The lookup runs on this caller's client, which closes when this
+        # caller ends. If this caller is cancelled, the lookup is cancelled
+        # too (nothing is cached) and the other callers look up again.
+        return dict(await lookup)
+    try:
+        return dict(await asyncio.shield(lookup))
+    except asyncio.CancelledError:
+        current = asyncio.current_task()
+        if not lookup.cancelled() or (current and current.cancelling()):
+            raise
+    # The owner was cancelled. Forget its lookup before retrying, so the
+    # retry starts a new one instead of awaiting the cancelled one again.
+    _forget_lookup(key, lookup)
+    return await resolve_actor(client, cache_key)
 
 
 @contextlib.asynccontextmanager
 async def _actor_for(client: HailClient, cache_key: str | None = None):
-    identity: dict[str, Any] = {}
-    # Logfire tags spans with the actor. PostHog analytics reads the cache
-    # (``cached_actor_ids``), which exists only for per-bearer clients.
-    tracing = telemetry_enabled()
-    if tracing or (cache_key and _analytics_actor):
-        key = _actor_cache_key(cache_key) if cache_key else None
-        hit = _actor_cache.get(key) if key else None
-        if hit and hit[0] > time.monotonic():
-            identity = dict(hit[1])
-        else:
-            try:
-                # Resolve the actor only through the API that verifies the bearer.
-                actor = await client.whoami()
-                identity = {
-                    "organization_id": actor.get("organization_id"),
-                    "user_id": actor.get("user_id"),
-                }
-                org_id = actor.get("organization_id")
-                if tracing:
-                    # Analytics alone needs only the two ids.
-                    identity["user_email"] = actor.get("email")
-                    identity["auth_kind"] = actor.get("auth_kind")
-                    identity["actor_kind"] = actor.get("auth_kind")
-                    if org_id:
-                        identity["organization_name"] = await fetch_organization_name(
-                            str(org_id)
-                        )
-                ttl = _ACTOR_TTL_SECONDS
-            except Exception:
-                # Metadata enrichment never decides whether the tool is authorized.
-                # Keep the ids whoami already returned; retry sooner.
-                ttl = _ACTOR_FAILURE_TTL_SECONDS
-            if key:
-                if len(_actor_cache) >= _ACTOR_CACHE_MAX:
-                    _actor_cache.clear()
-                _actor_cache[key] = (time.monotonic() + ttl, dict(identity))
-    with identity_scope(identity):
+    with identity_scope(await resolve_actor(client, cache_key)):
         yield
 
 

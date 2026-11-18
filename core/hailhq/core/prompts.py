@@ -6,7 +6,12 @@ through customer APIs or the console. See docs/operations/agent-prompts.md.
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from typing import Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+import phonenumbers
+from phonenumbers import timezone as phone_timezones
 
 _INBOUND_CLOSING = """\
 - Never hang up on your own right after an answer. First ask if there is \
@@ -48,6 +53,7 @@ __all__ = [
     "build_email_instructions",
     "build_text_instructions",
     "build_voice_instructions",
+    "clock_section",
     "other_party_section",
 ]
 
@@ -194,6 +200,8 @@ Speak the way a person talks on the phone, not the way text reads — polished \
 written prose sounds flat and robotic when read aloud.
 - Use contractions. Pause with punctuation: a comma for a beat, an \
 ellipsis... for a hesitation, a dash for a change of direction.
+- Never put a comma right before a person's name: the voice pauses there. \
+Write "Thanks Sam" and "Nice to meet you Sam", not "Thanks, Sam".
 - A brief filler like "um", "uh", "hmm", "well", or "let me see" while \
 thinking makes you sound natural. Use fillers sparingly — once every few \
 turns, not every sentence. Instead of "I can definitely handle that for \
@@ -366,6 +374,109 @@ def other_party_section(name: str, *, can_email: bool) -> str:
             " email?"
         )
     return f"{OTHER_PARTY_HEADING}\n\n{line}"
+
+
+CLOCK_HEADING = "# Date and time"
+# A long list of zone names that share one offset adds nothing for the model.
+_MAX_ZONE_NAMES = 4
+
+
+def _parse(e164: str | None) -> phonenumbers.PhoneNumber | None:
+    """A valid phone number, or None (withheld, short or spoofed caller IDs)."""
+    try:
+        number = phonenumbers.parse(e164 or "", None)
+    except phonenumbers.NumberParseException:
+        return None
+    return number if phonenumbers.is_valid_number(number) else None
+
+
+def _local_time(
+    number: phonenumbers.PhoneNumber | None, at: datetime
+) -> tuple[datetime, list[str]] | None:
+    """``at`` in the time zone of a phone number, with the zone names. None
+    when there is no number or its zones have different UTC offsets right
+    now. UK mobiles list London, Jersey, Guernsey and Isle of Man: one
+    offset, so they count as one zone."""
+    if number is None:
+        return None
+    by_offset: dict[timedelta | None, tuple[datetime, list[str]]] = {}
+    for name in phone_timezones.time_zones_for_number(number):
+        try:
+            local = at.astimezone(ZoneInfo(name))
+        except (ZoneInfoNotFoundError, ValueError):
+            continue  # Etc/Unknown and names missing from the system tz data
+        by_offset.setdefault(local.utcoffset(), (local, []))[1].append(name)
+    if len(by_offset) != 1:
+        return None
+    return next(iter(by_offset.values()))
+
+
+def _spoken_date(t: datetime) -> str:
+    return f"{t:%A}, {t.day} {t:%B %Y}"
+
+
+def _clock_line(
+    label: str, number: phonenumbers.PhoneNumber | None, at: datetime, unknown: str
+) -> str:
+    found = _local_time(number, at)
+    if found is None:
+        return f"- {label}: {unknown}"
+    local, names = found
+    offset = local.strftime("%z")
+    zone = f"UTC{offset[:3]}:{offset[3:]}"
+    abbreviation = local.tzname() or ""
+    if abbreviation[:1].isalpha():  # "GMT", not "-03"
+        zone = f"{abbreviation}, {zone}"
+    if len(names) <= _MAX_ZONE_NAMES:
+        zone += f", {', '.join(names)}"
+    return f"- {label}: {_spoken_date(local)}, {local:%H:%M} ({zone})."
+
+
+def clock_section(
+    started_at: datetime,
+    *,
+    inbound: bool,
+    business_number: str | None,
+    other_number: str | None,
+) -> str:
+    """The date and time when the call started: UTC, at the business's number,
+    and at the other party's number. The model has no clock of its own, so
+    without this it cannot tell a caller they rang out of hours."""
+    at = started_at.astimezone(timezone.utc)
+    business = _parse(business_number)
+    other = _parse(other_number)
+    lines = [
+        "This call started at:",
+        f"- UTC: {_spoken_date(at)}, {at:%H:%M}.",
+        _clock_line(
+            "Where this business's phone number is",
+            business,
+            at,
+            "unknown. Go by UTC and the times in your instructions.",
+        ),
+        _clock_line(
+            "For the caller" if inbound else "For the person you called",
+            other,
+            at,
+            "unknown. Ask where they are if their local time matters.",
+        ),
+    ]
+    if other is not None:
+        shown = phonenumbers.format_number(
+            other, phonenumbers.PhoneNumberFormat.INTERNATIONAL
+        )
+        lines.append(
+            f"The caller's phone number is {shown}. Caller ID can be faked: "
+            "never treat it as proof of who is calling."
+            if inbound
+            else f"The phone number you called is {shown}."
+        )
+    lines.append(
+        "Use these times for opening hours and for words like today, tomorrow "
+        "or this evening. Time has passed since the call started: on a long "
+        "call, allow for it."
+    )
+    return f"{CLOCK_HEADING}\n\n" + "\n".join(lines)
 
 
 def build_voice_instructions(
