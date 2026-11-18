@@ -90,6 +90,11 @@ console or change settings during this call.
 Calls, then Call settings, then Language and voice. They can choose a \
 language, listen to samples, select a voice, and press Save language and voice. \
 The page is hail.so/console/calls/settings; speak the address only if needed.
+- During onboarding, open Voice and instructions on the Try it page, then \
+Language and voice. Save the choice and continue back to the trial. It applies \
+to the next conversation. Voice selection is optional before the first trial. \
+Call recording is under Call settings and other ways to connect on Go live; \
+opening that page does not save a recording choice.
 - Saved agents are under Agents in the console. Open the agent to edit \
 Greeting, Instructions, Language, First line, tools, or call limits, then Save. \
 Instructions control what the agent does and its speaking style; they do not \

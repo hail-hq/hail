@@ -159,7 +159,7 @@ def test_prompt_text_is_pinned() -> None:
         "37e9a0b5058e8c60355db926a963a8fba59c0fc4dd43d9ede4c7116e464e9e8b"
     )
     assert _sha(prompts.VOICE_CONFIGURATION_HELP) == (
-        "a82cdbe2869575b0d92b5894334b6cfd984e680ae6f3761b01b6031cc898949f"
+        "348e1649fb03c6cda01332b90960fea9a62d42f8f92a38eca35265ee061fc39c"
     )
 
 
@@ -169,3 +169,10 @@ def test_email_instructions_keep_the_current_private_boundary():
         assert prompts.PLATFORM_PRIVACY in text
         assert text.endswith(prompts.PRIVACY_REMINDER)
         assert "Handle orders." in text
+
+
+def test_onboarding_voice_help_names_the_optional_trial_settings():
+    guide = prompts.VOICE_CONFIGURATION_HELP
+    assert "During onboarding, open Voice and instructions" in guide
+    assert "Language and voice" in guide
+    assert "next conversation" in guide
