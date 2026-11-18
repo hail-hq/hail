@@ -16,10 +16,10 @@ Muse is Meta's assistant. Users can already add Hail without a listing: they ask
 - [x] Re-checked against <https://platform.muse.ai/docs> on 2026-11-18 ("Connector guidelines")
 - [x] The guide <https://hail.so/mcp/muse> is live
 - [x] Tool list with Read, Write, and Sensitive classes (below), as the guidelines ask
-- [ ] Decide the reviewer test account (guidelines 5.5)
+- [x] Reviewer test account created 2026-11-18 (see **Notes**)
 - [ ] Business verification through Persona (company documents of the legal entity on <https://hail.so/legal>)
 - [ ] Data processing questionnaire answered
-- [ ] Reviewer test account with sample data (calls, texts, email), entered only in the Muse portal
+- [ ] Reviewer sign-in entered in the Muse portal
 - [ ] Sign-in test passes in the portal (Technical details, Test)
 - [ ] Submitted
 - [ ] Confirmed live
@@ -71,6 +71,7 @@ Muse's guidelines (5.4, 5.6) ask for each tool's class until the portal has its 
 - No fee and no country limit are stated (checked 2026-11-18).
 
 - Auth: Muse supports Dynamic Client Registration and client ID metadata documents (CIMD). Hail's OAuth server supports Dynamic Client Registration.
+- A dedicated reviewer account exists (created 2026-11-18), with email and password sign-in and prepaid credit. It has no phone number: reviewers can buy one with the credit to test calls and texts. Remove the account after the review ends.
 - Never post the reviewer password in a screenshot or a file. Enter it only in the Muse portal.
 - Review time: not stated. Manufact reports a Muse email on 2026-10-23 about "more than 4,500 submissions and an onboarding backlog".
 - Status: the developer portal at <https://platform.muse.ai/> and the **Manage your submission** link in the confirmation.
