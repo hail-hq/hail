@@ -18,6 +18,7 @@ ciphertext off the row to sign each outbound POST.
 
 from __future__ import annotations
 
+import asyncio
 import secrets as _secrets
 from datetime import datetime, timezone
 from typing import Annotated
@@ -104,7 +105,9 @@ async def create_subscription(
     it is lost or compromised.
     """
     try:
-        validate_webhook_target(
+        # DNS lookup: keep it off the event loop.
+        await asyncio.to_thread(
+            validate_webhook_target,
             body.target_url,
             allow_private_networks=settings.hail_webhook_allow_private_networks,
         )
@@ -226,7 +229,9 @@ async def patch_subscription(
     updates: dict = {}
     if body.target_url is not None:
         try:
-            validate_webhook_target(
+            # DNS lookup: keep it off the event loop.
+            await asyncio.to_thread(
+                validate_webhook_target,
                 body.target_url,
                 allow_private_networks=settings.hail_webhook_allow_private_networks,
             )

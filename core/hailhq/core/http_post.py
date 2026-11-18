@@ -8,82 +8,48 @@ disable the guard via ``HAIL_WEBHOOK_ALLOW_PRIVATE_NETWORKS=true``.
 from __future__ import annotations
 
 import asyncio
-import ipaddress
-import socket
-from urllib.parse import urlparse
 
 import httpx
+from hailhq.core.url_guard import UnsafeUrlError, assert_public_host, connect_target
 
 __all__ = [
     "PrivateNetworkBlockedError",
     "httpx_post",
-    "is_private_url",
     "validate_webhook_target",
 ]
 
 
 class PrivateNetworkBlockedError(RuntimeError):
-    """Refused to POST: target resolves to a private / local address."""
-
-
-def _ip_is_private(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
-    return ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
-
-
-def _resolve_all(host: str) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
-    try:
-        infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
-    except socket.gaierror:
-        return []
-    out: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = []
-    for _family, _type, _proto, _canon, sockaddr in infos:
-        try:
-            out.append(ipaddress.ip_address(sockaddr[0]))
-        except ValueError:
-            continue
-    return out
-
-
-def _is_private_host(host: str) -> bool:
-    if host == "localhost":
-        return True
-    try:
-        return _ip_is_private(ipaddress.ip_address(host))
-    except ValueError:
-        pass
-    # Check EVERY resolved address (A + AAAA) — an AAAA-only host pointing
-    # at ::1/ULA space must not slip through an IPv4-only lookup.
-    ips = _resolve_all(host)
-    return any(_ip_is_private(ip) for ip in ips)
-
-
-def is_private_url(url: str) -> bool:
-    parsed = urlparse(url)
-    if not parsed.hostname:
-        return False
-    return _is_private_host(parsed.hostname)
+    """Refused to POST: target does not resolve, or resolves to a non-public address."""
 
 
 def validate_webhook_target(url: str, *, allow_private_networks: bool) -> None:
     """Raise ValueError if ``url`` is not a deliverable webhook target.
 
-    Requires https; rejects private/local targets unless the deployment
-    has opted in (self-host escape hatch). Mirrors the delivery-time guard
-    in ``httpx_post`` so misconfig fails synchronously at write time.
+    Requires https; rejects non-public or unresolvable targets (ranges in
+    ``url_guard``) unless the deployment has opted in (self-host escape
+    hatch). Same check as ``httpx_post`` at delivery time, so misconfig
+    fails synchronously at write time. Blocking (DNS): call it off the
+    event loop.
 
     When ``allow_private_networks=True``, plain HTTP (not only HTTPS) is
     accepted to ANY host — the escape hatch is a blanket relaxation, not
     restricted to private-network addresses only.
     """
-    parsed = urlparse(url)
+    try:
+        parsed, host, port = connect_target(url)
+    except UnsafeUrlError as exc:
+        raise ValueError(f"target_url is not valid: {exc}") from exc
     if parsed.scheme != "https" and not (
         allow_private_networks and parsed.scheme == "http"
     ):
         raise ValueError("target_url must use https")
-    if not parsed.hostname:
-        raise ValueError("target_url must include a host")
-    if not allow_private_networks and is_private_url(url):
-        raise ValueError("target_url must not point at a private address")
+    if allow_private_networks:
+        return
+    try:
+        assert_public_host(host, port)
+    except UnsafeUrlError as exc:
+        raise ValueError(f"target_url is not allowed: {exc}") from exc
 
 
 async def httpx_post(
@@ -96,11 +62,17 @@ async def httpx_post(
 ) -> tuple[int, str]:
     """POST and return ``(status_code, response_text)``.
 
-    Raises ``PrivateNetworkBlockedError`` when the target resolves to a
-    private/local address and ``allow_private_networks`` is False.
+    Raises ``UnsafeUrlError`` (a ValueError) for a URL httpx would not send
+    (no host, bad port, control characters). Raises
+    ``PrivateNetworkBlockedError`` when ``allow_private_networks`` is False
+    and the host does not resolve or has a non-public address.
     """
-    if not allow_private_networks and await asyncio.to_thread(is_private_url, url):
-        raise PrivateNetworkBlockedError(url)
+    _, host, port = connect_target(url)
+    if not allow_private_networks:
+        try:
+            await asyncio.to_thread(assert_public_host, host, port)
+        except UnsafeUrlError as exc:
+            raise PrivateNetworkBlockedError(str(exc)) from exc
     async with httpx.AsyncClient(timeout=timeout_seconds) as client:
         resp = await client.post(url, content=body, headers=headers)
         return resp.status_code, resp.text

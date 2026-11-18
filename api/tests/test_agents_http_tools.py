@@ -12,6 +12,7 @@ from hailhq.core.config import settings
 from hailhq.core.models import Agent, AgentHttpTool
 from hailhq.core.provider_config import provider_cipher
 from hailhq.core.secret_cipher import generate_key
+from hailhq.core.url_guard import NOT_PUBLIC
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -201,7 +202,7 @@ async def test_private_url_is_refused_on_save(client, org, url):
     _, headers = org
     resp = await _create(client, headers, http_tools=[_tool(url=url)])
     assert resp.status_code == 422, resp.text
-    assert "non-public address" in resp.text
+    assert NOT_PUBLIC in resp.text
     assert resp.json()["detail"][0]["loc"] == ["body", "http_tools", 0, "url"]
 
 
