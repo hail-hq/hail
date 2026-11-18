@@ -302,7 +302,7 @@ async def test_adding_the_event_to_an_old_subscription_does_not_replay(
     await async_session.commit()
     # What PATCH /v1/webhooks/{id} writes when the event is added.
     sub.event_types = ["call.completed", "call.analyzed"]
-    sub.updated_at = datetime.now(timezone.utc)
+    sub.updated_at = func.statement_timestamp()
     await async_session.commit()
     assert await claim_call_to_analyze(async_session) is None
 
@@ -404,7 +404,7 @@ async def test_a_subscription_changed_after_the_call_gets_no_delivery(
     call = await _seed_call(async_session)
     call_id = call.id
     sub = await _subscription(async_session, call.organization_id)
-    sub.updated_at = datetime.now(timezone.utc)
+    sub.updated_at = func.statement_timestamp()  # what PATCH writes
     await async_session.commit()
     turns = await call_transcript(async_session, call_id)
     assert not await send_call_analyzed(async_session, call_id, turns, None)

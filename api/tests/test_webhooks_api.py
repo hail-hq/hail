@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
 from uuid import UUID, uuid4
 
 import httpx
@@ -9,7 +10,7 @@ import pytest
 from hailhq.core.config import settings
 from hailhq.core.models import WebhookDelivery, WebhookSubscription
 from hailhq.core.secret_cipher import SecretCipher, generate_key
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -149,6 +150,50 @@ async def test_patch_disables(client: httpx.AsyncClient, auth_headers: dict[str,
     )
     assert p.status_code == 200
     assert p.json()["status"] == "disabled"
+
+
+@pytest.mark.asyncio
+async def test_patch_and_rotation_set_updated_at_on_the_db_clock(
+    client: httpx.AsyncClient,
+    auth_headers: dict[str, str],
+    async_session: AsyncSession,
+):
+    """call.analyzed sends only calls that ended after the subscription was
+    created or last changed (hailhq.core.call_analysis), so every change
+    bumps updated_at, on the DB clock like the create default."""
+    create = await client.post(
+        "/webhooks",
+        json={"target_url": "https://example.com/h", "event_types": ["call.completed"]},
+        headers=auth_headers,
+    )
+    sub_id = create.json()["id"]
+    for change in (
+        lambda: client.patch(
+            f"/webhooks/{sub_id}",
+            json={"event_types": ["call.completed", "call.analyzed"]},
+            headers=auth_headers,
+        ),
+        lambda: client.post(f"/webhooks/{sub_id}/rotate-secret", headers=auth_headers),
+    ):
+        await async_session.execute(
+            update(WebhookSubscription)
+            .where(WebhookSubscription.id == sub_id)
+            .values(updated_at=func.now() - timedelta(days=1))
+        )
+        await async_session.commit()
+        before = await async_session.scalar(select(func.statement_timestamp()))
+        await async_session.commit()
+        resp = await change()
+        assert resp.status_code == 200
+        async_session.expire_all()
+        updated_at = await async_session.scalar(
+            select(WebhookSubscription.updated_at).where(
+                WebhookSubscription.id == sub_id
+            )
+        )
+        after = await async_session.scalar(select(func.statement_timestamp()))
+        await async_session.commit()
+        assert before <= updated_at <= after
 
 
 @pytest.mark.asyncio

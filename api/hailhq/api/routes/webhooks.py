@@ -234,8 +234,9 @@ async def patch_subscription(
             updates["consecutive_failures"] = 0
     if updates:
         # DB clock, like the create default: call.analyzed compares it with
-        # call end times (hailhq.core.call_analysis).
-        updates["updated_at"] = func.now()
+        # call end times (hailhq.core.call_analysis). The UPDATE's own time,
+        # not now() (the transaction start, before the DNS check above).
+        updates["updated_at"] = func.statement_timestamp()
         await db.execute(
             update(WebhookSubscription)
             .where(WebhookSubscription.id == sub.id)
@@ -311,7 +312,7 @@ async def rotate_secret(
         .where(WebhookSubscription.id == sub.id)
         .values(
             secret_encrypted=cipher.encrypt(secret),
-            updated_at=func.now(),
+            updated_at=func.statement_timestamp(),
         )
     )
     await db.commit()
