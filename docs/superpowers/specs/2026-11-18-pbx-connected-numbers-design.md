@@ -33,8 +33,8 @@ This design covers milestone 1. The others stay on the list and get their own de
 | How Hail accepts calls | One LiveKit inbound trunk and one outbound trunk per connection. |
 | Inbound authentication | SIP digest (username and password Hail generates). Always on. |
 | Handover | The agent dials the person through the PBX, as today's handover dials through a carrier. The agent comes back when nobody answers. |
-| Caller ID on a handover | The original caller's number. |
-| Price per minute | 10¢ a minute, every direction, every country. Recording adds 1¢ a minute (as today). Kept in one config value, easy to change. |
+| Caller ID on a handover | The original caller's number, when it is `+E.164` or a 1-6 digit extension. Otherwise (anonymous, unreadable) the connected number. |
+| Price per minute | 10¢ a minute, every direction, every country. A handover adds 10¢ a minute for the handover leg, from its answer to its end, on top of the call (20¢ a minute while the person is on the line). Recording adds 1¢ a minute of call length (as today). Each price is one config value, easy to change. |
 | Monthly and setup fee | $0 in milestone 1. Recurring pricing is milestone 2. |
 | Ownership check | Hail calls the claimed number over the public phone network; the call must arrive back on the connection's trunk. Billed as a normal call. |
 | SMS | None in milestone 1. |
@@ -109,12 +109,12 @@ New table `sip_connections`. Tables checked first: `org_provider_config` holds e
 | `organization_id` | uuid NOT NULL | |
 | `label` | text NOT NULL | "Main office PBX". 1-80 chars. |
 | `inbound_username` | text NOT NULL UNIQUE | Hail generates it. |
-| `encrypted_inbound_password` | bytea NOT NULL | Hail generates it. Fernet, `HAIL_PROVIDER_SECRET_KEY`. |
+| `encrypted_inbound_password` | text NOT NULL | Hail generates it. Fernet, `HAIL_PROVIDER_SECRET_KEY`. Text, not bytea: `SecretCipher` returns a `str` token, as `org_provider_config.encrypted_api_key` stores it. |
 | `pbx_host` | text NULL | Host or IP Hail dials for outbound and handover. NULL: answer only. |
 | `pbx_port` | int NOT NULL DEFAULT 5060 | |
 | `pbx_transport` | text NOT NULL DEFAULT 'auto' | CHECK `IN ('auto','udp','tcp','tls')`. |
 | `pbx_username` | text NULL | Optional (builder call, 2026-11-18): the tested PBX accepts trunk calls by host match only and has no setting to ask for a password. The setup page warns that LiveKit's source IPs are shared with other LiveKit customers, so the PBX must send trunk calls only to its own extensions, never back out to a carrier. |
-| `encrypted_pbx_password` | bytea NULL | |
+| `encrypted_pbx_password` | text NULL | Same as above. |
 | `default_region` | text NOT NULL | ISO country, to read national caller numbers. |
 | `livekit_inbound_trunk_id` | text NULL | Set once created. |
 | `livekit_outbound_trunk_id` | text NULL | NULL when `pbx_host` is NULL. |
@@ -142,7 +142,8 @@ New functions in `core/hailhq/core/livekit.py`: create, update and delete an inb
   - `auth_username`, `auth_password`: the connection's inbound credentials.
 - Outbound trunk per connection (only with `pbx_host`):
   - `address`: `pbx_host:pbx_port`, `transport`, optional `auth_username`/`auth_password`.
-  - `numbers`: the connection's numbers. The handover leg needs the original caller's number as `sip_number`; check whether LiveKit accepts a `sip_number` not on the list, else use a wildcard `numbers` on outbound trunks.
+  - `numbers`: `["*"]`, so the handover leg can show the original caller's number as `sip_number`. The build plan probes this on a dev LiveKit project first. If LiveKit refuses `["*"]` or a `sip_number` not on the list, `numbers` is the connection's live numbers, and the handover caller ID falls back to the connected number.
+  - The same probe checks that LiveKit accepts the `pbx-<connection id>` placeholder in an inbound trunk's `numbers`.
 - Dispatch rule: one-time ops change. Set `hail-inbound`'s `trunk_ids` to empty, so it matches every trunk. Every trunk in the project is Hail's. Write it in `docs/public/self-host/livekit-cloud.md`.
 - A connection's trunks are created with the connection and deleted with it (after its numbers are removed). Account close deletes them too (`api/hailhq/api/org_close.py`).
 
@@ -170,7 +171,7 @@ A test call the customer makes through their own PBX proves nothing: they choose
 - A new number on a connection starts `unverified`.
 - The customer sets their PBX to send that number's incoming calls to Hail, then clicks "Check" (console) or calls `POST /v1/sip-connections/{id}/numbers/{number_id}/verify`.
 - Hail places one outbound call from a Hail pool number, through a carrier, to the claimed number.
-- The check passes when an INVITE for that number arrives on that connection's inbound trunk while Hail's outbound leg is ringing (30 s limit), **and** a 6-digit code that Hail sends as key presses on its outbound leg arrives on that inbound leg. The code only travels over the real phone network, so an INVITE the customer sends for a number they do not own cannot pass. Hail stores only a hash of the code. Then Hail sets the number `active`, plays a short "connected" message, and hangs up both legs.
+- The check passes when an INVITE for that number arrives on that connection's inbound trunk while Hail's outbound leg is ringing (30 s limit), **and** a 6-digit code that Hail sends as key presses on its outbound leg arrives on that inbound leg. The code only travels over the real phone network, so an INVITE the customer sends for a number they do not own cannot pass. Hail stores only a hash of the code. Only the first 6 digits received count, so a stream of key presses cannot try many codes; a digit pressed before the code fails the check, and the customer runs it again. Then Hail sets the number `active`, plays a short "connected" message, and hangs up both legs.
 - It fails when the call arrives anywhere else, not at all, or without the code. Hail says why: no call arrived, arrived on the wrong trunk, or the code did not come through (the phone system drops key presses).
 - Billed as a normal outbound call at the normal price for the destination. Max 5 checks per number per day.
 - An `unverified` number older than 7 days is removed (frees the `e164`).
@@ -183,28 +184,29 @@ A test call the customer makes through their own PBX proves nothing: they choose
   - `contacts_phone_or_email` CHECK becomes phone, email or extension. `ContactCreate`, MCP `create_contact`, CLI contacts and the console contact form accept it.
   - `validate_handover` and `handover_targets` (`core/hailhq/core/handover.py`), `_linked_person` and the phone check in `agent_handover` accept an extension contact on a `pbx` call. On a carrier call, an extension contact is skipped.
   - The sold-country check and `check_handover_allowed` do not apply to an extension (it never leaves the customer's PBX). They still apply to an E.164 contact dialed through the PBX.
-  - The handover price quote: a `pbx` call quotes the per-minute price without a destination, so an extension never hits the E.164-only quote route.
-- Caller ID on the handover leg: the original caller's number (decision). The PBX shows it to the person.
+  - The handover price quote: a `pbx` call quotes the `pbx` prices without a destination (10¢ a minute for the call, 20¢ a minute with the handover leg), so an extension never hits the E.164-only quote route.
+- Caller ID on the handover leg: the original caller's number (decision), when it is `+E.164` or a 1-6 digit extension; an anonymous or unreadable caller gets the connected number. The PBX shows it to the person.
 - While the handover rings: an email to contacts with an email, as today. No text (the number cannot text).
 
 ### 7. Billing
 
-Prices (owner, 2026-11-18). Kept in `hail-website/lib/private-rates.ts` as one `pbx` entry, so milestone 2 or another session can change them in one place.
+Prices (owner, 2026-11-18). Kept in `hail-website/lib/private-rates.ts` as one `pbx` entry (`PBX_PRICES`: `cents_per_minute`, `handover_cents_per_minute`, `monthly_cents`, `setup_cents`), so milestone 2 or another session can change them in one place.
 
 | Item | Price |
 |---|---|
-| Call minute: inbound, outbound, handover leg | 10¢ a minute, every country |
-| Recording | +1¢ a minute, as today |
+| Call minute: inbound or outbound | 10¢ a minute of call length, every country |
+| Handover leg on a connected call (owner, 2026-11-18) | +10¢ a minute, from the handover answer to its end, on top of the call minute. An unanswered dial costs nothing. |
+| Recording | +1¢ a minute of call length, as today |
 | Ownership check call | Normal outbound call price for the destination |
 | Monthly fee per connected number | $0 |
 | Setup fee | $0 |
 
 How it is charged:
 
-- Every leg on a `pbx` call is written to `call_legs` with `provider = 'pbx'`, `cost_status = 'found'`, `cost_usd = 0` at insert. The rater then charges the `pbx` per-minute price.
+- Every leg on a `pbx` call is written to `call_legs` with `provider = 'pbx'`, `cost_status = 'found'`, `cost_usd = 0` at insert. The rater then charges the `pbx` per-minute price for the call, plus the handover price for each answered handover leg (its `answered_at` to `left_at` in `call_legs`, pro rata like the call).
 - hail-website:
-  - `voice-cost-rater.ts` and `voiceCallCents`: a `pbx` call uses the `pbx` price; a `pbx` leg with no row is priced at 0, never from the rate table.
-  - Call price quote (`/api/internal/voice-rates/quote`): `pbx` quotes the `pbx` price.
+  - `voice-cost-rater.ts` and `voiceCallCents`: a `pbx` call uses the `pbx` price; a `pbx` call leg costs 0 and an answered `pbx` handover leg costs the handover price; neither is ever priced from the rate table.
+  - Call price quote (`/api/internal/voice-rates/quote`): `pbx` quotes the `pbx` price, and the handover price on top for each handover leg, so hail holds enough balance while a person is on the line.
   - `monthly-fee-rater.ts`: skip `pbx` numbers. Without this, the run fails on a number with no price.
   - `idle-number-release.ts` and `number-dunning.ts`: skip `pbx` numbers.
 
