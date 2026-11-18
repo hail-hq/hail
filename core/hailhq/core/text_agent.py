@@ -23,7 +23,11 @@ from hailhq.core.billing import has_funds
 from hailhq.core.config import settings
 from hailhq.core.jsonb import merge_object
 from hailhq.core.models import Agent, PhoneNumber, Sms
-from hailhq.core.prompts import TEXT_PREAMBLE, build_text_instructions
+from hailhq.core.prompts import (
+    TEXT_PREAMBLE,
+    build_text_instructions,
+    safe_clock_section,
+)
 from hailhq.core.threads import ThreadItem, thread_items
 from sqlalchemy import (
     ColumnElement,
@@ -65,6 +69,7 @@ __all__ = [
     "finish_reply",
     "prior_reply",
     "replies_in_thread",
+    "reply_clock",
     "retry_reply",
     "should_queue_reply",
     "thread_history_for_reply",
@@ -338,16 +343,31 @@ async def replies_in_thread(db: AsyncSession, sms: Sms) -> int:
     return int((await db.execute(stmt)).scalar_one() or 0)
 
 
+def reply_clock(sms: Sms) -> str | None:
+    """The date and time section for a reply to ``sms``: the business's number
+    is the one texted, the other party's is the sender's. A failure leaves the
+    section out instead of failing the reply."""
+    return safe_clock_section(
+        started_at=datetime.now(timezone.utc),
+        channel="text",
+        business_number=sms.to_e164,
+        other_number=sms.from_e164,
+        received_at=sms.requested_at,
+    )
+
+
 def build_chat_messages(
-    agent: Agent, history: list[ThreadItem]
+    agent: Agent, history: list[ThreadItem], *, clock: str | None = None
 ) -> list[dict[str, Any]]:
-    """OpenAI-style messages: system (preamble, the thread_history hint and
-    the instructions) then the texts, inbound as ``user`` and outbound as
-    ``assistant``. Call items are left out."""
+    """OpenAI-style messages: system (preamble, the thread_history hint, the
+    instructions and the ``clock``) then the texts, inbound as ``user`` and
+    outbound as ``assistant``. Call items are left out."""
     messages: list[dict[str, Any]] = [
         {
             "role": "system",
-            "content": build_text_instructions(agent.system_prompt, thread_tool=True),
+            "content": build_text_instructions(
+                agent.system_prompt, thread_tool=True, clock=clock
+            ),
         }
     ]
     for item in history:
