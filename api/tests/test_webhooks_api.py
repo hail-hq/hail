@@ -187,7 +187,10 @@ async def test_create_stamps_created_and_updated_at_alike(
     apart when both are missing."""
     create = await client.post(
         "/webhooks",
-        json={"target_url": "https://example.com/h", "event_types": ["call.analyzed"]},
+        json={
+            "target_url": "https://example.com/h",
+            "event_types": ["call.transcribed"],
+        },
         headers=auth_headers,
     )
     assert create.status_code == 201, create.text
@@ -207,7 +210,7 @@ async def test_patch_and_rotation_bump_updated_at(
     auth_headers: dict[str, str],
     async_session: AsyncSession,
 ):
-    """call.analyzed sends only calls that ended after the subscription was
+    """call.transcribed sends only calls that ended after the subscription was
     created or last changed (hailhq.core.call_analysis), so every change
     bumps updated_at. (The test cannot tell now() from statement_timestamp():
     both fall inside the request.)"""
@@ -221,7 +224,7 @@ async def test_patch_and_rotation_bump_updated_at(
     for change in (
         lambda: client.patch(
             f"/webhooks/{sub_id}",
-            json={"event_types": ["call.completed", "call.analyzed"]},
+            json={"event_types": ["call.completed", "call.transcribed"]},
             headers=auth_headers,
         ),
         lambda: client.post(f"/webhooks/{sub_id}/rotate-secret", headers=auth_headers),

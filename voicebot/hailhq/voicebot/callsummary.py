@@ -1,4 +1,4 @@
-"""Call analysis worker: sends ``call.analyzed`` with a short AI summary.
+"""Call analysis worker: sends ``call.transcribed`` with a short AI summary.
 
 Runs as one more poller in the text worker thread (``textbot.run_forever``),
 so the summary uses the same LLM precedence and keys as texts:
@@ -26,7 +26,7 @@ from hailhq.core.call_analysis import (
     ANALYSIS_WINDOW,
     call_transcript,
     claim_call_to_analyze,
-    send_call_analyzed,
+    send_call_transcribed,
 )
 from hailhq.core.db import session_scope
 from hailhq.core.prompts import CALL_SUMMARY_INSTRUCTIONS
@@ -126,7 +126,7 @@ def _given_up() -> set[uuid.UUID]:
 
 
 async def analyze_once(_api: Any = None) -> bool:
-    """Send ``call.analyzed`` for one call. Returns False when none waited.
+    """Send ``call.transcribed`` for one call. Returns False when none waited.
     ``_api`` is unused: the poller hands every worker the API client.
 
     Any error after a call is picked counts against that call, so one bad
@@ -151,7 +151,7 @@ async def analyze_once(_api: Any = None) -> bool:
             summary = await summarize(org_id, call_id, turns) if turns else None
             summarized = True
         async with session_scope() as db:
-            await send_call_analyzed(db, call_id, turns, summary)
+            await send_call_transcribed(db, call_id, turns, summary)
     except Exception:
         if failure is None:
             failure = _failures[call_id] = _Failure(0, time.monotonic())

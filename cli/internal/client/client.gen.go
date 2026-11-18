@@ -1391,13 +1391,13 @@ func (e WebhookDeliveryResponseStatus) Valid() bool {
 
 // Defines values for WebhookEventType.
 const (
-	CallAnalyzed            WebhookEventType = "call.analyzed"
 	CallAnswered            WebhookEventType = "call.answered"
 	CallBusy                WebhookEventType = "call.busy"
 	CallCompleted           WebhookEventType = "call.completed"
 	CallFailed              WebhookEventType = "call.failed"
 	CallNoAnswer            WebhookEventType = "call.no_answer"
 	CallReceived            WebhookEventType = "call.received"
+	CallTranscribed         WebhookEventType = "call.transcribed"
 	CallTransferred         WebhookEventType = "call.transferred"
 	EmailBounced            WebhookEventType = "email.bounced"
 	EmailClicked            WebhookEventType = "email.clicked"
@@ -1417,8 +1417,6 @@ const (
 // Valid indicates whether the value is a known member of the WebhookEventType enum.
 func (e WebhookEventType) Valid() bool {
 	switch e {
-	case CallAnalyzed:
-		return true
 	case CallAnswered:
 		return true
 	case CallBusy:
@@ -1430,6 +1428,8 @@ func (e WebhookEventType) Valid() bool {
 	case CallNoAnswer:
 		return true
 	case CallReceived:
+		return true
+	case CallTranscribed:
 		return true
 	case CallTransferred:
 		return true

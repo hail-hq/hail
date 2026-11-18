@@ -78,7 +78,7 @@ async def _seed(session, *, subscribe=True, turns=None) -> uuid.UUID:
             WebhookSubscription(
                 organization_id=org,
                 target_url="https://example.com/hook",
-                event_types=["call.analyzed"],
+                event_types=["call.transcribed"],
                 secret_encrypted="x",
                 created_at=ended_at - timedelta(hours=1),
                 updated_at=ended_at - timedelta(hours=1),
@@ -92,7 +92,7 @@ async def _delivery(session, call_id) -> WebhookDelivery | None:
     return (
         await session.execute(
             select(WebhookDelivery).where(
-                WebhookDelivery.event_type == "call.analyzed",
+                WebhookDelivery.event_type == "call.transcribed",
                 WebhookDelivery.event_id == call_id,
             )
         )
@@ -203,15 +203,15 @@ async def test_two_workers_run_the_model_once(async_session, llm, monkeypatch) -
 
 async def test_a_failed_try_keeps_its_claim(async_session, llm, monkeypatch) -> None:
     await _seed(async_session)
-    real_send = callsummary.send_call_analyzed
+    real_send = callsummary.send_call_transcribed
 
     async def broken_send(db, cid, turns, summary):
         raise RuntimeError("db down")
 
-    monkeypatch.setattr(callsummary, "send_call_analyzed", broken_send)
+    monkeypatch.setattr(callsummary, "send_call_transcribed", broken_send)
     with pytest.raises(RuntimeError):
         await callsummary.analyze_once()
-    monkeypatch.setattr(callsummary, "send_call_analyzed", real_send)
+    monkeypatch.setattr(callsummary, "send_call_transcribed", real_send)
     # Drop the kept summary, as another replica has none: a re-pick would
     # run the model again. The DB claim keeps the call for the lease.
     callsummary._failures.clear()
@@ -232,7 +232,7 @@ async def test_failed_send_is_retried_then_given_up(
         sent_turns.append(turns)
         raise RuntimeError("db down")
 
-    monkeypatch.setattr(callsummary, "send_call_analyzed", broken_send)
+    monkeypatch.setattr(callsummary, "send_call_transcribed", broken_send)
     for _ in range(callsummary.MAX_SEND_ATTEMPTS):
         with pytest.raises(RuntimeError):
             await callsummary.analyze_once()

@@ -160,16 +160,16 @@ async def test_get_events_hides_call_analysis_claims(
     org_id, _, plain = org_and_key
     await add_phone_number(async_session, org_id)
     call_id = await _create_call_for_events(client, plain)
-    await _add_event(async_session, call_id, "analyzing", {})
-    await _add_event(async_session, call_id, "analyzed", {"turns": 0})
+    await _add_event(async_session, call_id, "transcribing", {})
+    await _add_event(async_session, call_id, "transcribed", {"turns": 0})
     headers = {"Authorization": f"Bearer {plain}"}
-    for url in (f"/events?id=call:{call_id}", "/events", "/events?kind=analyzing"):
+    for url in (f"/events?id=call:{call_id}", "/events", "/events?kind=transcribing"):
         resp = await client.get(url, headers=headers)
         assert resp.status_code == 200
         kinds = [item["kind"] for item in resp.json()["items"]]
-        assert "analyzing" not in kinds
+        assert "transcribing" not in kinds
     resp = await client.get(f"/events?id=call:{call_id}", headers=headers)
-    assert "analyzed" in [item["kind"] for item in resp.json()["items"]]
+    assert "transcribed" in [item["kind"] for item in resp.json()["items"]]
 
 
 async def test_get_events_id_filter_unknown_call_returns_404(
