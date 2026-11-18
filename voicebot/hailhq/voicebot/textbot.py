@@ -49,9 +49,6 @@ from hailhq.core.text_agent import (
     thread_history_for_reply,
 )
 from hailhq.core.threads import ThreadScope
-
-# A skip reason code from reply-sms ("thread_cap", "sms_registration").
-_REASON_CODE = re.compile(r"[a-z][a-z0-9_]{1,40}")
 from hailhq.voicebot import callsummary, emailbot
 from hailhq.voicebot.chat_loop import (
     LLM_TIMEOUT_SECONDS,
@@ -65,6 +62,9 @@ from hailhq.voicebot.tools import wrap_tool
 from livekit.agents.llm import FunctionToolCall
 
 logger = logging.getLogger("hailhq.voicebot.textbot")
+
+# A skip reason code from reply-sms ("thread_cap", "sms_registration").
+_REASON_CODE = re.compile(r"[a-z][a-z0-9_]{1,40}")
 
 POLL_SECONDS = 2.0
 
@@ -256,7 +256,14 @@ async def _reply_claimed(api: AgentApiClient, claimed: ClaimedReply, span=None) 
         reason if isinstance(reason, str) and _REASON_CODE.fullmatch(reason) else None
     )
     if state != "done":
-        logger.info("sms_id=%s reply %s: %s %s", sms.id, state, reason, detail or "")
+        # An older API's sentence can hold the recipient's number: not logged.
+        logger.info(
+            "sms_id=%s reply %s: %s %s",
+            sms.id,
+            state,
+            code if code or reason is None else "[sentence hidden]",
+            detail or "",
+        )
     if span is not None:
         span.set_attribute("reply.state", state)
     # The reason is saved on the text, so the console can say why it got no reply.

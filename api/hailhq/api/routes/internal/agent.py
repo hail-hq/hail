@@ -135,6 +135,7 @@ from hailhq.core.telemetry_identity import tag_context
 from hailhq.core.telephony_catalog import sells_in
 from hailhq.core.text_agent import (
     AGENT_CAPS_SKIP,
+    INSUFFICIENT_FUNDS_SKIP,
     MAX_REPLIES_PER_THREAD,
     NO_AGENT_SKIP,
     SEND_BLOCKED_SKIP,
@@ -875,7 +876,7 @@ async def agent_reply_sms(
         return AgentReplySmsResponse(ok=False, state="skipped", reason=THREAD_CAP_SKIP)
     if not await has_funds(db, org):
         return AgentReplySmsResponse(
-            ok=False, state="skipped", reason="insufficient_funds"
+            ok=False, state="skipped", reason=INSUFFICIENT_FUNDS_SKIP
         )
     gate = await check_sms_allowed(db, org, inbound.from_e164)
     if not gate.allowed:
