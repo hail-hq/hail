@@ -31,7 +31,7 @@ def _instructions(started_at: datetime) -> str:
     return prompts.build_voice_instructions(FRONT_DESK, "inbound", other_party=clock)
 
 
-async def _reply(system: str, caller: str) -> str:
+async def _complete(system: str, messages: list[dict[str, str]]) -> str:
     async with anthropic.AsyncAnthropicBedrock(
         aws_region=os.environ["ANTHROPIC_BEDROCK_REGION"], max_retries=0
     ) as client:
@@ -39,17 +39,31 @@ async def _reply(system: str, caller: str) -> str:
             model=os.environ["ANTHROPIC_MODEL"],
             max_tokens=300,
             system=system,
-            messages=[
-                {"role": "user", "content": "Hello?"},
-                {
-                    "role": "assistant",
-                    "content": "Hi, Northgate Dental, you're speaking to our AI "
-                    "assistant. Can I take your name?",
-                },
-                {"role": "user", "content": caller},
-            ],
+            messages=messages,
         )
     return " ".join(block.text for block in response.content if block.type == "text")
+
+
+async def _reply(system: str, caller: str) -> str:
+    return await _complete(
+        system,
+        [
+            {"role": "user", "content": "Hello?"},
+            {
+                "role": "assistant",
+                "content": "Hi, Northgate Dental, you're speaking to our AI "
+                "assistant. Can I take your name?",
+            },
+            {"role": "user", "content": caller},
+        ],
+    )
+
+
+def _assert_answer(text: str, is_open: bool) -> None:
+    """The reply leads with yes or no, as asked."""
+    answer = re.search(r"\b(yes|no)\b", text, re.IGNORECASE)
+    assert answer is not None, text
+    assert (answer.group(1).lower() == "yes") == is_open, text
 
 
 async def _speech(system: str, caller: str) -> str:
@@ -71,10 +85,7 @@ async def test_agent_knows_whether_the_office_is_open(started_at, is_open) -> No
         _instructions(started_at),
         "It's Sam. Is the office open right now? Start your answer with yes or no.",
     )
-    # The caller asks for yes or no: the answer leads the reply.
-    answer = re.search(r"\b(yes|no)\b", speech, re.IGNORECASE)
-    assert answer is not None, speech
-    assert (answer.group(1).lower() == "yes") == is_open, speech
+    _assert_answer(speech, is_open)
 
 
 @pytest.mark.parametrize("attempt", range(3))
@@ -85,3 +96,45 @@ async def test_no_comma_before_the_callers_name(attempt) -> None:
     )
     assert "Sam" in speech, speech
     assert not re.search(r",\s+Sam\b", speech), speech
+
+
+OFFICE = (
+    "You answer messages for Northgate Dental. We are open 9am to 5pm, "
+    "London time, Monday to Friday."
+)
+
+
+@pytest.mark.parametrize(
+    "channel,at,is_open",
+    [
+        pytest.param("text", datetime(2026, 11, 18, 20, 5, tzinfo=timezone.utc), False),
+        pytest.param("text", datetime(2026, 11, 18, 10, 0, tzinfo=timezone.utc), True),
+        pytest.param(
+            "email", datetime(2026, 11, 18, 20, 5, tzinfo=timezone.utc), False
+        ),
+        pytest.param("email", datetime(2026, 11, 18, 10, 0, tzinfo=timezone.utc), True),
+    ],
+)
+async def test_a_reply_knows_whether_the_office_is_open(channel, at, is_open) -> None:
+    clock = prompts.clock_section(
+        at,
+        channel=channel,
+        business_number="+442079460000",
+        other_number="+447911123456",
+    )
+    build = (
+        prompts.build_text_instructions
+        if channel == "text"
+        else prompts.build_email_instructions
+    )
+    text = await _complete(
+        build(OFFICE, clock=clock),
+        [
+            {
+                "role": "user",
+                "content": "Is the office open right now? "
+                "Start your answer with yes or no.",
+            }
+        ],
+    )
+    _assert_answer(text, is_open)

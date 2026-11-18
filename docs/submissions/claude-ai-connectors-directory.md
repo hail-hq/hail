@@ -4,34 +4,59 @@ slug: claude-ai-connectors-directory
 category: mcp-registry
 url: "https://claude.ai/directory/manage"
 score: 5
-status: drafted
+status: submitted
 ---
 
 # Claude.ai Connectors Directory
 
 Review the live [Directory Policy](https://support.claude.com/en/articles/13145358-anthropic-software-directory-policy) before submitting.
 
-## Listing content
+## TODO
+
+- [x] Submitted (reported by the owner before 2026-11-16)
+- [x] Portal shows "In review" (owner, 2026-11-16)
+- [ ] Confirm these steps from the earlier draft were done before submitting:
+  - [ ] Written permission for AI phone calls (Directory Policy 4.B), or a separate connector scope agreed with Anthropic
+  - [ ] Description and MCP telemetry changes deployed and verified
+  - [ ] Review account prepared, and every tool tested through a Claude custom connector
+- [ ] Approved
+- [ ] Published
+
+## Content
 
 Paste these into the portal at <https://claude.ai/directory/manage>.
 
 - **Name:** Hail
-- **Tagline (55 characters or fewer):** Phone, SMS and email for agents.
+- **Tagline (55 characters or fewer):**
+
+  <!-- copy:tagline -->
+
+  Give your AI a real phone number and an email inbox.
+  <!-- /copy -->
+
 - **Categories:** Communication, Productivity, Developer Tools
 - **Docs URL:** <https://hail.so/docs/mcp>
 - **Privacy policy URL:** <https://hail.so/legal/privacy>
 - **Support contact:** hi@hail.so
 - **Server:** `https://mcp.hail.so`, Streamable HTTP at the root path
 - **Authentication:** OAuth with Dynamic Client Registration. Public discovery precedes sign-in for tool execution.
-- **Icon:** the square monogram from the hail-website repo, `public/assets/monogram-512.png`.
+- **Icon:** the square monogram from the hail-website repo, `public/assets/brand/logo/monogram-512.png`.
 
 **Description (2,000 characters or fewer):**
 
-> Hail gives an AI agent a phone number, an inbox and a voice. One remote MCP server covers phone calls, text messages and email.
+<!-- copy:long -->
+
+> Hail gives your AI assistant a real phone number and an email inbox. Your agent can do any work people do on the phone and in email.
 >
-> Place an outbound AI call and read its transcript. Send and receive text messages. Send email, read replies and attachments, and check delivery events and stats. Buy and route phone numbers, manage saved agents, and submit carrier registrations.
+> Run a support receptionist, answering service, or your own assistant on one account. It handles calls, texts, and email day and night, and passes calls to your phone when needed.
 >
-> Sign in with OAuth. Each person authorizes their own Hail account. Hail is open source (AGPLv3) and can be self-hosted. The same features are available in the CLI, the Python SDK and the OpenAPI spec.
+> Get a local or toll-free number in 120+ countries, even where you have no office. Hail helps with the paperwork some countries need. Send and receive email on your own domain.
+>
+> Webhooks send every call, text, and email to your app, so your own tools stay up to date.
+>
+> Connect Claude, ChatGPT, or Cursor over MCP in minutes, or build with the API. Hail is open source.
+
+<!-- /copy -->
 
 **Use cases:**
 
@@ -56,7 +81,7 @@ Paste these into the portal at <https://claude.ai/directory/manage>.
 | Registrations        | `get_verification_requirements`, `check_verification`, `submit_verification`, `confirm_verification`, `get_verification`, `list_verifications`, `cancel_verification`                           |
 | Contacts and account | `create_contact`, `list_contacts`, `lookup_contact`, `whoami`                                                                                                                                   |
 
-## Portal steps
+## Steps to submit
 
 1. Introduction: read the overview.
 2. Connection: server URL `https://mcp.hail.so`, transport HTTP (Streamable), per-user OAuth.
@@ -68,8 +93,6 @@ Paste these into the portal at <https://claude.ai/directory/manage>.
 8. Test and launch: paste reviewer access (see Reviewer testing below).
 9. Compliance: check the acknowledgements below only after reading each against current practice.
 10. Review: fix what the checklist flags, then submit.
-
-Escalate a stuck review to `mcp-review@anthropic.com`.
 
 ## Policy acknowledgements
 
@@ -95,9 +118,25 @@ Unit tests, tool discovery and calls through other clients are separate evidence
 Tests that require paid actions, number release or registration documents need explicit authorization and disposable resources.
 Each tool needs a recorded result. An error response alone does not demonstrate successful functionality.
 
-## Remaining steps
+## Notes
 
-- Obtain written permission for AI phone calls, or agree a separate connector scope with Anthropic.
-- Deploy and verify the description and MCP telemetry changes.
-- Prepare the review account and complete the client-level tool tests.
-- Complete the truthful acknowledgements and submit the draft.
+### Status
+
+The owner reports the connector was submitted before 2026-11-16 and is in review (2026-11-16). No email from Anthropic yet.
+
+Check the status (from <https://claude.com/docs/directory/submission-status.md>, read 2026-11-16):
+
+1. Open <https://claude.ai/directory/manage>. Sign in with the organization that submitted Hail.
+2. Open the Hail connector from the list of submissions.
+3. Read the card at the top. It shows the status and the next step.
+
+| Status            | Who acts next | What to do                                                       |
+| ----------------- | ------------- | ---------------------------------------------------------------- |
+| Draft             | Hail          | Nothing was sent. Finish the steps and submit.                   |
+| In review         | Anthropic     | Wait. Anthropic emails the primary contact if it needs anything. |
+| Changes requested | Hail          | Click **View feedback**, fix, resubmit.                          |
+| Not approved      | Hail          | Click **View feedback**. Edit and resubmit.                      |
+| Approved          | Hail          | Click **Publish**. Editing first sends it back to draft.         |
+| Published         | Nobody        | Live as a Community connector.                                   |
+
+Anthropic gives no fixed review time. Escalate a stuck review to `mcp-review@anthropic.com` with the listing name, the organization, and the status the portal shows.

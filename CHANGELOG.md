@@ -8,6 +8,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 - Agents can email the person on a call a link or short note at an address they confirm, when `email_caller_enabled` is on (off by default).
 - Call agents know the date, time and time zone at the start of each call.
+- Text and email reply agents know the date, time and time zone too.
 - Calls: `GET /v1/calls/{id}` returns the call's transcript, and the new `call.analyzed` webhook sends the transcript and a short summary after each call.
 - Rejected number registrations can be fixed and sent again for 30 days with `POST /v1/verifications/{id}/resubmit` (MCP: `resubmit_verification`).
 - `sms.received` webhooks and `received` SMS events have a new `compliance_keyword` field: `STOP`, `START` or `HELP` when the text is one of those keywords, otherwise `null`.
@@ -26,6 +27,11 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 - `POST /v1/numbers/quotes` takes an optional `subject_type` (`person` or `business`) and returns each offer's `paperwork` for it.
 - Number paperwork says when the address can be in any country: the new `address_any_country` item, from DIDWW.
 - Email agents: route an address to an agent, and it answers inbound mail in the thread.
+
+### Changed
+
+- Webhooks to CGNAT addresses (`100.64.0.0/10`, used by Tailscale), multicast, IPv6 site-local, or hosts that do not resolve are now refused, and existing ones fail on delivery. Self-hosters can allow them with `HAIL_WEBHOOK_ALLOW_PRIVATE_NETWORKS=true`.
+- A webhook `target_url` or BYO LLM `base_url` whose host is private or does not resolve is refused with one error text, which ends in `URL host is private or could not be resolved`.
 
 ### Fixed
 

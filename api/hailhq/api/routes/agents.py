@@ -44,7 +44,7 @@ from hailhq.core.schemas import (
     AgentUpdate,
     HandoverContactOut,
 )
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -372,10 +372,7 @@ async def delete_agent(
                 select(PhoneNumber)
                 .where(
                     PhoneNumber.organization_id == principal.organization_id,
-                    or_(
-                        PhoneNumber.voice_agent_id == agent.id,
-                        PhoneNumber.sms_agent_id == agent.id,
-                    ),
+                    PhoneNumber.answered_by(agent.id),
                 )
                 .limit(1)
             )

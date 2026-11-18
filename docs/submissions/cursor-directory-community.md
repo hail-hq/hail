@@ -34,10 +34,29 @@ status: drafted
 
 **Name:** Hail
 
-**One-liner:** Phone, SMS & email — for agents.
+**One-liner:**
+
+<!-- copy:tagline -->
+
+Give your AI a real phone number and an email inbox.
+
+<!-- /copy -->
 
 **Description (long):**
-Hail is a self-hostable, AGPLv3 communication platform built for AI agents. It gives an agent a real phone number, inbox, and messaging line — place and receive calls, send and receive email, and read back structured events — all through one remote MCP server. No local install: connect a client to `https://mcp.hail.so`, authorize once via OAuth, and the agent gets tools immediately. Self-hosters run the same server with a static API key instead of OAuth. Also available via CLI, a Python SDK, and OpenAPI for non-MCP integrations.
+
+<!-- copy:long -->
+
+Hail gives your AI assistant a real phone number and an email inbox. Your agent can do any work people do on the phone and in email.
+
+Run a support receptionist, answering service, or your own assistant on one account. It handles calls, texts, and email day and night, and passes calls to your phone when needed.
+
+Get a local or toll-free number in 120+ countries, even where you have no office. Hail helps with the paperwork some countries need. Send and receive email on your own domain.
+
+Webhooks send every call, text, and email to your app, so your own tools stay up to date.
+
+Connect Claude, ChatGPT, or Cursor over MCP in minutes, or build with the API. Hail is open source.
+
+<!-- /copy -->
 
 **Config/URL field:**
 
@@ -59,12 +78,14 @@ Hail is a self-hostable, AGPLv3 communication platform built for AI agents. It g
 
 **License:** AGPL-3.0-or-later — [`LICENSE`](../../LICENSE)
 
-**Logo asset:** `hail-website/public/assets/hail-monogram.svg` (square mark; `hail-website/public/assets/avatar-1024.png` as raster fallback)
+**Logo asset:** `hail-website/public/assets/brand/logo/hail-monogram.svg` (square mark; `hail-website/public/assets/brand/logo/avatar-1024.png` as raster fallback)
 
 ## Notes
 
+- 2026-11-16: could not check whether Hail is listed. cursor.directory returned HTTP 429 (rate limit) to every scripted request. Check <https://cursor.directory/plugins/new> in a browser.
+
 - Listed as **"Unofficial community form"** with **no formal vetting** per the target brief — treat this as low-effort/low-certainty: no confirmation email, moderation queue, or SLA should be assumed. If the form submits with no visible acknowledgment, that's expected, not a failure.
-- SMS is a shipped, present-tense capability of Hail as a whole (voice, SMS, email), but there is currently no `send_sms`/`list_sms` tool wired into the MCP tool surface (`mcp/hailhq/mcp/tools.py` exposes only call and email tools plus event/stats readers) — SMS-over-MCP is "coming soon." Keep SMS out of any field that implies it's an MCP _tool_; it's fine in the general product description since Hail overall does ship SMS.
+- 2026-11-16: SMS is shipped. The MCP server exposes `send_sms`, `get_sms` and `list_sms` (`mcp/hailhq/mcp/tools.py`). Earlier notes that said SMS was not shipped were removed.
 - Voice is Twilio-backed, email is SES-backed (`core/hailhq/core/providers/voice/twilio.py`, `core/hailhq/core/providers/email/ses.py`) — no other carrier/vendor is wired up yet, so don't name any other provider in the listing copy.
 - Couldn't verify the live form's exact field set (name/description/config vs. a longer multi-field layout) — cursor.directory's `/plugins/new` page wasn't fetched for this draft; confirm actual fields at submission time and adjust which **Content** items get pasted where.
 - No documented review turnaround, contact channel, or edit/removal process found for this target — treat as fire-and-forget until proven otherwise.

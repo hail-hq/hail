@@ -59,8 +59,8 @@ from hailhq.core.prompts import (
     VOICE_PREAMBLE,
     VOICE_PREAMBLE_INBOUND,
     build_voice_instructions,
-    clock_section,
     other_party_section,
+    safe_clock_section,
 )
 from hailhq.core.providers.voice import TwilioVoiceProvider
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
@@ -330,16 +330,12 @@ def _call_clock(metadata: dict[str, Any], inbound: bool) -> str | None:
     caller, dialed = metadata.get("from_e164"), metadata.get("to_e164")
     if not inbound and metadata.get(CALL_META_FROM_POOL):
         caller = None  # a shared pool number, not the business's own
-    try:
-        return clock_section(
-            datetime.now(timezone.utc),
-            inbound=inbound,
-            business_number=dialed if inbound else caller,
-            other_number=caller if inbound else dialed,
-        )
-    except Exception:
-        logger.exception("could not build the call's date and time section")
-        return None
+    return safe_clock_section(
+        started_at=datetime.now(timezone.utc),
+        inbound=inbound,
+        business_number=dialed if inbound else caller,
+        other_number=caller if inbound else dialed,
+    )
 
 
 # The other-party lookup runs before the session starts, so a slow DB must

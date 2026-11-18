@@ -22,6 +22,7 @@ from sqlalchemy import (
     UniqueConstraint,
     event,
     func,
+    or_,
     text,
 )
 from sqlalchemy.dialects.postgresql import INET, JSONB, UUID
@@ -717,6 +718,11 @@ class PhoneNumber(Base):
     # Set while the number is on its carrier's LiveKit inbound trunk and
     # attached for inbound at the carrier (hailhq.core.inbound_routing).
     inbound_registered_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
+
+    @classmethod
+    def answered_by(cls, agent_id: uuid.UUID):
+        """SQL: the number's calls or texts go to ``agent_id``."""
+        return or_(cls.voice_agent_id == agent_id, cls.sms_agent_id == agent_id)
 
     __table_args__ = (
         CheckConstraint(

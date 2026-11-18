@@ -86,8 +86,23 @@ number (`phonenumbers`). A number whose zones have different UTC offsets right
 now (US toll-free, Australian mobiles) gets "unknown": for the business the
 model is told to go by UTC, for the other party to ask where they are. An
 outbound call from a shared pool number also gets "unknown" for the
-business, since the pool number's country says nothing about the business. Text
-and email replies do not get this section yet.
+business, since the pool number's country says nothing about the business.
+
+Text and email replies get the same section, with the time the reply is
+written ("It is now"), after the business instructions and before the privacy
+reminder (`reply_clock` in `core/hailhq/core/text_agent.py` and
+`core/hailhq/core/email_agent.py`):
+
+- A text reply: the texted number is the business, the sender's number is the
+  other party, with a note that a sender's number can be faked.
+- An email reply: no other party. The business's zone comes from the active
+  numbers the agent answers calls or texts on, oldest first, skipping a number
+  with several zones; without one, UTC only.
+- Both say when the message being answered arrived (UTC and business time),
+  since a retried reply is written later.
+
+`safe_clock_section` builds the section for calls, texts and emails; any
+failure leaves it out.
 
 ## Names in speech
 

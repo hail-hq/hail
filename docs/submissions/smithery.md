@@ -4,7 +4,7 @@ slug: smithery
 category: mcp-registry
 url: "https://smithery.ai/docs/build/publish"
 score: 8
-status: drafted
+status: n/a
 ---
 
 # Smithery
@@ -50,10 +50,21 @@ status: drafted
 
 **Name:** Hail
 
-**One-liner:** Phone, SMS & email — for agents.
+**One-liner:**
+
+<!-- copy:tagline -->
+
+Give your AI a real phone number and an email inbox.
+
+<!-- /copy -->
 
 **Description:**
-Hail is a self-hostable, AGPLv3 communication platform built for AI agents. It gives an agent a real phone number, inbox, and messaging line — place and receive calls, send and receive email, and read back structured events — all through one remote MCP server. No local install: connect a client to `https://mcp.hail.so`, authorize once via OAuth, and the agent gets tools immediately. Self-hosters run the same server with a static API key instead of OAuth. Also available via CLI, a Python SDK, and OpenAPI for non-MCP integrations.
+
+<!-- copy:medium -->
+
+Give your AI assistant a real phone number and an email inbox. Run a support receptionist, answering service, or your assistant on one account. Get a number in 120+ countries and email on your own domain, with MCP, API, and webhook support for your app.
+
+<!-- /copy -->
 
 **Server URL (paste into Smithery):**
 
@@ -90,13 +101,15 @@ npx -y @smithery/cli mcp publish "https://mcp.hail.so" -n @hail-hq/hail
 
 **License:** AGPLv3 — `github.com/hail-hq/hail`
 
-**Logo asset:** `hail-website/public/assets/hail-monogram.svg` (square mark, use for the listing icon; `avatar-1024.png` as a raster fallback if SVG isn't accepted)
+**Logo asset:** `hail-website/public/assets/brand/logo/hail-monogram.svg` (square mark, use for the listing icon; `avatar-1024.png` as a raster fallback if SVG isn't accepted)
 
 ## Notes
 
+- **2026-11-16: Smithery is now part of Arcade (arcade.dev).** From <https://smithery.ai/future>: "On October 31, 2026, we're shutting down Smithery's connection management services. Smithery will remain as a public (non-proxied) MCP registry." Its accounts, API keys, CLI, and hosted server URLs are shut down. The steps above no longer work. No new submission path was found: <https://smithery.ai/docs> returns 404. Hail was not found at the Smithery server URLs tried. The registry search API returned HTTP 500.
+
 - Auto-scan will discover the tool list live from `https://mcp.hail.so` — the table above is included for the human filling out the form, but Smithery's own scan is the actual source that populates the listing page.
 - Smithery's docs describe an optional manual-metadata escape hatch at `/.well-known/mcp/server-card.json` for auth-protected servers where auto-scan can't complete. Checked directly: `https://mcp.hail.so/.well-known/mcp/server-card.json` currently 404s (`mcp/hailhq/mcp/server.py` only mounts `/.well-known/oauth-protected-resource`, which FastMCP auto-publishes for `oauth-rs` mode). If Smithery's OAuth-based auto-scan can't complete against Hail's flow, adding this file is the fallback — flag to engineering, don't build it speculatively for this submission.
-- SMS is a shipped, present-tense capability of Hail as a whole (voice, SMS, email), but there is currently no `send_sms`/`list_sms` tool wired into the MCP tool surface (`mcp/hailhq/mcp/tools.py` exposes only call and email tools plus event/stats readers — 11 tools total, confirmed against the module's own docstring) — SMS-over-MCP is "coming soon." Don't claim SMS tools exist on this listing; the auto-scan would immediately contradict it.
+- 2026-11-16: SMS is shipped. The MCP server exposes `send_sms`, `get_sms` and `list_sms` (`mcp/hailhq/mcp/tools.py`). Earlier notes that said SMS was not shipped were removed.
 - Voice is Twilio-backed, email is SES-backed (`core/hailhq/core/providers/voice/twilio.py`, `core/hailhq/core/providers/email/ses.py`) — those are the only provider adapters in `core/hailhq/core/providers/`, so don't name any other carrier/vendor in the listing copy.
 - The logo path (`hail-website/public/assets/...`) follows the convention used across every other file in `docs/submissions/`, but `hail-website` is not part of this monorepo checkout — its existence/contents couldn't be verified from here. Confirm the actual filename before uploading.
 - Review turnaround not documented by Smithery publicly; no stated SLA. Check the listing status directly on smithery.ai after submitting.
