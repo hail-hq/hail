@@ -9,7 +9,8 @@ neither needs a new column. A partial index on ``emails`` keeps the tool's
 caps (per call, per caller number per day, per org per day) cheap. It is
 built CONCURRENTLY so sends and inbound mail keep writing to ``emails``
 while it builds; that cannot run in a transaction, hence the autocommit
-block.
+block. A partial unique index on ``call_events`` keeps one ``email_caller``
+event per send (rule 5: one table, several kinds of row).
 
 Revision ID: 0082
 Revises: 0081
@@ -25,20 +26,39 @@ down_revision: str | None = "0081"
 branch_labels = None
 depends_on = None
 
+_INDEXES = (
+    (
+        "emails_caller_email_idx",
+        "emails",
+        ["organization_id", "requested_at"],
+        "(metadata ->> 'email_caller') = 'true'",
+        False,
+    ),
+    (
+        "call_events_email_caller_uq",
+        "call_events",
+        ["call_id", sa.text("(payload ->> 'tool_invocation_id')")],
+        "kind = 'email_caller'",
+        True,
+    ),
+)
+
 
 def upgrade() -> None:
-    # Index first, then the column: if the slow build fails, nothing is
-    # committed that a rerun would trip on. IF NOT EXISTS covers a rerun
-    # after a column failure.
+    # Indexes first, then the column. A failed CONCURRENTLY build leaves an
+    # INVALID index behind, so each build drops any old one first: a rerun
+    # rebuilds it instead of keeping an index the planner never uses.
     with op.get_context().autocommit_block():
-        op.create_index(
-            "emails_caller_email_idx",
-            "emails",
-            ["organization_id", "requested_at"],
-            postgresql_where=sa.text("(metadata ->> 'email_caller') = 'true'"),
-            postgresql_concurrently=True,
-            if_not_exists=True,
-        )
+        for name, table, columns, where, unique in _INDEXES:
+            op.execute(sa.text(f"DROP INDEX CONCURRENTLY IF EXISTS {name}"))
+            op.create_index(
+                name,
+                table,
+                columns,
+                unique=unique,
+                postgresql_where=sa.text(where),
+                postgresql_concurrently=True,
+            )
     op.add_column(
         "agents",
         sa.Column(
@@ -52,9 +72,6 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     with op.get_context().autocommit_block():
-        op.drop_index(
-            "emails_caller_email_idx",
-            table_name="emails",
-            postgresql_concurrently=True,
-        )
+        for name, table, *_ in _INDEXES:
+            op.drop_index(name, table_name=table, postgresql_concurrently=True)
     op.drop_column("agents", "email_caller_enabled")

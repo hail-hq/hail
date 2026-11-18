@@ -1824,7 +1824,7 @@ async def agent_email_caller(
     ):
         return AgentSendResponse(ok=False, spoken=_SPOKEN_NOT_ALLOWED)
 
-    if not email_caller.clean_subject(body.subject):
+    if not email_caller.clean_subject(body.subject) or not body.body_text.strip():
         return AgentSendResponse(
             ok=False,
             spoken="I need a subject and a message before I can send the email.",
@@ -1832,7 +1832,12 @@ async def agent_email_caller(
     recipient = normalize_recipient(body.to_address)
     meta = {**_meta(body), CALLER_EMAIL_MARK: True, "caller_e164": caller}
     denial = await _shared_denial(db, call)
+    name_task: asyncio.Task[str | None] | None = None
     if denial is None:
+        # The name for the fixed lines (the organizations table, else
+        # hail.so), looked up beside the cap check so the locks below never
+        # wait on it.
+        name_task = asyncio.create_task(organization_name(org))
         # Serializes caller emails across this org's calls until the row is
         # committed, so two calls cannot both pass a cap with one slot left.
         # Its own key: org_lock is held through slow carrier work.
@@ -1862,6 +1867,8 @@ async def agent_email_caller(
             recipient=recipient,
         )
     if denial is not None:
+        if name_task is not None:
+            name_task.cancel()
         spoken, reason = denial
         return await _deny(
             org,
@@ -1871,9 +1878,7 @@ async def agent_email_caller(
             payload={**meta, "reason": reason},
         )
 
-    # Every cheap refusal is behind us: only now look up the name for the
-    # fixed lines (the organizations table, else hail.so).
-    org_name = await organization_name(org)
+    org_name = await name_task
     result, row = await _send_email_row(
         db,
         email_provider,

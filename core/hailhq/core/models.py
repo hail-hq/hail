@@ -936,6 +936,17 @@ class CallEvent(Base):
         TS, server_default=text("now()"), nullable=False
     )
 
+    __table_args__ = (
+        # One email_caller event per send (the tool's invocation id).
+        Index(
+            "call_events_email_caller_uq",
+            "call_id",
+            text("(payload ->> 'tool_invocation_id')"),
+            unique=True,
+            postgresql_where=text("kind = 'email_caller'"),
+        ),
+    )
+
 
 class CallLeg(Base):
     """One carrier leg of a call, and what the carrier charged for it.

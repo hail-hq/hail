@@ -533,3 +533,21 @@ async def test_hidden_caller_number_is_refused(
     call = await _call(async_session, add_phone_number, to_e164="anonymous")
     assert (await _post(client, call))["ok"] is False
     assert await _emails(async_session) == []
+
+
+async def test_a_blank_body_is_refused(
+    client, async_session, email_mock, add_phone_number
+):
+    call = await _call(async_session, add_phone_number)
+    body = json.dumps(
+        {
+            "call_id": str(call.id),
+            "tool_invocation_id": str(uuid.uuid4()),
+            "to_address": "sam@example.com",
+            "subject": "Datasheet",
+            "body_text": "   ",
+        }
+    ).encode()
+    resp = await client.post(PATH, content=body, headers=_signed(body))
+    assert resp.json()["ok"] is False
+    assert await _emails(async_session) == []
