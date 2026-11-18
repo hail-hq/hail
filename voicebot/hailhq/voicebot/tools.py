@@ -23,6 +23,7 @@ from hailhq.core.agent_tools.registry import all_tools
 from hailhq.core.agent_tools.spec import SPOKEN_FALLBACK, ToolContext, ToolSpec
 from hailhq.core.config import settings
 from hailhq.core.db import session_scope
+from hailhq.core.threads import is_e164
 from hailhq.voicebot.attachment_reader import inspect_tool_file
 from livekit.agents.llm import function_tool
 from livekit.agents.voice import RunContext
@@ -180,13 +181,18 @@ async def build_agent_tools(
     # `tools` list names it, so every call gets it here, as cancel_transfer is.
     if allowed != []:  # `tools: []` opts out of every tool
         specs.append(hail_help.SPEC)
-        # Opt-in per agent: only an explicit true turns it on, and a `tools`
-        # list must name it (the API keeps it in an agent's own list while
-        # the switch is on). The API checks the switch again on every send.
-        if metadata.get(email_caller.METADATA_KEY) is True and (
-            allowed is None or email_caller.SPEC.name in allowed
-        ):
-            specs.append(email_caller.SPEC)
+    # Opt-in per agent, apart from `tools`: only the agent's switch (an
+    # explicit true) turns it on, on a phone call with a known number. The
+    # API checks all of it again on every send.
+    if metadata.get(email_caller.METADATA_KEY) is True and is_e164(
+        str(
+            metadata.get(
+                "from_e164" if metadata.get("direction") == "inbound" else "to_e164"
+            )
+            or ""
+        )
+    ):
+        specs.append(email_caller.SPEC)
     if not specs:
         return [], None
 

@@ -327,26 +327,35 @@ async def _email_caller_names(monkeypatch, meta: dict) -> list[str]:
             await api.aclose()
 
 
+_PHONE = {"direction": "outbound", "to_e164": "+14155550123"}
+
+
 async def test_email_caller_is_off_unless_the_agent_opted_in(db, monkeypatch) -> None:
-    assert "email_caller" not in await _email_caller_names(monkeypatch, {})
+    assert "email_caller" not in await _email_caller_names(monkeypatch, _PHONE)
     assert "email_caller" not in await _email_caller_names(
-        monkeypatch, {"email_caller_enabled": "true"}
+        monkeypatch, {**_PHONE, "email_caller_enabled": "true"}
     )
     assert "email_caller" in await _email_caller_names(
-        monkeypatch, {"email_caller_enabled": True}
+        monkeypatch, {**_PHONE, "email_caller_enabled": True}
     )
 
 
-async def test_a_tools_list_must_name_email_caller(db, monkeypatch) -> None:
-    on = {"email_caller_enabled": True}
+async def test_email_caller_follows_the_switch_not_the_tools_list(
+    db, monkeypatch
+) -> None:
+    on = {**_PHONE, "email_caller_enabled": True}
+    for tools in (["end_call"], [], None):
+        assert "email_caller" in await _email_caller_names(
+            monkeypatch, {**on, "tools": tools}
+        ), tools
+
+
+async def test_email_caller_needs_a_known_caller_number(db, monkeypatch) -> None:
+    hidden = {"direction": "inbound", "from_e164": "anonymous"}
+    assert "email_caller" not in await _email_caller_names(
+        monkeypatch, {**hidden, "email_caller_enabled": True}
+    )
+    known = {"direction": "inbound", "from_e164": "+14155550123"}
     assert "email_caller" in await _email_caller_names(
-        monkeypatch, {**on, "tools": ["end_call", "email_caller"]}
-    )
-    assert "email_caller" not in await _email_caller_names(
-        monkeypatch, {**on, "tools": ["end_call"]}
-    )
-    assert await _email_caller_names(monkeypatch, {**on, "tools": []}) == []
-    # The name alone does nothing without the agent's switch.
-    assert "email_caller" not in await _email_caller_names(
-        monkeypatch, {"tools": ["email_caller"]}
+        monkeypatch, {**known, "email_caller_enabled": True}
     )

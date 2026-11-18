@@ -1,7 +1,8 @@
 """email_caller — email the person on this call. outbound_send tier.
 
 Opt-in per agent (``agents.email_caller_enabled``), so it is not in
-``all_tools()``: the voicebot adds it when the dispatch metadata turns it on.
+``all_tools()``: the voicebot adds it when the dispatch metadata turns it on,
+whatever the ``tools`` list says, on a phone call with a known number.
 The caller dictates the address; the agent reads it back and sends only
 after a yes. Plain text with links, one recipient, no attachments. The
 switch, the caps, the gate and billing run server-side in
@@ -14,6 +15,7 @@ address, with text they dictate. The caps below bound that, and
 
 from __future__ import annotations
 
+import unicodedata
 import uuid
 from typing import Any
 
@@ -25,7 +27,7 @@ from hailhq.core.schemas import EMAIL_ADDR
 # The internal route (AgentEmailCallerRequest) imports these as its caps.
 MAX_ADDRESS_CHARS = 254
 MAX_BODY_CHARS = 2000
-# Emails to the person on one call.
+# Emails to the person on one call, all to one address.
 MAX_EMAILS_PER_CALL = 2
 # Per caller phone number, over any 24 hours, across all calls.
 MAX_EMAILS_PER_CALLER_PER_DAY = 3
@@ -48,12 +50,22 @@ def _call_with(org_name: str | None) -> str:
     return f"a phone call with {name}" if name else "a phone call"
 
 
+def clean_subject(subject: str) -> str:
+    """The dictated subject on one line, with control and format characters
+    (newlines, bidi overrides, zero-width marks) removed: in a Subject header
+    they break it, get the send refused, or disguise the text. May be empty."""
+    kept = "".join(
+        " " if c.isspace() else c
+        for c in subject
+        if c.isspace() or not unicodedata.category(c).startswith("C")
+    )
+    return " ".join(kept.split())
+
+
 def framed_subject(subject: str, org_name: str | None) -> str:
     """The subject as sent: fixed words first, so the inbox list shows that
     the caller asked for it before any dictated words."""
-    # One line: a newline in a Subject header breaks it or gets the send
-    # refused.
-    return f"From {_call_with(org_name)}: {' '.join(subject.split())}"
+    return f"From {_call_with(org_name)}: {clean_subject(subject)}"
 
 
 def framed_body(body_text: str, org_name: str | None) -> str:
@@ -76,7 +88,7 @@ async def _execute(ctx: ToolContext, args: dict[str, Any]) -> str:
     if ctx.api is None:
         return _UNAVAILABLE
     to_address = str(args.get("to_address", "")).strip()
-    subject = str(args.get("subject", "")).strip()
+    subject = clean_subject(str(args.get("subject", "")))
     body_text = str(args.get("body_text", ""))
     # Raw LiveKit tool calls are not schema-validated: catch what the route
     # would reject with a 422, and say what to fix. Never cut: a cut address
@@ -109,8 +121,9 @@ SPEC = ToolSpec(
         "link or a short follow-up, at an address they give you. Before you "
         "send, read the address back letter by letter where it is unclear, "
         "and send only after they say yes. Never guess or complete an "
-        "address. Plain text and links only; you cannot attach files. At "
-        f"most {MAX_EMAILS_PER_CALL} emails per call. Hail adds a short line "
+        "address. Plain text and links only; you cannot attach files. One "
+        f"address per call, and at most {MAX_EMAILS_PER_CALL} emails per call. "
+        "Hail adds a short line "
         "saying it was asked for on this call. Then say it is sent."
     ),
     parameters={
@@ -146,6 +159,7 @@ __all__ = [
     "MAX_EMAILS_PER_ORG_PER_DAY",
     "METADATA_KEY",
     "SPEC",
+    "clean_subject",
     "framed_body",
     "framed_subject",
 ]

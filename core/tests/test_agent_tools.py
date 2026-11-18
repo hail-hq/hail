@@ -839,3 +839,20 @@ def test_public_sends_cannot_plant_the_caller_email_marks():
                 recipient_consent=True,
                 metadata={key: True},
             )
+
+
+def test_email_caller_cleans_control_characters_from_the_subject():
+    assert email_caller.clean_subject("Data\u202esheet\r\nfor\x00 Sam") == (
+        "Datasheet for Sam"
+    )
+    assert email_caller.clean_subject("\u200b\r\n\t ") == ""
+
+
+async def test_email_caller_refuses_a_subject_with_nothing_left():
+    api = FakeApi(spoken="Email sent.")
+    spoken = await email_caller.SPEC.execute(
+        _ctx(api=api),
+        {"to_address": "sam@example.com", "subject": "\u200b\n", "body_text": "b"},
+    )
+    assert "subject" in spoken
+    assert api.posts == []

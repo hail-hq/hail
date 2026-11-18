@@ -90,6 +90,7 @@ from hailhq.core.email_agent import (
 )
 from hailhq.core.email_agent import (
     MAX_TOOL_SENDS,
+    may_have_reached_someone,
     reply_references,
     reply_subject,
     routed_agent,
@@ -149,7 +150,7 @@ from hailhq.core.text_agent import (
 from hailhq.core.threads import is_e164
 from hailhq.core.webhook_fanout import call_event_data, fanout_call_event
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field
-from sqlalchemy import and_, func, select, text, update
+from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -1746,9 +1747,8 @@ def _caller_cap_denial(
 
     ``rows`` are the org's caller emails of the last 24 hours that may have
     gone out: ``(address, status, call_id, caller_e164)``. A bounced email
-    counts toward the totals but not toward the caller's addresses. A
-    second address on one call (a misheard first one) is allowed within the
-    caller's address cap."""
+    counts toward the totals but does not hold its address. One address per
+    call: the agent reads it back and gets a yes before the first send."""
     if len(rows) >= email_caller.MAX_EMAILS_PER_ORG_PER_DAY:
         return "I can't send more emails right now.", "org_daily_cap"
     mine = [r for r in rows if r[3] == caller]
@@ -1763,6 +1763,11 @@ def _caller_cap_denial(
     this_call = [r for r in rows if r[2] == str(call_id)]
     if len(this_call) >= email_caller.MAX_EMAILS_PER_CALL:
         return "That is the limit of emails for one call.", "call_cap"
+    if any(r[0] != recipient for r in this_call if r[1] != "bounced"):
+        return (
+            "I can only email the address I already used on this call.",
+            "one_address",
+        )
     return None
 
 
@@ -1780,20 +1785,6 @@ async def agent_email_caller(
     The send itself is the directory send's path: suppression, velocity and
     agent caps, the org's sending domain, and normal email billing.
     """
-    # The name goes in the fixed lines. Looked up before any lock (it opens
-    # its own session and may ask hail.so), and only when the send can go.
-    hint = (
-        await db.execute(
-            select(Call.organization_id, Call.status, Agent.email_caller_enabled)
-            .join(Agent, Agent.id == Call.agent_id)
-            .where(Call.id == body.call_id)
-        )
-    ).first()
-    org_name = (
-        await organization_name(hint[0])
-        if hint is not None and hint[1] == "in_progress" and hint[2]
-        else None
-    )
     call = await _load_call_for_update(db, body.call_id)
     await _tag_call(db, call)
     if call is None:
@@ -1833,6 +1824,11 @@ async def agent_email_caller(
     ):
         return AgentSendResponse(ok=False, spoken=_SPOKEN_NOT_ALLOWED)
 
+    if not email_caller.clean_subject(body.subject):
+        return AgentSendResponse(
+            ok=False,
+            spoken="I need a subject and a message before I can send the email.",
+        )
     recipient = normalize_recipient(body.to_address)
     meta = {**_meta(body), CALLER_EMAIL_MARK: True, "caller_e164": caller}
     denial = await _shared_denial(db, call)
@@ -1853,10 +1849,7 @@ async def agent_email_caller(
                 Email.requested_at >= datetime.now(timezone.utc) - _CAP_WINDOW,
                 # Only a send SES surely never took is free. After a timeout
                 # SES may have sent it, so it counts.
-                ~and_(
-                    Email.status == "failed",
-                    func.coalesce(Email.end_reason, "").in_(SES_NOT_ACCEPTED_FAILURES),
-                ),
+                may_have_reached_someone(),
             )
         )
         denial = _caller_cap_denial(
@@ -1878,6 +1871,9 @@ async def agent_email_caller(
             payload={**meta, "reason": reason},
         )
 
+    # Every cheap refusal is behind us: only now look up the name for the
+    # fixed lines (the organizations table, else hail.so).
+    org_name = await organization_name(org)
     result, row = await _send_email_row(
         db,
         email_provider,

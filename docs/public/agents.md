@@ -114,11 +114,10 @@ CLI: `hail agents update <id> --email-caller` (`--email-caller=false` turns it o
 MCP: `create_agent(email_caller_enabled=true)` or `update_agent(agent_id, email_caller_enabled=true)`.
 SDK: `client.agents.update(agent_id, email_caller_enabled=True)`.
 
-- The agent gets the `email_caller` tool on phone calls. It reads the address
-  back and sends only after the person says yes. With `tools: null` the switch
-  alone decides. An agent's own `tools` list gets `email_caller` added while
-  the switch is on, and removed when it is off; `tools: []` stays empty. A
-  `tools` list on `POST /calls` that leaves it out turns it off for that call.
+- The agent gets the `email_caller` tool on phone calls with a known caller
+  number. It reads the address back and sends only after the person says yes.
+  The switch alone decides: the `tools` list does not turn it on or off, and
+  `email_caller` is not a `tools` name (naming it returns 422).
 - One recipient, no CC or BCC. Plain text and links, up to 2,000 characters;
   no attachments.
 - Hail adds fixed words the agent cannot change: the subject starts with
@@ -127,12 +126,13 @@ SDK: `client.agents.update(agent_id, email_caller_enabled=True)`.
   footer says the address was given during that call.
 - Relay risk: anyone who can call the number can ask for an email to any
   address, with text they dictate, from your domain. Hail caps it:
-  - 2 emails per call (the second can fix a misheard address);
+  - 2 emails per call, both to one address. Fix a misheard address before
+    the send: the agent reads it back first;
   - 3 emails and 2 addresses per phone number of the other person, in any
     24 hours, across calls;
   - 100 emails per organization in any 24 hours.
 
-  A bounced email counts, but not toward the addresses. A send
+  A bounced email still counts, but its address can be replaced. A send
   that may have reached the provider counts even if it failed. A caller
   with a hidden number gets no email. Caller ID can be faked, so the
   per-number caps slow one person down but do not stop a determined one; the

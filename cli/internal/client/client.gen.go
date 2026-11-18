@@ -1719,7 +1719,7 @@ type AgentCreate struct {
 	// AiDisclosureLine The AI line this agent speaks. '{org}' is replaced by the organization's name. Omitted: the workspace line, else Hail's built-in line for the call's direction.
 	AiDisclosureLine *string `json:"ai_disclosure_line,omitempty"`
 
-	// EmailCallerEnabled Let the agent email the person on a call, at an address they give and confirm on the call. Plain text and links, no attachments, with a fixed line saying it was asked for on the call. Anyone who can call the number can ask for an email to any address, so Hail caps it: 2 per call, 3 per caller number and at most 2 addresses per caller number in 24 hours, 100 per organization in 24 hours. Off by default.
+	// EmailCallerEnabled Let the agent email the person on a call, at an address they give and confirm on the call. Plain text and links, no attachments, with a fixed line saying it was asked for on the call. Anyone who can call the number can ask for an email to any address, so Hail caps it: 2 per call to one address, 3 per caller number and at most 2 addresses per caller number in 24 hours, 100 per organization in 24 hours. The `tools` list does not affect it. Off by default.
 	EmailCallerEnabled *bool `json:"email_caller_enabled,omitempty"`
 
 	// EmailEnabled Answer email on addresses that route email to this agent.

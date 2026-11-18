@@ -79,6 +79,7 @@ __all__ = [
     "email_thread",
     "finish_reply",
     "is_authenticated",
+    "may_have_reached_someone",
     "prior_reply",
     "proves_sender",
     "queue_decision",
@@ -233,7 +234,7 @@ async def sender_refusal(
     return None
 
 
-def _may_have_reached_someone():
+def may_have_reached_someone():
     """Any email row but one SES proved it never took."""
     return or_(
         Email.status != "failed",
@@ -275,7 +276,7 @@ async def replies_in_thread(
             and_(
                 Email.metadata_["thread_sender"].astext == sender,
                 not_this_run(Email),
-                _may_have_reached_someone(),
+                may_have_reached_someone(),
             ),
         ),
     )
@@ -842,7 +843,7 @@ async def tool_sends_for_reply(db: AsyncSession, inbound: Email) -> int:
             model.metadata_["inbound_email_id"].astext == str(inbound.id),
         )
         if model is Email:
-            stmt = stmt.where(_may_have_reached_someone())
+            stmt = stmt.where(may_have_reached_someone())
         total += int((await db.execute(stmt)).scalar_one() or 0)
     return total
 

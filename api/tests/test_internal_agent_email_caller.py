@@ -205,17 +205,56 @@ async def test_two_emails_per_call_then_refused(
     assert len(await _emails(async_session)) == email_caller.MAX_EMAILS_PER_CALL
 
 
-async def test_a_misheard_address_can_be_fixed_on_the_call(
+async def test_a_second_address_on_the_call_is_refused(
     client, async_session, email_mock, add_phone_number
 ):
     call = await _call(async_session, add_phone_number)
-    assert (await _post(client, call, to="sam@exmple.com"))["ok"] is True
-    # Still "sent": no bounce yet. The caller's address cap (2) allows it.
-    assert (await _post(client, call, to="sam@example.com"))["ok"] is True
-    assert sorted(e.to_addresses[0] for e in await _emails(async_session)) == [
-        "sam@example.com",
-        "sam@exmple.com",
+    assert (await _post(client, call))["ok"] is True
+    other = await _post(client, call, to="someone.else@example.com")
+    assert other["ok"] is False
+    assert "already used" in other["spoken"]
+    assert [e.to_addresses for e in await _emails(async_session)] == [
+        ["sam@example.com"]
     ]
+
+
+async def test_control_characters_are_cleaned_from_the_subject(
+    client, async_session, email_mock, add_phone_number
+):
+    call = await _call(async_session, add_phone_number)
+    body = json.dumps(
+        {
+            "call_id": str(call.id),
+            "tool_invocation_id": str(uuid.uuid4()),
+            "to_address": "sam@example.com",
+            "subject": "Data\u202esheet\r\nBcc: x@example.com",
+            "body_text": "Link.",
+        }
+    ).encode()
+    resp = await client.post(PATH, content=body, headers=_signed(body))
+    assert resp.json()["ok"] is True
+    (row,) = await _emails(async_session)
+    assert row.subject == (
+        "From a phone call with Acme Dental: Datasheet Bcc: x@example.com"
+    )
+
+
+async def test_a_subject_of_only_control_characters_is_refused(
+    client, async_session, email_mock, add_phone_number
+):
+    call = await _call(async_session, add_phone_number)
+    body = json.dumps(
+        {
+            "call_id": str(call.id),
+            "tool_invocation_id": str(uuid.uuid4()),
+            "to_address": "sam@example.com",
+            "subject": "\u200b\r\n\t",
+            "body_text": "Link.",
+        }
+    ).encode()
+    resp = await client.post(PATH, content=body, headers=_signed(body))
+    assert resp.json()["ok"] is False
+    assert await _emails(async_session) == []
 
 
 async def test_a_failed_send_with_no_reason_counts(
@@ -426,6 +465,19 @@ async def test_caller_number_gets_two_addresses_a_day(
     data = await _post(client, third, to="c@example.com")
     assert data["ok"] is False
     assert "another address" in data["spoken"]
+    reasons = (
+        (
+            await async_session.execute(
+                select(AuditLog.payload["reason"].astext).where(
+                    AuditLog.organization_id == first.organization_id,
+                    AuditLog.action == "agent.email.blocked",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert reasons == ["caller_daily_addresses"]
     assert sorted(e.to_addresses[0] for e in await _emails(async_session)) == [
         "a@example.com",
         "b@example.com",
