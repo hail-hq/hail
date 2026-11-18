@@ -339,11 +339,16 @@ async def test_email_caller_is_off_unless_the_agent_opted_in(db, monkeypatch) ->
     )
 
 
-async def test_email_caller_comes_with_any_tools_list_but_not_none(
-    db, monkeypatch
-) -> None:
+async def test_a_tools_list_must_name_email_caller(db, monkeypatch) -> None:
     on = {"email_caller_enabled": True}
     assert "email_caller" in await _email_caller_names(
+        monkeypatch, {**on, "tools": ["end_call", "email_caller"]}
+    )
+    assert "email_caller" not in await _email_caller_names(
         monkeypatch, {**on, "tools": ["end_call"]}
     )
     assert await _email_caller_names(monkeypatch, {**on, "tools": []}) == []
+    # The name alone does nothing without the agent's switch.
+    assert "email_caller" not in await _email_caller_names(
+        monkeypatch, {"tools": ["email_caller"]}
+    )

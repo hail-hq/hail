@@ -1085,3 +1085,43 @@ async def test_email_caller_defaults_off_and_can_be_changed(client, org) -> None
         headers=headers,
     )
     assert r.json()["email_caller_enabled"] is True
+
+
+async def test_an_explicit_tools_list_follows_the_email_caller_switch(
+    client, org
+) -> None:
+    _, headers = org
+    r = await client.post(
+        "/agents",
+        json={
+            "name": "Desk",
+            "system_prompt": "Help.",
+            "tools": ["end_call"],
+            "email_caller_enabled": True,
+        },
+        headers=headers,
+    )
+    assert r.json()["tools"] == ["end_call", "email_caller"]
+    agent_id = r.json()["id"]
+    r = await client.patch(
+        f"/agents/{agent_id}", json={"email_caller_enabled": False}, headers=headers
+    )
+    assert r.json()["tools"] == ["end_call"]
+    r = await client.patch(
+        f"/agents/{agent_id}", json={"email_caller_enabled": True}, headers=headers
+    )
+    assert r.json()["tools"] == ["end_call", "email_caller"]
+    # Naming it without the switch does not turn it on.
+    r = await client.patch(
+        f"/agents/{agent_id}",
+        json={"email_caller_enabled": False, "tools": ["email_caller"]},
+        headers=headers,
+    )
+    assert r.json()["tools"] == []
+    # Null (every tool) stays null.
+    r = await client.patch(
+        f"/agents/{agent_id}",
+        json={"email_caller_enabled": True, "tools": None},
+        headers=headers,
+    )
+    assert r.json()["tools"] is None

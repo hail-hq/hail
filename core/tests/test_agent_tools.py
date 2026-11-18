@@ -829,3 +829,7 @@ def test_email_caller_frames_every_email():
     assert body.endswith("If that was not you, you can ignore it.")
     nameless = email_caller.framed_body("Hi.", None)
     assert nameless.startswith("You asked for this during a phone call.\n\n")
+    assert (
+        email_caller.framed_subject(" Datasheet ", "Acme Dental")
+        == "From a phone call with Acme Dental: Datasheet"
+    )

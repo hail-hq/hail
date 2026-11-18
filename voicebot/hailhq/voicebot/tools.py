@@ -180,9 +180,12 @@ async def build_agent_tools(
     # `tools` list names it, so every call gets it here, as cancel_transfer is.
     if allowed != []:  # `tools: []` opts out of every tool
         specs.append(hail_help.SPEC)
-        # Opt-in per agent: only an explicit true turns it on. The API checks
-        # the agent's switch again before every send.
-        if metadata.get(email_caller.METADATA_KEY) is True:
+        # Opt-in per agent: only an explicit true turns it on, and a `tools`
+        # list must name it (the API keeps it in an agent's own list while
+        # the switch is on). The API checks the switch again on every send.
+        if metadata.get(email_caller.METADATA_KEY) is True and (
+            allowed is None or email_caller.SPEC.name in allowed
+        ):
             specs.append(email_caller.SPEC)
     if not specs:
         return [], None

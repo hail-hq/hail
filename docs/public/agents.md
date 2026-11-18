@@ -115,14 +115,16 @@ MCP: `create_agent(email_caller_enabled=true)` or `update_agent(agent_id, email_
 SDK: `client.agents.update(agent_id, email_caller_enabled=True)`.
 
 - The agent gets the `email_caller` tool on phone calls. It reads the address
-  back and sends only after the person says yes. `tools: []` turns it off with
-  every other tool. `email_caller` is not a `tools` name: the switch controls
-  it, and a `tools` list that names it returns 422.
+  back and sends only after the person says yes. With `tools: null` the switch
+  alone decides. An agent's own `tools` list gets `email_caller` added while
+  the switch is on, and removed when it is off. A `tools` list on
+  `POST /calls` that leaves it out turns it off for that call.
 - One recipient, no CC or BCC. Plain text and links, up to 2,000 characters;
   no attachments.
-- Hail wraps the text in fixed lines the agent cannot change: first
+- Hail adds fixed words the agent cannot change: the subject starts with
+  `From a phone call with <your organization>:`, the body starts with
   `You asked for this during a phone call with <your organization>.`, and a
-  footer saying the address was given during that call.
+  footer says the address was given during that call.
 - Relay risk: anyone who can call the number can ask for an email to any
   address, with text they dictate, from your domain. Hail caps it:
   - 2 emails per call, both to the same address;
@@ -130,8 +132,14 @@ SDK: `client.agents.update(agent_id, email_caller_enabled=True)`.
     24 hours, across calls;
   - 100 emails per organization in any 24 hours.
 
-  A bounced email still counts, but its address can be corrected. A caller
-  with a hidden number gets no email.
+  A bounced email still counts, but its address can be corrected. A send
+  that may have reached the provider counts even if it failed. A caller
+  with a hidden number gets no email. Caller ID can be faked, so the
+  per-number caps slow one person down but do not stop a determined one; the
+  organization cap is the hard limit.
+
+- The agent's later threads leave these emails out: their text came from the
+  caller, so they are never quoted back as your team's mail.
 
 - Sent from the same address as the agent's other email: your verified custom
   domain (the oldest, if you have several), else your hail-mail address.

@@ -25,7 +25,8 @@ from hailhq.api.errors import unprocessable
 from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.api.routes.calls import get_livekit_optional
 from hailhq.core import inbound_routing
-from hailhq.core.agent_tools.registry import all_tools
+from hailhq.core.agent_tools import email_caller
+from hailhq.core.agent_tools.registry import nameable_tools
 from hailhq.core.db import get_session, org_lock
 from hailhq.core.handover import (
     HandoverInvalid,
@@ -81,8 +82,7 @@ def _check_tools(tools: list[str] | None) -> None:
     """Unknown tool names fail here, not on the first call that uses the agent."""
     if tools is None:
         return
-    known = {t.name for t in all_tools()}
-    unknown = sorted(set(tools) - known)
+    unknown = sorted(set(tools) - nameable_tools())
     if unknown:
         raise unprocessable(
             f"unknown tools: {', '.join(unknown)}", loc=["body", "tools"]
@@ -101,6 +101,18 @@ def _with_handover_tool(
     if not has_handover:
         return rest
     return list(tools) if "transfer_call" in tools else [*tools, "transfer_call"]
+
+
+def _with_email_caller_tool(tools: list[str] | None, enabled: bool) -> list[str] | None:
+    """Keep ``email_caller`` in an explicit tools list exactly when the agent's
+    switch is on, as ``transfer_call`` follows handover contacts. ``None``
+    (every tool) is left alone: the switch alone decides then. A call's own
+    ``tools`` list (POST /calls) can still leave it out."""
+    if tools is None:
+        return None
+    name = email_caller.SPEC.name
+    rest = [t for t in tools if t != name]
+    return [*rest, name] if enabled else rest
 
 
 async def _check_handover(
@@ -175,7 +187,10 @@ async def create_agent(
         recording_enabled=body.recording_enabled,
         ai_disclosure_line=body.ai_disclosure_line,
         voice_config=body.voice_config.model_dump(mode="json"),
-        tools=_with_handover_tool(body.tools, bool(handover)),
+        tools=_with_email_caller_tool(
+            _with_handover_tool(body.tools, bool(handover)),
+            body.email_caller_enabled,
+        ),
         max_duration_seconds=body.max_duration_seconds,
         handover_max_duration_seconds=body.handover_max_duration_seconds,
         voice_enabled=body.voice_enabled,
@@ -298,14 +313,17 @@ async def update_agent(
         items = await _check_handover(
             db, principal.organization_id, body.handover_contacts, linked
         )
-    if "tools" in changes or items is not None:
+    if "tools" in changes or items is not None or "email_caller_enabled" in changes:
         # Same rule as create, on the values the agent will have after this.
         tools = changes.get("tools", agent.tools)
         if items is not None:
             has_handover = bool(items)
         else:
             has_handover = bool((await load_handover(db, [agent.id])).get(agent.id))
-        synced = _with_handover_tool(tools, has_handover)
+        synced = _with_email_caller_tool(
+            _with_handover_tool(tools, has_handover),
+            changes.get("email_caller_enabled", agent.email_caller_enabled),
+        )
         if synced != tools or "tools" in changes:
             changes["tools"] = synced
     for field, value in changes.items():

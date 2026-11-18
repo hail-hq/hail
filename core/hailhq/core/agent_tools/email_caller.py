@@ -43,12 +43,22 @@ EVENT_KIND = "email_caller"
 _UNAVAILABLE = "Email is not available right now."
 
 
+def _call_with(org_name: str | None) -> str:
+    name = " ".join((org_name or "").split())[:_MAX_ORG_NAME_CHARS]
+    return f"a phone call with {name}" if name else "a phone call"
+
+
+def framed_subject(subject: str, org_name: str | None) -> str:
+    """The subject as sent: fixed words first, so the inbox list shows that
+    the caller asked for it before any dictated words."""
+    return f"From {_call_with(org_name)}: {subject.strip()}"
+
+
 def framed_body(body_text: str, org_name: str | None) -> str:
     """The email as sent: a fixed first line and footer around the agent's
     text, so a dictated message cannot pass as the organization's own mail
     and the reader knows why it came."""
-    name = " ".join((org_name or "").split())[:_MAX_ORG_NAME_CHARS]
-    call = f"a phone call with {name}" if name else "a phone call"
+    call = _call_with(org_name)
     return (
         f"You asked for this during {call}.\n\n"
         f"{body_text.strip()}\n\n"
@@ -136,4 +146,5 @@ __all__ = [
     "METADATA_KEY",
     "SPEC",
     "framed_body",
+    "framed_subject",
 ]

@@ -121,7 +121,14 @@ _NO_REPLY_LOCAL = re.compile(
 # Why a stored row stays out of the chat: nothing proved who wrote it, or it was
 # never meant for the agent.
 _AGENT_SEND_KEYS = ("reply_to_email_id", "inbound_email_id", "thread_sender")
-_NOT_TEAM_SEND_KEYS = ("forwarded_from", "system_kind", "call_id", "tool_invocation_id")
+_NOT_TEAM_SEND_KEYS = (
+    "forwarded_from",
+    "system_kind",
+    "call_id",
+    "tool_invocation_id",
+    # The email_caller tool: text a caller dictated, never team mail.
+    "email_caller",
+)
 _UNTRUSTED_SKIPS = (
     "auto_generated",
     "sender_blocked",
@@ -678,6 +685,9 @@ def email_history_filter(sender: str, *, allow_call_mail: bool = False):
                 Email.metadata_["call_id"].astext.is_not(None),
                 ~has_key("forwarded_from"),
                 ~has_key("system_kind"),
+                # A caller email holds text the caller dictated: history
+                # must not quote it back as the team's own mail.
+                ~has_key("email_caller"),
             ),
         )
     return and_(

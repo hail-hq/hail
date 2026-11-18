@@ -39,7 +39,7 @@ from hailhq.api.ratelimit import (
     merge_rate_limited_responses,
 )
 from hailhq.api.route_prefixes import request_mount_prefix
-from hailhq.core.agent_tools.registry import all_tools
+from hailhq.core.agent_tools.registry import nameable_tools
 from hailhq.core.billing import CALL_META_BILLED
 from hailhq.core.call_allowance import (
     available_cents,
@@ -421,8 +421,7 @@ async def create_call(
     # created. `None` (omitted) means "all tools"; `[]` means "no tools" and
     # is passed through as-is below.
     if body.tools is not None:
-        known = {t.name for t in all_tools()}
-        unknown = sorted(set(body.tools) - known)
+        unknown = sorted(set(body.tools) - nameable_tools())
         if unknown:
             raise await cache_failure(
                 idem,

@@ -10,6 +10,7 @@ import json
 import uuid
 
 import pytest
+from botocore.exceptions import ConnectTimeoutError, ReadTimeoutError
 from hailhq.api.routes.internal import agent as agent_routes
 from hailhq.core import hmac_signing
 from hailhq.core.agent_tools import email_caller
@@ -159,6 +160,7 @@ async def test_on_sends_to_the_caller_from_the_verified_domain(
     assert row.cc_addresses in (None, [])
     assert row.bcc_addresses in (None, [])
     assert row.from_address == "noreply@mail.a.test"
+    assert row.subject == "From a phone call with Acme Dental: Datasheet"
     # None, as for other call sends, so thread history shows it later.
     assert row.agent_id is None
     assert row.metadata_["call_id"] == str(call.id)
@@ -220,7 +222,8 @@ async def test_a_failed_send_does_not_count(
 ):
     call = await _call(async_session, add_phone_number)
     happy = email_mock.send_email.side_effect
-    email_mock.send_email.side_effect = RuntimeError("ses down")
+    # SES surely never took it: the send is free.
+    email_mock.send_email.side_effect = ConnectTimeoutError(endpoint_url="ses")
     assert (await _post(client, call))["ok"] is False
     email_mock.send_email.side_effect = happy
     assert (await _post(client, call))["ok"] is True
@@ -240,6 +243,19 @@ async def test_a_failed_send_does_not_count(
         .all()
     )
     assert sorted(p["status"] for p in kinds) == ["failed", "sent", "sent"]
+
+
+async def test_a_send_that_may_have_gone_out_counts(
+    client, async_session, email_mock, add_phone_number
+):
+    call = await _call(async_session, add_phone_number)
+    happy = email_mock.send_email.side_effect
+    # A read timeout: SES may have sent it, so it uses a slot.
+    email_mock.send_email.side_effect = ReadTimeoutError(endpoint_url="ses")
+    assert (await _post(client, call))["ok"] is False
+    email_mock.send_email.side_effect = happy
+    assert (await _post(client, call))["ok"] is True
+    assert (await _post(client, call))["ok"] is False
 
 
 async def test_suppressed_address_is_refused(
