@@ -243,7 +243,7 @@ def test_unresolvable_host_is_blocked(monkeypatch):
         raise socket.gaierror(socket.EAI_AGAIN, "temporary failure")
 
     monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
-    with pytest.raises(ValueError, match="does not resolve"):
+    with pytest.raises(ValueError, match="could not be resolved"):
         validate_webhook_target(
             "https://flaky.example.com/hook", allow_private_networks=False
         )
@@ -255,10 +255,26 @@ async def test_httpx_post_blocks_unresolvable_host(monkeypatch):
         raise socket.gaierror(socket.EAI_AGAIN, "temporary failure")
 
     monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
-    with pytest.raises(PrivateNetworkBlockedError, match="does not resolve"):
+    with pytest.raises(PrivateNetworkBlockedError, match="could not be resolved"):
         await httpx_post(
             "https://flaky.example.com/hook",
             b"{}",
             {},
             allow_private_networks=False,
         )
+
+
+@pytest.mark.asyncio
+async def test_errors_never_show_the_resolved_address(monkeypatch):
+    def fake_getaddrinfo(host, port, **kw):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.4.2.7", 0))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+    url = "https://db.internal.example.com/x"
+    with pytest.raises(ValueError) as write_err:
+        validate_webhook_target(url, allow_private_networks=False)
+    with pytest.raises(PrivateNetworkBlockedError) as send_err:
+        await httpx_post(url, b"{}", {}, allow_private_networks=False)
+    for err in (write_err.value, send_err.value):
+        assert "10.4.2.7" not in str(err)
+        assert "private address" in str(err)

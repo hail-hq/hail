@@ -33,7 +33,9 @@ def example_hosts_resolve(monkeypatch: pytest.MonkeyPatch) -> None:
     real_getaddrinfo = socket.getaddrinfo
 
     def fake_getaddrinfo(host, port, *args, **kwargs):
-        if isinstance(host, str) and host.endswith("example.com"):
+        if host == "example.com" or (
+            isinstance(host, str) and host.endswith(".example.com")
+        ):
             return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))]
         return real_getaddrinfo(host, port, *args, **kwargs)
 

@@ -29,7 +29,8 @@ def validate_webhook_target(url: str, *, allow_private_networks: bool) -> None:
     Requires https; rejects non-public or unresolvable targets (ranges in
     ``url_guard``) unless the deployment has opted in (self-host escape
     hatch). Same check as ``httpx_post`` at delivery time, so misconfig
-    fails synchronously at write time.
+    fails synchronously at write time. Blocking (DNS): call it off the
+    event loop.
 
     When ``allow_private_networks=True``, plain HTTP (not only HTTPS) is
     accepted to ANY host — the escape hatch is a blanket relaxation, not
@@ -48,9 +49,7 @@ def validate_webhook_target(url: str, *, allow_private_networks: bool) -> None:
     try:
         assert_public_host(host, port)
     except UnsafeUrlError as exc:
-        raise ValueError(
-            f"target_url must not point at a private or unresolvable address: {exc}"
-        ) from exc
+        raise ValueError(f"target_url is not allowed: {exc}") from exc
 
 
 async def httpx_post(
