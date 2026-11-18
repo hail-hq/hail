@@ -170,8 +170,8 @@ A test call the customer makes through their own PBX proves nothing: they choose
 - A new number on a connection starts `unverified`.
 - The customer sets their PBX to send that number's incoming calls to Hail, then clicks "Check" (console) or calls `POST /v1/sip-connections/{id}/numbers/{number_id}/verify`.
 - Hail places one outbound call from a Hail pool number, through a carrier, to the claimed number.
-- The check passes when an INVITE for that number arrives on that connection's inbound trunk while Hail's outbound leg is ringing (30 s limit). Hail sets the number `active`, plays a short "connected" message, and hangs up both legs.
-- It fails when the call arrives anywhere else, or not at all. Hail says why: no call arrived, or it arrived without valid credentials.
+- The check passes when an INVITE for that number arrives on that connection's inbound trunk while Hail's outbound leg is ringing (30 s limit), **and** a 6-digit code that Hail sends as key presses on its outbound leg arrives on that inbound leg. The code only travels over the real phone network, so an INVITE the customer sends for a number they do not own cannot pass. Hail stores only a hash of the code. Then Hail sets the number `active`, plays a short "connected" message, and hangs up both legs.
+- It fails when the call arrives anywhere else, not at all, or without the code. Hail says why: no call arrived, arrived on the wrong trunk, or the code did not come through (the phone system drops key presses).
 - Billed as a normal outbound call at the normal price for the destination. Max 5 checks per number per day.
 - An `unverified` number older than 7 days is removed (frees the `e164`).
 - The customer can change their PBX rule back (for example to after hours only) once checked.
@@ -286,6 +286,10 @@ Connect your phone system
 - Calls at once: each connected call uses a LiveKit agent session and voicebot CPU like any call. LiveKit Agents stops taking new jobs above 70% CPU (`livekit/agents` default `load_threshold`). Test 6 calls at once before onboarding a customer who needs that many.
 - The PBX's own limit: a call the PBX sends to Hail usually uses 2 of its call channels, and a handover adds 1. The setup page says so.
 - LiveKit trunk count: no published limit. Ask LiveKit support before rollout to many customers.
+- LiveKit project limits that every call shares (the self-hosted voicebot does not count against LiveKit's hosted agent session limit):
+  - Recordings at once (egress): a recorded call holds one egress for its whole length. Past the limit, a new recording likely fails while the call continues (inferred from `core/hailhq/core/recordings.py`, not tested). Check the plan's egress limit before promising recording on many calls at once.
+  - Adaptive interruption: a per-minute request limit and a concurrent connection limit. Two busy agent-to-agent calls reached the per-minute limit on 2026-11-18. Past either limit, the agent falls back to VAD interruption (`livekit/agents/voice/agent_activity.py`, `_fallback_to_vad_interruption`); the call does not drop, but noise interrupts the agent more easily.
+  - The 6-call test checks both, with recording on.
 - DTMF: test the agent's key presses through the PBX at the first customer setup.
 - A PBX queue or IVR that answers at once starts the call clock and answering-machine detection early. The setup page says to send calls straight to the trunk.
 - A wrong PBX setting gives no call at all and Hail sees nothing. The ownership check catches it at setup.
