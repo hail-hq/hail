@@ -10,8 +10,8 @@ loopback or internal hosts and turn the server into an SSRF proxy.
 address is public. Not public (``ip_is_public``): private (RFC 1918,
 IPv6 ULA fc00::/7), loopback, link-local (incl. 169.254.169.254),
 CGNAT 100.64.0.0/10 (Tailscale), IPv6 site-local fec0::/10, multicast,
-reserved and unspecified; IPv4-mapped and 6to4 IPv6 addresses are judged
-on the IPv4 address they wrap.
+reserved and unspecified; IPv4-mapped, 6to4 and NAT64 IPv6 addresses are
+judged on the IPv4 address they wrap.
 A host that does not resolve is refused too, and so are ``localhost`` and
 ``*.localhost`` (RFC 6761), before any lookup. No operator allowlist for
 ``base_url`` (decision 2026-07-08); webhooks have
@@ -68,6 +68,10 @@ class UnsafeUrlError(ValueError):
 # either — the same kind of provider-internal address the metadata/RFC1918
 # checks below exist to block.
 _CGNAT_V4 = ipaddress.ip_network("100.64.0.0/10")
+_NAT64_V6 = (
+    ipaddress.ip_network("64:ff9b::/96"),
+    ipaddress.ip_network("64:ff9b:1::/48"),
+)
 
 
 def httpx_url(url: str) -> httpx.URL:
@@ -121,6 +125,14 @@ def ip_is_public(ip: str | ipaddress.IPv4Address | ipaddress.IPv6Address) -> boo
     sixtofour = getattr(addr, "sixtofour", None)
     if sixtofour is not None:
         addr = sixtofour
+    # NAT64 (RFC 6052 well-known 64:ff9b::/96, RFC 8215 local-use
+    # 64:ff9b:1::/48): the IPv4 address sits in the low 32 bits. ipaddress
+    # calls the whole range reserved or private, which also refuses public
+    # targets; judge the embedded IPv4 address instead.
+    if isinstance(addr, ipaddress.IPv6Address) and any(
+        addr in net for net in _NAT64_V6
+    ):
+        addr = ipaddress.IPv4Address(int(addr) & 0xFFFFFFFF)
     if isinstance(addr, ipaddress.IPv4Address) and addr in _CGNAT_V4:
         return False
     # Deprecated IPv6 site-local (fec0::/10): ipaddress counts it neither
