@@ -75,7 +75,7 @@ def _rename(
         text(
             "UPDATE webhook_subscriptions SET event_types = array_append("
             " ARRAY(SELECT e FROM unnest(event_types) AS e"
-            " WHERE e <> ALL(CAST(:old AS text[]))), :new)"
+            " WHERE e <> ALL(CAST(:old AS text[])) AND e <> :new), :new)"
             " WHERE event_types && CAST(:old AS text[])"
         ).bindparams(old=[old_event, *also_old_events], new=new_event)
     )
