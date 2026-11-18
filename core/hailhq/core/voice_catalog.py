@@ -24,6 +24,9 @@ from hailhq.core.languages import (
 
 log = logging.getLogger(__name__)
 HEADERS_VERSION = "2026-08-14"
+# Bound the whole lookup, including pagination/model discovery and lock waits,
+# so a slow optional provider cannot stall the onboarding picker indefinitely.
+CATALOGUE_TIMEOUT_SECONDS = 5
 _cache: dict[tuple[str, str, str], tuple[float, dict]] = {}
 _catalogue_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
@@ -300,7 +303,11 @@ async def voice_catalogue(language: str) -> dict:
         if key and model and p in SUPPORTED_LANGUAGES[language].tts
     ]
     results = await asyncio.gather(
-        *[_provider_catalogue(*p) for p in providers], return_exceptions=True
+        *[
+            asyncio.wait_for(_provider_catalogue(*p), timeout=CATALOGUE_TIMEOUT_SECONDS)
+            for p in providers
+        ],
+        return_exceptions=True,
     )
     choices, partial = [], False
     for (provider, model, _), result in zip(providers, results, strict=True):

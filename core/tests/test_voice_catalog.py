@@ -1,3 +1,4 @@
+import asyncio
 from unittest.mock import AsyncMock
 
 import httpx
@@ -237,6 +238,73 @@ async def test_failed_provider_keeps_other_choices_and_pipeline_languages(monkey
     assert [v["id"] for v in result["voices"]] == ["current"]
     assert result["partial"] is True
     assert {v["code"] for v in result["languages"]} == set(catalog.SUPPORTED_LANGUAGES)
+
+
+async def test_slow_provider_models_do_not_hold_ready_voices_or_cache_incomplete_data(
+    monkeypatch,
+):
+    monkeypatch.setattr(settings, "eleven_api_key", "eleven-key")
+    monkeypatch.setattr(catalog, "CATALOGUE_TIMEOUT_SECONDS", 0.1, raising=False)
+    cancelled = asyncio.Event()
+
+    async def blocked_models(_request):
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    with respx.mock:
+        cartesia = respx.get("https://api.cartesia.ai/voices").mock(
+            return_value=httpx.Response(
+                200, json={"data": [cart_row()], "has_more": False}
+            )
+        )
+        respx.get("https://api.elevenlabs.io/v2/voices").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "voices": [
+                        {
+                            "voice_id": "other",
+                            "name": "Other",
+                            "category": "premade",
+                            "verified_languages": [
+                                {"language": "en", "model_id": "test-model"}
+                            ],
+                        }
+                    ],
+                    "has_more": False,
+                },
+            )
+        )
+        models = respx.get("https://api.elevenlabs.io/v1/models").mock(
+            side_effect=blocked_models
+        )
+
+        result = await asyncio.wait_for(catalog.voice_catalogue("en"), timeout=1)
+
+        assert [v["id"] for v in result["voices"]] == ["current"]
+        assert result["partial"] is True
+        assert result["default_voice"] == {"provider": "cartesia", "id": "current"}
+        assert cancelled.is_set()
+
+        models.mock(
+            return_value=httpx.Response(
+                200,
+                json=[
+                    {
+                        "model_id": "test-model",
+                        "can_do_text_to_speech": True,
+                        "languages": [{"language_id": "en"}],
+                    }
+                ],
+            )
+        )
+        retried = await catalog.voice_catalogue("en")
+        assert {v["id"] for v in retried["voices"]} == {"current", "other"}
+        assert retried["partial"] is False
+        # A completed provider stays cached while the timed-out one retries.
+        assert cartesia.call_count == 1
 
 
 async def test_catalogue_cache_is_reused_and_invalidated_by_model(monkeypatch):

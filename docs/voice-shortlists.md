@@ -27,6 +27,12 @@ Both integrations walk every catalogue page before selection. A missing,
 repeated or excessive pagination cursor fails that provider's discovery instead
 of silently ranking an incomplete page. The catalogue cache lasts 15 minutes
 and includes provider, model and a credential fingerprint in its key.
+Each complete provider lookup has a five-second budget, including time waiting
+for another refresh, pagination and model discovery. A timed-out lookup is
+cancelled; its incomplete data is not cached. Choices from completed providers
+can still appear with partial discovery and Retry instead of waiting for a
+slow optional provider. If every provider misses the budget, Retry is shown
+without suggestions.
 
 Cartesia discovery includes active public voices. A requested language must
 match a supported accent, or the reported primary language for legacy entries
