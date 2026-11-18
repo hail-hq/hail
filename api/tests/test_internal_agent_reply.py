@@ -11,6 +11,7 @@ import pytest
 from hailhq.core import hmac_signing
 from hailhq.core.config import settings
 from hailhq.core.models import AccountCredit, Agent, PhoneNumber, Sms
+from hailhq.core.providers.sms.base import ProviderSmsResult
 from hailhq.core.sms_ingest import ingest_inbound_sms
 from hailhq.core.text_agent import thread_lock_key
 from sqlalchemy import select, text
@@ -110,6 +111,43 @@ async def test_reply_goes_out_from_the_dialed_number(
     )
     assert resp.json()["reply_id"] == data["reply_id"]
     assert sms_mock.send_sms.await_count == 1
+
+
+@pytest.mark.parametrize(
+    ("send", "reason"),
+    [
+        (RuntimeError("carrier down"), "provider_error"),
+        (
+            ProviderSmsResult(
+                provider_message_sid="SM_x",
+                status="failed",
+                segment_count=1,
+                error_code="30007",
+            ),
+            "carrier_rejected",
+        ),
+    ],
+)
+async def test_failed_send_returns_a_code_not_the_carriers(
+    client, async_session, sms_mock, send, reason
+) -> None:
+    _org, _agent, _number, sms_id = await _seed(async_session)
+    if isinstance(send, Exception):
+        sms_mock.send_sms.side_effect = send
+    else:
+        sms_mock.send_sms.side_effect = None
+        sms_mock.send_sms.return_value = send
+    body = _payload(sms_id)
+    resp = await client.post(
+        "/internal/agent/reply-sms", content=body, headers=_signed(body)
+    )
+    data = resp.json()
+    assert data["state"] == "failed"
+    assert data["reason"] == reason
+    if reason == "carrier_rejected":
+        # The carrier's own code stays on the reply row.
+        reply = await async_session.get(Sms, uuid.UUID(data["reply_id"]))
+        assert reply.error_code == "30007"
 
 
 async def test_reply_skipped_without_funds(client, async_session, sms_mock) -> None:

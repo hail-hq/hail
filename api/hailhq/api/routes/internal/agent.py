@@ -135,9 +135,11 @@ from hailhq.core.telemetry_identity import tag_context
 from hailhq.core.telephony_catalog import sells_in
 from hailhq.core.text_agent import (
     AGENT_CAPS_SKIP,
+    CARRIER_REJECTED_SKIP,
     INSUFFICIENT_FUNDS_SKIP,
     MAX_REPLIES_PER_THREAD,
     NO_AGENT_SKIP,
+    PROVIDER_ERROR_SKIP,
     SEND_BLOCKED_SKIP,
     SMS_REGISTRATION_SKIP,
     THREAD_CAP_SKIP,
@@ -931,8 +933,12 @@ async def agent_reply_sms(
     )
     err = await deliver_sms(db, reply)
     if err is not None:
+        # A carrier's own error code stays on the reply row (``error_code``).
+        code = (
+            PROVIDER_ERROR_SKIP if err == PROVIDER_ERROR_SKIP else CARRIER_REJECTED_SKIP
+        )
         return AgentReplySmsResponse(
-            ok=False, state="failed", reason=err, reply_id=reply.id
+            ok=False, state="failed", reason=code, reply_id=reply.id
         )
     return AgentReplySmsResponse(ok=True, state="done", reply_id=reply.id)
 

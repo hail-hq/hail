@@ -21,6 +21,7 @@ from typing import Any, Literal
 
 from hailhq.core.billing import has_funds
 from hailhq.core.config import settings
+from hailhq.core.jsonb import merge_object
 from hailhq.core.models import Agent, PhoneNumber, Sms
 from hailhq.core.prompts import TEXT_PREAMBLE, build_text_instructions
 from hailhq.core.threads import ThreadItem, thread_items
@@ -28,18 +29,16 @@ from sqlalchemy import (
     ColumnElement,
     DateTime,
     and_,
-    cast,
     func,
-    literal_column,
     or_,
     select,
     update,
 )
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = [
     "AGENT_CAPS_SKIP",
+    "CARRIER_REJECTED_SKIP",
     "CHAT_LIMIT",
     "CHAT_WINDOW",
     "CLAIM_LEASE",
@@ -50,6 +49,8 @@ __all__ = [
     "MAX_REPLIES_PER_THREAD",
     "MAX_REPLY_CHARS",
     "NO_AGENT_SKIP",
+    "PROVIDER_ERROR_SKIP",
+    "REPLY_FAILED_SKIP",
     "RETRY_BACKOFF",
     "SEND_BLOCKED_SKIP",
     "SMS_REGISTRATION_SKIP",
@@ -100,6 +101,13 @@ THREAD_CAP_SKIP = "thread_cap"
 SEND_BLOCKED_SKIP = "send_blocked"
 SMS_REGISTRATION_SKIP = "sms_registration"
 AGENT_CAPS_SKIP = "agent_caps"
+# A failed send: the carrier could not be reached, or it refused the reply
+# (its own error code stays in ``sms.error_code`` of the reply row).
+PROVIDER_ERROR_SKIP = "provider_error"
+CARRIER_REJECTED_SKIP = "carrier_rejected"
+# Any other failed reply: model errors past ``MAX_ATTEMPTS``, a missing model
+# key, or an older API that sent no code.
+REPLY_FAILED_SKIP = "reply_failed"
 
 ReplyState = Literal["done", "skipped", "failed"]
 
@@ -153,7 +161,9 @@ async def _expire_unclaimable(db: AsyncSession, now: datetime) -> None:
     await db.execute(
         update(Sms)
         .where(*base, Sms.agent_reply_attempts >= MAX_ATTEMPTS)
-        .values(agent_reply_state="failed")
+        .values(
+            agent_reply_state="failed", metadata_=with_skip_reason(REPLY_FAILED_SKIP)
+        )
     )
 
 
@@ -339,16 +349,11 @@ def build_chat_messages(
 def with_skip_reason(reason: str, detail: str | None = None) -> ColumnElement[Any]:
     """``metadata`` with ``skipped_reason`` (and ``skipped_detail``) merged in,
     so the console can say why the agent did not reply. An older detail is
-    dropped first, so it never sits under a new reason. ``||`` on a JSON
-    ``null`` makes an array and the key is lost, so that row starts from ``{}``."""
-    current = func.coalesce(
-        func.nullif(Sms.metadata_, literal_column("'null'::jsonb")),
-        literal_column("'{}'::jsonb"),
-    ).op("-")(literal_column("'skipped_detail'"))
+    dropped first, so it never sits under a new reason."""
     fields: dict[str, str] = {"skipped_reason": reason}
     if detail:
         fields["skipped_detail"] = detail
-    return current.op("||")(cast(fields, JSONB))
+    return merge_object(Sms.metadata_, fields, drop="skipped_detail")
 
 
 async def finish_reply(
@@ -363,7 +368,8 @@ async def finish_reply(
     """Record the final state. With ``attempt`` it only applies while that
     claim still owns the row (a reclaimed row is not overwritten by a worker
     that was presumed dead). A skipped or failed row records ``reason`` (a
-    short code) and ``detail`` in its metadata."""
+    short code) and ``detail`` in its metadata. A failed row with no reason
+    records ``REPLY_FAILED_SKIP``."""
     stmt = update(Sms).where(Sms.id == sms.id)
     if attempt is not None:
         stmt = stmt.where(
@@ -371,6 +377,8 @@ async def finish_reply(
             Sms.agent_reply_attempts == attempt,
         )
     values: dict[str, Any] = {"agent_reply_state": state}
+    if state == "failed" and not reason:
+        reason, detail = REPLY_FAILED_SKIP, None
     if state in ("skipped", "failed") and reason:
         values["metadata_"] = with_skip_reason(reason, detail)
     await db.execute(stmt.values(**values))
