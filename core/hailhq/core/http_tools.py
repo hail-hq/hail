@@ -41,11 +41,13 @@ class HttpToolHeadersNeeded(ValueError):
         self.index = index
 
 
-def _origin(url: str) -> tuple[str, str, int, str | None, int | None] | None:
+def _origin(
+    url: str,
+) -> tuple[str, str, int, str, str | None, int | None] | None:
     """Scheme, host and port with the canonical ASCII (IDNA 2008) host and
     the default port filled in, so ``faß.example`` and
-    ``xn--fa-hia.example:443`` are one origin. The host and port as yarl
-    reads them are part of it too: aiohttp connects with yarl, whose parser
+    ``xn--fa-hia.example:443`` are one origin. The scheme, host and port as
+    yarl reads them are part of it too: aiohttp connects with yarl, whose parser
     differs from httpx's, so two urls are one origin only when both parsers
     agree. None for a url that cannot be parsed."""
     try:
@@ -53,7 +55,7 @@ def _origin(url: str) -> tuple[str, str, int, str | None, int | None] | None:
         connect = URL(url)
     except (UnsafeUrlError, ValueError):
         return None
-    return parsed.scheme, host, port, connect.raw_host, connect.port
+    return parsed.scheme, host, port, connect.scheme, connect.raw_host, connect.port
 
 
 def _same_origin(saved_url: str, new_url: str) -> bool:
