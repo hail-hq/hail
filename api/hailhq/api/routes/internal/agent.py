@@ -151,6 +151,7 @@ from hailhq.core.threads import is_e164
 from hailhq.core.webhook_fanout import call_event_data, fanout_call_event
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 from sqlalchemy import select, text, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -1707,36 +1708,26 @@ _CAP_WINDOW = timedelta(hours=24)
 async def _record_caller_email(
     db: AsyncSession, call_id: UUID, invocation: UUID, row: Email
 ) -> None:
-    """Write the call's ``email_caller`` event for this send, once. Under the
-    call row lock, so the original request and a retry never both write it."""
-    call = await _load_call_for_update(db, call_id)
-    if call is None:
-        return
-    exists = await db.scalar(
-        select(CallEvent.id)
-        .where(
-            CallEvent.call_id == call_id,
-            CallEvent.kind == email_caller.EVENT_KIND,
-            CallEvent.payload["tool_invocation_id"].astext == str(invocation),
+    """Write the call's ``email_caller`` event for this send, once: the
+    partial unique index ``call_events_email_caller_uq`` drops a second
+    write (a retry), so no lock is needed. The address is not copied here:
+    ``email_id`` leads to it, on the row data-subject requests cover.
+    ``status`` is the status right after the send; the email's own events
+    carry what happens later."""
+    await db.execute(
+        pg_insert(CallEvent)
+        .values(
+            call_id=call_id,
+            kind=email_caller.EVENT_KIND,
+            payload={
+                "tool_invocation_id": str(invocation),
+                "email_id": str(row.id),
+                "subject": row.subject,
+                "status": row.status,
+            },
         )
-        .limit(1)
+        .on_conflict_do_nothing()
     )
-    if exists is None:
-        # ``status`` is the status right after the send; the email's own
-        # events carry what happens later.
-        db.add(
-            CallEvent(
-                call_id=call_id,
-                kind=email_caller.EVENT_KIND,
-                payload={
-                    "tool_invocation_id": str(invocation),
-                    "email_id": str(row.id),
-                    "to": row.to_addresses[0],
-                    "subject": row.subject,
-                    "status": row.status,
-                },
-            )
-        )
     await db.commit()
 
 
@@ -1878,7 +1869,7 @@ async def agent_email_caller(
 
     # The name for the fixed lines: the dispatch's copy, else one indexed
     # read on this session. Never a network call while the locks are held.
-    org_name = body.org_name or await db.scalar(
+    org_name = " ".join((body.org_name or "").split()) or await db.scalar(
         select(Organization.name).where(Organization.id == org)
     )
     result, row = await _send_email_row(

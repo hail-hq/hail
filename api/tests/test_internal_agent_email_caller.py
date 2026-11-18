@@ -180,7 +180,7 @@ async def test_on_sends_to_the_caller_from_the_verified_domain(
         .all()
     )
     assert event.payload["email_id"] == str(row.id)
-    assert event.payload["to"] == "Sam@Example.com"
+    assert "to" not in event.payload  # the address stays on the email row
     assert event.payload["status"] == "sent"
 
 

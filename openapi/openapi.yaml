@@ -7570,9 +7570,8 @@ components:
           description:
             Free-form JSON object attached to the email and echoed back
             on reads. Not interpreted by Hail. The keys 'forwarded_from', 'forward_headers',
-            'system_kind', 'reply_to_email_id', 'inbound_email_id', 'thread_sender',
-            'email_caller' and 'caller_e164' are reserved for Hail's own bookkeeping
-            and are rejected.
+            'system_kind', 'reply_to_email_id', 'inbound_email_id', 'thread_sender'
+            and 'email_caller' are reserved for Hail's own bookkeeping and are rejected.
         attachment_ids:
           anyOf:
             - items:

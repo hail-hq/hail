@@ -830,7 +830,7 @@ def test_email_caller_frames_every_email():
 def test_public_sends_cannot_plant_the_caller_email_marks():
     # The caps count marked rows and history hides them: a forged mark could
     # use up the caps or hide mail from history.
-    for key in ("email_caller", "caller_e164"):
+    for key in ("email_caller",):
         with pytest.raises(ValueError, match="reserved"):
             EmailCreate(
                 to=["a@example.com"],
@@ -872,3 +872,9 @@ async def test_email_caller_carries_the_dispatch_org_name():
         {"to_address": "sam@example.com", "subject": "s", "body_text": "b"},
     )
     assert "org_name" not in api.posts[1][1]
+
+
+def test_email_caller_sends_no_blank_org_name():
+    for name in ("  ", "\n", 7):
+        tool = email_caller.SPEC.bind({"org_name": name})
+        assert tool.execute.keywords["org_name"] is None

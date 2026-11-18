@@ -146,7 +146,7 @@ SDK: `client.agents.update(agent_id, email_caller_enabled=True)`.
 - The same checks as any email: suppression list, bounce and complaint rules,
   sending limits. Billed as a normal outbound email; with no credit it is not sent.
 - Each send adds an `email_caller` event to the call (`GET /v1/events?id=call:<call id>`,
-  or `hail tail <call id>`) with `email_id`, `to`, `subject`, and `status` right
+  or `hail tail <call id>`) with `email_id`, `subject`, and `status` right
   after the send. Later changes (bounce, complaint) are on the email's own
   events: `GET /v1/events?id=email:<email_id>`.
 - The address is whatever the person says. Hail cannot prove it is theirs.

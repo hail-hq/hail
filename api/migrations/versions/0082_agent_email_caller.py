@@ -66,6 +66,10 @@ def upgrade() -> None:
                 postgresql_where=sa.text(where),
                 postgresql_concurrently=True,
             )
+    # The block committed env.py's transaction and its SET LOCAL guards. Set
+    # them again for any later migration in the same run.
+    op.execute("SET LOCAL statement_timeout = '120s'")
+    op.execute("SET LOCAL lock_timeout = '5s'")
 
 
 def downgrade() -> None:

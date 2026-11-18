@@ -159,7 +159,9 @@ SPEC = ToolSpec(
 def _bind(metadata: dict[str, Any]) -> ToolSpec:
     """This call's tool: carries the organization name from the dispatch."""
     name = metadata.get("org_name")
-    name = name[:MAX_ORG_NAME_CHARS] if isinstance(name, str) else None
+    # Blank or not text: send none, so the API reads its own copy.
+    name = " ".join(name.split())[:MAX_ORG_NAME_CHARS] if isinstance(name, str) else ""
+    name = name or None
     return dataclasses.replace(
         SPEC, execute=functools.partial(_execute, org_name=name), bind=None
     )
