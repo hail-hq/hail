@@ -10,7 +10,8 @@ loopback or internal hosts and turn the server into an SSRF proxy.
 address is public. Not public (``ip_is_public``): private (RFC 1918,
 IPv6 ULA fc00::/7), loopback, link-local (incl. 169.254.169.254),
 CGNAT 100.64.0.0/10 (Tailscale), IPv6 site-local fec0::/10, multicast,
-reserved and unspecified; IPv4-mapped IPv6 is judged on its IPv4 address.
+reserved and unspecified; IPv4-mapped and 6to4 IPv6 addresses are judged
+on the IPv4 address they wrap.
 A host that does not resolve is refused too, and so are ``localhost`` and
 ``*.localhost`` (RFC 6761), before any lookup. No operator allowlist for
 ``base_url`` (decision 2026-07-08); webhooks have
@@ -115,6 +116,11 @@ def ip_is_public(ip: str | ipaddress.IPv4Address | ipaddress.IPv6Address) -> boo
     mapped = getattr(addr, "ipv4_mapped", None)
     if mapped is not None:
         addr = mapped
+    # 6to4 (2002::/16) wraps an IPv4 address and ipaddress calls it global
+    # even when it wraps 169.254.169.254 or RFC 1918: judge the wrapped one.
+    sixtofour = getattr(addr, "sixtofour", None)
+    if sixtofour is not None:
+        addr = sixtofour
     if isinstance(addr, ipaddress.IPv4Address) and addr in _CGNAT_V4:
         return False
     # Deprecated IPv6 site-local (fec0::/10): ipaddress counts it neither

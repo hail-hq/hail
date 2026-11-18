@@ -35,6 +35,8 @@ def test_public_https_passes() -> None:
         "https://100.100.100.200/v1",  # CGNAT (cloud metadata, Tailscale)
         "https://[fec0::1]/v1",  # IPv6 site-local
         "https://224.0.0.1/v1",  # multicast
+        "https://[2002:a9fe:a9fe::]/v1",  # 6to4 wrapping 169.254.169.254
+        "https://[2002:a00:1::]/v1",  # 6to4 wrapping 10.0.0.1
         "https:///v1",  # no host
         "not-a-url",
     ],
@@ -245,3 +247,13 @@ def test_localhost_names_refused_without_lookup(split_dns: list[str], url: str) 
         assert_public_https_url(url)
     assert str(excinfo.value) == NOT_PUBLIC
     assert split_dns == []
+
+
+def test_public_6to4_address_still_allowed() -> None:
+    # 2002:5db8:d822:: wraps 93.184.216.34, a public address.
+    assert guard.ip_is_public("2002:5db8:d822::")
+
+
+def test_localhost_check_ignores_case() -> None:
+    with pytest.raises(UnsafeUrlError):
+        guard.assert_public_host("Foo.LocalHost.", 443)
