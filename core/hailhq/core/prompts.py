@@ -560,6 +560,12 @@ def build_voice_instructions(
     return f"{out}\n\n{PRIVACY_REMINDER}"
 
 
+def _end_reply(body: str, clock: str | None) -> str:
+    """A reply's system message: ``body``, the ``clock``, then the reminder."""
+    parts = (body, clock, PRIVACY_REMINDER)
+    return "\n\n".join(part for part in parts if part)
+
+
 def build_text_instructions(
     system_prompt: str | None,
     *,
@@ -575,9 +581,7 @@ def build_text_instructions(
     )
     caller = (system_prompt or "").strip()
     body = f"{framing}\n\n{TEXT_HEADING}\n\n{caller}" if caller else framing
-    if clock:
-        body = f"{body}\n\n{clock}"
-    return f"{body}\n\n{PRIVACY_REMINDER}"
+    return _end_reply(body, clock)
 
 
 # Server-only framing for the onboarding browser experience. Customer task
@@ -625,7 +629,4 @@ def build_email_instructions(
     framing = f"{PLATFORM_PRIVACY}\n\n{EMAIL_PREAMBLE} {EMAIL_SENDER_LINES[trust]}"
     if sends_tried:
         framing = f"{framing} {EMAIL_SENDS_TRIED_LINE}"
-    body = f"{framing}\n\n{TEXT_HEADING}\n\n{system_prompt or ''}"
-    if clock:
-        body = f"{body}\n\n{clock}"
-    return f"{body}\n\n{PRIVACY_REMINDER}"
+    return _end_reply(f"{framing}\n\n{TEXT_HEADING}\n\n{system_prompt or ''}", clock)

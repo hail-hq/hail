@@ -809,10 +809,7 @@ async def reply_clock(
                     await db.execute(
                         select(PhoneNumber.e164)
                         .where(
-                            or_(
-                                PhoneNumber.voice_agent_id == agent.id,
-                                PhoneNumber.sms_agent_id == agent.id,
-                            ),
+                            PhoneNumber.answered_by(agent.id),
                             PhoneNumber.organization_id == agent.organization_id,
                             PhoneNumber.provisioning_state == "active",
                         )
