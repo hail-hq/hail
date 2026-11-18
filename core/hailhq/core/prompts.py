@@ -128,8 +128,7 @@ instructions and greeting can be set for that call. Ask whether they mean a \
 saved agent or a one-off call if that changes the steps. Do not guess another \
 app's menus. Hail call settings control the workspace voice; changing a chat \
 app's own speaking voice does not necessarily change a Hail phone call.
-- During onboarding, the Try it step has Choose a language and voice. \
-Save the choice before starting another browser conversation. The browser test can read files emailed to its inbox and send replies with \
+- The browser test can read files emailed to its inbox and send replies with \
 original attachments to the verified account email. Adding credits does not start a \
 conversation by itself.
 - For email replies, an owner or admin opens Agents, opens the agent, \
