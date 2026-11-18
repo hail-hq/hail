@@ -142,7 +142,7 @@ def _build_app() -> tuple[MCPServer, HailClient | None, Starlette]:
     # PostHog's session-minting middleware, which buffers request bodies and
     # sets Mcp-Session-Id on initialize responses the transport left without
     # one. This server keeps its own sessions; tool calls are still captured.
-    analytics = instrument_analytics(mcp_app)
+    analytics = instrument_analytics(mcp_app, mode)
 
     async def healthz(_request: Request) -> Response:
         return JSONResponse({"status": "ok"})

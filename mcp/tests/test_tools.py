@@ -660,6 +660,26 @@ async def test_get_call_happy_path(client: HailClient) -> None:
     assert result["status"] == "completed"
 
 
+@respx.mock
+async def test_get_call_returns_the_transcript(client: HailClient) -> None:
+    cid = str(uuid4())
+    body = _call_response(cid, status="completed")
+    body["transcript"] = [
+        {"role": "assistant", "text": "Hi, this is Acme.", "at": "2026-11-17T12:00:00Z"}
+    ]
+    respx.get(f"{_BASE_URL}/calls/{cid}").mock(
+        return_value=httpx.Response(200, json=body)
+    )
+    result = await tools.get_call(client=client, call_id=cid)
+    assert result["transcript"] == [
+        {
+            "role": "assistant",
+            "text": "Hi, this is Acme.",
+            "at": "2026-11-17T12:00:00Z",
+        }
+    ]
+
+
 # --------------------------------------------------------------------------- #
 # list_calls
 # --------------------------------------------------------------------------- #

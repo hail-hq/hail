@@ -1,4 +1,5 @@
 import hashlib
+from datetime import datetime, timezone
 
 from hailhq.core import prompts
 
@@ -137,15 +138,15 @@ def _sha(text: str) -> str:
 
 # Any change here changes what every agent is told: update on purpose only.
 _VOICE = {
-    (None, None): "256478185a4fcf57e8e63943fdb0ddd605d46c524dc6c78137ef8f224851fa7d",
+    (None, None): "9d3cfa6c40e03f696bff169884718a670482829d61bdec8cb7231ded68e4fa52",
     (None, "inbound"): (
-        "4f0ebc11114eb81cdfbe5c55b59aff7bcc584059c27032c280bd4caf222a51e2"
+        "54675424df2c5d9c9c6a7e211f166fd83aaf8be38acbc01c084c927b9fc4ca93"
     ),
     ("Be kind.", None): (
-        "59709a4fbf2d84a6af0bf1912355f6a9d435700a57cde8d94037ea22c5767b8a"
+        "656057cf6e43f33771c73bc1d4aee1c5cb862b1a4713a49a057f8c7ea04469c1"
     ),
     ("Be kind.", "inbound"): (
-        "09b49da91f94f26cf4a20b6cbfa89c1ee62659af254550600230f04876945711"
+        "f849abfde4b790926e7339319db3a4d92b82f73196fe572fca4abe2ee63e911d"
     ),
 }
 
@@ -169,3 +170,100 @@ def test_email_instructions_keep_the_current_private_boundary():
         assert prompts.PLATFORM_PRIVACY in text
         assert text.endswith(prompts.PRIVACY_REMINDER)
         assert "Handle orders." in text
+
+
+_EVENING = datetime(2026, 11, 18, 20, 5, tzinfo=timezone.utc)
+
+
+def test_clock_gives_utc_business_and_caller_time() -> None:
+    out = prompts.clock_section(
+        _EVENING,
+        inbound=True,
+        business_number="+442079460000",
+        other_number="+12125550100",
+    )
+    assert out.startswith(prompts.CLOCK_HEADING)
+    assert "- UTC: Wednesday, 18 November 2026, 20:05." in out
+    assert (
+        "- Where this business's phone number is: Wednesday, 18 November 2026, "
+        "20:05 (GMT, UTC+00:00, Europe/London)." in out
+    )
+    assert (
+        "- For the caller: Wednesday, 18 November 2026, 15:05 "
+        "(EST, UTC-05:00, America/New_York)." in out
+    )
+    assert "The caller's phone number is +1 212-555-0100." in out
+
+
+def test_clock_follows_summer_time() -> None:
+    out = prompts.clock_section(
+        datetime(2026, 7, 1, 9, 0, tzinfo=timezone.utc),
+        inbound=True,
+        business_number="+442079460000",
+        other_number=None,
+    )
+    assert "Wednesday, 1 July 2026, 10:00 (BST, UTC+01:00, Europe/London)." in out
+
+
+def test_uk_mobile_zones_share_one_offset() -> None:
+    # A UK mobile lists London, Jersey, Guernsey and Isle of Man.
+    out = prompts.clock_section(
+        _EVENING, inbound=True, business_number="+447911123456", other_number=None
+    )
+    assert "20:05 (GMT, UTC+00:00, " in out and "Europe/London" in out
+
+
+def test_clock_says_unknown_for_numbers_across_time_zones() -> None:
+    out = prompts.clock_section(
+        _EVENING,
+        inbound=False,
+        business_number="+18005550100",  # US toll-free
+        other_number="+61412345678",  # Australian mobile
+    )
+    assert "- Where this business's phone number is: unknown. Go by UTC" in out
+    assert "- For the person you called: unknown. Ask where they are" in out
+    assert "The phone number you called is +61 412 345 678." in out
+
+
+def test_clock_skips_a_withheld_caller_number() -> None:
+    out = prompts.clock_section(
+        _EVENING,
+        inbound=True,
+        business_number="+442079460000",
+        other_number="anonymous",
+    )
+    assert "- For the caller: unknown." in out
+    assert "phone number is anonymous" not in out
+    assert "The caller's phone number" not in out
+
+
+def test_no_comma_before_a_name() -> None:
+    assert '"Thanks Sam"' in prompts.VOICE_PREAMBLE
+    assert '"Thanks Sam"' in prompts.VOICE_PREAMBLE_INBOUND
+
+
+def test_clock_skips_an_invalid_caller_number() -> None:
+    out = prompts.clock_section(
+        _EVENING, inbound=True, business_number="+442079460000", other_number="+12345"
+    )
+    assert "+1 2345" not in out and "- For the caller: unknown." in out
+
+
+def test_clock_without_a_business_number_goes_by_utc() -> None:
+    out = prompts.clock_section(
+        _EVENING, inbound=True, business_number=None, other_number=None
+    )
+    assert "phone number is: unknown. Go by UTC" in out
+
+
+def test_clock_skips_a_national_caller_id() -> None:
+    # The voicebot adds "+" to an all-digit caller ID, so a national number
+    # arrives invalid and is left out rather than guessed.
+    out = prompts.clock_section(
+        _EVENING,
+        inbound=True,
+        business_number="+442079460000",
+        other_number="+07700900123",
+    )
+    assert "- For the caller: unknown." in out
+    assert "The caller's phone number" not in out

@@ -10,6 +10,7 @@ subscription.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -96,22 +97,20 @@ async def fanout_email_event(
     event_type: str,
     event_id: UUID,
     data: dict[str, Any],
+    changed_before: datetime | None = None,
 ) -> int:
-    """Insert delivery rows. Returns the number inserted."""
+    """Insert delivery rows. Returns the number inserted. With
+    ``changed_before``, only subscriptions created or last changed at or
+    before that time get one."""
     inserted = 0
 
-    subs = (
-        (
-            await db.execute(
-                select(WebhookSubscription).where(
-                    WebhookSubscription.organization_id == organization_id,
-                    WebhookSubscription.status == "active",
-                )
-            )
-        )
-        .scalars()
-        .all()
+    stmt = select(WebhookSubscription).where(
+        WebhookSubscription.organization_id == organization_id,
+        WebhookSubscription.status == "active",
     )
+    if changed_before is not None:
+        stmt = stmt.where(WebhookSubscription.updated_at <= changed_before)
+    subs = (await db.execute(stmt)).scalars().all()
     for sub in subs:
         if event_type not in (sub.event_types or []):
             continue
@@ -182,6 +181,7 @@ async def fanout_call_event(
     event_type: str,
     event_id: UUID,
     data: dict[str, Any],
+    changed_before: datetime | None = None,
 ) -> int:
     """Insert one WebhookDelivery row per active subscription whose
     event_types includes event_type. Thin call-shaped wrapper around the
@@ -194,6 +194,7 @@ async def fanout_call_event(
         event_type=event_type,
         event_id=event_id,
         data=data,
+        changed_before=changed_before,
     )
 
 

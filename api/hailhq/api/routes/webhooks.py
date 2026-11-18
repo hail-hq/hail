@@ -47,7 +47,7 @@ from hailhq.core.schemas import (
 )
 from hailhq.core.secret_cipher import SecretCipher
 from hailhq.core.webhook_events import WebhookEventType
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(
@@ -115,11 +115,20 @@ async def create_subscription(
         raise unprocessable(str(exc), loc=["body", "target_url"]) from exc
     secret = _new_secret()
     cipher = SecretCipher(settings.hail_webhook_secret_key)
+    # The INSERT's own time, not the column default now(): now() is the
+    # transaction start, which usually comes before the target URL check:
+    # auth and telemetry statements on the request session often leave the
+    # transaction open. call.analyzed compares updated_at with call end
+    # times (hailhq.core.call_analysis). statement_timestamp() is one value
+    # for the whole statement, so both columns get the same time.
+    stamp = func.statement_timestamp()
     sub = WebhookSubscription(
         organization_id=principal.organization_id,
         target_url=body.target_url,
         secret_encrypted=cipher.encrypt(secret),
         event_types=list(body.event_types),
+        created_at=stamp,
+        updated_at=stamp,
     )
     db.add(sub)
     await db.commit()
@@ -238,7 +247,9 @@ async def patch_subscription(
         if body.status == "active":
             updates["consecutive_failures"] = 0
     if updates:
-        updates["updated_at"] = datetime.now(timezone.utc)
+        # The UPDATE's own time on the DB clock, as on create: call.analyzed
+        # compares it with call end times (hailhq.core.call_analysis).
+        updates["updated_at"] = func.statement_timestamp()
         await db.execute(
             update(WebhookSubscription)
             .where(WebhookSubscription.id == sub.id)
@@ -314,7 +325,7 @@ async def rotate_secret(
         .where(WebhookSubscription.id == sub.id)
         .values(
             secret_encrypted=cipher.encrypt(secret),
-            updated_at=datetime.now(timezone.utc),
+            updated_at=func.statement_timestamp(),
         )
     )
     await db.commit()

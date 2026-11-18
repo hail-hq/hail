@@ -100,7 +100,7 @@ func resolveTailID(ctx context.Context, apiClient *client.ClientWithResponses, r
 	}
 	switch resType {
 	case "call":
-		id, _, err := resolveCallID(ctx, apiClient, idPart)
+		id, err := resolveCallID(ctx, apiClient, idPart)
 		return id, err
 	case "email":
 		return resolveEmailID(ctx, apiClient, idPart)
