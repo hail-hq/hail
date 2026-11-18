@@ -158,7 +158,7 @@ func (f *agentFlags) readHTTPTools() ([]any, error) {
 	}
 	if tools == nil {
 		// `null` would read as "leave the list"; [] clears it.
-		return nil, fmt.Errorf("--http-tools-file must hold a JSON array of tools, got null (use --no-http-tools to remove them)")
+		return nil, fmt.Errorf("--http-tools-file must hold a JSON array of tools, got null (use [] for no tools)")
 	}
 	return tools, nil
 }

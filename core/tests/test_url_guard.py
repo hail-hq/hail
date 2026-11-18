@@ -28,6 +28,7 @@ def test_public_https_passes() -> None:
         "https://0.0.0.0/v1",  # unspecified
         "https://[::ffff:169.254.169.254]/v1",  # ipv4-mapped metadata
         "https:///v1",  # no host
+        "https://" + "a" * 64 + ".com/v1",  # label too long to look up
         "not-a-url",
     ],
 )

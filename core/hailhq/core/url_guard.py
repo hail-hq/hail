@@ -75,7 +75,8 @@ def assert_public_https_url(url: str, *, field: str = "base_url") -> str:
 
     try:
         infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
-    except socket.gaierror as exc:
+    except (socket.gaierror, UnicodeError) as exc:
+        # UnicodeError: a host name the lookup cannot encode (label too long).
         raise UnsafeUrlError(f"{field} host does not resolve: {host}") from exc
 
     for info in infos:

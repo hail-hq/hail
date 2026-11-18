@@ -185,8 +185,9 @@ def verify(secret: str, signature_header: str, raw_body: bytes) -> bool:
 - `wait_message` is said on calls while Hail waits, not in texts or email.
 - HTTP tools are on whatever `tools` says; `tools` lists built-in tools only.
 - A request can repeat when a text or email reply is retried, with a new
-  `id`. Make lookups safe to run twice; for a tool that changes something,
-  dedupe on `sms_id` or `email_id` plus your own arguments.
+  `id`, and the arguments can differ the second time. Make lookups safe to
+  run twice. For a tool that changes something, check on your side whether
+  the change was already made for that `sms_id` or `email_id`.
 - `http_tool_secret` is returned once: on the first save with HTTP tools, and
   by `POST /v1/agents/{id}/rotate-tool-secret`. Live calls keep the secret
   they started with.

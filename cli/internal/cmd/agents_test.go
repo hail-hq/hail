@@ -336,16 +336,23 @@ func TestAgentsCreate_HTTPToolsFileSendsTheList(t *testing.T) {
 func TestAgentsCreate_HTTPToolsFileMustBeAnArray(t *testing.T) {
 	srv := newFakeServer(t, http.StatusCreated, sampleAgent())
 	path := t.TempDir() + "/tools.json"
+	commands := [][]string{
+		{"agents", "create", "Desk", "--prompt", "hi"},
+		{"agents", "update", "33333333-3333-3333-3333-333333333333"},
+	}
 	for _, content := range []string{`{"name": "x"}`, `null`} {
 		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		_, _, err := runRoot(t,
-			map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
-			"agents", "update", "33333333-3333-3333-3333-333333333333", "--http-tools-file", path,
-		)
-		if err == nil {
-			t.Fatalf("%s must fail", content)
+		for _, command := range commands {
+			args := append(append([]string{}, command...), "--http-tools-file", path)
+			_, _, err := runRoot(t,
+				map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+				args...,
+			)
+			if err == nil {
+				t.Fatalf("%s %s must fail", command[1], content)
+			}
 		}
 	}
 }

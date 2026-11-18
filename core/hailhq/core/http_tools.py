@@ -98,6 +98,15 @@ async def replace_http_tools(
     ``SecretKeyMissing`` when tools are given and HAIL_PROVIDER_SECRET_KEY is
     unset. Nothing is written before either error.
     """
+    if items:
+        # Lock the agent row first, then read the secret and the saved tools:
+        # two saves at once must not each make (and return) a different
+        # secret, or carry headers over from a list the other one replaced.
+        agent.http_tool_secret_encrypted = await db.scalar(
+            select(Agent.http_tool_secret_encrypted)
+            .where(Agent.id == agent.id)
+            .with_for_update()
+        )
     old = {
         row.name: row
         for row in (
@@ -110,13 +119,6 @@ async def replace_http_tools(
     rows: list[AgentHttpTool] = []
     if items:
         cipher = provider_cipher()
-        # Lock the agent row and read the secret again: two first saves at
-        # once must not each make (and return) a different secret.
-        agent.http_tool_secret_encrypted = await db.scalar(
-            select(Agent.http_tool_secret_encrypted)
-            .where(Agent.id == agent.id)
-            .with_for_update()
-        )
         if agent.http_tool_secret_encrypted is None:
             created = new_tool_secret()
             agent.http_tool_secret_encrypted = cipher.encrypt(created)

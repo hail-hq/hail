@@ -180,6 +180,11 @@ async def test_private_ip_literal_is_refused(url) -> None:
     assert await call_http_tool(_tool(url), _conv(), {}) == BLOCKED
 
 
+async def test_url_that_cannot_be_parsed_never_raises() -> None:
+    out = await call_http_tool(_tool("https://example.com:99999/x"), _conv(), {})
+    assert out == http_tool.UNREACHABLE
+
+
 async def test_host_resolving_to_loopback_is_refused(server) -> None:
     """localhost resolves to loopback: the resolver refuses it at connect
     time, so a name that changes its answer after a save is still caught."""
