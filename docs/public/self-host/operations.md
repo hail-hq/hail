@@ -756,9 +756,13 @@ describe-active-receipt-rule-set` again.
 - **SES sandbox.** New SES accounts accept mail only from verified
   addresses. During sandbox, the mail's `From:` must be on a verified
   SES identity.
-- **Private webhook target rejected.** `httpx_post` blocks RFC-1918
-  addresses by default. Self-hosters with internal webhook targets
-  set `HAIL_WEBHOOK_ALLOW_PRIVATE_NETWORKS=true`.
+- **Private webhook target rejected.** By default, webhooks refuse a
+  host that does not resolve, or that resolves to any non-public
+  address: private (RFC 1918, IPv6 `fc00::/7`), loopback, link-local
+  (incl. `169.254.169.254`), CGNAT `100.64.0.0/10` (used by
+  Tailscale), IPv6 site-local `fec0::/10`, multicast, reserved and
+  unspecified. Self-hosters with internal webhook targets set
+  `HAIL_WEBHOOK_ALLOW_PRIVATE_NETWORKS=true`.
 - **Lambda → API connection refused.** Check the Lambda's
   CloudWatch logs (`/aws/lambda/hail-inbound-prod-ingest`). The
   POST URL must be reachable from AWS over the public internet.

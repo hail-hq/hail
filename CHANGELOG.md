@@ -24,6 +24,10 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 - Number paperwork says when the address can be in any country: the new `address_any_country` item, from DIDWW.
 - Email agents: route an address to an agent, and it answers inbound mail in the thread.
 
+### Changed
+
+- Self-hosting: webhooks to CGNAT addresses (`100.64.0.0/10`, used by Tailscale), multicast, IPv6 site-local, or hosts that do not resolve are now refused. Set `HAIL_WEBHOOK_ALLOW_PRIVATE_NETWORKS=true` to allow them.
+
 ### Fixed
 
 - MCP: `preview_sms_application` no longer fails with "the API and this MCP version differ" on a US texting form that lists its consent methods.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import socket
 from uuid import UUID, uuid4
 
 import httpx
@@ -19,6 +20,24 @@ def webhook_secret_key(monkeypatch: pytest.MonkeyPatch) -> str:
     key = generate_key()
     monkeypatch.setattr(settings, "hail_webhook_secret_key", key)
     return key
+
+
+@pytest.fixture(autouse=True)
+def example_hosts_resolve(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Resolve ``*.example.com`` to a public address, with no real DNS.
+
+    The webhook guard refuses names that do not resolve, and most
+    ``example.com`` subdomains have no DNS record. Other names (the test
+    database host) use the real resolver.
+    """
+    real_getaddrinfo = socket.getaddrinfo
+
+    def fake_getaddrinfo(host, port, *args, **kwargs):
+        if isinstance(host, str) and host.endswith("example.com"):
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))]
+        return real_getaddrinfo(host, port, *args, **kwargs)
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
 
 
 @pytest.fixture()

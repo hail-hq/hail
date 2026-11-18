@@ -5,6 +5,7 @@ from __future__ import annotations
 import socket
 
 import hailhq.core.url_guard as guard
+import httpx2
 import pytest
 from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
 
@@ -30,6 +31,9 @@ def test_public_https_passes() -> None:
         "https://172.16.0.1/v1",  # RFC1918
         "https://0.0.0.0/v1",  # unspecified
         "https://[::ffff:169.254.169.254]/v1",  # ipv4-mapped metadata
+        "https://100.100.100.200/v1",  # CGNAT (cloud metadata, Tailscale)
+        "https://[fec0::1]/v1",  # IPv6 site-local
+        "https://224.0.0.1/v1",  # multicast
         "https:///v1",  # no host
         "not-a-url",
     ],
@@ -172,5 +176,5 @@ def test_malformed_host_or_port_rejected(url: str) -> None:
 def test_httpx2_connects_to_the_same_host(url: str) -> None:
     # The openai SDK sends BYO LLM requests with httpx2, a separate package
     # from the httpx the guard parses with. Fail if their hosts ever differ.
-    httpx2 = pytest.importorskip("httpx2")
+    # httpx2 is always installed in CI (`uv sync --all-packages`).
     assert guard.httpx_url(url).raw_host == httpx2.URL(url).raw_host

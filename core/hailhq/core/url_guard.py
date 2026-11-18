@@ -1,20 +1,30 @@
-"""SSRF guard for customer-supplied URLs (BYO openai-compatible base_url).
+"""SSRF guard for customer-supplied URLs.
 
-A BYO LLM base_url is fetched by the hail server both at validation time
-(``provider_validation``) and at call time (voicebot LLM build). Without a
-guard, an org admin could point it at cloud metadata (169.254.169.254),
-loopback, or RFC1918 hosts and turn the server into an SSRF proxy. This
-enforces https-only and resolves the host, rejecting any address in a
-private / loopback / link-local / unspecified range. No operator allowlist
-(decision 2026-07-08): any public HTTPS endpoint is allowed.
+Two callers: the BYO openai-compatible LLM ``base_url``
+(``assert_public_https_url``; fetched at validation time and at call time)
+and webhook deliveries (``core/hailhq/core/http_post.py``). Without a
+guard, a customer could point either at cloud metadata (169.254.169.254),
+loopback or internal hosts and turn the server into an SSRF proxy.
 
-The host is read with httpx's own URL parser (``httpx_url``), so the guard
-resolves exactly the host httpx (and httpx2, used by the openai SDK; same
-parser) will connect to. The stdlib ``urlsplit`` + ``getaddrinfo`` pair
-converts non-ASCII names with IDNA 2003, which maps ``faß.example`` to
-``fass.example``; httpx uses IDNA 2008 (``xn--fa-hia.example``), a
+``assert_public_host`` resolves the host and refuses it unless every
+address is public. Not public (``ip_is_public``): private (RFC 1918,
+IPv6 ULA fc00::/7), loopback, link-local (incl. 169.254.169.254),
+CGNAT 100.64.0.0/10 (Tailscale), IPv6 site-local fec0::/10, multicast,
+reserved and unspecified; IPv4-mapped IPv6 is judged on its IPv4 address.
+A host that does not resolve is refused too. No operator allowlist for
+``base_url`` (decision 2026-07-08); webhooks have
+``HAIL_WEBHOOK_ALLOW_PRIVATE_NETWORKS``.
+
+The host is read with httpx's own URL parser (``connect_target``), so the
+guard resolves exactly the host httpx (and httpx2, used by the openai SDK;
+same parser) will connect to. The stdlib ``urlsplit`` + ``getaddrinfo``
+pair converts non-ASCII names with IDNA 2003, which maps ``faß.example``
+to ``fass.example``; httpx uses IDNA 2008 (``xn--fa-hia.example``), a
 different host. Control characters (C0, DEL and C1) are refused before
 parsing: httpx itself refuses only the ASCII ones.
+
+Not covered: httpx resolves the host again when it connects, so a DNS
+rebind between the two lookups is still possible.
 """
 
 from __future__ import annotations
@@ -26,7 +36,14 @@ import unicodedata
 import httpx
 from hailhq.core.urls import canonical_url
 
-__all__ = ["UnsafeUrlError", "assert_public_https_url", "httpx_url", "ip_is_public"]
+__all__ = [
+    "UnsafeUrlError",
+    "assert_public_host",
+    "assert_public_https_url",
+    "connect_target",
+    "httpx_url",
+    "ip_is_public",
+]
 
 
 class UnsafeUrlError(ValueError):
@@ -58,7 +75,25 @@ def httpx_url(url: str) -> httpx.URL:
         raise UnsafeUrlError(f"URL is not valid: {exc}") from exc
 
 
+def connect_target(url: str) -> tuple[httpx.URL, str, int]:
+    """Return ``(parsed, host, port)`` for the connection httpx will open.
+
+    ``host`` is ASCII: IDNA 2008 for non-ASCII names, lowercased, IPv6
+    without brackets. Raises UnsafeUrlError for the cases in ``httpx_url``,
+    a URL with no host, or a port outside 1-65535.
+    """
+    parsed = httpx_url(url)
+    host = parsed.raw_host.decode("ascii")
+    if not host:
+        raise UnsafeUrlError("URL has no host")
+    port = parsed.port or (80 if parsed.scheme == "http" else 443)
+    if not 0 < port <= 65535:
+        raise UnsafeUrlError(f"URL has an invalid port: {port}")
+    return parsed, host, port
+
+
 def ip_is_public(ip: str | ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """False for every range listed in the module docstring."""
     addr = ipaddress.ip_address(ip)
     # Judge IPv4-mapped IPv6 (::ffff:a.b.c.d) on the embedded IPv4 address:
     # whether CPython's is_* checks see through the mapping is patch-level
@@ -67,6 +102,10 @@ def ip_is_public(ip: str | ipaddress.IPv4Address | ipaddress.IPv6Address) -> boo
     if mapped is not None:
         addr = mapped
     if isinstance(addr, ipaddress.IPv4Address) and addr in _CGNAT_V4:
+        return False
+    # Deprecated IPv6 site-local (fec0::/10): ipaddress counts it neither
+    # private nor reserved, but it is never internet-routable.
+    if isinstance(addr, ipaddress.IPv6Address) and addr.is_site_local:
         return False
     return not (
         addr.is_private
@@ -78,37 +117,39 @@ def ip_is_public(ip: str | ipaddress.IPv4Address | ipaddress.IPv6Address) -> boo
     )
 
 
-def assert_public_https_url(url: str) -> str:
-    """Return the canonicalized URL if it is a public HTTPS endpoint.
+def assert_public_host(host: str, port: int) -> None:
+    """Raise UnsafeUrlError unless ``host`` resolves and every address is public.
 
-    Raises UnsafeUrlError for non-https schemes, missing hosts, unresolvable
-    hosts, or any host that resolves to a private/loopback/link-local/
-    reserved/unspecified address (every resolved address must be public).
+    ``host`` is the ASCII host from ``connect_target``. Blocking (DNS):
+    call it off the event loop.
     """
-    parts = httpx_url(url)
-    if parts.scheme != "https":
-        raise UnsafeUrlError(f"base_url must use https, got '{parts.scheme or url}'")
-    # The ASCII host httpx connects to: IDNA 2008 for non-ASCII names,
-    # lowercased, IPv6 without brackets.
-    host = parts.raw_host.decode("ascii")
-    if not host:
-        raise UnsafeUrlError("base_url has no host")
-
-    port = parts.port or 443
-    if not 0 < port <= 65535:
-        raise UnsafeUrlError(f"base_url has an invalid port: {port}")
-
+    if host == "localhost":
+        raise UnsafeUrlError("URL host is localhost")
     try:
         infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
     except (socket.gaierror, UnicodeError) as exc:
         # UnicodeError: the stdlib idna codec refuses an empty or too-long
         # label (``a..b.com``) before any DNS lookup.
-        raise UnsafeUrlError(f"base_url host does not resolve: {host}") from exc
-
+        raise UnsafeUrlError(f"URL host does not resolve: {host}") from exc
+    if not infos:
+        raise UnsafeUrlError(f"URL host does not resolve: {host}")
+    # Check EVERY resolved address (A + AAAA): one private address is enough
+    # to refuse.
     for info in infos:
         ip = info[4][0]
         if not ip_is_public(ip):
-            raise UnsafeUrlError(
-                f"base_url host {host} resolves to non-public address {ip}"
-            )
+            raise UnsafeUrlError(f"URL host {host} resolves to non-public address {ip}")
+
+
+def assert_public_https_url(url: str) -> str:
+    """Return the canonicalized URL if it is a public HTTPS endpoint.
+
+    Raises UnsafeUrlError for non-https schemes, a missing host or bad port,
+    an unresolvable host, or any host with a non-public address (see the
+    module docstring for the ranges).
+    """
+    parsed, host, port = connect_target(url)
+    if parsed.scheme != "https":
+        raise UnsafeUrlError(f"base_url must use https, got '{parsed.scheme or url}'")
+    assert_public_host(host, port)
     return canonical_url(url)
