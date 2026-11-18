@@ -50,7 +50,13 @@ status: submitted
 
 **Repo link:** `https://github.com/hail-hq/hail`
 
-**One-liner (for the PR description, not the README line):** Phone, SMS & email — for agents.
+**One-liner (for the PR description, not the README line):**
+
+<!-- copy:tagline -->
+
+Give your AI a real phone number and an email inbox.
+
+<!-- /copy -->
 
 **Category (target's internal taxonomy):** Communication
 
