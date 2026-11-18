@@ -408,6 +408,8 @@ async def test_ended_call_is_refused(
     "extra",
     [
         {"to_address": "not an address"},
+        {"to_address": "bob\u200b@example.com"},
+        {"to_address": "a@example.com, b@example.com"},
         {"to_address": "a@b.test", "cc": ["c@d.test"]},
         {"to_address": "a@b.test", "attachment_ids": [str(uuid.uuid4())]},
     ],

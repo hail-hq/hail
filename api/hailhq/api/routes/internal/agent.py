@@ -135,7 +135,6 @@ from hailhq.core.models import (
 )
 from hailhq.core.providers.email import EmailProvider
 from hailhq.core.providers.email.ses import SES_NOT_ACCEPTED_FAILURES
-from hailhq.core.schemas import EMAIL_ADDR
 from hailhq.core.sms_registration_gate import us_registration_block
 from hailhq.core.telemetry import bind_organization
 from hailhq.core.telemetry_identity import tag_context
@@ -1690,7 +1689,7 @@ class AgentEmailCallerRequest(AgentSendBase):
     to_address: str = Field(
         min_length=3,
         max_length=email_caller.MAX_ADDRESS_CHARS,
-        pattern=EMAIL_ADDR.pattern,
+        pattern=email_caller.ADDRESS_PATTERN,
     )
     subject: str = Field(min_length=1, max_length=MAX_SUBJECT_CHARS)
     body_text: str = Field(min_length=1, max_length=email_caller.MAX_BODY_CHARS)
@@ -1708,8 +1707,9 @@ async def _record_caller_email(
 ) -> None:
     """Write the call's ``email_caller`` event for this send, once: the
     partial unique index ``call_events_email_caller_uq`` drops a second
-    write (a retry), so no lock is needed. The address is not copied here:
-    ``email_id`` leads to it, on the row data-subject requests cover.
+    write (a retry), so no lock is needed. The address is not copied into
+    this event: ``email_id`` leads to the email row. (The spoken turns still
+    hold what the caller said, as for any call.)
     ``status`` is the status right after the send; the email's own events
     carry what happens later."""
     await db.execute(

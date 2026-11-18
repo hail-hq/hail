@@ -886,3 +886,21 @@ def test_email_caller_cleans_the_body_but_keeps_its_lines():
     )
     assert "Hi there.\nLink:\thttps://x.test\n\n--\n" in body
     assert email_caller.clean_body("\u200b\u202e ") == ""
+
+
+async def test_email_caller_takes_one_plain_mailbox_only():
+    api = FakeApi(spoken="Email sent.")
+    ok = {"subject": "s", "body_text": "b"}
+    for bad in (
+        "bob\u200b@example.com",
+        "bob@exa\u202emple.com",
+        '"a<x@evil.test>"@example.com',
+        "a@example.com, b@example.com",
+        "a@example.com>",
+        "a b@example.com",
+    ):
+        spoken = await email_caller.SPEC.execute(
+            _ctx(api=api), {**ok, "to_address": bad}
+        )
+        assert "full email address" in spoken, bad
+    assert api.posts == []

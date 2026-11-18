@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import dataclasses
 import functools
+import re
 import unicodedata
 import uuid
 from typing import Any
@@ -24,7 +25,6 @@ from typing import Any
 from hailhq.core.agent_tools.send_email import MAX_SUBJECT_CHARS
 from hailhq.core.agent_tools.send_email import _is_available as _email_available
 from hailhq.core.agent_tools.spec import NO_CALL, SPOKEN_FALLBACK, ToolContext, ToolSpec
-from hailhq.core.schemas import EMAIL_ADDR
 
 # The internal route (AgentEmailCallerRequest) imports these as its caps.
 MAX_ADDRESS_CHARS = 254
@@ -38,6 +38,12 @@ MAX_ADDRESSES_PER_CALLER_PER_DAY = 2
 MAX_EMAILS_PER_ORG_PER_DAY = 100
 # Longest organization name shown in the fixed lines.
 MAX_ORG_NAME_CHARS = 80
+
+# One plain mailbox, ASCII only: no quotes, brackets, commas, spaces or
+# invisible characters that make two addresses look the same. The route
+# uses the same pattern.
+ADDRESS_PATTERN = r"^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$"
+_ADDRESS = re.compile(ADDRESS_PATTERN)
 
 # The dispatch metadata key that turns the tool on for a call.
 METADATA_KEY = "email_caller_enabled"
@@ -108,7 +114,7 @@ async def _execute(
     # Raw LiveKit tool calls are not schema-validated: catch what the route
     # would reject with a 422, and say what to fix. Never cut: a cut address
     # is another address, and a cut body can end inside a link.
-    if len(to_address) > MAX_ADDRESS_CHARS or not EMAIL_ADDR.match(to_address):
+    if len(to_address) > MAX_ADDRESS_CHARS or not _ADDRESS.match(to_address):
         return "I need a full email address before I can send the email."
     if not subject or not clean_body(body_text):
         return "I need a subject and a message before I can send the email."
@@ -130,6 +136,17 @@ async def _execute(
         },
     )
     return str(resp.get("spoken", SPOKEN_FALLBACK))
+
+
+def _bind(metadata: dict[str, Any]) -> ToolSpec:
+    """This call's tool: carries the organization name from the dispatch."""
+    name = metadata.get("org_name")
+    # Blank or not text: send none, so the API reads its own copy.
+    # _call_with cleans and cuts it.
+    name = name if isinstance(name, str) and name.strip() else None
+    return dataclasses.replace(
+        SPEC, execute=functools.partial(_execute, org_name=name), bind=None
+    )
 
 
 SPEC = ToolSpec(
@@ -164,24 +181,12 @@ SPEC = ToolSpec(
     risk_tier="outbound_send",
     is_available=_email_available,
     execute=_execute,
+    bind=_bind,
 )
 
 
-def _bind(metadata: dict[str, Any]) -> ToolSpec:
-    """This call's tool: carries the organization name from the dispatch."""
-    name = metadata.get("org_name")
-    # Blank or not text: send none, so the API reads its own copy.
-    # _call_with cleans and cuts it.
-    name = name if isinstance(name, str) and name.strip() else None
-    return dataclasses.replace(
-        SPEC, execute=functools.partial(_execute, org_name=name), bind=None
-    )
-
-
-SPEC = dataclasses.replace(SPEC, bind=_bind)
-
-
 __all__ = [
+    "ADDRESS_PATTERN",
     "EVENT_KIND",
     "MAX_ADDRESSES_PER_CALLER_PER_DAY",
     "MAX_ADDRESS_CHARS",

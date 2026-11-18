@@ -150,6 +150,9 @@ SDK: `client.agents.update(agent_id, email_caller_enabled=True)`.
   after the send. Later changes (bounce, complaint) are on the email's own
   events: `GET /v1/events?id=email:<email_id>`.
 - The address is whatever the person says. Hail cannot prove it is theirs.
+  It must be one plain ASCII mailbox (no quotes, brackets or spaces).
+- The call event and the tool record do not copy the address or the text.
+  The call's transcript still holds what was said aloud.
 - Turning it on applies from the next call. Turning it off, or pausing the
   agent, stops emails at once, also on a call in progress.
 

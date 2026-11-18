@@ -77,6 +77,7 @@ from hailhq.core.telemetry_identity import (
     set_identity,
     tag_context,
 )
+from hailhq.core.threads import phone_counterpart
 from hailhq.core.url_guard import assert_public_https_url
 from hailhq.core.webhook_fanout import fanout_call_event
 from hailhq.voicebot import text_watch
@@ -346,7 +347,7 @@ async def other_party(call_id: UUID) -> DirectoryEntry | None:
             if row is None:
                 return None
             organization_id, direction, from_e164, to_e164 = row
-            number = from_e164 if direction == "inbound" else to_e164
+            number = phone_counterpart(direction, from_e164, to_e164)
             if not number:
                 return None
             entry = await find_by_phone(session, organization_id, number)
@@ -2168,9 +2169,10 @@ def attach_event_handlers(
             except ValueError:
                 parsed = {"_raw": _cap(raw)}
             if c.name == email_caller.SPEC.name:
-                # Allowlist: only the subject. The address and the dictated
-                # text stay on the email row, which data-subject requests
-                # cover; a raw string that did not parse may hold them too.
+                # Allowlist: only the subject. The tool's record does not copy
+                # the address or the dictated text (the email row holds them;
+                # the spoken turns hold what was said). A raw string that did
+                # not parse may hold them, so it is dropped.
                 parsed = (
                     {k: parsed[k] for k in ("subject",) if k in parsed}
                     if isinstance(parsed, dict) and "_raw" not in parsed
