@@ -1737,6 +1737,21 @@ async def _record_caller_email(
     await db.commit()
 
 
+async def _record_caller_email_safely(
+    db: AsyncSession, call_id: UUID, invocation: UUID, row: Email
+) -> None:
+    """``_record_caller_email`` after the email was handed over: a failure
+    is logged, never reported as a failed send (the agent would send
+    again)."""
+    try:
+        await _record_caller_email(db, call_id, invocation, row)
+    except Exception:
+        logger.warning(
+            "email_caller event not written for call_id=%s", call_id, exc_info=True
+        )
+        await db.rollback()
+
+
 class _CallerEmailRow(NamedTuple):
     """One caller email of the last 24 hours, as the caps read it."""
 
@@ -1815,10 +1830,15 @@ async def agent_email_caller(
     # sending when the call ends.
     prior = await _prior_send(db, Email, org, body.tool_invocation_id)
     if prior is not None:
+        # Answer from the row before the event write: a rollback there
+        # expires it.
+        replay = _email_replay(prior)
         if prior.status != "queued":
             # The original may have stopped before writing the call event.
-            await _record_caller_email(db, call.id, body.tool_invocation_id, prior)
-        return _email_replay(prior)
+            await _record_caller_email_safely(
+                db, call.id, body.tool_invocation_id, prior
+            )
+        return replay
 
     if call.status != "in_progress":
         return AgentSendResponse(ok=False, spoken=_SPOKEN_CALL_UNAVAILABLE)
@@ -1837,7 +1857,9 @@ async def agent_email_caller(
     ):
         return AgentSendResponse(ok=False, spoken=_SPOKEN_NOT_ALLOWED)
 
-    if not email_caller.usable_address(body.to_address):
+    if mailbox_key(body.to_address).startswith("@"):
+        # The request model already checked the pattern and length; only an
+        # empty email inbox key (+tag only, Gmail dots only) is left.
         return AgentSendResponse(
             ok=False, spoken="I need a full email address before I can send the email."
         )
@@ -1914,16 +1936,8 @@ async def agent_email_caller(
         consent_source="voice_call",
     )
     if row is not None:
-        # Shows the send in the call's activity next to the transcript. The
-        # email is already handed over: a failure here must not tell the
-        # agent it failed (it would send again).
-        try:
-            await _record_caller_email(db, call.id, body.tool_invocation_id, row)
-        except Exception:
-            logger.warning(
-                "email_caller event not written for call_id=%s", call.id, exc_info=True
-            )
-            await db.rollback()
+        # Shows the send in the call's activity next to the transcript.
+        await _record_caller_email_safely(db, call.id, body.tool_invocation_id, row)
     return result
 
 

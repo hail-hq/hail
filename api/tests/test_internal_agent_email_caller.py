@@ -736,3 +736,18 @@ async def test_a_failed_event_write_still_reports_the_send(
     call = await _call(async_session, add_phone_number)
     assert (await _post(client, call))["ok"] is True
     assert len(await _emails(async_session)) == 1
+
+
+async def test_a_failed_event_write_on_a_retry_still_reports_the_send(
+    client, async_session, email_mock, add_phone_number, monkeypatch
+):
+    call = await _call(async_session, add_phone_number)
+    invocation = uuid.uuid4()
+    assert (await _post(client, call, invocation=invocation))["ok"] is True
+
+    async def broken(*_args, **_kwargs):
+        raise RuntimeError("db blip")
+
+    monkeypatch.setattr(agent_routes, "_record_caller_email", broken)
+    assert (await _post(client, call, invocation=invocation))["ok"] is True
+    assert len(await _emails(async_session)) == 1

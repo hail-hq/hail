@@ -11,6 +11,7 @@ import pytest
 from hailhq.core.agent_tools import email_caller
 from hailhq.core.agent_tools.registry import all_tools
 from hailhq.core.agent_tools.spec import ToolContext
+from hailhq.core.compliance_gate import mailbox_key
 from hailhq.core.config import settings
 from hailhq.core.models import (
     Agent,
@@ -922,7 +923,7 @@ def test_email_caller_cuts_a_long_org_name_before_posting():
 
 
 def test_email_caller_mailbox_key():
-    key = email_caller.mailbox_key
+    key = mailbox_key
     assert key("Sam+news@Example.com") == "sam@example.com"
     assert key("s.a.m@example.com") == "s.a.m@example.com"  # dots matter here
     assert key("S.am+x@googlemail.com") == key("sam@gmail.com") == "sam@gmail.com"

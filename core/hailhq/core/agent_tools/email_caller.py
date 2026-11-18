@@ -222,6 +222,5 @@ __all__ = [
     "clean_subject",
     "framed_body",
     "framed_subject",
-    "mailbox_key",
     "usable_address",
 ]
