@@ -360,11 +360,11 @@ async def test_org_name_comes_from_the_organizations_table(
     )
     await async_session.commit()
     monkeypatch.setattr(inbound_calls, "fetch_organization_name", fail)
-    assert await inbound_calls.organization_name(org) == "Acme Dental"
+    assert await inbound_calls._organization_name(org) == "Acme Dental"
 
 
 async def test_org_name_falls_back_to_hail_so_without_a_row(async_session) -> None:
-    assert await inbound_calls.organization_name(uuid.uuid4()) == "Acme Dental"
+    assert await inbound_calls._organization_name(uuid.uuid4()) == "Acme Dental"
 
 
 async def test_org_name_falls_back_to_hail_so_when_the_db_fails(monkeypatch) -> None:
@@ -372,4 +372,4 @@ async def test_org_name_falls_back_to_hail_so_when_the_db_fails(monkeypatch) -> 
         raise OSError("db down")
 
     monkeypatch.setattr(inbound_calls, "session_scope", broken)
-    assert await inbound_calls.organization_name(uuid.uuid4()) == "Acme Dental"
+    assert await inbound_calls._organization_name(uuid.uuid4()) == "Acme Dental"

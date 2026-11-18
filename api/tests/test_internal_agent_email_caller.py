@@ -11,7 +11,6 @@ import uuid
 
 import pytest
 from botocore.exceptions import ConnectTimeoutError, ReadTimeoutError
-from hailhq.api.routes.internal import agent as agent_routes
 from hailhq.core import hmac_signing
 from hailhq.core.agent_tools import email_caller
 from hailhq.core.billing import CALL_META_BILLED
@@ -26,7 +25,7 @@ from hailhq.core.models import (
     EmailDomain,
     PhoneNumber,
 )
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 HMAC_SECRET = "test-internal-secret"
@@ -36,14 +35,6 @@ PATH = "/internal/agent/email-caller"
 @pytest.fixture(autouse=True)
 def _internal_secret(monkeypatch):
     monkeypatch.setattr(settings, "hail_internal_secret", HMAC_SECRET)
-
-
-@pytest.fixture(autouse=True)
-def _org_name(monkeypatch):
-    async def name(_org):
-        return "Acme Dental"
-
-    monkeypatch.setattr(agent_routes, "organization_name", name)
 
 
 def _signed(body: bytes) -> dict[str, str]:
@@ -119,6 +110,7 @@ async def _post(client, call: Call, to="sam@example.com", invocation=None):
             "to_address": to,
             "subject": "Datasheet",
             "body_text": "Here it is: https://example.com/ds.pdf",
+            "org_name": "Acme Dental",
         }
     ).encode()
     resp = await client.post(PATH, content=body, headers=_signed(body))
@@ -229,6 +221,7 @@ async def test_control_characters_are_cleaned_from_the_subject(
             "to_address": "sam@example.com",
             "subject": "Data\u202esheet\r\nBcc: x@example.com",
             "body_text": "Link.",
+            "org_name": "Acme Dental",
         }
     ).encode()
     resp = await client.post(PATH, content=body, headers=_signed(body))
@@ -551,3 +544,38 @@ async def test_a_blank_body_is_refused(
     resp = await client.post(PATH, content=body, headers=_signed(body))
     assert resp.json()["ok"] is False
     assert await _emails(async_session) == []
+
+
+async def test_paused_agent_sends_nothing(
+    client, async_session, email_mock, add_phone_number
+):
+    call = await _call(async_session, add_phone_number)
+    agent = await async_session.get(Agent, call.agent_id)
+    agent.status = "paused"
+    await async_session.commit()
+    assert (await _post(client, call))["ok"] is False
+    assert await _emails(async_session) == []
+
+
+async def test_org_name_falls_back_to_the_organizations_table(
+    client, async_session, email_mock, add_phone_number
+):
+    call = await _call(async_session, add_phone_number)
+    await async_session.execute(
+        text("INSERT INTO organizations (id, name) VALUES (:id, :name)"),
+        {"id": call.organization_id, "name": "Acme Dental"},
+    )
+    await async_session.commit()
+    body = json.dumps(
+        {
+            "call_id": str(call.id),
+            "tool_invocation_id": str(uuid.uuid4()),
+            "to_address": "sam@example.com",
+            "subject": "Datasheet",
+            "body_text": "Link.",
+        }
+    ).encode()
+    resp = await client.post(PATH, content=body, headers=_signed(body))
+    assert resp.json()["ok"] is True
+    (row,) = await _emails(async_session)
+    assert row.subject == "From a phone call with Acme Dental: Datasheet"

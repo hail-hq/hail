@@ -179,9 +179,9 @@ async def build_agent_tools(
             specs.append(transfer_call.CANCEL_SPEC)
     # The settings guide is loaded by tool, not carried in the prompt. No
     # `tools` list names it, so every call gets it here, as cancel_transfer is.
-    if allowed != []:  # `tools: []` opts out of every tool
+    if allowed != []:  # `tools: []` opts out of every tool above
         specs.append(hail_help.SPEC)
-    # Opt-in per agent, apart from `tools`: only the agent's switch (an
+    # Opt-in per agent, apart from `tools` (even `[]`): only the agent's switch (an
     # explicit true) turns it on, on a phone call with a known number. The
     # API checks all of it again on every send.
     if metadata.get(email_caller.METADATA_KEY) is True and is_e164(
@@ -192,7 +192,7 @@ async def build_agent_tools(
             or ""
         )
     ):
-        specs.append(email_caller.SPEC)
+        specs.append(email_caller.SPEC.bind(metadata))
     if not specs:
         return [], None
 

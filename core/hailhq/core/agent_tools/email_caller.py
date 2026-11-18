@@ -15,6 +15,8 @@ address, with text they dictate. The caps below bound that, and
 
 from __future__ import annotations
 
+import dataclasses
+import functools
 import unicodedata
 import uuid
 from typing import Any
@@ -35,7 +37,7 @@ MAX_ADDRESSES_PER_CALLER_PER_DAY = 2
 # Per organization, over any 24 hours.
 MAX_EMAILS_PER_ORG_PER_DAY = 100
 # Longest organization name shown in the fixed lines.
-_MAX_ORG_NAME_CHARS = 80
+MAX_ORG_NAME_CHARS = 80
 
 # The dispatch metadata key that turns the tool on for a call.
 METADATA_KEY = "email_caller_enabled"
@@ -46,7 +48,7 @@ _UNAVAILABLE = "Email is not available right now."
 
 
 def _call_with(org_name: str | None) -> str:
-    name = " ".join((org_name or "").split())[:_MAX_ORG_NAME_CHARS]
+    name = " ".join((org_name or "").split())[:MAX_ORG_NAME_CHARS]
     return f"a phone call with {name}" if name else "a phone call"
 
 
@@ -82,7 +84,9 @@ def framed_body(body_text: str, org_name: str | None) -> str:
     )
 
 
-async def _execute(ctx: ToolContext, args: dict[str, Any]) -> str:
+async def _execute(
+    ctx: ToolContext, args: dict[str, Any], *, org_name: str | None = None
+) -> str:
     if ctx.call_id is None or ctx.inbound_email_id is not None:
         return NO_CALL
     if ctx.api is None:
@@ -109,6 +113,9 @@ async def _execute(ctx: ToolContext, args: dict[str, Any]) -> str:
             "to_address": to_address,
             "subject": subject,
             "body_text": body_text,
+            # From the dispatch, so the API does not look it up under its
+            # locks. The API falls back to its own copy when it is missing.
+            **({"org_name": org_name} if org_name else {}),
         },
     )
     return str(resp.get("spoken", SPOKEN_FALLBACK))
@@ -149,6 +156,18 @@ SPEC = ToolSpec(
 )
 
 
+def _bind(metadata: dict[str, Any]) -> ToolSpec:
+    """This call's tool: carries the organization name from the dispatch."""
+    name = metadata.get("org_name")
+    name = name[:MAX_ORG_NAME_CHARS] if isinstance(name, str) else None
+    return dataclasses.replace(
+        SPEC, execute=functools.partial(_execute, org_name=name), bind=None
+    )
+
+
+SPEC = dataclasses.replace(SPEC, bind=_bind)
+
+
 __all__ = [
     "EVENT_KIND",
     "MAX_ADDRESSES_PER_CALLER_PER_DAY",
@@ -157,6 +176,7 @@ __all__ = [
     "MAX_EMAILS_PER_CALL",
     "MAX_EMAILS_PER_CALLER_PER_DAY",
     "MAX_EMAILS_PER_ORG_PER_DAY",
+    "MAX_ORG_NAME_CHARS",
     "METADATA_KEY",
     "SPEC",
     "clean_subject",

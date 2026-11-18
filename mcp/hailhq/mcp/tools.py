@@ -2218,8 +2218,9 @@ _AGENT_EMAIL_CALLER = _d(
     "Whether this agent may email the person on a call a link or short note, "
     "at an address that person gives and confirms on the call. Anyone who "
     "can call the number can request an email to any address. Plain text, "
-    "billed like any email, capped at 2 per call, 3 per caller number a day "
-    "and 100 per workspace a day. Off by default."
+    "billed like any email, capped at 2 per call to one address, 3 emails "
+    "and 2 addresses per caller number a day, and 100 per workspace a day. "
+    "Works on a live agent whatever its tools list. Off by default."
 )
 _AGENT_DURATION_RULES = _rules(AgentCreate, "max_duration_seconds")
 _AGENT_HANDOVER_RULES = _rules(AgentCreate, "handover_max_duration_seconds")

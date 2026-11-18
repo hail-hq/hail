@@ -45,9 +45,16 @@ _INDEXES = (
 
 
 def upgrade() -> None:
-    # Indexes first, then the column. A failed CONCURRENTLY build leaves an
-    # INVALID index behind, so each build drops any old one first: a rerun
-    # rebuilds it instead of keeping an index the planner never uses.
+    # The column first, inside env.py's transaction and its lock and
+    # statement timeouts. IF NOT EXISTS: a rerun after a failed index build
+    # below finds it already there.
+    op.execute(
+        "ALTER TABLE agents ADD COLUMN IF NOT EXISTS email_caller_enabled "
+        "BOOLEAN NOT NULL DEFAULT FALSE"
+    )
+    # Then the indexes, CONCURRENTLY (no transaction). A failed concurrent
+    # build leaves an INVALID index, so each build drops any old one first:
+    # a rerun rebuilds it instead of keeping an index the planner never uses.
     with op.get_context().autocommit_block():
         for name, table, columns, where, unique in _INDEXES:
             op.execute(sa.text(f"DROP INDEX CONCURRENTLY IF EXISTS {name}"))
@@ -59,15 +66,6 @@ def upgrade() -> None:
                 postgresql_where=sa.text(where),
                 postgresql_concurrently=True,
             )
-    op.add_column(
-        "agents",
-        sa.Column(
-            "email_caller_enabled",
-            sa.Boolean(),
-            server_default=sa.text("FALSE"),
-            nullable=False,
-        ),
-    )
 
 
 def downgrade() -> None:

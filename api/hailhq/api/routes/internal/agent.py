@@ -118,7 +118,6 @@ from hailhq.core.handover import (
     has_answered_handover,
     load_handover,
 )
-from hailhq.core.inbound_calls import organization_name
 from hailhq.core.internal_webhook import quote_call_price, quotes_enabled
 from hailhq.core.models import (
     CALLER_EMAIL_MARK,
@@ -130,6 +129,7 @@ from hailhq.core.models import (
     Email,
     EmailAttachment,
     EmailDomain,
+    Organization,
     PhoneNumber,
     Sms,
 )
@@ -1693,6 +1693,10 @@ class AgentEmailCallerRequest(AgentSendBase):
     )
     subject: str = Field(min_length=1, max_length=MAX_SUBJECT_CHARS)
     body_text: str = Field(min_length=1, max_length=email_caller.MAX_BODY_CHARS)
+    # From the dispatch metadata. Missing: the mirrored organizations table.
+    org_name: str | None = Field(
+        default=None, max_length=email_caller.MAX_ORG_NAME_CHARS
+    )
 
 
 # The caps count marked rows; the predicate is the partial index's own SQL
@@ -1818,6 +1822,7 @@ async def agent_email_caller(
         call.transport == "browser"
         or agent is None
         or agent.organization_id != org
+        or agent.status != "live"
         or not agent.email_caller_enabled
         or not caller
         or not is_e164(caller)
@@ -1832,12 +1837,7 @@ async def agent_email_caller(
     recipient = normalize_recipient(body.to_address)
     meta = {**_meta(body), CALLER_EMAIL_MARK: True, "caller_e164": caller}
     denial = await _shared_denial(db, call)
-    name_task: asyncio.Task[str | None] | None = None
     if denial is None:
-        # The name for the fixed lines (the organizations table, else
-        # hail.so), looked up beside the cap check so the locks below never
-        # wait on it.
-        name_task = asyncio.create_task(organization_name(org))
         # Serializes caller emails across this org's calls until the row is
         # committed, so two calls cannot both pass a cap with one slot left.
         # Its own key: org_lock is held through slow carrier work.
@@ -1867,8 +1867,6 @@ async def agent_email_caller(
             recipient=recipient,
         )
     if denial is not None:
-        if name_task is not None:
-            name_task.cancel()
         spoken, reason = denial
         return await _deny(
             org,
@@ -1878,7 +1876,11 @@ async def agent_email_caller(
             payload={**meta, "reason": reason},
         )
 
-    org_name = await name_task
+    # The name for the fixed lines: the dispatch's copy, else one indexed
+    # read on this session. Never a network call while the locks are held.
+    org_name = body.org_name or await db.scalar(
+        select(Organization.name).where(Organization.id == org)
+    )
     result, row = await _send_email_row(
         db,
         email_provider,

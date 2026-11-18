@@ -856,3 +856,19 @@ async def test_email_caller_refuses_a_subject_with_nothing_left():
     )
     assert "subject" in spoken
     assert api.posts == []
+
+
+async def test_email_caller_carries_the_dispatch_org_name():
+    api = FakeApi(spoken="Email sent.")
+    tool = email_caller.SPEC.bind({"org_name": "Acme Dental"})
+    await tool.execute(
+        _ctx(api=api),
+        {"to_address": "sam@example.com", "subject": "s", "body_text": "b"},
+    )
+    assert api.posts[0][1]["org_name"] == "Acme Dental"
+    unnamed = email_caller.SPEC.bind({})
+    await unnamed.execute(
+        _ctx(api=api),
+        {"to_address": "sam@example.com", "subject": "s", "body_text": "b"},
+    )
+    assert "org_name" not in api.posts[1][1]
