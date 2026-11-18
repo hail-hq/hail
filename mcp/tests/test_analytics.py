@@ -7,6 +7,7 @@ the captured ``$mcp_tool_call`` carries metadata only.
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import json
 
@@ -64,6 +65,7 @@ async def _session(
     actor: dict | None = None,
     auth: dict | None = None,
     lookup_fails: bool = False,
+    followup_actors: list[dict | None] | None = None,
 ) -> tuple[list, list]:
     monkeypatch.setattr("hailhq.core.config.settings.mcp_resource_url", "https://m.t")
     monkeypatch.setattr(
@@ -90,7 +92,14 @@ async def _session(
         lambda self, event, **kw: captured.append((event, kw)),
     )
 
+    pause_call = False
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
     async def regions(_self):
+        if pause_call:
+            entered.set()
+            await release.wait()
         if fail:
             raise RuntimeError(_SECRET)
         return {"regions": [], "note": _SECRET}
@@ -99,6 +108,9 @@ async def _session(
         "hailhq.mcp.hail_client.HailClient.list_number_regions", regions
     )
     auth = (_AUTH if oauth else {}) if auth is None else auth
+    expected_lookups = (
+        [next(iter(auth.values())).split(" ", 1)[1]] if token and oauth and auth else []
+    )
     actor = (
         actor
         if actor is not None
@@ -173,11 +185,26 @@ async def _session(
                     headers,
                     {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": call},
                 )
-    if token and oauth and auth:
-        # Initialize, list, and call must share the verified actor lookup.
-        assert lookups == [next(iter(auth.values())).split(" ", 1)[1]]
-    else:
-        assert lookups == []
+            pending = None
+            if followup_actors:
+                # Keep A's tool running while B and an anonymous caller list.
+                pause_call = True
+                pending = asyncio.create_task(post(*_modern("tools/call", 9, **call)))
+                await asyncio.wait_for(entered.wait(), 5)
+            try:
+                for i, next_actor in enumerate(followup_actors or []):
+                    auth = {}
+                    if next_actor is not None:
+                        actor = next_actor
+                        auth = {"Authorization": f"Bearer followup-{i}"}
+                        expected_lookups.append(f"followup-{i}")
+                    await post(*_modern("tools/list", 10 + i))
+            finally:
+                release.set()
+                if pending:
+                    await pending
+    # Initialize, list, and call must share each verified bearer lookup.
+    assert lookups == expected_lookups
     return seen, captured
 
 
@@ -318,6 +345,34 @@ async def test_api_key_owner_is_identified(monkeypatch, profile):
         assert calls[0]["properties"]["$set"] == {"email": _EMAIL, "name": _NAME}
     else:
         assert "$set" not in calls[0]["properties"]
+
+
+@pytest.mark.asyncio
+async def test_stateless_requests_do_not_share_person_profiles(monkeypatch):
+    other_user = "00000000-0000-0000-0000-0000000000cc"
+    _, events = await _session(
+        monkeypatch,
+        "phc_test",
+        oauth=True,
+        protocol=_MODERN,
+        fail=False,
+        followup_actors=[{"user_id": other_user, "email": None, "name": None}, None],
+    )
+    lists = [event for name, event in events if name == "$mcp_tools_list"]
+    assert len(lists) == 3
+    assert lists[0]["distinct_id"] == _USER
+    assert lists[0]["properties"]["$set"] == {"email": _EMAIL, "name": _NAME}
+    assert lists[1]["distinct_id"] == other_user
+    assert "$set" not in lists[1]["properties"]
+    assert "$groups" not in lists[1]["properties"]
+    assert lists[2]["distinct_id"] not in {_USER, other_user}
+    assert lists[2]["properties"]["$process_person_profile"] is False
+    assert "$set" not in lists[2]["properties"]
+    calls = [event for name, event in events if name == "$mcp_tool_call"]
+    assert len(calls) == 2
+    for event in calls:
+        assert event["distinct_id"] == _USER
+        assert event["properties"]["$set"] == {"email": _EMAIL, "name": _NAME}
 
 
 @pytest.mark.asyncio

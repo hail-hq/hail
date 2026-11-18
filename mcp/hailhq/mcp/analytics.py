@@ -80,6 +80,7 @@ _MODEL_DESCRIPTION = (
 # like a model ID (has a letter, no spaces or @), never an email or a number.
 _MODEL_ID = re.compile(r"(?=[^@\s]*[A-Za-z])[A-Za-z0-9][A-Za-z0-9._:/+-]{0,99}")
 _MODEL_PROPERTIES = ("$mcp_llm_model", "$mcp_llm_model_source")
+_REQUEST_IDENTITY = "hail_request_identity"
 
 
 async def _identify(_request: Any, extra: Any) -> UserIdentity | None:
@@ -116,8 +117,41 @@ async def _identify(_request: Any, extra: Any) -> UserIdentity | None:
     )
 
 
+async def _event_identity(request: Any, extra: Any) -> dict[str, Any]:
+    # Modern MCP has no transport session. The SDK can reuse one fallback
+    # session across callers and merge their profiles. Stamp a fresh snapshot
+    # on each event, using the same verified cache as identify (no extra HTTP).
+    identity = await _identify(request, extra)
+    return {
+        _REQUEST_IDENTITY: (
+            {
+                "distinct_id": identity.distinct_id,
+                "properties": identity.properties,
+                "groups": identity.groups,
+            }
+            if identity
+            else None
+        )
+    }
+
+
 def _keep_metadata(event: dict[str, Any]) -> dict[str, Any]:
     properties = event.get("properties") or {}
+    if _REQUEST_IDENTITY in properties:
+        # Ignore any sticky SDK identity; this event belongs to this request.
+        identity = properties[_REQUEST_IDENTITY]
+        properties = dict(properties)
+        for key in ("$set", "$groups", "$process_person_profile"):
+            properties.pop(key, None)
+        if identity:
+            event["distinct_id"] = identity["distinct_id"]
+            if identity["properties"]:
+                properties["$set"] = identity["properties"]
+            if identity["groups"]:
+                properties["$groups"] = identity["groups"]
+        else:
+            event["distinct_id"] = properties.get("$session_id") or "anonymous"
+            properties["$process_person_profile"] = False
     event["properties"] = {k: v for k, v in properties.items() if k in _KEPT_PROPERTIES}
     if "$set" in event["properties"]:
         event["properties"]["$set"] = {
@@ -168,6 +202,7 @@ def instrument_analytics(server: Any) -> Analytics | None:
             capture_model=MCPAnalyticsModelOptions(description=_MODEL_DESCRIPTION),
             before_send=_keep_metadata,
             identify=_identify,
+            event_properties=_event_identity,
             server_build=settings.logfire_service_version or None,
         )
         handle = instrument(server, client, options)
