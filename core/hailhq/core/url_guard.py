@@ -50,9 +50,10 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-# The one customer-facing text for a refused host. It never says which case
-# applied (localhost, private, unresolvable), so a customer cannot learn what
-# our resolver answers for internal names. Details go to the server log.
+# The one customer-facing text for a refused host. It does not say which case
+# applied (private address or no DNS answer), so the error text does not tell
+# a customer what our resolver answers for internal names. Details go to the
+# server log.
 NOT_PUBLIC = "URL host is private or could not be resolved"
 
 
@@ -135,9 +136,6 @@ def assert_public_host(host: str, port: int) -> None:
     ``host`` is the ASCII host from ``connect_target``. Blocking (DNS):
     call it off the event loop.
     """
-    if host == "localhost":
-        logger.info("url guard: refused localhost")
-        raise UnsafeUrlError(NOT_PUBLIC)
     try:
         infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
     except (socket.gaierror, UnicodeError) as exc:

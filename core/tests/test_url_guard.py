@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import socket
 
 import hailhq.core.url_guard as guard
@@ -108,7 +109,7 @@ def split_dns(monkeypatch) -> list[str]:
 def test_idna_2008_host_is_the_one_checked(
     split_dns: list[str], url: str, httpx_host: str
 ) -> None:
-    with pytest.raises(UnsafeUrlError, match=NOT_PUBLIC):
+    with pytest.raises(UnsafeUrlError, match=re.escape(NOT_PUBLIC)):
         assert_public_https_url(url)
     assert split_dns == [httpx_host]
 
@@ -198,5 +199,22 @@ def test_unreadable_resolved_address_fails_closed(monkeypatch) -> None:
         return [(None, None, None, "", ("not-an-ip", 0))]
 
     monkeypatch.setattr(guard.socket, "getaddrinfo", fake_getaddrinfo)
-    with pytest.raises(UnsafeUrlError, match=NOT_PUBLIC):
+    with pytest.raises(UnsafeUrlError, match=re.escape(NOT_PUBLIC)):
         assert_public_https_url("https://odd.example.com/v1")
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        [],  # resolver gave no addresses
+        [(None, None, None, "", ("127.0.0.1", 0))],  # localhost / loopback
+    ],
+)
+def test_every_refusal_uses_the_same_text(monkeypatch, answer) -> None:
+    def fake_getaddrinfo(host, *args, **kwargs):
+        return answer
+
+    monkeypatch.setattr(guard.socket, "getaddrinfo", fake_getaddrinfo)
+    with pytest.raises(UnsafeUrlError) as excinfo:
+        assert_public_https_url("https://localhost/v1")
+    assert str(excinfo.value) == NOT_PUBLIC

@@ -1,3 +1,4 @@
+import re
 import socket
 
 import pytest
@@ -243,7 +244,7 @@ def test_unresolvable_host_is_blocked(monkeypatch):
         raise socket.gaierror(socket.EAI_AGAIN, "temporary failure")
 
     monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
-    with pytest.raises(ValueError, match=NOT_PUBLIC):
+    with pytest.raises(ValueError, match=re.escape(NOT_PUBLIC)):
         validate_webhook_target(
             "https://flaky.example.com/hook", allow_private_networks=False
         )
@@ -255,7 +256,7 @@ async def test_httpx_post_blocks_unresolvable_host(monkeypatch):
         raise socket.gaierror(socket.EAI_AGAIN, "temporary failure")
 
     monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
-    with pytest.raises(PrivateNetworkBlockedError, match=NOT_PUBLIC):
+    with pytest.raises(PrivateNetworkBlockedError, match=re.escape(NOT_PUBLIC)):
         await httpx_post(
             "https://flaky.example.com/hook",
             b"{}",

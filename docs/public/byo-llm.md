@@ -223,8 +223,9 @@ responsive instead of stalled.
 **URLs must be `https` and publicly resolvable.** Hail checks the scheme
 when you submit the call, then resolves the host and rejects private,
 loopback, and link-local addresses — twice: once in the API, once again in
-the voicebot at call time. A URL that resolves to a private address by the
-time the call runs ends the call with `end_reason=provider_key_error`.
+the voicebot at call time. A URL that resolves to a private address, or does not
+resolve, by the time the call runs ends the call with
+`end_reason=provider_key_error`.
 
 **There is no fallback.** You chose this brain deliberately, so Hail does
 not silently substitute its own models when your endpoint fails. A standing
