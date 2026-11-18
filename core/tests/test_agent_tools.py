@@ -926,3 +926,10 @@ def test_email_caller_mailbox_key():
     assert key("Sam+news@Example.com") == "sam@example.com"
     assert key("s.a.m@example.com") == "s.a.m@example.com"  # dots matter here
     assert key("S.am+x@googlemail.com") == key("sam@gmail.com") == "sam@gmail.com"
+
+
+def test_email_caller_usable_address():
+    assert email_caller.usable_address("sam+news@example.com")
+    assert not email_caller.usable_address("+news@example.com")
+    assert not email_caller.usable_address("..@gmail.com")
+    assert not email_caller.usable_address("sam@example")

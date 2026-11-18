@@ -133,9 +133,12 @@ SDK: `client.agents.update(agent_id, email_caller_enabled=True)`.
   - 3 emails to one address in any 24 hours, from any caller;
   - 100 emails per organization in any 24 hours.
 
-  The caps count inboxes, not spellings: `+tags` are ignored, and Gmail
-  dots too (`n.ame+1@gmail.com` is `name@gmail.com`). The email still goes
-  to the address as given. A bounced email still counts, but its address
+  Each check takes the stricter reading. The per-address cap counts inboxes:
+  `+tags` are ignored, and Gmail dots too (`n.ame+1@gmail.com` is
+  `name@gmail.com`). The per-call and per-number address rules count
+  spellings: `a+x@example.com` and `a@example.com` are two addresses. An
+  address that is only a `+tag` is refused. The email goes to the address
+  as given. A bounced email still counts, but its address
   can be replaced. A send
   that may have reached the provider counts even if it failed. A caller
   with a hidden number gets no email. Caller ID can be faked, so the

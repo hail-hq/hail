@@ -652,13 +652,30 @@ async def test_plus_tags_and_gmail_dots_count_as_one_inbox(
     )
 
 
-async def test_tag_variants_do_not_add_caller_addresses(
+async def test_tag_variants_count_as_new_addresses_for_a_call_and_a_caller(
     client, async_session, email_mock, add_phone_number
 ):
+    """On most domains a+x@ and a@ can be two inboxes, so for the per-call
+    and per-caller address rules each spelling is its own address."""
     first = await _call(async_session, add_phone_number)
     assert (await _post(client, first, to="sam+a@example.com"))["ok"] is True
     second = await _call(async_session, add_phone_number, like=first)
-    # Same inbox as the first: not a second address, and allowed.
     assert (await _post(client, second, to="SAM+b@example.com"))["ok"] is True
-    # The per-call rule sees one inbox too.
-    assert (await _post(client, second, to="sam@example.com"))["ok"] is True
+    same_call = await _post(client, second, to="sam@example.com")
+    assert same_call["ok"] is False
+    assert "already used" in same_call["spoken"]
+    third = await _call(async_session, add_phone_number, like=first)
+    another = await _post(client, third, to="sam@example.com")
+    assert another["ok"] is False
+    assert "another address" in another["spoken"]
+    assert len(await _emails(async_session)) == 2
+
+
+@pytest.mark.parametrize("address", ["+news@example.com", "..@gmail.com"])
+async def test_an_address_with_no_inbox_is_refused(
+    client, async_session, email_mock, add_phone_number, address
+):
+    call = await _call(async_session, add_phone_number)
+    data = await _post(client, call, to=address)
+    assert data["ok"] is False
+    assert await _emails(async_session) == []

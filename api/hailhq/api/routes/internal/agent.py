@@ -1739,11 +1739,13 @@ def _caller_cap_denial(
     """``(spoken, audit_reason)`` when a cap stops this send, else None.
 
     ``rows`` are the org's caller emails of the last 24 hours that may have
-    gone out: ``(mailbox key, status, call_id, caller_e164)``; ``recipient``
-    is a mailbox key too (``email_caller.mailbox_key``), so ``+tags`` and
-    Gmail dots cannot dodge the caps. A bounced email
-    counts toward the totals but does not hold its address. One address per
-    call: the agent reads it back and gets a yes before the first send."""
+    gone out: ``(address, status, call_id, caller_e164)``, addresses
+    lowercased. Each check uses the stricter comparison: an address is new
+    to a call or a caller when its lowercased form is new (so ``a+x@`` and
+    ``a@``, maybe two inboxes, are two addresses); the per-address cap
+    counts by ``mailbox_key`` (so ``+tags`` and Gmail dots are one inbox). A
+    bounced email counts toward the totals but does not hold its address.
+    One address per call: the agent reads it back and gets a yes first."""
     if len(rows) >= email_caller.MAX_EMAILS_PER_ORG_PER_DAY:
         return "I can't send more emails right now.", "org_daily_cap"
     # This call's own rules first, so the refusal names the rule it broke.
@@ -1765,9 +1767,10 @@ def _caller_cap_denial(
             "caller_daily_addresses",
         )
     # Caller ID can be faked, so the per-number caps alone do not protect
-    # one recipient from many calls.
-    to_recipient = [r for r in rows if r[0] == recipient]
-    if len(to_recipient) >= email_caller.MAX_EMAILS_PER_ADDRESS_PER_DAY:
+    # one inbox from many calls.
+    inbox = email_caller.mailbox_key(recipient)
+    to_inbox = [r for r in rows if email_caller.mailbox_key(r[0]) == inbox]
+    if len(to_inbox) >= email_caller.MAX_EMAILS_PER_ADDRESS_PER_DAY:
         return "I can't send more emails to that address today.", "address_daily_cap"
     return None
 
@@ -1826,6 +1829,10 @@ async def agent_email_caller(
     ):
         return AgentSendResponse(ok=False, spoken=_SPOKEN_NOT_ALLOWED)
 
+    if not email_caller.usable_address(body.to_address):
+        return AgentSendResponse(
+            ok=False, spoken="I need a full email address before I can send the email."
+        )
     if not email_caller.clean_subject(body.subject) or not email_caller.clean_body(
         body.body_text
     ):
@@ -1857,12 +1864,12 @@ async def agent_email_caller(
         )
         denial = _caller_cap_denial(
             [
-                (email_caller.mailbox_key(to[0] if to else ""), st, c, e)
+                ((to[0] if to else "").strip().lower(), st, c, e)
                 for to, st, c, e in rows
             ],
             call_id=call.id,
             caller=caller,
-            recipient=email_caller.mailbox_key(body.to_address),
+            recipient=body.to_address.strip().lower(),
         )
     if denial is not None:
         spoken, reason = denial

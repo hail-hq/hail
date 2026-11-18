@@ -67,16 +67,27 @@ def _call_with(org_name: str | None) -> str:
 
 
 def mailbox_key(address: str) -> str:
-    """The inbox an address reaches, for counting caps: lowercase, without a
-    ``+tag``, and for Gmail without dots (googlemail.com is gmail.com).
-    ``name+1@gmail.com`` and ``n.ame@gmail.com`` are one inbox. Only the
-    counting uses this; the email goes to the address as given."""
+    """The inbox an address may reach: lowercase, without a ``+tag``, and for
+    Gmail without dots (googlemail.com is gmail.com). Used only where it
+    makes a cap stricter (the per-address count): on other domains
+    ``a+x@`` and ``a@`` may be different inboxes. The email goes to the
+    address as given."""
     local, _, domain = address.strip().lower().rpartition("@")
     local = local.split("+", 1)[0]
     if domain in ("gmail.com", "googlemail.com"):
         domain = "gmail.com"
         local = local.replace(".", "")
     return f"{local}@{domain}"
+
+
+def usable_address(address: str) -> bool:
+    """One plain mailbox whose inbox key is not empty (``+tag@`` alone, or
+    only Gmail dots, is not an inbox)."""
+    return (
+        len(address) <= MAX_ADDRESS_CHARS
+        and _ADDRESS.match(address) is not None
+        and not mailbox_key(address).startswith("@")
+    )
 
 
 def clean_subject(subject: str) -> str:
@@ -133,7 +144,7 @@ async def _execute(
     # Raw LiveKit tool calls are not schema-validated: catch what the route
     # would reject with a 422, and say what to fix. Never cut: a cut address
     # is another address, and a cut body can end inside a link.
-    if len(to_address) > MAX_ADDRESS_CHARS or not _ADDRESS.match(to_address):
+    if not usable_address(to_address):
         return "I need a full email address before I can send the email."
     if not subject or not clean_body(body_text):
         return "I need a subject and a message before I can send the email."
@@ -222,4 +233,5 @@ __all__ = [
     "framed_body",
     "framed_subject",
     "mailbox_key",
+    "usable_address",
 ]
