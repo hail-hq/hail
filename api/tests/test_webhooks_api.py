@@ -158,14 +158,15 @@ async def test_create_stamps_created_and_updated_at_alike(
     auth_headers: dict[str, str],
     async_session: AsyncSession,
 ):
-    """A new subscription has updated_at == created_at. This catches one of
-    the two stamps going missing; it cannot tell now() from
-    statement_timestamp() when both are missing."""
+    """A new subscription has updated_at == created_at. It catches one stamp
+    going missing only when now() and the INSERT's time differ (here by the
+    BEGIN round trip); it cannot tell them apart when both are missing."""
     create = await client.post(
         "/webhooks",
         json={"target_url": "https://example.com/h", "event_types": ["call.analyzed"]},
         headers=auth_headers,
     )
+    assert create.status_code == 201, create.text
     created = (
         await async_session.execute(
             select(WebhookSubscription).where(
