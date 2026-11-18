@@ -69,6 +69,7 @@ __all__ = [
     "phone_counterpart",
     "render_thread",
     "requeue_skipped_for_call",
+    "spoken_text",
     "thread_item",
     "thread_items",
 ]
@@ -172,11 +173,21 @@ def _sms_item(row: Sms) -> ThreadItem:
     )
 
 
-def _event_item(ev: CallEvent) -> ThreadItem | None:
-    text = str((ev.payload or {}).get("text", ""))
+def spoken_text(ev: CallEvent) -> str | None:
+    """The words of a ``user_turn`` or ``agent_turn`` row, or None for a
+    blank turn or a text the caller sent during the call (an SMS row
+    already). One rule for threads and call transcripts."""
+    text = str((ev.payload or {}).get("text") or "")
     if ev.kind == "user_turn" and text.startswith(TEXT_MARKER):
         return None
     if not text.strip():
+        return None
+    return text
+
+
+def _event_item(ev: CallEvent) -> ThreadItem | None:
+    text = spoken_text(ev)
+    if text is None:
         return None
     return ThreadItem(
         id=f"event:{ev.id}",

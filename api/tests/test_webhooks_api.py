@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
 from uuid import UUID, uuid4
 
 import httpx
@@ -9,7 +10,7 @@ import pytest
 from hailhq.core.config import settings
 from hailhq.core.models import WebhookDelivery, WebhookSubscription
 from hailhq.core.secret_cipher import SecretCipher, generate_key
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -112,6 +113,7 @@ async def test_rotate_secret_returns_new_value(
         },
         headers=auth_headers,
     )
+    assert create.status_code == 201, create.text
     sub_id = create.json()["id"]
     first_secret = create.json()["secret"]
 
@@ -141,6 +143,7 @@ async def test_patch_disables(client: httpx.AsyncClient, auth_headers: dict[str,
         },
         headers=auth_headers,
     )
+    assert create.status_code == 201, create.text
     sub_id = create.json()["id"]
     p = await client.patch(
         f"/webhooks/{sub_id}",
@@ -149,6 +152,78 @@ async def test_patch_disables(client: httpx.AsyncClient, auth_headers: dict[str,
     )
     assert p.status_code == 200
     assert p.json()["status"] == "disabled"
+
+
+@pytest.mark.asyncio
+async def test_create_stamps_created_and_updated_at_alike(
+    client: httpx.AsyncClient,
+    auth_headers: dict[str, str],
+    async_session: AsyncSession,
+):
+    """A new subscription has updated_at == created_at. It catches one stamp
+    going missing only when now() and the INSERT's time differ (by the
+    auth statements or at least the BEGIN round trip); it cannot tell them
+    apart when both are missing."""
+    create = await client.post(
+        "/webhooks",
+        json={"target_url": "https://example.com/h", "event_types": ["call.analyzed"]},
+        headers=auth_headers,
+    )
+    assert create.status_code == 201, create.text
+    created = (
+        await async_session.execute(
+            select(WebhookSubscription).where(
+                WebhookSubscription.id == create.json()["id"]
+            )
+        )
+    ).scalar_one()
+    assert created.updated_at == created.created_at
+
+
+@pytest.mark.asyncio
+async def test_patch_and_rotation_bump_updated_at(
+    client: httpx.AsyncClient,
+    auth_headers: dict[str, str],
+    async_session: AsyncSession,
+):
+    """call.analyzed sends only calls that ended after the subscription was
+    created or last changed (hailhq.core.call_analysis), so every change
+    bumps updated_at. (The test cannot tell now() from statement_timestamp():
+    both fall inside the request.)"""
+    create = await client.post(
+        "/webhooks",
+        json={"target_url": "https://example.com/h", "event_types": ["call.completed"]},
+        headers=auth_headers,
+    )
+    assert create.status_code == 201, create.text
+    sub_id = create.json()["id"]
+    for change in (
+        lambda: client.patch(
+            f"/webhooks/{sub_id}",
+            json={"event_types": ["call.completed", "call.analyzed"]},
+            headers=auth_headers,
+        ),
+        lambda: client.post(f"/webhooks/{sub_id}/rotate-secret", headers=auth_headers),
+    ):
+        await async_session.execute(
+            update(WebhookSubscription)
+            .where(WebhookSubscription.id == sub_id)
+            .values(updated_at=func.now() - timedelta(days=1))
+        )
+        await async_session.commit()
+        before = await async_session.scalar(select(func.statement_timestamp()))
+        await async_session.commit()
+        resp = await change()
+        assert resp.status_code == 200
+        async_session.expire_all()
+        updated_at = await async_session.scalar(
+            select(WebhookSubscription.updated_at).where(
+                WebhookSubscription.id == sub_id
+            )
+        )
+        after = await async_session.scalar(select(func.statement_timestamp()))
+        await async_session.commit()
+        assert before <= updated_at <= after
 
 
 @pytest.mark.asyncio
@@ -161,6 +236,7 @@ async def test_delete_removes(client: httpx.AsyncClient, auth_headers: dict[str,
         },
         headers=auth_headers,
     )
+    assert create.status_code == 201, create.text
     sub_id = create.json()["id"]
     d = await client.delete(f"/webhooks/{sub_id}", headers=auth_headers)
     assert d.status_code == 204
@@ -185,6 +261,7 @@ async def test_cross_org_isolation(
         },
         headers=auth_headers,
     )
+    assert create.status_code == 201, create.text
     sub_id = create.json()["id"]
 
     _, _, plain_b = await insert_org_and_key(async_session)
@@ -206,6 +283,7 @@ async def test_deliveries_empty_on_fresh_subscription(
         },
         headers=auth_headers,
     )
+    assert create.status_code == 201, create.text
     sub_id = create.json()["id"]
     d = await client.get(f"/webhooks/{sub_id}/deliveries", headers=auth_headers)
     assert d.status_code == 200
@@ -253,6 +331,7 @@ async def test_patch_rejects_non_https_target_url(
         json={"target_url": "https://example.com/h", "event_types": ["email.received"]},
         headers=auth_headers,
     )
+    assert create.status_code == 201, create.text
     sub_id = create.json()["id"]
     resp = await client.patch(
         f"/webhooks/{sub_id}",

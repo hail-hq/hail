@@ -923,6 +923,23 @@ class CallBalanceHold(Base):
 
 class CallEvent(Base):
     __tablename__ = "call_events"
+    __table_args__ = (
+        # One call.analyzed marker per call (hailhq.core.call_analysis).
+        Index(
+            "call_events_analyzed_uniq",
+            "call_id",
+            unique=True,
+            postgresql_where=text("kind = 'analyzed'"),
+        ),
+        # One email_caller event per send (the tool's invocation id).
+        Index(
+            "call_events_email_caller_uq",
+            "call_id",
+            text("(payload ->> 'tool_invocation_id')"),
+            unique=True,
+            postgresql_where=text("kind = 'email_caller'"),
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
@@ -934,17 +951,6 @@ class CallEvent(Base):
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
     occurred_at: Mapped[datetime] = mapped_column(
         TS, server_default=text("now()"), nullable=False
-    )
-
-    __table_args__ = (
-        # One email_caller event per send (the tool's invocation id).
-        Index(
-            "call_events_email_caller_uq",
-            "call_id",
-            text("(payload ->> 'tool_invocation_id')"),
-            unique=True,
-            postgresql_where=text("kind = 'email_caller'"),
-        ),
     )
 
 

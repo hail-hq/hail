@@ -7,6 +7,8 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 ### Added
 
 - Agents can email the person on a call a link or short note at an address they confirm, when `email_caller_enabled` is on (off by default).
+- Call agents know the date, time and time zone at the start of each call.
+- Calls: `GET /v1/calls/{id}` returns the call's transcript, and the new `call.analyzed` webhook sends the transcript and a short summary after each call.
 - Rejected number registrations can be fixed and sent again for 30 days with `POST /v1/verifications/{id}/resubmit` (MCP: `resubmit_verification`).
 - `sms.received` webhooks and `received` SMS events have a new `compliance_keyword` field: `STOP`, `START` or `HELP` when the text is one of those keywords, otherwise `null`.
 - [Hail for Vercel Chat SDK](https://github.com/hail-hq/chat-sdk-adapter/releases/tag/v0.1.0): the published [`@hail-hq/chat-sdk-adapter`](https://www.npmjs.com/package/@hail-hq/chat-sdk-adapter) connects SMS webhooks and replies to Chat SDK. Hail maintains the adapter; its Vercel vendor-official listing requires separate acceptance.
@@ -27,6 +29,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Fixed
 
+- Call agents no longer pause before saying a person's name.
 - MCP: `preview_sms_application` no longer fails with "the API and this MCP version differ" on a US texting form that lists its consent methods.
 - Email: informational mail no longer carries `List-Unsubscribe` headers, so an email agent no longer skips it as list mail. Marketing mail still does.
 - Billing: the same charge or credit can no longer be written to the ledger twice.

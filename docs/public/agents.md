@@ -187,7 +187,9 @@ Code: [`email_caller.py`](../../core/hailhq/core/agent_tools/email_caller.py).
    sentence of `first_message`, then `I'm an AI assistant for {org}.`, then
    the rest. `call.answered` and
    `call.completed` follow as on outbound calls. Each answered minute costs
-   the same as an outbound minute.
+   the same as an outbound minute. After the call,
+   [`call.analyzed`](webhooks.md#call-analyzed) sends the transcript and a
+   short summary, and `GET /v1/calls/{id}` returns the transcript.
 
 The AI line on inbound calls defaults to
 `Hi, this is an AI assistant answering on behalf of {org}.` (or the short

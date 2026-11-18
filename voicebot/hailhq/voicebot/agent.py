@@ -54,11 +54,12 @@ from hailhq.core.internal_webhook import notify_usage_event_recorded
 from hailhq.core.languages import SUPPORTED_LANGUAGES
 from hailhq.core.livekit import VOICE_READY_ATTRIBUTE
 from hailhq.core.models import Call, CallEvent, UsageEvent
-from hailhq.core.pool import release_pool_reservation
+from hailhq.core.pool import CALL_META_FROM_POOL, release_pool_reservation
 from hailhq.core.prompts import (
     VOICE_PREAMBLE,
     VOICE_PREAMBLE_INBOUND,
     build_voice_instructions,
+    clock_section,
     other_party_section,
 )
 from hailhq.core.providers.voice import TwilioVoiceProvider
@@ -308,6 +309,7 @@ def build_instructions(
     *,
     language: str | None = None,
     other_party: str | None = None,
+    clock: str | None = None,
 ) -> str:
     """The call's instructions (see :func:`hailhq.core.prompts.build_voice_instructions`)."""
     # The language line goes before the privacy reminder, which stays last.
@@ -316,8 +318,28 @@ def build_instructions(
         if language in SUPPORTED_LANGUAGES
         else None
     )
-    tail = "\n\n".join(part for part in (other_party, spoken) if part) or None
+    tail = "\n\n".join(part for part in (other_party, clock, spoken) if part) or None
     return build_voice_instructions(system_prompt, direction, other_party=tail)
+
+
+def _call_clock(metadata: dict[str, Any], inbound: bool) -> str | None:
+    """The date and time section for this call (see
+    :func:`hailhq.core.prompts.clock_section`). The business's number is the
+    one dialed on an inbound call and the caller ID on an outbound one. A
+    failure leaves the section out instead of failing the call."""
+    caller, dialed = metadata.get("from_e164"), metadata.get("to_e164")
+    if not inbound and metadata.get(CALL_META_FROM_POOL):
+        caller = None  # a shared pool number, not the business's own
+    try:
+        return clock_section(
+            datetime.now(timezone.utc),
+            inbound=inbound,
+            business_number=dialed if inbound else caller,
+            other_number=caller if inbound else dialed,
+        )
+    except Exception:
+        logger.exception("could not build the call's date and time section")
+        return None
 
 
 # The other-party lookup runs before the session starts, so a slow DB must
@@ -2561,6 +2583,7 @@ async def _run_call(
                 if known is not None
                 else None
             ),
+            clock=_call_clock(metadata, inbound),
         ),
         tools=agent_tools,
     )
