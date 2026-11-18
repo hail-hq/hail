@@ -150,8 +150,8 @@ SDK: `client.agents.update(agent_id, email_caller_enabled=True)`.
   after the send. Later changes (bounce, complaint) are on the email's own
   events: `GET /v1/events?id=email:<email_id>`.
 - The address is whatever the person says. Hail cannot prove it is theirs.
-- Turning it off, or pausing the agent, applies at once, also to calls
-  already in progress.
+- Turning it on applies from the next call. Turning it off, or pausing the
+  agent, stops emails at once, also on a call in progress.
 
 Code: [`email_caller.py`](../../core/hailhq/core/agent_tools/email_caller.py).
 

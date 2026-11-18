@@ -878,3 +878,11 @@ def test_email_caller_sends_no_blank_org_name():
     for name in ("  ", "\n", 7):
         tool = email_caller.SPEC.bind({"org_name": name})
         assert tool.execute.keywords["org_name"] is None
+
+
+def test_email_caller_cleans_the_body_but_keeps_its_lines():
+    body = email_caller.framed_body(
+        "Hi\u202e there\u200b.\nLink:\thttps://x.test", None
+    )
+    assert "Hi there.\nLink:\thttps://x.test\n\n--\n" in body
+    assert email_caller.clean_body("\u200b\u202e ") == ""

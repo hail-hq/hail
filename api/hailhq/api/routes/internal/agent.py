@@ -147,7 +147,7 @@ from hailhq.core.text_agent import (
     replies_in_thread,
     thread_lock_key,
 )
-from hailhq.core.threads import is_e164
+from hailhq.core.threads import is_e164, phone_counterpart
 from hailhq.core.webhook_fanout import call_event_data, fanout_call_event
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 from sqlalchemy import select, text, update
@@ -258,7 +258,7 @@ def _other_party(call: Call) -> str | None:
     """The person on the line: the caller on inbound, the callee on outbound."""
     if call.transport == "browser":
         return call.metadata_.get("browser_contacts", {}).get("sms")
-    return call.from_e164 if call.direction == "inbound" else call.to_e164
+    return phone_counterpart(call.direction, call.from_e164, call.to_e164)
 
 
 async def _prior_send(
@@ -1695,9 +1695,7 @@ class AgentEmailCallerRequest(AgentSendBase):
     subject: str = Field(min_length=1, max_length=MAX_SUBJECT_CHARS)
     body_text: str = Field(min_length=1, max_length=email_caller.MAX_BODY_CHARS)
     # From the dispatch metadata. Missing: the mirrored organizations table.
-    org_name: str | None = Field(
-        default=None, max_length=email_caller.MAX_ORG_NAME_CHARS
-    )
+    org_name: str | None = Field(default=None, max_length=500)
 
 
 # The caps count marked rows; the predicate is the partial index's own SQL
@@ -1820,7 +1818,9 @@ async def agent_email_caller(
     ):
         return AgentSendResponse(ok=False, spoken=_SPOKEN_NOT_ALLOWED)
 
-    if not email_caller.clean_subject(body.subject) or not body.body_text.strip():
+    if not email_caller.clean_subject(body.subject) or not email_caller.clean_body(
+        body.body_text
+    ):
         return AgentSendResponse(
             ok=False,
             spoken="I need a subject and a message before I can send the email.",
@@ -1869,7 +1869,7 @@ async def agent_email_caller(
 
     # The name for the fixed lines: the dispatch's copy, else one indexed
     # read on this session. Never a network call while the locks are held.
-    org_name = " ".join((body.org_name or "").split()) or await db.scalar(
+    org_name = (body.org_name or "").strip() or await db.scalar(
         select(Organization.name).where(Organization.id == org)
     )
     result, row = await _send_email_row(

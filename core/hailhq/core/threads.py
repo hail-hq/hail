@@ -44,6 +44,14 @@ def is_e164(value: str | None) -> bool:
     )
 
 
+def phone_counterpart(
+    direction: str | None, from_e164: str | None, to_e164: str | None
+) -> str | None:
+    """The person on a phone call: the caller on inbound, the callee on
+    outbound. The API's send routes and the voicebot share this rule."""
+    return from_e164 if direction == "inbound" else to_e164
+
+
 __all__ = [
     "ACTIVE_CALL_MAX_AGE",
     "ACTIVE_CALL_SKIP",
@@ -58,6 +66,7 @@ __all__ = [
     "active_call_for_thread",
     "call_thread_context",
     "call_thread_key",
+    "phone_counterpart",
     "render_thread",
     "requeue_skipped_for_call",
     "thread_item",

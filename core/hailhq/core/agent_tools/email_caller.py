@@ -70,6 +70,17 @@ def framed_subject(subject: str, org_name: str | None) -> str:
     return f"From {_call_with(org_name)}: {clean_subject(subject)}"
 
 
+def clean_body(body_text: str) -> str:
+    """The dictated body without control and format characters (bidi
+    overrides, zero-width marks) that could disguise its text. Newlines and
+    tabs stay."""
+    return "".join(
+        c
+        for c in body_text
+        if c in "\n\t" or not unicodedata.category(c).startswith("C")
+    ).strip()
+
+
 def framed_body(body_text: str, org_name: str | None) -> str:
     """The email as sent: a fixed first line and footer around the agent's
     text, so a dictated message cannot pass as the organization's own mail
@@ -77,7 +88,7 @@ def framed_body(body_text: str, org_name: str | None) -> str:
     call = _call_with(org_name)
     return (
         f"You asked for this during {call}.\n\n"
-        f"{body_text.strip()}\n\n"
+        f"{clean_body(body_text)}\n\n"
         "--\n"
         f"You got this email because this address was given during {call}. "
         "If that was not you, you can ignore it."
@@ -99,7 +110,7 @@ async def _execute(
     # is another address, and a cut body can end inside a link.
     if len(to_address) > MAX_ADDRESS_CHARS or not EMAIL_ADDR.match(to_address):
         return "I need a full email address before I can send the email."
-    if not subject or not body_text.strip():
+    if not subject or not clean_body(body_text):
         return "I need a subject and a message before I can send the email."
     if len(subject) > MAX_SUBJECT_CHARS:
         return f"The subject is too long. Keep it under {MAX_SUBJECT_CHARS} characters. Nothing was sent."
@@ -160,8 +171,8 @@ def _bind(metadata: dict[str, Any]) -> ToolSpec:
     """This call's tool: carries the organization name from the dispatch."""
     name = metadata.get("org_name")
     # Blank or not text: send none, so the API reads its own copy.
-    name = " ".join(name.split())[:MAX_ORG_NAME_CHARS] if isinstance(name, str) else ""
-    name = name or None
+    # _call_with cleans and cuts it.
+    name = name if isinstance(name, str) and name.strip() else None
     return dataclasses.replace(
         SPEC, execute=functools.partial(_execute, org_name=name), bind=None
     )
@@ -181,6 +192,7 @@ __all__ = [
     "MAX_ORG_NAME_CHARS",
     "METADATA_KEY",
     "SPEC",
+    "clean_body",
     "clean_subject",
     "framed_body",
     "framed_subject",

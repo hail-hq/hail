@@ -1230,6 +1230,35 @@ async def test_tool_call_event_records_arguments(
     ]
 
 
+async def test_email_caller_event_leaves_out_the_address_and_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The address and dictated text stay on the email row only."""
+    recorded: list[tuple[str, dict]] = []
+
+    async def _fake_write(call_id: UUID, kind: str, payload: dict) -> None:
+        recorded.append((kind, payload))
+
+    monkeypatch.setattr("hailhq.voicebot.agent.write_call_event", _fake_write)
+    session = _FakeSession()
+    tasks = attach_event_handlers(session, UUID("11111111-1111-1111-1111-111111111111"))
+    session.handlers["function_tools_executed"](
+        SimpleNamespace(
+            function_calls=[
+                SimpleNamespace(
+                    name="email_caller",
+                    arguments='{"to_address": "sam@example.com", '
+                    '"subject": "Datasheet", "body_text": "Link."}',
+                )
+            ]
+        )
+    )
+    await asyncio.gather(*list(tasks))
+    assert recorded[0][1]["calls"] == [
+        {"name": "email_caller", "args": {"subject": "Datasheet"}}
+    ]
+
+
 async def test_speak_greeting_deferred_path_skips_generated_opening() -> None:
     """``generate_opening=False`` (the deferred IVR path) fires no opening
     turn: the greeting runs because a person just spoke, and the session's
