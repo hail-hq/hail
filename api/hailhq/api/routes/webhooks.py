@@ -119,7 +119,8 @@ async def create_subscription(
         event_types=list(body.event_types),
         # The INSERT's own time, not the column default now() (the
         # transaction start, before the target URL check): call.analyzed
-        # compares it with call end times (hailhq.core.call_analysis).
+        # compares updated_at with call end times (hailhq.core.call_analysis).
+        created_at=func.statement_timestamp(),
         updated_at=func.statement_timestamp(),
     )
     db.add(sub)

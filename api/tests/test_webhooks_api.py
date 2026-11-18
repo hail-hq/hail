@@ -168,6 +168,14 @@ async def test_patch_and_rotation_bump_updated_at(
         headers=auth_headers,
     )
     sub_id = create.json()["id"]
+    # Create stamps both with the INSERT's own time, not the transaction
+    # start (which came before the auth query and the target URL check).
+    created = (
+        await async_session.execute(
+            select(WebhookSubscription).where(WebhookSubscription.id == sub_id)
+        )
+    ).scalar_one()
+    assert created.updated_at == created.created_at
     for change in (
         lambda: client.patch(
             f"/webhooks/{sub_id}",

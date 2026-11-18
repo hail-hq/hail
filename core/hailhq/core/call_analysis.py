@@ -179,7 +179,8 @@ async def claim_call_to_analyze(
     marker, so a worker whose lease ran out cannot send a second event.
     "Now" here is the DB clock (``now()``). Claims are written and aged on
     that clock, so host clock skew does not move the lease. A subscription's
-    ``updated_at`` is the DB clock too (create default, PATCH, rotation).
+    ``updated_at`` is the DB clock too (``statement_timestamp()`` on create,
+    PATCH and rotation).
     ``ended_at`` is the voicebot or api host clock (the DB's ``now()`` for a
     sweeper-ended call), so the windows and the ``updated_at <= ended_at``
     check can move by that host's skew: a call that ends within the skew of
