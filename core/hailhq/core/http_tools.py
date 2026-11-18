@@ -19,6 +19,7 @@ from hailhq.core.schemas import HttpToolIn, HttpToolOut
 from hailhq.core.url_guard import UnsafeUrlError, connect_target
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from yarl import URL
 
 __all__ = [
     "HttpToolHeadersNeeded",
@@ -40,16 +41,24 @@ class HttpToolHeadersNeeded(ValueError):
         self.index = index
 
 
-def _origin(url: str) -> tuple[str, str, int] | None:
-    """``(scheme, host, port)`` with the canonical ASCII (IDNA 2008) host and
+def _origin(url: str) -> tuple[str, str, int, str | None, int | None] | None:
+    """Scheme, host and port with the canonical ASCII (IDNA 2008) host and
     the default port filled in, so ``faß.example`` and
-    ``xn--fa-hia.example:443`` are one origin. None for a url that cannot
-    be parsed."""
+    ``xn--fa-hia.example:443`` are one origin. The host and port as yarl
+    reads them are part of it too: aiohttp connects with yarl, whose parser
+    differs from httpx's, so two urls are one origin only when both parsers
+    agree. None for a url that cannot be parsed."""
     try:
         parsed, host, port = connect_target(url)
-    except UnsafeUrlError:
+        connect = URL(url)
+    except (UnsafeUrlError, ValueError):
         return None
-    return parsed.scheme, host, port
+    return parsed.scheme, host, port, connect.raw_host, connect.port
+
+
+def _same_origin(saved_url: str, new_url: str) -> bool:
+    saved = _origin(saved_url)
+    return saved is not None and saved == _origin(new_url)
 
 
 def new_tool_secret() -> str:
@@ -127,9 +136,7 @@ async def replace_http_tools(
                 prev = old.get(item.name)
                 if prev is None or prev.headers_encrypted is None:
                     headers_encrypted, header_names = None, []
-                elif (origin := _origin(prev.url)) is None or origin != _origin(
-                    item.url
-                ):
+                elif not _same_origin(prev.url, item.url):
                     # Keeping them would send the saved secrets to whoever
                     # runs the new host.
                     raise HttpToolHeadersNeeded(position, item.name)
