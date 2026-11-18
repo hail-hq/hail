@@ -233,7 +233,8 @@ async def test_claim_skips_when_routing_changed(async_session) -> None:
     row = await async_session.get(Sms, result.sms_id)
     await async_session.refresh(row)
     assert row.agent_reply_state == "skipped"
-    assert "skipped_reason" not in row.metadata_  # not an active-call skip
+    # The console names why; it is not an active-call skip.
+    assert row.metadata_["skipped_reason"] == "no_agent"
 
 
 async def test_claim_skips_unfunded_org_and_takes_the_next_row(
@@ -484,7 +485,7 @@ async def test_old_pending_text_is_skipped_not_answered(
     assert claimed is not None and claimed.sms.id == fresh.sms_id
     await async_session.refresh(row)
     assert row.agent_reply_state == "skipped"
-    assert "skipped_reason" not in row.metadata_  # expiry is not a call skip
+    assert row.metadata_["skipped_reason"] == "expired"  # not a call skip
 
 
 async def test_inbound_text_carries_the_numbers_agent(async_session) -> None:

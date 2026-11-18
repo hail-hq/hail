@@ -24,7 +24,18 @@ from hailhq.core.config import settings
 from hailhq.core.models import Agent, PhoneNumber, Sms
 from hailhq.core.prompts import TEXT_PREAMBLE, build_text_instructions
 from hailhq.core.threads import ThreadItem, thread_items
-from sqlalchemy import DateTime, and_, func, or_, select, update
+from sqlalchemy import (
+    ColumnElement,
+    DateTime,
+    and_,
+    cast,
+    func,
+    literal_column,
+    or_,
+    select,
+    update,
+)
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = [
@@ -117,7 +128,9 @@ async def _expire_unclaimable(db: AsyncSession, now: datetime) -> None:
         Sms.requested_at,
     )
     await db.execute(
-        update(Sms).where(*base, age_from < cutoff).values(agent_reply_state="skipped")
+        update(Sms)
+        .where(*base, age_from < cutoff)
+        .values(agent_reply_state="skipped", metadata_=with_skip_reason("expired"))
     )
     await db.execute(
         update(Sms)
@@ -201,7 +214,7 @@ async def claim_pending_reply(db: AsyncSession) -> ClaimedReply | None:
             # Routing changed between ingest and now: drop it quietly and take
             # the next row, so a backlog of dropped texts does not cost a poll
             # each.
-            await finish_reply(db, sms, "skipped")
+            await finish_reply(db, sms, "skipped", reason="no_agent")
             continue
         org = sms.organization_id
         # Also for an expired lease: a worker still running cannot overwrite
@@ -305,19 +318,43 @@ def build_chat_messages(
     return messages
 
 
+def with_skip_reason(reason: str, detail: str | None = None) -> ColumnElement[Any]:
+    """``metadata`` with ``skipped_reason`` (and ``skipped_detail``) merged in,
+    so the console can say why the agent did not reply. ``||`` on a JSON
+    ``null`` makes an array and the key is lost, so that row starts from ``{}``."""
+    current = func.coalesce(
+        func.nullif(Sms.metadata_, literal_column("'null'::jsonb")),
+        literal_column("'{}'::jsonb"),
+    )
+    fields: dict[str, str] = {"skipped_reason": reason}
+    if detail:
+        fields["skipped_detail"] = detail
+    return current.op("||")(cast(fields, JSONB))
+
+
 async def finish_reply(
-    db: AsyncSession, sms: Sms, state: ReplyState, *, attempt: int | None = None
+    db: AsyncSession,
+    sms: Sms,
+    state: ReplyState,
+    *,
+    attempt: int | None = None,
+    reason: str | None = None,
+    detail: str | None = None,
 ) -> None:
     """Record the final state. With ``attempt`` it only applies while that
     claim still owns the row (a reclaimed row is not overwritten by a worker
-    that was presumed dead)."""
+    that was presumed dead). A skipped row records ``reason`` (a short code)
+    and ``detail`` in its metadata."""
     stmt = update(Sms).where(Sms.id == sms.id)
     if attempt is not None:
         stmt = stmt.where(
             Sms.agent_reply_state == "processing",
             Sms.agent_reply_attempts == attempt,
         )
-    await db.execute(stmt.values(agent_reply_state=state))
+    values: dict[str, Any] = {"agent_reply_state": state}
+    if state == "skipped" and reason:
+        values["metadata_"] = with_skip_reason(reason, detail)
+    await db.execute(stmt.values(**values))
     await db.commit()
 
 

@@ -91,6 +91,7 @@ async def test_reply_goes_out_from_the_dialed_number(
         "ok": True,
         "state": "done",
         "reason": None,
+        "detail": None,
         "reply_id": data["reply_id"],
     }
 
@@ -151,6 +152,7 @@ async def test_reply_skipped_after_thread_cap(
         "ok": False,
         "state": "skipped",
         "reason": "thread_cap",
+        "detail": None,
         "reply_id": None,
     }
     sms_mock.send_sms.assert_not_awaited()
@@ -235,5 +237,6 @@ async def test_reply_needs_us_sms_registration(
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["state"] == "skipped"
-    assert resp.json()["reason"] == BLOCK_MESSAGE
+    assert resp.json()["reason"] == "sms_registration"
+    assert resp.json()["detail"] == BLOCK_MESSAGE
     sms_mock.send_sms.assert_not_awaited()

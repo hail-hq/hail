@@ -130,13 +130,25 @@ async def _prepare(claimed: ClaimedReply) -> list[dict[str, Any]]:
 
 
 async def _settle(
-    claimed: ClaimedReply, state: ReplyState | None, *, retry: bool = False
+    claimed: ClaimedReply,
+    state: ReplyState | None,
+    *,
+    retry: bool = False,
+    reason: str | None = None,
+    detail: str | None = None,
 ) -> None:
     async with session_scope() as db:
         if retry:
             await retry_reply(db, claimed)
         elif state is not None:
-            await finish_reply(db, claimed.sms, state, attempt=claimed.attempt)
+            await finish_reply(
+                db,
+                claimed.sms,
+                state,
+                attempt=claimed.attempt,
+                reason=reason,
+                detail=detail,
+            )
 
 
 async def reply_once(api: AgentApiClient) -> bool:
@@ -213,7 +225,7 @@ async def _reply_claimed(api: AgentApiClient, claimed: ClaimedReply, span=None) 
         if span is not None:
             span.set_attribute("reply.state", "skipped")
         logger.info("sms_id=%s text agent wrote nothing; skipped", sms.id)
-        await _settle(claimed, "skipped")
+        await _settle(claimed, "skipped", reason="empty_reply")
         return True
     try:
         result = await api.post(
@@ -231,11 +243,19 @@ async def _reply_claimed(api: AgentApiClient, claimed: ClaimedReply, span=None) 
     state = str(result.get("state") or "failed")
     if state not in ("done", "skipped", "failed"):
         state = "failed"
+    reason = result.get("reason")
+    detail = result.get("detail")
     if state != "done":
-        logger.info("sms_id=%s reply %s: %s", sms.id, state, result.get("reason"))
+        logger.info("sms_id=%s reply %s: %s %s", sms.id, state, reason, detail or "")
     if span is not None:
         span.set_attribute("reply.state", state)
-    await _settle(claimed, state)  # type: ignore[arg-type]
+    # The reason is saved on the text, so the console can say why it got no reply.
+    await _settle(
+        claimed,
+        state,  # type: ignore[arg-type]
+        reason=str(reason) if reason else None,
+        detail=str(detail) if detail else None,
+    )
     return True
 
 

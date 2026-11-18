@@ -799,7 +799,10 @@ class AgentReplySmsResponse(BaseModel):
     ok: bool
     # done | skipped | failed: what the worker writes to agent_reply_state.
     state: str
+    # A short code the worker stores as sms.metadata.skipped_reason; the
+    # console names it. ``detail`` is the sentence behind a code that has one.
     reason: str | None = None
+    detail: str | None = None
     reply_id: UUID | None = None
 
 
@@ -866,13 +869,17 @@ async def agent_reply_sms(
         )
     gate = await check_sms_allowed(db, org, inbound.from_e164)
     if not gate.allowed:
-        return AgentReplySmsResponse(ok=False, state="skipped", reason=gate.reason)
+        return AgentReplySmsResponse(
+            ok=False, state="skipped", reason="send_blocked", detail=gate.reason
+        )
     cap_denial = await check_agent_send_allowed(db, org, "sms", [inbound.from_e164])
     if cap_denial is not None:
         return AgentReplySmsResponse(ok=False, state="skipped", reason="agent_caps")
     block = await us_registration_block(db, org, number, inbound.from_e164)
     if block is not None:
-        return AgentReplySmsResponse(ok=False, state="skipped", reason=block)
+        return AgentReplySmsResponse(
+            ok=False, state="skipped", reason="sms_registration", detail=block
+        )
 
     reply = Sms(
         organization_id=org,
