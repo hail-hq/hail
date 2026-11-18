@@ -777,7 +777,23 @@ async def test_a_reply_gets_the_date_and_time(async_session) -> None:
     assert system.endswith(PRIVACY_REMINDER)
 
 
-def test_a_broken_number_never_fails_a_reply() -> None:
-    sms = Sms(from_e164=None, to_e164="not a number")
+def test_a_failed_clock_never_fails_a_reply(monkeypatch) -> None:
+    def broken(**_):
+        raise ValueError("no clock")
+
+    monkeypatch.setattr("hailhq.core.prompts.clock_section", broken)
+    assert text_agent.reply_clock(Sms(from_e164=PERSON, to_e164=ORG_NUMBER)) is None
+
+
+def test_the_clock_says_when_the_text_arrived() -> None:
+    sms = Sms(
+        from_e164=PERSON,
+        to_e164=ORG_NUMBER,
+        requested_at=datetime(2026, 11, 18, 16, 58, tzinfo=timezone.utc),
+    )
     clock = text_agent.reply_clock(sms)
-    assert clock is not None and "- For the person texting: unknown." in clock
+    assert clock is not None
+    assert (
+        "- The text you are answering arrived at: Wednesday, 18 November 2026, 16:58 UTC."
+        in clock
+    )

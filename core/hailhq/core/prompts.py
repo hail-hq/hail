@@ -6,12 +6,15 @@ through customer APIs or the console. See docs/operations/agent-prompts.md.
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta, timezone
-from typing import Literal
+from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import phonenumbers
 from phonenumbers import timezone as phone_timezones
+
+logger = logging.getLogger(__name__)
 
 _INBOUND_CLOSING = """\
 - Never hang up on your own right after an answer. First ask if there is \
@@ -54,7 +57,9 @@ __all__ = [
     "build_text_instructions",
     "build_voice_instructions",
     "clock_section",
+    "number_with_one_zone",
     "other_party_section",
+    "safe_clock_section",
 ]
 
 # Keep customer configuration help separate from private runtime instructions.
@@ -438,19 +443,33 @@ def clock_section(
     business_number: str | None,
     other_number: str | None = None,
     channel: ClockChannel = "call",
+    received_at: datetime | None = None,
 ) -> str:
     """The date and time: UTC, at the business's number, and (calls and
     texts) at the other party's number. For a call it is when the call
     started; for a text or email reply it is when the reply is written. The
     model has no clock of its own, so without this it cannot tell someone
-    they got in touch out of hours."""
+    they got in touch out of hours. ``received_at`` (texts) is when the text
+    being answered arrived: a retried reply can be written later."""
     at = started_at.astimezone(timezone.utc)
     business = _parse(business_number)
     lines = [
         "This call started at:" if channel == "call" else "It is now:",
         f"- UTC: {_spoken_date(at)}, {at:%H:%M}.",
+    ]
+    if channel == "text" and received_at is not None:
+        got = received_at.astimezone(timezone.utc)
+        lines.append(
+            f"- The text you are answering arrived at: {_spoken_date(got)}, "
+            f"{got:%H:%M} UTC."
+        )
+    lines += [
         _clock_line(
-            "Where this business's phone number is",
+            (
+                "For this business"
+                if channel == "email"
+                else "Where this business's phone number is"
+            ),
             business,
             at,
             "unknown. Go by UTC and the times in your instructions.",
@@ -493,6 +512,25 @@ def clock_section(
         )
     lines.append(closing)
     return f"{CLOCK_HEADING}\n\n" + "\n".join(lines)
+
+
+def number_with_one_zone(numbers: list[str], at: datetime) -> str | None:
+    """The first of ``numbers`` whose time zone is known at ``at`` (a US
+    toll-free number is not), else the first one."""
+    for number in numbers:
+        if _local_time(_parse(number), at) is not None:
+            return number
+    return numbers[0] if numbers else None
+
+
+def safe_clock_section(**kwargs: Any) -> str | None:
+    """:func:`clock_section`, or None when it fails: the section is left out
+    instead of failing the call or reply."""
+    try:
+        return clock_section(**kwargs)
+    except Exception:
+        logger.exception("could not build the date and time section")
+        return None
 
 
 def build_voice_instructions(

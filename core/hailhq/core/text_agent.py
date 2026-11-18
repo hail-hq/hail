@@ -23,7 +23,11 @@ from hailhq.core.billing import has_funds
 from hailhq.core.config import settings
 from hailhq.core.jsonb import merge_object
 from hailhq.core.models import Agent, PhoneNumber, Sms
-from hailhq.core.prompts import TEXT_PREAMBLE, build_text_instructions, clock_section
+from hailhq.core.prompts import (
+    TEXT_PREAMBLE,
+    build_text_instructions,
+    safe_clock_section,
+)
 from hailhq.core.threads import ThreadItem, thread_items
 from sqlalchemy import (
     ColumnElement,
@@ -61,11 +65,11 @@ __all__ = [
     "ReplyState",
     "answers_texts",
     "build_chat_messages",
-    "reply_clock",
     "claim_pending_reply",
     "finish_reply",
     "prior_reply",
     "replies_in_thread",
+    "reply_clock",
     "retry_reply",
     "should_queue_reply",
     "thread_history_for_reply",
@@ -343,16 +347,13 @@ def reply_clock(sms: Sms) -> str | None:
     """The date and time section for a reply to ``sms``: the business's number
     is the one texted, the other party's is the sender's. A failure leaves the
     section out instead of failing the reply."""
-    try:
-        return clock_section(
-            datetime.now(timezone.utc),
-            channel="text",
-            business_number=sms.to_e164,
-            other_number=sms.from_e164,
-        )
-    except Exception:
-        logger.exception("could not build the reply's date and time section")
-        return None
+    return safe_clock_section(
+        started_at=datetime.now(timezone.utc),
+        channel="text",
+        business_number=sms.to_e164,
+        other_number=sms.from_e164,
+        received_at=sms.requested_at,
+    )
 
 
 def build_chat_messages(
