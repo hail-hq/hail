@@ -22,8 +22,10 @@ import re
 from typing import Any
 
 from hailhq.core.config import settings
+from hailhq.mcp.auth import AuthMode
+from hailhq.mcp.discovery_auth import DISCOVERY_BEARER
 from hailhq.mcp.hail_client import HailClient
-from hailhq.mcp.tools import resolve_actor, resolve_actor_for_analytics
+from hailhq.mcp.tools import cached_actor, resolve_actor, resolve_actor_for_analytics
 
 logger = logging.getLogger(__name__)
 
@@ -81,23 +83,25 @@ _MODEL_DESCRIPTION = (
 _MODEL_ID = re.compile(r"(?=[^@\s]*[A-Za-z])[A-Za-z0-9][A-Za-z0-9._:/+-]{0,99}")
 _MODEL_PROPERTIES = ("$mcp_llm_model", "$mcp_llm_model_source")
 _REQUEST_IDENTITY = "hail_request_identity"
+# Set by instrument_analytics. Only oauth-rs requests carry a per-user bearer.
+_per_user = False
 
 
 async def _identify(_request: Any, extra: Any) -> UserIdentity | None:
     # Static-key mode has no per-request user; never identify an inbound header
     # as the operator of the server's shared key.
-    if not settings.hail_auth_url:
+    if not _per_user:
         return None
     scheme, _, bearer = (
         (get_request_headers(extra) or {}).get("authorization") or ""
     ).partition(" ")
-    if scheme.lower() != "bearer" or not bearer.strip():
+    bearer = bearer.strip()
+    if scheme.lower() != "bearer" or not bearer or bearer == DISCOVERY_BEARER:
         return None
-    # DiscoveryAuthMiddleware injects this placeholder for public discovery.
-    if bearer.strip() == "anonymous-discovery":
-        return None
-    async with HailClient(api_key=bearer.strip()) as client:
-        actor = await resolve_actor(client, cache_key=bearer.strip())
+    actor = cached_actor(bearer)
+    if actor is None:
+        async with HailClient(api_key=bearer) as client:
+            actor = await resolve_actor(client, cache_key=bearer)
     user_id = actor.get("user_id")
     if not user_id:
         return None
@@ -137,28 +141,24 @@ async def _event_identity(request: Any, extra: Any) -> dict[str, Any]:
 
 def _keep_metadata(event: dict[str, Any]) -> dict[str, Any] | None:
     properties = event.get("properties") or {}
-    if (
-        event.get("event", "").startswith("$mcp_")
-        and _REQUEST_IDENTITY not in properties
-    ):
+    if _REQUEST_IDENTITY not in properties:
         # The SDK swallows callback errors. Never emit its cached identity when
         # the request-specific enrichment failed; tool responses stay intact.
         return None
-    if _REQUEST_IDENTITY in properties:
-        # Ignore any sticky SDK identity; this event belongs to this request.
-        identity = properties[_REQUEST_IDENTITY]
-        properties = dict(properties)
-        for key in ("$set", "$groups", "$process_person_profile"):
-            properties.pop(key, None)
-        if identity:
-            event["distinct_id"] = identity["distinct_id"]
-            if identity["properties"]:
-                properties["$set"] = identity["properties"]
-            if identity["groups"]:
-                properties["$groups"] = identity["groups"]
-        else:
-            event["distinct_id"] = properties.get("$session_id") or "anonymous"
-            properties["$process_person_profile"] = False
+    # Ignore any sticky SDK identity; this event belongs to this request.
+    identity = properties[_REQUEST_IDENTITY]
+    properties = dict(properties)
+    for key in ("$set", "$groups", "$process_person_profile"):
+        properties.pop(key, None)
+    if identity:
+        event["distinct_id"] = identity["distinct_id"]
+        if identity["properties"]:
+            properties["$set"] = identity["properties"]
+        if identity["groups"]:
+            properties["$groups"] = identity["groups"]
+    else:
+        event["distinct_id"] = properties.get("$session_id") or "anonymous"
+        properties["$process_person_profile"] = False
     event["properties"] = {k: v for k, v in properties.items() if k in _KEPT_PROPERTIES}
     if "$set" in event["properties"]:
         event["properties"]["$set"] = {
@@ -194,9 +194,11 @@ class Analytics:
             logger.warning("PostHog MCP client flush failed", exc_info=True)
 
 
-def instrument_analytics(server: Any) -> Analytics | None:
+def instrument_analytics(server: Any, mode: AuthMode) -> Analytics | None:
     """Instrument ``server`` for tool-call analytics. ``None`` when off."""
+    global _per_user
     resolve_actor_for_analytics(False)
+    _per_user = mode is AuthMode.OAUTH_RS
     token = settings.next_public_posthog_key
     if not token or Posthog is None:
         return None

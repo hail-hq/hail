@@ -263,6 +263,7 @@ async def test_analytics_keeps_responses_unchanged(monkeypatch, oauth, protocol,
 def test_keep_metadata_drops_content():
     event = {
         "properties": {
+            analytics._REQUEST_IDENTITY: None,
             "$mcp_tool_name": "send_sms",
             "$mcp_parameters": {"body": _SECRET},
             "$mcp_response": _SECRET,
@@ -271,15 +272,20 @@ def test_keep_metadata_drops_content():
         }
     }
     assert analytics._keep_metadata(event)["properties"] == {
-        "$mcp_tool_name": "send_sms"
+        "$mcp_tool_name": "send_sms",
+        "$process_person_profile": False,
     }
 
 
 def test_keep_metadata_limits_person_properties():
     event = {
-        "distinct_id": _USER,
+        "distinct_id": "ses_shared",
         "properties": {
-            "$set": {"email": _EMAIL, "name": _NAME, "body": _SECRET},
+            analytics._REQUEST_IDENTITY: {
+                "distinct_id": _USER,
+                "properties": {"email": _EMAIL, "name": _NAME, "body": _SECRET},
+                "groups": None,
+            },
             "$mcp_parameters": {"email": _SECRET},
         },
     }
@@ -298,6 +304,16 @@ def test_missing_request_identity_drops_sticky_sdk_profile():
             "$session_id": "ses_shared",
             "$set": {"email": _EMAIL, "name": _NAME},
         },
+    }
+    assert analytics._keep_metadata(event) is None
+
+
+@pytest.mark.parametrize("name", ["$exception", "custom_event"])
+def test_any_event_without_request_identity_is_dropped(name):
+    event = {
+        "event": name,
+        "distinct_id": _USER,
+        "properties": {"$set": {"email": _EMAIL, "name": _NAME}},
     }
     assert analytics._keep_metadata(event) is None
 
@@ -424,6 +440,7 @@ async def test_llm_model_argument_never_reaches_the_tool(monkeypatch, token):
 def test_keep_metadata_keeps_only_model_ids(model, kept):
     event = {
         "properties": {
+            analytics._REQUEST_IDENTITY: None,
             "$mcp_llm_model": model,
             "$mcp_llm_model_source": "self_reported",
         }

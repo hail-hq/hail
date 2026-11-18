@@ -54,6 +54,9 @@ from mcp.server.streamable_http import MCP_SESSION_ID_HEADER
 from mcp.shared.inbound import MCP_PROTOCOL_VERSION_HEADER
 from mcp.types.version import HANDSHAKE_PROTOCOL_VERSIONS
 
+# Bearer injected for public discovery requests. Not a credential.
+DISCOVERY_BEARER = "anonymous-discovery"
+
 _LIST_METHODS = frozenset(
     {"tools/list", "resources/list", "resources/templates/list", "prompts/list"}
 )
@@ -281,7 +284,7 @@ class DiscoveryAuthMiddleware:
                 break
             try:
                 message = await asyncio.wait_for(receive(), timeout=remaining)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 oversized = True
                 peek_failure = "body_timeout"
                 break
@@ -358,7 +361,9 @@ class DiscoveryAuthMiddleware:
             rejection_reason = "discovery_rate_limited"
         if method in _DISCOVERY_METHODS and not cap_exceeded:
             new_headers = list(scope.get("headers", []))
-            new_headers.append((b"authorization", b"Bearer anonymous-discovery"))
+            new_headers.append(
+                (b"authorization", f"Bearer {DISCOVERY_BEARER}".encode())
+            )
             scope = {**scope, "headers": new_headers}
             discovery = True
             rejection_reason = "discovery_rejected"

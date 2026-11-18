@@ -213,3 +213,21 @@ async def test_actor_cache_separates_bearers_and_refreshes_expired_profiles(
     assert refreshed["user_email"] == "new@example.org"
     assert refreshed["user_name"] == "New Name"
     assert whoami.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_slow_org_name_shares_the_lookup_bound_and_keeps_ids(monkeypatch):
+    monkeypatch.setattr(tools, "telemetry_enabled", lambda: True)
+    monkeypatch.setattr(tools, "_actor_cache", {})
+    monkeypatch.setattr(tools, "_ACTOR_LOOKUP_SECONDS", 0.01)
+
+    async def slow_org_name(_org_id):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(tools, "fetch_organization_name", slow_org_name)
+    whoami = AsyncMock(return_value={"organization_id": "org-id", "user_id": "user-id"})
+    actor = await asyncio.wait_for(
+        tools.resolve_actor(SimpleNamespace(whoami=whoami), "user.jwt"), 0.2
+    )
+    assert actor["user_id"] == "user-id"
+    assert "organization_name" not in actor
