@@ -227,7 +227,7 @@ address: private, loopback, link-local, CGNAT (`100.64.0.0/10`), IPv6
 site-local, multicast, reserved, or unspecified. A per-call `llm` block is
 checked when you submit the call (a `422`) and again in the voicebot at
 call time. For an endpoint saved in the console, saving checks only the
-`https` scheme and host syntax; validating the endpoint and every call
+`https` scheme and that a host is present; validating the endpoint and every call
 run the full check. A URL that fails the call-time check ends the call with
 `end_reason=provider_key_error`.
 

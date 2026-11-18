@@ -40,6 +40,8 @@ def test_public_https_passes() -> None:
         "https://[64:ff9b::a9fe:a9fe]/v1",  # NAT64 wrapping 169.254.169.254
         "https://[64:ff9b::a00:1]/v1",  # NAT64 wrapping 10.0.0.1
         "https://[64:ff9b:1::a00:1]/v1",  # local-use NAT64 wrapping 10.0.0.1
+        "https://[64:ff9b:1::5db8:d822]/v1",  # local-use NAT64: always refused
+        "https://[64:ff9b:1:a9fe:a9:fe00:5db8:d822]/v1",  # /48 layout, metadata
         "https:///v1",  # no host
         "not-a-url",
     ],
@@ -255,12 +257,11 @@ def test_localhost_names_refused_without_lookup(split_dns: list[str], url: str) 
 @pytest.mark.parametrize(
     "ip",
     [
-        "2002:5db8:d822::",  # 6to4 wrapping 93.184.216.34
-        "64:ff9b::5db8:d822",  # NAT64 wrapping 93.184.216.34
-        "64:ff9b:1::5db8:d822",  # local-use NAT64 wrapping 93.184.216.34
+        "64:ff9b::5db8:d822",  # well-known NAT64 wrapping 93.184.216.34
+        "::ffff:93.184.216.34",  # IPv4-mapped public
     ],
 )
-def test_wrapped_public_address_still_allowed(ip: str) -> None:
+def test_wrapped_public_address_allowed(ip: str) -> None:
     assert guard.ip_is_public(ip)
 
 
