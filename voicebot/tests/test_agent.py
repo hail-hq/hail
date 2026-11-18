@@ -1259,6 +1259,36 @@ async def test_email_caller_event_leaves_out_the_address_and_text(
     ]
 
 
+async def test_email_caller_event_stores_nothing_when_args_do_not_parse(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recorded: list[tuple[str, dict]] = []
+
+    async def _fake_write(call_id: UUID, kind: str, payload: dict) -> None:
+        recorded.append((kind, payload))
+
+    monkeypatch.setattr("hailhq.voicebot.agent.write_call_event", _fake_write)
+    session = _FakeSession()
+    tasks = attach_event_handlers(session, UUID("11111111-1111-1111-1111-111111111111"))
+    session.handlers["function_tools_executed"](
+        SimpleNamespace(
+            function_calls=[
+                SimpleNamespace(
+                    name="email_caller",
+                    arguments='{"to_address": "sam@example.com", "body_text": "Li',
+                ),
+                SimpleNamespace(name="email_caller", arguments='["sam@example.com"]'),
+            ]
+        )
+    )
+    await asyncio.gather(*list(tasks))
+    assert recorded[0][1]["calls"] == [
+        {"name": "email_caller", "args": {}},
+        {"name": "email_caller", "args": {}},
+    ]
+    assert "sam@example.com" not in json.dumps(recorded)
+
+
 async def test_speak_greeting_deferred_path_skips_generated_opening() -> None:
     """``generate_opening=False`` (the deferred IVR path) fires no opening
     turn: the greeting runs because a person just spoke, and the session's

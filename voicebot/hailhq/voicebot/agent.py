@@ -2167,14 +2167,15 @@ def attach_event_handlers(
                 parsed = _cap(json.loads(raw)) if raw else {}
             except ValueError:
                 parsed = {"_raw": _cap(raw)}
-            if c.name == email_caller.SPEC.name and isinstance(parsed, dict):
-                # The address and the dictated text stay on the email row,
-                # which data-subject requests cover, not in call events.
-                parsed = {
-                    k: v
-                    for k, v in parsed.items()
-                    if k not in ("to_address", "body_text")
-                }
+            if c.name == email_caller.SPEC.name:
+                # Allowlist: only the subject. The address and the dictated
+                # text stay on the email row, which data-subject requests
+                # cover; a raw string that did not parse may hold them too.
+                parsed = (
+                    {k: parsed[k] for k in ("subject",) if k in parsed}
+                    if isinstance(parsed, dict) and "_raw" not in parsed
+                    else {}
+                )
             calls.append({"name": c.name, "args": parsed})
         _spawn(
             "tool_call",
