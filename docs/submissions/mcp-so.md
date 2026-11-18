@@ -4,7 +4,7 @@ slug: mcp-so
 category: mcp-registry
 url: "https://mcp.so/submit"
 score: 6.5
-status: drafted
+status: submitted
 ---
 
 # mcp.so
@@ -12,7 +12,7 @@ status: drafted
 ## TODO
 
 - [x] Checked 2026-11-16: Hail is not listed (search "hail" on mcp.so; no GitHub issue for hail-hq in chatmcp/mcpso)
-- [ ] Submitted as a GitHub issue (free route)
+- [x] Submitted as a GitHub issue (free route): <https://github.com/chatmcp/mcpso/issues/7604>, 2026-11-18
 - [ ] Confirmed live: record the listing URL in **Notes**
 
 ## Steps to submit
@@ -71,22 +71,22 @@ https://github.com/hail-hq/hail (open source, AGPLv3). The MCP server is in the 
 
 ### Description
 
-Give your AI a real phone number and an email inbox. One remote MCP server covers phone calls, text messages (SMS), and email.
+Hail gives your AI assistant a real phone number and an email inbox. Your agent can do any work people do on the phone and in email.
 
-Your agent can:
+Run a support receptionist, answering service, or your own assistant on one account. It handles calls, texts, and email day and night, and passes calls to your phone when needed.
 
-- Place an outbound AI call and read its transcript
-- Send and receive text messages
-- Send email, read replies and attachments, and check delivery events
-- Buy phone numbers in 120+ countries and route them to a saved agent
-- Submit carrier registrations, such as US A2P 10DLC
+Get a local or toll-free number in 120+ countries, even where you have no office. Hail helps with the paperwork some countries need. Send and receive email on your own domain.
 
-Hail can also be self-hosted. The same features are in the CLI, the Python SDK and the OpenAPI spec.
+Webhooks send every call, text, and email to your app, so your own tools stay up to date.
+
+Connect Claude, ChatGPT, or Cursor over MCP in minutes, or build with the API. Hail is open source.
 
 Listed in the official MCP registry as `io.github.hail-hq/hail-mcp`.
 ````
 
 ## Notes
+
+- 2026-11-18: submitted as <https://github.com/chatmcp/mcpso/issues/7604>. The description is the long listing copy from `README.md`.
 
 - 2026-11-16: the old two-field form (name, GitHub URL) from 2026-07 is gone. The page now has tabs (MCP Server, Remote Server, MCP Client, AI Product) and the $39 paid option.
 - No review time is stated. The repo had about 4,500 open issues on 2026-11-16.
