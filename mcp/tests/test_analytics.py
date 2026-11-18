@@ -296,7 +296,8 @@ def test_keep_metadata_limits_person_properties():
     assert kept["properties"] == {"$set": {"email": _EMAIL, "name": _NAME}}
 
 
-def test_missing_request_identity_drops_sticky_sdk_profile(caplog):
+def test_missing_request_identity_drops_sticky_sdk_profile(caplog, monkeypatch):
+    monkeypatch.setattr(analytics, "_drop_logged", False)
     # The SDK swallows event_properties callback errors. Without a snapshot,
     # its remaining identity could belong to a previous request.
     event = {
@@ -310,6 +311,9 @@ def test_missing_request_identity_drops_sticky_sdk_profile(caplog):
     assert analytics._keep_metadata(event) is None
     # A broken callback must not stop analytics without a trace in our logs.
     assert "dropped: no request identity" in caplog.text
+    caplog.clear()
+    assert analytics._keep_metadata(dict(event)) is None
+    assert "dropped" not in caplog.text
 
 
 @pytest.mark.parametrize("name", ["$exception", "custom_event"])

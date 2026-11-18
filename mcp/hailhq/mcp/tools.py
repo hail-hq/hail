@@ -1952,6 +1952,11 @@ async def _resolve_and_cache(
     return identity
 
 
+def _forget_lookup(key: str, lookup: asyncio.Future[dict[str, Any]]) -> None:
+    if _actor_lookups.get(key) is lookup:
+        del _actor_lookups[key]
+
+
 async def resolve_actor(
     client: HailClient, cache_key: str | None = None
 ) -> dict[str, Any]:
@@ -1970,13 +1975,7 @@ async def resolve_actor(
     if lookup is None:
         lookup = asyncio.ensure_future(_resolve_and_cache(client, cache_key, tracing))
         _actor_lookups[key] = lookup
-        lookup.add_done_callback(
-            lambda done: (
-                _actor_lookups.pop(key, None)
-                if _actor_lookups.get(key) is done
-                else None
-            )
-        )
+        lookup.add_done_callback(lambda done: _forget_lookup(key, done))
         # The lookup runs on this caller's client, which closes when this
         # caller ends. If this caller is cancelled, the lookup is cancelled
         # too (nothing is cached) and the other callers look up again.
@@ -1987,6 +1986,9 @@ async def resolve_actor(
         current = asyncio.current_task()
         if not lookup.cancelled() or (current and current.cancelling()):
             raise
+    # The owner was cancelled. Forget its lookup before retrying, so the
+    # retry starts a new one instead of awaiting the cancelled one again.
+    _forget_lookup(key, lookup)
     return await resolve_actor(client, cache_key)
 
 

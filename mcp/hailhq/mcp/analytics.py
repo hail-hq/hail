@@ -85,6 +85,8 @@ _MODEL_PROPERTIES = ("$mcp_llm_model", "$mcp_llm_model_source")
 _REQUEST_IDENTITY = "hail_request_identity"
 # Set by instrument_analytics. Only oauth-rs requests carry a per-user bearer.
 _per_user = False
+# Dropped events are logged once per process, not once per event.
+_drop_logged = False
 
 
 def _request_actor(extra: Any) -> dict[str, Any]:
@@ -145,9 +147,13 @@ def _keep_metadata(event: dict[str, Any]) -> dict[str, Any] | None:
     if _REQUEST_IDENTITY not in properties:
         # The SDK swallows callback errors. Never emit its cached identity when
         # the request-specific enrichment failed; tool responses stay intact.
-        logger.warning(
-            "PostHog MCP event %s dropped: no request identity", event.get("event")
-        )
+        global _drop_logged
+        if not _drop_logged:
+            _drop_logged = True
+            logger.warning(
+                "PostHog MCP events dropped: no request identity (first: %s)",
+                event.get("event"),
+            )
         return None
     # Ignore any sticky SDK identity; this event belongs to this request.
     identity = properties[_REQUEST_IDENTITY]
