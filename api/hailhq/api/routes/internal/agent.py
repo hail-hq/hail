@@ -133,7 +133,12 @@ from hailhq.core.telemetry import bind_organization
 from hailhq.core.telemetry_identity import tag_context
 from hailhq.core.telephony_catalog import sells_in
 from hailhq.core.text_agent import (
+    AGENT_CAPS_SKIP,
     MAX_REPLIES_PER_THREAD,
+    NO_AGENT_SKIP,
+    SEND_BLOCKED_SKIP,
+    SMS_REGISTRATION_SKIP,
+    THREAD_CAP_SKIP,
     answers_texts,
     prior_reply,
     replies_in_thread,
@@ -800,7 +805,8 @@ class AgentReplySmsResponse(BaseModel):
     # done | skipped | failed: what the worker writes to agent_reply_state.
     state: str
     # A short code the worker stores as sms.metadata.skipped_reason; the
-    # console names it. ``detail`` is the sentence behind a code that has one.
+    # console names it. ``detail`` is a customer-safe sentence for a code that
+    # has one (no phone numbers).
     reason: str | None = None
     detail: str | None = None
     reply_id: UUID | None = None
@@ -847,7 +853,7 @@ async def agent_reply_sms(
         or not answers_texts(agent)
         or number.provisioning_state != "active"
     ):
-        return AgentReplySmsResponse(ok=False, state="skipped", reason="no_agent")
+        return AgentReplySmsResponse(ok=False, state="skipped", reason=NO_AGENT_SKIP)
 
     # One request per thread at a time: the lock is held until the reply row
     # is committed, so a retry that races the original sees it below and the
@@ -862,23 +868,25 @@ async def agent_reply_sms(
         return AgentReplySmsResponse(ok=True, state="done", reply_id=prior.id)
 
     if await replies_in_thread(db, inbound) >= MAX_REPLIES_PER_THREAD:
-        return AgentReplySmsResponse(ok=False, state="skipped", reason="thread_cap")
+        return AgentReplySmsResponse(ok=False, state="skipped", reason=THREAD_CAP_SKIP)
     if not await has_funds(db, org):
         return AgentReplySmsResponse(
             ok=False, state="skipped", reason="insufficient_funds"
         )
     gate = await check_sms_allowed(db, org, inbound.from_e164)
     if not gate.allowed:
+        # The gate's sentence can hold the recipient's number: log it only.
+        logger.info("sms_id=%s agent reply blocked: %s", inbound.id, gate.reason)
         return AgentReplySmsResponse(
-            ok=False, state="skipped", reason="send_blocked", detail=gate.reason
+            ok=False, state="skipped", reason=SEND_BLOCKED_SKIP
         )
     cap_denial = await check_agent_send_allowed(db, org, "sms", [inbound.from_e164])
     if cap_denial is not None:
-        return AgentReplySmsResponse(ok=False, state="skipped", reason="agent_caps")
+        return AgentReplySmsResponse(ok=False, state="skipped", reason=AGENT_CAPS_SKIP)
     block = await us_registration_block(db, org, number, inbound.from_e164)
     if block is not None:
         return AgentReplySmsResponse(
-            ok=False, state="skipped", reason="sms_registration", detail=block
+            ok=False, state="skipped", reason=SMS_REGISTRATION_SKIP, detail=block
         )
 
     reply = Sms(

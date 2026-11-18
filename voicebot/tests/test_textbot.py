@@ -656,3 +656,23 @@ async def test_skip_detail_is_saved(async_session, fake_llm) -> None:
     row = await async_session.get(Sms, sms_id)
     assert row.metadata_["skipped_reason"] == "sms_registration"
     assert row.metadata_["skipped_detail"] == detail
+
+
+async def test_sentence_reason_from_an_older_api_is_not_stored(
+    async_session, fake_llm
+) -> None:
+    sms_id = await _seed(async_session)
+    api = SimpleNamespace(
+        post=AsyncMock(
+            return_value={
+                "ok": False,
+                "state": "skipped",
+                "reason": "recipient '+15550100123' is suppressed (STOP)",
+            }
+        )
+    )
+    await textbot.reply_once(api)
+    async_session.expire_all()
+    row = await async_session.get(Sms, sms_id)
+    assert row.agent_reply_state == "skipped"
+    assert "skipped_reason" not in (row.metadata_ or {})

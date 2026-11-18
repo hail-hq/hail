@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import threading
 from pathlib import Path
 from typing import Any
@@ -37,6 +38,7 @@ from hailhq.core.telemetry_identity import (
     tag_context,
 )
 from hailhq.core.text_agent import (
+    EMPTY_REPLY_SKIP,
     MAX_REPLY_CHARS,
     ClaimedReply,
     ReplyState,
@@ -47,6 +49,9 @@ from hailhq.core.text_agent import (
     thread_history_for_reply,
 )
 from hailhq.core.threads import ThreadScope
+
+# A skip reason code from reply-sms ("thread_cap", "sms_registration").
+_REASON_CODE = re.compile(r"[a-z][a-z0-9_]{1,40}")
 from hailhq.voicebot import callsummary, emailbot
 from hailhq.voicebot.chat_loop import (
     LLM_TIMEOUT_SECONDS,
@@ -225,7 +230,7 @@ async def _reply_claimed(api: AgentApiClient, claimed: ClaimedReply, span=None) 
         if span is not None:
             span.set_attribute("reply.state", "skipped")
         logger.info("sms_id=%s text agent wrote nothing; skipped", sms.id)
-        await _settle(claimed, "skipped", reason="empty_reply")
+        await _settle(claimed, "skipped", reason=EMPTY_REPLY_SKIP)
         return True
     try:
         result = await api.post(
@@ -245,6 +250,11 @@ async def _reply_claimed(api: AgentApiClient, claimed: ClaimedReply, span=None) 
         state = "failed"
     reason = result.get("reason")
     detail = result.get("detail")
+    # Codes only: an older API sent a sentence here (a rolling deploy can
+    # pair this worker with it). Such a sentence is not stored.
+    code = (
+        reason if isinstance(reason, str) and _REASON_CODE.fullmatch(reason) else None
+    )
     if state != "done":
         logger.info("sms_id=%s reply %s: %s %s", sms.id, state, reason, detail or "")
     if span is not None:
@@ -253,8 +263,8 @@ async def _reply_claimed(api: AgentApiClient, claimed: ClaimedReply, span=None) 
     await _settle(
         claimed,
         state,  # type: ignore[arg-type]
-        reason=str(reason) if reason else None,
-        detail=str(detail) if detail else None,
+        reason=code,
+        detail=str(detail) if code and detail else None,
     )
     return True
 

@@ -82,6 +82,16 @@ RETRY_BACKOFF = timedelta(seconds=30)  # doubled after each failed attempt
 # ``sms.metadata_["skipped_reason"]`` for a text skipped at claim because the
 # org has no funds. Never requeued (only ``threads.ACTIVE_CALL_SKIP`` is).
 INSUFFICIENT_FUNDS_SKIP = "insufficient_funds"
+# Other codes saved as ``sms.metadata_["skipped_reason"]`` (and on a failed
+# reply) so the console can say why a text got no answer. The website names
+# each one; keep these values stable.
+NO_AGENT_SKIP = "no_agent"
+EXPIRED_SKIP = "expired"
+EMPTY_REPLY_SKIP = "empty_reply"
+THREAD_CAP_SKIP = "thread_cap"
+SEND_BLOCKED_SKIP = "send_blocked"
+SMS_REGISTRATION_SKIP = "sms_registration"
+AGENT_CAPS_SKIP = "agent_caps"
 
 ReplyState = Literal["done", "skipped", "failed"]
 
@@ -130,7 +140,7 @@ async def _expire_unclaimable(db: AsyncSession, now: datetime) -> None:
     await db.execute(
         update(Sms)
         .where(*base, age_from < cutoff)
-        .values(agent_reply_state="skipped", metadata_=with_skip_reason("expired"))
+        .values(agent_reply_state="skipped", metadata_=with_skip_reason(EXPIRED_SKIP))
     )
     await db.execute(
         update(Sms)
@@ -214,7 +224,7 @@ async def claim_pending_reply(db: AsyncSession) -> ClaimedReply | None:
             # Routing changed between ingest and now: drop it quietly and take
             # the next row, so a backlog of dropped texts does not cost a poll
             # each.
-            await finish_reply(db, sms, "skipped", reason="no_agent")
+            await finish_reply(db, sms, "skipped", reason=NO_AGENT_SKIP)
             continue
         org = sms.organization_id
         # Also for an expired lease: a worker still running cannot overwrite
@@ -320,12 +330,13 @@ def build_chat_messages(
 
 def with_skip_reason(reason: str, detail: str | None = None) -> ColumnElement[Any]:
     """``metadata`` with ``skipped_reason`` (and ``skipped_detail``) merged in,
-    so the console can say why the agent did not reply. ``||`` on a JSON
+    so the console can say why the agent did not reply. An older detail is
+    dropped first, so it never sits under a new reason. ``||`` on a JSON
     ``null`` makes an array and the key is lost, so that row starts from ``{}``."""
     current = func.coalesce(
         func.nullif(Sms.metadata_, literal_column("'null'::jsonb")),
         literal_column("'{}'::jsonb"),
-    )
+    ).op("-")(literal_column("'skipped_detail'"))
     fields: dict[str, str] = {"skipped_reason": reason}
     if detail:
         fields["skipped_detail"] = detail
@@ -343,8 +354,8 @@ async def finish_reply(
 ) -> None:
     """Record the final state. With ``attempt`` it only applies while that
     claim still owns the row (a reclaimed row is not overwritten by a worker
-    that was presumed dead). A skipped row records ``reason`` (a short code)
-    and ``detail`` in its metadata."""
+    that was presumed dead). A skipped or failed row records ``reason`` (a
+    short code) and ``detail`` in its metadata."""
     stmt = update(Sms).where(Sms.id == sms.id)
     if attempt is not None:
         stmt = stmt.where(
@@ -352,7 +363,7 @@ async def finish_reply(
             Sms.agent_reply_attempts == attempt,
         )
     values: dict[str, Any] = {"agent_reply_state": state}
-    if state == "skipped" and reason:
+    if state in ("skipped", "failed") and reason:
         values["metadata_"] = with_skip_reason(reason, detail)
     await db.execute(stmt.values(**values))
     await db.commit()
