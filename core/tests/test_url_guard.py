@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import socket
+
+import hailhq.core.url_guard as guard
 import pytest
 from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
 
@@ -38,8 +41,6 @@ def test_unsafe_urls_rejected(url: str) -> None:
 
 def test_private_host_by_name_is_rejected(monkeypatch) -> None:
     # A public-looking hostname that resolves to a private IP must still fail.
-    import hailhq.core.url_guard as guard
-
     def fake_getaddrinfo(host, *args, **kwargs):
         return [(None, None, None, "", ("10.1.2.3", 0))]
 
@@ -51,8 +52,6 @@ def test_private_host_by_name_is_rejected(monkeypatch) -> None:
 def test_any_private_resolved_address_rejects(monkeypatch) -> None:
     # A host resolving to both a public and a private address must be rejected
     # (pins the "any private => reject" loop against future refactors).
-    import hailhq.core.url_guard as guard
-
     def fake_getaddrinfo(host, *args, **kwargs):
         return [
             (None, None, None, "", ("93.184.216.34", 0)),  # public
@@ -62,3 +61,98 @@ def test_any_private_resolved_address_rejects(monkeypatch) -> None:
     monkeypatch.setattr(guard.socket, "getaddrinfo", fake_getaddrinfo)
     with pytest.raises(UnsafeUrlError):
         assert_public_https_url("https://dual.example.com/v1")
+
+
+# ---------------------------------------------------------------------------
+# IDNA: the guard must resolve the exact host httpx connects to (IDNA 2008),
+# not the stdlib IDNA 2003 form (which maps ß -> ss, ς -> σ, drops ZWJ).
+# ---------------------------------------------------------------------------
+
+# host -> resolved IP. The IDNA 2003 form is public, the IDNA 2008 form (the
+# one httpx really connects to) is private: the attack the guard must stop.
+_SPLIT_DNS = {
+    "fass.example": "93.184.216.34",
+    "xn--fa-hia.example": "10.1.2.3",  # faß.example under IDNA 2008
+    "xn--nxasmq6b.example": "93.184.216.34",  # βόλοσ.example (IDNA 2003)
+    "xn--nxasmm1c.example": "10.1.2.4",  # βόλος.example under IDNA 2008
+    "xn--bcher-kva.example": "93.184.216.34",  # bücher.example (same in both)
+}
+
+
+@pytest.fixture
+def split_dns(monkeypatch) -> list[str]:
+    asked: list[str] = []
+
+    def fake_getaddrinfo(host, *args, **kwargs):
+        asked.append(host)
+        if host not in _SPLIT_DNS:
+            raise socket.gaierror(socket.EAI_NONAME, "not known")
+        return [(None, None, None, "", (_SPLIT_DNS[host], 0))]
+
+    monkeypatch.setattr(guard.socket, "getaddrinfo", fake_getaddrinfo)
+    return asked
+
+
+@pytest.mark.parametrize(
+    ("url", "httpx_host"),
+    [
+        ("https://faß.example/v1", "xn--fa-hia.example"),  # sharp s
+        ("https://FAß.Example/v1", "xn--fa-hia.example"),  # mixed case
+        ("https://βόλος.example/v1", "xn--nxasmm1c.example"),  # final sigma
+    ],
+)
+def test_idna_2008_host_is_the_one_checked(
+    split_dns: list[str], url: str, httpx_host: str
+) -> None:
+    with pytest.raises(UnsafeUrlError, match="non-public"):
+        assert_public_https_url(url)
+    assert split_dns == [httpx_host]
+
+
+def test_zero_width_joiner_host_rejected_without_lookup(split_dns: list[str]) -> None:
+    # IDNA 2003 silently drops U+200D (fa\u200dss -> fass); IDNA 2008 refuses
+    # it outside a virama context, so httpx would never send this URL.
+    with pytest.raises(UnsafeUrlError, match="not valid"):
+        assert_public_https_url("https://fa\u200dss.example/v1")
+    assert split_dns == []
+
+
+def test_normal_idn_host_still_works(split_dns: list[str]) -> None:
+    assert (
+        assert_public_https_url("https://bücher.example/v1/")
+        == "https://bücher.example/v1"
+    )
+    assert split_dns == ["xn--bcher-kva.example"]
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://fa\tss.example/v1",  # tab (urlsplit strips it silently)
+        "https://fa\nss.example/v1",  # newline
+        "https://fa\rss.example/v1",  # carriage return
+        "https://fass.example\x00.evil/v1",  # NUL
+        "https://fa\x7fss.example/v1",  # DEL
+        "https://fa\x85ss.example/v1",  # C1 next-line
+        "https://fass.example/v1\n",  # control char outside the host too
+    ],
+)
+def test_control_characters_rejected_without_lookup(
+    split_dns: list[str], url: str
+) -> None:
+    with pytest.raises(UnsafeUrlError, match="control character"):
+        assert_public_https_url(url)
+    assert split_dns == []
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://api.openai.com:99999/v1",  # port out of range
+        "https://api.openai.com:abc/v1",  # port not a number
+        "https://a..b.example/v1",  # empty label: stdlib idna raises UnicodeError
+    ],
+)
+def test_malformed_host_or_port_rejected(url: str) -> None:
+    with pytest.raises(UnsafeUrlError):
+        assert_public_https_url(url)

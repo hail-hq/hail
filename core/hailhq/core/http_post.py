@@ -10,9 +10,9 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import socket
-from urllib.parse import urlparse
 
 import httpx
+from hailhq.core.url_guard import UnsafeUrlError, httpx_url
 
 __all__ = [
     "PrivateNetworkBlockedError",
@@ -33,7 +33,9 @@ def _ip_is_private(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
 def _resolve_all(host: str) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
     try:
         infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
-    except socket.gaierror:
+    except (socket.gaierror, UnicodeError):
+        # UnicodeError: the stdlib idna codec refuses an empty or too-long
+        # label (``a..b.com``) before any DNS lookup.
         return []
     out: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = []
     for _family, _type, _proto, _canon, sockaddr in infos:
@@ -58,10 +60,16 @@ def _is_private_host(host: str) -> bool:
 
 
 def is_private_url(url: str) -> bool:
-    parsed = urlparse(url)
-    if not parsed.hostname:
+    # Parse with httpx's own parser so we check the exact (IDNA 2008, ASCII)
+    # host httpx will connect to; see url_guard.httpx_url.
+    try:
+        host = httpx_url(url).raw_host.decode("ascii")
+    except UnsafeUrlError:
+        # Fail closed: a URL httpx would not send is never a safe target.
+        return True
+    if not host:
         return False
-    return _is_private_host(parsed.hostname)
+    return _is_private_host(host)
 
 
 def validate_webhook_target(url: str, *, allow_private_networks: bool) -> None:
@@ -75,14 +83,18 @@ def validate_webhook_target(url: str, *, allow_private_networks: bool) -> None:
     accepted to ANY host — the escape hatch is a blanket relaxation, not
     restricted to private-network addresses only.
     """
-    parsed = urlparse(url)
+    try:
+        parsed = httpx_url(url)
+    except UnsafeUrlError as exc:
+        raise ValueError(f"target_url is not valid: {exc}") from exc
     if parsed.scheme != "https" and not (
         allow_private_networks and parsed.scheme == "http"
     ):
         raise ValueError("target_url must use https")
-    if not parsed.hostname:
+    host = parsed.raw_host.decode("ascii")
+    if not host:
         raise ValueError("target_url must include a host")
-    if not allow_private_networks and is_private_url(url):
+    if not allow_private_networks and _is_private_host(host):
         raise ValueError("target_url must not point at a private address")
 
 

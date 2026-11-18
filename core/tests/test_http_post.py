@@ -142,3 +142,54 @@ def test_mixed_records_any_private_is_private(monkeypatch):
 
     monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
     assert is_private_url("https://rebind.example.com/hook")
+
+
+# ---------------------------------------------------------------------------
+# IDNA + control characters: check the host httpx really connects to
+# ---------------------------------------------------------------------------
+
+
+def _split_dns(monkeypatch) -> list[str]:
+    # IDNA 2003 form public, IDNA 2008 form (what httpx uses) private.
+    answers = {"fass.example": "93.184.216.34", "xn--fa-hia.example": "10.1.2.3"}
+    asked: list[str] = []
+
+    def fake_getaddrinfo(host, port, **kw):
+        asked.append(host)
+        if host not in answers:
+            raise socket.gaierror(socket.EAI_NONAME, "not known")
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (answers[host], 0))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+    return asked
+
+
+def test_is_private_url_checks_idna_2008_host(monkeypatch):
+    asked = _split_dns(monkeypatch)
+    assert is_private_url("https://faß.example/hook")
+    assert asked == ["xn--fa-hia.example"]
+
+
+def test_validate_webhook_target_checks_idna_2008_host(monkeypatch):
+    asked = _split_dns(monkeypatch)
+    with pytest.raises(ValueError, match="private"):
+        validate_webhook_target(
+            "https://faß.example/hook", allow_private_networks=False
+        )
+    assert asked == ["xn--fa-hia.example"]
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://fa\tss.example/hook",
+        "https://fa\nss.example/hook",
+        "https://a\x00b.example/",
+    ],
+)
+def test_control_characters_refused(url):
+    assert is_private_url(url)
+    with pytest.raises(ValueError, match="control character"):
+        validate_webhook_target(url, allow_private_networks=False)
+    with pytest.raises(ValueError, match="control character"):
+        validate_webhook_target(url, allow_private_networks=True)
