@@ -116,17 +116,31 @@ SDK: `client.agents.update(agent_id, email_caller_enabled=True)`.
 
 - The agent gets the `email_caller` tool on phone calls. It reads the address
   back and sends only after the person says yes. `tools: []` turns it off with
-  every other tool; a `tools` list does not need to name it.
+  every other tool. `email_caller` is not a `tools` name: the switch controls
+  it, and a `tools` list that names it returns 422.
 - One recipient, no CC or BCC. Plain text and links, up to 2,000 characters;
   no attachments.
-- At most 2 emails per call, both to the same address.
+- Hail wraps the text in fixed lines the agent cannot change: first
+  `You asked for this during a phone call with <your organization>.`, and a
+  footer saying the address was given during that call.
+- Relay risk: anyone who can call the number can ask for an email to any
+  address, with text they dictate, from your domain. Hail caps it:
+  - 2 emails per call, both to the same address;
+  - 3 emails and 2 addresses per phone number of the other person, in any
+    24 hours, across calls;
+  - 100 emails per organization in any 24 hours.
+
+  A bounced email still counts, but its address can be corrected. A caller
+  with a hidden number gets no email.
+
 - Sent from the same address as the agent's other email: your verified custom
   domain (the oldest, if you have several), else your hail-mail address.
 - The same checks as any email: suppression list, bounce and complaint rules,
   sending limits. Billed as a normal outbound email; with no credit it is not sent.
-- Each send adds an `email_caller` event to the call (`GET /v1/events?id=call:<call id>`, or `hail tail <call id>`)
-  with `email_id`, `to`, `subject` and `status`. The email itself is in
-  `GET /v1/emails` with the agent's `agent_id`.
+- Each send adds an `email_caller` event to the call (`GET /v1/events?id=call:<call id>`,
+  or `hail tail <call id>`) with `email_id`, `to`, `subject`, and `status` right
+  after the send. Later changes (bounce, complaint) are on the email's own
+  events: `GET /v1/events?id=email:<email_id>`.
 - The address is whatever the person says. Hail cannot prove it is theirs.
 - Turning it off applies at once, also to calls already in progress.
 

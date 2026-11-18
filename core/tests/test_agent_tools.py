@@ -797,3 +797,35 @@ async def test_email_caller_checks_its_input_before_posting():
         _ctx(api=api, inbound_email_id=uuid.uuid4()), ok
     )
     assert api.posts == []
+
+
+async def test_email_caller_refuses_too_long_input_instead_of_cutting_it():
+    from hailhq.core.agent_tools import email_caller
+
+    api = FakeApi(spoken="Email sent.")
+    ok = {"to_address": "sam@example.com", "subject": "s", "body_text": "b"}
+    long_body = "x" * email_caller.MAX_BODY_CHARS + " https://example.com"
+    assert "too long" in await email_caller.SPEC.execute(
+        _ctx(api=api), {**ok, "body_text": long_body}
+    )
+    assert "too long" in await email_caller.SPEC.execute(
+        _ctx(api=api), {**ok, "subject": "s" * 201}
+    )
+    long_address = "a" * 250 + "@example.com"
+    assert "full email address" in await email_caller.SPEC.execute(
+        _ctx(api=api), {**ok, "to_address": long_address}
+    )
+    assert api.posts == []
+
+
+def test_email_caller_frames_every_email():
+    from hailhq.core.agent_tools import email_caller
+
+    body = email_caller.framed_body("  Link: https://example.com  ", "Acme\nDental")
+    assert body.startswith(
+        "You asked for this during a phone call with Acme Dental.\n\n"
+        "Link: https://example.com\n\n--\n"
+    )
+    assert body.endswith("If that was not you, you can ignore it.")
+    nameless = email_caller.framed_body("Hi.", None)
+    assert nameless.startswith("You asked for this during a phone call.\n\n")

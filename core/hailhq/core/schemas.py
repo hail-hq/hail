@@ -981,8 +981,12 @@ class AgentCreate(BaseModel):
         default=False,
         description=(
             "Let the agent email the person on a call, at an address they "
-            "give and confirm on the call (links and short text only, at most "
-            "2 emails per call). Off by default."
+            "give and confirm on the call. Plain text and links, no "
+            "attachments, with a fixed line saying it was asked for on the "
+            "call. Anyone who can call the number can ask for an email to any "
+            "address, so Hail caps it: 2 per call, 3 per caller number and "
+            "at most 2 addresses per caller number in 24 hours, 100 per "
+            "organization in 24 hours. Off by default."
         ),
     )
     status: AgentStatus = Field(

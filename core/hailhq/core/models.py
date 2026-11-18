@@ -1715,6 +1715,14 @@ class Email(Base):
             "agent_id",
             postgresql_where=text("agent_id IS NOT NULL"),
         ),
+        # Caller emails (the email_caller tool): its per-call, per-caller and
+        # per-org caps count these rows of the last 24 hours.
+        Index(
+            "emails_caller_email_idx",
+            "organization_id",
+            "requested_at",
+            postgresql_where=text("(metadata ->> 'email_caller') = 'true'"),
+        ),
         CheckConstraint(
             "status IN ('queued','sent','delivered','failed','bounced',"
             "'complained','received')",

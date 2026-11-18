@@ -3,8 +3,10 @@
 An agent setting, like ``voice_enabled`` or ``email_enabled``: a boolean
 on ``agents``, off by default so existing agents do not change. Tables
 checked: ``agents`` holds every per-agent setting, so the switch goes
-there. The emails it sends are ordinary ``emails`` rows, and what happened
-on the call is a ``call_events`` row; neither needs a new column.
+there. The emails it sends are ordinary ``emails`` rows (marked in
+``metadata``), and what happened on the call is a ``call_events`` row;
+neither needs a new column. A partial index on ``emails`` keeps the tool's
+caps (per call, per caller number per day, per org per day) cheap.
 
 Revision ID: 0082
 Revises: 0081
@@ -31,7 +33,14 @@ def upgrade() -> None:
             nullable=False,
         ),
     )
+    op.create_index(
+        "emails_caller_email_idx",
+        "emails",
+        ["organization_id", "requested_at"],
+        postgresql_where=sa.text("(metadata ->> 'email_caller') = 'true'"),
+    )
 
 
 def downgrade() -> None:
+    op.drop_index("emails_caller_email_idx", table_name="emails")
     op.drop_column("agents", "email_caller_enabled")

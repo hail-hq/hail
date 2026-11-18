@@ -4,8 +4,12 @@ Opt-in per agent (``agents.email_caller_enabled``), so it is not in
 ``all_tools()``: the voicebot adds it when the dispatch metadata turns it on.
 The caller dictates the address; the agent reads it back and sends only
 after a yes. Plain text with links, one recipient, no attachments. The
-switch, the per-call cap, the gate and billing run server-side in
+switch, the caps, the gate and billing run server-side in
 ``/internal/agent/email-caller``.
+
+Relay risk: anyone who can call the number can ask for an email to any
+address, with text they dictate. The caps below bound that, and
+``framed_body`` wraps every email in fixed lines the agent cannot change.
 """
 
 from __future__ import annotations
@@ -23,6 +27,13 @@ MAX_ADDRESS_CHARS = 254
 MAX_BODY_CHARS = 2000
 # Emails to the person on one call. Each goes to the same address.
 MAX_EMAILS_PER_CALL = 2
+# Per caller phone number, over any 24 hours, across all calls.
+MAX_EMAILS_PER_CALLER_PER_DAY = 3
+MAX_ADDRESSES_PER_CALLER_PER_DAY = 2
+# Per organization, over any 24 hours.
+MAX_EMAILS_PER_ORG_PER_DAY = 100
+# Longest organization name shown in the fixed lines.
+_MAX_ORG_NAME_CHARS = 80
 
 # The dispatch metadata key that turns the tool on for a call.
 METADATA_KEY = "email_caller_enabled"
@@ -32,20 +43,40 @@ EVENT_KIND = "email_caller"
 _UNAVAILABLE = "Email is not available right now."
 
 
+def framed_body(body_text: str, org_name: str | None) -> str:
+    """The email as sent: a fixed first line and footer around the agent's
+    text, so a dictated message cannot pass as the organization's own mail
+    and the reader knows why it came."""
+    name = " ".join((org_name or "").split())[:_MAX_ORG_NAME_CHARS]
+    call = f"a phone call with {name}" if name else "a phone call"
+    return (
+        f"You asked for this during {call}.\n\n"
+        f"{body_text.strip()}\n\n"
+        "--\n"
+        f"You got this email because this address was given during {call}. "
+        "If that was not you, you can ignore it."
+    )
+
+
 async def _execute(ctx: ToolContext, args: dict[str, Any]) -> str:
     if ctx.call_id is None or ctx.inbound_email_id is not None:
         return NO_CALL
     if ctx.api is None:
         return _UNAVAILABLE
-    to_address = str(args.get("to_address", "")).strip()[:MAX_ADDRESS_CHARS]
-    subject = str(args.get("subject", "")).strip()[:MAX_SUBJECT_CHARS]
-    body_text = str(args.get("body_text", ""))[:MAX_BODY_CHARS]
+    to_address = str(args.get("to_address", "")).strip()
+    subject = str(args.get("subject", "")).strip()
+    body_text = str(args.get("body_text", ""))
     # Raw LiveKit tool calls are not schema-validated: catch what the route
-    # would reject with a 422, and say what is missing instead.
-    if not EMAIL_ADDR.match(to_address):
+    # would reject with a 422, and say what to fix. Never cut: a cut address
+    # is another address, and a cut body can end inside a link.
+    if len(to_address) > MAX_ADDRESS_CHARS or not EMAIL_ADDR.match(to_address):
         return "I need a full email address before I can send the email."
     if not subject or not body_text.strip():
         return "I need a subject and a message before I can send the email."
+    if len(subject) > MAX_SUBJECT_CHARS:
+        return f"The subject is too long. Keep it under {MAX_SUBJECT_CHARS} characters. Nothing was sent."
+    if len(body_text) > MAX_BODY_CHARS:
+        return f"The message is too long. Keep it under {MAX_BODY_CHARS} characters. Nothing was sent."
     resp = await ctx.api.post(
         "/internal/agent/email-caller",
         {
@@ -68,7 +99,8 @@ SPEC = ToolSpec(
         "and send only after they say yes. Never guess or complete an "
         "address. Plain text and links only; you cannot attach files. One "
         "address per call, and at most "
-        f"{MAX_EMAILS_PER_CALL} emails per call. Then say it is sent."
+        f"{MAX_EMAILS_PER_CALL} emails per call. Hail adds a short line "
+        "saying it was asked for on this call. Then say it is sent."
     ),
     parameters={
         "type": "object",
@@ -95,9 +127,13 @@ SPEC = ToolSpec(
 
 __all__ = [
     "EVENT_KIND",
+    "MAX_ADDRESSES_PER_CALLER_PER_DAY",
     "MAX_ADDRESS_CHARS",
     "MAX_BODY_CHARS",
     "MAX_EMAILS_PER_CALL",
+    "MAX_EMAILS_PER_CALLER_PER_DAY",
+    "MAX_EMAILS_PER_ORG_PER_DAY",
     "METADATA_KEY",
     "SPEC",
+    "framed_body",
 ]

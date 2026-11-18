@@ -10,12 +10,21 @@ import json
 import uuid
 
 import pytest
+from hailhq.api.routes.internal import agent as agent_routes
 from hailhq.core import hmac_signing
 from hailhq.core.agent_tools import email_caller
 from hailhq.core.billing import CALL_META_BILLED
 from hailhq.core.compliance_gate import add_suppression
 from hailhq.core.config import settings
-from hailhq.core.models import Agent, AuditLog, Call, CallEvent, Email, EmailDomain
+from hailhq.core.models import (
+    Agent,
+    AuditLog,
+    Call,
+    CallEvent,
+    Email,
+    EmailDomain,
+    PhoneNumber,
+)
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,6 +35,14 @@ PATH = "/internal/agent/email-caller"
 @pytest.fixture(autouse=True)
 def _internal_secret(monkeypatch):
     monkeypatch.setattr(settings, "hail_internal_secret", HMAC_SECRET)
+
+
+@pytest.fixture(autouse=True)
+def _org_name(monkeypatch):
+    async def name(_org):
+        return "Acme Dental"
+
+    monkeypatch.setattr(agent_routes, "organization_name", name)
 
 
 def _signed(body: bytes) -> dict[str, str]:
@@ -43,10 +60,13 @@ async def _call(
     with_agent: bool = True,
     billed: bool = False,
     transport: str | None = None,
+    like: Call | None = None,
+    to_e164: str = "+14155550123",
 ) -> Call:
-    org = uuid.uuid4()
-    agent = None
-    if with_agent:
+    """A live outbound call. ``like``: another call of the same org and agent."""
+    org = like.organization_id if like else uuid.uuid4()
+    agent = await session.get(Agent, like.agent_id) if like else None
+    if with_agent and agent is None:
         agent = Agent(
             organization_id=org,
             name="Front desk",
@@ -54,21 +74,26 @@ async def _call(
             email_caller_enabled=enabled,
         )
         session.add(agent)
-    session.add(
-        EmailDomain(
-            organization_id=org,
-            kind="custom",
-            domain="mail.a.test",
-            verification_status="verified",
+    if like is None:
+        session.add(
+            EmailDomain(
+                organization_id=org,
+                kind="custom",
+                domain="mail.a.test",
+                verification_status="verified",
+            )
         )
-    )
     await session.flush()
-    number = await add_phone_number(session, org)
+    number = (
+        await session.get(PhoneNumber, like.from_number_id)
+        if like
+        else await add_phone_number(session, org)
+    )
     call = Call(
         organization_id=org,
         from_number_id=number.id,
         from_e164=number.e164,
-        to_e164="+14155550123",
+        to_e164=to_e164,
         status="in_progress",
         agent_id=agent.id if agent else None,
         voice_config={},
@@ -134,9 +159,17 @@ async def test_on_sends_to_the_caller_from_the_verified_domain(
     assert row.cc_addresses in (None, [])
     assert row.bcc_addresses in (None, [])
     assert row.from_address == "noreply@mail.a.test"
-    assert row.agent_id == call.agent_id
+    # None, as for other call sends, so thread history shows it later.
+    assert row.agent_id is None
     assert row.metadata_["call_id"] == str(call.id)
     assert row.metadata_["email_caller"] is True
+    assert row.metadata_["caller_e164"] == "+14155550123"
+    # Fixed lines the agent cannot change, around its text.
+    assert row.body_text.startswith(
+        "You asked for this during a phone call with Acme Dental.\n\n"
+        "Here it is: https://example.com/ds.pdf\n\n--\n"
+    )
+    assert "If that was not you, you can ignore it." in row.body_text
     assert row.status == "sent"
     email_mock.send_email.assert_awaited_once()
 
@@ -316,3 +349,92 @@ async def test_bad_input_is_rejected(client, extra):
     ).encode()
     resp = await client.post(PATH, content=body, headers=_signed(body))
     assert resp.status_code == 422
+
+
+async def test_caller_number_gets_three_emails_a_day_across_calls(
+    client, async_session, email_mock, add_phone_number
+):
+    first = await _call(async_session, add_phone_number)
+    assert (await _post(client, first))["ok"] is True
+    assert (await _post(client, first))["ok"] is True
+    second = await _call(async_session, add_phone_number, like=first)
+    assert (await _post(client, second))["ok"] is True
+    third = await _call(async_session, add_phone_number, like=first)
+    data = await _post(client, third)
+    assert data["ok"] is False
+    assert "today" in data["spoken"]
+    assert len(await _emails(async_session)) == 3
+    # Another person calling the same org still gets an email.
+    other = await _call(
+        async_session, add_phone_number, like=first, to_e164="+14155550199"
+    )
+    assert (await _post(client, other))["ok"] is True
+
+
+async def test_caller_number_gets_two_addresses_a_day(
+    client, async_session, email_mock, add_phone_number
+):
+    first = await _call(async_session, add_phone_number)
+    assert (await _post(client, first, to="a@example.com"))["ok"] is True
+    second = await _call(async_session, add_phone_number, like=first)
+    assert (await _post(client, second, to="b@example.com"))["ok"] is True
+    # A third address from the same caller, on a new call, is refused.
+    third = await _call(async_session, add_phone_number, like=first)
+    data = await _post(client, third, to="c@example.com")
+    assert data["ok"] is False
+    assert "another address" in data["spoken"]
+    assert sorted(e.to_addresses[0] for e in await _emails(async_session)) == [
+        "a@example.com",
+        "b@example.com",
+    ]
+
+
+async def test_org_daily_cap(
+    client, async_session, email_mock, add_phone_number, monkeypatch
+):
+    monkeypatch.setattr(email_caller, "MAX_EMAILS_PER_ORG_PER_DAY", 2)
+    first = await _call(async_session, add_phone_number, to_e164="+14155550101")
+    assert (await _post(client, first))["ok"] is True
+    second = await _call(
+        async_session, add_phone_number, like=first, to_e164="+14155550102"
+    )
+    assert (await _post(client, second))["ok"] is True
+    third = await _call(
+        async_session, add_phone_number, like=first, to_e164="+14155550103"
+    )
+    assert (await _post(client, third))["ok"] is False
+    assert len(await _emails(async_session)) == 2
+    reasons = (
+        (
+            await async_session.execute(
+                select(AuditLog.payload["reason"].astext).where(
+                    AuditLog.organization_id == first.organization_id,
+                    AuditLog.action == "agent.email.blocked",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert reasons == ["org_daily_cap"]
+
+
+async def test_a_bounced_address_can_be_corrected_on_the_call(
+    client, async_session, email_mock, add_phone_number
+):
+    call = await _call(async_session, add_phone_number)
+    assert (await _post(client, call, to="sam@exmple.com"))["ok"] is True
+    (row,) = await _emails(async_session)
+    row.status = "bounced"
+    await async_session.commit()
+    assert (await _post(client, call, to="sam@example.com"))["ok"] is True
+    # The bounce still used one of the two emails for this call.
+    assert (await _post(client, call, to="sam@example.com"))["ok"] is False
+
+
+async def test_hidden_caller_number_is_refused(
+    client, async_session, email_mock, add_phone_number
+):
+    call = await _call(async_session, add_phone_number, to_e164="anonymous")
+    assert (await _post(client, call))["ok"] is False
+    assert await _emails(async_session) == []

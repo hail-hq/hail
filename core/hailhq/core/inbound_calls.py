@@ -51,7 +51,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["Accepted", "Rejected", "SipAttributes", "open_inbound_call"]
+__all__ = [
+    "Accepted",
+    "Rejected",
+    "SipAttributes",
+    "open_inbound_call",
+    "organization_name",
+]
 
 
 @dataclass(frozen=True)
@@ -172,14 +178,14 @@ async def open_inbound_call(
     # The caller is already connected and hearing silence: look the name up
     # while the checks and the Call row are written, as POST /calls does.
     org_id = number.organization_id
-    org_name = asyncio.create_task(_organization_name(org_id))
+    org_name = asyncio.create_task(organization_name(org_id))
     try:
         return await _answer_or_refuse(db, number, org_id, attrs, org_name)
     finally:
         org_name.cancel()  # no-op once it has finished (refusals never await it)
 
 
-async def _organization_name(org_id: UUID) -> str | None:
+async def organization_name(org_id: UUID) -> str | None:
     """The org's display name from the mirrored ``organizations`` table, in
     its own session so it runs beside the answer checks. Each inbound call is
     a fresh voicebot process, so the hail.so lookup's cache never helps here;

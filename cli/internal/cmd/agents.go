@@ -529,6 +529,7 @@ func printAgent(opts *Options, a *client.AgentResponse, banner bool) error {
 	fmt.Fprintf(opts.Stdout, "  Calls:         %s\n", yesNo(a.VoiceEnabled))
 	fmt.Fprintf(opts.Stdout, "  Texts:         %s\n", yesNo(a.SmsEnabled))
 	fmt.Fprintf(opts.Stdout, "  Email:         %s\n", yesNo(a.EmailEnabled == nil || *a.EmailEnabled))
+	fmt.Fprintf(opts.Stdout, "  Email caller:  %s\n", yesNo(a.EmailCallerEnabled != nil && *a.EmailCallerEnabled))
 	if a.MaxDurationSeconds != nil {
 		fmt.Fprintf(opts.Stdout, "  Max length:    %d min\n", *a.MaxDurationSeconds/60)
 	}
