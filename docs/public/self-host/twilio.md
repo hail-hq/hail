@@ -79,9 +79,9 @@ the service. Nothing to set on the number itself. Hail verifies Twilio's
 `X-Twilio-Signature` against `HAIL_API_URL`, so that value must be the public
 URL that Twilio posts to.
 
-**Recognized keywords** (Hail matches them on the message body, case-insensitive):
+**Recognized keywords** (the whole message body, ignoring case and extra spaces; for opt-out words, also end punctuation):
 
-- Opt out (STOP): `STOP`, `STOPALL`, `UNSUBSCRIBE`, `CANCEL`, `END`, `QUIT`
+- Opt out (STOP): `STOP`, `STOPALL`, `UNSUBSCRIBE`, `CANCEL`, `END`, `QUIT`, `REVOKE`, `OPT OUT` (`OPTOUT`, `OPT-OUT`)
 - Opt in (START): `START`, `YES`, `UNSTOP`
 - Help: `HELP`, `INFO`
 

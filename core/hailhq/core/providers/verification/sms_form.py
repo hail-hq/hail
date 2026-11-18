@@ -22,6 +22,7 @@ from hailhq.core.providers.verification.forms import (
     display_name,
     text_length,
 )
+from hailhq.core.sms_keywords import HELP_KEYWORDS, exact_keyword, is_stop
 
 _BUSINESS_TYPES = (
     FieldOption(key="PRIVATE_PROFIT", label="Private company"),
@@ -764,16 +765,10 @@ def _application_problems(
                 + ", ".join(missing)
                 + ". Update the real response before filing; Hail will not add this wording for you.",
             )
-    if "KEYWORD" in methods and val("keyword_keyword").upper() in {
-        "STOP",
-        "STOPALL",
-        "UNSUBSCRIBE",
-        "CANCEL",
-        "END",
-        "QUIT",
-        "HELP",
-        "INFO",
-    }:
+    if "KEYWORD" in methods and (
+        is_stop(val("keyword_keyword"))
+        or exact_keyword(val("keyword_keyword")) in HELP_KEYWORDS
+    ):
         issue(
             "keyword_keyword",
             "Choose your advertised opt-in keyword. STOP/opt-out and HELP/info keywords cannot enroll recipients.",

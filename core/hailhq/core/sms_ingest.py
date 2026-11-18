@@ -27,6 +27,12 @@ from hailhq.core.config import settings
 from hailhq.core.db import org_lock
 from hailhq.core.models import Call, PhoneNumber, Sms, SmsEvent
 from hailhq.core.providers.sms import ProviderSmsResult, SmsProvider
+from hailhq.core.sms_keywords import (
+    HELP_KEYWORDS,
+    START_KEYWORDS,
+    exact_keyword,
+    is_stop,
+)
 from hailhq.core.telemetry import bind_organization
 from hailhq.core.telemetry_identity import tag_context
 from hailhq.core.text_agent import should_queue_reply
@@ -46,14 +52,11 @@ __all__ = ["IngestResult", "active_dedicated_number", "ingest_inbound_sms"]
 # _BENIGN_DEDUP_INDEXES pattern.
 _SMS_SID_UNIQUE = "sms_provider_message_sid_key"
 
-# Carrier opt-out keywords (CTIA/Twilio). We match the message body
-# ourselves rather than relying solely on Twilio's ``OptOutType`` param,
-# which is only populated when the number sits behind a Messaging Service
-# with Advanced Opt-Out — a config Hail does not require. ``OptOutType``
-# is honored as corroboration when present.
-_STOP_KEYWORDS = frozenset({"STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT"})
-_START_KEYWORDS = frozenset({"START", "YES", "UNSTOP"})
-_HELP_KEYWORDS = frozenset({"HELP", "INFO"})
+# Carrier opt-out keywords (CTIA/Twilio, plus FCC words): see sms_keywords.
+# We match the message body ourselves rather than relying solely on Twilio's
+# ``OptOutType`` param, which is only populated when the number sits behind a
+# Messaging Service with Advanced Opt-Out — a config Hail does not require.
+# ``OptOutType`` is honored as corroboration when present.
 
 
 @dataclass
@@ -65,12 +68,12 @@ class IngestResult:
 def _opt_out_action(body: str, opt_out_type: str | None) -> str | None:
     """Return 'STOP', 'START', 'HELP', or None from the body keyword (with
     Twilio's OptOutType as corroboration)."""
-    keyword = body.strip().upper()
-    if opt_out_type == "STOP" or keyword in _STOP_KEYWORDS:
+    keyword = exact_keyword(body)
+    if opt_out_type == "STOP" or is_stop(body):
         return "STOP"
-    if opt_out_type == "START" or keyword in _START_KEYWORDS:
+    if opt_out_type == "START" or keyword in START_KEYWORDS:
         return "START"
-    if opt_out_type == "HELP" or keyword in _HELP_KEYWORDS:
+    if opt_out_type == "HELP" or keyword in HELP_KEYWORDS:
         return "HELP"
     return None
 

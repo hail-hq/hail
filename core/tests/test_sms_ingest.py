@@ -555,3 +555,102 @@ async def test_sms_received_payload_names_the_compliance_keyword(async_session) 
     for _, body, _, keyword in texts:
         assert by_body[body]["compliance_keyword"] == keyword
         assert event_by_body[body]["compliance_keyword"] == keyword
+
+
+async def test_opt_out_words_with_punctuation_and_fcc_words(async_session) -> None:
+    """'Stop.', 'STOP!', REVOKE and OPT OUT suppress the sender. A keyword
+    inside a sentence does not."""
+    from hailhq.core.compliance_gate import is_suppressed
+
+    org_id = uuid.uuid4()
+    await _seed_number(async_session, org_id)
+    await async_session.commit()
+
+    texts = [
+        ("+14155551301", "Stop.", True),
+        ("+14155551302", "STOP!", True),
+        ("+14155551303", "  revoke ", True),
+        ("+14155551304", "Opt  out", True),
+        ("+14155551305", "opt-out", True),
+        ("+14155551306", "OPTOUT 🛑", True),
+        ("+14155551307", "please stop texting me", False),
+        ("+14155551308", "stopped by today", False),
+        ("+14155551309", "_STOP_", True),
+    ]
+    for index, (sender, body, _) in enumerate(texts):
+        await ingest_inbound_sms(
+            async_session,
+            carrier="twilio",
+            from_e164=sender,
+            to_e164="+14155559999",
+            body=body,
+            provider_message_sid=f"SM_optout_{index}",
+            opt_out_type=None,
+        )
+        await async_session.commit()
+
+    for sender, body, suppressed in texts:
+        assert (
+            await is_suppressed(async_session, org_id, sender, "sms")
+        ) is suppressed, body
+
+
+async def test_end_punctuation_does_not_widen_start_or_help(async_session) -> None:
+    """'Yes.' from an opted-out sender keeps them opted out, and 'Help?' stays
+    a normal text for the agent (compliance_keyword null)."""
+    from hailhq.core.compliance_gate import add_suppression, is_suppressed
+
+    org_id = uuid.uuid4()
+    await _seed_number(async_session, org_id)
+    await add_suppression(
+        async_session,
+        organization_id=org_id,
+        recipient="+14155551401",
+        channel="sms",
+        reason="prior stop",
+        source="stop_keyword",
+    )
+    async_session.add(
+        WebhookSubscription(
+            organization_id=org_id,
+            target_url="https://example.com/hook",
+            secret_encrypted="fake",
+            status="active",
+            event_types=["sms.received"],
+        )
+    )
+    await async_session.commit()
+
+    for index, (sender, body) in enumerate(
+        [("+14155551401", "Yes."), ("+14155551402", "Help?")]
+    ):
+        await ingest_inbound_sms(
+            async_session,
+            carrier="twilio",
+            from_e164=sender,
+            to_e164="+14155559999",
+            body=body,
+            provider_message_sid=f"SM_loose_{index}",
+            opt_out_type=None,
+        )
+        await async_session.commit()
+
+    assert await is_suppressed(async_session, org_id, "+14155551401", "sms")
+    deliveries = (
+        (
+            await async_session.execute(
+                select(WebhookDelivery).where(
+                    WebhookDelivery.event_type == "sms.received"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert {
+        d.payload["data"]["body"]: d.payload["data"]["compliance_keyword"]
+        for d in deliveries
+    } == {
+        "Yes.": None,
+        "Help?": None,
+    }
