@@ -284,7 +284,7 @@ class DiscoveryAuthMiddleware:
                 break
             try:
                 message = await asyncio.wait_for(receive(), timeout=remaining)
-            except TimeoutError:
+            except asyncio.TimeoutError:
                 oversized = True
                 peek_failure = "body_timeout"
                 break

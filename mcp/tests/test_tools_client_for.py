@@ -231,6 +231,11 @@ async def test_slow_org_name_shares_the_lookup_bound_and_keeps_ids(monkeypatch):
     )
     assert actor["user_id"] == "user-id"
     assert "organization_name" not in actor
+    # whoami worked, so the entry keeps the full TTL, not the failure TTL.
+    # The clock moves only now: the event loop's timeouts read it too.
+    later = tools.time.monotonic() + tools._ACTOR_FAILURE_TTL_SECONDS + 1
+    monkeypatch.setattr(tools.time, "monotonic", lambda: later)
+    assert tools.cached_actor("user.jwt")["user_id"] == "user-id"
 
 
 @pytest.mark.asyncio
@@ -254,3 +259,30 @@ async def test_parallel_calls_share_one_actor_lookup(monkeypatch):
     assert [a["user_id"] for a in actors] == ["user-id"] * 3
     assert whoami.await_count == 1
     assert tools._actor_lookups == {}
+
+
+@pytest.mark.asyncio
+async def test_cancelled_first_caller_does_not_break_the_others(monkeypatch):
+    monkeypatch.setattr(tools, "telemetry_enabled", lambda: False)
+    monkeypatch.setattr(tools, "_analytics_actor", True)
+    monkeypatch.setattr(tools, "_actor_cache", {})
+    monkeypatch.setattr(tools, "_actor_lookups", {})
+    started = asyncio.Event()
+
+    async def hang():
+        started.set()
+        await asyncio.Event().wait()
+
+    first = SimpleNamespace(whoami=AsyncMock(side_effect=hang))
+    second = SimpleNamespace(
+        whoami=AsyncMock(return_value={"organization_id": "o", "user_id": "u-id"})
+    )
+    owner = asyncio.create_task(tools.resolve_actor(first, "u"))
+    await started.wait()
+    waiter = asyncio.create_task(tools.resolve_actor(second, "u"))
+    await asyncio.sleep(0)
+    owner.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await owner
+    assert (await asyncio.wait_for(waiter, 1))["user_id"] == "u-id"
+    assert tools.cached_actor("u")["user_id"] == "u-id"

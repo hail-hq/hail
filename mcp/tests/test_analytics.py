@@ -336,6 +336,10 @@ async def test_unresolved_user_stays_personless(monkeypatch, protocol, lookup_fa
         assert event["distinct_id"] not in {_USER, _ORG}
         assert event["properties"]["$process_person_profile"] is False
         assert "$set" not in event["properties"]
+    calls = [event for name, event in events if name == "$mcp_tool_call"]
+    # An org-only caller still counts under its organization.
+    expected = None if lookup_fails else {"organization": _ORG}
+    assert calls[0]["properties"].get("$groups") == expected
 
 
 @pytest.mark.asyncio

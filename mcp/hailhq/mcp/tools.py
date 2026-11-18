@@ -1939,8 +1939,9 @@ async def _resolve_and_cache(
         ttl = _ACTOR_TTL_SECONDS
     except Exception:
         # Metadata enrichment never decides whether the tool is authorized.
-        # Keep the ids whoami already returned; retry sooner.
-        ttl = _ACTOR_FAILURE_TTL_SECONDS
+        # Keep the ids whoami already returned. Retry sooner only when whoami
+        # itself failed; a slow org-name lookup alone keeps the full TTL.
+        ttl = _ACTOR_TTL_SECONDS if identity else _ACTOR_FAILURE_TTL_SECONDS
     if cache_key:
         if len(_actor_cache) >= _ACTOR_CACHE_MAX:
             _actor_cache.clear()
@@ -1976,8 +1977,17 @@ async def resolve_actor(
                 else None
             )
         )
-    # Shielded: one cancelled caller must not cancel the others' lookup.
-    return dict(await asyncio.shield(lookup))
+        # The lookup runs on this caller's client, which closes when this
+        # caller ends. If this caller is cancelled, the lookup is cancelled
+        # too (nothing is cached) and the other callers look up again.
+        return dict(await lookup)
+    try:
+        return dict(await asyncio.shield(lookup))
+    except asyncio.CancelledError:
+        current = asyncio.current_task()
+        if not lookup.cancelled() or (current and current.cancelling()):
+            raise
+    return await resolve_actor(client, cache_key)
 
 
 @contextlib.asynccontextmanager
