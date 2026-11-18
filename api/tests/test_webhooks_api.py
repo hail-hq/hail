@@ -153,6 +153,30 @@ async def test_patch_disables(client: httpx.AsyncClient, auth_headers: dict[str,
 
 
 @pytest.mark.asyncio
+async def test_create_stamps_created_and_updated_at_alike(
+    client: httpx.AsyncClient,
+    auth_headers: dict[str, str],
+    async_session: AsyncSession,
+):
+    """A new subscription has updated_at == created_at. This catches one of
+    the two stamps going missing; it cannot tell now() from
+    statement_timestamp() when both are missing."""
+    create = await client.post(
+        "/webhooks",
+        json={"target_url": "https://example.com/h", "event_types": ["call.analyzed"]},
+        headers=auth_headers,
+    )
+    created = (
+        await async_session.execute(
+            select(WebhookSubscription).where(
+                WebhookSubscription.id == create.json()["id"]
+            )
+        )
+    ).scalar_one()
+    assert created.updated_at == created.created_at
+
+
+@pytest.mark.asyncio
 async def test_patch_and_rotation_bump_updated_at(
     client: httpx.AsyncClient,
     auth_headers: dict[str, str],
@@ -168,14 +192,6 @@ async def test_patch_and_rotation_bump_updated_at(
         headers=auth_headers,
     )
     sub_id = create.json()["id"]
-    # Create stamps both with the INSERT's own time, not the transaction
-    # start (which came before the auth query and the target URL check).
-    created = (
-        await async_session.execute(
-            select(WebhookSubscription).where(WebhookSubscription.id == sub_id)
-        )
-    ).scalar_one()
-    assert created.updated_at == created.created_at
     for change in (
         lambda: client.patch(
             f"/webhooks/{sub_id}",

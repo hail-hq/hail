@@ -112,16 +112,18 @@ async def create_subscription(
         raise unprocessable(str(exc), loc=["body", "target_url"]) from exc
     secret = _new_secret()
     cipher = SecretCipher(settings.hail_webhook_secret_key)
+    # The INSERT's own time, not the column default now(): now() is the
+    # transaction start, which comes before the target URL check when an
+    # earlier statement (JWT auth) left the transaction open. call.analyzed
+    # compares updated_at with call end times (hailhq.core.call_analysis).
+    stamp = func.statement_timestamp()
     sub = WebhookSubscription(
         organization_id=principal.organization_id,
         target_url=body.target_url,
         secret_encrypted=cipher.encrypt(secret),
         event_types=list(body.event_types),
-        # The INSERT's own time, not the column default now() (the
-        # transaction start, before the target URL check): call.analyzed
-        # compares updated_at with call end times (hailhq.core.call_analysis).
-        created_at=func.statement_timestamp(),
-        updated_at=func.statement_timestamp(),
+        created_at=stamp,
+        updated_at=stamp,
     )
     db.add(sub)
     await db.commit()
