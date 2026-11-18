@@ -54,7 +54,9 @@ _UNAVAILABLE = "Email is not available right now."
 
 
 def _call_with(org_name: str | None) -> str:
-    name = " ".join((org_name or "").split())[:MAX_ORG_NAME_CHARS]
+    # Same cleaning as the subject: no control or format characters in the
+    # fixed words.
+    name = clean_subject(org_name or "")[:MAX_ORG_NAME_CHARS]
     return f"a phone call with {name}" if name else "a phone call"
 
 

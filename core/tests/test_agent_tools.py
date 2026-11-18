@@ -904,3 +904,8 @@ async def test_email_caller_takes_one_plain_mailbox_only():
         )
         assert "full email address" in spoken, bad
     assert api.posts == []
+
+
+def test_email_caller_cleans_the_org_name_in_the_fixed_words():
+    subject = email_caller.framed_subject("Datasheet", "Acme\u202e\u200b Dental")
+    assert subject == "From a phone call with Acme Dental: Datasheet"
