@@ -23,8 +23,8 @@ Tables checked:
 None holds this kind of record, so it gets its own table, linked to
 ``agents`` with ON DELETE CASCADE.
 
-Revision ID: 0082
-Revises: 0081
+Revision ID: 0083
+Revises: 0082
 """
 
 from __future__ import annotations
@@ -33,8 +33,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision: str = "0082"
-down_revision: str | None = "0081"
+revision: str = "0083"
+down_revision: str | None = "0082"
 branch_labels = None
 depends_on = None
 

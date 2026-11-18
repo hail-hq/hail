@@ -265,6 +265,18 @@ def test_hail_mail_head_is_globally_unique(empty_db: str) -> None:
         assert _index_def(conn, "email_domains_hail_mail_prefix_uq") is None
 
 
+def test_call_events_analyzed_marker_is_unique(empty_db: str) -> None:
+    """After 0082 a call has at most one ``analyzed`` call event, so the
+    call.analyzed webhook cannot be sent twice."""
+    _run_alembic(empty_db, ["upgrade", "head"])
+    with psycopg.connect(_to_libpq_url(to_sync_url(empty_db))) as conn:
+        indexdef = _index_def(conn, "call_events_analyzed_uniq")
+        assert indexdef is not None, "call_events_analyzed_uniq missing"
+        assert "UNIQUE" in indexdef
+        assert "(call_id)" in indexdef
+        assert "'analyzed'" in indexdef
+
+
 def test_forward_queue_poll_index_exists(empty_db: str) -> None:
     """After 0010 a partial index covers the forward worker's 1s poll
     (status='queued' AND direction='outbound') so it never seq-scans

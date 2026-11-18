@@ -105,8 +105,8 @@ func resolveIDPrefix[T any](
 	return matchHexPrefix(items, getID, input, label)
 }
 
-func resolveCallID(ctx context.Context, apiClient *client.ClientWithResponses, input string) (uuid.UUID, *client.CallResponse, error) {
-	return resolveIDPrefix(ctx, input, "call",
+func resolveCallID(ctx context.Context, apiClient *client.ClientWithResponses, input string) (uuid.UUID, error) {
+	id, _, err := resolveIDPrefix(ctx, input, "call",
 		func(ctx context.Context, limit int) ([]client.CallResponse, error) {
 			resp, err := apiClient.ListCallsV1CallsGetWithResponse(ctx, &client.ListCallsV1CallsGetParams{Limit: &limit})
 			if err != nil {
@@ -119,6 +119,7 @@ func resolveCallID(ctx context.Context, apiClient *client.ClientWithResponses, i
 		},
 		func(c client.CallResponse) openapi_types.UUID { return c.Id },
 	)
+	return id, err
 }
 
 func resolveEmailID(ctx context.Context, apiClient *client.ClientWithResponses, input string) (uuid.UUID, error) {

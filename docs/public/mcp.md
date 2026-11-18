@@ -30,7 +30,7 @@ Every tool sets the MCP hints `readOnlyHint`, `destructiveHint`, `idempotentHint
 | Tool                            | Does                                                                                                                            |
 | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | `place_call`                    | Originate an outbound phone call.                                                                                               |
-| `get_call`                      | Fetch the current state of one call.                                                                                            |
+| `get_call`                      | Fetch the current state and transcript of one call.                                                                             |
 | `list_calls`                    | List recent calls (cursor-paginated).                                                                                           |
 | `send_sms`                      | Send an outbound SMS (recipient consent is required).                                                                           |
 | `get_sms`                       | Fetch the current state of one SMS.                                                                                             |

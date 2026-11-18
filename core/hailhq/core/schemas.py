@@ -368,6 +368,22 @@ NumberType = Literal["local", "mobile", "toll_free", "national"]
 Capability = Literal["voice", "sms"]
 
 
+class CallTranscriptTurn(BaseModel):
+    role: Literal["user", "assistant"] = Field(
+        description=(
+            "'assistant' is the Hail agent. 'user' is the person (or "
+            "answering machine) on the other end of the line."
+        )
+    )
+    text: str = Field(description="What was said in this turn.")
+    at: datetime = Field(
+        description=(
+            "When the speaker started this turn, ISO 8601. When that is not "
+            "known, when Hail recorded the turn."
+        )
+    )
+
+
 class CallResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -440,6 +456,14 @@ class CallResponse(BaseModel):
     failure_message: str | None = Field(
         default=None,
         description="Human-readable explanation for a failed call. Null for other statuses.",
+    )
+    transcript: list[CallTranscriptTurn] | None = Field(
+        default=None,
+        description=(
+            "What was said on the call, in the order it was said. Set only by "
+            "GET /v1/calls/{call_id}: an empty list until someone speaks. "
+            "Null in POST /v1/calls and GET /v1/calls responses."
+        ),
     )
 
 

@@ -1,0 +1,461 @@
+"""Call transcript and the call.analyzed webhook: picking, sending once."""
+
+from __future__ import annotations
+
+import asyncio
+import uuid
+from datetime import datetime, timedelta, timezone
+
+import pytest
+from hailhq.core.call_analysis import (
+    ANALYZED_KIND,
+    CLAIM_KIND,
+    CLAIM_LEASE,
+    call_transcript,
+    claim_call_to_analyze,
+    send_call_analyzed,
+)
+from hailhq.core.models import (
+    Agent,
+    Call,
+    CallEvent,
+    PhoneNumber,
+    WebhookDelivery,
+    WebhookSubscription,
+)
+from hailhq.core.threads import TEXT_MARKER
+from hailhq.core.webhook_events import WebhookEventType
+from sqlalchemy import func, select, update
+from sqlalchemy.exc import IntegrityError
+
+ORG_NUMBER = "+14155550100"
+PERSON = "+33612345678"
+
+
+async def _seed_call(
+    session,
+    *,
+    org: uuid.UUID | None = None,
+    ended_ago: timedelta = timedelta(minutes=1),
+    turns: list[tuple[str, str]] | None = None,
+    subscribe: bool = True,
+    answered: bool = True,
+) -> Call:
+    org = org or uuid.uuid4()
+    agent = Agent(organization_id=org, name="Front desk", system_prompt="Help.")
+    session.add(agent)
+    await session.flush()
+    number = PhoneNumber(
+        organization_id=org,
+        e164=f"+1415555{uuid.uuid4().int % 10_000:04d}",
+        country_code="US",
+        number_type="local",
+        provisioning_state="active",
+        provider_resource_id=f"PN{uuid.uuid4().hex}",
+    )
+    session.add(number)
+    await session.flush()
+    ended_at = datetime.now(timezone.utc) - ended_ago
+    call = Call(
+        organization_id=org,
+        agent_id=agent.id,
+        to_number_id=number.id,
+        from_e164=PERSON,
+        to_e164=number.e164,
+        direction="inbound",
+        status="completed",
+        end_reason="normal_hangup",
+        provider="twilio",
+        voice_config={},
+        answered_at=ended_at - timedelta(seconds=74) if answered else None,
+        ended_at=ended_at,
+    )
+    session.add(call)
+    await session.flush()
+    start = ended_at - timedelta(seconds=60)
+    for i, (kind, text) in enumerate(
+        turns
+        if turns is not None
+        else [
+            ("agent_turn", "Hi, this is Acme."),
+            ("user_turn", "I'd like to move my appointment."),
+        ]
+    ):
+        session.add(
+            CallEvent(
+                call_id=call.id,
+                kind=kind,
+                payload={
+                    "role": "user" if kind == "user_turn" else "assistant",
+                    "text": text,
+                },
+                occurred_at=start + timedelta(seconds=i),
+            )
+        )
+    if subscribe:
+        session.add(
+            WebhookSubscription(
+                organization_id=org,
+                target_url="https://example.com/hook",
+                event_types=[WebhookEventType.CALL_ANALYZED.value],
+                secret_encrypted="x",
+                created_at=ended_at - timedelta(hours=1),
+                updated_at=ended_at - timedelta(hours=1),
+            )
+        )
+    await session.commit()
+    return call
+
+
+async def _age_claims(session, call_id) -> None:
+    """Make the call's claims older than the lease (the claimer died)."""
+    await session.execute(
+        update(CallEvent)
+        .where(CallEvent.call_id == call_id, CallEvent.kind == CLAIM_KIND)
+        .values(occurred_at=CallEvent.occurred_at - CLAIM_LEASE - timedelta(seconds=1))
+    )
+    await session.commit()
+
+
+async def _subscription(session, org) -> WebhookSubscription:
+    """The org's only subscription (the one ``_seed_call`` made)."""
+    return (
+        await session.execute(
+            select(WebhookSubscription).where(
+                WebhookSubscription.organization_id == org
+            )
+        )
+    ).scalar_one()
+
+
+async def _deliveries(session, call_id) -> list[WebhookDelivery]:
+    return list(
+        (
+            await session.execute(
+                select(WebhookDelivery).where(
+                    WebhookDelivery.event_type == "call.analyzed",
+                    WebhookDelivery.event_id == call_id,
+                )
+            )
+        ).scalars()
+    )
+
+
+async def test_transcript_is_ordered_and_skips_blank_and_texts(async_session) -> None:
+    call = await _seed_call(
+        async_session,
+        turns=[
+            ("agent_turn", "Hi, this is Acme."),
+            ("user_turn", "   "),
+            ("user_turn", TEXT_MARKER + "running late"),
+            ("voice_metrics", "not a turn"),
+            ("user_turn", "Can I come at ten?"),
+        ],
+    )
+    turns = await call_transcript(async_session, call.id)
+    assert [(t["role"], t["text"]) for t in turns] == [
+        ("assistant", "Hi, this is Acme."),
+        ("user", "Can I come at ten?"),
+    ]
+    assert all(datetime.fromisoformat(t["at"]) for t in turns)
+
+
+async def test_transcript_follows_speech_start_not_write_order(
+    async_session,
+) -> None:
+    call = await _seed_call(async_session, turns=[])
+    t0 = call.ended_at - timedelta(seconds=30)
+
+    def turn(kind: str, text: str, written: float, spoken: object) -> CallEvent:
+        payload: dict = {"text": text}
+        if spoken is not None:
+            payload["started_speaking_at"] = spoken
+        return CallEvent(
+            call_id=call.id,
+            kind=kind,
+            payload=payload,
+            occurred_at=t0 + timedelta(seconds=written),
+        )
+
+    async_session.add_all(
+        [
+            # Barge-in: the caller's turn was written before the agent turn
+            # it interrupted, though the agent started speaking first.
+            turn(
+                "user_turn",
+                "Wait, Thursday.",
+                5.0,
+                (t0 + timedelta(seconds=3)).timestamp(),
+            ),
+            turn(
+                "agent_turn",
+                "Your booking is on",
+                5.01,
+                (t0 + timedelta(seconds=1)).timestamp(),
+            ),
+            # No speech start (or a bad one): falls back to the write time.
+            turn("agent_turn", "Moved to Thursday.", 8.0, None),
+            turn("user_turn", "Thanks.", 9.0, "soon"),
+        ]
+    )
+    await async_session.commit()
+    turns = await call_transcript(async_session, call.id)
+    assert [t["text"] for t in turns] == [
+        "Your booking is on",
+        "Wait, Thursday.",
+        "Moved to Thursday.",
+        "Thanks.",
+    ]
+    at = [datetime.fromisoformat(t["at"]) for t in turns]
+    assert abs(at[0] - (t0 + timedelta(seconds=1))) < timedelta(milliseconds=1)
+    assert at[2] == t0 + timedelta(seconds=8)
+
+
+async def test_event_type_is_registered() -> None:
+    assert WebhookEventType("call.analyzed").channel == "Calls"
+
+
+async def test_picks_an_ended_subscribed_call(async_session) -> None:
+    call = await _seed_call(async_session)
+    assert await claim_call_to_analyze(async_session, exclude={call.id}) is None
+    picked = await claim_call_to_analyze(async_session)
+    assert picked is not None and picked.id == call.id
+
+
+async def test_a_live_claim_keeps_the_call_until_the_lease_ends(
+    async_session,
+) -> None:
+    call = await _seed_call(async_session)
+    call_id = call.id
+    assert (await claim_call_to_analyze(async_session)).id == call_id
+    # Claimed: no other worker gets it, so the model runs once.
+    assert await claim_call_to_analyze(async_session) is None
+    # The claimer died: after the lease the call is claimed again.
+    await _age_claims(async_session, call_id)
+    assert (await claim_call_to_analyze(async_session)).id == call_id
+    claims = await async_session.scalar(
+        select(func.count())
+        .select_from(CallEvent)
+        .where(CallEvent.call_id == call_id, CallEvent.kind == CLAIM_KIND)
+    )
+    assert claims == 2
+
+
+async def test_two_workers_race_one_claim(session_factory) -> None:
+    async with session_factory() as s:
+        call = await _seed_call(s)
+
+    async def claim() -> uuid.UUID | None:
+        async with session_factory() as s:
+            picked = await claim_call_to_analyze(s)
+            return picked.id if picked is not None else None
+
+    results = await asyncio.gather(*(claim() for _ in range(4)))
+    assert [r for r in results if r is not None] == [call.id]
+    assert await asyncio.gather(claim(), claim()) == [None, None]
+    async with session_factory() as s:
+        count = await s.scalar(
+            select(func.count())
+            .select_from(CallEvent)
+            .where(CallEvent.call_id == call.id, CallEvent.kind == CLAIM_KIND)
+        )
+        assert count == 1
+
+
+async def test_skips_calls_it_must_not_analyze(async_session) -> None:
+    await _seed_call(async_session, subscribe=False)
+    await _seed_call(async_session, ended_ago=timedelta(hours=25))
+    await _seed_call(async_session, ended_ago=timedelta(seconds=1))
+    await _seed_call(async_session, turns=[])
+    assert await claim_call_to_analyze(async_session) is None
+
+
+async def test_subscription_created_after_the_call_is_not_enough(
+    async_session,
+) -> None:
+    call = await _seed_call(async_session, subscribe=False)
+    async_session.add(
+        WebhookSubscription(
+            organization_id=call.organization_id,
+            target_url="https://example.com/late",
+            event_types=["call.analyzed"],
+            secret_encrypted="x",
+        )
+    )
+    await async_session.commit()
+    assert await claim_call_to_analyze(async_session) is None
+
+
+async def test_adding_the_event_to_an_old_subscription_does_not_replay(
+    async_session,
+) -> None:
+    call = await _seed_call(async_session, subscribe=False)
+    sub = WebhookSubscription(
+        organization_id=call.organization_id,
+        target_url="https://example.com/old",
+        event_types=["call.completed"],
+        secret_encrypted="x",
+        created_at=call.ended_at - timedelta(days=3),
+        updated_at=call.ended_at - timedelta(days=3),
+    )
+    async_session.add(sub)
+    await async_session.commit()
+    # What PATCH /v1/webhooks/{id} writes when the event is added.
+    sub.event_types = ["call.completed", "call.analyzed"]
+    sub.updated_at = func.statement_timestamp()
+    await async_session.commit()
+    assert await claim_call_to_analyze(async_session) is None
+
+
+async def test_disabled_or_other_event_subscription_is_not_enough(
+    async_session,
+) -> None:
+    call = await _seed_call(async_session, subscribe=False)
+    async_session.add_all(
+        [
+            WebhookSubscription(
+                organization_id=call.organization_id,
+                target_url="https://example.com/a",
+                event_types=["call.completed"],
+                secret_encrypted="x",
+                created_at=call.ended_at - timedelta(hours=1),
+                updated_at=call.ended_at - timedelta(hours=1),
+            ),
+            WebhookSubscription(
+                organization_id=call.organization_id,
+                target_url="https://example.com/b",
+                event_types=["call.analyzed"],
+                secret_encrypted="x",
+                status="disabled",
+                created_at=call.ended_at - timedelta(hours=1),
+                updated_at=call.ended_at - timedelta(hours=1),
+            ),
+        ]
+    )
+    await async_session.commit()
+    assert await claim_call_to_analyze(async_session) is None
+
+
+async def test_send_enqueues_one_delivery_with_the_payload(async_session) -> None:
+    call = await _seed_call(async_session)
+    turns = await call_transcript(async_session, call.id)
+    assert await send_call_analyzed(async_session, call.id, turns, "Moved to Thursday.")
+    [delivery] = await _deliveries(async_session, call.id)
+    data = delivery.payload["data"]
+    assert data["id"] == str(call.id)
+    assert data["direction"] == "inbound"
+    assert data["from"] == PERSON
+    assert data["to"] == call.to_e164
+    assert data["agent_id"] == str(call.agent_id)
+    assert data["end_reason"] == "normal_hangup"
+    assert data["duration_seconds"] == 74
+    assert data["summary"] == "Moved to Thursday."
+    assert [t["text"] for t in data["transcript"]] == [
+        "Hi, this is Acme.",
+        "I'd like to move my appointment.",
+    ]
+    marker = (
+        await async_session.execute(
+            select(CallEvent).where(
+                CallEvent.call_id == call.id, CallEvent.kind == ANALYZED_KIND
+            )
+        )
+    ).scalar_one()
+    # The event stream gets counts, never the text.
+    assert marker.payload == {"turns": 2, "summary": True}
+    # Sent once: no second delivery, and the call is not picked again.
+    call_id = call.id  # the refused send rolls back, expiring ``call``
+    assert not await send_call_analyzed(async_session, call_id, turns, "again")
+    assert len(await _deliveries(async_session, call_id)) == 1
+    assert await claim_call_to_analyze(async_session) is None
+    await _age_claims(async_session, call_id)
+    assert await claim_call_to_analyze(async_session) is None
+
+
+async def test_subscription_made_after_the_call_gets_no_delivery(
+    async_session,
+) -> None:
+    call = await _seed_call(async_session)
+    call_id = call.id
+    old_id = (await _subscription(async_session, call.organization_id)).id
+    async_session.add(
+        WebhookSubscription(
+            organization_id=call.organization_id,
+            target_url="https://example.com/late",
+            event_types=["call.analyzed"],
+            secret_encrypted="x",
+        )
+    )
+    await async_session.commit()
+    turns = await call_transcript(async_session, call_id)
+    assert await send_call_analyzed(async_session, call_id, turns, None)
+    [delivery] = await _deliveries(async_session, call_id)
+    assert delivery.subscription_id == old_id
+    # The same ``at`` text as GET /v1/calls/{id} (pydantic JSON).
+    assert delivery.payload["data"]["transcript"][0]["at"].endswith("Z")
+
+
+async def test_a_subscription_changed_after_the_call_gets_no_delivery(
+    async_session,
+) -> None:
+    # The documented rule (webhooks.md): only calls that end after the
+    # subscription was created or last changed are sent. A change while the
+    # call waits (a PATCH, a secret rotation) drops that call's event.
+    call = await _seed_call(async_session)
+    call_id = call.id
+    sub = await _subscription(async_session, call.organization_id)
+    sub.updated_at = func.statement_timestamp()  # what PATCH writes
+    await async_session.commit()
+    turns = await call_transcript(async_session, call_id)
+    assert not await send_call_analyzed(async_session, call_id, turns, None)
+    assert await _deliveries(async_session, call_id) == []
+
+
+async def test_the_database_refuses_a_second_marker(async_session) -> None:
+    call = await _seed_call(async_session)
+    for _ in range(2):
+        async_session.add(CallEvent(call_id=call.id, kind=ANALYZED_KIND, payload={}))
+    with pytest.raises(IntegrityError):
+        await async_session.commit()
+
+
+async def test_summary_null_and_unanswered_duration(async_session) -> None:
+    call = await _seed_call(async_session, answered=False)
+    turns = await call_transcript(async_session, call.id)
+    assert await send_call_analyzed(async_session, call.id, turns, None)
+    [delivery] = await _deliveries(async_session, call.id)
+    assert delivery.payload["data"]["summary"] is None
+    assert delivery.payload["data"]["duration_seconds"] is None
+
+
+async def test_two_senders_race_one_delivery(session_factory) -> None:
+    async with session_factory() as s:
+        call = await _seed_call(s)
+
+    async def send() -> bool:
+        async with session_factory() as s:
+            turns = await call_transcript(s, call.id)
+            return await send_call_analyzed(s, call.id, turns, "Summary.")
+
+    results = await asyncio.gather(send(), send())
+    assert sorted(results) == [False, True]
+    async with session_factory() as s:
+        assert len(await _deliveries(s, call.id)) == 1
+        count = await s.scalar(
+            select(func.count())
+            .select_from(CallEvent)
+            .where(CallEvent.call_id == call.id, CallEvent.kind == ANALYZED_KIND)
+        )
+        assert count == 1
+
+
+async def test_empty_after_filtering_is_marked_not_sent(async_session) -> None:
+    call = await _seed_call(async_session, turns=[("user_turn", "  ")])
+    call_id = call.id
+    assert (await claim_call_to_analyze(async_session)).id == call_id
+    turns = await call_transcript(async_session, call_id)
+    assert turns == []
+    assert not await send_call_analyzed(async_session, call_id, turns, None)
+    assert await _deliveries(async_session, call_id) == []
+    await _age_claims(async_session, call_id)
+    assert await claim_call_to_analyze(async_session) is None
