@@ -329,10 +329,11 @@ paths:
       description:
         "Place an outbound AI voice call.\n\nThe call is placed asynchronously\
         \ \u2014 this returns as soon as the call is\nqueued, not when it completes.\
-        \ Poll GET /v1/calls/{call_id} or configure a\nwebhook to get the final status\
-        \ and transcript. Requires\nrecipient_consent=true on the request body; Hail\
-        \ does not verify lawful\nbasis to contact the recipient, the caller warrants\
-        \ it."
+        \ Poll GET /v1/calls/{call_id} for the final\nstatus and the transcript, or\
+        \ subscribe to webhooks: call.completed (and\nthe other call.* events) for\
+        \ the status, call.analyzed for the transcript\nand a short summary. Requires\
+        \ recipient_consent=true on the request body;\nHail does not verify lawful\
+        \ basis to contact the recipient, the caller\nwarrants it."
       operationId: create_call_v1_calls_post
       parameters:
         - name: authorization
@@ -504,14 +505,19 @@ paths:
         - calls
       summary: Get Call
       description:
-        "Fetch one call by id, including its current status and end reason.
+        "Fetch one call by id, including its current status, end reason
+        and
+
+        transcript.
 
 
         Org-scoped: returns 404 for a call belonging to a different organization
 
         (not 403, to avoid confirming the id exists). Use this to poll for the
 
-        final outcome of a call placed with POST /v1/calls."
+        final outcome of a call placed with POST /v1/calls. The transcript grows
+
+        while the call runs."
       operationId: get_call_v1_calls__call_id__get
       parameters:
         - name: call_id
@@ -6980,6 +6986,17 @@ components:
           description:
             Human-readable explanation for a failed call. Null for other
             statuses.
+        transcript:
+          anyOf:
+            - items:
+                $ref: "#/components/schemas/CallTranscriptTurn"
+              type: array
+            - type: "null"
+          title: Transcript
+          description:
+            "What was said on the call, in the order it was said. Set only by
+            GET /v1/calls/{call_id}: an empty list until someone speaks. Null in POST
+            /v1/calls and GET /v1/calls responses."
       type: object
       required:
         - id
@@ -6998,6 +7015,31 @@ components:
         - answered_at
         - ended_at
       title: CallResponse
+    CallTranscriptTurn:
+      properties:
+        role:
+          type: string
+          enum:
+            - user
+            - assistant
+          title: Role
+          description: "'assistant' is the Hail agent. 'user' is the person (or
+            answering machine) on the other end of the line."
+        text:
+          type: string
+          title: Text
+          description: What was said in this turn.
+        at:
+          type: string
+          format: date-time
+          title: At
+          description: When the speaker started this turn, ISO 8601. When that is not known, when Hail recorded the turn.
+      type: object
+      required:
+        - role
+        - text
+        - at
+      title: CallTranscriptTurn
     ConfirmRequest:
       properties:
         code:
@@ -11127,7 +11169,8 @@ components:
         given_names:
           type: string
           title: Given Names
-          description: The given names of the person the document is about or addressed
+          description:
+            The given names of the person the document is about or addressed
             to, never a person who signs for the issuer.
         surnames:
           type: string
@@ -11148,8 +11191,9 @@ components:
         business_name:
           type: string
           title: Business Name
-          description: The name of the company the document is about or addressed to,
-            never the company that issued it.
+          description:
+            The name of the company the document is about or addressed
+            to, never the company that issued it.
       type: object
       required:
         - given_names
@@ -11672,6 +11716,7 @@ components:
         - call.busy
         - call.no_answer
         - call.transferred
+        - call.analyzed
       title: WebhookEventType
     WebhookSubscriptionCreate:
       properties:
