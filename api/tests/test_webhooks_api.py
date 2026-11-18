@@ -153,14 +153,15 @@ async def test_patch_disables(client: httpx.AsyncClient, auth_headers: dict[str,
 
 
 @pytest.mark.asyncio
-async def test_patch_and_rotation_set_updated_at_on_the_db_clock(
+async def test_patch_and_rotation_bump_updated_at(
     client: httpx.AsyncClient,
     auth_headers: dict[str, str],
     async_session: AsyncSession,
 ):
     """call.analyzed sends only calls that ended after the subscription was
     created or last changed (hailhq.core.call_analysis), so every change
-    bumps updated_at, on the DB clock like the create default."""
+    bumps updated_at. (The test cannot tell now() from statement_timestamp():
+    both fall inside the request.)"""
     create = await client.post(
         "/webhooks",
         json={"target_url": "https://example.com/h", "event_types": ["call.completed"]},

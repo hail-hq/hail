@@ -117,6 +117,10 @@ async def create_subscription(
         target_url=body.target_url,
         secret_encrypted=cipher.encrypt(secret),
         event_types=list(body.event_types),
+        # The INSERT's own time, not the column default now() (the
+        # transaction start, before the target URL check): call.analyzed
+        # compares it with call end times (hailhq.core.call_analysis).
+        updated_at=func.statement_timestamp(),
     )
     db.add(sub)
     await db.commit()
@@ -233,9 +237,8 @@ async def patch_subscription(
         if body.status == "active":
             updates["consecutive_failures"] = 0
     if updates:
-        # DB clock, like the create default: call.analyzed compares it with
-        # call end times (hailhq.core.call_analysis). The UPDATE's own time,
-        # not now() (the transaction start, before the DNS check above).
+        # The UPDATE's own time on the DB clock, as on create: call.analyzed
+        # compares it with call end times (hailhq.core.call_analysis).
         updates["updated_at"] = func.statement_timestamp()
         await db.execute(
             update(WebhookSubscription)
