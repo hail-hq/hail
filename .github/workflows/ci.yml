@@ -2,6 +2,23 @@ name: CI
 
 on:
   pull_request:
+    # A PR that changes only these files runs nothing here: no job lints,
+    # tests or builds them. core/tests/test_deploy_paths.py fails if this
+    # list covers Python, TOML or lock files, costs/, cli/, openapi/, or any
+    # file an image copies.
+    # A skipped run reports no checks, so a required check on main would
+    # block these PRs forever: drop this list before requiring a CI job.
+    paths-ignore:
+      - "**/*.md"
+      - "**/*.tf"
+      - "**/*.hcl"
+      - "docs-site/**"
+      - "web/**"
+      - "shared/**"
+      - "postman/**"
+      - "scripts/postman/**"
+      - ".agents/**"
+      - ".cursor-plugin/**"
   # The deployment workflow runs these checks for its exact main commit.
   workflow_call:
 
@@ -56,8 +73,12 @@ jobs:
         run: uv run --frozen pytest tests -v --durations=20
         env:
           DATABASE_URL: postgresql+psycopg://hail:hail@localhost:5432/hail
+      # Operator scripts (scripts/ops) import hailhq.core, so they run with core.
+      - name: Run ops script tests
+        if: matrix.package == 'core'
+        run: uv run --frozen pytest scripts/ops -v
 
-  # Preserve the existing required check while the suites run in parallel.
+  # One check that sums up every Python suite (none is required on main today).
   test:
     if: ${{ always() }}
     needs: python-tests

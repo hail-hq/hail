@@ -7,7 +7,9 @@
 Some countries require the buyer of a phone number to be verified first (ID, address, or a regulatory bundle). Hail collects the details in the console, files them with the carrier, and follows the carrier's decision. Once approved, `POST /numbers` can buy numbers of that country and type for the organization.
 
 - Twilio is the only carrier plug-in in v1. It is registered in [`core/hailhq/core/providers/verification/__init__.py`](../../core/hailhq/core/providers/verification/__init__.py) and is active whenever `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN` are set.
-- Hail stores state, opaque carrier IDs, and the name of the person or company (`subject_name`). Number verification keeps no addresses or documents. SMS registration retains submitted text fields and address privately for application repair; document files are never kept on the verification (table `carrier_verifications`, [`core/hailhq/core/models.py`](../../core/hailhq/core/models.py)). A document sent with an upload link (`POST /v1/uploads`, then the `upload.<slot>` part) is stored until the verification is saved, then it is deleted. The GC (`core/hailhq/core/email_attachment_gc.py`, every 10 minutes) deletes any left 1 hour after upload. `POST /v1/verifications/check` runs every check before filing and saves nothing. The name is never logged.
+- Hail stores state, opaque carrier IDs, and the name of the person or company (`subject_name`). Number verification keeps the customer's answers and an encrypted copy of each file for 30 days after submit, for a resubmit (see [Kept answers and files](#kept-answers-and-files-resubmit)). SMS registration retains submitted text fields and address privately for application repair, until 30 days after a cancel or rejection, or until the account closes, whichever comes first; document files are never kept on the verification (table `carrier_verifications`, [`core/hailhq/core/models.py`](../../core/hailhq/core/models.py)). A document sent with an upload link (`POST /v1/uploads`, then the `upload.<slot>` part) is stored until the verification is saved, then it is deleted. The GC (`core/hailhq/core/email_attachment_gc.py`, every 10 minutes) deletes any left 1 hour after upload. `POST /v1/verifications/check` runs every check before filing and saves nothing. The name is never logged.
+- **At account close** (`POST /internal/org-closures`, then every background pass for each org in `org_closures`), [`close_org_carrier_items`](../../api/hailhq/api/org_close.py) first releases the org's numbers and cancels its registrations at the carrier (see [Cancel rules](#cancel-rules)). Then [`clear_closed_org_registrations`](../../core/hailhq/core/retention.py) deletes the saved answers and the text made from them (`provider_refs` keys in `REGISTRATION_ANSWER_REFS`: `application`, `application_amendment_hash`, `campaign`, `replies`, `subject_name`), `rejection_reason`, and `subject_name` (except on a live number verification, which a unique index needs named). It keeps the state, dates, carrier ids and billing keys. It logs counts only. hail-website's account deletion calls `POST /internal/org-closures`; an account deleted before that has no closure row, so nothing is cleared for it.
+- **UK (GB):** a new number verification for Telnyx GB local, mobile or toll-free cannot start (Hail sells those from Twilio only), and Telnyx GB national takes a company only (a person gets 422, `ctx.subject_types: ["business"]`). Existing rows still load, poll and cancel. Rules and reason: [number-catalog-sync.md](number-catalog-sync.md#rules-the-sync-cannot-hold).
 - **Customer-facing text never names a carrier.** Error details, docstrings (they become OpenAPI descriptions), and console copy say "the carrier", never "Twilio" or "bundle".
 
 ## Configuration
@@ -21,14 +23,14 @@ Nothing else needs to be set. A `.env` without `HAIL_VERIFICATION_POLL_SECONDS` 
 
 ## Lifecycle
 
-| State             | Meaning                                                       | Who moves it here                                                                           |
-| ----------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `awaiting_review` | Draft exists at the carrier, not yet sent for review.         | `POST /verifications`, or a submit that failed because the carrier was down.                |
-| `submitting`      | Hail is sending it to the carrier right now.                  | `_submit_row` before the carrier call (so a crash cannot submit twice).                     |
-| `submitted`       | Carrier is reviewing.                                         | `_submit_row` after the carrier accepted.                                                   |
-| `approved`        | Carrier approved. Numbers can be bought.                      | `GET` refresh or the background pass, from the carrier's status.                            |
-| `rejected`        | Carrier or a superadmin refused. `rejection_reason` says why. | Carrier status, superadmin reject, or the background pass when the carrier refuses a draft. |
-| `cancelled`       | Customer withdrew or dismissed it.                            | `DELETE /verifications/{id}`.                                                               |
+| State             | Meaning                                                                                                                     | Who moves it here                                                                           |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `awaiting_review` | Draft exists at the carrier, not yet sent for review.                                                                       | `POST /verifications`, or a submit that failed because the carrier was down.                |
+| `submitting`      | Hail is sending it to the carrier right now.                                                                                | `_submit_row` before the carrier call (so a crash cannot submit twice).                     |
+| `submitted`       | Carrier is reviewing.                                                                                                       | `_submit_row` after the carrier accepted.                                                   |
+| `approved`        | Carrier approved. Numbers can be bought.                                                                                    | `GET` refresh or the background pass, from the carrier's status.                            |
+| `rejected`        | Carrier or a superadmin refused. `rejection_reason` says why and what to fix (see [Rejection reasons](#rejection-reasons)). | Carrier status, superadmin reject, or the background pass when the carrier refuses a draft. |
+| `cancelled`       | Customer withdrew or dismissed it.                                                                                          | `DELETE /verifications/{id}`.                                                               |
 
 For a number (`purpose=number`): an organization may hold several live verifications per (carrier, country, number type, `subject_type`): several people, several companies. Only an exact duplicate is refused: the same `subject_type` and the same `subject_name`, ignoring case (unique index `carrier_verifications_number_live_uniq` on `(organization_id, provider, country_code, number_type, subject_type, lower(subject_name))`, rows with a name only). That is a 409 `You already have a verification for <name> as a person/company for this number type.` For US SMS (`purpose=sms`): one live registration per (organization, carrier, country, number type) (`carrier_verifications_sms_live_uniq`). `cancelled` and `rejected` rows do not count, so the customer can start over.
 
@@ -72,10 +74,10 @@ The last log line reads `verification names: N named, N without a name at the ca
 1. `GET /verifications/requirements?quote_id=<quote_id>&country_code=GB&number_type=mobile&subject_type=person` returns the form: fields, address rules, document slots. `subject_type` (`person` or `business`) is required on this route and on `POST /verifications` (422 without it). `quote_id` is the offer's id from `POST /numbers/quotes`. It is required for `purpose=number` (422 without it): Hail reads the carrier from it. A number support orders by hand also has an offer (`by_request: true`) with a `quote_id` for this.
 2. `POST /verifications` (multipart, same `quote_id`) sends the details and files. The carrier evaluates them at once. Problems come back as 422 with the field named, and nothing is stored.
    Credit hold (`purpose=number`, billed key, offer not `by_request`): the balance must cover the quote's `setup_cents + monthly_cents`, else 402 before any carrier call. It is checked again under `org_lock` when the row is saved; a late 402 discards the carrier draft. The same transaction writes a debit `verification_hold:<id>` (source `verification_hold`, channel `voice` or `sms` like a number order). A credit `verification_hold_return:<id>` (source `verification_hold_return`) gives it back when the row becomes `rejected` or `cancelled`, when `POST /numbers` buys with it (same commit as the order's `number_reservation` hold; both 402 checks count the open hold), or when the background pass finds it `approved` for 30 days (`approved_at`) with the hold still open. Helpers: [`core/hailhq/core/verification_hold.py`](../../core/hailhq/core/verification_hold.py). The ledger has no unique index on `ref`; a release locks the hold row, so it is written once. Quote offers show the open hold per verification as `verifications[].held_cents`. Verifications made before holds existed have none (`held_cents` 0).
-3. When the evaluation passes, the row is saved as `awaiting_review` and submitted to the carrier in the same request. There is no human gate. If the carrier is unreachable the row stays `awaiting_review`; the background pass retries. If the carrier refuses to take the draft, the row is `rejected` and the draft discarded (superadmin approve answers 409). If the discard fails, the row keeps its ids and goes back to `awaiting_review` (approve still answers 409).
+3. When the evaluation passes, the row is saved as `awaiting_review` and submitted to the carrier in the same request. There is no human gate. If the carrier is unreachable the row stays `awaiting_review`; the background pass retries. If the carrier refuses to take the draft, the row is `rejected` and the draft discarded (superadmin approve answers 409). If the discard fails on an outage, the row keeps its ids and goes back to `awaiting_review` (approve still answers 409); if the carrier refuses the delete, the row is `rejected` with `discard_refused` (see [Cancel rules](#cancel-rules)).
 4. `GET /verifications/{id}` and `GET /verifications` ask the carrier for the current status at most once a minute per row and update `submitted` rows to `approved` or `rejected`.
 5. Every `HAIL_VERIFICATION_POLL_SECONDS` the background pass (`sweep_verifications` in [`api/hailhq/api/routes/verifications.py`](../../api/hailhq/api/routes/verifications.py)) does:
-   - `awaiting_review` rows untouched for 2 minutes: lock the row (`FOR UPDATE SKIP LOCKED`), ask the carrier to check the draft. Pass → submit. Refused → `rejected` with the carrier's message, draft discarded, audit `verification.reject` by `system`. Before the discard, ids the carrier call wrote are committed, and the row is locked again (waiting, not skipping); a row that changed meanwhile is left as it is. Discard fails → the row keeps its ids and its state. Carrier down → the ids it wrote are saved; try next pass. A check, submit, status poll, or discard (of a refused draft or a superadmin reject) that fails partway keeps only the ids it added (new keys, empty values filled in, items appended to a list, the same inside nested objects); keys it removed or changed go back to what they were. A customer cancel's discard is not covered: it fails as a whole.
+   - `awaiting_review` rows untouched for 2 minutes: lock the row (`FOR UPDATE SKIP LOCKED`), ask the carrier to check the draft. Pass → submit. Refused → `rejected` with the carrier's message, draft discarded, audit `verification.reject` by `system`. Before the discard, ids the carrier call wrote are committed, and the row is locked again (waiting, not skipping); a row that changed meanwhile is left as it is. Discard fails on an outage → the row keeps its ids and its state; the carrier refuses the delete → `rejected` with `discard_refused`. Carrier down → the ids it wrote are saved; try next pass. A check, submit, status poll, or discard (of a refused draft or a superadmin reject) that fails partway keeps only the ids it added (new keys, empty values filled in, items appended to a list, the same inside nested objects); keys it removed or changed go back to what they were. A customer cancel's discard is not covered: it fails as a whole.
    - `submitting` and `submitted` rows: refresh from the carrier. A `submitting` row older than 5 minutes is settled from the carrier's status. A poll that fails keeps only the ids it added, as above.
 6. Quotes and purchases read the org's approved rows with `approved_handles` (a list per carrier, newest first, each with its `subject_type` and `subject_name`, carrier ids from each plug-in's `purchase_handle`). Hail's rows decide which approval is used. The carrier only confirms it is still valid, in its `offers` adapter: Twilio by bundle SID and the bundle's regulation (individual = person), Telnyx by requirement group id (kind-blind), DIDWW by address id. A carrier-side approval with no Hail row is not used. `POST /numbers/quotes` first refreshes the org's submitted rows for that country (at most once a minute per row).
 7. Each offer lists `subject_types` (who the carrier accepts) and `verifications`: every live row for its carrier, country and type (`id`, `state`, `subject_type`, `subject_name`), approved first, then newest. `POST /numbers` takes `verification_id` (Hail's id): it must be one of the org's approved number rows that the carrier still accepts for this offer, else 422 on `verification_id`. Without it, the one approved valid row is used (after the optional `subject_type` filter); more than one is a 422 on `verification_id` (`You have more than one verification for this number. Pass verification_id.`). `subject_type` alone still gives `Verify as a person first` / `Verify as a company first` when that kind has no valid approval. The number stores `subject_type`, `subject_name` and `verification_row_id` in `provisioning_metadata.offer`; `PhoneNumberResponse` returns `subject_type`, `subject_name` and `verification_id` from it. A carrier rejection after the purchase (DIDWW) rejects that row only.
@@ -216,9 +218,90 @@ registration does not verify toll-free messaging.
 
   CLI: `hail numbers confirm-sms <verification-id> --code 482913`.
 
-- **`TWILIO_PRIMARY_PROFILE_SID`.** The approved Trust Hub primary profile (business identity ISV Reseller or Partner) that every Twilio brand is created under. Without it the Twilio SMS registration plug-in is off: `purpose=sms` with Twilio returns 404.
+- **`TWILIO_PRIMARY_PROFILE_SID`.** The approved Trust Hub primary profile (business identity ISV Reseller or Partner) that every Twilio brand is created under. It is required for local 10DLC registration. Toll-free verification and read-only approval checks need the Twilio credentials but do not use this local setting.
 
 - **Owner emails.** When a verification becomes `approved` or `rejected` (carrier poll, superadmin reject, a draft the carrier refuses, a bought number whose registration is refused), the API pings the website after the commit (`notify_verification_decided`, `POST /api/internal/verifications/decided`). Session listeners in [`verification_decisions.py`](../../api/hailhq/api/verification_decisions.py) send the ping for any row whose `state` changed to one of those, so a new path needs no extra call. Polls lock the row, so two polls at once send one email. Hail Cloud's website emails the org's owners. A ping is fire-and-forget: if the website is down, that email is not sent. Self-hosted installs without the website send nothing.
+
+## Document check (AI read)
+
+`POST /v1/verifications/document-check` (MCP `check_verification_documents`) reads the files of a number verification form with an AI model before submit. The console calls it once per uploaded file, only after the admin ticks the consent box and clicks "Use my document to fill in the fields". A file that stands for other slots (one passport for several proofs) is sent once, with `documents.<slot>.covers` naming those slots; one read fills all of them. It returns the values each file shows, by the carrier's field names, and warnings: unreadable, turned, expired, another document type, or a typed name that differs from the printed one. Hail words every warning; the model only reads. Every name it reads is the holder's: the person or company the document is about or addressed to, never the issuer (a bank, phone company, utility or authority). Code: [`document_check.py`](../../core/hailhq/core/providers/verification/document_check.py), [`document_reader.py`](../../core/hailhq/core/providers/llm/document_reader.py), [`document_reads.py`](../../core/hailhq/core/document_reads.py) (the cap).
+
+- **Model:** `DOCUMENT_READER_MODEL`, code default `ANTHROPIC_BACKUP_MODEL` (Haiku 5.5). Not in `.env.example`: set it only to try another model. It must take effort `low` and structured output; its thinking-off value comes from `THINKING_OFF` ([`thinking.py`](../../core/hailhq/core/providers/llm/thinking.py)). Bedrock when `ANTHROPIC_BEDROCK_REGION` is set, else Anthropic's API ([voice-llm.md](voice-llm.md)).
+- **Fallback models:** when another model may help (`_next_model_may_help` in `document_reader.py`: a missing model or one without access, a rate limit (set per model on Bedrock and Anthropic's API), a server or connection error, or a 400 or 424 whose text names a model problem, not the file), the same read tries `ANTHROPIC_BACKUP_MODEL`, then `ANTHROPIC_MODEL`, each id once, each with its own thinking-off value. Any other 400 or 424, or a 413, is about the file: the document goes to no other model. Never after a timeout, and only with at least 1 s left of the same 15 s. A fallback never uses a second read. Logs name the exception type and the try number only. Probed on 2026-11-16, Bedrock eu-central-1: Haiku 5.5 and Sonnet 5.5 (with `between_tools`) read a PNG and a PDF; Sonnet 5.5 with `disabled` is a 400. Probed on 2026-11-17: an unknown Bedrock id is a 400 "The provided model identifier is invalid." A model that refuses the request is harmless: the read fails open.
+- **Cautions after an edit:** `POST /v1/verifications/document-cautions` (JSON, console only, no MCP tool) gives the `name`, `document_type` and `expired` warnings again for the form as typed and chosen now, from the reads the console got earlier (`documents.<slot>.read`, the whole object the check returned). Same rules as the check (`document_cautions` in `document_check.py`); no file, no model, no read used. The "does not look like one" type warning and the expiry need `none_of_types` and `expiry_date` in the read; slots with the same `file_slot` get one name check per box. The carrier's form is kept 10 minutes per API process for this route (`_caution_forms`), so an edit does not call the carrier. Requests that miss at once share one carrier call. A slot missing from a form kept 30 s or longer fetches the form once more before the 422. If the carrier is down for that fetch, the kept form answers, one warning line is logged, and the next try waits 30 s again. If the carrier refuses (a 4xx, like a subject type it no longer takes), the kept form is dropped and that refusal answers for 10 minutes, without another carrier call.
+- **Fails open:** no model, an error on every model tried, a timeout, a refusal, a PDF of more than 5 pages, a file that is not its declared type, a PNG or progressive JPEG over 40 million pixels (larger baseline JPEGs are decoded at a reduced scale), more than 15 s, under 1 s left before the send, a failed bucket fetch, a file past the 30 MB total, or a failed cap reservation gives `read: false` for those slots and no warning; the other files are still read. The customer fills the form by hand. Only the first 3 pages of a PDF go to the model. Files are prepared in a child process without credentials ([`document_image.py`](../../core/hailhq/core/providers/llm/document_image.py), run by [`isolated_process.py`](../../core/hailhq/core/isolated_process.py), shared with the voicebot's attachment reader), one at a time per API process, with 512 MB of memory and 10 s each: the server has no swap, and live calls run beside the API. The model gets only what is left of the 15 s.
+- **Cap:** 30 reads per workspace per UTC day (`DAILY_DOCUMENT_READS`). A read is one file sent to the model, whatever happens to the call after (an error, a timeout). A request reserves its reads before any file is fetched, so a workspace over the cap costs nothing; a reserved read whose file was never sent (not readable, over the limits, not decoded) is given back. With no model configured nothing is reserved or fetched. One file given for several slots (one upload, or one passport covering several proofs) is read once and counts once. Past the cap a slot is `read: false` with `skipped: "daily_limit"`, no error and no warning; the console shows "You have used today's document reads. Fill in the boxes below." A Haiku 5.5 read costs well under 1 cent. A read that falls back to Sonnet 5.5 costs more. A refused request or a missing model is not billed; a try that fails after the model answered in part can be. So the 30 reads bound the count, not a fixed price per day.
+- **Count:** rows in `agent_send_log` with `channel = 'document_read'` and the slot name as `recipient`. Today's usage for a workspace:
+
+  ```sql
+  SELECT count(*) FROM agent_send_log
+  WHERE organization_id = '<org id>' AND channel = 'document_read'
+    AND created_at >= date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC';
+  ```
+
+- **Privacy:** the files go to the model provider for this read only. Logs hold counts and exception types, never a value, a name or the answer.
+
+**Open decision: charge per read or keep free.** Reads are free to customers now; Hail pays the provider. Options:
+
+1. Charge per read from credits. Needs a per-read price in the website rater (prices are kept out of this repo) and a usage row the rater prices.
+2. Keep free, with the daily cap (today).
+3. Free only for workspaces that hold credits; others fill the form by hand.
+
+## Kept answers and files (resubmit)
+
+A rejected number registration (`purpose=number`) can be fixed and filed again without typing everything again:
+
+```bash
+curl -X POST https://api.hail.so/v1/verifications/$ID/resubmit \
+  -H "Authorization: Bearer $HAIL_API_KEY" \
+  -F 'fields={"first_name":"Ada","last_name":"King"}' \
+  -F 'file.proof_of_identity=@passport.jpg;type=image/jpeg'
+```
+
+What Hail keeps, from the moment of `POST /verifications`:
+
+| What                                                        | Where                                                                                                                                                                                                                                                                                                              |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Typed answers (fields, address, document options, quote id) | `carrier_verifications.provider_refs.application` (the same key US texting uses). Encrypted with Fernet and `HAIL_PROVIDER_SECRET_KEY` under `sealed`; only `schema_version` and `quote_id` stay readable. Without that key (self-host), stored as plain JSON. If the key changes, the answers read as gone (404). |
+| Each file                                                   | Mail bucket, `verification-kept/<org>/<upload id>`, written with S3 server-side encryption (`AES256`). Row in `file_uploads` with `purpose = 'verification_kept'`, `verification_id` and `slot`.                                                                                                                   |
+
+When it is deleted (whichever comes first):
+
+| Trigger                             | Answers                                                                  | Files                                                                                                                                                                                                 |
+| ----------------------------------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 30 days after submit (`created_at`) | Background pass (`forget_kept_registrations`). Reads return 404 at once. | Background pass.                                                                                                                                                                                      |
+| Carrier approves                    | At once (`_apply_status`).                                               | Right after that commit (`_refresh`); the background pass retries.                                                                                                                                    |
+| Customer cancels (`DELETE`)         | At once (`_wiped_refs`).                                                 | Right after the cancel; the background pass retries.                                                                                                                                                  |
+| Resubmit filed                      | Moved to the new row in the same commit.                                 | Files sent again move to the new row in the same commit (no copy), and each object is copied onto itself so the lifecycle clock restarts. The old row's other files are deleted after the new filing. |
+| Account close                       | `POST /internal/org-closures` and every pass.                            | Same.                                                                                                                                                                                                 |
+| Backstop                            | none                                                                     | S3 lifecycle rule `expire-verification-kept`: 32 days.                                                                                                                                                |
+
+A rejection (carrier, carrier refusal of the draft, or superadmin) keeps both. The background pass runs every `HAIL_VERIFICATION_POLL_SECONDS` (600 s). A failed S3 delete keeps the row and is retried on the next pass. A failed S3 write at submit only logs (`could not keep the files of verification <id>`); the files written before it stay kept, the filing goes ahead, and the customer adds the missing files again on a resubmit. No value or file name is ever logged.
+
+Resubmit rules ([`resubmit_verification`](../../api/hailhq/api/routes/verifications.py)):
+
+- Only a `rejected` number registration whose answers are kept (`resubmittable: true`, `kept_until` on the verification). Else 409 or 404.
+- `fields`, `address`, `documents` each replace the kept value whole. `file.<slot>` / `upload.<slot>` replace that slot's kept file; other slots reuse the kept file while they keep the document option it was filed with (a new option needs a new file). `quote_id` defaults to the kept quote. The quote purge (`purge_expired_quotes`) skips a quote a kept application names, so it works for the console's form and the resubmit for the 30 days. A 409 means that offer is no longer sold: quote again and pass the new one.
+- `purpose`, `country_code`, `number_type`, `subject_type`, `number_id` cannot change (422). `provider` is ignored, as on `POST /verifications`.
+- The new filing runs every check of `POST /verifications` (422, 402 credit hold, 409). Nothing changes on the old row unless the new one is saved. Then the old row is dismissed like `DELETE` (carrier draft discarded); if the carrier is down, it stays `rejected` with nothing kept.
+- Two resubmits at once: the first to commit takes the answers; the other gets 409 and its carrier draft is discarded.
+- `GET /verifications/{id}/application` returns the kept answers, file names (never the bytes), `quote_id` and `hold_cents` (what a resubmit sets aside), `Cache-Control: no-store`. MCP: `get_sms_application`, `resubmit_verification`.
+
+Support resubmits for a customer with the same call, using an API key of the customer's workspace (the console uses "Fix and resubmit" on the rejected row). Find kept rows:
+
+```sql
+BEGIN READ ONLY;
+SELECT v.id, v.organization_id, v.state, v.created_at + interval '30 days' AS kept_until,
+       count(f.id) AS files
+FROM carrier_verifications v
+LEFT JOIN file_uploads f ON f.verification_id = v.id AND f.purpose = 'verification_kept'
+WHERE v.purpose = 'number' AND v.provider_refs ? 'application'
+GROUP BY v.id
+ORDER BY v.created_at DESC;
+ROLLBACK;
+```
+
+Infra: the API's IAM policy needs `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject` on `verification-kept/*` and `s3:ListBucket` with that prefix ([`infra/terraform/iam.tf`](../../infra/terraform/iam.tf)), plus the lifecycle rule in [`infra/terraform/s3_mail.tf`](../../infra/terraform/s3_mail.tf). Apply the Terraform stack before or with the deploy (`cd infra && terragrunt apply`). Until then, keeping files fails open (answers are kept, files are not).
 
 ## Cancel rules
 
@@ -229,10 +312,44 @@ registration does not verify toll-free messaging.
 - `submitting`, `submitted` → **409** while review is pending. Exception: an SMS campaign already accepted by the carrier but waiting in `runtime_setup` (`campaign_accepted=true`, `runtime_ready=false`) can be cancelled. The API rates the existing campaign before discarding it and rechecks eligibility under locks, preserving normal billing and provider cleanup behavior. A `needs_information` registration is repaired with PATCH on its existing row, not cancellation. Every verification response carries `cancellable`: true when `DELETE` accepts the row now. Clients show Cancel from it.
 - `approved` with `purpose=sms` → `cancelled`. Each number on it (`phone_numbers.sms_registration_id`) leaves the campaign (Telnyx unlink; a person's Twilio number leaves the person's service and is set up in the org's service again), then the campaign, brand, bundle and profile are discarded. `cancelled_at` is set; the website rater bills the monthly fee through that month. Telnyx bills at least 3 monthly fees from approval, so for Telnyx the rater bills through the later of the cancel month and the approval month + 2 (`minimum_months` in `costs/sms-registration.json`). Audit row `verification.cancel`.
 - `approved` with `purpose=number`, `cancelled` → 409.
+- Carrier delete failed. Every plug-in's `discard` runs all its steps, then raises ([`DiscardFailures`](../../core/hailhq/core/providers/verification/base.py)); a record the carrier no longer holds (404, 410) counts as deleted. An error that escapes `discard` outside its steps counts the same way ([`counted_discard`](../../core/hailhq/core/providers/verification/base.py), on every discard: customer cancel, account close, background pass, superadmin reject). Any httpx or requests transport error (a lost connection, a timeout, a response cut off in transit) is an outage. The error nearest the one raised decides: a lost connection while handling a 403 is an outage. A number's unlink from an SMS registration (`detach_number`) counts the same way: a 404 is done, an outage answers 503, and a refusal lets the cancel go through with the number in `discard_refused.unlinks`; at close it follows the close column. An error outside the carrier delete (the database) answers 500 on the route and is retried with no limit at close. How a failure counts is one table, [`failure_kind`](../../core/hailhq/core/carrier_routing.py):
+
+  | Failure                                                                   | `DELETE /verifications/{id}`                                                                  | Account close                             |
+  | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | ----------------------------------------- |
+  | 5xx, timeout, lost connection, 401, 408, 425, 429, carrier not configured | **503** `carrier unavailable; try again later`. Nothing changes: state, carrier ids, numbers. | Retried every pass, no limit.             |
+  | 403, 409 (the carrier refuses this record for now)                        | Cancelled in Hail, ids kept in `provider_refs.discard_refused`.                               | Retried for 7 days, then `close_refused`. |
+  | Any other 4xx (400, 422)                                                  | Cancelled in Hail, ids kept in `discard_refused`.                                             | `close_refused` at once.                  |
+  | A step that failed with no carrier answer and no network error (a bug)    | Cancelled in Hail, ids kept in `discard_refused` (`status` null).                             | Retried for 7 days, then `close_refused`. |
+
+  On a 503, the numbers of an approved SMS registration may already have left the campaign at the carrier (that runs before `discard`); a retry is safe, as both steps accept work already done. A cancel that goes through on a refusal stops Hail's fees like any cancel (`cancelled_at`; `_notify_billing`). A draft that failed while it was made is cleaned up best effort (`discard_draft`), so the error that stopped it is the one reported.
+
+**`discard_refused`** (`{"status": <HTTP status or null>, "at": <ISO time>, "held": {<carrier ids>}}`): the row ended in Hail (`cancelled`, or `rejected` by the background pass or a superadmin) while the carrier still holds a record. `held` has the carrier ids and flags, never the customer's answers. When the carrier refused to unlink a number, `unlinks` lists each one (`number_id`, `provider_resource_id`, `status`): unlink it at the carrier by hand. `status` is the delete's, else the first unlink's. The mark stays when a rejected row is dismissed. Ops deletes what `held` names at the carrier by hand, then removes the key. Find them:
+
+```sql
+BEGIN READ ONLY;
+SELECT id, organization_id, provider, purpose, state, updated_at,
+       provider_refs->'discard_refused' AS discard_refused
+FROM carrier_verifications
+WHERE provider_refs ? 'discard_refused'
+ORDER BY updated_at DESC;
+ROLLBACK;
+```
+
+At account close ([`hailhq.api.org_close`](../../api/hailhq/api/org_close.py), not a route): every row that is not `cancelled` is cancelled, in any state, with the whole filing discarded (no brand kept). A `cancelled` row with `provider_refs.kept_brand_id` has that brand discarded and the key dropped. A row waits while a number it covers is not released yet (a number verification: the org's numbers of its carrier, country and type; an SMS registration: the numbers on it and its toll-free number). When the carrier refused that number's release (`release_refused`), the row is not cancelled: it is marked `close_refused` with `status` null and the `number_id`, its ids kept for the delete by hand. The close does not call the fee rater and writes no audit row. A failure counts as in the table above. A refusal is stored as `provider_refs.close_refused` (`status`, `at`) and the row is not tried again, with its state and carrier ids. The 7-day window starts at the first 403, 409 or bug (`provider_refs.close_failing_since`; `provisioning_metadata.close_failing_since` on a number); a success or any failure that does not count clears it, so it only measures refusals that keep coming. A closed org's numbers that leave a person's Twilio campaign are not set up for SMS again. Left at the carrier after a close: a Twilio texting brand (no delete API), and a Telnyx brand within 3 months of its campaign. The background pass submits, polls and attaches nothing for a closed org. Find what a close left at the carrier:
+
+```sql
+BEGIN READ ONLY;
+SELECT id, organization_id, provider, purpose, state,
+       provider_refs->'close_refused' AS close_refused
+FROM carrier_verifications
+WHERE provider_refs ? 'close_refused'
+ORDER BY organization_id;
+ROLLBACK;
+```
 
 ## Superadmin routes
 
-`/admin/verifications` (list, `POST /{id}/approve`, `POST /{id}/reject`) are not in the OpenAPI spec. Only a console session the website minted with `superadmin: true` passes ([`api/hailhq/api/superadmin.py`](../../api/hailhq/api/superadmin.py)); API keys never do. The console page lives in hail-website at `app/console/admin/verifications/`. Approve re-checks the draft with the carrier, then submits; reject records the reason and discards the draft. If the row changed while a filed campaign was rated (the background pass submitted it, say), reject answers 409 and discards nothing. If the discard fails, reject answers 502 and the row keeps its state and ids. Both write an audit row (`verification.approve`, `verification.reject`) with the admin as actor.
+`/admin/verifications` (list, `POST /{id}/approve`, `POST /{id}/reject`) are not in the OpenAPI spec. Only a console session the website minted with `superadmin: true` passes ([`api/hailhq/api/superadmin.py`](../../api/hailhq/api/superadmin.py)); API keys never do. The console page lives in hail-website at `app/console/admin/verifications/`. Approve re-checks the draft with the carrier, then submits; reject records the reason and discards the draft. If the row changed while a filed campaign was rated (the background pass submitted it, say), reject answers 409 and discards nothing. If the discard fails on an outage, reject answers 502 and the row keeps its state and ids; if the carrier refuses the delete, the row is rejected with `discard_refused`. Both write an audit row (`verification.approve`, `verification.reject`) with the admin as actor.
 
 ## Where to look
 
@@ -253,3 +370,63 @@ registration does not verify toll-free messaging.
 ## Known gaps
 
 - `VerificationResponse.provider` returns the carrier name to the customer. It predates the "never name a carrier" rule and has not been changed.
+
+## Toll-free texting verification
+
+Use `purpose=sms`, `number_type=toll_free`, the number's `country_code` (`US` or
+`CA`), and its owned `number_id`. Read `/v1/verifications/requirements` first.
+Each verification covers exactly one number. `carrier_verifications.number_id`
+links that number and permits separate live requests for separate toll-free
+numbers. This path currently supports Twilio only.
+
+Toll-free verification is free. It creates no 10DLC brand, campaign, OTP or fee.
+The API does not notify the 10DLC fee rater. Before a Cloud filing, it checks the
+website's signed `POST /api/internal/sms-registrations/capabilities` response for
+`{"toll_free":{"supported":true,"filing_cents":0,"monthly_cents":0}}`.
+An old, unavailable or malformed website response stops filing before any carrier
+write or verification row. Self-hosted installs with no website need no handshake.
+Deploy Hail first, then the website's free-TFV billing guards and UI. New filings
+stay unavailable during that gap. Keep those guards when rolling back a website
+that already has toll-free verification rows.
+
+Submit the end business's real identity, contact, address and public business
+website or social page. Supply clear message purposes, branded samples, exact
+opt-in steps, separate optional consent and public redacted evidence for every
+selected method. Verbal consent needs a script document. Marketing needs written
+consent. Dedicated privacy and terms URLs are always filed. Hail never fetches
+these arbitrary evidence URLs. Public email domains are not rejected locally.
+
+A lost create response is recovered by the owned carrier number and a hash of
+the exact submitted answers. Existing unmatched carrier requests return a 422 on `number_id` that names support.
+Editable rejections keep the same row in `submitted` / `needs_information`.
+`PATCH /v1/verifications/{id}/application` checks the original sender, confirms
+that the carrier still permits edits, and updates the same carrier request.
+The send gate blocks US and Canadian recipients until this exact number has an
+approved verification. Another number's approval never unlocks it. Existing
+manual Twilio approvals continue through a read-only check: the current incoming
+phone resource must match the owned SID, E.164 number and authenticated account.
+Every TFV record read must match the same SID/account, and the newest one must be
+`TWILIO_APPROVED`. An error, timeout or mismatch fails closed. A "yes" is kept
+for 10 minutes in each API process, so a revoked approval, or a number moved
+out of the Twilio account, stops sends within 10 minutes. A "no" is not kept. This check writes no provider or
+Hail registration and stores no guessed customer identity. Other carriers keep
+their existing carrier-side checks until Hail supports their TFV API.
+
+Official guidance checked November 14, 2026:
+[approval guidance](https://www.twilio.com/en-us/blog/insights/best-practices/improving-your-chances-of-toll-free-verification-approval),
+[API onboarding](https://www.twilio.com/docs/messaging/compliance/toll-free/api-onboarding),
+[verification API](https://www.twilio.com/docs/messaging/api/tollfree-verification-resource).
+The SDK regression tests use the pinned real SDK with an offline HTTP recorder.
+No live provider filing, message, charge or refund is part of local validation.
+
+## Rejection reasons
+
+A number verification the carrier rejects gets a `rejection_reason` the customer can act on.
+The console, the rejection email, the API and the MCP server all show it.
+The plug-in builds it in `status()` with [`rejections.py`](../../core/hailhq/core/providers/verification/rejections.py):
+
+- **Twilio.** The bundle holds no reason. Each rejected supporting document has `failure_reason` and `errors[].code`, and the newest evaluation lists failed fields. A known code gets Hail's fix (`TWILIO_FIXES`, from Twilio's 18001-18064 error list). Any other code shows Twilio's text after "The carrier said:". Some rejections carry no reason at all; then the generic line stays.
+- **Telnyx.** The requirement group lists each `declined` or `expired` requirement. Hail names it from `GET /requirement_types/{id}`.
+- **DIDWW.** DIDWW rejects the registration when a number is ordered. The order step (`rejected_registration` in `api/hailhq/api/number_orders.py`) puts the address verification's `reject_reasons` and `reject_comment` after "The carrier said:".
+
+The carrier's text can quote what the customer filed. It is shown to the workspace (console, API, MCP) and in the rejection email to the workspace owners, sent through the email provider. It is kept in the audit row `verification.reject` (`carrier_reason`), and never logged.

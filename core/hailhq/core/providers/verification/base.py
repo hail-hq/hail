@@ -12,13 +12,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from abc import ABC, abstractmethod
-from collections.abc import Mapping
+from collections.abc import Awaitable, Mapping
 from types import MappingProxyType
-from typing import Literal
+from typing import Literal, TypeVar
 
 from hailhq.core.schemas import Address
 from pydantic import BaseModel, ConfigDict, Field, computed_field
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "BRAND_REJECTED",
@@ -29,6 +32,8 @@ __all__ = [
     "SMS_VALUE_REFUSED",
     "VALUE_NOT_ACCEPTED",
     "Address",
+    "DiscardFailures",
+    "DiscardRefused",
     "DocumentInput",
     "DocumentOption",
     "DocumentSlot",
@@ -46,6 +51,8 @@ __all__ = [
     "VerificationProvider",
     "VerificationProviderError",
     "VerificationRequirements",
+    "counted_discard",
+    "escaped_discard_error",
 ]
 
 SubjectType = Literal["person", "business"]
@@ -54,6 +61,93 @@ FieldKind = Literal["text", "email", "phone", "url", "choices"]
 
 class VerificationProviderError(Exception):
     """The carrier failed in a way the customer cannot fix (outage, auth)."""
+
+
+class DiscardRefused(VerificationProviderError):
+    """``discard`` left a record the carrier still holds, and a retry soon
+    will not delete it: the carrier refused (a 403, a 409 or a final 4xx;
+    ``carrier_routing.failure_kind``), or a step failed with no carrier
+    answer and no network error (a bug). Raised from the first such error,
+    so ``carrier_http_status`` reads its status (None for a bug)."""
+
+
+class DiscardFailures:
+    """The failed steps of one ``discard``, which runs every step and then
+    calls ``raise_any``. Logs the carrier, step, error type and status only,
+    never the carrier's text."""
+
+    def __init__(self, carrier: str) -> None:
+        self.carrier = carrier
+        self.retry: BaseException | None = None
+        self.refused: BaseException | None = None
+
+    def add(self, exc: BaseException, step: str) -> None:
+        # Imported here: carrier_routing imports the voice adapters, and the
+        # Twilio and DIDWW ones import these verification plug-ins.
+        from hailhq.core.carrier_routing import carrier_http_status, failure_kind
+
+        kind = failure_kind(exc, unknown="refused")
+        if kind == "gone":
+            return
+        logger.warning(
+            "%s discard step %s failed (%s, %s, status=%s)",
+            self.carrier,
+            step,
+            kind,
+            type(exc).__name__,
+            carrier_http_status(exc),
+        )
+        if kind == "outage":
+            self.retry = self.retry or exc
+        else:
+            self.refused = self.refused or exc
+
+    def raise_any(self, message: str) -> None:
+        """Raise when a step failed: ``VerificationProviderError`` when one
+        must be tried again (an outage wins: once it passes, a retry may
+        get further), else ``DiscardRefused``."""
+        if self.retry is not None:
+            raise VerificationProviderError(message) from self.retry
+        if self.refused is not None:
+            raise DiscardRefused(message) from self.refused
+
+
+def escaped_discard_error(exc: BaseException) -> VerificationProviderError | None:
+    """``exc`` raised by a ``discard`` outside its steps (``DiscardFailures``
+    only sees errors inside a step), as ``discard`` would have raised it:
+    None when the carrier no longer holds the record (404, 410),
+    ``VerificationProviderError`` for an outage, else ``DiscardRefused``
+    (a refusal, or a bug). Raise the result ``from exc``."""
+    # Imported here: see DiscardFailures.add.
+    from hailhq.core.carrier_routing import failure_kind
+
+    if isinstance(exc, VerificationProviderError):
+        return exc
+    kind = failure_kind(exc, unknown="refused")
+    if kind == "gone":
+        return None
+    if kind == "outage":
+        return VerificationProviderError("discard failed")
+    return DiscardRefused("discard refused")
+
+
+_T = TypeVar("_T")
+
+
+async def counted_discard(call: Awaitable[_T]) -> _T | None:
+    """Await a ``discard`` (or ``discard_rejected``) call, counting an error
+    that escapes its steps as ``escaped_discard_error`` does: None when the
+    carrier no longer holds the record, else ``VerificationProviderError``
+    (an outage) or ``DiscardRefused``."""
+    try:
+        return await call
+    except Exception as exc:
+        error = escaped_discard_error(exc)
+        if error is exc:
+            raise
+        if error is not None:
+            raise error from exc
+        return None
 
 
 class RegistrationHoldsAnotherNumber(VerificationProviderError):
@@ -262,7 +356,9 @@ class Requirements(VerificationRequirements):
 
 
 class UploadedFile(BaseModel):
-    """File bytes held in memory only. Never written to disk or the database."""
+    """File bytes held in memory for the carrier call. Never written to disk
+    or the database. A number registration also keeps an encrypted copy in
+    the mail bucket for a resubmit (``hailhq.core.file_uploads``)."""
 
     model_config = ConfigDict(frozen=True, repr=False)
 
@@ -338,10 +434,13 @@ class ProviderStatus(BaseModel):
     ``pending``: submitted and under review."""
 
     state: Literal["draft", "pending", "approved", "rejected"]
-    # Shown to the customer: Hail's own wording.
+    # Shown to the customer and emailed to the workspace owners. Hail's own
+    # wording, which can quote the carrier's text (see rejections.py), so
+    # never log it.
     reason: str | None = None
-    # The carrier's own text for a rejection. Kept in the audit log only;
-    # never logged, never shown to the customer.
+    # The carrier's own text for a rejection. Kept in the audit log; never
+    # logged. ``reason`` may quote it when Hail has no fix of its own
+    # (see rejections.py).
     raw_reason: str | None = None
 
 
@@ -393,7 +492,25 @@ class VerificationProvider(ABC):
 
     @abstractmethod
     async def discard(self, refs: dict) -> None:
-        """Delete a draft. Best effort; never raises."""
+        """Delete the draft or filing at the carrier. Runs every step, then
+        raises (``DiscardFailures``): ``VerificationProviderError`` when a
+        step must be tried again (an outage), ``DiscardRefused`` when the
+        carrier refused or a step failed with no carrier answer. Either way
+        the carrier still holds a record: the caller keeps its ids. A record
+        the carrier no longer holds (404) counts as done."""
+
+    async def discard_draft(self, refs: dict) -> None:
+        """``discard`` for a draft that failed while it was made: best
+        effort, never raises, so the error that stopped the draft is the
+        one reported."""
+        try:
+            await self.discard(refs)
+        except Exception as exc:
+            logger.warning(
+                "verification draft cleanup failed: %s (%s)",
+                type(self).__name__,
+                type(exc).__name__,
+            )
 
     def subject_name(
         self,
@@ -458,9 +575,11 @@ class SmsRegistrationProvider(VerificationProvider):
         self, refs: dict, *, provider_resource_id: str, e164: str
     ) -> bool:
         """Take a number off the campaign (before a release, or when the
-        registration is cancelled). Best effort; never raises. True when the
-        number also left its messaging service, so the caller clears
-        ``messaging_service_sid`` and may set the number up again."""
+        registration is cancelled). Not linked (a 404) counts as done. Raises
+        the carrier's error when the link stays; a cancel counts it as a
+        ``discard`` error (``escaped_discard_error``), a release logs it.
+        True when the number also left its messaging service, so the caller
+        clears ``messaging_service_sid`` and may set the number up again."""
         return False
 
     async def confirm(self, refs: dict, code: str) -> list[Problem]:
@@ -520,6 +639,14 @@ class SmsRegistrationProvider(VerificationProvider):
         None means support must restore authoritative details before amendment.
         """
         return None
+
+    async def amend_filed_application(
+        self, refs, fields, address, subject_type
+    ) -> None:
+        """Resubmit a free per-number verification when the carrier permits it."""
+        raise VerificationProviderError(
+            "This registration does not accept changes. Contact support."
+        )
 
     async def recover_campaign(self, refs: dict) -> bool:
         """Read-only discovery of a previously filed campaign; never create one."""

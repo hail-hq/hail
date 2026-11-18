@@ -26,6 +26,7 @@ from didww.configuration import Environment
 from didww.exceptions import DidwwApiError
 from hailhq.core.carrier_offer import Approval, CarrierOffer, cents, number_prefix
 from hailhq.core.config import settings
+from hailhq.core.providers.verification.rejections import sentence
 from hailhq.core.providers.voice.base import (
     CarrierNotConfigured,
     CarrierPreOrderError,
@@ -581,11 +582,8 @@ def _revoke_sync(address_id: str, org: UUID, country: str, kind: str) -> str | N
         return None
     newest = max(rejected, key=lambda v: v["attributes"].get("created_at") or "")
     attrs = newest["attributes"]
-    parts = [
-        "; ".join(r for r in attrs.get("reject_reasons") or [] if r),
-        attrs.get("reject_comment") or "",
-    ]
-    return " - ".join(p.strip() for p in parts if p.strip()) or None
+    parts = [*(attrs.get("reject_reasons") or []), attrs.get("reject_comment") or ""]
+    return " ".join(sentence(p) for p in parts if p and p.strip()) or None
 
 
 async def revoke_registration(
@@ -665,6 +663,11 @@ async def revoke(offer: CarrierOffer, org: UUID) -> str | None:
 # (docs/public/self-host/didww.md). ``DIDWW_VOICE_IN_TRUNK_ID`` is created once
 # by the operator; Hail assigns a DID to it when the number routes calls to an
 # agent and clears it when the agent is removed.
+#
+# A DID needs call capacity too: Hail buys the 0-channel (metered) plan, and
+# DIDWW rejects every call to a DID with no capacity. Attaching also puts the
+# DID in the account's capacity group with pay-per-minute channels (made once
+# by the operator in the DIDWW panel, no monthly fee).
 
 
 class _NoSuchDid(Exception):
@@ -685,18 +688,67 @@ def _did_id_sync(resource_id: str | None, e164: str) -> str:
     raise _NoSuchDid(f"{e164} is not a DID on this DIDWW account")
 
 
-def _set_voice_in_trunk_sync(did_id: str, trunk_id: str | None) -> None:
+def _set_voice_in_trunk_sync(
+    did_id: str, trunk_id: str | None, capacity_group_id: str | None = None
+) -> None:
     data = {"type": "voice_in_trunks", "id": trunk_id} if trunk_id else None
+    relationships: dict = {"voice_in_trunk": {"data": data}}
+    if capacity_group_id:
+        relationships["shared_capacity_group"] = {
+            "data": {"type": "shared_capacity_groups", "id": capacity_group_id}
+        }
     didww_client().patch(
         f"dids/{did_id}",
-        {
-            "data": {
-                "id": did_id,
-                "type": "dids",
-                "relationships": {"voice_in_trunk": {"data": data}},
-            }
-        },
+        {"data": {"id": did_id, "type": "dids", "relationships": relationships}},
     )
+
+
+def _channels(group: dict | None) -> int:
+    """Calls a capacity group can carry at once: pay-per-minute plus shared."""
+    attrs = (group or {}).get("attributes") or {}
+    return (attrs.get("metered_channels_count") or 0) + (
+        attrs.get("shared_channels_count") or 0
+    )
+
+
+def _capacity_group_sync(did_id: str) -> str | None:
+    """The capacity group to put the DID in, or None to leave it as it is.
+
+    A DID already in a group with channels keeps it: an operator may have
+    given it paid shared channels. Otherwise the account's group with the
+    most pay-per-minute channels (sorted by id on a tie, so the pick is
+    stable). Without one, no DIDWW number Hail sells can take a call."""
+    client = didww_client()
+    # DIDWW returns a relationship's data only when it is included.
+    did = client.get(f"dids/{did_id}", params={"include": "shared_capacity_group"})
+    current = (
+        (did["data"].get("relationships") or {}).get("shared_capacity_group") or {}
+    ).get("data")
+    if current:
+        group = next(
+            (
+                i
+                for i in did.get("included", [])
+                if i.get("type") == current.get("type")
+                and i.get("id") == current.get("id")
+            ),
+            None,
+        )
+        if _channels(group) > 0:
+            return None
+    groups = client.get("shared_capacity_groups", params={"page[size]": 100}).get(
+        "data", []
+    )
+    metered = [
+        (-((g.get("attributes") or {}).get("metered_channels_count") or 0), g["id"])
+        for g in groups
+    ]
+    metered = [m for m in metered if m[0] < 0]
+    if not metered:
+        raise CarrierNotConfigured(
+            "DIDWW has no capacity group with pay-per-minute channels"
+        )
+    return min(metered)[1]
 
 
 async def attach_inbound_number(resource_id: str | None, e164: str) -> None:
@@ -705,7 +757,9 @@ async def attach_inbound_number(resource_id: str | None, e164: str) -> None:
 
     def attach() -> None:
         did_id = _did_id_sync(resource_id, e164)
-        _set_voice_in_trunk_sync(did_id, settings.didww_voice_in_trunk_id)
+        _set_voice_in_trunk_sync(
+            did_id, settings.didww_voice_in_trunk_id, _capacity_group_sync(did_id)
+        )
 
     try:
         await asyncio.to_thread(attach)

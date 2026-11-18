@@ -28,12 +28,15 @@ from hailhq.core.models import (
 )
 from hailhq.core.number_offers import CarrierOffer, discover_offers
 from hailhq.core.providers.verification import get_verification_provider
+from hailhq.core.providers.verification.rejections import customer_reason
 from hailhq.core.providers.voice import (
     CarrierPreOrderError,
     CarrierRequestError,
 )
+from hailhq.core.retention import org_closed, org_is_closed
 from hailhq.core.schemas import NumberAcquireRequest
-from sqlalchemy import and_, delete, or_, select, update
+from sqlalchemy import and_, case, cast, delete, or_, select, update
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -50,6 +53,10 @@ QUOTE_RETENTION = timedelta(hours=24)
 # Consumed quotes answer replays of the purchase that used them (idempotency
 # keys live 24h) and are deleted after this long.
 CONSUMED_QUOTE_RETENTION = timedelta(days=7)
+# Text Postgres reads as a uuid: 32 hex digits, optional hyphens between
+# groups of 4, in braces or not (both braces or neither).
+_UUID_HEX = r"[0-9a-f]{4}(-?[0-9a-f]{4}){7}"
+_UUID_TEXT = rf"^(\{{{_UUID_HEX}\}}|{_UUID_HEX})$"
 
 NUMBER_TAKEN_DETAIL = "This number is already held or has a pending order"
 NUMBER_SETUP_HELP_DETAIL = (
@@ -106,7 +113,8 @@ async def finish_order(
 
     ``reason`` is stored for a failed order and shown to the buyer; it is
     Hail's own wording, never the carrier's text (``rejected_registration``
-    keeps that as ``carrier_reason`` in the metadata).
+    keeps that as ``carrier_reason`` in the metadata and on the
+    verification).
     ``keep_setup`` charges the setup fee even on failure:
     the carrier already billed it and does not refund (the number was
     bought, then its registration was rejected or never cleared)."""
@@ -151,7 +159,12 @@ async def finish_order(
         meta["failure_reason"] = reason or "the carrier did not complete the order"
     number.provisioning_metadata = meta
     await db.commit()
-    if not failed and "sms" in number.capabilities:
+    if (
+        not failed
+        and "sms" in number.capabilities
+        # A closed org's number is released by the close step, not set up.
+        and not await org_is_closed(db, number.organization_id)
+    ):
         # The number is bought and billed; SMS setup is a separate, retried
         # step (assigning a texts agent or POST /enable-sms runs it again).
         # The commit above released the transaction-scoped org lock. Take it
@@ -173,7 +186,7 @@ async def finish_order(
 
 
 # Shown to the buyer when the carrier refuses the end-user registration of a
-# bought number. Hail's own wording, never the carrier's.
+# bought number and gives no reason.
 REGISTRATION_REJECTED = (
     "the carrier rejected the end-user registration; "
     "start a new verification with corrected details"
@@ -205,11 +218,13 @@ async def rejected_registration(
 ) -> str:
     """The carrier refused the end-user registration of a bought number.
     Releases the number, takes the approval back and marks the Hail
-    verification rejected. Returns the reason shown to the buyer: Hail's own
-    wording. The carrier's text is kept in the DB only (the audit row's
-    ``carrier_reason`` and the number's
-    ``provisioning_metadata['carrier_reason']``): never logged, never shown.
-    The log line names the carrier and the org, number and verification ids.
+    verification rejected. The verification's ``rejection_reason`` quotes
+    the carrier's text, if any, so the customer knows what to fix. The
+    returned order reason is Hail's own wording only: it reaches the 409
+    (which Logfire records) and the number's metadata. The carrier's text
+    is also kept in the audit row's ``carrier_reason`` and the number's
+    ``provisioning_metadata['carrier_reason']``. It is never logged: the log
+    line names only the carrier and the org, number and verification ids.
 
     Caller holds the org lock and fails the order. The carrier calls run
     under that lock on purpose: two concurrent reconciles must never both
@@ -232,7 +247,14 @@ async def rejected_registration(
                 "approval back by hand: number=%s",
                 number.id,
             )
-    reason = REGISTRATION_REJECTED
+    # DIDWW's reasons come from a fixed list plus a reviewer's note; Hail
+    # has no fixes for them, so the customer reads the carrier's words.
+    reason = customer_reason(
+        [],
+        [raw or ""],
+        fallback=REGISTRATION_REJECTED,
+        next_step="start a new verification",
+    )
     verification = await _purchase_verification(db, number)
     # Not the carrier's text: a reviewer's note can quote the customer's
     # papers, and logs leave this server. It is kept in the DB below.
@@ -251,8 +273,8 @@ async def rejected_registration(
         }
     if verification is not None:
         verification.state = "rejected"
-        # Hail's wording for the customer; the carrier's text is in the
-        # audit row below.
+        # Hail's wording plus the carrier's text; the carrier's text alone
+        # is in the audit row below.
         verification.rejection_reason = reason
         verification.updated_at = datetime.now(timezone.utc)
         # Same audit trail as every other system-driven rejection
@@ -267,7 +289,12 @@ async def rejected_registration(
             actor_user_id=None,
             actor_kind="system",
         )
-    return reason
+        if raw and raw.strip():
+            # The order's failure_reason reaches the 409 (which Logfire
+            # records) and the number's metadata: Hail's wording only. The
+            # carrier's text stays on the verification.
+            return f"{REGISTRATION_REJECTED}; the verification's rejection_reason says what to fix"
+    return REGISTRATION_REJECTED
 
 
 async def _purchase_verification(
@@ -528,6 +555,14 @@ async def acquire_offer(
                 f"${offer.setup_cents / 100:.2f} setup); "
                 "request a new quote"
             ),
+        )
+    # A quote made before Hail stopped selling this kind of number at this
+    # carrier (telephony_catalog.not_sold): another carrier may still sell it,
+    # so this says refresh, not "we don't offer".
+    if telephony_catalog.not_sold(offer.provider, country, kind):
+        raise HTTPException(
+            status_code=409,
+            detail="This offer is no longer available; refresh number offers",
         )
     catalog_capabilities(country, kind, offer.provider)
     if row.expires_at <= datetime.now(timezone.utc):
@@ -1021,11 +1056,23 @@ async def retry_unreleased_numbers():
 
 async def purge_expired_quotes() -> int:
     """Delete stale quotes: unused ones after QUOTE_RETENTION, consumed ones
-    after CONSUMED_QUOTE_RETENTION. Returns how many."""
+    after CONSUMED_QUOTE_RETENTION. Returns how many. A quote a number
+    registration kept for a resubmit stays while its answers are kept (30
+    days after submit at most): the resubmit and the console's form read the
+    carrier and the credit to set aside from it."""
     now = datetime.now(timezone.utc)
     async with session_scope() as db:
+        # One uncorrelated subquery: Postgres reads the kept quotes once,
+        # and the ids compare as uuids (any spelling Postgres reads as one).
+        # A value that is not a UUID is skipped, never fails the purge.
+        quote_id = CarrierVerification.provider_refs["application"]["quote_id"].astext
+        is_uuid = quote_id.op("~*")(_UUID_TEXT)
+        kept = select(cast(case((is_uuid, quote_id)), PG_UUID(as_uuid=True))).where(
+            CarrierVerification.purpose == "number", is_uuid
+        )
         result = await db.execute(
             delete(NumberOffer).where(
+                NumberOffer.id.notin_(kept),
                 or_(
                     and_(
                         NumberOffer.number_id.is_(None),
@@ -1035,7 +1082,7 @@ async def purge_expired_quotes() -> int:
                         NumberOffer.number_id.is_not(None),
                         NumberOffer.expires_at < now - CONSUMED_QUOTE_RETENTION,
                     ),
-                )
+                ),
             )
         )
         await db.commit()
@@ -1062,6 +1109,10 @@ async def sync_sms_setup() -> None:
                         PhoneNumber.provisioning_state == "active",
                         PhoneNumber.messaging_service_sid.is_(None),
                         PhoneNumber.capabilities.any("sms"),
+                        # Never set up a closed org's number: it is released.
+                        ~org_closed(
+                            PhoneNumber.organization_id, datetime.now(timezone.utc)
+                        ),
                     )
                     .limit(50)
                 )

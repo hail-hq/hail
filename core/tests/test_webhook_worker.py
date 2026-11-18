@@ -436,3 +436,55 @@ async def test_tick_emits_both_subscription_and_domain_headers(async_session):
     assert await worker.tick() == 1
     assert captured[0]["X-Hail-Subscription"] == str(sub.id)
     assert captured[0]["X-Hail-Email-Domain"] == str(dom.id)
+
+
+@pytest.mark.asyncio
+async def test_delivery_holds_no_session_while_posting(async_session, session_factory):
+    """A slow customer server must not hold a pooled connection: the POST
+    runs between two short sessions."""
+    org_id = uuid.uuid4()
+    sub = WebhookSubscription(
+        organization_id=org_id,
+        target_url="https://hooks.example.com/h",
+        secret_encrypted="plain",
+        event_types=["email.received"],
+    )
+    async_session.add(sub)
+    await async_session.commit()
+    delivery = WebhookDelivery(
+        subscription_id=sub.id,
+        event_type="email.received",
+        event_id=uuid.uuid4(),
+        payload={"organization_id": str(org_id), "data": {"id": "evt_x"}},
+    )
+    async_session.add(delivery)
+    await async_session.commit()
+
+    open_sessions = 0
+    open_during_post: list[int] = []
+
+    @asynccontextmanager
+    async def factory():
+        nonlocal open_sessions
+        open_sessions += 1
+        try:
+            # Separate sessions, as in production: the row is detached
+            # between the read and the result write.
+            async with session_factory() as session:
+                yield session
+        finally:
+            open_sessions -= 1
+
+    async def fake_post(url, body, headers):
+        open_during_post.append(open_sessions)
+        return 500, "down"
+
+    worker = WebhookWorker(
+        session_factory=factory, http_post=fake_post, decrypt=lambda c: c
+    )
+    assert await worker.tick() == 1
+    assert open_during_post == [0]
+    await async_session.refresh(delivery)
+    assert delivery.status == "pending"
+    assert delivery.attempt == 1
+    assert delivery.response_status == 500

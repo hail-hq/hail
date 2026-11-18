@@ -107,7 +107,7 @@ async def test_upgrade_moves_carrier_text_and_downgrade_restores_it(
         org,
         "Website lacks business information",
         purpose="sms",
-        number_type="toll_free",
+        number_type="national",
         provider_refs={"brand_id": "B1", "campaign_id": "C1"},
         state="cancelled",
     )

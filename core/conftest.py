@@ -4,6 +4,7 @@ from hailhq.core.testing.fixtures import (  # noqa: F401
     database_schemas,
     database_url,
     db,
+    fresh_db_pools,
     prepare_database,
     session_factory,
 )

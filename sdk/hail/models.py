@@ -128,6 +128,15 @@ class CallCreate(BaseModel):
         return self
 
 
+class CallTranscriptTurn(BaseModel):
+    """One spoken turn of a call. ``role`` is ``assistant`` for the Hail
+    agent and ``user`` for the other side."""
+
+    role: Literal["user", "assistant"]
+    text: str
+    at: datetime
+
+
 class CallResponse(BaseModel):
     """Shape returned by ``POST /calls`` and ``GET /calls/{id}``."""
 
@@ -153,6 +162,9 @@ class CallResponse(BaseModel):
     answered_at: datetime | None = None
     ended_at: datetime | None = None
     failure_message: str | None = None
+    # Set only by ``GET /calls/{id}`` (``get_call``); None in lists and
+    # create responses.
+    transcript: list[CallTranscriptTurn] | None = None
 
 
 class CallListResponse(BaseModel):
@@ -896,6 +908,7 @@ __all__ = [
     "CallListResponse",
     "CallResponse",
     "CallStatus",
+    "CallTranscriptTurn",
     "DkimRecord",
     "DmarcCheck",
     "DnsProvider",

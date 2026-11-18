@@ -11,6 +11,9 @@ import {
   COSTS_SITE_DESCRIPTION,
   COSTS_SITE_TITLE,
 } from "@/lib/site-copy";
+import { SITE_ORIGIN } from "@/lib/url";
+import { JsonLd } from "../../../shared/JsonLd";
+import { collectionSchema } from "../../../shared/structured-data";
 
 export const dynamic = "force-static";
 
@@ -67,6 +70,21 @@ export default function CostsPage() {
 
   return (
     <>
+      <JsonLd
+        data={collectionSchema({
+          title: COSTS_HERO_COPY.heading,
+          description: COSTS_SITE_DESCRIPTION,
+          path: "/costs",
+          origin: SITE_ORIGIN,
+          items: [
+            { name: "Language models", path: "/costs#llm" },
+            { name: "Speech recognition", path: "/costs#stt" },
+            { name: "Speech synthesis", path: "/costs#tts" },
+            { name: "Phone numbers", path: "/costs#telephony" },
+            { name: "SMS", path: "/costs#sms" },
+          ],
+        })}
+      />
       <div className="dispatch-tape">
         <div className="wrap row">
           <div className="left">
@@ -76,12 +94,7 @@ export default function CostsPage() {
         </div>
       </div>
 
-      <header
-        style={{
-          padding: "clamp(72px,9vw,120px) 0 clamp(52px,7vw,88px)",
-          borderBottom: "1px solid var(--color-ink)",
-        }}
-      >
+      <header className="costs-hero">
         <div className="wrap">
           <div className="hero-grid">
             <div className="costs-hero-copy">
@@ -104,10 +117,7 @@ export default function CostsPage() {
                 <dd>CC-BY-4.0</dd>
                 <dt>Source</dt>
                 <dd>
-                  <a
-                    href="https://github.com/hail-hq/hail/tree/main/costs"
-                    style={{ textDecoration: "underline" }}
-                  >
+                  <a href="https://github.com/hail-hq/hail/tree/main/costs">
                     github / hail-hq
                   </a>
                 </dd>
@@ -129,7 +139,9 @@ export default function CostsPage() {
               <div className="k">LLMs</div>
               <div className="v">{llm.models.length}</div>
               <div className="n">
-                {rowRange(llm.models, 'output_per_mtok_usd',
+                {rowRange(
+                  llm.models,
+                  "output_per_mtok_usd",
                   2,
                   0,
                   "Mtok output",
@@ -140,18 +152,16 @@ export default function CostsPage() {
               <div className="k">STT</div>
               <div className="v">{stt.models.length}</div>
               <div className="n">
-                {rowRange(stt.models, 'price_per_minute_usd',
-                  6,
-                  4,
-                  "min",
-                )}
+                {rowRange(stt.models, "price_per_minute_usd", 6, 4, "min")}
               </div>
             </div>
             <div className="stat">
               <div className="k">TTS</div>
               <div className="v">{tts.models.length}</div>
               <div className="n">
-                {rowRange(tts.models, 'price_per_1m_chars_usd',
+                {rowRange(
+                  tts.models,
+                  "price_per_1m_chars_usd",
                   0,
                   0,
                   "1M chars",
@@ -162,12 +172,8 @@ export default function CostsPage() {
               <div className="k">SMS</div>
               <div className="v">{sms.providers.length}</div>
               <div className="n">
-                {rowRange(sms.providers, 'usd_per_segment',
-                  5,
-                  5,
-                  "segment",
-                )}{" "}
-                · base
+                {rowRange(sms.providers, "usd_per_segment", 5, 5, "segment")} ·
+                base
               </div>
             </div>
             <div className="stat">
@@ -203,70 +209,36 @@ export default function CostsPage() {
       <TelephonySection data={numbers} />
       <SmsSection data={sms.providers} />
 
-      <section
-        style={{
-          padding: "36px 0",
-          borderBottom: "2px solid var(--color-ink)",
-          background: "var(--color-paper)",
-        }}
-      >
+      <section className="costs-data">
         <div className="wrap">
-          <h3
-            style={{
-              fontSize: 15,
-              fontWeight: 600,
-              color: "var(--color-mute)",
-              margin: "0 0 14px",
-            }}
-          >
-            Programmatic access
-          </h3>
-          <p style={{ maxWidth: "60ch", margin: "0 0 18px", fontSize: 15 }}>
+          <h2>Programmatic access</h2>
+          <p>
             The full dataset is published as JSON and Markdown. Agents and
             scripts should fetch directly:
           </p>
-          <ul
-            style={{
-              listStyle: "none",
-              padding: 0,
-              margin: 0,
-              fontFamily: "var(--font-mono)",
-              fontSize: 13,
-              lineHeight: 1.9,
-            }}
-          >
+          <ul>
             <li>
-              <a href="/costs/costs.md" style={{ textDecoration: "underline" }}>
-                /costs.md
-              </a>{" "}
-              · markdown view (this page)
+              <a href="/costs/costs.md">/costs.md</a> · markdown view (this
+              page)
             </li>
             <li>
-              <a
-                href="https://raw.githubusercontent.com/hail-hq/hail/main/costs/llm.json"
-                style={{ textDecoration: "underline" }}
-              >
+              <a href="https://raw.githubusercontent.com/hail-hq/hail/main/costs/llm.json">
                 raw / costs/llm.json
               </a>
             </li>
             <li>
-              <a
-                href="https://raw.githubusercontent.com/hail-hq/hail/main/costs/stt.json"
-                style={{ textDecoration: "underline" }}
-              >
+              <a href="https://raw.githubusercontent.com/hail-hq/hail/main/costs/stt.json">
                 raw / costs/stt.json
               </a>
             </li>
             <li>
-              <a
-                href="https://raw.githubusercontent.com/hail-hq/hail/main/costs/tts.json"
-                style={{ textDecoration: "underline" }}
-              >
+              <a href="https://raw.githubusercontent.com/hail-hq/hail/main/costs/tts.json">
                 raw / costs/tts.json
               </a>
             </li>
             <li>
-              Phone numbers, one file per carrier (Twilio&apos;s also holds the 10DLC fees):{" "}
+              Phone numbers, one file per carrier (Twilio&apos;s also holds the
+              10DLC fees):{" "}
               <code>
                 https://raw.githubusercontent.com/hail-hq/hail/main/costs/twilio.json
               </code>
@@ -279,19 +251,13 @@ export default function CostsPage() {
               </code>
             </li>
           </ul>
-          <p style={{ maxWidth: "60ch", margin: "18px 0 0", fontSize: 15 }}>
+          <p>
             See this data applied:{" "}
-            <a
-              href="https://hail.so/tools/voice-agent-cost-calculator"
-              style={{ textDecoration: "underline" }}
-            >
+            <a href="https://hail.so/tools/voice-agent-cost-calculator">
               AI voice agent cost calculator
             </a>{" "}
             ·{" "}
-            <a
-              href="https://hail.so/tools/sms-length-calculator"
-              style={{ textDecoration: "underline" }}
-            >
+            <a href="https://hail.so/tools/sms-length-calculator">
               SMS length &amp; segment calculator
             </a>
             {" — free tools built on these numbers."}

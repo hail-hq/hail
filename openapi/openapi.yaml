@@ -329,10 +329,11 @@ paths:
       description:
         "Place an outbound AI voice call.\n\nThe call is placed asynchronously\
         \ \u2014 this returns as soon as the call is\nqueued, not when it completes.\
-        \ Poll GET /v1/calls/{call_id} or configure a\nwebhook to get the final status\
-        \ and transcript. Requires\nrecipient_consent=true on the request body; Hail\
-        \ does not verify lawful\nbasis to contact the recipient, the caller warrants\
-        \ it."
+        \ Poll GET /v1/calls/{call_id} for the final\nstatus and the transcript, or\
+        \ subscribe to webhooks: call.completed (and\nthe other call.* events) for\
+        \ the status, call.analyzed for the transcript\nand a short summary. Requires\
+        \ recipient_consent=true on the request body;\nHail does not verify lawful\
+        \ basis to contact the recipient, the caller\nwarrants it."
       operationId: create_call_v1_calls_post
       parameters:
         - name: authorization
@@ -388,7 +389,11 @@ paths:
               schema:
                 type: integer
         "402":
-          description: insufficient credits; top up at https://hail.so/console/billing
+          description:
+            insufficient credits; top up at https://hail.so/console/billing.
+            Also returned when the credit left, less what live calls have set aside,
+            pays for less than one minute to this destination. A call's time limit
+            is cut to the minutes the credit pays for.
         "422":
           description: Validation Error
           content:
@@ -500,14 +505,19 @@ paths:
         - calls
       summary: Get Call
       description:
-        "Fetch one call by id, including its current status and end reason.
+        "Fetch one call by id, including its current status, end reason
+        and
+
+        transcript.
 
 
         Org-scoped: returns 404 for a call belonging to a different organization
 
         (not 403, to avoid confirming the id exists). Use this to poll for the
 
-        final outcome of a call placed with POST /v1/calls."
+        final outcome of a call placed with POST /v1/calls. The transcript grows
+
+        while the call runs."
       operationId: get_call_v1_calls__call_id__get
       parameters:
         - name: call_id
@@ -676,7 +686,7 @@ paths:
 
         ```
 
-        curl -sS -X PUT --data-binary @passport.jpg '<upload_url>'
+        curl --silent --show-error --globoff --upload-file 'passport.jpg' '<upload_url>'
 
         ```
 
@@ -1864,11 +1874,14 @@ paths:
         - email-domains
       summary: Patch Email Domain
       description:
-        "Edit hail-mail prefixes and/or inbound action settings.\n\nTwo\
-        \ modes, mutually compatible:\n\n* **Prefix edit** (``local_prefix_user``\
+        "Edit hail-mail prefixes, the send switch, and/or inbound action.\n\
+        \nFour modes, mutually compatible:\n\n* **Prefix edit** (``local_prefix_user``\
         \ / ``local_prefix_org``):\n  hail_mail rows only. The managed-cloud console\
         \ writes here when\n  an org admin changes the visible hail-mail address.\n\
-        * **Inbound action edit** (``inbound_enabled`` / ``forward_to`` /\n  ``forward_rate_per_hour``):\
+        * **Send switch** (``sends_enabled``): custom rows only. ``false``\n  stops\
+        \ the domain from sending at all \u2014 it is skipped by sender\n  selection\
+        \ and a send that names it explicitly is refused with 422.\n* **Inbound action\
+        \ edit** (``inbound_enabled`` / ``forward_to`` /\n  ``forward_rate_per_hour``):\
         \ any row kind.\n* **Agent route** (``email_agent_id`` / ``email_agent_scope``):\
         \ any row\n  kind. The agent must be in the organization, live, and answer\
         \ email."
@@ -2710,18 +2723,20 @@ paths:
                 maxItems: 2
               - type: "null"
             description:
-              "Optional. Keep only options that do all these jobs. Without
-              it, each number type shows its best option in this order: buy now before
-              order by hand, then ready now, then options that do every job the type
-              offers (even when a number that does fewer jobs costs less), then lower
-              price, then fewer papers."
+              "Optional. Keep only options that do all these jobs, priced
+              and listed for these jobs only, the same as /numbers/quotes. Without it,
+              options are priced for every job they do, and each number type shows its
+              best option in this order: buy now before order by hand, then ready now,
+              then options that do every job the type offers (even when a number that
+              does fewer jobs costs less), then lower price, then fewer papers."
             title: Capabilities
           description:
-            "Optional. Keep only options that do all these jobs. Without
-            it, each number type shows its best option in this order: buy now before
-            order by hand, then ready now, then options that do every job the type offers
-            (even when a number that does fewer jobs costs less), then lower price,
-            then fewer papers."
+            "Optional. Keep only options that do all these jobs, priced and
+            listed for these jobs only, the same as /numbers/quotes. Without it, options
+            are priced for every job they do, and each number type shows its best option
+            in this order: buy now before order by hand, then ready now, then options
+            that do every job the type offers (even when a number that does fewer jobs
+            costs less), then lower price, then fewer papers."
         - name: authorization
           in: header
           required: false
@@ -2853,7 +2868,11 @@ paths:
 
         messaging registration requirements. `provider` is ignored: Hail compares
 
-        every carrier.
+        every carrier. A US or Canada `toll_free` search that asks for `sms`
+
+        returns only carriers whose toll-free numbers Hail can register for
+
+        texting.
 
 
         A number support orders by hand comes back as an offer with
@@ -5140,12 +5159,14 @@ paths:
                 format: uuid
               - type: "null"
             description:
-              "For purpose=sms: id of one of your US numbers. The carrier
-              is read from it. Needed when your US numbers are with more than one carrier."
+              "For purpose=sms: id of an owned US local or US/Canadian toll-free
+              number. Required for toll-free verification. The carrier is read from
+              it. Needed when your US numbers are with more than one carrier."
             title: Number Id
           description:
-            "For purpose=sms: id of one of your US numbers. The carrier is
-            read from it. Needed when your US numbers are with more than one carrier."
+            "For purpose=sms: id of an owned US local or US/Canadian toll-free
+            number. Required for toll-free verification. The carrier is read from it.
+            Needed when your US numbers are with more than one carrier."
         - name: authorization
           in: header
           required: false
@@ -5263,7 +5284,8 @@ paths:
 
         Parts: `purpose` (`number`, the default, or `sms` to register to send SMS
 
-        in the US; `sms` takes `country_code=US` and `number_type=local`; its fees
+        in the US; use US/local for 10DLC, or US/CA and toll_free with number_id for
+        free per-number toll-free verification; 10DLC fees
 
         are charged from credit per step, when the details are submitted and when
 
@@ -5333,6 +5355,17 @@ paths:
         the field named, and nothing is kept. When it passes, the verification is
 
         submitted to the carrier for its review; read it back to follow the state.
+
+
+        For a number registration Hail keeps your answers (fields, address,
+
+        document options) and an encrypted copy of each file for 30 days after
+
+        submit, so a rejected filing can be fixed and sent again
+
+        (`POST /v1/verifications/{id}/resubmit`). They are deleted sooner when
+
+        the registration is approved or cancelled, or the account closes.
 
         A `provider` part is deprecated and ignored: Hail picks the carrier.'
       operationId: create_verification
@@ -5523,6 +5556,184 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
+  /v1/verifications/document-check:
+    post:
+      tags:
+        - verifications
+      summary: Check Verification Documents
+      description:
+        "Read the documents of a number verification form before you submit
+        it
+
+        (multipart/form-data).
+
+
+        Send the documents first: the same parts as `POST /verifications`, with
+
+        a file per slot to read (`file.<slot>`, or `upload.<slot>` with the id
+
+        of a `verification_document` upload). Only the slots with a file in
+
+        this request are read. A file that stands for other slots too (one
+
+        passport for several proofs) is sent once, for its slot, with
+
+        `documents.<slot>.covers` listing the other slots: it is read once and
+
+        fills all of them. One file given for several slots uses one read. A
+
+        `file.<slot>` part for a slot not in `documents` is not read and comes
+
+        back `read` false. `quote_id`, `country_code`, `number_type` and
+
+        `subject_type` are required. `documents` may leave out `option` while
+
+        the type is not chosen; `fields` and `address` may be empty or partial.
+
+
+        Returns the values the files show, by the carrier's field names, to
+
+        fill the form (`fields`, `address`, `documents.<slot>.fields`, and the
+
+        document type each file looks like in `documents.<slot>.option`). Also
+
+        returns `warnings`: an unreadable, upside-down or expired document, a
+
+        file that does not match the chosen document type, or a typed name that
+
+        differs from the printed one. Show each warning with its fix. You can
+
+        still submit.
+
+
+        A file nothing was read from has `read` false: with an `unreadable`
+
+        warning when the file is not clear, else with no warning (the read
+
+        failed or took too long, the file is over the size or page limits, or
+
+        the workspace used its 30 reads for today). Nothing is filed, saved,
+
+        held or charged, and uploads are not used up. The files are read by an
+
+        Anthropic AI model, on AWS (Amazon Bedrock) or Anthropic's API, for this
+
+        check only."
+      operationId: check_verification_documents
+      parameters:
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerificationDocumentCheckResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /v1/verifications/document-cautions:
+    post:
+      tags:
+        - verifications
+      summary: Check Verification Document Cautions
+      description:
+        "Check the typed names and chosen document types again, against
+        the
+
+        reads an earlier `POST /verifications/document-check` returned (JSON).
+
+
+        Send the form as it is now, with each slot's earlier read in
+
+        `documents.<slot>.read` (the `documents.<slot>` that check returned).
+
+        Only slots with a read are checked. Returns the `name`, `document_type`
+
+        and `expired` warnings that check would give for this form. No file is
+
+        sent, no AI model runs, no daily read is used, and nothing is saved."
+      operationId: check_verification_document_cautions
+      parameters:
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VerificationDocumentCautionsRequest"
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerificationDocumentCautionsResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
   /v1/verifications/{verification_id}:
     get:
       tags:
@@ -5615,7 +5826,16 @@ paths:
 
         cancelled sooner is still charged for that many months (prices: see the
 
-        console)."
+        console).
+
+
+        When the carrier is down or rate-limits the delete, the call answers
+
+        503 and changes nothing: try again later. When the carrier refuses the
+
+        delete, the verification is cancelled in Hail all the same and Hail's
+
+        fees stop as above."
       operationId: cancel_verification
       parameters:
         - name: verification_id
@@ -5673,11 +5893,29 @@ paths:
         - verifications
       summary: Get Verification Application
       description:
-        "Read your organization's saved SMS answers, including after rejection.
+        "Read your organization's saved answers, including after rejection.
 
-        Answers of a cancelled or rejected registration are kept for 30 days
 
-        after it ended; after that this returns 404.
+        A number registration (`purpose=number`) keeps its answers (fields,
+
+        address, document options) and its files for 30 days after submit, so a
+
+        rejected filing can be fixed and sent again
+
+        (`POST /v1/verifications/{id}/resubmit`). They are deleted sooner when
+
+        it is approved or cancelled, or the account closes; then this returns
+
+        404. `files` lists the kept files by name; their bytes are never
+
+        returned.
+
+
+        For US texting (`purpose=sms`): answers of a cancelled or rejected
+
+        registration are kept for 30 days after it ended; after that this
+
+        returns 404.
 
 
         Older applications may recover their verified sender identity through
@@ -5810,6 +6048,95 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
+  /v1/verifications/{verification_id}/resubmit:
+    post:
+      tags:
+        - verifications
+      summary: Resubmit Verification
+      description:
+        "Fix a rejected number registration and file it again\n(multipart/form-data),\
+        \ without typing everything again.\n\nHail keeps a number registration's answers\
+        \ and files for 30 days after\nsubmit (`kept_until` on the verification; read\
+        \ them with\n`GET /v1/verifications/{id}/application`). This files a new\n\
+        registration from them, with your changes. Every part is optional:\n\n* `fields`\
+        \ (JSON object), `address` (JSON object) and `documents` (JSON\n  object:\
+        \ slot name to `{\"option\": ..., \"fields\": {...}}`) each replace\n  the\
+        \ kept value whole when sent;\n* `file.<slot>`, or `upload.<slot>` (an upload\
+        \ id, as in\n  `POST /v1/verifications`), replaces the kept file of that slot.\
+        \ A slot\n  with no new file reuses the kept one, while it keeps the document\n\
+        \  `option` it was filed with (a new option needs a new file). A kept\n  file\
+        \ whose slot is no longer in `documents` is not sent;\n* `quote_id`: the offer\
+        \ to verify for. Default: the quote of the\n  rejected filing, which Hail\
+        \ keeps while the answers are kept. Pass a\n  new one for a newer price, or\
+        \ when that offer is no longer sold (409).\n\nThe purpose, country, number\
+        \ type and subject type stay as filed:\nsending one of them with another value\
+        \ is a 422. The new registration goes through every check of\n`POST /v1/verifications`\
+        \ (422, 402, 409, the credit set aside) and\nanswers the same way, as a new\
+        \ verification with its own id. Once it is\nfiled, the rejected one is dismissed\
+        \ (as `DELETE /v1/verifications/{id}`)\nand its kept answers and files are\
+        \ deleted. Only one resubmit of a\nregistration can succeed; another one sent\
+        \ at the same time is a 409."
+      operationId: resubmit_verification
+      parameters:
+        - name: verification_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Verification Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "201":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerificationResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "402":
+          description:
+            Not enough credit for the offer's setup and first month. Nothing
+            is filed and the rejected registration is unchanged.
+        "404":
+          description: Not found, or Hail no longer keeps its answers.
+        "409":
+          description:
+            Not a rejected number registration, or it was already sent
+            again. Nothing is filed.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
   /v1/verifications/{verification_id}/confirm:
     post:
       tags:
@@ -5922,7 +6249,9 @@ components:
         city:
           type: string
           title: City
-          description: City or locality.
+          description:
+            City or town of the street address, as written on mail sent
+            there.
         region:
           type: string
           title: Region
@@ -5930,7 +6259,7 @@ components:
         postal_code:
           type: string
           title: Postal Code
-          description: Postal or ZIP code.
+          description: Postal or ZIP code of the street address, such as `94103`.
         country_code:
           type: string
           title: Country Code
@@ -6657,6 +6986,17 @@ components:
           description:
             Human-readable explanation for a failed call. Null for other
             statuses.
+        transcript:
+          anyOf:
+            - items:
+                $ref: "#/components/schemas/CallTranscriptTurn"
+              type: array
+            - type: "null"
+          title: Transcript
+          description:
+            "What was said on the call, in the order it was said. Set only by
+            GET /v1/calls/{call_id}: an empty list until someone speaks. Null in POST
+            /v1/calls and GET /v1/calls responses."
       type: object
       required:
         - id
@@ -6675,6 +7015,31 @@ components:
         - answered_at
         - ended_at
       title: CallResponse
+    CallTranscriptTurn:
+      properties:
+        role:
+          type: string
+          enum:
+            - user
+            - assistant
+          title: Role
+          description: "'assistant' is the Hail agent. 'user' is the person (or
+            answering machine) on the other end of the line."
+        text:
+          type: string
+          title: Text
+          description: What was said in this turn.
+        at:
+          type: string
+          format: date-time
+          title: At
+          description: When the speaker started this turn, ISO 8601. When that is not known, when Hail recorded the turn.
+      type: object
+      required:
+        - role
+        - text
+        - at
+      title: CallTranscriptTurn
     ConfirmRequest:
       properties:
         code:
@@ -7436,6 +7801,16 @@ components:
             - type: "null"
           title: Forward Rate Per Hour
           description: Cap on forwarded messages per hour. Omit to leave unchanged.
+        sends_enabled:
+          anyOf:
+            - type: boolean
+            - type: "null"
+          title: Sends Enabled
+          description:
+            "Send switch for kind='custom' rows. False stops the domain
+            from sending at all: skipped by default sender selection and a send naming
+            it explicitly returns 422. Only allowed on custom rows; Omit to leave
+            unchanged."
         email_agent_id:
           anyOf:
             - type: string
@@ -7445,7 +7820,7 @@ components:
           description:
             The agent that answers mail to this address. The agent must
             be live and answer email. A custom domain must be verified with inbound
-            on. Null stops agent replies. Omit to leave unchanged.
+            and sending on. Null stops agent replies. Omit to leave unchanged.
         email_agent_scope:
           anyOf:
             - type: string
@@ -7467,7 +7842,10 @@ components:
         "Body for PATCH /email-domains/{id}.\n\nTwo clusters of mutable\
         \ fields:\n\n* Hail-mail addressing \u2014 the user/org prefix pair (only\
         \ valid on\n  ``kind='hail_mail'`` rows; the handler returns 422 if a tenant\
-        \ tries\n  to PATCH these on a custom row).\n* Inbound action \u2014 ``inbound_enabled``\
+        \ tries\n  to PATCH these on a custom row).\n* Send switch \u2014 ``sends_enabled``\
+        \ (only valid on ``kind='custom'``\n  rows; the handler returns 422 otherwise).\
+        \ ``false`` stops the\n  domain from sending at all: skipped by sender selection,\
+        \ explicit\n  ``from`` refused.\n* Inbound action \u2014 ``inbound_enabled``\
         \ + ``forward_to`` + the optional\n  ``forward_rate_per_hour`` cap. These\
         \ apply to either kind, but this\n  milestone routes inbound only to ``hail_mail``\
         \ rows; custom-domain\n  inbound (MX delegation) is the next milestone.\n\n\
@@ -7564,6 +7942,14 @@ components:
           title: Inbound Enabled
           description: Whether this domain accepts and forwards inbound mail.
           default: false
+        sends_enabled:
+          type: boolean
+          title: Sends Enabled
+          description:
+            "Send switch for kind='custom' rows. False stops the domain
+            from sending at all: it is skipped by default sender selection and a send
+            that names it explicitly returns 422. Always true for hail_mail rows."
+          default: true
         forward_to:
           anyOf:
             - items:
@@ -8878,6 +9264,48 @@ components:
         - phone_e164
         - note
       title: HandoverContactOut
+    KeptDocumentAnswer:
+      properties:
+        option:
+          type: string
+          title: Option
+          description: The document option chosen.
+          default: ""
+        fields:
+          additionalProperties:
+            type: string
+          type: object
+          title: Fields
+          description: The document's typed fields.
+      type: object
+      title: KeptDocumentAnswer
+      description: A document slot's saved choice on a number registration.
+    KeptFileInfo:
+      properties:
+        slot:
+          type: string
+          title: Slot
+          description: The document slot it was filed for.
+        filename:
+          type: string
+          title: Filename
+          description: The file name as it was sent.
+        content_type:
+          type: string
+          title: Content Type
+          description: "'image/jpeg', 'image/png' or 'application/pdf'."
+        size_bytes:
+          type: integer
+          title: Size Bytes
+          description: Size in bytes.
+      type: object
+      required:
+        - slot
+        - filename
+        - content_type
+        - size_bytes
+      title: KeptFileInfo
+      description: A file Hail keeps for a resubmit. The bytes are never returned.
     LLMConfig:
       properties:
         base_url:
@@ -9901,14 +10329,63 @@ components:
             - $ref: "#/components/schemas/Address"
             - type: "null"
           description: Original sender address, when available.
+        documents:
+          anyOf:
+            - additionalProperties:
+                $ref: "#/components/schemas/KeptDocumentAnswer"
+              type: object
+            - type: "null"
+          title: Documents
+          description:
+            "Number registration only: each document slot's option and
+            fields, by slot name. Null for US texting."
+        files:
+          items:
+            $ref: "#/components/schemas/KeptFileInfo"
+          type: array
+          title: Files
+          description:
+            "Number registration only: the files Hail keeps, by slot. A
+            resubmit reuses each one unless you send a new file for its slot."
+        kept_until:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: "null"
+          title: Kept Until
+          description:
+            "Number registration only: when Hail deletes these answers
+            and files."
+        quote_id:
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
+          title: Quote Id
+          description:
+            "Number registration only: the quote it was filed for. It keeps
+            working with GET /v1/verifications/requirements and the resubmit while
+            the answers are kept."
+        hold_cents:
+          anyOf:
+            - type: integer
+            - type: "null"
+          title: Hold Cents
+          description:
+            "Number registration only: the credit a resubmit with that
+            quote sets aside (its setup and first month). Null when nothing is set
+            aside or the quote is gone."
       type: object
       required:
         - subject_type
         - fields
       title: SmsApplicationResponse
       description:
-        Private submitted SMS answers, or verified sender details for an
-        old filing.
+        "Private saved answers of a registration: a US texting application
+
+        (or verified sender details for an old filing), or a number
+
+        registration kept for a resubmit."
     SmsCreate:
       properties:
         recipient_consent:
@@ -10020,8 +10497,8 @@ components:
             - type: "null"
           title: Number Id
           description:
-            Owned US local number selecting the carrier, required when
-            ambiguous.
+            Owned US local or US/Canadian toll-free number. Required for
+            toll-free verification or when the carrier is ambiguous.
         fields:
           additionalProperties:
             type: string
@@ -10404,6 +10881,328 @@ components:
       description:
         Returned by ``POST /verifications/check`` when every local check
         passes.
+    VerificationDocumentCautionDocument:
+      properties:
+        option:
+          type: string
+          title: Option
+          description: The chosen document type key, or empty when not chosen yet.
+          default: ""
+        fields:
+          additionalProperties:
+            type: string
+          type: object
+          title: Fields
+          description: The values typed for this slot's fields, by field name.
+        read:
+          anyOf:
+            - $ref: "#/components/schemas/VerificationDocumentCautionRead"
+            - type: "null"
+          description:
+            The slot's `documents.<slot>` from an earlier document check,
+            or null when it has no successful read. Only slots with a read are checked.
+      type: object
+      title: VerificationDocumentCautionDocument
+      description: "One slot of the form: what is typed now, and its earlier read."
+    VerificationDocumentCautionRead:
+      properties:
+        option:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Option
+          description: The document type the file looked like, or null.
+        printed_name:
+          anyOf:
+            - $ref: "#/components/schemas/VerificationPrintedName"
+            - type: "null"
+          description: The name printed on the file, or null (no name check).
+        expiry_date:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Expiry Date
+          description:
+            The expiry date read from the file (YYYY-MM-DD), or null (no
+            expiry check).
+        none_of_types:
+          type: boolean
+          title: None Of Types
+          description:
+            True when the file looked like none of the slot's document
+            types.
+          default: false
+        file_slot:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: File Slot
+          description:
+            "The slot whose file this was read from. Slots with the same
+            `file_slot` get one name check per box, as in the document check. Null:
+            slots with the same printed name count as one file."
+      type: object
+      title: VerificationDocumentCautionRead
+      description:
+        "A slot's earlier read, as `POST /verifications/document-check`
+
+        returned it in `documents.<slot>`. Send that whole object: `option`,
+
+        `printed_name`, `expiry_date`, `none_of_types` and `file_slot` are used;
+
+        the other keys may be sent and are ignored."
+    VerificationDocumentCautionsRequest:
+      properties:
+        quote_id:
+          type: string
+          format: uuid
+          title: Quote Id
+          description: The `quote_id` of the number offer being verified.
+        country_code:
+          type: string
+          maxLength: 2
+          minLength: 2
+          title: Country Code
+          description: ISO 3166-1 alpha-2 country of the number, like GB.
+        number_type:
+          type: string
+          title: Number Type
+          description: The number type of the offer, like `local` or `mobile`.
+        subject_type:
+          type: string
+          enum:
+            - person
+            - business
+          title: Subject Type
+          description: "'person' (you) or 'business' (your company)."
+        fields:
+          additionalProperties:
+            type: string
+          type: object
+          title: Fields
+          description: The form's typed fields, by name.
+        address:
+          additionalProperties:
+            type: string
+          type: object
+          title: Address
+          description: The typed address parts (`customer_name` is compared).
+        documents:
+          additionalProperties:
+            $ref: "#/components/schemas/VerificationDocumentCautionDocument"
+          type: object
+          title: Documents
+          description: The form's document slots, by name.
+      type: object
+      required:
+        - quote_id
+        - country_code
+        - number_type
+        - subject_type
+      title: VerificationDocumentCautionsRequest
+      description: Body of ``POST /verifications/document-cautions``.
+    VerificationDocumentCautionsResponse:
+      properties:
+        warnings:
+          items:
+            $ref: "#/components/schemas/VerificationDocumentWarning"
+          type: array
+          title: Warnings
+          description:
+            "`name`, `document_type` and `expired` warnings: the typed
+            form and chosen types against the earlier reads. Empty when nothing differs."
+      type: object
+      required:
+        - warnings
+      title: VerificationDocumentCautionsResponse
+      description: Returned by ``POST /verifications/document-cautions``.
+    VerificationDocumentCheckResponse:
+      properties:
+        fields:
+          additionalProperties:
+            type: string
+          type: object
+          title: Fields
+          description:
+            Values for the form's own `fields`, by field name, read from
+            the files.
+        address:
+          additionalProperties:
+            type: string
+          type: object
+          title: Address
+          description:
+            Address parts read from the files (`customer_name`, `street`,
+            `city`, `region`, `postal_code`, `country_code`). Only the parts found.
+        documents:
+          additionalProperties:
+            $ref: "#/components/schemas/VerificationDocumentRead"
+          type: object
+          title: Documents
+          description: What was read from each slot that had a file, by slot name.
+        warnings:
+          items:
+            $ref: "#/components/schemas/VerificationDocumentWarning"
+          type: array
+          title: Warnings
+          description: Things the carrier may refuse. Empty when nothing was found.
+        note:
+          type: string
+          title: Note
+          description: What the check does not cover.
+      type: object
+      required:
+        - fields
+        - address
+        - documents
+        - warnings
+        - note
+      title: VerificationDocumentCheckResponse
+      description: Returned by ``POST /verifications/document-check``.
+    VerificationDocumentRead:
+      properties:
+        read:
+          type: boolean
+          title: Read
+          description:
+            "False when nothing was read from the file: the reader is off,
+            the file type is not supported, the read failed or took too long (no warning),
+            or the file is unreadable (an 'unreadable' warning). The other values
+            are then empty."
+        option:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Option
+          description:
+            The slot's document type the file looks like, as an option
+            key, or null when none fits or it was not read.
+        fields:
+          additionalProperties:
+            type: string
+          type: object
+          title: Fields
+          description:
+            Values for the fields of the slot's document types, by field
+            name, as printed on the file.
+        expiry_date:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Expiry Date
+          description: The expiry date printed on the file (YYYY-MM-DD), or null.
+        printed_name:
+          anyOf:
+            - $ref: "#/components/schemas/VerificationPrintedName"
+            - type: "null"
+          description: The name printed on the file, or null when not read.
+        skipped:
+          anyOf:
+            - type: string
+              const: daily_limit
+            - type: "null"
+          title: Skipped
+          description:
+            "Why the file was not read, when Hail chose not to: 'daily_limit'
+            when the workspace has used today's document reads. Null otherwise."
+        none_of_types:
+          type: boolean
+          title: None Of Types
+          description:
+            True when the file was read and looks like none of the slot's
+            document types (`option` is then null).
+          default: false
+        file_slot:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: File Slot
+          description:
+            "The slot whose file this was read from: this slot, or the
+            slot whose file covers it. Slots with the same `file_slot` share one file.
+            Null when not read."
+      type: object
+      required:
+        - read
+        - option
+        - fields
+        - expiry_date
+        - printed_name
+      title: VerificationDocumentRead
+      description: What was read from one slot's file.
+    VerificationDocumentWarning:
+      properties:
+        field:
+          type: string
+          title: Field
+          description:
+            "Where to show it: a slot name for the document itself, or
+            the path of a typed value (`first_name`, `<slot>.<field>`, `address.customer_name`)."
+        kind:
+          type: string
+          enum:
+            - unreadable
+            - rotated
+            - expired
+            - document_type
+            - name
+          title: Kind
+          description: "'unreadable', 'rotated' (upside down or on its side),
+            'expired', 'document_type' (the file does not match the chosen type),
+            or 'name' (the typed name differs from the printed one)."
+        message:
+          type: string
+          title: Message
+          description: What is wrong and how to fix it.
+      type: object
+      required:
+        - field
+        - kind
+        - message
+      title: VerificationDocumentWarning
+      description:
+        "Something on an uploaded document the carrier may refuse. A warning
+
+        only: you can still submit."
+    VerificationPrintedName:
+      properties:
+        given_names:
+          type: string
+          title: Given Names
+          description:
+            The given names of the person the document is about or addressed
+            to, never a person who signs for the issuer.
+        surnames:
+          type: string
+          title: Surnames
+          description: That person's surnames.
+        latin_given_names:
+          type: string
+          title: Latin Given Names
+          description:
+            The given names in Latin letters as the document prints them
+            (its machine-readable zone or a transliteration), or empty.
+          default: ""
+        latin_surnames:
+          type: string
+          title: Latin Surnames
+          description: The surnames in Latin letters, the same way.
+          default: ""
+        business_name:
+          type: string
+          title: Business Name
+          description:
+            The name of the company the document is about or addressed
+            to, never the company that issued it.
+      type: object
+      required:
+        - given_names
+        - surnames
+        - business_name
+      title: VerificationPrintedName
+      description:
+        The name printed on a document, as read. Empty strings when not
+        printed.
     VerificationRequirements:
       properties:
         country_code:
@@ -10475,6 +11274,15 @@ components:
           format: uuid
           title: Id
           description: Unique identifier for this verification.
+        number_id:
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
+          title: Number Id
+          description:
+            The owned number covered by toll-free SMS verification. Null
+            for organization-wide registrations.
         country_code:
           type: string
           title: Country Code
@@ -10501,7 +11309,8 @@ components:
           title: Purpose
           description:
             "'number': permission to buy a number in this country. 'sms':
-            registration to text US numbers from a US number."
+            US local texting registration or per-number US/Canada toll-free texting
+            verification."
         state:
           type: string
           title: State
@@ -10587,6 +11396,25 @@ components:
           description:
             True when `DELETE /v1/verifications/{id}` accepts this verification
             now.
+          default: false
+        kept_until:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: "null"
+          title: Kept Until
+          description:
+            "For a number registration: when Hail deletes the answers and
+            files it keeps so the filing can be fixed and sent again (30 days after
+            submit). They go sooner when it is approved or cancelled, or the account
+            closes. Null when nothing is kept."
+        resubmittable:
+          type: boolean
+          title: Resubmittable
+          description:
+            "True when `POST /v1/verifications/{id}/resubmit` accepts this
+            verification now: a rejected number registration whose answers are still
+            kept (`kept_until`)."
           default: false
         identity_confirmed:
           type: boolean
@@ -10888,6 +11716,7 @@ components:
         - call.busy
         - call.no_answer
         - call.transferred
+        - call.analyzed
       title: WebhookEventType
     WebhookSubscriptionCreate:
       properties:

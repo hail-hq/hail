@@ -318,3 +318,83 @@ def test_capabilities_are_booleans_for_null_flags(tmp_path, monkeypatch):
         }
     finally:
         telephony_catalog._load.cache_clear()
+
+
+def test_toll_free_sms_only_where_hail_can_verify_it():
+    from hailhq.core.telephony_catalog import effective_capabilities
+
+    tf = {"voice": True, "sms": True}
+    assert effective_capabilities(tf, "twilio", "US", "toll_free") == ["voice", "sms"]
+    assert effective_capabilities(tf, "telnyx", "US", "toll_free") == ["voice"]
+    assert effective_capabilities(tf, "telnyx", "CA", "toll_free") == ["voice"]
+    assert effective_capabilities(tf, "telnyx", "US", "local") == ["voice", "sms"]
+    assert effective_capabilities(tf, "telnyx", "GB", "toll_free") == ["voice", "sms"]
+
+
+def test_toll_free_mms_follows_sms_hail_can_verify():
+    caps = telephony_catalog.capabilities("US", "toll_free", "telnyx")
+    assert caps == {"voice": True, "sms": False, "mms": False}
+
+
+def _gb_catalog(tmp_path, monkeypatch):
+    blocks = {
+        "person": {"accepted": True, "items": ["id_document"]},
+        "business": {"accepted": True, "items": ["company_registration"]},
+    }
+    rows = [
+        {
+            "country_code": "GB",
+            "number_type": nt,
+            "usd_per_month": "1.00",
+            "voice": True,
+            "sms": nt == "mobile",
+            "mms": False,
+            "verification_required": True,
+            "requirements": blocks,
+        }
+        for nt in ("local", "mobile", "national", "toll_free")
+    ]
+    for name, numbers in (
+        ("telnyx", rows),
+        ("twilio", [r for r in rows if r["number_type"] != "national"]),
+    ):
+        (tmp_path / f"{name}.json").write_text(json.dumps({"numbers": numbers}))
+    monkeypatch.setenv("HAIL_TELEPHONY_CATALOG_DIR", str(tmp_path))
+    telephony_catalog._load.cache_clear()
+
+
+def test_telnyx_gb_local_mobile_toll_free_not_sold(tmp_path, monkeypatch):
+    # Telnyx declines private individuals for UK numbers (see _NOT_SOLD).
+    _gb_catalog(tmp_path, monkeypatch)
+    try:
+        for nt in ("local", "mobile", "toll_free"):
+            assert telephony_catalog.not_sold("telnyx", "GB", nt)
+            assert telephony_catalog.capabilities("GB", nt, "telnyx") is None
+            # Twilio still sells them, so 'auto' does too.
+            assert telephony_catalog.capabilities("GB", nt, "twilio") is not None
+            assert telephony_catalog.capabilities("GB", nt) is not None
+        assert [r["number_type"] for r in telephony_catalog.rows("GB", "telnyx")] == [
+            "national"
+        ]
+        assert len(telephony_catalog.rows("GB", "twilio")) == 3
+        # Owned Telnyx GB numbers keep their country: handover still covers GB.
+        assert telephony_catalog.sells_in("GB", "telnyx")
+    finally:
+        telephony_catalog._load.cache_clear()
+
+
+def test_telnyx_gb_national_is_business_only(tmp_path, monkeypatch):
+    _gb_catalog(tmp_path, monkeypatch)
+    try:
+        assert telephony_catalog.business_only("telnyx", "GB", "national")
+        assert not telephony_catalog.business_only("twilio", "GB", "local")
+        assert not telephony_catalog.business_only("telnyx", "DE", "national")
+        assert telephony_catalog.capabilities("GB", "national", "telnyx") is not None
+        # The cost file keeps the carrier's own block.
+        block = telephony_catalog.requirements("GB", "national", "telnyx")
+        assert block["person"]["accepted"] is True
+        # A not-sold row is not read at all.
+        assert telephony_catalog.requirements("GB", "local", "telnyx") is None
+        assert telephony_catalog.by_request_row("GB", "local", "telnyx") is None
+    finally:
+        telephony_catalog._load.cache_clear()

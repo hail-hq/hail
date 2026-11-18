@@ -112,7 +112,7 @@ The catalog and subscription validation share the `WebhookEventType` registry in
 - **`sms.failed`** — the send failed (transport error or carrier rejection).
 
 **Call lifecycle** — `received` (inbound only), `answered`, `completed`,
-`failed`, `busy`, `no_answer`, `transferred` (there is no `canceled` event; it has no data source):
+`failed`, `busy`, `no_answer`, `transferred`, `analyzed` (there is no `canceled` event; it has no data source):
 
 - **`call.received`** — an inbound call reached one of your numbers and an
   agent is about to answer ([Agents](agents.md)). Fired before the answer.
@@ -129,6 +129,8 @@ The catalog and subscription validation share the `WebhookEventType` registry in
   `{"contact_id": "…", "contact_name": "Sam"}`. `contact_id` is the id
   `GET /contacts` returns: a contact's uuid, or `member:<user id>` for a
   team member. Never a phone number.
+- **`call.analyzed`** — the call's transcript and a short AI summary, sent
+  once after the call ends ([Call analyzed](#call-analyzed)).
 
 Every `call.*` payload's `data` carries `id`, `status`, `direction`
 (`inbound` or `outbound`), `from`, `to`, `agent_id` (null for calls placed
@@ -152,6 +154,70 @@ destination is disabled. Raw carrier error text is never returned.
   }
 }
 ```
+
+## Call analyzed
+
+Subscribe to `call.analyzed` to get what was said on each call and a short
+summary, about 10 seconds after the call ends:
+
+```bash
+curl -X POST "$HAIL_API_URL/v1/webhooks" \
+  -H "Authorization: Bearer $HAIL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"target_url": "https://example.com/hooks/hail", "event_types": ["call.analyzed"]}'
+```
+
+```json
+{
+  "type": "call.analyzed",
+  "data": {
+    "id": "0d9c…",
+    "status": "completed",
+    "direction": "inbound",
+    "from": "+33612345678",
+    "to": "+14155550100",
+    "agent_id": "a1b2…",
+    "end_reason": "normal_hangup",
+    "duration_seconds": 74,
+    "transcript": [
+      {
+        "role": "assistant",
+        "text": "Hi, this is an AI assistant answering on behalf of Acme.",
+        "at": "2026-11-17T12:00:02Z"
+      },
+      {
+        "role": "user",
+        "text": "Hi, I'd like to move my Tuesday appointment.",
+        "at": "2026-11-17T12:00:06Z"
+      }
+    ],
+    "summary": "The caller asked to move their Tuesday appointment. The agent moved it to Thursday at 10am."
+  }
+}
+```
+
+- `data` is built by `call_analyzed_data` in
+  [`call_analysis.py`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/call_analysis.py).
+  It has the `call.*` fields above, plus `duration_seconds`, `transcript` and `summary`.
+- `transcript` holds the same turns as `GET /v1/calls/{id}`, in the order
+  they were said. `at` is when the speaker started the turn.
+  `assistant` is the agent; `user` is the other side. Texts the caller sends
+  during the call are not in it (they arrive as `sms.received`).
+- `duration_seconds` runs from answer to hang-up. It is null when the call was never answered.
+- `summary` comes from your workspace's own LLM when you set one (Hail's models
+  back it up only when you turned fallback on). Otherwise it comes from Hail's
+  chain, the one calls and texts use (Anthropic, then OpenAI, then Gemini). A
+  per-call `llm` from `POST /v1/calls` is not used. When the model fails,
+  `summary` is null and the event is still sent.
+- Only phone calls with at least one spoken turn are sent. A call nobody spoke on gets no event.
+- Only calls that end after your `call.analyzed` subscription was created
+  or last changed (`PATCH`, secret rotation) are sent, so turning it on
+  never replays past calls. A call not sent within 24 hours of its end is
+  dropped.
+- Once it is sent, `GET /v1/events` shows an `analyzed` call event. It holds
+  counts only (`turns`, and `summary` true or false), not the text.
+- Self-hosting: the voicebot sends this event from its text worker, which
+  runs only when `HAIL_INTERNAL_SECRET` and `HAIL_API_URL` are set.
 
 ## Payload
 
@@ -208,10 +274,26 @@ shape comes from the event type. Inbound events use [`build_event_data`](https:/
     "id": "sms-uuid",
     "from": "+14155551234",
     "to": "+14155559999",
-    "body": "hello back"
+    "body": "hello back",
+    "compliance_keyword": null
   }
 }
 ```
+
+`compliance_keyword` is `"STOP"`, `"START"` or `"HELP"` when the text is one of
+these keywords, and `null` otherwise. The same value is in the `received` event
+on `GET /v1/events` (events stored before this field existed do not have it).
+
+- `STOP`: `STOP`, `STOPALL`, `UNSUBSCRIBE`, `CANCEL`, `END` or `QUIT`. Hail
+  suppresses the sender.
+- `START`: `START`, `YES` or `UNSTOP` from a sender who opted out. Hail lifts
+  the suppression. From anyone else, these words are a normal reply (`null`).
+- `HELP`: `HELP` or `INFO`.
+
+Matching ignores case and surrounding spaces. When Twilio sends its own opt-out
+type for a text, that type decides too ([`sms_ingest.py`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/sms_ingest.py)).
+The carrier or Hail answers these keywords, depending on your setup, so a bot
+should not answer them too.
 
 `raw_url` and each attachment `url` are Hail API endpoints that 302-redirect to a
 presigned S3 URL on access. `email.received.suppressed` carries a trimmed `data`
@@ -279,3 +361,43 @@ The `event_types` enum and request/response schemas are in
 [`openapi/openapi.yaml`](https://github.com/hail-hq/hail/blob/main/openapi/openapi.yaml) (`WebhookSubscriptionCreate`).
 The CLI has no `webhooks` command group — for the full endpoint list, refer to
 [the CLI reference](./cli.md#webhooks).
+
+## Chat SDK
+
+The published [Hail adapter](https://www.npmjs.com/package/@hail-hq/chat-sdk-adapter) connects SMS to a [Vercel Chat SDK](https://chat-sdk.dev) bot. Hail also supports email and phone calls through its APIs; this adapter currently exposes SMS.
+
+Install the adapter and a Chat SDK state backend:
+
+```bash
+pnpm add @hail-hq/chat-sdk-adapter chat @chat-adapter/state-memory
+```
+
+```typescript
+import { Chat } from "chat";
+import { createMemoryState } from "@chat-adapter/state-memory";
+import { createHailAdapter } from "@hail-hq/chat-sdk-adapter";
+
+export const bot = new Chat({
+  userName: "mybot",
+  adapters: { hail: createHailAdapter() },
+  state: createMemoryState(),
+});
+
+bot.onDirectMessage(async (thread, message) => {
+  await thread.post(`You said: ${message.text}`);
+});
+```
+
+Set `HAIL_API_KEY`, `HAIL_FROM_NUMBER` (your Hail-owned E.164 number), and
+`HAIL_WEBHOOK_SECRET`. Subscribe to `sms.received` and route the webhook to
+`bot.webhooks.hail(request)`. Set `HAIL_RECIPIENT_CONSENT=true` only when you
+attest to the required consent for all recipients; otherwise sending fails.
+Clear the number's `sms_agent_id` if a Hail text agent would also answer it.
+Memory state needs no external database. Use a shared state adapter, such as Redis or PostgreSQL, for multiple instances or serverless deployments; Redis is not a Hail requirement.
+
+The adapter verifies signatures, isolates conversations by phone pair, and
+supports SMS replies. It requires Node.js 20+ and `chat >=4.44.0`.
+Refer to the [adapter setup, configuration, and limitations](https://github.com/hail-hq/chat-sdk-adapter)
+and its [Next.js example](https://github.com/hail-hq/chat-sdk-adapter/tree/main/examples/nextjs).
+
+See the [0.1.0 release announcement](https://github.com/hail-hq/chat-sdk-adapter/releases/tag/v0.1.0) for the published package and supported capabilities. Hail maintains the adapter; a Vercel vendor-official listing requires separate acceptance.

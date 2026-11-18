@@ -2,10 +2,10 @@
 
 The MCP service has two operator postures, chosen at startup from env:
 
-* **oauth-rs** — ``HAIL_AUTH_URL`` set. FastMCP gets ``AuthSettings`` and
+* **oauth-rs** — ``HAIL_AUTH_URL`` set. MCPServer gets ``AuthSettings`` and
   a pass-through ``TokenVerifier``; protected-resource metadata is auto-
-  mounted by FastMCP. Tools forward each request's JWT to the API.
-* **static-key** — ``HAIL_API_KEY`` set. FastMCP runs unauthenticated;
+  mounted by MCPServer. Tools forward each request's JWT to the API.
+* **static-key** — ``HAIL_API_KEY`` set. MCPServer runs unauthenticated;
   tools use the shared singleton ``HailClient(api_key=HAIL_API_KEY)``.
 
 The two modes are mutually exclusive — both set is a configuration error
@@ -56,11 +56,11 @@ class PassThroughVerifier(TokenVerifier):
     The API verifies the JWT (signature, issuer, audience, expiry, JWKS) —
     duplicating that here would create a key-rotation race and a second
     source of truth. The verifier's job is to populate request state so
-    FastMCP's auth middleware recognises the call as authenticated and so
+    MCPServer's auth middleware recognises the call as authenticated and so
     tools can read the bearer off ``ctx.request_context``.
 
     ``resource_server_url`` is the MCP's audience identity (e.g.
-    ``https://mcp.hail.so``). FastMCP uses it both for the
+    ``https://mcp.hail.so``). MCPServer uses it both for the
     ``WWW-Authenticate: Bearer resource_metadata=...`` header on 401s and
     as the ``resource`` field on the ``AccessToken`` it hands tools.
     """

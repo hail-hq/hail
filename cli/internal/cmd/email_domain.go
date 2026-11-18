@@ -375,7 +375,8 @@ A new agent starts at members unless the same call passes --scope.
 --scope members (default): verified members of the organization whose mail
 passes DMARC. --scope anyone: every sender whose mail passes DMARC and the spam
 checks. With anyone, a stranger can make the agent use its tools. Mail without
-a DMARC pass gets no reply. A custom domain must be verified with inbound on.`,
+a DMARC pass gets no reply. A custom domain must be verified with inbound and
+sending on.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id, err := uuid.Parse(args[0])

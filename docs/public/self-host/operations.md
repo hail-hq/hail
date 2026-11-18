@@ -184,14 +184,25 @@ Run `hail login`. The CLI opens `/device` on the website. You approve, and the C
 
 The MCP service (`hail/mcp`) picks one of two modes at boot from env:
 
-| Mode           | Env                                                            | Behaviour                                                                                                                                                                                  |
-| -------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **oauth-rs**   | `HAIL_AUTH_URL` + `MCP_RESOURCE_URL` set, `HAIL_API_KEY` empty | FastMCP rejects unauth requests with `401 WWW-Authenticate: Bearer resource_metadata=…`; tools forward each request's JWT to the API; `.well-known/oauth-protected-resource` is published. |
-| **static-key** | `HAIL_API_KEY` set, `HAIL_AUTH_URL` empty                      | No inbound auth; tools use the singleton `HailClient(api_key=HAIL_API_KEY)`; no protected-resource route.                                                                                  |
+| Mode           | Env                                                            | Behaviour                                                                                                                                                                                    |
+| -------------- | -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **oauth-rs**   | `HAIL_AUTH_URL` + `MCP_RESOURCE_URL` set, `HAIL_API_KEY` empty | MCPServer rejects unauth requests with `401 WWW-Authenticate: Bearer resource_metadata=…`; tools forward each request's JWT to the API; `.well-known/oauth-protected-resource` is published. |
+| **static-key** | `HAIL_API_KEY` set, `HAIL_AUTH_URL` empty                      | No inbound auth; tools use the singleton `HailClient(api_key=HAIL_API_KEY)`; no protected-resource route.                                                                                    |
 
 If both are set, boot fails with `ambiguous MCP auth config`. If neither is set, boot fails with `MCP auth not configured`. The service decides the mode once; a restart is necessary to change it.
 
 The MCP service does not validate JWT signatures. `hail/api` is the single source of JWT-validation truth (`HAIL_AUTH_URL`, `HAIL_AUTH_AUDIENCES`). MCP forwards the bearer on the outbound call. The API validates the token and resolves the org.
+
+### MCP analytics
+
+Optional. The HTTP MCP server reuses `NEXT_PUBLIC_POSTHOG_KEY`, the PostHog project key of the costs site. When it is set, restart the `mcp` service. The HTTP MCP server sends one `$mcp_tool_call` event per tool call, plus `$mcp_initialize` and `$mcp_tools_list` ([`mcp/hailhq/mcp/analytics.py`](https://github.com/hail-hq/hail/blob/main/mcp/hailhq/mcp/analytics.py)).
+
+- Sent: tool name, argument names (not values), duration, success or error type and status, MCP client name, version and User-Agent, the calling model (`$mcp_llm_model`), protocol version, the tool name list on `tools/list`, `$mcp_server_build` (from `LOGFIRE_SERVICE_VERSION`), and in oauth-rs mode the caller's user id, organization id, email and name. `_KEPT_PROPERTIES` is the full allowlist.
+- Never sent: argument values (except the optional `llm_model`, kept only when it looks like a model ID), tool results, error messages.
+- In oauth-rs mode, the caller's user id (the OAuth user or the API key owner) is the `distinct_id`, and the organization id is the `organization` group. The website identifies the same user id, so MCP events join that person. The person profile gets only the user's email and name. All of this comes from the actor cache that tool calls fill: one `whoami` call per bearer token (2 second limit), cached 5 minutes (30 seconds after a failed call), shared with Logfire. Without a cached user id (static-key mode, a shared key with no owner, or a caller's first `initialize` and `tools/list` before any tool call), events use the session id and create no person. Clients on protocol 2026-07-28 send no session id, so their sessionless events share one session id per process.
+- Each tool gets one optional input, `llm_model`, where the agent can name its model. The server removes it before the tool runs. Tool results are unchanged. The stdio entry point sends nothing.
+- `NEXT_PUBLIC_POSTHOG_HOST` sets the ingestion host for both. Empty means PostHog US Cloud.
+- Check it: call a read-only tool such as `list_number_regions`, then open the project's MCP analytics activity page and filter on `$mcp_server_build`.
 
 ## Database migrations
 
@@ -214,7 +225,7 @@ For v1, write migrations as raw SQL by hand (`env.py` has no SQLAlchemy `target_
 
 ### Migration discipline
 
-**The deploy workflow runs `alembic upgrade head` against prod on every push to `main`.** There is no human review gate between the merge of a migration and its execution. Three rules keep this safe. The workflow enforces one; the other two depend on you:
+**The deploy workflow runs `alembic upgrade head` against prod on every push to `main` that deploys.** A push that changes only docs, the web sites, the CLI or other files the services never read deploys nothing (`paths-ignore` in `.github/workflows/deploy.yml`); run the workflow by hand to deploy anyway. There is no human review gate between the merge of a migration and its execution. Three rules keep this safe. The workflow enforces one; the other two depend on you:
 
 1. **`api/migrations/env.py` caps statement runtime at 120s and lock-acquisition at 5s** via `SET LOCAL statement_timeout` / `SET LOCAL lock_timeout`. It issues them inside the migration transaction, so they apply to every statement that the migration runs. The choice of `SET LOCAL` (not `PGOPTIONS` or session-level `SET`) is deliberate. Neon's `-pooler` endpoint and other PgBouncer transaction-pooled connections reject the libpq startup option and reset session state between transactions. The per-transaction form is the only one that works on all of pooled / unpooled / direct.
 
@@ -301,6 +312,37 @@ docker compose up -d
 
 The migration `0001_initial.py` issues `CREATE EXTENSION IF NOT EXISTS pgcrypto;`. If a hosted provider gates extensions, allow `pgcrypto` on it.
 
+### Database connection budget
+
+The defaults are below. Set either key in `.env` to change it:
+
+```dotenv
+DATABASE_POOL_SIZE=5
+DATABASE_MAX_OVERFLOW=0
+```
+
+Each API process and voice job owns a pool. The text worker also uses a pool.
+Each pool can open `DATABASE_POOL_SIZE + DATABASE_MAX_OVERFLOW` connections.
+At the limit, work waits for a returned connection. The wait times out after 30 seconds.
+Idle pools keep up to `DATABASE_POOL_SIZE` connections until disposal.
+
+The API's background jobs (webhook delivery, email forwarding, carrier syncs) use a second pool of the same size.
+A job that waits on a slow outside call then cannot take the connections that requests need.
+
+Audit, usage, and idempotency writes share a separate pool with two connections per process.
+They must commit independently while request transactions remain open.
+Their reserved slots prevent request traffic from starving those commits.
+With the defaults, an API process can use twelve connections: five for requests, five for background jobs, and two for independent writes.
+Other processes open only the pools they use.
+
+Count every process when budgeting a shared session pooler.
+Leave room for the website, migrations, operator tools, and overlapping deployments.
+A session pooler accepts only as many clients as its pool size, so the sum must stay below it.
+The default reduces that risk. It does not enforce a global connection limit.
+Keep `DATABASE_POOL_SIZE` at 2 or more and `DATABASE_MAX_OVERFLOW` nonnegative.
+SQLAlchemy treats zero pool size and negative overflow as unlimited, so Hail rejects them.
+Inbound call setup holds two sessions at once, so Hail also rejects a pool size of 1.
+
 ## Releases
 
 Tag conventions:
@@ -317,7 +359,7 @@ collides with the CLI's release namespace — it did once (2026-08-13), and the 
 release then published its binaries onto a page whose tag pointed at older code.
 `release-cli.yml` now fails loudly if that tag already exists somewhere else.
 
-Hail does **not** release the service images (`hail-api`, `hail-voicebot`, `hail-mcp`) as versioned artifacts. The deploy workflow (`.github/workflows/deploy.yml`) pushes `latest` and `sha-<commit>` tags to GHCR on each push to `main` — the production VM pulls these. Self-hosters build from source via `docker compose up`. Versioned image releases are on the v1.x list.
+Hail does **not** release the service images (`hail-api`, `hail-voicebot`, `hail-mcp`) as versioned artifacts. The deploy workflow (`.github/workflows/deploy.yml`) pushes `latest` and `sha-<commit>` tags to GHCR on each push to `main` that deploys — the production VM pulls these. Self-hosters build from source via `docker compose up`. Versioned image releases are on the v1.x list.
 
 The images install exactly the versions in `uv.lock` (`uv sync --frozen`), never newer ones at build time. To move to newer releases, run `uv lock --upgrade` in a PR; CI tests the new lock before it reaches an image.
 
@@ -714,9 +756,13 @@ describe-active-receipt-rule-set` again.
 - **SES sandbox.** New SES accounts accept mail only from verified
   addresses. During sandbox, the mail's `From:` must be on a verified
   SES identity.
-- **Private webhook target rejected.** `httpx_post` blocks RFC-1918
-  addresses by default. Self-hosters with internal webhook targets
-  set `HAIL_WEBHOOK_ALLOW_PRIVATE_NETWORKS=true`.
+- **Private webhook target rejected.** By default, webhooks refuse a
+  host that does not resolve, or that resolves to any non-public
+  address: private (RFC 1918, IPv6 `fc00::/7`), loopback, link-local
+  (incl. `169.254.169.254`), CGNAT `100.64.0.0/10` (used by
+  Tailscale), IPv6 site-local `fec0::/10`, multicast, reserved and
+  unspecified. Self-hosters with internal webhook targets set
+  `HAIL_WEBHOOK_ALLOW_PRIVATE_NETWORKS=true`.
 - **Lambda → API connection refused.** Check the Lambda's
   CloudWatch logs (`/aws/lambda/hail-inbound-prod-ingest`). The
   POST URL must be reachable from AWS over the public internet.

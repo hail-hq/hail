@@ -20,7 +20,7 @@ from hailhq.core.carrier_offer import (
     TypeOptions,
     cents,
 )
-from hailhq.core.number_offers import PROVIDERS, by_request_quotable
+from hailhq.core.number_offers import PROVIDERS, by_request_quotable, toll_free_sms_ok
 from hailhq.core.providers.verification import get_verification_provider
 from hailhq.core.schemas import Capability
 
@@ -134,7 +134,13 @@ def paperwork_from_block(
 def offer_paperwork(
     country_code: str, number_type: str, provider: str, subject: str, needs: bool
 ) -> SubjectPapers:
-    """The papers one subject must give for one carrier row."""
+    """The papers one subject must give for one carrier row. A person is
+    not accepted where only a company may buy
+    (``telephony_catalog.business_only``), whatever the catalog block says."""
+    if subject == "person" and telephony_catalog.business_only(
+        provider, country_code, number_type
+    ):
+        return SubjectPapers([], True, False)
     block = (
         telephony_catalog.requirements(country_code, number_type, provider)
         if needs
@@ -184,28 +190,33 @@ def _candidates(
             # Same as /quotes: no verification provider, no by-request row.
             if (needs or by_request) and get_verification_provider(provider) is None:
                 continue
-            caps = telephony_catalog.effective_capabilities(row, provider)
+            caps = telephony_catalog.effective_capabilities(
+                row, provider, country_code, row["number_type"]
+            )
             # By-request rows: the /quotes rule (needs voice plus all asked).
             ok = (
                 by_request_quotable(caps, capabilities)
                 if by_request
                 else all(c in caps for c in capabilities)
             )
-            if not caps or not ok:
-                continue
             nt = row["number_type"]
-            block = (
-                telephony_catalog.requirements(country_code, nt, provider)
-                if needs
-                else None
-            )
+            # Same as /quotes: no SMS toll-free number Hail cannot verify.
+            if (
+                not caps
+                or not ok
+                or not toll_free_sms_ok(provider, country_code, nt, capabilities)
+            ):
+                continue
+            # Like /quotes: a filter prices and shows only the asked jobs, so
+            # a calls-only search pays no SMS fee. No filter: every job.
+            priced = [c for c in caps if c in capabilities] if capabilities else caps
             monthly = telephony_catalog.monthly_price(
-                provider, cents(row["usd_per_month"]), caps
+                provider, cents(row["usd_per_month"]), priced
             )["monthly_cents"]
             setup = cents(row.get("setup_usd") or 0)
             found = verifications.get((provider, country_code, nt), [])
             for subject in SUBJECTS:
-                papers = paperwork_from_block(block, subject, needs)
+                papers = offer_paperwork(country_code, nt, provider, subject, needs)
                 if not papers.accepted:
                     continue
                 status, v = option_status(needs, by_request, subject, found)
@@ -214,7 +225,7 @@ def _candidates(
                     how="by_request" if by_request else "buy",
                     monthly_cents=monthly,
                     setup_cents=setup,
-                    capabilities=caps,
+                    capabilities=priced,
                     paperwork=papers.items,
                     paperwork_known=papers.known,
                     status=status,

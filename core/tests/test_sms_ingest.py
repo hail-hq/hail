@@ -9,6 +9,7 @@ import uuid
 from hailhq.core.models import (
     PhoneNumber,
     Sms,
+    SmsEvent,
     Suppression,
     WebhookDelivery,
     WebhookSubscription,
@@ -485,3 +486,72 @@ async def test_browser_quota_still_acknowledges_stop_start_help_once(
     )
     assert sum(bool(row.metadata_.get("browser_compliance")) for row in rows) == 3
     assert len(rows) == 6  # three normal texts plus three deduped control messages
+
+
+async def test_sms_received_payload_names_the_compliance_keyword(async_session) -> None:
+    """STOP, HELP and a START from an opted-out sender carry the keyword, also
+    through synonyms and Twilio's OptOutType. An ordinary text, and a YES from a
+    sender who never opted out, carry null. The /v1/events row matches."""
+    org_id = uuid.uuid4()
+    await _seed_number(async_session, org_id)
+    async_session.add(
+        WebhookSubscription(
+            organization_id=org_id,
+            target_url="https://example.com/hook",
+            secret_encrypted="fake",
+            status="active",
+            event_types=["sms.received"],
+        )
+    )
+    await async_session.commit()
+
+    texts = [
+        ("+14155551234", "hello", None, None),
+        ("+14155551235", " yes ", None, None),
+        ("+14155551234", "help", None, "HELP"),
+        ("+14155551234", "info", None, "HELP"),
+        ("+14155551234", "Stop", None, "STOP"),
+        ("+14155551234", "START", None, "START"),
+        ("+14155551236", "end", None, "STOP"),
+        ("+14155551237", "please stop texting me", "STOP", "STOP"),
+        # No opt-out type, as from Telnyx: the body alone decides.
+        ("+14155551238", "quit", None, "STOP"),
+    ]
+    for index, (sender, body, opt_out_type, _) in enumerate(texts):
+        await ingest_inbound_sms(
+            async_session,
+            carrier="twilio",
+            from_e164=sender,
+            to_e164="+14155559999",
+            body=body,
+            provider_message_sid=f"SM_keyword_{index}",
+            opt_out_type=opt_out_type,
+        )
+        await async_session.commit()
+
+    deliveries = (
+        (
+            await async_session.execute(
+                select(WebhookDelivery).where(
+                    WebhookDelivery.event_type == "sms.received"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(deliveries) == len(texts)
+    by_body = {d.payload["data"]["body"]: d.payload["data"] for d in deliveries}
+    events = (
+        (
+            await async_session.execute(
+                select(SmsEvent).where(SmsEvent.kind == "received")
+            )
+        )
+        .scalars()
+        .all()
+    )
+    event_by_body = {e.payload["body"]: e.payload for e in events}
+    for _, body, _, keyword in texts:
+        assert by_body[body]["compliance_keyword"] == keyword
+        assert event_by_body[body]["compliance_keyword"] == keyword

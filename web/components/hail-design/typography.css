@@ -1,0 +1,28 @@
+/* Portable typography and interaction defaults. Content kits set their own layout. */
+:is(.hsite, .hail-public, .legal-page) :where(h1,h2,h3,h4) {
+  font-family: var(--font-display);
+  font-weight: 600;
+  text-transform: none;
+  text-wrap: balance;
+  letter-spacing: -.04em;
+}
+:is(.hsite, .hail-public, .legal-page) :where(p,li) { text-wrap: pretty; }
+:is(.hsite, .hail-public, .legal-page) :where(button,input,textarea,select) { font-family: var(--font-ui); }
+:is(.hsite, .hail-public, .legal-page) :where(pre,code,kbd,samp) { font-family: var(--font-code); }
+:is(.hsite, .hail-public, .legal-page) :where(pre) { max-width: 100%; overflow-x: auto; }
+:is(.hsite, .hail-public, .legal-page) :where(img,video,iframe) { max-width: 100%; }
+:is(.hsite, .hail-public, .legal-page) :where(a,button,input,textarea,select,summary):focus-visible {
+  outline: 2px solid var(--ac-text);
+  outline-offset: 4px;
+}
+:is(.hsite, .hail-public, .legal-page) ::selection { background: var(--ac-soft); color: var(--ink); }
+@media (prefers-reduced-motion: reduce) {
+  :is(.hsite, .hail-public, .legal-page) *,
+  :is(.hsite, .hail-public, .legal-page) *::before,
+  :is(.hsite, .hail-public, .legal-page) *::after {
+    scroll-behavior: auto !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}

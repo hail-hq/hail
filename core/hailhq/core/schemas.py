@@ -367,6 +367,22 @@ NumberType = Literal["local", "mobile", "toll_free", "national"]
 Capability = Literal["voice", "sms"]
 
 
+class CallTranscriptTurn(BaseModel):
+    role: Literal["user", "assistant"] = Field(
+        description=(
+            "'assistant' is the Hail agent. 'user' is the person (or "
+            "answering machine) on the other end of the line."
+        )
+    )
+    text: str = Field(description="What was said in this turn.")
+    at: datetime = Field(
+        description=(
+            "When the speaker started this turn, ISO 8601. When that is not "
+            "known, when Hail recorded the turn."
+        )
+    )
+
+
 class CallResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -439,6 +455,14 @@ class CallResponse(BaseModel):
     failure_message: str | None = Field(
         default=None,
         description="Human-readable explanation for a failed call. Null for other statuses.",
+    )
+    transcript: list[CallTranscriptTurn] | None = Field(
+        default=None,
+        description=(
+            "What was said on the call, in the order it was said. Set only by "
+            "GET /v1/calls/{call_id}: an empty list until someone speaks. "
+            "Null in POST /v1/calls and GET /v1/calls responses."
+        ),
     )
 
 
@@ -1406,6 +1430,10 @@ class EmailDomainPatch(BaseModel):
     * Hail-mail addressing — the user/org prefix pair (only valid on
       ``kind='hail_mail'`` rows; the handler returns 422 if a tenant tries
       to PATCH these on a custom row).
+    * Send switch — ``sends_enabled`` (only valid on ``kind='custom'``
+      rows; the handler returns 422 otherwise). ``false`` stops the
+      domain from sending at all: skipped by sender selection, explicit
+      ``from`` refused.
     * Inbound action — ``inbound_enabled`` + ``forward_to`` + the optional
       ``forward_rate_per_hour`` cap. These apply to either kind, but this
       milestone routes inbound only to ``hail_mail`` rows; custom-domain
@@ -1448,12 +1476,21 @@ class EmailDomainPatch(BaseModel):
         default=None,
         description="Cap on forwarded messages per hour. Omit to leave unchanged.",
     )
+    sends_enabled: bool | None = Field(
+        default=None,
+        description=(
+            "Send switch for kind='custom' rows. False stops the domain "
+            "from sending at all: skipped by default sender selection and a "
+            "send naming it explicitly returns 422. Only allowed on custom "
+            "rows; Omit to leave unchanged."
+        ),
+    )
     email_agent_id: UUID | None = Field(
         default=None,
         description=(
             "The agent that answers mail to this address. The agent must be "
             "live and answer email. A custom domain must be verified with "
-            "inbound on. Null stops agent replies. Omit to leave unchanged."
+            "inbound and sending on. Null stops agent replies. Omit to leave unchanged."
         ),
     )
     email_agent_scope: EmailAgentScope | None = Field(
@@ -1507,13 +1544,14 @@ class EmailDomainPatch(BaseModel):
             and self.inbound_enabled is None
             and self.forward_to is None
             and self.forward_rate_per_hour is None
+            and self.sends_enabled is None
             and "email_agent_id" not in self.model_fields_set
             and self.email_agent_scope is None
         ):
             raise ValueError(
                 "at least one of local_prefix_user, local_prefix_org, "
                 "inbound_enabled, forward_to, forward_rate_per_hour, "
-                "email_agent_id, or email_agent_scope must be set"
+                "sends_enabled, email_agent_id, or email_agent_scope must be set"
             )
         return self
 
@@ -1562,6 +1600,15 @@ class EmailDomainResponse(BaseModel):
     inbound_enabled: bool = Field(
         default=False,
         description="Whether this domain accepts and forwards inbound mail.",
+    )
+    sends_enabled: bool = Field(
+        default=True,
+        description=(
+            "Send switch for kind='custom' rows. False stops the domain "
+            "from sending at all: it is skipped by default sender selection "
+            "and a send that names it explicitly returns 422. Always true "
+            "for hail_mail rows."
+        ),
     )
     forward_to: list[str] | None = Field(
         default=None,
@@ -2297,6 +2344,229 @@ class VerificationCheckResponse(BaseModel):
     note: str = Field(description="What the check does not cover.")
 
 
+class VerificationDocumentWarning(BaseModel):
+    """Something on an uploaded document the carrier may refuse. A warning
+    only: you can still submit."""
+
+    field: str = Field(
+        description=(
+            "Where to show it: a slot name for the document itself, or the "
+            "path of a typed value (`first_name`, `<slot>.<field>`, "
+            "`address.customer_name`)."
+        )
+    )
+    kind: Literal["unreadable", "rotated", "expired", "document_type", "name"] = Field(
+        description=(
+            "'unreadable', 'rotated' (upside down or on its side), 'expired', "
+            "'document_type' (the file does not match the chosen type), or "
+            "'name' (the typed name differs from the printed one)."
+        )
+    )
+    message: str = Field(description="What is wrong and how to fix it.")
+
+
+class VerificationPrintedName(BaseModel):
+    """The name printed on a document, as read. Empty strings when not printed."""
+
+    given_names: str = Field(
+        description=(
+            "The given names of the person the document is about or "
+            "addressed to, never a person who signs for the issuer."
+        )
+    )
+    surnames: str = Field(description="That person's surnames.")
+    latin_given_names: str = Field(
+        default="",
+        description=(
+            "The given names in Latin letters as the document prints them "
+            "(its machine-readable zone or a transliteration), or empty."
+        ),
+    )
+    latin_surnames: str = Field(
+        default="", description="The surnames in Latin letters, the same way."
+    )
+    business_name: str = Field(
+        description=(
+            "The name of the company the document is about or addressed "
+            "to, never the company that issued it."
+        )
+    )
+
+
+class VerificationDocumentRead(BaseModel):
+    """What was read from one slot's file."""
+
+    read: bool = Field(
+        description=(
+            "False when nothing was read from the file: the reader is off, "
+            "the file type is not supported, the read failed or took too "
+            "long (no warning), or the file is unreadable (an 'unreadable' "
+            "warning). The other values are then empty."
+        )
+    )
+    option: str | None = Field(
+        description=(
+            "The slot's document type the file looks like, as an option key, "
+            "or null when none fits or it was not read."
+        )
+    )
+    fields: dict[str, str] = Field(
+        description=(
+            "Values for the fields of the slot's document types, by field "
+            "name, as printed on the file."
+        )
+    )
+    expiry_date: str | None = Field(
+        description="The expiry date printed on the file (YYYY-MM-DD), or null."
+    )
+    printed_name: VerificationPrintedName | None = Field(
+        description="The name printed on the file, or null when not read."
+    )
+    skipped: Literal["daily_limit"] | None = Field(
+        default=None,
+        description=(
+            "Why the file was not read, when Hail chose not to: "
+            "'daily_limit' when the workspace has used today's document "
+            "reads. Null otherwise."
+        ),
+    )
+    none_of_types: bool = Field(
+        default=False,
+        description=(
+            "True when the file was read and looks like none of the slot's "
+            "document types (`option` is then null)."
+        ),
+    )
+    file_slot: str | None = Field(
+        default=None,
+        description=(
+            "The slot whose file this was read from: this slot, or the slot "
+            "whose file covers it. Slots with the same `file_slot` share one "
+            "file. Null when not read."
+        ),
+    )
+
+
+class VerificationDocumentCheckResponse(BaseModel):
+    """Returned by ``POST /verifications/document-check``."""
+
+    fields: dict[str, str] = Field(
+        description="Values for the form's own `fields`, by field name, read from the files."
+    )
+    address: dict[str, str] = Field(
+        description=(
+            "Address parts read from the files (`customer_name`, `street`, "
+            "`city`, `region`, `postal_code`, `country_code`). Only the parts found."
+        )
+    )
+    documents: dict[str, VerificationDocumentRead] = Field(
+        description="What was read from each slot that had a file, by slot name."
+    )
+    warnings: list[VerificationDocumentWarning] = Field(
+        description="Things the carrier may refuse. Empty when nothing was found."
+    )
+    note: str = Field(description="What the check does not cover.")
+
+
+class VerificationDocumentCautionRead(BaseModel):
+    """A slot's earlier read, as `POST /verifications/document-check`
+    returned it in `documents.<slot>`. Send that whole object: `option`,
+    `printed_name`, `expiry_date`, `none_of_types` and `file_slot` are used;
+    the other keys may be sent and are ignored."""
+
+    option: str | None = Field(
+        default=None,
+        description="The document type the file looked like, or null.",
+    )
+    printed_name: VerificationPrintedName | None = Field(
+        default=None,
+        description="The name printed on the file, or null (no name check).",
+    )
+    expiry_date: str | None = Field(
+        default=None,
+        description=(
+            "The expiry date read from the file (YYYY-MM-DD), or null (no "
+            "expiry check)."
+        ),
+    )
+    none_of_types: bool = Field(
+        default=False,
+        description=(
+            "True when the file looked like none of the slot's document types."
+        ),
+    )
+    file_slot: str | None = Field(
+        default=None,
+        description=(
+            "The slot whose file this was read from. Slots with the same "
+            "`file_slot` get one name check per box, as in the document "
+            "check. Null: slots with the same printed name count as one file."
+        ),
+    )
+
+
+class VerificationDocumentCautionDocument(BaseModel):
+    """One slot of the form: what is typed now, and its earlier read."""
+
+    option: str = Field(
+        default="",
+        description="The chosen document type key, or empty when not chosen yet.",
+    )
+    fields: dict[str, str] = Field(
+        default_factory=dict,
+        description="The values typed for this slot's fields, by field name.",
+    )
+    read: VerificationDocumentCautionRead | None = Field(
+        default=None,
+        description=(
+            "The slot's `documents.<slot>` from an earlier document check, or "
+            "null when it has no successful read. Only slots with a read are "
+            "checked."
+        ),
+    )
+
+
+class VerificationDocumentCautionsRequest(BaseModel):
+    """Body of ``POST /verifications/document-cautions``."""
+
+    quote_id: UUID = Field(
+        description="The `quote_id` of the number offer being verified."
+    )
+    country_code: str = Field(
+        min_length=2,
+        max_length=2,
+        description="ISO 3166-1 alpha-2 country of the number, like GB.",
+    )
+    number_type: str = Field(
+        description="The number type of the offer, like `local` or `mobile`."
+    )
+    subject_type: Literal["person", "business"] = Field(
+        description="'person' (you) or 'business' (your company)."
+    )
+    fields: dict[str, str] = Field(
+        default_factory=dict, description="The form's typed fields, by name."
+    )
+    address: dict[str, str] = Field(
+        default_factory=dict,
+        description="The typed address parts (`customer_name` is compared).",
+    )
+    documents: dict[str, VerificationDocumentCautionDocument] = Field(
+        default_factory=dict, description="The form's document slots, by name."
+    )
+
+
+class VerificationDocumentCautionsResponse(BaseModel):
+    """Returned by ``POST /verifications/document-cautions``."""
+
+    warnings: list[VerificationDocumentWarning] = Field(
+        description=(
+            "`name`, `document_type` and `expired` warnings: the typed form "
+            "and chosen types against the earlier reads. Empty when nothing "
+            "differs."
+        )
+    )
+
+
 class EmailResponse(EmailSummary):
     body_text: str | None = Field(description="Plain-text body, if any.")
     body_html: str | None = Field(description="HTML body, if any.")
@@ -2853,14 +3123,40 @@ class ProviderValidateResult(BaseModel):
 class Address(BaseModel):
     customer_name: str = Field(description="Name associated with the address.")
     street: str = Field(description="Street address.")
-    city: str = Field(description="City or locality.")
+    city: str = Field(
+        description="City or town of the street address, as written on mail sent there."
+    )
     region: str = Field(description="State, province or region.")
-    postal_code: str = Field(description="Postal or ZIP code.")
+    postal_code: str = Field(
+        description="Postal or ZIP code of the street address, such as `94103`."
+    )
     country_code: str = Field(description="ISO alpha-2 address country.")
 
 
+class KeptDocumentAnswer(BaseModel):
+    """A document slot's saved choice on a number registration."""
+
+    option: str = Field(default="", description="The document option chosen.")
+    fields: dict[str, str] = Field(
+        default_factory=dict, description="The document's typed fields."
+    )
+
+
+class KeptFileInfo(BaseModel):
+    """A file Hail keeps for a resubmit. The bytes are never returned."""
+
+    slot: str = Field(description="The document slot it was filed for.")
+    filename: str = Field(description="The file name as it was sent.")
+    content_type: str = Field(
+        description="'image/jpeg', 'image/png' or 'application/pdf'."
+    )
+    size_bytes: int = Field(description="Size in bytes.")
+
+
 class SmsApplicationResponse(BaseModel):
-    """Private submitted SMS answers, or verified sender details for an old filing."""
+    """Private saved answers of a registration: a US texting application
+    (or verified sender details for an old filing), or a number
+    registration kept for a resubmit."""
 
     schema_version: int = Field(
         default=1, description="Version of this saved-answer response format."
@@ -2873,6 +3169,40 @@ class SmsApplicationResponse(BaseModel):
     )
     address: Address | None = Field(
         default=None, description="Original sender address, when available."
+    )
+    documents: dict[str, KeptDocumentAnswer] | None = Field(
+        default=None,
+        description=(
+            "Number registration only: each document slot's option and "
+            "fields, by slot name. Null for US texting."
+        ),
+    )
+    files: list[KeptFileInfo] = Field(
+        default_factory=list,
+        description=(
+            "Number registration only: the files Hail keeps, by slot. A "
+            "resubmit reuses each one unless you send a new file for its slot."
+        ),
+    )
+    kept_until: datetime | None = Field(
+        default=None,
+        description="Number registration only: when Hail deletes these answers and files.",
+    )
+    quote_id: UUID | None = Field(
+        default=None,
+        description=(
+            "Number registration only: the quote it was filed for. It keeps "
+            "working with GET /v1/verifications/requirements and the resubmit "
+            "while the answers are kept."
+        ),
+    )
+    hold_cents: int | None = Field(
+        default=None,
+        description=(
+            "Number registration only: the credit a resubmit with that quote "
+            "sets aside (its setup and first month). Null when nothing is set "
+            "aside or the quote is gone."
+        ),
     )
 
 
@@ -2896,6 +3226,10 @@ class VerificationResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID = Field(description="Unique identifier for this verification.")
+    number_id: UUID | None = Field(
+        default=None,
+        description="The owned number covered by toll-free SMS verification. Null for organization-wide registrations.",
+    )
     country_code: str = Field(description="ISO alpha-2 country code.")
     number_type: str = Field(
         description="Kind of number: 'local', 'mobile', 'toll_free', or 'national'."
@@ -2912,7 +3246,7 @@ class VerificationResponse(BaseModel):
     purpose: str = Field(
         description=(
             "'number': permission to buy a number in this country. "
-            "'sms': registration to text US numbers from a US number."
+            "'sms': US local texting registration or per-number US/Canada toll-free texting verification."
         )
     )
     state: str = Field(
@@ -2973,6 +3307,23 @@ class VerificationResponse(BaseModel):
     cancellable: bool = Field(
         default=False,
         description="True when `DELETE /v1/verifications/{id}` accepts this verification now.",
+    )
+    kept_until: datetime | None = Field(
+        default=None,
+        description=(
+            "For a number registration: when Hail deletes the answers and "
+            "files it keeps so the filing can be fixed and sent again (30 "
+            "days after submit). They go sooner when it is approved or "
+            "cancelled, or the account closes. Null when nothing is kept."
+        ),
+    )
+    resubmittable: bool = Field(
+        default=False,
+        description=(
+            "True when `POST /v1/verifications/{id}/resubmit` accepts this "
+            "verification now: a rejected number registration whose answers "
+            "are still kept (`kept_until`)."
+        ),
     )
     identity_confirmed: bool = Field(
         default=False,

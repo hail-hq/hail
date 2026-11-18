@@ -1,24 +1,24 @@
 """Hail MCP server — Streamable HTTP only, mode-dispatched at boot.
 
-The deployable artifact is ``app``. FastMCP serves Streamable HTTP at
+The deployable artifact is ``app``. MCPServer serves Streamable HTTP at
 ``/`` (root — the service runs on a dedicated MCP subdomain so the
 endpoint is the bare host URL). ``/healthz`` is mounted on the same
 Starlette parent app so the compose healthcheck stays a one-line probe.
-``/.well-known/glama.json`` is mounted the same way, to verify ownership
-of the Glama MCP connector listing for this domain.
 ``/.well-known/openai-apps-challenge`` serves the OpenAI app ownership token.
+``/favicon.ico`` and ``/icon.svg`` redirect to the website's current raster
+and vector icons; the ``initialize`` result advertises both.
 
 Two boot modes (see ``hailhq.mcp.auth.select_auth_mode``):
 
-* **oauth-rs** — FastMCP receives ``AuthSettings`` + a pass-through
-  ``TokenVerifier``. FastMCP auto-mounts
+* **oauth-rs** — MCPServer receives ``AuthSettings`` + a pass-through
+  ``TokenVerifier``. MCPServer auto-mounts
   ``/.well-known/oauth-protected-resource`` and rejects bearer-less
   requests with ``401 WWW-Authenticate: Bearer resource_metadata=...``.
-* **static-key** — no FastMCP auth, no protected-resource route. Tools
+* **static-key** — no MCPServer auth, no protected-resource route. Tools
   use the shared ``HAIL_API_KEY`` singleton (unchanged from pre-1c).
 
 Streamable HTTP needs its session manager running for the lifetime of
-the app. ``FastMCP.streamable_http_app()`` wires that into its own
+the app. ``MCPServer.streamable_http_app()`` wires that into its own
 Starlette lifespan, but here we own the combined parent app, so we drive
 ``session_manager.run()`` from the parent lifespan ourselves.
 """
@@ -41,10 +41,13 @@ from hailhq.core.telemetry import (
 )
 from hailhq.core.telemetry_identity import IdentityMiddleware
 from hailhq.core.urls import join_url
+from hailhq.mcp.analytics import instrument_analytics
 from hailhq.mcp.auth import AuthMode, PassThroughVerifier, select_auth_mode
 from hailhq.mcp.discovery_auth import DiscoveryAuthMiddleware
 from hailhq.mcp.hail_client import HailClient
-from hailhq.mcp.tools import TaggedFastMCP, register_tools
+from hailhq.mcp.metadata import server_metadata
+from hailhq.mcp.tools import TaggedMCPServer, register_tools
+from pydantic import AnyHttpUrl
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.requests import Request
@@ -57,45 +60,64 @@ from starlette.responses import (
 from starlette.routing import Route
 
 from mcp.server.auth.settings import AuthSettings
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from mcp.types import Icon
 
+# mcp 2 emits its own OpenTelemetry span per request (named after the
+# method, e.g. "tools/call place_call"), so there is no MCP instrumentation
+# to install; logfire.instrument_mcp() is a no-op with it.
 _telemetry = configure_telemetry("hail-mcp")
-if _telemetry:
-    instrument("MCP", logfire.instrument_mcp)
 
 
-def _build_app() -> tuple[FastMCP, HailClient | None, Starlette]:
+def _build_app() -> tuple[MCPServer, HailClient | None, Starlette]:
     mode = select_auth_mode()
 
     if mode is AuthMode.OAUTH_RS and not settings.mcp_resource_url:
         raise RuntimeError("oauth-rs mode requires MCP_RESOURCE_URL to be set")
 
-    # The website owns branding. Advertise a stable endpoint and resolve its
-    # current raster icon from the web manifest when a client requests it.
+    # The website owns branding. Advertise stable endpoints and resolve the
+    # current icons from the web manifest when a client requests them. Raster
+    # first: some clients cannot draw SVG. The vector entry's type and size
+    # are safe to state because its route only redirects to an SVG.
     manifest_url = (
         join_url(settings.hail_base_url, "site.webmanifest")
         if settings.hail_base_url
         else None
     )
     icons = (
-        [Icon(src=join_url(settings.mcp_resource_url, "favicon.ico"))]
+        [
+            Icon(src=join_url(settings.mcp_resource_url, "favicon.ico")),
+            Icon(
+                src=join_url(settings.mcp_resource_url, "icon.svg"),
+                mime_type="image/svg+xml",
+                sizes=["any"],
+            ),
+        ]
         if manifest_url and settings.mcp_resource_url
         else None
     )
+    metadata = {
+        **server_metadata(),
+        "icons": icons,
+    }
 
     if mode is AuthMode.OAUTH_RS:
-        verifier = PassThroughVerifier(resource_server_url=settings.mcp_resource_url)
+        # mcp 1.x parsed this as a plain AnyHttpUrl, which adds "/" to a bare
+        # host, so clients have always seen "resource": "https://mcp.hail.so/".
+        # mcp 2 keeps the string as given; parse it the old way to publish the
+        # same value. The API and the website accept both forms.
+        resource_url = str(AnyHttpUrl(settings.mcp_resource_url))
+        verifier = PassThroughVerifier(resource_server_url=resource_url)
         auth_settings = AuthSettings(
             issuer_url=settings.hail_auth_url,
-            resource_server_url=settings.mcp_resource_url,
+            resource_server_url=resource_url,
             required_scopes=None,  # scope enforcement deferred to Phase 2
+            # The API checks the JWT audience; PassThroughVerifier decodes nothing.
+            validate_token_resource=False,
         )
-        mcp_app: FastMCP = TaggedFastMCP(
+        mcp_app: MCPServer = TaggedMCPServer(
             name="hail",
-            icons=icons,
-            streamable_http_path="/",
-            host="0.0.0.0",
+            **metadata,
             token_verifier=verifier,
             auth=auth_settings,
         )
@@ -104,19 +126,29 @@ def _build_app() -> tuple[FastMCP, HailClient | None, Starlette]:
         singleton: HailClient | None = None
     else:
         # static-key: pre-1c shape.
-        mcp_app = TaggedFastMCP(
-            name="hail", icons=icons, streamable_http_path="/", host="0.0.0.0"
-        )
+        mcp_app = TaggedMCPServer(name="hail", **metadata)
         singleton = HailClient()
 
     register_tools(mcp_app, mode=mode, singleton=singleton)
 
-    http_app = mcp_app.streamable_http_app()  # / (root)
+    # "/" (root). host="0.0.0.0" marks a public bind, so the SDK does not
+    # turn on its localhost-only Host check (see tests/test_server.py).
+    # The SDK default caps open sessions at 10 000 (as mcp 1.30 did). A caller
+    # with any bearer can open sessions, so the cap keeps a flood from using
+    # all memory; past it, new sessions get 503. Idle sessions close after the
+    # SDK's 30-minute timeout.
+    http_app = mcp_app.streamable_http_app(streamable_http_path="/", host="0.0.0.0")
+    # After streamable_http_app() on purpose: instrument() would otherwise add
+    # PostHog's session-minting middleware, which buffers request bodies and
+    # sets Mcp-Session-Id on initialize responses the transport left without
+    # one. This server keeps its own sessions; tool calls are still captured.
+    analytics = instrument_analytics(mcp_app, mode)
 
     async def healthz(_request: Request) -> Response:
         return JSONResponse({"status": "ok"})
 
-    async def favicon(_request: Request) -> Response:
+    async def manifest_icon(types: set[str]) -> Response:
+        """Redirect to the first manifest icon of one of ``types``."""
         if not manifest_url:
             return Response(status_code=404)
         try:
@@ -126,10 +158,7 @@ def _build_app() -> tuple[FastMCP, HailClient | None, Starlette]:
             manifest = response.json()
             entries = manifest.get("icons", []) if isinstance(manifest, dict) else []
             for icon in entries if isinstance(entries, list) else []:
-                if not isinstance(icon, dict) or icon.get("type") not in {
-                    "image/png",
-                    "image/jpeg",
-                }:
+                if not isinstance(icon, dict) or icon.get("type") not in types:
                     continue
                 src = icon.get("src")
                 if not isinstance(src, str) or not src:
@@ -144,26 +173,29 @@ def _build_app() -> tuple[FastMCP, HailClient | None, Starlette]:
             pass
         return Response(status_code=503)
 
-    async def glama_connector_claim(_request: Request) -> Response:
-        return JSONResponse(
-            {
-                "$schema": "https://glama.ai/mcp/schemas/connector.json",
-                "maintainers": [{"email": "r@hail.so"}],
-            }
-        )
+    async def favicon(_request: Request) -> Response:
+        return await manifest_icon({"image/png", "image/jpeg"})
+
+    async def vector_icon(_request: Request) -> Response:
+        return await manifest_icon({"image/svg+xml"})
 
     async def openai_apps_challenge(_request: Request) -> Response:
         return PlainTextResponse("POAuiIrWlgcsgNoQiGI4OhKFQLOqtQoDpweSKl4fGkY")
 
     @contextlib.asynccontextmanager
     async def lifespan(_app: Starlette) -> AsyncIterator[None]:
-        async with mcp_app.session_manager.run():
-            try:
+        try:
+            async with mcp_app.session_manager.run():
                 yield
-            finally:
-                await asyncio.to_thread(flush_telemetry)
+        finally:
+            # After the session manager stops, so tool calls that end while
+            # sessions close are flushed too.
+            flushes = [asyncio.to_thread(flush_telemetry)]
+            if analytics:
+                flushes.append(analytics.flush())
+            await asyncio.gather(*flushes)
 
-    # Splatting sub_app.routes drops sub_app.user_middleware. FastMCP
+    # Splatting sub_app.routes drops sub_app.user_middleware. MCPServer
     # adds AuthenticationMiddleware + AuthContextMiddleware *inside*
     # streamable_http_app() when auth is configured — those land on
     # http_app.user_middleware, NOT on its routes. Fold them into the
@@ -171,14 +203,14 @@ def _build_app() -> tuple[FastMCP, HailClient | None, Starlette]:
     # before any route resolution.
     #
     # DiscoveryAuthMiddleware goes first in the list (= outermost = runs
-    # first on the way in), ahead of FastMCP's own auth middleware, so it
-    # can inject a synthetic bearer for the two capability-discovery
+    # first on the way in), ahead of MCPServer's own auth middleware, so it
+    # can inject a synthetic bearer for the capability-discovery
     # methods before AuthenticationMiddleware reads the headers.
     app = Starlette(
         routes=[
             Route("/healthz", healthz, methods=["GET"]),
             Route("/favicon.ico", favicon, methods=["GET"]),
-            Route("/.well-known/glama.json", glama_connector_claim, methods=["GET"]),
+            Route("/icon.svg", vector_icon, methods=["GET"]),
             Route(
                 "/.well-known/openai-apps-challenge",
                 openai_apps_challenge,

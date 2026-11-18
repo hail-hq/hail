@@ -86,3 +86,51 @@ def test_upgrade_keeps_rows_as_uploaded_email_attachments(
         assert _index_def(conn, "email_attachment_uploads_org_idx") is not None
 
     _run_alembic(empty_db, ["upgrade", "head"])
+
+
+def test_kept_registration_files_link_to_their_verification(
+    empty_db: str,  # noqa: F811
+) -> None:
+    """Migration 0081: ``verification_kept`` rows name a verification and
+    slot, no other row does, one file per slot, and they go with the row."""
+    _run_alembic(empty_db, ["upgrade", "0081"])
+    org, vid = uuid.uuid4(), uuid.uuid4()
+    insert = (
+        "INSERT INTO file_uploads (organization_id, purpose, filename, "
+        "content_type, s3_key, verification_id, slot) VALUES "
+        "(%s, %s, 'a.jpg', 'image/jpeg', %s, %s, %s)"
+    )
+    with _connect(empty_db) as conn:
+        conn.execute(
+            "INSERT INTO carrier_verifications (id, organization_id, provider, "
+            "country_code, number_type, subject_type, state, "
+            "requirements_version) VALUES "
+            "(%s, %s, 'twilio', 'GB', 'mobile', 'person', 'rejected', 'v1')",
+            (vid, org),
+        )
+        conn.execute(insert, (org, "verification_kept", "k1", vid, "id"))
+        for purpose, key, link, slot in (
+            ("verification_kept", "k2", None, None),
+            ("verification_document", "k3", vid, "id2"),
+        ):
+            try:
+                conn.execute(insert, (org, purpose, key, link, slot))
+            except psycopg.errors.CheckViolation:
+                pass
+            else:  # pragma: no cover
+                raise AssertionError(f"{purpose} with link {link} was accepted")
+        try:
+            conn.execute(insert, (org, "verification_kept", "k4", vid, "id"))
+        except psycopg.errors.UniqueViolation:
+            pass
+        else:  # pragma: no cover
+            raise AssertionError("a second file for one slot was accepted")
+        conn.execute("DELETE FROM carrier_verifications WHERE id = %s", (vid,))
+        assert conn.execute(
+            "SELECT count(*) FROM file_uploads WHERE purpose = 'verification_kept'"
+        ).fetchone() == (0,)
+
+    _run_alembic(empty_db, ["downgrade", "0080"])
+    with _connect(empty_db) as conn:
+        assert not _constraint_exists(conn, "file_uploads_kept_link_check")
+    _run_alembic(empty_db, ["upgrade", "head"])

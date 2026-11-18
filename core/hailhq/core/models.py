@@ -22,6 +22,7 @@ from sqlalchemy import (
     UniqueConstraint,
     event,
     func,
+    or_,
     text,
 )
 from sqlalchemy.dialects.postgresql import INET, JSONB, UUID
@@ -235,7 +236,8 @@ class UsageEvent(Base):
     analytics primitive they can query directly.
 
     ``ref`` formats (the rater's parsing contract):
-      * voice: bare call UUID
+      * voice: bare call UUID, or ``{uuid}:recording-v1`` for a recorded
+               call (``billing.RECORDING_USAGE_REF_SUFFIX``)
       * sms:   ``sms:{uuid}:{tier}`` where tier is us/ca/row
                (rows written before the tiered rates shipped are bare
                ``sms:{uuid}``; the rater must treat those as ``us``)
@@ -266,6 +268,13 @@ class UsageEvent(Base):
         CheckConstraint(
             "units >= 0",
             name="usage_events_units_nonneg_check",
+        ),
+        # A call's usage row, for the balance hold check (call_allowance).
+        Index(
+            "usage_events_voice_ref_idx",
+            "organization_id",
+            text("split_part(ref, ':', 1)"),
+            postgresql_where=text("channel = 'voice'"),
         ),
     )
 
@@ -368,17 +377,20 @@ class ChannelSuspension(Base):
 class OrgClosure(Base):
     """Local record that an org's account was closed/deleted on hail-website.
 
-    hail's own DB does not own account/org lifecycle — organizations live in
-    hail-website's separate Postgres (better-auth schema), cross-referenced
-    only by a bare ``organization_id`` with no FK (same posture as
-    ``OrganizationMember``/``ApiKey`` above). Without this table hail has no
-    way to tell whether/when an org closed, so it can't enforce the
-    retention policy (account duration + 12 months) on its own.
+    hail does not own account/org lifecycle: hail-website owns the
+    ``organizations`` table (better-auth schema) in the same database, and
+    hail's tables reference it only by a bare ``organization_id`` with no FK
+    (same posture as ``OrganizationMember``/``ApiKey`` above). The org row
+    is deleted with the account, so without this table hail has no way to
+    tell whether/when an org closed.
 
-    Populated by ``POST /internal/org-closures``, which hail-website calls
-    when it closes/deletes an account (see
-    ``api/hailhq/api/routes/internal/org_closures.py``). Read by
-    ``hailhq.core.retention.purge_expired_data``.
+    hail-website's account deletion inserts the row inside its own deletion
+    transaction (upsert on ``organization_id``), then calls
+    ``POST /internal/org-closures`` (see
+    ``api/hailhq/api/routes/internal/org_closures.py``), which upserts the
+    same row. Read by ``hailhq.core.retention`` (answer clearing, retention
+    sweep) and ``hailhq.api.org_close`` (number release and registration
+    cancel at close).
     """
 
     __tablename__ = "org_closures"
@@ -702,6 +714,11 @@ class PhoneNumber(Base):
     # attached for inbound at the carrier (hailhq.core.inbound_routing).
     inbound_registered_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
 
+    @classmethod
+    def answered_by(cls, agent_id: uuid.UUID):
+        """SQL: the number's calls or texts go to ``agent_id``."""
+        return or_(cls.voice_agent_id == agent_id, cls.sms_agent_id == agent_id)
+
     __table_args__ = (
         CheckConstraint(
             "number_type IN ('local','mobile','toll_free','national')",
@@ -870,8 +887,52 @@ class Call(Base):
         return value if isinstance(value, str) else "disabled"
 
 
+class CallBalanceHold(Base):
+    """Money a live call sets aside from the balance (migration 0079). One
+    row per call; the amount and the end time only grow. See
+    hailhq.core.call_allowance."""
+
+    __tablename__ = "call_balance_holds"
+
+    call_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("calls.id", ondelete="CASCADE"), primary_key=True
+    )
+    cents: Mapped[Decimal] = mapped_column(Numeric(14, 1), nullable=False)
+    hold_until: Mapped[datetime] = mapped_column(TS, nullable=False)
+    # The highest prices held for the call: once it ends, the hold counts
+    # its real minutes at these (hailhq.core.call_allowance). NULL: a line
+    # ran at a price Hail does not know, so the full hold counts.
+    cents_per_minute: Mapped[Decimal | None] = mapped_column(Numeric)
+    cents_per_call: Mapped[Decimal | None] = mapped_column(Numeric)
+    # Handover dials approved for the call; each may bill the second line.
+    dials: Mapped[int] = mapped_column(Integer, server_default="0", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint("cents >= 0", name="call_balance_holds_cents_check"),
+        CheckConstraint("dials >= 0", name="call_balance_holds_dials_check"),
+        CheckConstraint(
+            "cents_per_minute >= 0 AND cents_per_call >= 0"
+            " AND (cents_per_minute IS NULL) = (cents_per_call IS NULL)",
+            name="call_balance_holds_prices_check",
+        ),
+        Index("call_balance_holds_until_idx", "hold_until"),
+    )
+
+
 class CallEvent(Base):
     __tablename__ = "call_events"
+    __table_args__ = (
+        # One call.analyzed marker per call (hailhq.core.call_analysis).
+        Index(
+            "call_events_analyzed_uniq",
+            "call_id",
+            unique=True,
+            postgresql_where=text("kind = 'analyzed'"),
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
@@ -1252,6 +1313,16 @@ class EmailDomain(Base):
     provider: Mapped[str] = mapped_column(Text, server_default="ses", nullable=False)
     provider_resource_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     verified_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
+    # Send switch. False means this identity must not send at all: it is
+    # skipped by verified_senders (so from-less sends fall back to hail-mail
+    # or resolveSender's remaining cases), and a send that names it
+    # explicitly is refused with 422. Hail-mail rows may not be switched off
+    # (see email_domains_sends_enabled_check) — they are the fallback
+    # identity a from-less send resolves to. Inbound mail is unaffected.
+    # Mirrors migration 0076.
+    sends_enabled: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("true"), nullable=False
+    )
     inbound_enabled: Mapped[bool] = mapped_column(
         Boolean, server_default=text("false"), nullable=False
     )
@@ -1288,6 +1359,13 @@ class EmailDomain(Base):
         CheckConstraint(
             "verification_status IN ('pending','verified','failed')",
             name="email_domains_verification_status_check",
+        ),
+        # Hail-mail rows may not stop sending: they are the fallback a
+        # from-less send resolves to, and system mail (forward confirmations)
+        # names their address. Mirrors migration 0076.
+        CheckConstraint(
+            "kind <> 'hail_mail' OR sends_enabled",
+            name="email_domains_sends_enabled_check",
         ),
         # Hail-mail rows need both prefixes; custom rows leave both NULL.
         # Mirrors the migration so Base.metadata.create_all (tests) produces
@@ -1728,6 +1806,9 @@ class Email(Base):
             text("created_at DESC"),
         ),
         Index("emails_message_id_idx", "message_id"),
+        # The console asks "does this domain have mail?" (EXISTS), and
+        # DELETE /email-domains checks the same. Mirrors migration 0077.
+        Index("emails_email_domain_id_idx", "email_domain_id"),
         # The forward worker polls this every second; keep it index-only.
         # Direct-send rows pass through 'queued' only momentarily, so the
         # partial index stays tiny.
@@ -1775,6 +1856,12 @@ class FileUpload(Base):
     * ``verification_document``: a document for one carrier verification.
       ``POST /verifications`` reads it and deletes it; rows left over are
       deleted 1 hour after upload.
+    * ``verification_kept``: Hail's own encrypted copy of a file a number
+      registration was filed with, for ``verification_id`` and ``slot``,
+      kept for a resubmit. Deleted 30 days after submit, or when the
+      registration is approved or cancelled or the account closes
+      (``hailhq.api.routes.verifications.forget_kept_registrations``).
+      ``uploaded_at`` is set once the object is written.
 
     An upload link (``POST /uploads``) makes the row first with
     ``uploaded_at`` null and ``token_hash`` set; the ``PUT`` that sends the
@@ -1810,6 +1897,18 @@ class FileUpload(Base):
     link_expires_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
     uploaded_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
     sha256: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # A kept registration file: the verification it was filed with, and the
+    # document slot. Set for ``verification_kept`` only.
+    verification_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "carrier_verifications.id",
+            name="file_uploads_verification_id_fkey",
+            ondelete="CASCADE",
+        ),
+        nullable=True,
+    )
+    slot: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # The link rules, on the database clock (``statement_timestamp()``, the
     # time of each statement), so they hold on any number of API hosts.
@@ -1831,8 +1930,23 @@ class FileUpload(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "purpose IN ('email_attachment', 'verification_document')",
+            "purpose IN ('email_attachment', 'verification_document', "
+            "'verification_kept')",
             name="file_uploads_purpose_check",
+        ),
+        # A kept file always names its verification and slot; no other
+        # upload does.
+        CheckConstraint(
+            "(purpose = 'verification_kept') = "
+            "(verification_id IS NOT NULL AND slot IS NOT NULL)",
+            name="file_uploads_kept_link_check",
+        ),
+        Index(
+            "file_uploads_verification_slot_uniq",
+            "verification_id",
+            "slot",
+            unique=True,
+            postgresql_where=text("verification_id IS NOT NULL"),
         ),
         CheckConstraint(
             "uploaded_at IS NULL OR size_bytes IS NOT NULL",
@@ -2066,7 +2180,12 @@ class Organization(Base):
 class AgentSendLog(Base):
     """One row per allowed agent-origin send attempt — the counter behind
     the velocity caps in agent_caps.py. Written by the gate itself at
-    check time (counts attempts, uniform across channels)."""
+    check time (counts attempts, uniform across channels).
+
+    ``channel = 'document_read'`` rows count AI reads of verification
+    documents instead (document_reads.py, the daily cap), with the slot
+    name as ``recipient``. Every query here filters by channel, so those
+    rows never count as agent sends; a new query must do the same."""
 
     __tablename__ = "agent_send_log"
 
@@ -2078,7 +2197,7 @@ class AgentSendLog(Base):
     )
     channel: Mapped[str] = mapped_column(
         Text, nullable=False
-    )  # 'email' | 'sms' | 'voice'
+    )  # 'email' | 'sms' | 'voice' | 'document_read'
     recipient: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         TS, nullable=False, server_default=text("now()")
@@ -2129,10 +2248,15 @@ class NumberOffer(Base):
 class CarrierVerification(Base):
     """A customer's verification with a carrier, needed before buying numbers
     in some countries. Holds state, opaque carrier IDs and the name of the
-    person or company it is for (``subject_name``). No addresses or
-    document data are stored for number verification. SMS provider_refs also
-    retains the submitted application text/address for organization-scoped repair;
-    document files are never stored here."""
+    person or company it is for (``subject_name``). ``provider_refs.application``
+    keeps what the customer typed, privately, for the organization only
+    (a number registration's answers encrypted when
+    ``HAIL_PROVIDER_SECRET_KEY`` is set):
+    for SMS until 30 days after it ends; for a number registration (fields,
+    address, document options) until 30 days after submit, or sooner when it
+    is approved or cancelled. Both go at account close
+    (``hailhq.core.retention``). A number registration's files are kept as
+    ``file_uploads`` rows (``verification_kept``), not here."""
 
     __tablename__ = "carrier_verifications"
 
@@ -2141,6 +2265,17 @@ class CarrierVerification(Base):
     )
     organization_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), nullable=False
+    )
+    # TFV covers one owned number; 10DLC remains organization-wide.
+    number_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "phone_numbers.id",
+            name="carrier_verifications_number_id_fkey",
+            ondelete="RESTRICT",
+            use_alter=True,
+        ),
+        nullable=True,
     )
     provider: Mapped[str] = mapped_column(Text, nullable=False)
     country_code: Mapped[str] = mapped_column(Text, nullable=False)
@@ -2215,7 +2350,10 @@ class CarrierVerification(Base):
                 "AND subject_name IS NULL"
             ),
         ),
-        # One live SMS registration.
+        CheckConstraint(
+            "purpose != 'sms' OR number_type != 'toll_free' OR number_id IS NOT NULL",
+            name="carrier_verifications_tollfree_number_check",
+        ),
         Index(
             "carrier_verifications_sms_live_uniq",
             "organization_id",
@@ -2224,7 +2362,15 @@ class CarrierVerification(Base):
             "number_type",
             unique=True,
             postgresql_where=text(
-                "purpose = 'sms' AND state NOT IN ('cancelled','rejected')"
+                "purpose = 'sms' AND number_type != 'toll_free' AND state NOT IN ('cancelled','rejected')"
+            ),
+        ),
+        Index(
+            "carrier_verifications_tollfree_live_uniq",
+            "number_id",
+            unique=True,
+            postgresql_where=text(
+                "purpose = 'sms' AND number_type = 'toll_free' AND state NOT IN ('cancelled','rejected')"
             ),
         ),
         Index("carrier_verifications_org_idx", "organization_id"),

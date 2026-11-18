@@ -23,64 +23,65 @@ Example. Ask your agent: "Find me a US number that can call and text." It calls 
 
 The server exposes 43 tools. Schemas (args, validation, return shapes) are the source of truth — refer to [`mcp/hailhq/mcp/tools.py`](https://github.com/hail-hq/hail/blob/main/mcp/hailhq/mcp/tools.py).
 
-Every tool sets the MCP hints `readOnlyHint`, `destructiveHint`, `idempotentHint` and `openWorldHint`, so clients can ask for approval before a write. `release_number`, `delete_agent`, `acquire_number`, `submit_verification` and `cancel_verification` are marked destructive. The first three also need a confirmation argument (`confirm_e164`, `confirm_name`, `confirm_total_cents`). `submit_verification` needs `attest_authorized: true`.
+Every tool sets the MCP hints `readOnlyHint`, `destructiveHint`, `idempotentHint` and `openWorldHint`, so clients can ask for approval before a write. `release_number`, `delete_agent`, `acquire_number`, `submit_verification`, `resubmit_verification` and `cancel_verification` are marked destructive. The first three also need a confirmation argument (`confirm_e164`, `confirm_name`, `confirm_total_cents`). `submit_verification` and `resubmit_verification` need `attest_authorized: true`.
 
 `place_call`, `send_sms` and `send_email` need `recipient_consent` set to the JSON boolean `true`. Strings such as `"true"` and numbers such as `1` are refused before any request is sent.
 
-| Tool                            | Does                                                                                               |
-| ------------------------------- | -------------------------------------------------------------------------------------------------- |
-| `place_call`                    | Originate an outbound phone call.                                                                  |
-| `get_call`                      | Fetch the current state of one call.                                                               |
-| `list_calls`                    | List recent calls (cursor-paginated).                                                              |
-| `send_sms`                      | Send an outbound SMS (recipient consent is required).                                              |
-| `get_sms`                       | Fetch the current state of one SMS.                                                                |
-| `list_sms`                      | List recent SMS messages (cursor-paginated).                                                       |
-| `send_email`                    | Send an outbound email (supports `attachment_ids`).                                                |
-| `upload_email_attachment`       | Upload a small file (under about 50 KB) as base64, get back a reusable id.                         |
-| `create_file_upload`            | A one-time link to upload a file with `curl`, for an email attachment or a verification document.  |
-| `get_email`                     | Fetch one email's full record (body + inbound headers).                                            |
-| `list_emails`                   | List emails (`direction="inbound"` for replies).                                                   |
-| `get_email_raw`                 | Presigned URL for an inbound email's raw MIME.                                                     |
-| `get_email_attachment`          | Presigned URL for one inbound attachment.                                                          |
-| `get_email_events`              | Page through one email's event history.                                                            |
-| `get_email_stats`               | Aggregate email counts for a time window.                                                          |
-| `get_events`                    | Page through the event stream.                                                                     |
-| `list_email_domains`            | List sending identities + the default `from` address.                                              |
-| `whoami`                        | Identify the human behind the session (for `reply_to`).                                            |
-| `list_contacts`                 | List the org's contacts (members + manual contacts).                                               |
-| `lookup_contact`                | Find one contact by name, email, or phone fragment.                                                |
-| `create_contact`                | Add a manual contact.                                                                              |
-| `list_agents`                   | List saved agents.                                                                                 |
-| `get_agent`                     | Fetch one saved agent.                                                                             |
-| `create_agent`                  | Save an agent that answers calls and texts.                                                        |
-| `update_agent`                  | Change an agent. `clear_fields` removes optional values.                                           |
-| `delete_agent`                  | Delete an agent. Destructive. Needs `confirm_name`.                                                |
-| `route_number`                  | Choose which agent answers a number.                                                               |
-| `route_email_domain`            | Choose which agent answers an email address, and who it answers.                                   |
-| `quote_numbers`                 | Compare live carrier offers for a new number (read-only).                                          |
-| `list_number_regions`           | List the US/CA state codes `quote_numbers` takes as optional `region` (read-only).                 |
-| `acquire_number`                | Buy a quoted number. Spends money. Needs `confirm_total_cents`.                                    |
-| `list_numbers`                  | List the org's numbers (cursor-paginated).                                                         |
-| `get_number`                    | Fetch one number.                                                                                  |
-| `release_number`                | Release a number. Destructive and permanent. Needs `confirm_e164`.                                 |
-| `get_verification_requirements` | Read what a carrier needs to verify the org for a number type (read-only).                         |
-| `check_verification`            | Run every check Hail can run on a verification form. Files nothing (read-only).                    |
-| `submit_verification`           | Send details and documents to the carrier. Irreversible. Needs `attest_authorized`.                |
-| `list_verifications`            | List the org's verifications and their states (read-only).                                         |
-| `get_verification`              | Fetch one verification; poll it for `approved` (read-only).                                        |
-| `cancel_verification`           | Cancel an `awaiting_review` one, dismiss a `rejected` one, or end an approved US SMS registration. |
-| `confirm_verification`          | Enter the code the carrier texted a person (`confirmation: "code"`).                               |
+| Tool                            | Does                                                                                                                            |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `place_call`                    | Originate an outbound phone call.                                                                                               |
+| `get_call`                      | Fetch the current state and transcript of one call.                                                                             |
+| `list_calls`                    | List recent calls (cursor-paginated).                                                                                           |
+| `send_sms`                      | Send an outbound SMS (recipient consent is required).                                                                           |
+| `get_sms`                       | Fetch the current state of one SMS.                                                                                             |
+| `list_sms`                      | List recent SMS messages (cursor-paginated).                                                                                    |
+| `send_email`                    | Send an outbound email (supports `attachment_ids`).                                                                             |
+| `upload_email_attachment`       | Upload a small file (under about 50 KB) as base64, get back a reusable id.                                                      |
+| `create_file_upload`            | A one-time link to upload a file with `curl`, for an email attachment or a verification document.                               |
+| `get_email`                     | Fetch one email's full record (body + inbound headers).                                                                         |
+| `list_emails`                   | List emails (`direction="inbound"` for replies).                                                                                |
+| `get_email_raw`                 | Presigned URL for an inbound email's raw MIME.                                                                                  |
+| `get_email_attachment`          | Presigned URL for one inbound attachment.                                                                                       |
+| `get_email_events`              | Page through one email's event history.                                                                                         |
+| `get_email_stats`               | Aggregate email counts for a time window.                                                                                       |
+| `get_events`                    | Page through the event stream.                                                                                                  |
+| `list_email_domains`            | List sending identities + the default `from` address.                                                                           |
+| `whoami`                        | Identify the human behind the session (for `reply_to`).                                                                         |
+| `list_contacts`                 | List the org's contacts (members + manual contacts).                                                                            |
+| `lookup_contact`                | Find one contact by name, email, or phone fragment.                                                                             |
+| `create_contact`                | Add a manual contact.                                                                                                           |
+| `list_agents`                   | List saved agents.                                                                                                              |
+| `get_agent`                     | Fetch one saved agent.                                                                                                          |
+| `create_agent`                  | Save an agent that answers calls and texts.                                                                                     |
+| `update_agent`                  | Change an agent. `clear_fields` removes optional values.                                                                        |
+| `delete_agent`                  | Delete an agent. Destructive. Needs `confirm_name`.                                                                             |
+| `route_number`                  | Choose which agent answers a number.                                                                                            |
+| `route_email_domain`            | Choose which agent answers an email address, and who it answers.                                                                |
+| `quote_numbers`                 | Compare live carrier offers for a new number (read-only).                                                                       |
+| `list_number_regions`           | List the US/CA state codes `quote_numbers` takes as optional `region` (read-only).                                              |
+| `acquire_number`                | Buy a quoted number. Spends money. Needs `confirm_total_cents`.                                                                 |
+| `list_numbers`                  | List the org's numbers (cursor-paginated).                                                                                      |
+| `get_number`                    | Fetch one number.                                                                                                               |
+| `release_number`                | Release a number. Destructive and permanent. Needs `confirm_e164`.                                                              |
+| `get_verification_requirements` | Read what a carrier needs to verify the org for a number type (read-only).                                                      |
+| `check_verification`            | Run every check Hail can run on a verification form. Files nothing (read-only).                                                 |
+| `check_verification_documents`  | Read the files of a verification form: values to fill it, and warnings. Uses daily document reads.                              |
+| `submit_verification`           | Send details and documents to the carrier. Irreversible. Needs `attest_authorized`.                                             |
+| `list_verifications`            | List the org's verifications and their states (read-only).                                                                      |
+| `get_verification`              | Fetch one verification; poll it for `approved` (read-only).                                                                     |
+| `resubmit_verification`         | File a rejected number registration again from the kept answers and files, with fixes. Irreversible. Needs `attest_authorized`. |
+| `cancel_verification`           | Cancel an `awaiting_review` one, dismiss a `rejected` one, or end an approved US SMS registration.                              |
+| `confirm_verification`          | Enter the code the carrier texted a person (`confirmation: "code"`).                                                            |
 
 ### Sending a file
 
 A tool call carries text only, so a file in base64 makes the model write every character into the call. That is slow and fails for most real files. `create_file_upload` returns a one-time link instead, and the agent's shell sends the bytes:
 
 1. `create_file_upload`: `{"purpose": "email_attachment", "filename": "invoice.pdf", "content_type": "application/pdf"}`. The result has `id`, `upload_url`, `expires_at` (15 minutes) and a ready `curl` line.
-2. Run the `curl` line with the file's path after the `@`:
+2. Replace `FILE_PATH` in the `curl` line with the file's absolute path and run it. Keep the single quotes, so a file name cannot run as a command; write any `'` in the path as `'\''`. For `/home/agent/invoice.pdf`:
 
    ```bash
-   curl -sS -X PUT --data-binary @invoice.pdf \
-     -H 'Content-Type: application/pdf' \
+   curl --silent --show-error --globoff --upload-file '/home/agent/invoice.pdf' \
      'https://api.hail.so/v1/uploads/<id>?token=<token>'
    ```
 
@@ -117,11 +118,12 @@ Some numbers, for example a UK mobile, need a carrier check of the organization 
 1. `quote_numbers`: `{"country_code": "GB", "number_type": "mobile"}`. The offer has `readiness: "verification_required"`, its `quote_id`, and `subject_types`: who may verify for it (`person`, `business`, or both).
 2. Ask the user: "you or your company?". That is `subject_type` (`person` or `business`). It is required; never guess it.
 3. `get_verification_requirements`: `{"country_code": "GB", "number_type": "mobile", "quote_id": "<quote_id>", "subject_type": "person"}`. The result lists `fields`, `documents` (skip a slot whose `needs_input` is false) and `address_required`.
-4. Ask the user for every field and file. The agent must not invent or guess any value.
+4. Ask the user for the files first, then for every field the files do not show. The agent must not invent or guess any value.
    The balance must cover the offer's `setup_cents` plus `monthly_cents`, or `submit_verification` returns a 402 error and sends nothing. Ask the user to add credit first. That amount is set aside while the carrier checks the papers. It pays for setup and the first month when the number is bought with this verification, and comes back if the verification is rejected or cancelled, or if no number is bought within 30 days of approval. Each entry in the offer's `verifications` shows it as `held_cents`.
 5. Upload each file with `create_file_upload` (see [Sending a file](#sending-a-file)): `{"purpose": "verification_document", "filename": "passport.jpg", "content_type": "image/jpeg"}`. Run the `curl` line it returns. The upload id works for 1 hour.
-6. `check_verification` with the same arguments as `submit_verification`, minus `attest_authorized`. It runs every check Hail can run (credit, duplicates, required fields, documents, file types and sizes) and files nothing. Fix any `problems` with the user.
-7. `submit_verification`. Each `files` entry is `{"slot", "upload_id"}`, or `{"slot", "content_type", "content_base64"}` for a very small file. Slot names in `files` must be keys in `documents`:
+6. `check_verification_documents` with the files and the `documents` (the `option` may wait). An AI model reads each file. It returns the values the files show, by the form's own keys, and `warnings`: an unreadable, upside-down or expired document, a file of another type than the chosen one, or a typed name that differs from the printed one. Confirm the values with the user and tell them each warning. A warning never blocks the submission. A workspace has 30 reads per day; after that a file comes back `read: false` with `skipped: "daily_limit"`. Only the first 3 pages of a PDF are read, and a PDF of more than 5 pages is not read.
+7. `check_verification` with the same arguments as `submit_verification`, minus `attest_authorized`. It runs every check Hail can run (credit, duplicates, required fields, documents, file types and sizes) and files nothing. Fix any `problems` with the user.
+8. `submit_verification`. Each `files` entry is `{"slot", "upload_id"}`, or `{"slot", "content_type", "content_base64"}` for a very small file. Slot names in `files` must be keys in `documents`:
 
    ```json
    {
@@ -148,9 +150,9 @@ Some numbers, for example a UK mobile, need a carrier check of the organization 
 
    The result holds the verification `id` and `state`, never the details. If the carrier finds a problem, the result lists `problems` (`loc`, `msg`) and nothing is stored. Fix them with the user and submit again. A used upload is deleted once the verification is saved; after a failed submit it stays for the retry.
 
-8. `get_verification`: `{"verification_id": "<id>"}`. Poll every few minutes to hours, not every few seconds. Review takes business days. Hail sends no email or webhook when it ends.
-9. On `approved`: `quote_numbers` again. The offer is now `ready`. Then `acquire_number` and `route_number` as above. The organization may hold several approved verifications (several people or companies). Each entry in the offer's `verifications` has a `subject_name`: the person's or company's name from the form. When more than one is approved, show the user the names, ask which one, and pass its `id` as `verification_id` to `acquire_number`.
-10. On `rejected`: read `rejection_reason`, ask the user, call `cancel_verification` to dismiss it, and submit a new one.
+9. `get_verification`: `{"verification_id": "<id>"}`. Poll every few minutes to hours, not every few seconds. Review takes business days. Hail sends no email or webhook when it ends.
+10. On `approved`: `quote_numbers` again. The offer is now `ready`. Then `acquire_number` and `route_number` as above. The organization may hold several approved verifications (several people or companies). Each entry in the offer's `verifications` has a `subject_name`: the person's or company's name from the form. When more than one is approved, show the user the names, ask which one, and pass its `id` as `verification_id` to `acquire_number`.
+11. On `rejected`: read `rejection_reason` and ask the user what to fix. For a number registration with `resubmittable: true`, `get_sms_application` shows the kept answers and file names, and `resubmit_verification` files it again with only the changes (Hail keeps them for 30 days after submit, until `kept_until`). Otherwise call `cancel_verification` to dismiss it and submit a new one.
 
 A person's US texting registration may wait on the person. `confirmation: "code"`: ask them for the code the carrier texted and call `confirm_verification` with `{"verification_id": "<id>", "code": "<code>"}`. `confirmation: "reply"`: they answer the carrier's text; nothing to call.
 

@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
+from datetime import datetime, timezone
 from uuid import UUID
 
 from hailhq.core.config import settings
@@ -27,6 +29,12 @@ logger = logging.getLogger(__name__)
 _NUMBER_IN_ANOTHER_SERVICE = 21712
 # Twilio error 21710: the number is already in this messaging service.
 _NUMBER_ALREADY_IN_SERVICE = 21710
+
+# A "yes" from the toll-free approval check is kept this long per process, so
+# a bulk send does not ask Twilio before every text. A "no" is never kept.
+_TOLLFREE_APPROVED_TTL_SECONDS = 600
+# (account SID, number SID, E.164) -> monotonic time the "yes" expires.
+_tollfree_approved_until: dict[tuple[str, str, str], float] = {}
 
 
 class TwilioSmsProvider(SmsProvider):
@@ -50,6 +58,64 @@ class TwilioSmsProvider(SmsProvider):
                 )
             client = TwilioClient(self.account_sid, token)
         self._client = client
+
+    async def tollfree_approved(self, *, provider_resource_id: str, e164: str) -> bool:
+        """Preserve existing manual approvals without importing identity or filing.
+
+        The current owned phone and every TFV record read must match this
+        account and exact SID, and the newest record must be approved. An old
+        approval for another/released number never authorizes this sender.
+        A "yes" is cached for ``_TOLLFREE_APPROVED_TTL_SECONDS``.
+        """
+        key = (self.account_sid or "", provider_resource_id, e164)
+        if _tollfree_approved_until.get(key, 0.0) > time.monotonic():
+            return True
+
+        def read():
+            phone = self._client.incoming_phone_numbers(provider_resource_id).fetch()
+            if (
+                phone.sid != provider_resource_id
+                or phone.phone_number != e164
+                or phone.account_sid != self.account_sid
+            ):
+                return False
+            records = self._client.messaging.v1.tollfree_verifications.list(
+                # Every page: the list order is not documented, and the
+                # newest record decides.
+                tollfree_phone_number_sid=provider_resource_id,
+                # One page holds every record of a number in practice, so the
+                # read stays inside the 5 second wait below.
+                page_size=100,
+            )
+            if not records or any(
+                r.tollfree_phone_number_sid != provider_resource_id
+                or r.account_sid != self.account_sid
+                for r in records
+            ):
+                return False
+            oldest = datetime.min.replace(tzinfo=timezone.utc)
+            newest = max(records, key=lambda r: r.date_created or oldest)
+            return newest.status == "TWILIO_APPROVED"
+
+        try:
+            approved = await asyncio.wait_for(asyncio.to_thread(read), timeout=5)
+        except Exception as exc:
+            logger.warning(
+                "Toll-free approval lookup failed: exception=%s status=%s code=%s",
+                type(exc).__name__,
+                exc.status if isinstance(exc, TwilioRestException) else None,
+                exc.code if isinstance(exc, TwilioRestException) else None,
+            )
+            return False
+        if approved:
+            now = time.monotonic()
+            # Drop expired entries so numbers no longer texted do not pile up.
+            for stale in [k for k, t in _tollfree_approved_until.items() if t <= now]:
+                del _tollfree_approved_until[stale]
+            _tollfree_approved_until[key] = now + _TOLLFREE_APPROVED_TTL_SECONDS
+        else:
+            _tollfree_approved_until.pop(key, None)
+        return approved
 
     async def send_sms(
         self,
@@ -238,6 +304,11 @@ class LazyTwilioSmsProvider(SmsProvider):
         if self._inner is None:
             self._inner = TwilioSmsProvider()
         return self._inner
+
+    async def tollfree_approved(self, *, provider_resource_id: str, e164: str) -> bool:
+        return await self._provider().tollfree_approved(
+            provider_resource_id=provider_resource_id, e164=e164
+        )
 
     async def send_sms(
         self,

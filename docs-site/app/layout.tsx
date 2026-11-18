@@ -7,28 +7,31 @@ import localFont from "next/font/local";
 import type { ReactNode } from "react";
 import { DOCS_SITE_COPY } from "@/lib/site-copy";
 import "./global.css";
+import "@/components/hail-design/tokens.css";
+import "@/components/hail-design/typography.css";
+import "./public.css";
 
 // Every font loads from npm package files, so the build downloads nothing. A Google Fonts
 // download that failed broke a hail.so production build.
-const fontSans = localFont({
-  src: "../node_modules/@fontsource-variable/space-grotesk/files/space-grotesk-latin-wght-normal.woff2",
-  weight: "300 700",
-  variable: "--font-grotesk",
+const fontDisplay = localFont({
+  src: "../node_modules/@fontsource-variable/bricolage-grotesque/files/bricolage-grotesque-latin-wght-normal.woff2",
+  weight: "200 800",
+  variable: "--font-bricolage",
   display: "swap",
 });
 
-// The shared hail.so header and footer (components/hail-header, hail-footer) read --font-ui and --font-code.
+// The portable tokens map these local files to --font-ui and --font-code.
 const fontUi = localFont({
   src: "../node_modules/geist/dist/fonts/geist-sans/Geist-Variable.woff2",
   weight: "100 900",
-  variable: "--font-ui",
+  variable: "--font-geist-sans",
   display: "swap",
 });
 
 const fontCode = localFont({
   src: "../node_modules/geist/dist/fonts/geist-mono/GeistMono-Variable.woff2",
   weight: "100 900",
-  variable: "--font-code",
+  variable: "--font-geist-mono",
   display: "swap",
   adjustFontFallback: false,
   fallback: ["ui-monospace", "SFMono-Regular", "Menlo", "monospace"],
@@ -77,10 +80,13 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html
       lang="en"
       suppressHydrationWarning
-      className={`${fontMono.variable} ${fontSans.variable} ${fontUi.variable} ${fontCode.variable}`}
+      className={`${fontMono.variable} ${fontDisplay.variable} ${fontUi.variable} ${fontCode.variable}`}
     >
-      <body className="hail-docs flex min-h-screen flex-col">
-        <RootProvider theme={{ storageKey: "hail-theme" }}>
+      <body className="hail-public hail-docs flex min-h-screen flex-col">
+        <RootProvider
+          theme={{ storageKey: "hail-theme" }}
+          search={{ options: { api: "/docs/api/search" } }}
+        >
           <SiteHeader active="docs" themeControl={<HeaderTheme />} />
           {children}
           <SiteFooter />

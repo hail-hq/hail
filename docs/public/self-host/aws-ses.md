@@ -60,7 +60,7 @@ This is operator setup, done once per deployment. Hail does not configure SES fo
 
 > This MAIL FROM subdomain — `bounces.mail.hail.so` on the **operator parent** — is operator-managed: you configure it once, manually, in the steps above. **Custom tenant domains are different**: Hail configures their MAIL FROM automatically. `POST /email-domains` (kind=`custom`) calls `PutEmailIdentityMailFromAttributes` for `send.<domain>` and returns the MX + SPF records to publish together with the DKIM CNAMEs. `POST /email-domains/{id}/verify` then re-polls both the DKIM status and the MAIL FROM status. Refer to §7.
 
-## 5. DMARC alignment (required for inbox delivery)
+## 5. DMARC alignment (required for email inbox delivery)
 
 Without an aligned MAIL FROM, SES uses `<random>@amazonses.com` as the Return-Path. SPF then authenticates against `amazonses.com`, not against your domain. This breaks DMARC alignment, and the DMARC policies of recipients push your mail to spam.
 
@@ -68,7 +68,7 @@ With `bounces.mail.hail.so` as MAIL FROM:
 
 - **SPF** authenticates against `bounces.mail.hail.so` → aligns with the From-domain `mail.hail.so`.
 - **DKIM** signs with `mail.hail.so` → aligns.
-- Both aligned → DMARC `pass` → inbox.
+- Both aligned → DMARC `pass` → email inbox.
 
 Publish a DMARC record. Start at `p=none` (monitor-only). Increase the policy after some weeks of clean reports:
 
@@ -164,13 +164,15 @@ curl -X POST $HAIL_API_URL/v1/emails \
 
 The `from` field is optional. Resolution order:
 
-1. Explicit `from` — must match a `verified` email_domain row owned by the caller's org.
+1. Explicit `from` — must match a `verified` email_domain row owned by the caller's org. A custom domain switched off for sending (`PATCH /email-domains/{id}` with `sends_enabled: false`) is refused with `422`.
 2. The org's single verified custom domain, which wins over the hail-mail address. Own two or more and there is no default — the call returns `422` listing them, so `from` must be explicit.
 3. The org's hail-mail address. Hail mints it on the first send if the org has none and `HAIL_MAIL_BASE_DOMAIN` and the prefixes are configured.
 
 If none of these resolve, the call returns `503` with instructions to register a domain.
 
 To see which address a `from`-less send would use, read `default_from` on `GET /email-domains` (`hail email domain list`). It is `null` when the org owns several verified custom domains.
+
+A `custom` row can be blocked from sending with `PATCH /email-domains/{id}` (`sends_enabled: false`): it is skipped by the pick above and refuses an explicit `from`. Inbound mail on the domain is unaffected. Hail-mail rows cannot be blocked — they are the fallback a `from`-less send resolves to.
 
 The optional `from_name` field sets a display name on the `From:` header (`"Acme Billing" <billing@acme.com>`). Non-ASCII names are RFC-2047-encoded automatically; control characters are rejected with `422`.
 
@@ -242,8 +244,8 @@ consent screenshots. If you
 write the API's bucket policy by hand instead of with the module, copy the
 statements in [`infra/terraform/iam.tf`](https://github.com/hail-hq/hail/blob/main/infra/terraform/iam.tf).
 Copy all of them. Besides the inbound mail folders, the API gets, puts and
-deletes objects under `outbound-attachments/*`, `verification-uploads/*` and
-`sms-evidence/*`, and lists those three folders. `s3:ListBucket` is granted
+deletes objects under `outbound-attachments/*`, `verification-uploads/*`,
+`verification-kept/*` and `sms-evidence/*`, and lists those four folders. `s3:ListBucket` is granted
 on the bucket ARN itself (not on an object path), with a `StringLike`
 condition on `s3:prefix`, as in that file.
 
@@ -421,7 +423,7 @@ the SES side in [`infra/terraform/ses_events.tf`](https://github.com/hail-hq/hai
 Tenants configure routing per `email_domains` row:
 
 ```bash
-# Forward every inbound on the org's hail-mail address to a real inbox
+# Forward every inbound on the org's hail-mail address to a real email inbox
 curl -X PATCH $HAIL_API_URL/v1/email-domains/$DOMAIN_ID \
   -H "Authorization: Bearer $HAIL_API_KEY" \
   -H "Content-Type: application/json" \

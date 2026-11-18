@@ -40,14 +40,25 @@ data "aws_iam_policy_document" "main" {
 
   # Verification documents sent with an upload link (routes/uploads.py).
   # Read once by POST /verifications, then deleted; the GC deletes any left.
+  # The copy Hail keeps for a resubmit lives under verification-kept/.
   statement {
     sid       = "VerificationUploadsReadWriteDelete"
     actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
     resources = ["${aws_s3_bucket.inbound.arn}/verification-uploads/*"]
   }
 
-  # The retention sweep lists a closed organization's folder to delete it,
-  # and the upload-link sweep an expired link's attempts.
+  # Encrypted copies of a number registration's files, kept 30 days after
+  # submit for a resubmit (routes/verifications.py). The verification
+  # worker deletes them; S3 expires any it missed (s3_mail.tf).
+  statement {
+    sid       = "VerificationKeptReadWriteDelete"
+    actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
+    resources = ["${aws_s3_bucket.inbound.arn}/verification-kept/*"]
+  }
+
+  # The retention sweep lists a closed organization's folders (uploaded and
+  # kept documents) to delete them, and the upload-link sweep an expired
+  # link's attempts.
   statement {
     sid       = "VerificationUploadsList"
     actions   = ["s3:ListBucket"]
@@ -55,7 +66,7 @@ data "aws_iam_policy_document" "main" {
     condition {
       test     = "StringLike"
       variable = "s3:prefix"
-      values   = ["verification-uploads/*"]
+      values   = ["verification-uploads/*", "verification-kept/*"]
     }
   }
 

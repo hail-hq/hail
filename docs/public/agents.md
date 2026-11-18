@@ -89,7 +89,10 @@ MCP: `create_agent(handover_contacts=[{"contact_id": "...", "note": "..."}])` se
   `handover_max_duration_seconds` (60..3600, default 1800 = 30 minutes;
   CLI `--handover-max-minutes`) counts from the answer. When it is reached
   the agent says goodbye and the call ends for both people. Either person
-  can hang up sooner.
+  can hang up sooner. On Hail's cloud the limit is also cut to the minutes
+  your credits pay for. A handover is refused when your credits leave less
+  than one minute of talk, after about 30 seconds for the pickup check and
+  10 seconds for the goodbye.
 - Billed as one call at the normal voice rate. The text and the email to the
   contact are billed as a normal SMS and email.
 - Sends a [`call.transferred`](webhooks.md) webhook once someone on the
@@ -116,7 +119,9 @@ MCP: `create_agent(handover_contacts=[{"contact_id": "...", "note": "..."}])` se
    sentence of `first_message`, then `I'm an AI assistant for {org}.`, then
    the rest. `call.answered` and
    `call.completed` follow as on outbound calls. Each answered minute costs
-   the same as an outbound minute.
+   the same as an outbound minute. After the call,
+   [`call.analyzed`](webhooks.md#call-analyzed) sends the transcript and a
+   short summary, and `GET /v1/calls/{id}` returns the transcript.
 
 The AI line on inbound calls defaults to
 `Hi, this is an AI assistant answering on behalf of {org}.` (or the short
@@ -156,7 +161,29 @@ retried up to 3 times with backoff; a text still unanswered after
 credits gets no reply. If the balance is under 1 cent when the worker picks
 the text up, it is skipped before the model runs, with
 `metadata.skipped_reason: "insufficient_funds"`. If credits run out while the
-model writes, the text is skipped without that key.
+model writes, the text is skipped with the same reason.
+
+A text that gets no reply names why in `metadata.skipped_reason`:
+
+| Reason | Meaning |
+| --- | --- |
+| `insufficient_funds` | The workspace has no credits. |
+| `no_agent` | The number has no live text agent any more. |
+| `expired` | The text waited longer than `HAIL_TEXT_REPLY_MAX_AGE_SECONDS`. |
+| `empty_reply` | The model wrote no reply. |
+| `thread_cap` | The thread reached its reply limit. |
+| `send_blocked` | A send check refused the reply (opt-out, blocked number, rate limit, or texting suspended for the workspace). |
+| `sms_registration` | The number needs registration before it can text this person. `metadata.skipped_detail` says how. |
+| `agent_caps` | The agent reached its sending limit. |
+| `active_call` | A call with this person was in progress. The text is answered after the call. |
+
+A failed reply can also carry a `skipped_reason` from the send step:
+
+| Reason | Meaning |
+| --- | --- |
+| `provider_error` | The carrier could not be reached to send the reply. |
+| `carrier_rejected` | The carrier refused the reply. The reply's `error_code` holds the carrier's code. |
+| `reply_failed` | The reply failed for another reason: model or send errors after 3 tries, or no model key. |
 
 ## Answer email with an agent
 
@@ -180,7 +207,7 @@ address, because anyone can write a `From` header. Other mail gets no reply, so 
 domain with no DMARC policy gets none.
 
 A hail-mail address always receives mail, so the route is its only switch. A custom domain must
-be verified with inbound on.
+be verified with inbound and sending on.
 
 What happens on inbound mail:
 
@@ -189,8 +216,8 @@ What happens on inbound mail:
    from the address itself, and a custom-domain reply from `noreply@<domain>`. The agent reads
    its instructions and the last 20 proven messages of the thread.
 3. Hail never answers spam, viruses, auto-replies, list mail, `noreply` senders, or other Hail
-   addresses. Mail sent through Hail to one person carries `List-Unsubscribe`, so it counts as
-   list mail. For one sender in any 24 hours, the agent sends at most 20 messages, counting
+   addresses. Marketing mail sent through Hail to one person carries `List-Unsubscribe`, so it counts as
+   list mail. Informational mail does not. For one sender in any 24 hours, the agent sends at most 20 messages, counting
    replies and tool sends.
 4. With no credit, the mail is stored and the agent stays quiet. The row carries
    `suppressed_reasons: ["insufficient_funds"]`.
@@ -215,8 +242,11 @@ call ends, or when the stale-call sweep closes the call. The reply age limit
 
 - Scope: agent + caller number. Texts and call turns both count.
 - Prompts carry no history. Both agents read it with the `thread_history` tool:
-  `source` is `sms` (texts), `voice` (call turns) or `all`; `before` pages back
-  over the last 7 days; `item_id` returns one full message. The voice prompt
+  `source` is `sms` (texts), `voice` (call turns) or `all`.
+  `query` searches all stored history for this agent and caller, including older conversations.
+  `before` pages through older results; `item_id` returns one full message.
+  Without a query or cursor, the tool starts with recent messages. This is not a retention limit.
+  The voice prompt
   gets one line telling the agent to use the tool when the call has it; the
   text prompt always has it. Why: history in the prompt also held the agent's
   own past "I don't have that" lines, and the model repeated them.

@@ -235,9 +235,10 @@ def test_buy_voice_only_beats_by_request_voice_and_sms(catalog):
     assert o.capabilities == ["voice"] and o.how == "buy"
 
 
-def test_voice_filter_picks_voice_only(catalog):
+def test_voice_filter_prices_calls_only(catalog):
     o = _mixed(catalog, {}, {})
     assert o.capabilities == ["voice", "sms"]
+    # A calls-only search pays no SMS fee, at any carrier: both cost 8.00.
     v = one(number_options("AU", {}, capabilities=["voice"]), "mobile", "person")
     assert v.capabilities == ["voice"] and v.monthly_cents == 800
 
@@ -483,3 +484,93 @@ def test_union_counts_buy_options_only_when_any_buy(catalog):
     )
     o = one(number_options("AU", {}), "mobile", "person")
     assert o.how == "buy" and o.monthly_cents == 500
+
+
+def test_toll_free_sms_options_only_from_carriers_hail_can_verify(catalog):
+    # Same rule as /quotes: Hail verifies US/CA toll-free texting with Twilio
+    # only, so a cheaper Telnyx toll-free number is not offered for SMS.
+    tf = {"sms": True}
+    catalog(
+        twilio=[row("US", "toll_free", "2.15", **tf), row("US", "local", "1.15", **tf)],
+        telnyx=[row("US", "toll_free", "1.00", **tf), row("US", "local", "1.00", **tf)],
+    )
+    sms = number_options("US", {}, ["sms"])
+    o = one(sms, "toll_free")
+    assert o.monthly_cents == 225 and o.more_options == 0
+    # Local numbers keep every carrier.
+    assert one(sms, "local").monthly_cents == 110
+    # Calls only: every carrier competes.
+    voice = one(number_options("US", {}, ["voice"]), "toll_free")
+    # No SMS fee: it can never text, and a calls-only quote prices calls only.
+    assert voice.monthly_cents == 100 and voice.more_options == 1
+    # The cheaper Telnyx number can never text the US: it shows calls only.
+    assert voice.capabilities == ["voice"]
+
+
+def test_filtered_options_price_only_the_asked_jobs(catalog):
+    # /quotes prices the asked capabilities; options with the same filter
+    # must show the same price. The SMS fee applies only when SMS is asked.
+    catalog(telnyx=[row("US", "local", "1.00", sms=True)])
+    voice = one(number_options("US", {}, ["voice"]), "local")
+    both = one(number_options("US", {}, ["voice", "sms"]), "local")
+    every = one(number_options("US", {}), "local")
+    assert voice.monthly_cents == 100 and voice.capabilities == ["voice"]
+    assert both.monthly_cents == every.monthly_cents == 110
+
+
+GB_PERSON = {"accepted": True, "items": ["id_document", "proof_of_address"]}
+GB_BUSINESS = {"accepted": True, "items": ["company_registration"]}
+
+
+def test_gb_local_options_leave_out_telnyx(catalog):
+    # Telnyx declines private individuals for UK numbers: GB local comes
+    # from Twilio only, even when Telnyx's catalog row is cheaper.
+    gb = need(person=GB_PERSON, business=GB_BUSINESS)
+    catalog(
+        twilio=[row(cc="GB", usd="1.15", **gb)],
+        telnyx=[row(cc="GB", usd="1.00", setup_usd="1.00", **gb)],
+        didww=[row(cc="GB", usd="1.20", by_request=True)],
+    )
+    r = number_options("GB", {})
+    for subject in ("person", "business"):
+        o = one(r, subject=subject)
+        assert o.how == "buy" and o.monthly_cents == 115 and o.setup_cents == 0
+        # Twilio, then DIDWW by request; no Telnyx option.
+        assert o.more_options == 1
+
+
+def test_gb_national_is_company_only_at_telnyx(catalog):
+    catalog(
+        telnyx=[
+            row(
+                cc="GB",
+                nt="national",
+                setup_usd="1.00",
+                **need(person=GB_PERSON, business=GB_BUSINESS),
+            )
+        ]
+    )
+    r = number_options("GB", {})
+    p, b = one(r, "national"), one(r, "national", "business")
+    assert p.allowed is False and p.reason == "company_only"
+    assert b.allowed is True and b.how == "buy" and b.monthly_cents == 100
+
+
+def test_gb_national_person_refused_without_a_catalog_block(catalog):
+    # The rule holds even when the sync wrote no requirements block.
+    catalog(
+        telnyx=[
+            row(
+                cc="GB",
+                nt="national",
+                verification_required=True,
+                requirements=None,
+            )
+        ]
+    )
+    r = number_options("GB", {})
+    p, b = one(r, "national"), one(r, "national", "business")
+    assert p.allowed is False and p.reason == "company_only"
+    assert b.allowed is True
+    papers = mod.offer_paperwork("GB", "national", "telnyx", "person", True)
+    assert papers.accepted is False

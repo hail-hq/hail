@@ -5,11 +5,13 @@ POST /calls, POST /emails, and GET/POST /unsubscribe.
 from __future__ import annotations
 
 import uuid
+from email.message import EmailMessage
 
 import httpx
 import pytest
 from hailhq.core.compliance_gate import add_suppression
 from hailhq.core.config import settings
+from hailhq.core.email_mime import parse_mime
 from hailhq.core.models import ApiKey, AuditLog, Call, Email, Suppression, UsageEvent
 from hailhq.core.unsubscribe import build_unsubscribe_url
 from sqlalchemy import select
@@ -137,7 +139,7 @@ async def test_post_emails_succeeds_carries_unsubscribe_headers(
     org_and_key: tuple[uuid.UUID, ApiKey, str],
     email_mock,
 ) -> None:
-    """Happy-path send passes List-Unsubscribe headers to the provider and
+    """Marketing send passes List-Unsubscribe headers to the provider and
     logs the compliance scrub result even though nothing was blocked."""
     _org_id, _, plain = org_and_key
     headers = {"Authorization": f"Bearer {plain}"}
@@ -150,6 +152,8 @@ async def test_post_emails_succeeds_carries_unsubscribe_headers(
             "subject": "hi",
             "body_text": "hello",
             "recipient_consent": True,
+            "message_type": "marketing",
+            "consent_source": "newsletter opt-in form",
         },
         headers=headers,
     )
@@ -198,6 +202,8 @@ async def test_post_emails_multi_recipient_has_no_unsubscribe_headers(
             "subject": "hi",
             "body_text": "hello",
             "recipient_consent": True,
+            "message_type": "marketing",
+            "consent_source": "newsletter opt-in form",
         },
         headers=headers,
     )
@@ -206,6 +212,38 @@ async def test_post_emails_multi_recipient_has_no_unsubscribe_headers(
     send_headers = email_mock.send_email.call_args.kwargs["headers"] or {}
     assert "List-Unsubscribe" not in send_headers
     assert "List-Unsubscribe-Post" not in send_headers
+
+
+@pytest.mark.parametrize("message_type", [None, "informational"])
+async def test_informational_email_can_reach_an_incoming_agent(
+    client, org_and_key, email_mock, message_type
+):
+    """The sender's headers must not make ordinary mail look like a list."""
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    await _register_custom_verified(client, headers)
+    payload = {
+        "from": "ada@acme.com",
+        "to": ["agent@example.com"],
+        "subject": "Please read my document",
+        "body_text": "What is the formula in the attached manual?",
+        "recipient_consent": True,
+    }
+    if message_type is not None:
+        payload["message_type"] = message_type
+    response = await client.post("/emails", json=payload, headers=headers)
+    assert response.status_code == 201, response.text
+    sent = email_mock.send_email.call_args.kwargs
+    wire = EmailMessage()
+    wire["From"] = "ada@acme.com"
+    wire["To"] = "agent@example.com"
+    wire["Subject"] = payload["subject"]
+    for name, value in (sent["headers"] or {}).items():
+        wire[name] = value
+    wire.set_content(payload["body_text"])
+    assert parse_mime(wire.as_bytes()).auto_generated is False
+    assert "List-Unsubscribe" not in wire
+    assert "List-Unsubscribe-Post" not in wire
 
 
 # --------------------------------------------------------------------------- #

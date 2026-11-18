@@ -19,6 +19,9 @@ here, scoped to the call's org.
 
 from __future__ import annotations
 
+import asyncio
+import logging
+import re
 from datetime import datetime, timedelta, timezone
 from math import ceil
 from typing import Annotated, Any, Literal
@@ -57,6 +60,19 @@ from hailhq.core.agent_tools.send_sms import MAX_BODY_CHARS as SMS_MAX_BODY_CHAR
 from hailhq.core.agent_tools.transfer_call import MAX_REASON_CHARS
 from hailhq.core.billing import CALL_META_BILLED, has_funds
 from hailhq.core.browser_voice import reserve_browser_preview
+from hailhq.core.call_allowance import (
+    HANDOVER_MIN_SECONDS,
+    HANDOVER_PICKUP_SECONDS,
+    HANDOVER_RING_MINUTES,
+    available_cents,
+    cap_seconds,
+    forget_price,
+    handover_dials,
+    hold,
+    hold_until,
+    minutes_affordable,
+    paid_minutes,
+)
 from hailhq.core.carrier_routing import voice_route
 from hailhq.core.compliance_gate import (
     check_email_allowed,
@@ -94,10 +110,12 @@ from hailhq.core.handover import (
     ON_CALL_LINE,
     HandoverPerson,
     country_of,
+    handover_limit,
     handover_sms_text,
     has_answered_handover,
     load_handover,
 )
+from hailhq.core.internal_webhook import quote_call_price, quotes_enabled
 from hailhq.core.models import (
     Agent,
     AgentHandoverContact,
@@ -116,7 +134,15 @@ from hailhq.core.telemetry import bind_organization
 from hailhq.core.telemetry_identity import tag_context
 from hailhq.core.telephony_catalog import sells_in
 from hailhq.core.text_agent import (
+    AGENT_CAPS_SKIP,
+    CARRIER_REJECTED_SKIP,
+    INSUFFICIENT_FUNDS_SKIP,
     MAX_REPLIES_PER_THREAD,
+    NO_AGENT_SKIP,
+    PROVIDER_ERROR_SKIP,
+    SEND_BLOCKED_SKIP,
+    SMS_REGISTRATION_SKIP,
+    THREAD_CAP_SKIP,
     answers_texts,
     prior_reply,
     replies_in_thread,
@@ -127,6 +153,11 @@ from hailhq.core.webhook_fanout import call_event_data, fanout_call_event
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
+
+# A phone number inside a gate sentence, hidden before it is logged.
+_PHONE_IN_TEXT = re.compile(r"\+?\d[\d\s().-]{6,}\d")
 
 router = APIRouter(
     prefix="/internal/agent",
@@ -780,7 +811,11 @@ class AgentReplySmsResponse(BaseModel):
     ok: bool
     # done | skipped | failed: what the worker writes to agent_reply_state.
     state: str
+    # A short code the worker stores as sms.metadata.skipped_reason; the
+    # console names it. ``detail`` is a customer-safe sentence for a code that
+    # has one (no phone numbers).
     reason: str | None = None
+    detail: str | None = None
     reply_id: UUID | None = None
 
 
@@ -825,7 +860,7 @@ async def agent_reply_sms(
         or not answers_texts(agent)
         or number.provisioning_state != "active"
     ):
-        return AgentReplySmsResponse(ok=False, state="skipped", reason="no_agent")
+        return AgentReplySmsResponse(ok=False, state="skipped", reason=NO_AGENT_SKIP)
 
     # One request per thread at a time: the lock is held until the reply row
     # is committed, so a retry that races the original sees it below and the
@@ -840,20 +875,31 @@ async def agent_reply_sms(
         return AgentReplySmsResponse(ok=True, state="done", reply_id=prior.id)
 
     if await replies_in_thread(db, inbound) >= MAX_REPLIES_PER_THREAD:
-        return AgentReplySmsResponse(ok=False, state="skipped", reason="thread_cap")
+        return AgentReplySmsResponse(ok=False, state="skipped", reason=THREAD_CAP_SKIP)
     if not await has_funds(db, org):
         return AgentReplySmsResponse(
-            ok=False, state="skipped", reason="insufficient_funds"
+            ok=False, state="skipped", reason=INSUFFICIENT_FUNDS_SKIP
         )
     gate = await check_sms_allowed(db, org, inbound.from_e164)
     if not gate.allowed:
-        return AgentReplySmsResponse(ok=False, state="skipped", reason=gate.reason)
+        # The gate's sentence can hold the recipient's number: it is not
+        # returned or stored, and the log shows it with the number hidden.
+        logger.info(
+            "sms_id=%s agent reply blocked: %s",
+            inbound.id,
+            _PHONE_IN_TEXT.sub("[number]", gate.reason or ""),
+        )
+        return AgentReplySmsResponse(
+            ok=False, state="skipped", reason=SEND_BLOCKED_SKIP
+        )
     cap_denial = await check_agent_send_allowed(db, org, "sms", [inbound.from_e164])
     if cap_denial is not None:
-        return AgentReplySmsResponse(ok=False, state="skipped", reason="agent_caps")
+        return AgentReplySmsResponse(ok=False, state="skipped", reason=AGENT_CAPS_SKIP)
     block = await us_registration_block(db, org, number, inbound.from_e164)
     if block is not None:
-        return AgentReplySmsResponse(ok=False, state="skipped", reason=block)
+        return AgentReplySmsResponse(
+            ok=False, state="skipped", reason=SMS_REGISTRATION_SKIP, detail=block
+        )
 
     reply = Sms(
         organization_id=org,
@@ -887,8 +933,12 @@ async def agent_reply_sms(
     )
     err = await deliver_sms(db, reply)
     if err is not None:
+        # A carrier's own error code stays on the reply row (``error_code``).
+        code = (
+            PROVIDER_ERROR_SKIP if err == PROVIDER_ERROR_SKIP else CARRIER_REJECTED_SKIP
+        )
         return AgentReplySmsResponse(
-            ok=False, state="failed", reason=err, reply_id=reply.id
+            ok=False, state="failed", reason=code, reply_id=reply.id
         )
     return AgentReplySmsResponse(ok=True, state="done", reply_id=reply.id)
 
@@ -1673,6 +1723,8 @@ class AgentHandoverResponse(BaseModel):
     from_e164: str | None = None
     trunk_id: str | None = None
     headers: dict[str, str] | None = None
+    # The most seconds the balance pays for once the contact answers.
+    max_seconds: int | None = None
 
 
 class AgentHandoverResultRequest(BaseModel):
@@ -1824,6 +1876,11 @@ async def agent_handover(
         return await _deny_handover(call, body, "carrier_route_failed")
     # The Hail number on this call: outbound dials from it, inbound rang it.
     hail_number = call.to_e164 if call.direction == "inbound" else call.from_e164
+    max_seconds = None
+    if call.metadata_.get(CALL_META_BILLED) and quotes_enabled():
+        max_seconds = await _handover_cap(db, call, contact.phone_e164, hail_number)
+        if max_seconds == 0:
+            return await _deny_handover(call, body, "insufficient_funds")
     return AgentHandoverResponse(
         ok=True,
         spoken="",
@@ -1831,7 +1888,106 @@ async def agent_handover(
         from_e164=hail_number,
         trunk_id=trunk_id,
         headers=headers or None,
+        max_seconds=max_seconds,
     )
+
+
+async def _handover_cap(
+    db: AsyncSession, call: Call, to_e164: str, hail_number: str | None
+) -> int | None:
+    """The handover's time limit from the balance (0: not one minute), and
+    the call's hold grown to cover it (hailhq.core.call_allowance). The time
+    already talked and the ring are priced as the call alone; the handover
+    as both lines plus the agent. The hold never shrinks: if nobody answers,
+    the call runs on under its own limit. When the price is unknown, None:
+    the agent's own handover limit applies, nothing more is held, and the
+    call's full hold counts after it ends."""
+    caller = call.from_e164 if call.direction == "inbound" else hail_number
+    main = {
+        "direction": call.direction,
+        "carrier": call.provider,
+        "number_e164": call.to_e164 or "",
+        "caller_e164": caller or "",
+    }
+    second = {
+        "direction": "outbound",
+        "carrier": call.provider,
+        "number_e164": to_e164,
+        "caller_e164": hail_number or "",
+    }
+    org = str(call.organization_id)
+    recording = bool(call.metadata_.get("recording_enabled"))
+    alone, both = await asyncio.gather(
+        quote_call_price(org, [main], recording),
+        quote_call_price(org, [main, second], recording),
+    )
+    # The agent's own handover limit: the voicebot stops the handover there.
+    limit = handover_limit(
+        await db.get(Agent, call.agent_id) if call.agent_id else None
+    )
+    if alone is None or both is None:
+        # The agent's own handover limit, nothing more held: a slow price
+        # check must not cut off callers who have the credit. The second
+        # line's price is unknown, so the call's full hold counts after it
+        # ends.
+        logger.warning("handover price unknown for call %s; agent limit", call.id)
+        # Under the lock, like the priced path, so a handover racing this one
+        # reads this dial.
+        await org_lock(db, call.organization_id)
+        # The call can now run until the handover limit ends: keep its hold
+        # counting until then.
+        await forget_price(
+            db,
+            call.id,
+            hold_until(
+                datetime.now(timezone.utc),
+                (HANDOVER_RING_MINUTES * 60) + HANDOVER_PICKUP_SECONDS + limit,
+            ),
+        )
+        await db.commit()
+        return None
+    per_minute, per_call = both
+    await org_lock(db, call.organization_id)
+    # Read under the lock: each earlier approved dial is counted, even one
+    # whose result the voicebot has not posted yet.
+    tries = await handover_dials(db, call.id)
+    now = datetime.now(timezone.utc)
+    since = call.answered_at or call.started_at or call.requested_at
+    used = ceil(max(0.0, (now - since).total_seconds()) / 60)
+    # Each earlier handover dial may have billed the second line: up to a
+    # minute (it picked up and failed the pickup check) and its per-call fee.
+    # Counted for every dial: Hail cannot tell which ones picked up, so it
+    # holds more.
+    spent = (
+        alone[0] * (used + HANDOVER_RING_MINUTES)
+        + (per_minute - alone[0] + per_call - alone[1]) * tries
+        + per_call
+    )
+    available = await available_cents(
+        db, call.organization_id, exclude=call.id, now=now
+    )
+    # spent goes in as the fee, so the check rounds the same sum hold() stores.
+    affordable = minutes_affordable(available, per_minute, spent)
+    # Both lines run from pickup; the limit starts after the pickup check.
+    seconds = min(cap_seconds(affordable, HANDOVER_PICKUP_SECONDS), limit)
+    if seconds < HANDOVER_MIN_SECONDS:
+        seconds = 0
+    if seconds > 0:
+        # Hold only the minutes the handover can use.
+        minutes = paid_minutes(seconds, HANDOVER_PICKUP_SECONDS)
+        await hold(
+            db,
+            call.id,
+            spent + per_minute * minutes,
+            hold_until(
+                now, (HANDOVER_RING_MINUTES * 60) + HANDOVER_PICKUP_SECONDS + seconds
+            ),
+            cents_per_minute=per_minute,
+            cents_per_call=per_call,
+            dial=True,
+        )
+    await db.commit()
+    return seconds
 
 
 async def _deny_handover(

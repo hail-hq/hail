@@ -82,3 +82,25 @@ async def test_lifespan_waits_for_pending_sms_refusal_audits(
     async with lifespan(app):
         pass
     assert finished.is_set()
+
+
+@pytest.mark.asyncio
+async def test_lifespan_starts_every_job_on_the_background_pool(
+    monkeypatch: pytest.MonkeyPatch, async_session: AsyncSession
+):
+    """A job started with a plain ``asyncio.create_task`` would share the
+    request pool again, so a slow carrier could starve requests."""
+    import asyncio
+
+    from hailhq.core import db as core_db
+
+    before = asyncio.all_tasks()
+    async with lifespan(app):
+        started = asyncio.all_tasks() - before
+        assert started
+        on_request_pool = [
+            task.get_name()
+            for task in started
+            if not task.get_context().get(core_db._in_background)
+        ]
+        assert on_request_pool == []

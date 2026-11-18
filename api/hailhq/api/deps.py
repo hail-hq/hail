@@ -30,7 +30,7 @@ from hailhq.api.auth import (
     verify_jwt,
 )
 from hailhq.core.config import SELF_HOSTED_ORG_ID, settings
-from hailhq.core.db import get_session, session_scope
+from hailhq.core.db import get_session
 from hailhq.core.models import ApiKey, Organization, OrganizationMember
 from hailhq.core.s3_mail import S3MailClient
 from hailhq.core.telemetry import telemetry_enabled
@@ -156,22 +156,25 @@ async def _apikey_table_exists(db: AsyncSession) -> bool:
     return _caches.apikey_table_present
 
 
-async def _stamp_last_used(api_key_id: uuid.UUID, ts: datetime) -> None:
-    """Update ``lastRequest`` and bump ``requestCount`` in a fresh session.
+async def _stamp_last_used(
+    db: AsyncSession, api_key_id: uuid.UUID, ts: datetime
+) -> None:
+    """Commit key usage through the request's authentication connection.
 
     ``requestCount`` is nullable in the apikey schema; treat NULL as 0 so the
-    first hit becomes 1 instead of staying NULL forever.
+    first hit becomes 1 instead of staying NULL forever. Authentication runs
+    before the handler, so this commit cannot commit handler writes. A nested
+    session would need another connection while the auth SELECT holds one.
     """
-    async with session_scope() as session:
-        await session.execute(
-            update(ApiKey)
-            .where(ApiKey.id == api_key_id)
-            .values(
-                last_request=ts,
-                request_count=func.coalesce(ApiKey.request_count, 0) + 1,
-            )
+    await db.execute(
+        update(ApiKey)
+        .where(ApiKey.id == api_key_id)
+        .values(
+            last_request=ts,
+            request_count=func.coalesce(ApiKey.request_count, 0) + 1,
         )
-        await session.commit()
+    )
+    await db.commit()
 
 
 def _check_shared_key(token: str) -> bool:
@@ -223,9 +226,6 @@ async def _principal_from_apikey_table(token: str, db: AsyncSession) -> Principa
             ),
         )
 
-    if api_key.last_request is None or now - api_key.last_request > _LAST_USED_THROTTLE:
-        await _stamp_last_used(api_key.id, now)
-
     try:
         user_id = uuid.UUID(api_key.reference_id)
     except ValueError:
@@ -237,13 +237,16 @@ async def _principal_from_apikey_table(token: str, db: AsyncSession) -> Principa
         # rewritten to tolerate non-UUID reference_ids).
         user_id = None
 
-    return Principal(
+    principal = Principal(
         auth_kind="apikey",
         api_key_id=api_key.id,
         user_id=user_id,
         organization_id=organization_id,
         scopes=_scopes_from_permissions(api_key.permissions),
     )
+    if api_key.last_request is None or now - api_key.last_request > _LAST_USED_THROTTLE:
+        await _stamp_last_used(db, api_key.id, now)
+    return principal
 
 
 def _looks_like_jwt(token: str) -> bool:

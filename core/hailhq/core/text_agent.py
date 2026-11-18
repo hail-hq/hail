@@ -21,22 +21,46 @@ from typing import Any, Literal
 
 from hailhq.core.billing import has_funds
 from hailhq.core.config import settings
+from hailhq.core.jsonb import merge_object
 from hailhq.core.models import Agent, PhoneNumber, Sms
-from hailhq.core.prompts import TEXT_PREAMBLE, build_text_instructions
+from hailhq.core.prompts import (
+    TEXT_PREAMBLE,
+    build_text_instructions,
+    safe_clock_section,
+)
 from hailhq.core.threads import ThreadItem, thread_items
-from sqlalchemy import DateTime, and_, func, or_, select, update
+from sqlalchemy import (
+    ColumnElement,
+    DateTime,
+    and_,
+    func,
+    or_,
+    select,
+    update,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = [
+    "AGENT_CAPS_SKIP",
+    "CARRIER_REJECTED_SKIP",
     "CHAT_LIMIT",
     "CHAT_WINDOW",
     "CLAIM_LEASE",
+    "EMPTY_REPLY_SKIP",
+    "EXPIRED_SKIP",
     "INSUFFICIENT_FUNDS_SKIP",
     "MAX_ATTEMPTS",
     "MAX_REPLIES_PER_THREAD",
     "MAX_REPLY_CHARS",
+    "NO_AGENT_SKIP",
+    "PROVIDER_ERROR_SKIP",
+    "REPLY_FAILED_SKIP",
     "RETRY_BACKOFF",
+    "SEND_BLOCKED_SKIP",
+    "SKIP_REASONS",
+    "SMS_REGISTRATION_SKIP",
     "TEXT_PREAMBLE",
+    "THREAD_CAP_SKIP",
     "ClaimedReply",
     "ReplyState",
     "answers_texts",
@@ -45,9 +69,11 @@ __all__ = [
     "finish_reply",
     "prior_reply",
     "replies_in_thread",
+    "reply_clock",
     "retry_reply",
     "should_queue_reply",
     "thread_history_for_reply",
+    "with_skip_reason",
 ]
 
 logger = logging.getLogger(__name__)
@@ -71,6 +97,39 @@ RETRY_BACKOFF = timedelta(seconds=30)  # doubled after each failed attempt
 # ``sms.metadata_["skipped_reason"]`` for a text skipped at claim because the
 # org has no funds. Never requeued (only ``threads.ACTIVE_CALL_SKIP`` is).
 INSUFFICIENT_FUNDS_SKIP = "insufficient_funds"
+# Other codes saved as ``sms.metadata_["skipped_reason"]`` (and on a failed
+# reply) so the console can say why a text got no answer. The website names
+# each one; keep these values stable.
+NO_AGENT_SKIP = "no_agent"
+EXPIRED_SKIP = "expired"
+EMPTY_REPLY_SKIP = "empty_reply"
+THREAD_CAP_SKIP = "thread_cap"
+SEND_BLOCKED_SKIP = "send_blocked"
+SMS_REGISTRATION_SKIP = "sms_registration"
+AGENT_CAPS_SKIP = "agent_caps"
+# A failed send: the carrier could not be reached, or it refused the reply
+# (its own error code stays in ``sms.error_code`` of the reply row).
+PROVIDER_ERROR_SKIP = "provider_error"
+CARRIER_REJECTED_SKIP = "carrier_rejected"
+# Any other failed reply: model errors past ``MAX_ATTEMPTS``, a missing model
+# key, or an older API that sent no code.
+REPLY_FAILED_SKIP = "reply_failed"
+# Every code above: the worker stores only these from reply-sms.
+SKIP_REASONS = frozenset(
+    {
+        INSUFFICIENT_FUNDS_SKIP,
+        NO_AGENT_SKIP,
+        EXPIRED_SKIP,
+        EMPTY_REPLY_SKIP,
+        THREAD_CAP_SKIP,
+        SEND_BLOCKED_SKIP,
+        SMS_REGISTRATION_SKIP,
+        AGENT_CAPS_SKIP,
+        PROVIDER_ERROR_SKIP,
+        CARRIER_REJECTED_SKIP,
+        REPLY_FAILED_SKIP,
+    }
+)
 
 ReplyState = Literal["done", "skipped", "failed"]
 
@@ -117,12 +176,16 @@ async def _expire_unclaimable(db: AsyncSession, now: datetime) -> None:
         Sms.requested_at,
     )
     await db.execute(
-        update(Sms).where(*base, age_from < cutoff).values(agent_reply_state="skipped")
+        update(Sms)
+        .where(*base, age_from < cutoff)
+        .values(agent_reply_state="skipped", metadata_=with_skip_reason(EXPIRED_SKIP))
     )
     await db.execute(
         update(Sms)
         .where(*base, Sms.agent_reply_attempts >= MAX_ATTEMPTS)
-        .values(agent_reply_state="failed")
+        .values(
+            agent_reply_state="failed", metadata_=with_skip_reason(REPLY_FAILED_SKIP)
+        )
     )
 
 
@@ -201,7 +264,7 @@ async def claim_pending_reply(db: AsyncSession) -> ClaimedReply | None:
             # Routing changed between ingest and now: drop it quietly and take
             # the next row, so a backlog of dropped texts does not cost a poll
             # each.
-            await finish_reply(db, sms, "skipped")
+            await finish_reply(db, sms, "skipped", reason=NO_AGENT_SKIP)
             continue
         org = sms.organization_id
         # Also for an expired lease: a worker still running cannot overwrite
@@ -215,12 +278,7 @@ async def claim_pending_reply(db: AsyncSession) -> ClaimedReply | None:
             # reply-sms would refuse the send: skip before the model runs.
             unfunded.add(org)
             logger.info("sms_id=%s reply skipped: %s", sms.id, INSUFFICIENT_FUNDS_SKIP)
-            sms.agent_reply_state = "skipped"
-            sms.metadata_ = {
-                **(sms.metadata_ or {}),
-                "skipped_reason": INSUFFICIENT_FUNDS_SKIP,
-            }
-            await db.commit()
+            await finish_reply(db, sms, "skipped", reason=INSUFFICIENT_FUNDS_SKIP)
             continue
         sms.agent_reply_state = "processing"
         sms.agent_reply_attempts += 1
@@ -285,16 +343,31 @@ async def replies_in_thread(db: AsyncSession, sms: Sms) -> int:
     return int((await db.execute(stmt)).scalar_one() or 0)
 
 
+def reply_clock(sms: Sms) -> str | None:
+    """The date and time section for a reply to ``sms``: the business's number
+    is the one texted, the other party's is the sender's. A failure leaves the
+    section out instead of failing the reply."""
+    return safe_clock_section(
+        started_at=datetime.now(timezone.utc),
+        channel="text",
+        business_number=sms.to_e164,
+        other_number=sms.from_e164,
+        received_at=sms.requested_at,
+    )
+
+
 def build_chat_messages(
-    agent: Agent, history: list[ThreadItem]
+    agent: Agent, history: list[ThreadItem], *, clock: str | None = None
 ) -> list[dict[str, Any]]:
-    """OpenAI-style messages: system (preamble, the thread_history hint and
-    the instructions) then the texts, inbound as ``user`` and outbound as
-    ``assistant``. Call items are left out."""
+    """OpenAI-style messages: system (preamble, the thread_history hint, the
+    instructions and the ``clock``) then the texts, inbound as ``user`` and
+    outbound as ``assistant``. Call items are left out."""
     messages: list[dict[str, Any]] = [
         {
             "role": "system",
-            "content": build_text_instructions(agent.system_prompt, thread_tool=True),
+            "content": build_text_instructions(
+                agent.system_prompt, thread_tool=True, clock=clock
+            ),
         }
     ]
     for item in history:
@@ -305,19 +378,42 @@ def build_chat_messages(
     return messages
 
 
+def with_skip_reason(reason: str, detail: str | None = None) -> ColumnElement[Any]:
+    """``metadata`` with ``skipped_reason`` (and ``skipped_detail``) merged in,
+    so the console can say why the agent did not reply. An older detail is
+    dropped first, so it never sits under a new reason."""
+    fields: dict[str, str] = {"skipped_reason": reason}
+    if detail:
+        fields["skipped_detail"] = detail
+    return merge_object(Sms.metadata_, fields, drop="skipped_detail")
+
+
 async def finish_reply(
-    db: AsyncSession, sms: Sms, state: ReplyState, *, attempt: int | None = None
+    db: AsyncSession,
+    sms: Sms,
+    state: ReplyState,
+    *,
+    attempt: int | None = None,
+    reason: str | None = None,
+    detail: str | None = None,
 ) -> None:
     """Record the final state. With ``attempt`` it only applies while that
     claim still owns the row (a reclaimed row is not overwritten by a worker
-    that was presumed dead)."""
+    that was presumed dead). A skipped or failed row records ``reason`` (a
+    short code) and ``detail`` in its metadata. A failed row with no reason
+    records ``REPLY_FAILED_SKIP``."""
     stmt = update(Sms).where(Sms.id == sms.id)
     if attempt is not None:
         stmt = stmt.where(
             Sms.agent_reply_state == "processing",
             Sms.agent_reply_attempts == attempt,
         )
-    await db.execute(stmt.values(agent_reply_state=state))
+    values: dict[str, Any] = {"agent_reply_state": state}
+    if state == "failed" and not reason:
+        reason, detail = REPLY_FAILED_SKIP, None
+    if state in ("skipped", "failed") and reason:
+        values["metadata_"] = with_skip_reason(reason, detail)
+    await db.execute(stmt.values(**values))
     await db.commit()
 
 

@@ -19,6 +19,7 @@ from hailhq.core.providers.verification.base import (
     NOT_ACCEPTED,
     Address,
     AddressScope,
+    DiscardFailures,
     DocumentInput,
     DocumentOption,
     DocumentSlot,
@@ -514,15 +515,15 @@ class DidwwVerificationProvider(VerificationProvider):
                 refs["proof_ids"].append(proof["id"])
             problems = self._validate(refs)
         except DidwwApiError as exc:
-            self._discard_sync(refs)
+            self._drop_draft_sync(refs)
             if carrier_status(exc) in (400, 422):
                 return DraftResult(refs={}, problems=_problems(exc))
             raise VerificationProviderError("DIDWW request failed") from exc
         except Exception:
-            self._discard_sync(refs)
+            self._drop_draft_sync(refs)
             raise
         if problems:
-            self._discard_sync(refs)
+            self._drop_draft_sync(refs)
             return DraftResult(refs={}, problems=problems)
         return DraftResult(refs=refs)
 
@@ -632,13 +633,22 @@ class DidwwVerificationProvider(VerificationProvider):
     async def discard(self, refs: dict) -> None:
         await asyncio.to_thread(self._discard_sync, refs)
 
+    def _drop_draft_sync(self, refs: dict) -> None:
+        """``_discard_sync`` for a draft that failed while it was made: best
+        effort, so the error that stopped the draft is the one reported."""
+        try:
+            self._discard_sync(refs)
+        except VerificationProviderError:
+            logger.warning("didww verification draft cleanup failed")
+
     def _discard_sync(self, refs: dict) -> None:
+        failures = DiscardFailures("didww")
         paths = [f"proofs/{p}" for p in refs.get("proof_ids", [])]
         paths += [f"encrypted_files/{f}" for f in refs.get("file_ids", [])]
         if refs.get("address_id"):
             paths.append(f"addresses/{refs['address_id']}")
         for path in paths:
-            self._delete(path)
+            self._delete(path, failures)
         if refs.get("identity_id") and refs.get("identity_created"):
             # A later registration may have reused the identity this draft
             # created. Delete it only when no address is left on it.
@@ -650,18 +660,15 @@ class DidwwVerificationProvider(VerificationProvider):
                         "page[size]": 1,
                     },
                 )["data"]
-            except Exception:
-                logger.warning(
-                    "didww identity %s kept: address lookup failed",
-                    refs["identity_id"],
-                    exc_info=True,
-                )
-                return
-            if not in_use:
-                self._delete(f"identities/{refs['identity_id']}")
+            except Exception as exc:
+                failures.add(exc, "identities")
+            else:
+                if not in_use:
+                    self._delete(f"identities/{refs['identity_id']}", failures)
+        failures.raise_any("DIDWW discard failed")
 
-    def _delete(self, path: str) -> None:
+    def _delete(self, path: str, failures: DiscardFailures) -> None:
         try:
             self._client.delete(path)
-        except Exception:
-            logger.warning("didww discard of %s failed", path, exc_info=True)
+        except Exception as exc:
+            failures.add(exc, path.split("/")[0])

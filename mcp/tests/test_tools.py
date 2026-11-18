@@ -2,7 +2,7 @@
 
 Tests target the tool callables in :mod:`hailhq.mcp.tools`,
 exercising local validation, HTTP request shape, and error mapping.
-The MCP/FastMCP transport layer is not covered here — that's framework
+The MCPServer transport layer is not covered here — that's framework
 territory; we trust the registered tools dispatch to the same callables
 we test directly.
 """
@@ -658,6 +658,26 @@ async def test_get_call_happy_path(client: HailClient) -> None:
     result = await tools.get_call(client=client, call_id=cid)
     assert result["id"] == cid
     assert result["status"] == "completed"
+
+
+@respx.mock
+async def test_get_call_returns_the_transcript(client: HailClient) -> None:
+    cid = str(uuid4())
+    body = _call_response(cid, status="completed")
+    body["transcript"] = [
+        {"role": "assistant", "text": "Hi, this is Acme.", "at": "2026-11-17T12:00:00Z"}
+    ]
+    respx.get(f"{_BASE_URL}/calls/{cid}").mock(
+        return_value=httpx.Response(200, json=body)
+    )
+    result = await tools.get_call(client=client, call_id=cid)
+    assert result["transcript"] == [
+        {
+            "role": "assistant",
+            "text": "Hi, this is Acme.",
+            "at": "2026-11-17T12:00:00Z",
+        }
+    ]
 
 
 # --------------------------------------------------------------------------- #
@@ -2004,7 +2024,7 @@ async def test_acquire_number_requires_confirm_total_cents_in_the_tool_schema(
 ) -> None:
     import importlib
 
-    from mcp.server.fastmcp.exceptions import ToolError
+    from mcp.server.mcpserver.exceptions import ToolError
 
     monkeypatch.setattr("hailhq.core.config.settings.hail_auth_url", "")
     monkeypatch.setattr("hailhq.core.config.settings.hail_api_key", "hl_live_test")
@@ -2012,13 +2032,13 @@ async def test_acquire_number_requires_confirm_total_cents_in_the_tool_schema(
 
     srv = importlib.reload(srv)
     tool = next(t for t in await srv.mcp_app.list_tools() if t.name == "acquire_number")
-    assert set(tool.inputSchema["required"]) == {
+    assert set(tool.input_schema["required"]) == {
         "quote_id",
         "country_code",
         "number_type",
         "confirm_total_cents",
     }
-    assert tool.inputSchema["properties"]["confirm_total_cents"]["type"] == "integer"
+    assert tool.input_schema["properties"]["confirm_total_cents"]["type"] == "integer"
     args = {k: v for k, v in _ACQUIRE_ARGS.items() if k != "confirm_total_cents"}
     with pytest.raises(ToolError):
         await srv.mcp_app.call_tool("acquire_number", args)

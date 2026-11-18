@@ -40,6 +40,7 @@ from hailhq.core.agent_tools import transfer_call
 from hailhq.core.agent_tools.client import AgentApiClient
 from hailhq.core.agent_tools.send_dtmf import DTMF_CODES
 from hailhq.core.agent_tools.spec import BridgeOutcome, BridgeRoute
+from hailhq.core.billing import RECORDING_USAGE_REF_SUFFIX
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.call_failures import DESTINATION_NOT_ALLOWED, call_failure_message
 from hailhq.core.call_legs import record_call_legs
@@ -53,12 +54,13 @@ from hailhq.core.internal_webhook import notify_usage_event_recorded
 from hailhq.core.languages import SUPPORTED_LANGUAGES
 from hailhq.core.livekit import VOICE_READY_ATTRIBUTE
 from hailhq.core.models import Call, CallEvent, UsageEvent
-from hailhq.core.pool import release_pool_reservation
+from hailhq.core.pool import CALL_META_FROM_POOL, release_pool_reservation
 from hailhq.core.prompts import (
     VOICE_PREAMBLE,
     VOICE_PREAMBLE_INBOUND,
     build_voice_instructions,
     other_party_section,
+    safe_clock_section,
 )
 from hailhq.core.providers.voice import TwilioVoiceProvider
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
@@ -307,6 +309,7 @@ def build_instructions(
     *,
     language: str | None = None,
     other_party: str | None = None,
+    clock: str | None = None,
 ) -> str:
     """The call's instructions (see :func:`hailhq.core.prompts.build_voice_instructions`)."""
     # The language line goes before the privacy reminder, which stays last.
@@ -315,8 +318,24 @@ def build_instructions(
         if language in SUPPORTED_LANGUAGES
         else None
     )
-    tail = "\n\n".join(part for part in (other_party, spoken) if part) or None
+    tail = "\n\n".join(part for part in (other_party, clock, spoken) if part) or None
     return build_voice_instructions(system_prompt, direction, other_party=tail)
+
+
+def _call_clock(metadata: dict[str, Any], inbound: bool) -> str | None:
+    """The date and time section for this call (see
+    :func:`hailhq.core.prompts.clock_section`). The business's number is the
+    one dialed on an inbound call and the caller ID on an outbound one. A
+    failure leaves the section out instead of failing the call."""
+    caller, dialed = metadata.get("from_e164"), metadata.get("to_e164")
+    if not inbound and metadata.get(CALL_META_FROM_POOL):
+        caller = None  # a shared pool number, not the business's own
+    return safe_clock_section(
+        started_at=datetime.now(timezone.utc),
+        inbound=inbound,
+        business_number=dialed if inbound else caller,
+        other_number=caller if inbound else dialed,
+    )
 
 
 # The other-party lookup runs before the session starts, so a slow DB must
@@ -737,20 +756,25 @@ def make_agent_bridge(
         # handover limit counts from now. A cap that already fired
         # (announcing now) is left to finish.
         soft_cap = bridge_state.pop("soft_cap_task", None)
-        if (
-            soft_cap is not None
-            and not soft_cap.done()
-            and not bridge_state.get("soft_cap_fired")
-        ):
-            soft_cap.cancel()
-            await asyncio.gather(soft_cap, return_exceptions=True)
-            if handover_seconds > 0:
+        if not bridge_state.get("soft_cap_fired"):
+            if soft_cap is not None and not soft_cap.done():
+                soft_cap.cancel()
+                await asyncio.gather(soft_cap, return_exceptions=True)
+            # Armed even when the call had no cap of its own: the balance
+            # cap (route.max_seconds) must always apply.
+            limit = handover_seconds
+            if route.max_seconds:
+                # The balance pays for no more than this.
+                limit = (
+                    min(limit, route.max_seconds) if limit > 0 else route.max_seconds
+                )
+            if limit > 0:
                 bridge_state["soft_cap_task"] = asyncio.create_task(
                     soft_cap_announce_and_hangup(
                         ctx,
                         session,
                         call_id,
-                        handover_seconds,
+                        limit,
                         on_fire=on_cap_fired,
                         bridge_state=bridge_state,
                         language=language,
@@ -2040,7 +2064,7 @@ async def on_call_end(
                 channel="voice",
                 units=duration_ms,
                 ref=(
-                    f"{call_id}:recording-v1"
+                    f"{call_id}{RECORDING_USAGE_REF_SUFFIX}"
                     if (call_metadata or {}).get("recording_enabled")
                     else str(call_id)
                 ),
@@ -2545,6 +2569,7 @@ async def _run_call(
                 if known is not None
                 else None
             ),
+            clock=_call_clock(metadata, inbound),
         ),
         tools=agent_tools,
     )

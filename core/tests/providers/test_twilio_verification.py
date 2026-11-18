@@ -24,7 +24,9 @@ from hailhq.core.providers.verification import twilio as twilio_mod
 from hailhq.core.providers.verification.base import (
     NOT_ACCEPTED,
     VALUE_NOT_ACCEPTED,
+    DiscardRefused,
     SubmitRefused,
+    VerificationProviderError,
 )
 from hailhq.core.providers.verification.twilio import TwilioVerificationProvider
 from twilio.base.exceptions import TwilioRestException
@@ -583,6 +585,171 @@ async def test_status_mapping(provider, twilio_status, state) -> None:
     assert (await provider.status(REFS)).state == state
 
 
+def _rejected_bundle(documents: dict, evaluation: list | None = None) -> None:
+    responses.add(
+        responses.GET,
+        f"{NUMBERS}/Bundles/{REFS['bundle_sid']}",
+        json={"sid": REFS["bundle_sid"], "status": "twilio-rejected"},
+        status=200,
+    )
+    for sid, doc in documents.items():
+        status = doc.pop("_status", 200)
+        responses.add(
+            responses.GET,
+            f"{NUMBERS}/SupportingDocuments/{sid}",
+            json={"sid": sid, **doc},
+            status=status,
+        )
+    responses.add(
+        responses.GET,
+        f"{NUMBERS}/Bundles/{REFS['bundle_sid']}/Evaluations",
+        json={
+            "results": (
+                [{"sid": "EL1", "status": "noncompliant", "results": evaluation}]
+                if evaluation is not None
+                else []
+            ),
+            "meta": {
+                "page": 0,
+                "page_size": 1,
+                "first_page_url": "x",
+                "previous_page_url": None,
+                "url": "x",
+                "next_page_url": None,
+                "key": "results",
+            },
+        },
+        status=200,
+    )
+
+
+@responses.activate
+async def test_rejection_reads_the_documents_reason(provider) -> None:
+    from hailhq.core.providers.verification.rejections import TWILIO_FIXES
+
+    twilio_text = "The name on the document does not match."
+    _rejected_bundle(
+        {
+            REFS["document_sids"][0]: {
+                "status": "rejected",
+                "failure_reason": twilio_text,
+                "errors": [{"code": 18008}],
+            }
+        },
+        evaluation=[],
+    )
+    status = await provider.status(REFS)
+    assert status.state == "rejected"
+    assert status.reason.startswith(TWILIO_FIXES[18008])
+    assert status.raw_reason == f"18008: {twilio_text}"
+
+
+@responses.activate
+async def test_rejection_reads_the_evaluation(provider) -> None:
+    _rejected_bundle(
+        {REFS["document_sids"][0]: {"status": "approved"}},
+        evaluation=[
+            {
+                "requirement_name": "individual_info",
+                "passed": False,
+                "error_code": None,
+                "failure_reason": None,
+                "invalid": [
+                    {
+                        "object_field": "first_name",
+                        "error_code": 18999,
+                        "failure_reason": "A brand new rule.",
+                    }
+                ],
+            }
+        ],
+    )
+    status = await provider.status(REFS)
+    assert "The carrier said: A brand new rule." in status.reason
+    assert status.raw_reason == "18999: A brand new rule."
+
+
+@responses.activate
+async def test_one_lost_document_keeps_the_others_reasons(provider) -> None:
+    from hailhq.core.providers.verification.rejections import TWILIO_FIXES
+
+    refs = {**REFS, "document_sids": ["RD" + "2" * 32, REFS["document_sids"][0]]}
+    _rejected_bundle(
+        {
+            refs["document_sids"][0]: {"_status": 404},
+            refs["document_sids"][1]: {
+                "status": "rejected",
+                "failure_reason": None,
+                "errors": [{"code": 18003}],
+            },
+        },
+        evaluation=[
+            {"passed": True, "error_code": None, "failure_reason": "stale note"}
+        ],
+    )
+    status = await provider.status(refs)
+    assert status.reason.startswith(TWILIO_FIXES[18003])
+    # A passed requirement is not a problem; a missing text is not "None".
+    assert status.raw_reason == "18003"
+
+
+@responses.activate
+async def test_fixed_document_and_missing_item(provider) -> None:
+    _rejected_bundle(
+        {
+            REFS["document_sids"][0]: {
+                "status": "approved",
+                "failure_reason": "Old reason from an earlier bundle.",
+                "errors": [{"code": 18002}],
+            }
+        },
+        evaluation=[
+            {
+                "passed": False,
+                "requirement_friendly_name": "Proof of Address",
+                "error_code": None,
+                "failure_reason": None,
+                "invalid": [],
+            }
+        ],
+    )
+    status = await provider.status(REFS)
+    assert "Old reason" not in status.reason
+    assert "The carrier said: Proof of Address is missing." in status.reason
+
+
+@responses.activate
+async def test_unknown_code_keeps_the_documents_text(provider) -> None:
+    from hailhq.core.providers.verification.rejections import TWILIO_FIXES
+
+    _rejected_bundle(
+        {
+            REFS["document_sids"][0]: {
+                "status": "expired",
+                "failure_reason": "Expired, and a new rule.",
+                "errors": [{"code": 18003}, {"code": 18999}],
+            }
+        },
+        evaluation=[],
+    )
+    status = await provider.status(REFS)
+    assert status.reason.startswith(TWILIO_FIXES[18003])
+    # Hail has no fix for 18999, so its text is shown, once.
+    assert status.reason.count("Expired, and a new rule.") == 1
+    assert status.raw_reason == "18003, 18999: Expired, and a new rule."
+
+
+@responses.activate
+async def test_rejection_without_a_reason_stays_generic(provider) -> None:
+    from hailhq.core.providers.verification.base import DETAILS_REJECTED
+
+    _rejected_bundle({REFS["document_sids"][0]: {"_status": 500}})
+    status = await provider.status(REFS)
+    assert status.state == "rejected"
+    assert status.reason == DETAILS_REJECTED
+    assert status.raw_reason is None
+
+
 async def test_purchase_handle(provider) -> None:
     assert await provider.purchase_handle(REFS) == {
         "verification_id": REFS["bundle_sid"],
@@ -595,9 +762,36 @@ async def test_purchase_handle(provider) -> None:
 
 
 @responses.activate
-async def test_discard_never_raises(provider) -> None:
-    # nothing is registered, so every call fails; discard must still return
-    await provider.discard(REFS)
+async def test_discard_raises_when_twilio_is_unreachable(provider) -> None:
+    # Nothing is registered, so every call fails to connect: the caller
+    # keeps the ids and tries again.
+    with pytest.raises(VerificationProviderError) as raised:
+        await provider.discard(REFS)
+    assert not isinstance(raised.value, DiscardRefused)
+
+
+@responses.activate
+async def test_discard_counts_gone_as_done(provider) -> None:
+    responses.add(
+        responses.DELETE,
+        f"{NUMBERS}/Bundles/{REFS['bundle_sid']}",
+        status=404,
+        json={"code": 20404, "message": "x", "status": 404},
+    )
+    await provider.discard({"bundle_sid": REFS["bundle_sid"]})
+
+
+@pytest.mark.parametrize("status", [400, 403, 409])
+@responses.activate
+async def test_discard_raises_refused_on_a_refusal(provider, status) -> None:
+    responses.add(
+        responses.DELETE,
+        f"{NUMBERS}/Bundles/{REFS['bundle_sid']}",
+        status=status,
+        json={"code": 20001, "message": "x", "status": status},
+    )
+    with pytest.raises(DiscardRefused):
+        await provider.discard({"bundle_sid": REFS["bundle_sid"]})
 
 
 def test_registry_returns_plugin_when_configured(monkeypatch) -> None:

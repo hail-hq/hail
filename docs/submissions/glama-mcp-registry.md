@@ -9,6 +9,12 @@ status: n/a
 
 # Glama MCP Registry
 
+**Connector ownership, 2026-11-15:** Use DNS TXT verification. The owner chose to
+remove `https://mcp.hail.so/.well-known/glama.json` from the MCP app while
+reclaiming ownership. The repository's root `glama.json` is separate and stays
+in place for the GitHub repository listing. The older file-verification notes
+below describe the previous setup.
+
 > **Abandoned 2026-07-07.** The `/mcp/servers` listing's Build & Release check requires wrapping the server with `mcp-proxy` as a stdio child process — structurally incompatible with Hail's deliberately remote-only HTTP MCP server (confirmed via direct reproduction: `mcp-proxy` waits 60s for a stdio JSON-RPC handshake that a Streamable HTTP server never sends). The `/mcp/connectors` route (verify via `/.well-known/glama.json`, shipped in PR #5 + #6) was the correct alternative, but this is no longer being pursued — deprioritized in favor of higher-value remaining targets. `glama.json` (PR #4) and the `/.well-known/glama.json` route (PR #5, #6) are harmless, already-merged additions; no need to revert them.
 
 ## TODO
@@ -17,7 +23,7 @@ status: n/a
 - [x] Confirm root `README.md` reads cleanly as a standalone doc for a crawler: install (`git clone` + `docker compose up`), usage (CLI/HTTP/MCP snippets), license — all present as of this draft (verified below)
 - [x] ~~Confirm live whether glama.ai/mcp/servers/new requires GitHub sign-in or accepts an anonymous URL paste~~ — **corrected 2026-07-07: no submission step exists at all.** Glama auto-discovers MCP servers from GitHub; the listing was already live at `https://glama.ai/mcp/servers/hail-hq/hail` with no action taken. See Notes.
 - [x] Draft copy reviewed against the feature-claim policy (voice/email present-tense and vendor-accurate; SMS flagged as not yet shipped)
-- [ ] Logo asset ready — `hail-website/public/assets/hail-monogram.svg` (square mark, light) or `avatar-1024.png` (raster) — only relevant if the claimed dashboard offers an editable avatar; unconfirmed until claim completes
+- [ ] Logo asset ready — `hail-website/public/assets/brand/logo/hail-monogram.svg` (square mark, light) or `avatar-1024.png` (raster) — only relevant if the claimed dashboard offers an editable avatar; unconfirmed until claim completes
 - [x] "Claim" the org-owned listing via `glama.json` + "Login with GitHub to claim" — `glama.json` added and PR opened: https://github.com/hail-hq/hail/pull/4
 - [ ] Once claimed: configure Docker build instructions to point at `mcp/Dockerfile` (repo-root build context — the file does `COPY core /app/core` + `COPY mcp /app/mcp`, so it is NOT self-contained if built from within `mcp/`) — this is likely why the auto-crawl build/introspection check is stuck pending
 - [ ] Once a real score renders (not "pending"), pull the badge from `https://glama.ai/mcp/servers/hail-hq/hail/badges/score.svg` and add it to the already-open `awesome-mcp-servers` PR (#9561) per that repo's `glama-check` bot requirement
@@ -41,10 +47,21 @@ status: n/a
 
 **Name:** Hail
 
-**One-liner:** Phone, SMS & email — for agents.
+**One-liner:**
+
+<!-- copy:tagline -->
+
+Give your AI a real phone number and an email inbox.
+
+<!-- /copy -->
 
 **Description (if an editable field is offered post-index):**
-Hail is a self-hostable, AGPLv3 communication platform built for AI agents. It gives an agent a real phone number and inbox — place and receive calls, send and receive email, and read back structured delivery events — all through one remote MCP server. No local install: point a client at `https://mcp.hail.so`, authorize once via OAuth, and the agent gets tools immediately. Self-hosters run the same server with a static API key instead of OAuth. Also available via CLI, a Python SDK, and OpenAPI for non-MCP integrations.
+
+<!-- copy:medium -->
+
+Give your AI assistant a real phone number and an email inbox. Run a support receptionist, answering service, or your assistant on one account. Get a number in 120+ countries and email on your own domain, with MCP, API, and webhook support for your app.
+
+<!-- /copy -->
 
 **Hosting type (Glama facet):** Remote (Streamable HTTP; no stdio, no local install — see [docs/setup/mcp.md](../setup/mcp.md#why-remote-only-no-stdio--no-pypi-install))
 
@@ -71,7 +88,7 @@ Hail is a self-hostable, AGPLv3 communication platform built for AI agents. It g
 
 **License:** AGPL-3.0-or-later — [`LICENSE`](../../LICENSE)
 
-**Logo asset (if a separate avatar upload exists):** `hail-website/public/assets/hail-monogram.svg` (square mark; `avatar-1024.png` as a raster fallback)
+**Logo asset (if a separate avatar upload exists):** `hail-website/public/assets/brand/logo/hail-monogram.svg` (square mark; `avatar-1024.png` as a raster fallback)
 
 ## Notes
 

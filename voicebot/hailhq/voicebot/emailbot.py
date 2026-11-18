@@ -33,6 +33,7 @@ from hailhq.core.email_agent import (
     email_thread,
     finish_reply,
     prior_reply,
+    reply_clock,
     retry_reply,
     run_refusal,
     sender_trust,
@@ -165,6 +166,9 @@ async def _prepare(
         # Keep context compact when history can be fetched on demand. Tool-free
         # retries and agents without retrieval still need their scoped thread.
         thread = [email] if can_read else await email_thread(db, email)
+        clock = await reply_clock(
+            db, claimed.agent, email.provider_received_at or email.requested_at
+        )
         files = []
         if can_read:
             rows = (
@@ -190,7 +194,7 @@ async def _prepare(
                 for row in rows
             ]
     messages = build_chat_messages(
-        claimed.agent, thread, trust=trust, sends_tried=sent > 0
+        claimed.agent, thread, trust=trust, sends_tried=sent > 0, clock=clock
     )
     messages.append(
         {

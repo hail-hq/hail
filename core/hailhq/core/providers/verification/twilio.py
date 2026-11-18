@@ -11,6 +11,7 @@ import asyncio
 import json
 import logging
 import re
+from datetime import datetime, timezone
 
 import requests
 from hailhq.core.config import settings
@@ -20,6 +21,7 @@ from hailhq.core.providers.verification.base import (
     SAME_DOCUMENT,
     VALUE_NOT_ACCEPTED,
     Address,
+    DiscardFailures,
     DocumentInput,
     DocumentOption,
     DocumentSlot,
@@ -40,10 +42,22 @@ from hailhq.core.providers.verification.forms import (
     pick_option,
     validate_input,
 )
+from hailhq.core.providers.verification.rejections import twilio_reason
 from twilio.base.exceptions import TwilioRestException
 from twilio.rest import Client as TwilioClient
 
 logger = logging.getLogger(__name__)
+
+_EPOCH = datetime.min.replace(tzinfo=timezone.utc)
+
+
+def _code(value: object) -> int | None:
+    """A Twilio error code, or None when it is missing or not a number."""
+    try:
+        return int(value) if value else None
+    except (TypeError, ValueError):
+        return None
+
 
 _UPLOAD_URL = (
     "https://numbers-upload.twilio.com/v2/RegulatoryCompliance/SupportingDocuments"
@@ -495,7 +509,7 @@ class TwilioVerificationProvider(VerificationProvider):
             for sid in [refs["end_user_sid"], *refs["document_sids"]]:
                 self._rc.bundles(bundle.sid).item_assignments.create(object_sid=sid)
         except TwilioRestException as exc:
-            self._discard_sync(refs)
+            self._drop_draft_sync(refs)
             if exc.status == 400:
                 return DraftResult(
                     refs={},
@@ -503,19 +517,19 @@ class TwilioVerificationProvider(VerificationProvider):
                 )
             raise VerificationProviderError("Twilio request failed") from exc
         except Exception:
-            self._discard_sync(refs)
+            self._drop_draft_sync(refs)
             raise
 
         try:
             problems = self._evaluate(refs)
         except TwilioRestException as exc:
-            self._discard_sync(refs)
+            self._drop_draft_sync(refs)
             raise VerificationProviderError("Twilio request failed") from exc
         except Exception:
-            self._discard_sync(refs)
+            self._drop_draft_sync(refs)
             raise
         if problems:
-            self._discard_sync(refs)
+            self._drop_draft_sync(refs)
             return DraftResult(refs={}, problems=problems)
         return DraftResult(refs=refs)
 
@@ -612,12 +626,90 @@ class TwilioVerificationProvider(VerificationProvider):
         if bundle.status == "twilio-approved":
             return ProviderStatus(state="approved")
         if bundle.status == "twilio-rejected":
+            problems = await self._rejection_problems(refs)
+            # One text can cover several codes: write it once, as
+            # "18003, 18999: text".
+            by_text: dict[str | None, list[str]] = {}
+            for code, text in problems:
+                by_text.setdefault(text, [])
+                if code:
+                    by_text[text].append(str(code))
+            entries = []
+            for text, codes in by_text.items():
+                label = ", ".join(codes)
+                entries.append(f"{label}: {text}" if label and text else label or text)
+            raw = "; ".join(e for e in entries if e)
             return ProviderStatus(
                 state="rejected",
-                reason=DETAILS_REJECTED,
-                raw_reason=getattr(bundle, "failure_reason", None),
+                reason=twilio_reason(problems) if problems else DETAILS_REJECTED,
+                raw_reason=raw or None,
             )
         return ProviderStatus(state="pending")
+
+    async def _rejection_problems(
+        self, refs: dict
+    ) -> list[tuple[int | None, str | None]]:
+        """Why Twilio rejected a bundle, as (error code, Twilio's text) pairs.
+        The bundle itself holds no reason: each rejected document has
+        ``failure_reason`` and ``errors[].code``, and the newest evaluation
+        lists failed requirements. Never raises: each read that fails is
+        logged and skipped, so the others still count."""
+        reads = [
+            asyncio.to_thread(self._document_problems, sid)
+            for sid in refs.get("document_sids") or []
+        ]
+        reads.append(asyncio.to_thread(self._evaluation_problems, refs["bundle_sid"]))
+        found: list[tuple[int | None, str | None]] = []
+        for result in await asyncio.gather(*reads, return_exceptions=True):
+            if isinstance(result, BaseException):
+                logger.warning(
+                    "could not read why Twilio rejected bundle %s: %s",
+                    refs["bundle_sid"],
+                    type(result).__name__,
+                )
+                continue
+            found += result
+        return list(dict.fromkeys(found))
+
+    def _document_problems(self, sid: str) -> list[tuple[int | None, str | None]]:
+        doc = self._rc.supporting_documents(sid).fetch()
+        if doc.status not in (None, "rejected", "expired"):
+            # A reused document keeps an old reason after it was fixed.
+            return []
+        codes = [
+            code
+            for e in doc.errors or []
+            if isinstance(e, dict) and (code := _code(e.get("code")))
+        ]
+        if codes:
+            return [(code, doc.failure_reason) for code in codes]
+        return [(None, doc.failure_reason)] if doc.failure_reason else []
+
+    def _evaluation_problems(
+        self, bundle_sid: str
+    ) -> list[tuple[int | None, str | None]]:
+        """The failed requirements of the newest evaluation. Hail's own
+        pre-submit evaluation passed (or Hail would not have submitted), so
+        its results add nothing."""
+        evaluations = self._rc.bundles(bundle_sid).evaluations.list(limit=50)
+        # Twilio does not promise an order: take the newest by date.
+        newest = max(evaluations, key=lambda e: e.date_created or _EPOCH, default=None)
+        found: list[tuple[int | None, str | None]] = []
+        for result in (newest.results or []) if newest else []:
+            if result.get("passed"):
+                continue
+            before = len(found)
+            # The failed fields say more than the requirement's summary.
+            for item in result.get("invalid") or [result]:
+                code, text = _code(item.get("error_code")), item.get("failure_reason")
+                if code or text:
+                    found.append((code, text))
+            if len(found) == before and result.get("requirement_friendly_name"):
+                # Failed with no reason: the item is missing.
+                found.append(
+                    (None, f"{result['requirement_friendly_name']} is missing.")
+                )
+        return found
 
     def subject_name(
         self,
@@ -666,23 +758,35 @@ class TwilioVerificationProvider(VerificationProvider):
 
     # -- discard -----------------------------------------------------------
 
+    def _drop_draft_sync(self, refs: dict) -> None:
+        """``_discard_sync`` for a draft that failed while it was made: best
+        effort, so the error that stopped the draft is the one reported."""
+        try:
+            self._discard_sync(refs)
+        except VerificationProviderError:
+            logger.warning("twilio verification draft cleanup failed")
+
     def _discard_sync(self, refs: dict) -> None:
         steps = []
         if refs.get("bundle_sid"):
-            steps.append(self._rc.bundles(refs["bundle_sid"]).delete)
+            steps.append(("bundle", self._rc.bundles(refs["bundle_sid"]).delete))
         steps.extend(
-            self._rc.supporting_documents(s).delete
+            ("document", self._rc.supporting_documents(s).delete)
             for s in refs.get("document_sids", [])
         )
         if refs.get("end_user_sid"):
-            steps.append(self._rc.end_users(refs["end_user_sid"]).delete)
+            steps.append(("end_user", self._rc.end_users(refs["end_user_sid"]).delete))
         if refs.get("address_sid"):
-            steps.append(self._client.addresses(refs["address_sid"]).delete)
-        for step in steps:
+            steps.append(
+                ("address", self._client.addresses(refs["address_sid"]).delete)
+            )
+        failures = DiscardFailures("twilio")
+        for key, step in steps:
             try:
                 step()
-            except Exception:  # best effort; a stray draft is harmless
-                logger.warning("twilio verification cleanup step failed", exc_info=True)
+            except Exception as exc:
+                failures.add(exc, key)
+        failures.raise_any("Twilio discard failed")
 
     async def discard(self, refs: dict) -> None:
         await asyncio.to_thread(self._discard_sync, refs)

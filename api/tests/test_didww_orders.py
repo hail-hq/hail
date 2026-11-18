@@ -294,8 +294,15 @@ async def test_didww_registration_rejected_revokes_approval(
     revoke.assert_awaited_once_with("addr-1", org, "PT", "national")
     # The owners are emailed once the rejection is committed.
     assert decided == [str(verification.id)]
-    # The buyer reads Hail's wording; the carrier's text stays server-side.
-    assert number.provisioning_metadata["failure_reason"] == NEUTRAL_REJECTION
+    # The buyer reads Hail's wording plus the carrier's reason, so they know
+    # what to fix.
+    shown = (
+        "The carrier said: Document is blurry. "
+        "Fix that and start a new verification."
+    )
+    assert number.provisioning_metadata["failure_reason"] == (
+        f"{NEUTRAL_REJECTION}; the verification's rejection_reason says what to fix"
+    )
     assert number.provisioning_metadata["carrier_reason"] == "Document is blurry"
     messages = [r.getMessage() for r in caplog.records]
     # The reviewer's note can quote personal data: kept in the DB, not logged.
@@ -306,7 +313,7 @@ async def test_didww_registration_rejected_revokes_approval(
     assert str(verification.id) in logged[0]
     await async_session.refresh(verification)
     assert verification.state == "rejected"
-    assert verification.rejection_reason == NEUTRAL_REJECTION
+    assert verification.rejection_reason == shown
     await async_session.refresh(other)
     assert other.state == "approved"
     assert await get_balance_cents(async_session, org) == 100000 - 350
@@ -319,7 +326,7 @@ async def test_didww_registration_rejected_revokes_approval(
         )
     ).scalar_one()
     assert audit.actor_kind == "system"
-    assert audit.payload["reason"] == NEUTRAL_REJECTION
+    assert audit.payload["reason"] == shown
     assert audit.payload["carrier_reason"] == "Document is blurry"
 
 

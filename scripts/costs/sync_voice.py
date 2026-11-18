@@ -180,13 +180,17 @@ def fetch_twilio(http: Http, today: str) -> list[dict]:
 
 
 def row_key(row: dict) -> tuple:
+    """One row per key. A carrier can price one label at two rates, so the
+    exact-match flag and the lowest destination prefix are part of the key."""
     return (
         row["provider"],
         row["country_code"],
         row["direction"],
-        row.get("number_type"),
-        row.get("name"),
+        row.get("number_type") or "",
+        row.get("name") or "",
         tuple(row.get("origination_prefixes") or ()),
+        bool(row.get("exact_match")),
+        min(row.get("destination_prefixes") or [""]),
     )
 
 
@@ -231,17 +235,7 @@ def merge(
 
 
 def sort_rows(rows: list[dict]) -> list[dict]:
-    return sorted(
-        rows,
-        key=lambda r: (
-            r["provider"],
-            r["country_code"],
-            r["direction"],
-            r.get("number_type") or "",
-            r.get("name") or "",
-            r.get("origination_prefixes") or [],
-        ),
-    )
+    return sorted(rows, key=row_key)
 
 
 def dump(rows: list[dict]) -> str:

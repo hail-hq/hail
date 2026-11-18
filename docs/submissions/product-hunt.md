@@ -48,7 +48,13 @@ status: drafted
 
 **Name:** Hail
 
-**Tagline (one-liner):** Phone, SMS & email — for agents.
+**Tagline (one-liner):**
+
+<!-- copy:tagline -->
+
+Give your AI a real phone number and an email inbox.
+
+<!-- /copy -->
 
 **Topics:** Developer Tools · Artificial Intelligence · Open Source · APIs
 
@@ -58,7 +64,12 @@ status: drafted
 - Repo: `https://github.com/hail-hq/hail`
 
 **Description:**
-Hail is a self-hostable, open-source (AGPLv3) communication platform for AI agents. Phone, SMS & email — for agents: your agent places and receives calls, sends and reads email, with delivery analytics and deliverability tracking built in, not bolted on. No dashboard to click through — agents drive it directly over a CLI, a Python SDK, a documented OpenAPI spec, or a remote MCP server (Streamable HTTP — no stdio, nothing to install locally). Self-host the whole stack with `docker compose up` on your own Twilio and AWS SES accounts, or run it managed at hail.so. Full source, no asterisks: it's AGPLv3.
+
+<!-- copy:medium -->
+
+Give your AI assistant a real phone number and an email inbox. Run a support receptionist, answering service, or your assistant on one account. Get a number in 120+ countries and email on your own domain, with MCP, API, and webhook support for your app.
+
+<!-- /copy -->
 
 **Install / usage snippet:**
 
@@ -86,22 +97,21 @@ hail mcp endpoint                  # prints your self-hosted connector URL (e.g.
 **Gallery (upload in this order — first item becomes the listing thumbnail):**
 
 1. `hail/docs/assets/gifs/hail-tail-live-stream.gif` — animated terminal demo of `hail tail` streaming live call events. Best available motion asset; use as thumbnail.
-2. `hail-website/public/assets/og-card-1200x630.png` — static brand card (placeholder slide until a real product screenshot is captured — see TODO). Path is in the separate `hail-website` repo; confirm the file is actually there before uploading (not part of this `hail` monorepo checkout).
-3. `hail-website/public/assets/wordmark-1200.png` — wordmark, as a clean closing slide. Same caveat: confirm in `hail-website` before uploading.
+2. `hail-website/public/assets/brand/social/link-card.png` — static brand card (placeholder slide until a real product screenshot is captured — see TODO). Path is in the separate `hail-website` repo; confirm the file is actually there before uploading (not part of this `hail` monorepo checkout).
+3. `hail-website/public/assets/brand/logo/wordmark-1200.png` — wordmark, as a clean closing slide. Same caveat: confirm in `hail-website` before uploading.
 
-**Product icon (separate upload, square):** `hail-website/public/assets/monogram-512.png` (fallback: `hail-website/public/assets/hail-monogram.svg`) — both paths are in the `hail-website` repo; confirm presence there first.
+**Product icon (separate upload, square):** `hail-website/public/assets/brand/logo/monogram-512.png` (fallback: `hail-website/public/assets/brand/logo/hail-monogram.svg`) — both paths are in the `hail-website` repo; confirm presence there first.
 
 **Maker's first comment (post immediately at launch):**
 
-> Hey Product Hunt — I built Hail because every "give my agent a phone number / inbox" project I found was either a SaaS behind a black-box pricing page, or a pile of glue code around Twilio you had to write yourself. Hail is that glue, already written: one API — plus a remote MCP server, so a client just plugs in — for voice calls, SMS, and email. Self-host it on your own Twilio and AWS SES accounts, or run it managed at hail.so. It's AGPLv3: full source, no asterisks. I'll be here all day answering questions about the architecture, the pricing, or why voice agents are still harder than they should be.
+> Hey Product Hunt, I built Hail because every "give my agent a phone number / email inbox" project I found was either a SaaS behind a black-box pricing page, or a pile of glue code around Twilio you had to write yourself. Hail is that glue, already written: one API — plus a remote MCP server, so a client just plugs in — for voice calls, SMS, and email. Self-host it on your own Twilio and AWS SES accounts, or run it managed at hail.so. It's AGPLv3: full source, no asterisks. I'll be here all day answering questions about the architecture, the pricing, or why voice agents are still harder than they should be.
 
 ## Notes
 
 - Product Hunt has no formal review queue for standard launches — a scheduled listing goes live automatically at the chosen time, provided it isn't flagged as spam/duplicate. No submission-to-live turnaround to wait on; the only gate is the founder's own schedule and the comment-thread commitment on launch day.
-- Contact used: redouane.a.achouri@gmail.com (founder's account email).
+- Contact used: the founder's account email.
 - Voice is Twilio-backed, email (send + receive) is AWS SES-backed — see `core/hailhq/core/providers/voice/twilio.py` and `core/hailhq/core/providers/email/ses.py`. No other carrier/vendor is wired up; don't name any other provider in the listing or comments.
-- **SMS is not yet wired to a concrete endpoint** — there is no `/sms` route in `openapi/openapi.yaml`, no `hail sms` CLI command, and no SMS tool in the MCP server (`mcp/hailhq/mcp/tools.py` only exposes call/email tools). Keep SMS in the tagline/description as a stated product capability (per brand-voice policy), but do **not** demo a literal SMS command in comments or gallery captions — there isn't one to run yet. Treat it as "coming soon" if a commenter asks for a live example.
-- MCP tool surface today: `place_call`, `send_email`, `get_call`, `list_calls`, `get_email`, `list_emails`, `get_email_raw`, `get_email_attachment`, `get_email_events`, `get_email_stats`, `get_events` — no SMS tools (matches the point above).
+- 2026-11-16: SMS is shipped. The MCP server exposes `send_sms`, `get_sms` and `list_sms` (`mcp/hailhq/mcp/tools.py`). Earlier notes that said SMS was not shipped were removed.
 - **Corrected 2026-07-07: `https://mcp.hail.so` (Hail Cloud) IS live today**, not "coming soon" as the root `README.md`'s quickstart comment states — that comment is stale. Verified directly: `curl -i https://mcp.hail.so/` returns `401` with `WWW-Authenticate: Bearer ... resource_metadata="https://mcp.hail.so/.well-known/oauth-protected-resource"`, matching `docs/setup/mcp.md` and the real `oauth-rs` mode in `mcp/hailhq/mcp/auth.py`. Fine to demo `mcp.hail.so` as a working connector — self-host (`hail mcp endpoint`) is also real and valid, both are live options.
 - Gallery is thin right now (1 real asset, confirmed in this repo). The other two gallery images and the product icon live in the separate `hail-website` repo, not this checkout — their presence there is unconfirmed from here. Do not schedule the launch until at least 2 additional genuine product screenshots exist and the brand-asset paths are confirmed — a thumbnail-only or broken-asset launch reads as unfinished on Product Hunt.
 - PH topic names drift; reconcile the four listed topics against the live picker at submission time and swap in the closest exact matches.

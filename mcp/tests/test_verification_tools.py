@@ -10,11 +10,13 @@ from __future__ import annotations
 import base64
 import json
 import re
+from dataclasses import asdict
 from uuid import uuid4
 
 import httpx
 import pytest
 import respx
+from hailhq.core.providers.verification.sms_form import campaign_text
 from hailhq.mcp import tools
 from hailhq.mcp.hail_client import HailClient
 
@@ -515,6 +517,7 @@ async def test_submit_returns_only_the_api_response(client: HailClient) -> None:
     result = await tools.submit_verification(**_kwargs(client))
     assert set(result) == {
         "id",
+        "number_id",
         "country_code",
         "number_type",
         "subject_type",
@@ -532,6 +535,8 @@ async def test_submit_returns_only_the_api_response(client: HailClient) -> None:
         "campaign_accepted",
         "runtime_ready",
         "cancellable",
+        "kept_until",
+        "resubmittable",
         "waiting_for_credit",
         "credit_needed_cents",
     }
@@ -954,7 +959,7 @@ async def test_attestation_is_strict_through_the_real_entry_point(
 async def test_wrong_shapes_through_the_real_entry_point_echo_nothing(
     monkeypatch, override
 ) -> None:
-    # FastMCP's own validation would print ``input_value=...``; the shape
+    # MCPServer's own validation would print ``input_value=...``; the shape
     # check inside the tool must run instead and name the argument only.
     srv = await _real_server(monkeypatch)
     route = respx.route().mock(return_value=httpx.Response(500))
@@ -992,7 +997,7 @@ async def test_requirements_tool_requires_subject_type(monkeypatch) -> None:
         for t in await srv.mcp_app.list_tools()
         if t.name == "get_verification_requirements"
     )
-    assert "subject_type" in tool.inputSchema["required"]
+    assert "subject_type" in tool.input_schema["required"]
 
 
 @respx.mock
@@ -1012,8 +1017,8 @@ async def test_attestation_schema_is_still_boolean(monkeypatch) -> None:
     tool = next(
         t for t in await srv.mcp_app.list_tools() if t.name == "submit_verification"
     )
-    assert tool.inputSchema["properties"]["attest_authorized"]["type"] == "boolean"
-    assert "attest_authorized" in tool.inputSchema["required"]
+    assert tool.input_schema["properties"]["attest_authorized"]["type"] == "boolean"
+    assert "attest_authorized" in tool.input_schema["required"]
 
 
 # --------------------------------------------------------------------------- #
@@ -1254,10 +1259,15 @@ async def test_get_sms_application_uses_authenticated_same_row(
     route = respx.get(f"{_BASE_URL}/verifications/{vid}/application").mock(
         return_value=httpx.Response(200, json=application)
     )
-    assert (
-        await tools.get_sms_application(client=client, verification_id=vid)
-        == application
-    )
+    # The number-registration keys come back empty for an SMS row.
+    assert await tools.get_sms_application(client=client, verification_id=vid) == {
+        **application,
+        "documents": None,
+        "files": [],
+        "kept_until": None,
+        "quote_id": None,
+        "hold_cents": None,
+    }
     assert route.calls[0].request.headers["authorization"] == f"Bearer {_API_KEY}"
     assert len(respx.calls) == 1
 
@@ -1430,6 +1440,39 @@ async def test_preview_sms_application_returns_campaign_text_without_filing(
         "number_id": number_id,
     }
     assert len(respx.calls) == 1
+
+
+@respx.mock
+@pytest.mark.parametrize(
+    ("extra", "version"),
+    [
+        ({}, 1),
+        ({"consent_methods": "WEBSITE", "website_url": "https://example.com/j"}, 2),
+        ({"consent_methods": "KEYWORD", "keyword_keyword": "JOIN"}, 2),
+    ],
+)
+async def test_preview_sms_application_accepts_every_text_version(
+    client: HailClient, extra: dict[str, str], version: int
+) -> None:
+    # Built by the real campaign_text, for each version it writes today.
+    fields = {
+        "text_types": "ACCOUNT_NOTIFICATION",
+        "campaign_description": "Account notices for signed-up customers.",
+        "opt_in_description": "They tick an unchecked box at sign-up.",
+        "sample_1": "Acme: Your balance is low. Reply STOP to opt out.",
+        "privacy_policy_url": "https://example.com/privacy",
+        "terms_url": "https://example.com/sms",
+        **extra,
+    }
+    preview = asdict(campaign_text(fields, "business"))
+    assert preview["schema_version"] == version
+    respx.post(f"{_BASE_URL}/verifications/sms/preview").mock(
+        return_value=httpx.Response(200, json=preview)
+    )
+    result = await tools.preview_sms_application(
+        client=client, subject_type="business", fields=fields
+    )
+    assert result == preview
 
 
 @respx.mock
@@ -1690,7 +1733,10 @@ async def test_amend_sms_application_path_problem_is_not_an_answer(
         httpx.Response(
             200, json={k: v for k, v in _CAMPAIGN_TEXT.items() if k != "opt_in_message"}
         ),
-        httpx.Response(200, json={**_CAMPAIGN_TEXT, "schema_version": 2}),
+        httpx.Response(200, json={**_CAMPAIGN_TEXT, "schema_version": 0}),
+        httpx.Response(200, json={**_CAMPAIGN_TEXT, "schema_version": "2"}),
+        httpx.Response(200, json={**_CAMPAIGN_TEXT, "schema_version": True}),
+        httpx.Response(200, json={**_CAMPAIGN_TEXT, "schema_version": 2.0}),
         httpx.Response(404, json={"detail": "Not Found"}),
     ],
 )
@@ -1996,10 +2042,13 @@ async def test_create_file_upload_returns_a_ready_curl_line(
     assert result["id"] == _UPLOAD
     assert result["upload_url"] == _LINK["upload_url"]
     assert result["curl"] == (
-        "curl -sS -X PUT --data-binary @<path to the file> "
-        f"-H 'Content-Type: image/jpeg' '{_LINK['upload_url']}'"
+        "curl --silent --show-error --globoff --upload-file 'FILE_PATH' "
+        f"'{_LINK['upload_url']}'"
     )
     assert "size_bytes" in result["next"] and "sha256" in result["next"]
+    # A quoted path keeps a file name such as $(...).pdf from running.
+    assert "keep the single quotes" in result["next"]
+    assert "'\\''" in result["next"]
 
 
 async def test_create_file_upload_checks_the_purpose_locally(
@@ -2066,3 +2115,167 @@ async def test_a_form_with_no_file_part_is_still_multipart(client: HailClient) -
     )
     assert "error" not in result, result
     assert captured["parts"]["purpose"]["body"] == b"sms"
+
+
+@respx.mock
+async def test_tollfree_submission_preserves_owned_number_and_type(
+    client: HailClient,
+) -> None:
+    number_id = str(uuid4())
+    captured = {}
+
+    def handler(request):
+        captured.update(_parse_multipart(request))
+        return httpx.Response(
+            201,
+            json=_verification(
+                country_code="CA",
+                number_type="toll_free",
+                number_id=number_id,
+                purpose="sms",
+            ),
+        )
+
+    respx.post(f"{_BASE_URL}/verifications").mock(side_effect=handler)
+    result = await tools.submit_verification(
+        **_kwargs(
+            client,
+            country_code="CA",
+            number_type="toll_free",
+            number_id=number_id,
+            purpose="sms",
+            fields={"registration_kind": "toll_free"},
+            documents={},
+            files=[],
+        )
+    )
+    assert result["number_id"] == number_id
+    assert result["number_type"] == "toll_free"
+    assert captured["number_id"]["body"] == number_id.encode()
+    assert captured["country_code"]["body"] == b"CA"
+    assert captured["number_type"]["body"] == b"toll_free"
+
+
+_DOCUMENT_CHECK_OK = {
+    "fields": {"first_name": "Testa"},
+    "address": {},
+    "documents": {
+        "identity": {
+            "read": True,
+            "option": "passport",
+            "fields": {},
+            "expiry_date": "2024-01-15",
+            "printed_name": {
+                "given_names": "Testa",
+                "surnames": "Example",
+                "latin_given_names": "",
+                "latin_surnames": "",
+                "business_name": "",
+            },
+            "skipped": None,
+            "none_of_types": False,
+            "file_slot": "identity",
+        }
+    },
+    "warnings": [
+        {
+            "field": "identity",
+            "kind": "expired",
+            "message": "This document expired on 2024-01-15. Upload one that is still valid.",
+        }
+    ],
+    "note": "Warnings only.",
+}
+
+
+@respx.mock
+async def test_document_check_posts_the_form_and_returns_values_and_warnings(
+    client: HailClient,
+) -> None:
+    captured: dict = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["parts"] = _parse_multipart(request)
+        return httpx.Response(200, json=_DOCUMENT_CHECK_OK)
+
+    route = respx.post(f"{_BASE_URL}/verifications/document-check").mock(
+        side_effect=_handler
+    )
+    kwargs = _check_kwargs(client, files=[{"slot": "identity", "upload_id": _UPLOAD}])
+    for key in ("purpose", "number_id"):
+        kwargs.pop(key, None)
+    result = await tools.check_verification_documents(**kwargs)
+    assert route.called
+    assert result == _DOCUMENT_CHECK_OK
+    parts = captured["parts"]
+    assert parts["upload.identity"]["body"] == _UPLOAD.encode()
+    assert parts["quote_id"]["body"] == _QUOTE.encode()
+
+
+async def test_document_check_needs_a_quote(client: HailClient) -> None:
+    kwargs = _check_kwargs(client, quote_id=None)
+    for key in ("purpose", "number_id"):
+        kwargs.pop(key, None)
+    result = await tools.check_verification_documents(**kwargs)
+    assert "quote_id" in result["error"]
+
+
+# -- resubmit_verification ---------------------------------------------------
+
+
+async def test_resubmit_needs_the_attestation(client: HailClient) -> None:
+    result = await tools.resubmit_verification(
+        client=client, verification_id=str(uuid4()), attest_authorized=False
+    )
+    assert "attest_authorized must be true" in result["error"]
+
+
+@respx.mock
+async def test_resubmit_sends_only_what_changes(client: HailClient) -> None:
+    vid = str(uuid4())
+    route = respx.post(f"{_BASE_URL}/verifications/{vid}/resubmit").mock(
+        return_value=httpx.Response(201, json=_verification())
+    )
+    upload_id = str(uuid4())
+    result = await tools.resubmit_verification(
+        client=client,
+        verification_id=vid,
+        attest_authorized=True,
+        fields={"first_name": "Ada", "last_name": "King"},
+        files=[{"slot": "proof_of_identity", "upload_id": upload_id}],
+    )
+    assert "error" not in result and result["state"]
+    body = route.calls[0].request.content
+    assert b'name="fields"' in body and b"King" in body
+    assert b'name="upload.proof_of_identity"' in body and upload_id.encode() in body
+    for kept in (b'name="documents"', b'name="address"', b'name="quote_id"'):
+        assert kept not in body
+
+
+@respx.mock
+async def test_resubmit_with_nothing_to_change_still_sends_a_form(
+    client: HailClient,
+) -> None:
+    vid = str(uuid4())
+    route = respx.post(f"{_BASE_URL}/verifications/{vid}/resubmit").mock(
+        return_value=httpx.Response(201, json=_verification())
+    )
+    await tools.resubmit_verification(
+        client=client, verification_id=vid, attest_authorized=True
+    )
+    assert (
+        route.calls[0].request.headers["content-type"].startswith("multipart/form-data")
+    )
+
+
+async def test_resubmit_refuses_a_file_for_a_slot_not_in_documents(
+    client: HailClient,
+) -> None:
+    result = await tools.resubmit_verification(
+        client=client,
+        verification_id=str(uuid4()),
+        attest_authorized=True,
+        documents={"proof_of_address": {"option": "bill"}},
+        files=[{"slot": "proof_of_identity", "upload_id": str(uuid4())}],
+    )
+    assert "Nothing was sent" in result["error"]

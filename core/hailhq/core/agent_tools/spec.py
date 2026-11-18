@@ -36,6 +36,9 @@ class BridgeRoute:
     trunk_id: str
     headers: dict[str, str] | None
     name: str
+    # The most seconds the balance pays for once the contact answers (the
+    # API's cap); None when no cap applies.
+    max_seconds: int | None = None
     # Called with ring_ms the moment the contact picks up. Returns the post
     # that records the answer; the bridge runs it in the background so a slow
     # API never delays the connect.

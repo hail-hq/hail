@@ -1,0 +1,788 @@
+/* Costs keeps its table components and legacy aliases. The public token
+   source owns every color; these names only adapt existing data renderers. */
+.hail-costs {
+  --color-ink: var(--ink);
+  --color-bg: var(--paper);
+  --color-paper: var(--section-alt);
+  --color-tape: var(--ac-soft);
+  --color-mute: var(--m2);
+  --color-dim: var(--m1);
+  --color-accent: var(--ac-text);
+  --color-line: var(--lline);
+  --accent-wash: var(--ac-soft);
+  min-height: 100dvh;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-ui), Arial, sans-serif;
+  font-size: var(--fs-body);
+  line-height: 1.6;
+}
+
+.hail-costs .wrap {
+  width: 100%;
+  max-width: var(--w-page);
+  margin-inline: auto;
+  padding-inline: var(--pad-page);
+}
+
+.hail-costs :is(.hero-grid, .costs-hero-copy, .table-wrap-outer) {
+  min-width: 0;
+}
+
+.hail-costs :focus-visible {
+  outline: 2px solid var(--ac-text);
+  outline-offset: 3px;
+}
+
+.hail-costs :is(pre, code, kbd, samp) {
+  font-family: var(--font-mono), var(--font-code), monospace;
+}
+
+.hail-costs .dispatch-tape {
+  padding-block: var(--s-3);
+  border-bottom: 1px solid var(--lline);
+  color: var(--m2);
+  font-size: var(--fs-small);
+}
+
+.hail-costs .dispatch-tape .row {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--s-2) var(--s-5);
+}
+
+.hail-costs .dispatch-tape .left {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.hail-costs .dispatch-tape .dot {
+  margin-inline-end: var(--s-1);
+  color: var(--ac-text);
+}
+
+.hail-costs .costs-hero {
+  padding-block: var(--gap-section);
+  border-bottom: 1px solid var(--lline);
+}
+
+.hail-costs .costs-hero--compact {
+  padding-block: var(--s-9);
+}
+
+.hail-costs .hero-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
+  align-items: start;
+  gap: var(--s-10);
+}
+
+.hail-costs .dispatch-h1 {
+  max-width: 19ch;
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(2.5rem, 5.2vw, 4rem);
+  font-weight: 600;
+  line-height: 1.06;
+  letter-spacing: -0.045em;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
+
+.hail-costs .costs-hero--compact .dispatch-h1 {
+  max-width: 28ch;
+  font-size: clamp(2rem, 4vw, 3rem);
+  line-height: 1.15;
+}
+
+.hail-costs .costs-hero-copy > p {
+  max-width: 62ch;
+  margin-block: var(--s-6) 0;
+  color: var(--m2);
+  font-size: var(--fs-lede);
+  line-height: 1.6;
+}
+
+.hail-costs .costs-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-3);
+  margin-top: var(--s-7);
+}
+
+.hail-costs :is(.btn, .costs-hero-actions a, .toolbar .anchors a, .add-pill) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-2);
+  min-height: var(--control-h);
+  padding: var(--s-2) var(--control-px);
+  border: 1px solid var(--m1);
+  border-radius: var(--r-md);
+  background: var(--card);
+  color: var(--ink);
+  font:
+    600 var(--control-fs)/1.35 var(--font-ui),
+    Arial,
+    sans-serif;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-color) var(--ease),
+    border-color var(--dur-color) var(--ease),
+    color var(--dur-color) var(--ease);
+}
+
+.hail-costs
+  :is(.btn, .costs-hero-actions a, .toolbar .anchors a, .add-pill):hover {
+  border-color: var(--ac-text);
+  background: var(--ac-soft);
+}
+
+.hail-costs
+  :is(.btn.btn-filled, .btn.btn-accent, .costs-hero-actions a:first-child) {
+  border-color: var(--ac);
+  background: var(--ac);
+  color: var(--ac-fg);
+}
+
+.hail-costs
+  :is(
+    .btn.btn-filled,
+    .btn.btn-accent,
+    .costs-hero-actions a:first-child
+  ):hover {
+  background: color-mix(in srgb, var(--ac) 85%, black);
+  border-color: color-mix(in srgb, var(--ac) 85%, black);
+}
+
+.hail-costs :is(.filed-panel, .summary-strip .stat) {
+  min-width: 0;
+  border: 1px solid var(--lline);
+  border-radius: var(--r-lg);
+  background: var(--card);
+  padding: var(--s-6);
+}
+
+.hail-costs .filed-panel {
+  font-size: var(--fs-small);
+}
+
+.hail-costs .filed-panel > :is(b, span) {
+  display: block;
+}
+
+.hail-costs .filed-panel > b {
+  font-weight: 600;
+}
+
+.hail-costs .filed-panel > span {
+  margin-top: var(--s-2);
+  color: var(--m2);
+}
+
+.hail-costs .filed-panel dl {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--s-2) var(--s-4);
+  margin: var(--s-5) 0 0;
+}
+
+.hail-costs .filed-panel dt {
+  color: var(--m2);
+}
+
+.hail-costs .filed-panel dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.hail-costs
+  :is(
+    .filed-panel a,
+    .costs-data a,
+    .costs-license a,
+    .compare-source,
+    .costs-notice a
+  ) {
+  color: var(--ac-text);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+.hail-costs .summary-strip {
+  padding-block: var(--s-7);
+  border-bottom: 1px solid var(--lline);
+  background: var(--section-alt);
+}
+
+.hail-costs .summary-strip .grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--s-4);
+}
+
+.hail-costs .summary-strip .stat .k {
+  color: var(--m2);
+  font-size: var(--fs-small);
+  font-weight: 500;
+}
+
+.hail-costs .summary-strip .stat .v {
+  margin-block: var(--s-2);
+  font-family: var(--font-display);
+  font-size: 2.25rem;
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+}
+
+.hail-costs .summary-strip .stat .n {
+  color: var(--m2);
+  font-size: var(--fs-small);
+  overflow-wrap: anywhere;
+}
+
+.hail-costs .toolbar {
+  position: sticky;
+  top: var(--hail-header-h, 0px);
+  z-index: 20;
+  border-bottom: 1px solid var(--lline);
+  background: var(--paper);
+  padding-block: var(--s-3);
+}
+
+.hail-costs
+  :is(
+    .toolbar .row,
+    .toolbar .anchors,
+    .costs-toolbar-actions,
+    .costs-model-options
+  ) {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+
+.hail-costs .costs-toolbar-actions,
+.hail-costs .costs-compare-anchors {
+  margin-inline-start: auto;
+}
+
+.hail-costs .toolbar input.search {
+  flex: 1;
+  min-width: 0;
+  min-height: var(--control-h);
+  border: 1px solid var(--m1);
+  border-radius: var(--r-md);
+  background: var(--card);
+  padding: var(--s-2) var(--s-3);
+  color: var(--ink);
+  font: inherit;
+}
+
+.hail-costs .cat {
+  padding-block: var(--s-9);
+  border-bottom: 1px solid var(--lline);
+  scroll-margin-top: calc(var(--hail-header-h, 0px) + 100px);
+}
+
+.hail-costs .cat-bar {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--s-3);
+  margin-bottom: var(--s-5);
+}
+
+.hail-costs .cat-bar .num {
+  color: var(--m2);
+  font-family: var(--font-code), monospace;
+  font-size: var(--fs-small);
+}
+
+.hail-costs .cat-bar h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(1.5rem, 2.5vw, 2rem);
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.03em;
+}
+
+.hail-costs .cat-bar .count {
+  margin-inline-start: auto;
+  color: var(--m2);
+  font-size: var(--fs-small);
+}
+
+.hail-costs .chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  margin-bottom: var(--s-4);
+}
+
+.hail-costs .chips .lbl {
+  color: var(--m2);
+  font-size: var(--fs-small);
+}
+
+.hail-costs .chip {
+  min-height: var(--control-h);
+  border: 1px solid var(--m1);
+  border-radius: var(--r-md);
+  background: var(--card);
+  padding: var(--s-2) var(--s-3);
+  color: var(--ink);
+  font:
+    500 var(--fs-small)/1.3 var(--font-ui),
+    Arial,
+    sans-serif;
+  cursor: pointer;
+}
+
+.hail-costs .chip:hover,
+.hail-costs .chip[aria-pressed="true"] {
+  border-color: var(--ac-text);
+  background: var(--ac-soft);
+  color: var(--ac-text);
+}
+
+.hail-costs .chip[aria-pressed="true"] {
+  box-shadow: inset 0 0 0 1px var(--ac-text);
+}
+
+.hail-costs .table-wrap-outer {
+  position: relative;
+  max-width: 100%;
+}
+
+.hail-costs .table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--lline);
+  border-radius: var(--r-lg);
+  background: var(--card);
+  overscroll-behavior-x: contain;
+}
+
+.hail-costs :is(.wire-table, .compare-table) {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: collapse;
+  font-size: var(--fs-small);
+  line-height: 1.5;
+}
+
+.hail-costs :is(.wire-table, .compare-table) :is(th, td) {
+  border-bottom: 1px solid var(--lline);
+  padding: var(--s-3) var(--s-4);
+  text-align: left;
+  vertical-align: top;
+}
+
+.hail-costs :is(.wire-table, .compare-table) thead th {
+  background: var(--section-alt);
+  color: var(--m2);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.hail-costs .wire-table thead th {
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+
+.hail-costs .wire-table thead th:hover,
+.hail-costs .wire-table tbody tr:hover td {
+  background: var(--ac-soft);
+}
+
+.hail-costs .wire-table thead th[aria-sort] {
+  color: var(--ink);
+}
+
+.hail-costs .wire-table th[aria-sort="descending"]::after {
+  content: " ↓";
+}
+
+.hail-costs .wire-table th[aria-sort="ascending"]::after {
+  content: " ↑";
+}
+
+.hail-costs .wire-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.hail-costs .wire-table td.num,
+.hail-costs .compare-table tbody td {
+  font-family: var(--font-mono), var(--font-code), monospace;
+  font-size: 0.8125rem;
+}
+
+.hail-costs .wire-table .killer {
+  color: var(--ac-text);
+  font-weight: 600;
+}
+
+.hail-costs .wire-table .code {
+  display: inline-block;
+  border: 1px solid var(--lline);
+  border-radius: var(--r-sm);
+  padding: var(--s-1) var(--s-2);
+  color: var(--m2);
+  font-family: var(--font-code), monospace;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.hail-costs .scroll-hint {
+  position: absolute;
+  inset-block: 1px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  width: 36px;
+  color: var(--ink);
+  font-size: 1.25rem;
+  font-weight: 600;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.hail-costs .scroll-hint.is-visible {
+  opacity: 0.65;
+}
+
+.hail-costs .scroll-hint-left {
+  left: 1px;
+  padding-inline-start: var(--s-1);
+  background: linear-gradient(to right, var(--card) 40%, transparent);
+}
+
+.hail-costs .scroll-hint-right {
+  right: 1px;
+  justify-content: flex-end;
+  padding-inline-end: var(--s-1);
+  background: linear-gradient(to left, var(--card) 40%, transparent);
+}
+
+.hail-costs .model-id-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s-1);
+  margin-top: var(--s-1);
+}
+
+.hail-costs :is(.copy-chip, .compare-link) {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-1);
+  min-height: 32px;
+  border: 1px solid var(--lline);
+  border-radius: var(--r-sm);
+  background: var(--card);
+  padding: var(--s-1) var(--s-2);
+  color: var(--m2);
+  font:
+    500 0.75rem/1.4 var(--font-ui),
+    Arial,
+    sans-serif;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.hail-costs .copy-chip {
+  font-family: var(--font-mono), var(--font-code), monospace;
+  user-select: text;
+  cursor: copy;
+}
+
+.hail-costs :is(.copy-chip, .compare-link):hover {
+  border-color: var(--ac-text);
+  background: var(--ac-soft);
+  color: var(--ac-text);
+}
+
+.hail-costs .copy-chip--copied,
+.hail-costs .copy-chip--copied:hover {
+  background: var(--ac);
+  border-color: var(--ac);
+  color: var(--ac-fg);
+}
+
+.hail-costs .copy-chip-icon {
+  display: inline-flex;
+}
+
+.hail-costs .copy-chip-text {
+  pointer-events: none;
+}
+
+.hail-costs .stale-pill {
+  display: inline-block;
+  margin-inline-start: var(--s-2);
+  border-radius: var(--r-sm);
+  background: var(--section-alt);
+  padding: 2px var(--s-2);
+  color: var(--m2);
+  font:
+    500 0.6875rem/1.4 var(--font-ui),
+    Arial,
+    sans-serif;
+}
+
+.hail-costs .empty {
+  padding: var(--s-7);
+  color: var(--m2);
+  font-size: var(--fs-small);
+  text-align: center;
+}
+
+.hail-costs .compare-table thead th {
+  min-width: 200px;
+  padding: 0;
+}
+
+.hail-costs .compare-table thead th.compare-attr {
+  min-width: 160px;
+  width: 200px;
+  background: var(--card);
+}
+
+.hail-costs .compare-model-head-inner {
+  position: relative;
+  padding: var(--s-5);
+}
+
+.hail-costs .compare-model-prov,
+.hail-costs .compare-verified-date {
+  margin-bottom: var(--s-2);
+  color: var(--m2);
+  font-size: 0.75rem;
+}
+
+.hail-costs .compare-model-name {
+  margin-bottom: var(--s-2);
+  padding-inline-end: var(--s-8);
+  color: var(--ink);
+  font-size: 1.0625rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.hail-costs .compare-remove {
+  position: absolute;
+  top: var(--s-2);
+  right: var(--s-2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--m1);
+  border-radius: var(--r-sm);
+  background: var(--card);
+  color: var(--ink);
+  font-size: 1rem;
+  text-decoration: none;
+}
+
+.hail-costs .compare-remove:hover {
+  background: var(--ac-soft);
+  border-color: var(--ac-text);
+}
+
+.hail-costs .compare-table tbody th.compare-attr-label {
+  color: var(--m2);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.hail-costs .compare-table :is(th, td) + :is(th, td) {
+  border-inline-start: 1px solid var(--lline);
+}
+
+.hail-costs .compare-table .compare-row-emphasis :is(th, td) {
+  background: var(--ac-soft);
+  color: var(--ac-text);
+  font-weight: 600;
+}
+
+.hail-costs .compare-source {
+  font-family: var(--font-ui), Arial, sans-serif;
+  font-size: 0.8125rem;
+}
+
+.hail-costs .add-pill {
+  min-width: 0;
+  max-width: 100%;
+  justify-content: flex-start;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.hail-costs .add-pill:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.hail-costs .add-pill-plus {
+  color: var(--ac-text);
+  font-size: 1.125rem;
+  line-height: 1;
+}
+
+.hail-costs .add-pill-prov {
+  margin-inline-end: var(--s-1);
+  color: var(--m2);
+  font-size: 0.75rem;
+}
+
+.hail-costs :is(.costs-data, .costs-model-picker, .costs-popular) {
+  padding-block: var(--s-9);
+  border-bottom: 1px solid var(--lline);
+  background: var(--section-alt);
+}
+
+.hail-costs :is(.costs-data, .costs-model-picker, .costs-popular) h2,
+.hail-costs .costs-model-group h3 {
+  margin: 0 0 var(--s-5);
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.025em;
+}
+
+.hail-costs .costs-data p {
+  max-width: 65ch;
+  margin: 0 0 var(--s-5);
+}
+
+.hail-costs .costs-data ul {
+  display: grid;
+  gap: var(--s-3);
+  padding: 0;
+  margin: 0 0 var(--s-5);
+  list-style: none;
+  font-size: var(--fs-small);
+}
+
+.hail-costs .costs-data :is(li, code) {
+  overflow-wrap: anywhere;
+}
+
+.hail-costs .costs-license {
+  padding-block: var(--s-5);
+  color: var(--m2);
+  font-size: var(--fs-small);
+}
+
+.hail-costs .costs-compare-summary {
+  padding-block: var(--s-6);
+}
+
+.hail-costs :is(.costs-notice, .costs-compare-empty) {
+  margin-bottom: var(--s-7);
+  border: 1px solid var(--lline);
+  border-radius: var(--r-lg);
+  background: var(--card);
+  padding: var(--s-6);
+}
+
+.hail-costs .costs-notice {
+  font-size: var(--fs-small);
+}
+
+.hail-costs .costs-notice-link {
+  margin-top: var(--s-2);
+}
+
+.hail-costs .costs-compare-empty p {
+  max-width: 50ch;
+  margin: var(--s-2) 0 0;
+  color: var(--m2);
+}
+
+.hail-costs .costs-model-group {
+  margin-top: var(--s-6);
+}
+
+.hail-costs .costs-model-group h3 {
+  margin-bottom: var(--s-3);
+  font-family: var(--font-ui), Arial, sans-serif;
+  font-size: var(--fs-small);
+  letter-spacing: 0;
+}
+
+@media (max-width: 899px) {
+  .hail-costs .hero-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--s-7);
+  }
+
+  .hail-costs .filed-panel {
+    max-width: 480px;
+  }
+}
+
+@media (max-width: 640px) {
+  .hail-costs .summary-strip .grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--s-3);
+  }
+
+  .hail-costs .summary-strip .stat {
+    padding: var(--s-4);
+  }
+
+  .hail-costs .summary-strip .stat .v {
+    font-size: 2rem;
+  }
+
+  .hail-costs .toolbar .row {
+    align-items: flex-start;
+  }
+
+  .hail-costs .toolbar .anchors {
+    width: 100%;
+  }
+
+  .hail-costs :is(.costs-toolbar-actions, .costs-compare-anchors) {
+    margin-inline-start: 0;
+  }
+
+  .hail-costs :is(.copy-chip, .compare-link, .compare-remove) {
+    min-height: 44px;
+  }
+
+  .hail-costs .compare-remove {
+    width: 44px;
+  }
+
+  .hail-costs .cat-bar .count {
+    flex-basis: 100%;
+    margin-inline-start: 0;
+  }
+
+  .hail-costs .costs-hero-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 359px) {
+  .hail-costs .summary-strip .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

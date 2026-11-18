@@ -1,6 +1,7 @@
 "use client";
 
-import { useId, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
+import { AnswerButton } from "./AnswerButton";
 import { useDropdown } from "./useDropdown";
 import { Mascot } from "./Mascot";
 import styles from "./SiteHeader.module.css";
@@ -11,6 +12,7 @@ export type SiteHeaderActive =
   | "pricing"
   | "docs"
   | "blog"
+  | "contact"
   | null;
 
 const RESOURCES = [
@@ -70,12 +72,16 @@ function navLinkClass(isActive: boolean, extra?: string) {
 /** Shared marketing navigation with a collapsible mobile menu. */
 export function SiteHeader({
   active = null,
+  loggedIn = false,
+  accountAction,
   themeControl,
   origin = "https://hail.so",
 }: {
   active?: SiteHeaderActive;
+  loggedIn?: boolean;
   themeControl: ReactNode;
   origin?: string;
+  accountAction?: { href: string; label: string };
 }) {
   const current = active;
   const siteHref = (path: string) => new URL(path, origin).href;
@@ -93,8 +99,23 @@ export function SiteHeader({
   const menuButton = useRef<HTMLButtonElement>(null);
   const navId = useId();
 
+  useEffect(() => {
+    const media = window.matchMedia?.("(max-width: 900px)");
+    if (!mobileOpen || !media?.matches) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const closeOnDesktop = () => {
+      if (!media.matches) setMobileOpen(false);
+    };
+    media.addEventListener("change", closeOnDesktop);
+    return () => {
+      document.body.style.overflow = previous;
+      media.removeEventListener("change", closeOnDesktop);
+    };
+  }, [mobileOpen, setMobileOpen]);
+
   return (
-    <header className={styles.header}>
+    <header className={styles.header} data-public-header>
       <div
         className={styles.shell}
         ref={mobileRef}
@@ -145,7 +166,16 @@ export function SiteHeader({
             }
           }}
         >
-          <div className={styles.dropdown} ref={ref}>
+          <div
+            className={styles.dropdown}
+            ref={ref}
+            onKeyDown={(event) => {
+              if (event.key === "Escape" && open) {
+                setOpen(false);
+                ref.current?.querySelector("button")?.focus();
+              }
+            }}
+          >
             <button
               type="button"
               className={navLinkClass(current === "product")}
@@ -192,7 +222,16 @@ export function SiteHeader({
               </div>
             )}
           </div>
-          <div className={styles.dropdown} ref={setupRef}>
+          <div
+            className={styles.dropdown}
+            ref={setupRef}
+            onKeyDown={(event) => {
+              if (event.key === "Escape" && setupOpen) {
+                setSetupOpen(false);
+                setupRef.current?.querySelector("button")?.focus();
+              }
+            }}
+          >
             <button
               type="button"
               className={navLinkClass(current === "setup")}
@@ -260,21 +299,52 @@ export function SiteHeader({
           >
             Pricing
           </a>
+          {/* Only in the phone menu. The desktop bar keeps Contact in the footer. */}
           <a
-            className={`${styles.navLink} ${styles.menuSignIn}`}
-            href={siteHref("/signin")}
+            href={siteHref("/contact")}
+            aria-current={current === "contact" ? "true" : undefined}
+            className={`${navLinkClass(current === "contact")} ${styles.menuOnly}`}
           >
-            Sign in
+            Contact
           </a>
+          {!accountAction && !loggedIn && (
+            <a
+              className={`${styles.navLink} ${styles.menuSignIn}`}
+              href={siteHref("/signin")}
+            >
+              Sign in
+            </a>
+          )}
         </nav>
         <div className={styles.navActions}>
           <div className={styles.themeButton}>{themeControl}</div>
-          <a className={styles.account} href={siteHref("/signin")}>
-            Sign in
-          </a>
-          <a className={styles.primary} href={siteHref("/signup")}>
-            Get started
-          </a>
+          {accountAction ? (
+            <AnswerButton
+              className={styles.primary}
+              href={siteHref(accountAction.href)}
+            >
+              {accountAction.label}
+            </AnswerButton>
+          ) : loggedIn ? (
+            <AnswerButton
+              className={styles.primary}
+              href={siteHref("/console")}
+            >
+              Console
+            </AnswerButton>
+          ) : (
+            <>
+              <a className={styles.account} href={siteHref("/signin")}>
+                Sign in
+              </a>
+              <AnswerButton
+                className={styles.primary}
+                href={siteHref("/signup")}
+              >
+                Get started
+              </AnswerButton>
+            </>
+          )}
           <button
             ref={menuButton}
             type="button"

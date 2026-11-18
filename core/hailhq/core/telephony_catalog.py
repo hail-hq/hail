@@ -15,19 +15,61 @@ from functools import lru_cache
 from pathlib import Path
 
 __all__ = [
+    "business_only",
     "by_request_row",
     "capabilities",
     "effective_capabilities",
     "monthly_price",
+    "not_sold",
     "requirements",
     "rows",
     "sells_in",
+    "tollfree_sms_unverifiable",
 ]
 
 # In the API image costs/ is copied to /app/costs (see api/Dockerfile); in dev
 # the module sits at core/hailhq/core/ so parents[3] is the repo root. An env
 # var overrides both (tests, alternate layouts).
 _DEFAULT_DIR = Path(__file__).resolve().parents[3] / "costs"
+
+
+# Rules per (carrier, country, number type) that the carrier catalogs cannot
+# hold: the weekly sync rewrites costs/*.json from the carriers' APIs.
+#
+# UK (GB): every Telnyx GB order asks for "Company Website URL (Business
+# Use Only)", a live site that names the business, and Telnyx declines the
+# "N/A" Hail sends for a private individual. Twilio asks an individual for
+# no website or use-case text. So GB local, mobile and toll-free numbers
+# come from Twilio only. Twilio has no GB national (03) numbers: Telnyx
+# keeps those, for companies only.
+#
+# Only new quotes, purchases and verifications follow these rules. Numbers
+# already bought keep their carrier, routing, renewal and release.
+#
+# hail-website copies these two sets (NOT_SOLD and BUSINESS_ONLY in
+# lib/number-floors.ts) for its prices. Change both, this repo first.
+_NOT_SOLD = frozenset(
+    {
+        ("telnyx", "GB", "local"),
+        ("telnyx", "GB", "mobile"),
+        ("telnyx", "GB", "toll_free"),
+    }
+)
+_BUSINESS_ONLY = frozenset({("telnyx", "GB", "national")})
+
+
+def not_sold(provider: str, country_code: str | None, number_type: str | None) -> bool:
+    """True when Hail does not sell this carrier's numbers of this kind, even
+    though its catalog lists them (see ``_NOT_SOLD``)."""
+    return (provider, country_code, number_type) in _NOT_SOLD
+
+
+def business_only(
+    provider: str, country_code: str | None, number_type: str | None
+) -> bool:
+    """True when only a company may verify for and buy this carrier's numbers
+    of this kind (see ``_BUSINESS_ONLY``)."""
+    return (provider, country_code, number_type) in _BUSINESS_ONLY
 
 
 def _path(provider: str) -> Path:
@@ -38,8 +80,14 @@ def _path(provider: str) -> Path:
 
 @lru_cache(maxsize=8)
 def _load(provider: str) -> dict[tuple[str, str], dict]:
+    """The carrier's rows by (country, number type). ``_NOT_SOLD`` rows are
+    left out here, so no reader of this module can offer them."""
     raw = json.loads(_path(provider).read_text())
-    return {(n["country_code"], n["number_type"]): n for n in raw["numbers"]}
+    return {
+        (n["country_code"], n["number_type"]): n
+        for n in raw["numbers"]
+        if not not_sold(provider, n["country_code"], n["number_type"])
+    }
 
 
 @lru_cache(maxsize=8)
@@ -53,16 +101,40 @@ def _sms_route_exists(provider: str) -> bool:
     return provider not in CARRIERS or CARRIERS[provider].sms_route is not None
 
 
-def effective_capabilities(row: dict, provider: str) -> list[str]:
+def tollfree_sms_unverifiable(
+    provider: str, country_code: str | None, number_type: str | None
+) -> bool:
+    """True for a US/CA toll-free number at a carrier Hail cannot verify
+    toll-free texting with: it can never text the US or Canada."""
+    if country_code not in {"US", "CA"} or number_type != "toll_free":
+        return False
+    # Imported here: carrier_routing imports the carrier adapters.
+    from hailhq.core.carrier_routing import CARRIERS
+
+    entry = CARRIERS.get(provider)
+    return not (entry and entry.toll_free_sms_verification)
+
+
+def effective_capabilities(
+    row: dict,
+    provider: str,
+    country_code: str | None = None,
+    number_type: str | None = None,
+) -> list[str]:
     """What Hail can deliver on this catalog row: ``voice`` and/or ``sms``.
     Hail routes no SMS through a carrier whose ``sms_route`` is None. Its
     catalog row may list SMS, because the carrier sells it; Hail cannot
     deliver it, so it is never promised. An SMS-only row at such a carrier
-    gives an empty list."""
+    gives an empty list. A US/CA toll-free row at a carrier Hail cannot verify
+    for toll-free texting never promises SMS either."""
     caps = []
     if row.get("voice"):
         caps.append("voice")
-    if row.get("sms") and _sms_route_exists(provider):
+    if (
+        row.get("sms")
+        and _sms_route_exists(provider)
+        and not tollfree_sms_unverifiable(provider, country_code, number_type)
+    ):
         caps.append("sms")
     return caps
 
@@ -88,11 +160,12 @@ def capabilities(
         # orders a by_request number by hand.
         if row.get("receive_only") or row.get("by_request"):
             continue
-        caps = effective_capabilities(row, name)
+        caps = effective_capabilities(row, name, country_code, number_type)
         if not caps and not _sms_route_exists(name):
             continue  # an SMS-only number Hail cannot use at this carrier
-        # No SMS route also means no MMS.
-        mms = bool(row.get("mms")) and _sms_route_exists(name)
+        # No SMS Hail can deliver (no SMS route, or toll-free SMS Hail cannot
+        # verify) means no MMS.
+        mms = bool(row.get("mms")) and "sms" in caps
         return {"voice": "voice" in caps, "sms": "sms" in caps, "mms": mms}
     return None
 

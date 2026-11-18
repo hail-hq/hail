@@ -7,20 +7,27 @@ left untouched; audit_log is never touched.
 
 from __future__ import annotations
 
+import ast
 import uuid
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 from hailhq.core.models import (
     AuditLog,
     Call,
+    CarrierVerification,
     Contact,
     Email,
     OrgClosure,
     PhoneNumber,
     Sms,
 )
-from hailhq.core.retention import purge_expired_data
+from hailhq.core.retention import (
+    REGISTRATION_ANSWER_REFS,
+    clear_closed_org_registrations,
+    purge_expired_data,
+)
 from sqlalchemy import select
 
 
@@ -425,3 +432,247 @@ async def test_an_evidence_failure_does_not_skip_the_verification_uploads(
     with pytest.raises(RuntimeError, match="1 org"):
         await purge_expired_data(async_session, now)
     assert uploads_tried == [org]
+
+
+# What a filed US texting registration keeps in provider_refs: carrier ids
+# and billing keys (kept), and copies of the customer's answers (deleted).
+_KEPT_REFS = {
+    "brand_sid": "BN1",
+    "campaign_sid": "CM1",
+    "campaign_filed_at": "2026-11-01T00:00:00+00:00",
+    "brand_reused": True,
+    "subject_type": "person",
+}
+_ANSWER_REFS = {
+    "application": {"fields": {"first_name": "Ada", "tax_id": "12-3456789"}},
+    "application_amendment_hash": "0" * 64,
+    "campaign": {"description": "Order updates", "contact_email": "ada@example.com"},
+    "replies": {"help": "Ada Lovelace: Reply STOP to opt out."},
+    "subject_name": "Ada Lovelace",
+}
+
+
+def _verification(org, **over) -> CarrierVerification:
+    return CarrierVerification(
+        organization_id=org,
+        provider=over.pop("provider", "twilio"),
+        country_code=over.pop("country_code", "US"),
+        number_type="local",
+        subject_type="person",
+        purpose=over.pop("purpose", "sms"),
+        subject_name=over.pop("subject_name", "Ada Lovelace"),
+        state=over.pop("state", "approved"),
+        provider_refs=over.pop("provider_refs", {**_KEPT_REFS, **_ANSWER_REFS}),
+        rejection_reason=over.pop("rejection_reason", None),
+        requirements_version="1",
+        **over,
+    )
+
+
+async def test_closed_org_registrations_lose_their_answers_at_close(async_session):
+    now = datetime.now(timezone.utc)
+    closed, open_org, other = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    # Closed just now: no 12-month wait.
+    async_session.add(
+        OrgClosure(organization_id=closed, closed_at=now, source="hail_website")
+    )
+    rows = {
+        "approved": _verification(closed),
+        "rejected": _verification(
+            closed,
+            provider="telnyx",
+            state="rejected",
+            rejection_reason="The carrier could not match Ada Lovelace.",
+        ),
+        # Two live number verifications: their names stay (a nameless-live
+        # unique index), the reason goes.
+        "number_a": _verification(
+            closed,
+            purpose="number",
+            country_code="GB",
+            subject_name="Ada Lovelace",
+            provider_refs={"bundle_sid": "BU1"},
+            rejection_reason="Earlier: blurry passport",
+        ),
+        "number_b": _verification(
+            closed,
+            purpose="number",
+            country_code="GB",
+            subject_name="Grace Hopper",
+            provider_refs={"bundle_sid": "BU2"},
+        ),
+        "number_ended": _verification(
+            closed,
+            purpose="number",
+            country_code="DE",
+            state="cancelled",
+            provider_refs={"bundle_sid": "BU3"},
+        ),
+        "open": _verification(open_org, rejection_reason="Fix the website"),
+        "other": _verification(other, provider="telnyx"),
+    }
+    async_session.add_all(rows.values())
+    await async_session.commit()
+
+    assert await clear_closed_org_registrations(async_session, now) == 4
+    # Safe to run twice: nothing left to clear.
+    assert await clear_closed_org_registrations(async_session, now) == 0
+
+    for row in rows.values():
+        await async_session.refresh(row)
+    for name in ("approved", "rejected"):
+        row = rows[name]
+        assert row.provider_refs == _KEPT_REFS, name
+        assert row.subject_name is None and row.rejection_reason is None, name
+    # State and dates stay for billing.
+    assert rows["approved"].state == "approved"
+    assert rows["rejected"].state == "rejected"
+    assert rows["number_a"].subject_name == "Ada Lovelace"
+    assert rows["number_a"].rejection_reason is None
+    assert rows["number_a"].provider_refs == {"bundle_sid": "BU1"}
+    assert rows["number_b"].subject_name == "Grace Hopper"
+    assert rows["number_ended"].subject_name is None
+    assert rows["number_ended"].provider_refs == {"bundle_sid": "BU3"}
+    # An open org and any other org keep everything.
+    for name in ("open", "other"):
+        row = rows[name]
+        assert row.provider_refs == {**_KEPT_REFS, **_ANSWER_REFS}, name
+        assert row.subject_name == "Ada Lovelace", name
+    assert rows["open"].rejection_reason == "Fix the website"
+
+
+async def test_closed_org_clear_waits_for_closed_at_and_takes_one_org(async_session):
+    now = datetime.now(timezone.utc)
+    later, first, second = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    async_session.add_all(
+        [
+            OrgClosure(
+                organization_id=later,
+                closed_at=now + timedelta(days=1),
+                source="hail_website",
+            ),
+            OrgClosure(organization_id=first, closed_at=now, source="hail_website"),
+            OrgClosure(organization_id=second, closed_at=now, source="hail_website"),
+        ]
+    )
+    rows = [_verification(org) for org in (later, first, second)]
+    async_session.add_all(rows)
+    await async_session.commit()
+
+    assert await clear_closed_org_registrations(async_session, now, first) == 1
+    for row in rows:
+        await async_session.refresh(row)
+    assert [("application" in r.provider_refs) for r in rows] == [True, False, True]
+
+
+# provider_refs keys that hold no customer-entered text: carrier ids, flags,
+# times, Hail's own ids and the form's slot labels. A key missing from this
+# list and from REGISTRATION_ANSWER_REFS fails the test below: decide which
+# one it belongs to.
+_NOT_ANSWER_REFS = {
+    "address_id",
+    "address_sid",
+    "brand_id",
+    "brand_reused",
+    "brand_sid",
+    "bundle_sid",
+    "campaign_accepted",
+    "campaign_filed_at",
+    "campaign_id",
+    "campaign_needs_repair",
+    "campaign_reserved_at",
+    "campaign_sid",
+    "confirm_attempts",
+    "country_code",
+    "document_ids",
+    "document_sids",
+    "e164",  # the Hail number on a toll-free registration
+    "end_user_sid",
+    "file_ids",
+    "group_id",
+    "identity_created",
+    "identity_id",
+    "identity_verified",
+    "messaging_profile_id",
+    "messaging_service_sid",
+    "needs_information",
+    "number_type",
+    "organization_id",
+    "otp_reference_id",
+    "otp_sent_at",
+    "profile_sid",
+    "proof_ids",
+    "provider_resource_id",
+    "refused_at_filing",
+    "registration_kind",
+    "replies_set",
+    "requirement_id",
+    "runtime_ready",
+    "slots",
+    "subject_type",
+    "tollfree_verification_sid",
+    "trust_sid",
+    "vetting_requested",
+}
+
+_ROOT = Path(__file__).resolve().parents[2]
+_REFS_WRITERS = [
+    *sorted((_ROOT / "core/hailhq/core/providers/verification").glob("*.py")),
+    _ROOT / "api/hailhq/api/routes/verifications.py",
+    _ROOT / "api/hailhq/api/sms_registration.py",
+]
+
+
+def _is_refs(node: ast.AST) -> bool:
+    name = getattr(node, "id", None) or getattr(node, "attr", None) or ""
+    return name.endswith("refs")
+
+
+def _dict_keys(node: ast.AST) -> list[str]:
+    if not isinstance(node, ast.Dict):
+        return []
+    return [k.value for k in node.keys if isinstance(k, ast.Constant)]
+
+
+def _written_refs_keys() -> set[str]:
+    """Keys the code writes into a ``*refs`` dict: ``refs["k"] = ...``,
+    ``refs = {"k": ...}``, ``refs={"k": ...}`` and ``refs.setdefault("k")``."""
+    keys: set[str] = set()
+    for path in _REFS_WRITERS:
+        for node in ast.walk(ast.parse(path.read_text())):
+            if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+                targets = (
+                    node.targets if isinstance(node, ast.Assign) else [node.target]
+                )
+                for target in targets:
+                    if _is_refs(target):
+                        keys.update(_dict_keys(node.value))
+                    for sub in ast.walk(target):
+                        if (
+                            isinstance(sub, ast.Subscript)
+                            and _is_refs(sub.value)
+                            and isinstance(sub.slice, ast.Constant)
+                        ):
+                            keys.add(sub.slice.value)
+            elif isinstance(node, ast.keyword) and (node.arg or "").endswith("refs"):
+                keys.update(_dict_keys(node.value))
+            elif (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "setdefault"
+                and _is_refs(node.func.value)
+                and node.args
+                and isinstance(node.args[0], ast.Constant)
+            ):
+                keys.add(node.args[0].value)
+    return keys
+
+
+def test_every_written_refs_key_is_classified():
+    """A new provider_refs key must be listed as an answer (deleted at
+    account close) or as not an answer."""
+    written = _written_refs_keys()
+    assert set(REGISTRATION_ANSWER_REFS) <= written
+    assert not set(REGISTRATION_ANSWER_REFS) & _NOT_ANSWER_REFS
+    unlisted = written - set(REGISTRATION_ANSWER_REFS) - _NOT_ANSWER_REFS
+    assert not unlisted, f"classify these provider_refs keys: {sorted(unlisted)}"

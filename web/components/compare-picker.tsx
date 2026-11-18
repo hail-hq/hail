@@ -97,7 +97,7 @@ export function CompareModels({ llm, stt, tts }: Props) {
         </div>
       </div>
 
-      <div className="wrap" style={{ padding: "20px 0" }}>
+      <div className="wrap costs-compare-summary">
         <aside className="filed-panel">
           <b>Compare</b>
           <span>Up to {MAX_COMPARE} models, side-by-side.</span>
@@ -124,7 +124,7 @@ export function CompareModels({ llm, stt, tts }: Props) {
               Clear
             </button>
           )}
-          <div style={{ marginLeft: "auto" }} className="anchors">
+          <div className="anchors costs-compare-anchors">
             {selectedLLM.length > 0 && <a href="#cmp-llm">LLM</a>}
             {selectedSTT.length > 0 && <a href="#cmp-stt">STT</a>}
             {selectedTTS.length > 0 && <a href="#cmp-tts">TTS</a>}
@@ -180,58 +180,16 @@ export function CompareModels({ llm, stt, tts }: Props) {
         </section>
       )}
 
-      <section
-        style={{
-          padding: "36px 0",
-          borderBottom: "2px solid var(--color-ink)",
-          background: "var(--color-paper)",
-        }}
-        id="cmp-add"
-      >
+      <section className="costs-model-picker" id="cmp-add">
         <div className="wrap">
           {total === 0 && (
-            <div
-              style={{
-                border: "2px dashed var(--color-ink)",
-                padding: "32px 28px",
-                background: "var(--color-paper)",
-                textAlign: "center",
-                marginBottom: 36,
-              }}
-            >
-              <div
-                style={{
-                  fontSize: 11,
-                  fontWeight: 700,
-                  color: "var(--color-mute)",
-                  marginBottom: 8,
-                }}
-              >
-                No models selected
-              </div>
-              <p
-                style={{
-                  fontSize: 18,
-                  margin: 0,
-                  maxWidth: "50ch",
-                  marginInline: "auto",
-                }}
-              >
-                Pick at least two models below to see them side-by-side.
-              </p>
+            <div className="costs-compare-empty">
+              <strong>No models selected</strong>
+              <p>Pick at least two models below to see them side-by-side.</p>
             </div>
           )}
 
-          <h3
-            style={{
-              fontSize: 11,
-              fontWeight: 700,
-              color: "var(--color-mute)",
-              margin: "0 0 16px",
-            }}
-          >
-            {total === 0 ? "Available models" : "Add another model"}
-          </h3>
+          <h2>{total === 0 ? "Available models" : "Add another model"}</h2>
           <ModelGroup
             label="LLMs"
             models={llm}
@@ -270,30 +228,15 @@ function ModelGroup({
   const available = models.filter((m) => !currentIds.includes(m.model_id));
   if (available.length === 0) return null;
   return (
-    <div style={{ marginBottom: 18 }}>
-      <div
-        style={{
-          fontSize: 10,
-          fontWeight: 700,
-          letterSpacing: "0.12em",
-          color: "var(--color-mute)",
-          marginBottom: 8,
-        }}
-      >
-        {label}
-      </div>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+    <div className="costs-model-group">
+      <h3>{label}</h3>
+      <div className="costs-model-options">
         {available.map((m) => (
           <button
             key={m.model_id}
             type="button"
             className="add-pill"
             disabled={currentIds.length >= MAX_COMPARE}
-            style={{
-              opacity: currentIds.length >= MAX_COMPARE ? 0.4 : undefined,
-              cursor:
-                currentIds.length >= MAX_COMPARE ? "not-allowed" : undefined,
-            }}
             onClick={() => {
               posthog.capture("model_added_to_compare", {
                 model_id: m.model_id,

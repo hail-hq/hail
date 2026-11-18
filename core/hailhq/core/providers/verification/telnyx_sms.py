@@ -9,6 +9,7 @@ stored or logged."""
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 from datetime import datetime, timedelta, timezone
@@ -21,6 +22,7 @@ from hailhq.core.providers.verification.base import (
     BRAND_REJECTED,
     SMS_REFUSED,
     SMS_VALUE_REFUSED,
+    DiscardFailures,
     DraftResult,
     Problem,
     ProviderStatus,
@@ -407,7 +409,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                     # already asked for vetting and must not ask again.
                     refs.setdefault("vetting_requested", False)
                 return DraftResult(refs=refs)
-            await self.discard(refs)
+            await self.discard_draft(refs)
             if refused:
                 logger.warning(
                     "10DLC draft failed: status=%s errors=%s",
@@ -423,7 +425,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
             raise VerificationProviderError("Telnyx request failed") from exc
         if problems:
             billed = _billed(refs)
-            await self.discard(refs)
+            await self.discard_draft(refs)
             return DraftResult(refs={}, problems=problems, billed_refs=billed)
         return DraftResult(refs=refs)
 
@@ -703,7 +705,8 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                 if await self.recover_campaign(refs, brand):
                     await self._set_replies(refs)
                     return ProviderStatus(state="pending")
-                text = refs["campaign"]
+                # No text once the account closed (its answers are deleted): held.
+                text = refs.get("campaign") or {}
                 if text.get("schema_version", 1) < 2 or not text.get("opt_in_message"):
                     refs["needs_information"] = True
                     return ProviderStatus(state="pending", reason=LEGACY_APPLICATION)
@@ -1014,16 +1017,25 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
         )
 
     async def detach_number(self, refs, *, provider_resource_id, e164) -> bool:
-        """Unlink a number from its 10DLC campaign. Never raises. The
-        number stays on the organization's messaging profile."""
+        """Unlink a number from its 10DLC campaign. Not linked (404) is
+        done; any other failure raises. The number stays on the
+        organization's messaging profile."""
         try:
             await self._api.request(
                 "DELETE", f"/10dlc/phone_number_campaigns/{path_id(e164)}"
             )
         except httpx.HTTPStatusError as exc:
-            logger.warning("10DLC unlink failed: status=%s", exc.response.status_code)
+            if exc.response.status_code != 404:
+                logger.warning(
+                    "10DLC unlink failed: status=%s", exc.response.status_code
+                )
+                raise
+        except json.JSONDecodeError:
+            # A 2xx with a body that does not parse: the link is gone.
+            pass
         except (httpx.HTTPError, ValueError) as exc:
             logger.warning("10DLC unlink failed: %s", type(exc).__name__)
+            raise
         return False
 
     async def attach_number(self, refs, *, provider_resource_id, e164) -> None:
@@ -1147,20 +1159,15 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
             ("campaign", refs.get("campaign_id")),
             ("brand", refs.get("brand_id")),
         )
+        failures = DiscardFailures("telnyx 10DLC")
         for key, resource_id in steps:
             if not resource_id:
                 continue
             try:
                 await self._api.request("DELETE", f"/10dlc/{key}/{resource_id}")
-            except httpx.HTTPStatusError as exc:
-                if exc.response.status_code != 404:
-                    logger.warning(
-                        "10DLC discard failed: step=%s status=%s",
-                        key,
-                        exc.response.status_code,
-                    )
-            except Exception:
-                logger.warning("10DLC discard failed: step=%s", key)
+            except Exception as exc:
+                failures.add(exc, key)
+        failures.raise_any("Telnyx discard failed")
 
 
 def _same_person(brand: dict, fields: dict) -> bool:

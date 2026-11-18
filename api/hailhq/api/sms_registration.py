@@ -22,9 +22,12 @@ from hailhq.api.audit import write_audit_log
 from hailhq.core.db import org_lock
 from hailhq.core.models import CarrierVerification, PhoneNumber
 from hailhq.core.providers.verification.base import (
+    DiscardRefused,
     RegistrationHoldsAnotherNumber,
     SmsRegistrationProvider,
+    escaped_discard_error,
 )
+from hailhq.core.retention import org_closed
 from hailhq.core.sms_registration_gate import US_SMS_COUNTRY_CODES
 from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -60,6 +63,25 @@ async def registered_numbers(
     and including the oldest one the carrier has not refused for this
     registration, so a refused number does not block the next one. Callers
     stop at the first number that attaches."""
+    if row.number_type == "toll_free":
+        return list(
+            (
+                await db.execute(
+                    select(PhoneNumber).where(
+                        PhoneNumber.id == row.number_id,
+                        PhoneNumber.organization_id == row.organization_id,
+                        PhoneNumber.provider == row.provider,
+                        PhoneNumber.number_type == "toll_free",
+                        PhoneNumber.country_code == row.country_code,
+                        PhoneNumber.provisioning_state == "active",
+                        PhoneNumber.provider_resource_id.is_not(None),
+                        PhoneNumber.capabilities.any("sms"),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
     numbers = (
         (
             await db.execute(
@@ -348,9 +370,14 @@ async def attach_org_numbers(
 
 async def detach_org_numbers(
     db: AsyncSession, row: CarrierVerification, provider: SmsRegistrationProvider
-) -> list[PhoneNumber]:
-    """Take every number off the registration. Returns the numbers that
-    left their messaging service; the caller sets them up again."""
+) -> tuple[list[PhoneNumber], list[tuple[PhoneNumber, BaseException]]]:
+    """Take every number off the registration (a cancel). A failed unlink
+    counts as a ``discard`` error (``escaped_discard_error``): an outage
+    raises ``VerificationProviderError`` (the caller rolls back and keeps
+    the ids); a refusal or a bug leaves the number off the registration in
+    Hail and is returned with its error. Returns the numbers that left
+    their messaging service (the caller sets them up again) and the
+    refused ones."""
     numbers = (
         (
             await db.execute(
@@ -361,17 +388,30 @@ async def detach_org_numbers(
         .all()
     )
     moved = []
+    refused = []
     for number in numbers:
-        if await detach_number(row, provider, number):
-            moved.append(number)
-    return moved
+        try:
+            if await detach_number(row, provider, number):
+                moved.append(number)
+        except Exception as exc:
+            error = escaped_discard_error(exc)
+            if error is not None and not isinstance(error, DiscardRefused):
+                if error is exc:
+                    raise
+                raise error from exc
+            number.sms_registration_id = None
+            if error is not None:
+                refused.append((number, exc))
+    return moved, refused
 
 
 async def detach_number(
     row: CarrierVerification, provider: SmsRegistrationProvider, number: PhoneNumber
 ) -> bool:
     """Take one number off the registration. True when it also left its
-    messaging service (``messaging_service_sid`` is then cleared)."""
+    messaging service (``messaging_service_sid`` is then cleared). Raises
+    the plug-in's error when the carrier kept the link; the number's row
+    is then unchanged."""
     left_service = False
     if number.provider_resource_id is not None:
         left_service = await provider.detach_number(
@@ -395,6 +435,7 @@ async def approved_registration(
                 CarrierVerification.organization_id == organization_id,
                 CarrierVerification.provider == provider,
                 CarrierVerification.purpose == "sms",
+                CarrierVerification.number_type == "local",
                 CarrierVerification.state == "approved",
             )
             # carrier_verifications_sms_live_uniq allows one live row per
@@ -440,7 +481,9 @@ async def attach_if_registered(db: AsyncSession, number: PhoneNumber, registry) 
         )
 
 
-async def reconcile_approved_registrations(db: AsyncSession, registry) -> int:
+async def reconcile_approved_registrations(
+    db: AsyncSession, registry, now: datetime | None = None
+) -> int:
     """Repair missing campaign links, including numbers held before territory support.
 
     Only an existing approved campaign is used; this never files a new brand
@@ -466,6 +509,11 @@ async def reconcile_approved_registrations(db: AsyncSession, registry) -> int:
                     CarrierVerification.purpose == "sms",
                     CarrierVerification.state == "approved",
                     missing_number,
+                    # A closed org's numbers are released, never attached.
+                    ~org_closed(
+                        CarrierVerification.organization_id,
+                        now or datetime.now(timezone.utc),
+                    ),
                 )
             )
         )

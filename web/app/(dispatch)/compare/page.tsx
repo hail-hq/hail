@@ -4,6 +4,8 @@ import { CompareModels } from "@/components/compare-picker";
 import { featuredPairs } from "@/lib/featured";
 import { SITE_ORIGIN } from "@/lib/url";
 import { pageMetadata } from "../../../../shared/site-metadata";
+import { JsonLd } from "../../../../shared/JsonLd";
+import { collectionSchema } from "../../../../shared/structured-data";
 
 export const dynamic = "force-static";
 
@@ -19,12 +21,20 @@ export const metadata = pageMetadata({
 export default function ComparePage() {
   return (
     <>
-      <header
-        style={{
-          padding: "40px 0 28px",
-          borderBottom: "2px solid var(--color-ink)",
-        }}
-      >
+      <JsonLd
+        data={collectionSchema({
+          title: "Compare AI model costs",
+          description:
+            "Compare pricing for language, speech recognition, and speech synthesis models.",
+          path: "/costs/compare",
+          origin: SITE_ORIGIN,
+          items: featuredPairs.map((pair) => ({
+            name: pair.models.map((model) => model.display_name).join(" vs "),
+            path: `/costs/compare/${pair.slug}`,
+          })),
+        })}
+      />
+      <header className="costs-hero costs-hero--compact">
         <div className="wrap">
           <h1 className="dispatch-h1">Side by side.</h1>
         </div>
@@ -34,21 +44,10 @@ export default function ComparePage() {
         <CompareModels llm={llm.models} stt={stt.models} tts={tts.models} />
       </Suspense>
 
-      <section
-        style={{ padding: "32px 0", borderTop: "2px solid var(--color-ink)" }}
-      >
+      <section className="costs-popular">
         <div className="wrap">
-          <h2
-            style={{
-              fontSize: 15,
-              fontWeight: 600,
-              color: "var(--color-mute)",
-              margin: "0 0 16px",
-            }}
-          >
-            Popular comparisons
-          </h2>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <h2>Popular comparisons</h2>
+          <div className="costs-model-options">
             {featuredPairs.map((p) => (
               <a
                 key={p.slug}

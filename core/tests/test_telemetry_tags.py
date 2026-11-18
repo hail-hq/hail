@@ -180,11 +180,19 @@ def test_inbound_masks_the_sender_and_keeps_the_hail_number():
 @pytest.mark.parametrize(
     "name, attributes",
     [
-        ("MCP server handle request: ping", {}),
-        ("MCP server handle request: tools/list", {}),
-        ("MCP server handle request: prompts/list", {}),
-        ("MCP server handle request: resources/list", {}),
-        ("MCP server handle request: resources/templates/list", {}),
+        ("ping", {"mcp.method.name": "ping"}),
+        ("tools/list", {"mcp.method.name": "tools/list"}),
+        ("prompts/list", {"mcp.method.name": "prompts/list"}),
+        ("resources/list", {"mcp.method.name": "resources/list"}),
+        (
+            "resources/templates/list",
+            {"mcp.method.name": "resources/templates/list"},
+        ),
+        (
+            "notifications/initialized",
+            {"mcp.method.name": "notifications/initialized"},
+        ),
+        ("server/discover", {"mcp.method.name": "server/discover"}),
         ("GET /", {"http.route": "/"}),
         (
             "GET /.well-known/oauth-protected-resource",
@@ -214,6 +222,15 @@ def test_mcp_tool_calls_and_other_services_are_exported():
                 "MCP server handle request: tools/call",
                 **{"mcp.tool.name": "place_call", "hail.channel": "mcp"},
             ),
+            _span(
+                "tools/call place_call",
+                **{"mcp.method.name": "tools/call", "hail.channel": "mcp"},
+            ),
+            # The POST that ran a tool is the trace root and stays.
+            _span(
+                "POST /",
+                **{"http.route": "/", "http.status_code": 200, "mcp.tool.name": "x"},
+            ),
             # A failed POST stays: it is where a 401 shows.
             _span("POST /", **{"http.route": "/", "http.status_code": 401}),
             _span("DELETE /", **{"http.route": "/", "http.status_code": 404}),
@@ -222,6 +239,8 @@ def test_mcp_tool_calls_and_other_services_are_exported():
     )
     assert [s.name for s in kept] == [
         "MCP server handle request: tools/call",
+        "tools/call place_call",
+        "POST /",
         "POST /",
         "DELETE /",
     ]

@@ -62,6 +62,14 @@ class Settings(BaseSettings):
     # See docs/operations/voice-llm.md.
     anthropic_model: str = ""
     anthropic_backup_model: str = ""
+    # The model that reads verification documents before submit
+    # (providers/llm/document_reader.py). Empty: ANTHROPIC_BACKUP_MODEL. Not
+    # in .env.example: the code default works (settings with a working code
+    # default stay out of .env files). It must take thinking "disabled",
+    # effort "low" and structured output. On an API error the same read
+    # tries ANTHROPIC_BACKUP_MODEL, then ANTHROPIC_MODEL (thinking
+    # "between_tools"). See docs/operations/carrier-verification.md.
+    document_reader_model: str = ""
     # Set: the house Anthropic model runs on Amazon Bedrock in this region,
     # signed with the AWS credentials below. Empty: Anthropic's API.
     anthropic_bedrock_region: str = ""
@@ -237,6 +245,12 @@ class Settings(BaseSettings):
 
     # Storage
     database_url: str = "postgresql://hail:hail@postgres:5432/hail"
+    # Per-pool limits. The API opens one pool for requests and one for
+    # background jobs. Session poolers share a small connection budget
+    # across the API, voice jobs, background workers, and other clients.
+    # At least 2: inbound call setup holds two sessions at once.
+    database_pool_size: int = Field(default=5, ge=2)
+    database_max_overflow: int = Field(default=0, ge=0)
     s3_endpoint: str = ""
     s3_bucket: str = "hail-assets"
     s3_access_key: str = ""
@@ -291,10 +305,14 @@ class Settings(BaseSettings):
 
     # MCP service resource identity (cloud), the public URL the MCP
     # serves under (e.g. "https://mcp.hail.so"). Used by the MCP server's
-    # FastMCP AuthSettings as ``resource_server_url`` so the 401's
+    # MCPServer AuthSettings as ``resource_server_url`` so the 401's
     # WWW-Authenticate header points clients at this MCP's own
     # ``.well-known/oauth-protected-resource``. Empty in self-host.
     mcp_resource_url: str = ""
+    # Optional PostHog MCP analytics for the HTTP MCP server. Reuses the web
+    # costs site's project key and host. An empty key disables it.
+    next_public_posthog_key: str = ""
+    next_public_posthog_host: str = ""
 
     # --- Pre-send compliance gate (hailhq.core.compliance_gate) --------- #
 
@@ -343,7 +361,8 @@ class Settings(BaseSettings):
     hail_verification_poll_seconds: int = 600
 
     # Text worker (voicebot): an inbound text pending longer than this is
-    # skipped, not answered; how many texts are answered at once per worker.
+    # skipped, not answered; how many texts are answered at once per worker
+    # (also emails, and call.analyzed summaries).
     hail_text_reply_max_age_seconds: int = Field(default=3600, ge=1)
     hail_text_reply_concurrency: int = Field(default=4, ge=1)
 

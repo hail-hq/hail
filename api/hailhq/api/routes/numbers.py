@@ -224,8 +224,8 @@ def _reject_if_released(number: PhoneNumber) -> None:
 
 async def _unlink_from_sms_registration(db: AsyncSession, number: PhoneNumber) -> None:
     """Take a number being released off its US SMS registration (Telnyx keeps
-    a released number linked to its campaign). Best effort: the plug-in
-    logs failures."""
+    a released number linked to its campaign). Best effort: a failure is
+    logged, and the release goes on."""
     if number.sms_registration_id is None:
         return
     row = await db.get(CarrierVerification, number.sms_registration_id)
@@ -233,7 +233,15 @@ async def _unlink_from_sms_registration(db: AsyncSession, number: PhoneNumber) -
     if row is None or not isinstance(plugin, SmsRegistrationProvider):
         number.sms_registration_id = None
         return
-    await sms_registration.detach_number(row, plugin, number)
+    try:
+        await sms_registration.detach_number(row, plugin, number)
+    except Exception as exc:
+        logger.warning(
+            "number %s: SMS registration unlink failed before release (%s)",
+            number.id,
+            type(exc).__name__,
+        )
+        number.sms_registration_id = None
 
 
 async def release_org_number(
@@ -590,8 +598,10 @@ async def get_number_options(
         Query(
             max_length=2,
             description=(
-                "Optional. Keep only options that do all these jobs. Without "
-                "it, each number type shows its best option in this order: "
+                "Optional. Keep only options that do all these jobs, priced "
+                "and listed for these jobs only, the same as /numbers/quotes. "
+                "Without it, options are priced for every job they do, and "
+                "each number type shows its best option in this order: "
                 "buy now before order by hand, then ready now, then options "
                 "that do every job the type offers (even when a number that "
                 "does fewer jobs costs less), then lower price, then fewer "
@@ -772,7 +782,9 @@ async def quote_numbers(
     Recommends a ready offer with the lowest monthly rent, then setup cost.
     Blocked offers sort by verification effort. SMS capability does not waive
     messaging registration requirements. `provider` is ignored: Hail compares
-    every carrier.
+    every carrier. A US or Canada `toll_free` search that asks for `sms`
+    returns only carriers whose toll-free numbers Hail can register for
+    texting.
 
     A number support orders by hand comes back as an offer with
     `by_request: true` and no `e164`, after the offers you can buy. It is never

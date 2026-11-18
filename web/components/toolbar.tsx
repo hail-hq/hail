@@ -2,7 +2,11 @@
 
 import posthog from "posthog-js";
 
-export function Toolbar({ categories }: { categories: { id: string; label: string }[] }) {
+export function Toolbar({
+  categories,
+}: {
+  categories: { id: string; label: string }[];
+}) {
   return (
     <div className="toolbar">
       <div className="wrap row">
@@ -13,7 +17,7 @@ export function Toolbar({ categories }: { categories: { id: string; label: strin
             </a>
           ))}
         </div>
-        <div style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
+        <div className="costs-toolbar-actions">
           <a
             className="btn btn-accent"
             href="/costs/compare"
