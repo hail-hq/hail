@@ -308,7 +308,7 @@ def test_0083_renames_call_analyzed(empty_db: str) -> None:
             "INSERT INTO webhook_subscriptions"
             " (organization_id, target_url, secret_encrypted, event_types)"
             " VALUES (%s, 'https://example.com/h', 'x',"
-            " ARRAY['call.transcribed']) RETURNING id",
+            " ARRAY['call.analyzed', 'call.transcribed']) RETURNING id",
             (org,),
         ).fetchone()[0]
 

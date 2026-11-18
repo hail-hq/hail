@@ -69,14 +69,16 @@ def _rename(
             new_claim=new_claim,
         )
     )
-    for event in (old_event, *also_old_events):
-        op.execute(
-            text(
-                "UPDATE webhook_subscriptions"
-                " SET event_types = array_replace(event_types, :old, :new)"
-                " WHERE :old = ANY(event_types)"
-            ).bindparams(old=event, new=new_event)
-        )
+    # Drop every old name, then add the new one once, so a subscription that
+    # lists two old names does not get the new one twice.
+    op.execute(
+        text(
+            "UPDATE webhook_subscriptions SET event_types = array_append("
+            " ARRAY(SELECT e FROM unnest(event_types) AS e"
+            " WHERE e <> ALL(CAST(:old AS text[]))), :new)"
+            " WHERE event_types && CAST(:old AS text[])"
+        ).bindparams(old=[old_event, *also_old_events], new=new_event)
+    )
     # Commit the moves before the old index goes.
     with op.get_context().autocommit_block():
         op.drop_index(
