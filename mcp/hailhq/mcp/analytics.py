@@ -135,8 +135,15 @@ async def _event_identity(request: Any, extra: Any) -> dict[str, Any]:
     }
 
 
-def _keep_metadata(event: dict[str, Any]) -> dict[str, Any]:
+def _keep_metadata(event: dict[str, Any]) -> dict[str, Any] | None:
     properties = event.get("properties") or {}
+    if (
+        event.get("event", "").startswith("$mcp_")
+        and _REQUEST_IDENTITY not in properties
+    ):
+        # The SDK swallows callback errors. Never emit its cached identity when
+        # the request-specific enrichment failed; tool responses stay intact.
+        return None
     if _REQUEST_IDENTITY in properties:
         # Ignore any sticky SDK identity; this event belongs to this request.
         identity = properties[_REQUEST_IDENTITY]

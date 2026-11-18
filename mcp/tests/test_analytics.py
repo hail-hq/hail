@@ -288,6 +288,20 @@ def test_keep_metadata_limits_person_properties():
     assert kept["properties"] == {"$set": {"email": _EMAIL, "name": _NAME}}
 
 
+def test_missing_request_identity_drops_sticky_sdk_profile():
+    # The SDK swallows event_properties callback errors. Without a snapshot,
+    # its remaining identity could belong to a previous request.
+    event = {
+        "event": "$mcp_tool_call",
+        "distinct_id": _USER,
+        "properties": {
+            "$session_id": "ses_shared",
+            "$set": {"email": _EMAIL, "name": _NAME},
+        },
+    }
+    assert analytics._keep_metadata(event) is None
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("protocol", [_LEGACY, _MODERN])
 @pytest.mark.parametrize("lookup_fails", [False, True])
