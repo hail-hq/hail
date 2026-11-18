@@ -177,7 +177,13 @@ A text that gets no reply names why in `metadata.skipped_reason`:
 | `agent_caps` | The agent reached its sending limit. |
 | `active_call` | A call with this person was in progress. The text is answered after the call. |
 
-A failed reply can also carry a `skipped_reason` from the send step.
+A failed reply can also carry a `skipped_reason` from the send step:
+
+| Reason | Meaning |
+| --- | --- |
+| `provider_error` | The carrier could not be reached to send the reply. |
+| `carrier_rejected` | The carrier refused the reply. |
+| `unknown_sms` | Hail could not find the text to answer. |
 
 ## Answer email with an agent
 
