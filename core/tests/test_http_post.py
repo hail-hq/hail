@@ -1,35 +1,55 @@
+import re
 import socket
 
 import pytest
 from hailhq.core.http_post import (
     PrivateNetworkBlockedError,
     httpx_post,
-    is_private_url,
     validate_webhook_target,
 )
+from hailhq.core.url_guard import NOT_PUBLIC, UnsafeUrlError
 
 
-def test_is_private_url_localhost():
-    assert is_private_url("http://localhost:8080/x")
-    assert is_private_url("https://127.0.0.1/x")
+def _blocked(url: str) -> bool:
+    """True if the webhook guard refuses ``url`` (no private-network opt-in)."""
+    try:
+        validate_webhook_target(url, allow_private_networks=False)
+    except ValueError:
+        return True
+    return False
 
 
-def test_is_private_url_rfc1918():
-    assert is_private_url("http://10.0.0.1/x")
-    assert is_private_url("http://192.168.1.1/x")
-    assert is_private_url("http://172.16.0.1/x")
+@pytest.fixture
+def public_dns(monkeypatch):
+    """Every name resolves to one public address (no real DNS in tests)."""
+
+    def fake_getaddrinfo(host, port, **kw):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
 
 
-def test_is_private_url_link_local():
-    assert is_private_url("http://169.254.1.1/x")
+def test_blocks_localhost():
+    assert _blocked("http://localhost:8080/x")
+    assert _blocked("https://127.0.0.1/x")
 
 
-def test_is_private_url_public_negative():
-    assert not is_private_url("https://api.example.com/x")
+def test_blocks_rfc1918():
+    assert _blocked("http://10.0.0.1/x")
+    assert _blocked("http://192.168.1.1/x")
+    assert _blocked("http://172.16.0.1/x")
 
 
-def test_is_private_url_ipv6_loopback():
-    assert is_private_url("http://[::1]:8080/x")
+def test_blocks_link_local():
+    assert _blocked("http://169.254.1.1/x")
+
+
+def test_blocks_public_negative(public_dns):
+    assert not _blocked("https://api.example.com/x")
+
+
+def test_blocks_ipv6_loopback():
+    assert _blocked("http://[::1]:8080/x")
 
 
 @pytest.mark.asyncio
@@ -57,7 +77,7 @@ async def test_httpx_post_allows_private_when_flag_true(respx_mock):
 
 
 @pytest.mark.asyncio
-async def test_httpx_post_returns_status_and_body(respx_mock):
+async def test_httpx_post_returns_status_and_body(respx_mock, public_dns):
     respx_mock.post("https://example.com/x").respond(200, text="ok")
     status, body = await httpx_post(
         "https://example.com/x", b"{}", {}, allow_private_networks=False
@@ -71,7 +91,7 @@ async def test_httpx_post_returns_status_and_body(respx_mock):
 # ---------------------------------------------------------------------------
 
 
-def test_validate_webhook_target_https_ok():
+def test_validate_webhook_target_https_ok(public_dns):
     """A public https URL passes validation."""
     validate_webhook_target(
         "https://hooks.example.com/ingest", allow_private_networks=False
@@ -121,7 +141,7 @@ def test_validate_webhook_target_missing_host_rejected():
 
 
 def test_ipv6_loopback_literal_is_private():
-    assert is_private_url("https://[::1]/hook")
+    assert _blocked("https://[::1]/hook")
 
 
 def test_ipv6_only_hostname_resolving_private_is_private(monkeypatch):
@@ -130,7 +150,7 @@ def test_ipv6_only_hostname_resolving_private_is_private(monkeypatch):
         return [(socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("::1", 0, 0, 0))]
 
     monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
-    assert is_private_url("https://internal.example.com/hook")
+    assert _blocked("https://internal.example.com/hook")
 
 
 def test_mixed_records_any_private_is_private(monkeypatch):
@@ -141,4 +161,121 @@ def test_mixed_records_any_private_is_private(monkeypatch):
         ]
 
     monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
-    assert is_private_url("https://rebind.example.com/hook")
+    assert _blocked("https://rebind.example.com/hook")
+
+
+# ---------------------------------------------------------------------------
+# IDNA + control characters: check the host httpx really connects to
+# ---------------------------------------------------------------------------
+
+
+def _split_dns(monkeypatch) -> list[str]:
+    # IDNA 2003 form public, IDNA 2008 form (what httpx uses) private.
+    answers = {"fass.example": "93.184.216.34", "xn--fa-hia.example": "10.1.2.3"}
+    asked: list[str] = []
+
+    def fake_getaddrinfo(host, port, **kw):
+        asked.append(host)
+        if host not in answers:
+            raise socket.gaierror(socket.EAI_NONAME, "not known")
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (answers[host], 0))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+    return asked
+
+
+def test_blocks_checks_idna_2008_host(monkeypatch):
+    asked = _split_dns(monkeypatch)
+    assert _blocked("https://faß.example/hook")
+    assert asked == ["xn--fa-hia.example"]
+
+
+def test_validate_webhook_target_checks_idna_2008_host(monkeypatch):
+    asked = _split_dns(monkeypatch)
+    with pytest.raises(ValueError, match="private"):
+        validate_webhook_target(
+            "https://faß.example/hook", allow_private_networks=False
+        )
+    assert asked == ["xn--fa-hia.example"]
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://fa\tss.example/hook",
+        "https://fa\nss.example/hook",
+        "https://a\x00b.example/",
+    ],
+)
+def test_control_characters_refused(url):
+    assert _blocked(url)
+    with pytest.raises(ValueError, match="control character"):
+        validate_webhook_target(url, allow_private_networks=False)
+    with pytest.raises(ValueError, match="control character"):
+        validate_webhook_target(url, allow_private_networks=True)
+
+
+def test_cgnat_and_multicast_are_private():
+    # Same classifier as the BYO base_url guard: 100.100.100.200 is a cloud
+    # metadata address inside CGNAT space.
+    assert _blocked("https://100.100.100.200/latest/meta-data")
+    assert _blocked("https://224.0.0.1/hook")
+    with pytest.raises(ValueError, match="private"):
+        validate_webhook_target(
+            "https://100.100.100.200/x", allow_private_networks=False
+        )
+
+
+@pytest.mark.asyncio
+async def test_httpx_post_without_host_says_so():
+    # A clear error, not PrivateNetworkBlockedError carrying the URL.
+    with pytest.raises(UnsafeUrlError, match="URL has no host"):
+        await httpx_post("https:///x.com", b"{}", {}, allow_private_networks=False)
+
+
+def test_ipv6_site_local_is_private():
+    assert _blocked("https://[fec0::1]/hook")
+
+
+def test_unresolvable_host_is_blocked(monkeypatch):
+    # Fail closed: a name the guard cannot resolve may resolve to a private
+    # address a moment later, when httpx looks it up again.
+    def fake_getaddrinfo(host, port, **kw):
+        raise socket.gaierror(socket.EAI_AGAIN, "temporary failure")
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+    with pytest.raises(ValueError, match=re.escape(NOT_PUBLIC)):
+        validate_webhook_target(
+            "https://flaky.example.com/hook", allow_private_networks=False
+        )
+
+
+@pytest.mark.asyncio
+async def test_httpx_post_blocks_unresolvable_host(monkeypatch):
+    def fake_getaddrinfo(host, port, **kw):
+        raise socket.gaierror(socket.EAI_AGAIN, "temporary failure")
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+    with pytest.raises(PrivateNetworkBlockedError, match=re.escape(NOT_PUBLIC)):
+        await httpx_post(
+            "https://flaky.example.com/hook",
+            b"{}",
+            {},
+            allow_private_networks=False,
+        )
+
+
+@pytest.mark.asyncio
+async def test_errors_never_show_the_resolved_address(monkeypatch):
+    def fake_getaddrinfo(host, port, **kw):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.4.2.7", 0))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+    url = "https://db.internal.example.com/x"
+    with pytest.raises(ValueError) as write_err:
+        validate_webhook_target(url, allow_private_networks=False)
+    with pytest.raises(PrivateNetworkBlockedError) as send_err:
+        await httpx_post(url, b"{}", {}, allow_private_networks=False)
+    for err in (write_err.value, send_err.value):
+        assert "10.4.2.7" not in str(err)
+        assert NOT_PUBLIC in str(err)

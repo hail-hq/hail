@@ -26,6 +26,11 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 - Number paperwork says when the address can be in any country: the new `address_any_country` item, from DIDWW.
 - Email agents: route an address to an agent, and it answers inbound mail in the thread.
 
+### Changed
+
+- Webhooks to CGNAT addresses (`100.64.0.0/10`, used by Tailscale), multicast, IPv6 site-local, or hosts that do not resolve are now refused, and existing ones fail on delivery. Self-hosters can allow them with `HAIL_WEBHOOK_ALLOW_PRIVATE_NETWORKS=true`.
+- A webhook `target_url` or BYO LLM `base_url` whose host is private or does not resolve is refused with one error text, which ends in `URL host is private or could not be resolved`.
+
 ### Fixed
 
 - Call agents no longer pause before saying a person's name.
