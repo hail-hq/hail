@@ -86,8 +86,8 @@ Give your AI a real phone number and an email inbox.
 Let your assistant handle calls, texts, and email. Building an app? Add AI
 calls, email and SMS with one API.
 
-Make and take calls, send and receive messages, and check conversation
-history from Cursor. Get phone numbers in 120+ countries, with help for
+Handle calls, texts, and email from Cursor, and check conversation
+history. Get phone numbers in 120+ countries, with help for
 local rules and required documents, including US A2P 10DLC registration.
 Choose a built-in voice or bring your own. Build with the API, CLI, or
 Python SDK. Open-source or cloud priced on usage.
