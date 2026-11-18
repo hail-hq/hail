@@ -118,7 +118,7 @@ async def create_subscription(
     # The INSERT's own time, not the column default now(): now() is the
     # transaction start, which usually comes before the target URL check:
     # auth and telemetry statements on the request session often leave the
-    # transaction open. call.transcribed compares updated_at with call end
+    # transaction open. call.summarized compares updated_at with call end
     # times (hailhq.core.call_analysis). statement_timestamp() is one value
     # for the whole statement, so both columns get the same time.
     stamp = func.statement_timestamp()
@@ -247,7 +247,7 @@ async def patch_subscription(
         if body.status == "active":
             updates["consecutive_failures"] = 0
     if updates:
-        # The UPDATE's own time on the DB clock, as on create: call.transcribed
+        # The UPDATE's own time on the DB clock, as on create: call.summarized
         # compares it with call end times (hailhq.core.call_analysis).
         updates["updated_at"] = func.statement_timestamp()
         await db.execute(

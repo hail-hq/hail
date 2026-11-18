@@ -46,4 +46,4 @@ class WebhookEventType(StrEnum):
     CALL_BUSY = ("call.busy", "Busy line", "Calls")
     CALL_NO_ANSWER = ("call.no_answer", "No answer", "Calls")
     CALL_TRANSFERRED = ("call.transferred", "Call transferred", "Calls")
-    CALL_TRANSCRIBED = ("call.transcribed", "Call transcript and summary", "Calls")
+    CALL_SUMMARIZED = ("call.summarized", "Call summarized", "Calls")

@@ -112,7 +112,7 @@ The catalog and subscription validation share the `WebhookEventType` registry in
 - **`sms.failed`** — the send failed (transport error or carrier rejection).
 
 **Call lifecycle** — `received` (inbound only), `answered`, `completed`,
-`failed`, `busy`, `no_answer`, `transferred`, `transcribed` (there is no `canceled` event; it has no data source):
+`failed`, `busy`, `no_answer`, `transferred`, `summarized` (there is no `canceled` event; it has no data source):
 
 - **`call.received`** — an inbound call reached one of your numbers and an
   agent is about to answer ([Agents](agents.md)). Fired before the answer.
@@ -129,8 +129,8 @@ The catalog and subscription validation share the `WebhookEventType` registry in
   `{"contact_id": "…", "contact_name": "Sam"}`. `contact_id` is the id
   `GET /contacts` returns: a contact's uuid, or `member:<user id>` for a
   team member. Never a phone number.
-- **`call.transcribed`** — the call's transcript and a short AI summary, sent
-  once after the call ends ([Call transcribed](#call-transcribed)).
+- **`call.summarized`** — the call's transcript and a short AI summary, sent
+  once after the call ends ([Call summarized](#call-summarized)).
 
 Every `call.*` payload's `data` carries `id`, `status`, `direction`
 (`inbound` or `outbound`), `from`, `to`, `agent_id` (null for calls placed
@@ -155,21 +155,21 @@ destination is disabled. Raw carrier error text is never returned.
 }
 ```
 
-## Call transcribed
+## Call summarized
 
-Subscribe to `call.transcribed` to get what was said on each call and a short
+Subscribe to `call.summarized` to get what was said on each call and a short
 summary, about 10 seconds after the call ends:
 
 ```bash
 curl -X POST "$HAIL_API_URL/v1/webhooks" \
   -H "Authorization: Bearer $HAIL_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"target_url": "https://example.com/hooks/hail", "event_types": ["call.transcribed"]}'
+  -d '{"target_url": "https://example.com/hooks/hail", "event_types": ["call.summarized"]}'
 ```
 
 ```json
 {
-  "type": "call.transcribed",
+  "type": "call.summarized",
   "data": {
     "id": "0d9c…",
     "status": "completed",
@@ -196,7 +196,7 @@ curl -X POST "$HAIL_API_URL/v1/webhooks" \
 }
 ```
 
-- `data` is built by `call_transcribed_data` in
+- `data` is built by `call_summarized_data` in
   [`call_analysis.py`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/call_analysis.py).
   It has the `call.*` fields above, plus `duration_seconds`, `transcript` and `summary`.
 - `transcript` holds the same turns as `GET /v1/calls/{id}`, in the order
@@ -210,11 +210,11 @@ curl -X POST "$HAIL_API_URL/v1/webhooks" \
   per-call `llm` from `POST /v1/calls` is not used. When the model fails,
   `summary` is null and the event is still sent.
 - Only phone calls with at least one spoken turn are sent. A call nobody spoke on gets no event.
-- Only calls that end after your `call.transcribed` subscription was created
+- Only calls that end after your `call.summarized` subscription was created
   or last changed (`PATCH`, secret rotation) are sent, so turning it on
   never replays past calls. A call not sent within 24 hours of its end is
   dropped.
-- Once it is sent, `GET /v1/events` shows a `transcribed` call event. It holds
+- Once it is sent, `GET /v1/events` shows a `summarized` call event. It holds
   counts only (`turns`, and `summary` true or false), not the text.
 - Self-hosting: the voicebot sends this event from its text worker, which
   runs only when `HAIL_INTERNAL_SECRET` and `HAIL_API_URL` are set.

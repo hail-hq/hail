@@ -1,4 +1,4 @@
-"""Call transcript and the call.transcribed webhook: picking, sending once."""
+"""Call transcript and the call.summarized webhook: picking, sending once."""
 
 from __future__ import annotations
 
@@ -10,10 +10,10 @@ import pytest
 from hailhq.core.call_analysis import (
     CLAIM_KIND,
     CLAIM_LEASE,
-    TRANSCRIBED_KIND,
+    SUMMARIZED_KIND,
     call_transcript,
     claim_call_to_analyze,
-    send_call_transcribed,
+    send_call_summarized,
 )
 from hailhq.core.models import (
     Agent,
@@ -97,7 +97,7 @@ async def _seed_call(
             WebhookSubscription(
                 organization_id=org,
                 target_url="https://example.com/hook",
-                event_types=[WebhookEventType.CALL_TRANSCRIBED.value],
+                event_types=[WebhookEventType.CALL_SUMMARIZED.value],
                 secret_encrypted="x",
                 created_at=ended_at - timedelta(hours=1),
                 updated_at=ended_at - timedelta(hours=1),
@@ -133,7 +133,7 @@ async def _deliveries(session, call_id) -> list[WebhookDelivery]:
         (
             await session.execute(
                 select(WebhookDelivery).where(
-                    WebhookDelivery.event_type == "call.transcribed",
+                    WebhookDelivery.event_type == "call.summarized",
                     WebhookDelivery.event_id == call_id,
                 )
             )
@@ -212,7 +212,7 @@ async def test_transcript_follows_speech_start_not_write_order(
 
 
 async def test_event_type_is_registered() -> None:
-    assert WebhookEventType("call.transcribed").channel == "Calls"
+    assert WebhookEventType("call.summarized").channel == "Calls"
 
 
 async def test_picks_an_ended_subscribed_call(async_session) -> None:
@@ -278,7 +278,7 @@ async def test_subscription_created_after_the_call_is_not_enough(
         WebhookSubscription(
             organization_id=call.organization_id,
             target_url="https://example.com/late",
-            event_types=["call.transcribed"],
+            event_types=["call.summarized"],
             secret_encrypted="x",
         )
     )
@@ -301,7 +301,7 @@ async def test_adding_the_event_to_an_old_subscription_does_not_replay(
     async_session.add(sub)
     await async_session.commit()
     # What PATCH /v1/webhooks/{id} writes when the event is added.
-    sub.event_types = ["call.completed", "call.transcribed"]
+    sub.event_types = ["call.completed", "call.summarized"]
     sub.updated_at = func.statement_timestamp()
     await async_session.commit()
     assert await claim_call_to_analyze(async_session) is None
@@ -324,7 +324,7 @@ async def test_disabled_or_other_event_subscription_is_not_enough(
             WebhookSubscription(
                 organization_id=call.organization_id,
                 target_url="https://example.com/b",
-                event_types=["call.transcribed"],
+                event_types=["call.summarized"],
                 secret_encrypted="x",
                 status="disabled",
                 created_at=call.ended_at - timedelta(hours=1),
@@ -339,7 +339,7 @@ async def test_disabled_or_other_event_subscription_is_not_enough(
 async def test_send_enqueues_one_delivery_with_the_payload(async_session) -> None:
     call = await _seed_call(async_session)
     turns = await call_transcript(async_session, call.id)
-    assert await send_call_transcribed(
+    assert await send_call_summarized(
         async_session, call.id, turns, "Moved to Thursday."
     )
     [delivery] = await _deliveries(async_session, call.id)
@@ -359,7 +359,7 @@ async def test_send_enqueues_one_delivery_with_the_payload(async_session) -> Non
     marker = (
         await async_session.execute(
             select(CallEvent).where(
-                CallEvent.call_id == call.id, CallEvent.kind == TRANSCRIBED_KIND
+                CallEvent.call_id == call.id, CallEvent.kind == SUMMARIZED_KIND
             )
         )
     ).scalar_one()
@@ -367,7 +367,7 @@ async def test_send_enqueues_one_delivery_with_the_payload(async_session) -> Non
     assert marker.payload == {"turns": 2, "summary": True}
     # Sent once: no second delivery, and the call is not picked again.
     call_id = call.id  # the refused send rolls back, expiring ``call``
-    assert not await send_call_transcribed(async_session, call_id, turns, "again")
+    assert not await send_call_summarized(async_session, call_id, turns, "again")
     assert len(await _deliveries(async_session, call_id)) == 1
     assert await claim_call_to_analyze(async_session) is None
     await _age_claims(async_session, call_id)
@@ -384,13 +384,13 @@ async def test_subscription_made_after_the_call_gets_no_delivery(
         WebhookSubscription(
             organization_id=call.organization_id,
             target_url="https://example.com/late",
-            event_types=["call.transcribed"],
+            event_types=["call.summarized"],
             secret_encrypted="x",
         )
     )
     await async_session.commit()
     turns = await call_transcript(async_session, call_id)
-    assert await send_call_transcribed(async_session, call_id, turns, None)
+    assert await send_call_summarized(async_session, call_id, turns, None)
     [delivery] = await _deliveries(async_session, call_id)
     assert delivery.subscription_id == old_id
     # The same ``at`` text as GET /v1/calls/{id} (pydantic JSON).
@@ -409,14 +409,14 @@ async def test_a_subscription_changed_after_the_call_gets_no_delivery(
     sub.updated_at = func.statement_timestamp()  # what PATCH writes
     await async_session.commit()
     turns = await call_transcript(async_session, call_id)
-    assert not await send_call_transcribed(async_session, call_id, turns, None)
+    assert not await send_call_summarized(async_session, call_id, turns, None)
     assert await _deliveries(async_session, call_id) == []
 
 
 async def test_the_database_refuses_a_second_marker(async_session) -> None:
     call = await _seed_call(async_session)
     for _ in range(2):
-        async_session.add(CallEvent(call_id=call.id, kind=TRANSCRIBED_KIND, payload={}))
+        async_session.add(CallEvent(call_id=call.id, kind=SUMMARIZED_KIND, payload={}))
     with pytest.raises(IntegrityError):
         await async_session.commit()
 
@@ -424,7 +424,7 @@ async def test_the_database_refuses_a_second_marker(async_session) -> None:
 async def test_summary_null_and_unanswered_duration(async_session) -> None:
     call = await _seed_call(async_session, answered=False)
     turns = await call_transcript(async_session, call.id)
-    assert await send_call_transcribed(async_session, call.id, turns, None)
+    assert await send_call_summarized(async_session, call.id, turns, None)
     [delivery] = await _deliveries(async_session, call.id)
     assert delivery.payload["data"]["summary"] is None
     assert delivery.payload["data"]["duration_seconds"] is None
@@ -437,7 +437,7 @@ async def test_two_senders_race_one_delivery(session_factory) -> None:
     async def send() -> bool:
         async with session_factory() as s:
             turns = await call_transcript(s, call.id)
-            return await send_call_transcribed(s, call.id, turns, "Summary.")
+            return await send_call_summarized(s, call.id, turns, "Summary.")
 
     results = await asyncio.gather(send(), send())
     assert sorted(results) == [False, True]
@@ -446,7 +446,7 @@ async def test_two_senders_race_one_delivery(session_factory) -> None:
         count = await s.scalar(
             select(func.count())
             .select_from(CallEvent)
-            .where(CallEvent.call_id == call.id, CallEvent.kind == TRANSCRIBED_KIND)
+            .where(CallEvent.call_id == call.id, CallEvent.kind == SUMMARIZED_KIND)
         )
         assert count == 1
 
@@ -457,7 +457,7 @@ async def test_empty_after_filtering_is_marked_not_sent(async_session) -> None:
     assert (await claim_call_to_analyze(async_session)).id == call_id
     turns = await call_transcript(async_session, call_id)
     assert turns == []
-    assert not await send_call_transcribed(async_session, call_id, turns, None)
+    assert not await send_call_summarized(async_session, call_id, turns, None)
     assert await _deliveries(async_session, call_id) == []
     await _age_claims(async_session, call_id)
     assert await claim_call_to_analyze(async_session) is None

@@ -1397,7 +1397,7 @@ const (
 	CallFailed              WebhookEventType = "call.failed"
 	CallNoAnswer            WebhookEventType = "call.no_answer"
 	CallReceived            WebhookEventType = "call.received"
-	CallTranscribed         WebhookEventType = "call.transcribed"
+	CallSummarized          WebhookEventType = "call.summarized"
 	CallTransferred         WebhookEventType = "call.transferred"
 	EmailBounced            WebhookEventType = "email.bounced"
 	EmailClicked            WebhookEventType = "email.clicked"
@@ -1429,7 +1429,7 @@ func (e WebhookEventType) Valid() bool {
 		return true
 	case CallReceived:
 		return true
-	case CallTranscribed:
+	case CallSummarized:
 		return true
 	case CallTransferred:
 		return true

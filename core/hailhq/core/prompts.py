@@ -295,7 +295,7 @@ TEXT_PREAMBLE = (
     "introduction in later replies."
 ) + f" {PLATFORM_PRIVACY}"
 
-# The call.transcribed webhook's summary (voicebot/hailhq/voicebot/callsummary.py).
+# The call.summarized webhook's summary (voicebot/hailhq/voicebot/callsummary.py).
 # The model reads the transcript only: no agent instructions, no tools.
 CALL_SUMMARY_INSTRUCTIONS = (
     "You summarize one finished phone call between an AI agent and a person. "

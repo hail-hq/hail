@@ -356,7 +356,7 @@ class Settings(BaseSettings):
 
     # Text worker (voicebot): an inbound text pending longer than this is
     # skipped, not answered; how many texts are answered at once per worker
-    # (also emails, and call.transcribed summaries).
+    # (also emails, and call.summarized summaries).
     hail_text_reply_max_age_seconds: int = Field(default=3600, ge=1)
     hail_text_reply_concurrency: int = Field(default=4, ge=1)
 

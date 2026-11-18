@@ -331,7 +331,7 @@ paths:
         \ \u2014 this returns as soon as the call is\nqueued, not when it completes.\
         \ Poll GET /v1/calls/{call_id} for the final\nstatus and the transcript, or\
         \ subscribe to webhooks: call.completed (and\nthe other call.* events) for\
-        \ the status, call.transcribed for the transcript\nand a short summary. Requires\
+        \ the status, call.summarized for the transcript\nand a short summary. Requires\
         \ recipient_consent=true on the request body;\nHail does not verify lawful\
         \ basis to contact the recipient, the caller\nwarrants it."
       operationId: create_call_v1_calls_post
@@ -11716,7 +11716,7 @@ components:
         - call.busy
         - call.no_answer
         - call.transferred
-        - call.transcribed
+        - call.summarized
       title: WebhookEventType
     WebhookSubscriptionCreate:
       properties:

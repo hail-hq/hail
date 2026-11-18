@@ -1,4 +1,4 @@
-"""Call transcripts and the ``call.transcribed`` webhook (DB side).
+"""Call transcripts and the ``call.summarized`` webhook (DB side).
 
 A phone call's transcript is its ``user_turn`` and ``agent_turn`` rows in
 ``call_events``, written by the voicebot while the call runs.
@@ -6,12 +6,12 @@ A phone call's transcript is its ``user_turn`` and ``agent_turn`` rows in
 :func:`call_transcript`.
 
 The voicebot's analysis worker (``hailhq.voicebot.callsummary``) calls
-:func:`claim_call_to_analyze`, which writes a ``transcribing`` call event (the
+:func:`claim_call_to_analyze`, which writes a ``summarizing`` call event (the
 claim, so only one worker runs the model for a call), then asks the LLM for a
-summary with no DB session open, then calls :func:`send_call_transcribed`. That
-last step locks the call row, writes one ``transcribed`` call event (the marker,
-so a call is sent once) and enqueues the ``call.transcribed`` deliveries in the
-same transaction. Only calls of an org with an active ``call.transcribed``
+summary with no DB session open, then calls :func:`send_call_summarized`. That
+last step locks the call row, writes one ``summarized`` call event (the marker,
+so a call is sent once) and enqueues the ``call.summarized`` deliveries in the
+same transaction. Only calls of an org with an active ``call.summarized``
 subscription are picked, so no model runs for an org that does not listen.
 """
 
@@ -35,19 +35,19 @@ __all__ = [
     "CLAIM_KIND",
     "CLAIM_LEASE",
     "SETTLE_DELAY",
-    "TRANSCRIBED_KIND",
+    "SUMMARIZED_KIND",
     "call_duration_seconds",
-    "call_transcribed_data",
+    "call_summarized_data",
     "call_transcript",
     "claim_call_to_analyze",
-    "send_call_transcribed",
+    "send_call_summarized",
 ]
 
-# ``call_events.kind`` of the marker row: the call's call.transcribed step ran.
-TRANSCRIBED_KIND = "transcribed"
+# ``call_events.kind`` of the marker row: the call's call.summarized step ran.
+SUMMARIZED_KIND = "summarized"
 # ``call_events.kind`` of a claim: a worker is summarizing the call. Counts
 # only while younger than ``CLAIM_LEASE``.
-CLAIM_KIND = "transcribing"
+CLAIM_KIND = "summarizing"
 # Longer than the model timeout (30 s) plus the config and transcript reads.
 # A worker that dies mid-summary frees the call when this runs out.
 CLAIM_LEASE = timedelta(minutes=5)
@@ -125,10 +125,10 @@ def call_duration_seconds(call: Call) -> int | None:
     return max(0, round((call.ended_at - call.answered_at).total_seconds()))
 
 
-def call_transcribed_data(
+def call_summarized_data(
     call: Call, transcript: list[dict[str, Any]], summary: str | None
 ) -> dict[str, Any]:
-    """``data`` of a ``call.transcribed`` event: the ``call.*`` fields plus the
+    """``data`` of a ``call.summarized`` event: the ``call.*`` fields plus the
     duration, the transcript and the summary (null when it failed)."""
     return call_event_data(
         call,
@@ -138,9 +138,9 @@ def call_transcribed_data(
     )
 
 
-def _transcribed(call_id_col: Any) -> Any:
+def _summarized(call_id_col: Any) -> Any:
     return exists().where(
-        CallEvent.call_id == call_id_col, CallEvent.kind == TRANSCRIBED_KIND
+        CallEvent.call_id == call_id_col, CallEvent.kind == SUMMARIZED_KIND
     )
 
 
@@ -163,19 +163,19 @@ async def claim_call_to_analyze(
     exclude: set[uuid.UUID] | None = None,
 ) -> Call | None:
     """Claim the oldest ended phone call that still needs its
-    ``call.transcribed`` event, and commit. None when no call waits.
+    ``call.summarized`` event, and commit. None when no call waits.
 
     The call ended between ``ANALYSIS_WINDOW`` and ``SETTLE_DELAY`` ago, has
-    at least one turn row, has no ``transcribed`` marker and no live claim, and
-    its org has an active subscription to ``call.transcribed`` last created or
+    at least one turn row, has no ``summarized`` marker and no live claim, and
+    its org has an active subscription to ``call.summarized`` last created or
     changed before the call ended (so a new, edited or re-enabled
     subscription never gets events for older calls).
 
     Only one worker gets a call, across threads and voicebot replicas: the
     call row is locked ``FOR NO KEY UPDATE SKIP LOCKED``, checked again, and an
-    ``transcribing`` row is written and committed before the slow model call.
+    ``summarizing`` row is written and committed before the slow model call.
     A claim older than ``CLAIM_LEASE`` no longer counts, so a crashed worker
-    does not drop the event. :func:`send_call_transcribed` still checks the
+    does not drop the event. :func:`send_call_summarized` still checks the
     marker, so a worker whose lease ran out cannot send a second event.
     "Now" here is the DB clock (``now()``). Claims are written and aged on
     that clock, so host clock skew does not move the lease. A subscription's
@@ -192,7 +192,7 @@ async def claim_call_to_analyze(
             select(WebhookSubscription.organization_id)
             .where(
                 WebhookSubscription.status == "active",
-                literal(WebhookEventType.CALL_TRANSCRIBED.value)
+                literal(WebhookEventType.CALL_SUMMARIZED.value)
                 == any_(WebhookSubscription.event_types),
             )
             .distinct()
@@ -207,7 +207,7 @@ async def claim_call_to_analyze(
         # secret rotation, never by the delivery worker: adding the event
         # or re-enabling a subscription does not replay past calls.
         WebhookSubscription.updated_at <= Call.ended_at,
-        literal(WebhookEventType.CALL_TRANSCRIBED.value)
+        literal(WebhookEventType.CALL_SUMMARIZED.value)
         == any_(WebhookSubscription.event_types),
     )
     has_turn = exists().where(
@@ -226,7 +226,7 @@ async def claim_call_to_analyze(
             Call.ended_at <= now - SETTLE_DELAY,
             listening,
             has_turn,
-            ~_transcribed(Call.id),
+            ~_summarized(Call.id),
             ~_claimed(Call.id),
         )
         .order_by(Call.ended_at, Call.id)
@@ -246,7 +246,7 @@ async def claim_call_to_analyze(
         # Check again in a new statement. Under READ COMMITTED the select
         # above read a snapshot taken before it got the lock, so a claim or
         # marker that another worker committed in between is seen only here.
-        if await db.scalar(select(or_(_transcribed(call_id), _claimed(call_id)))):
+        if await db.scalar(select(or_(_summarized(call_id), _claimed(call_id)))):
             await db.rollback()
             skip.add(call_id)
             continue
@@ -258,13 +258,13 @@ async def claim_call_to_analyze(
     return None
 
 
-async def send_call_transcribed(
+async def send_call_summarized(
     db: AsyncSession,
     call_id: uuid.UUID,
     transcript: list[dict[str, Any]],
     summary: str | None,
 ) -> bool:
-    """Write the ``transcribed`` marker and enqueue the ``call.transcribed``
+    """Write the ``summarized`` marker and enqueue the ``call.summarized``
     deliveries, once per call, then commit. ``transcript`` is the one the
     summary was written from (:func:`call_transcript`). Returns True when
     deliveries were enqueued. A call already marked, or one with an empty
@@ -275,13 +275,13 @@ async def send_call_transcribed(
             select(Call).where(Call.id == call_id).with_for_update(key_share=True)
         )
     ).scalar_one_or_none()
-    if call is None or await db.scalar(select(_transcribed(call_id))):
+    if call is None or await db.scalar(select(_summarized(call_id))):
         await db.rollback()
         return False
     db.add(
         CallEvent(
             call_id=call_id,
-            kind=TRANSCRIBED_KIND,
+            kind=SUMMARIZED_KIND,
             # Counts only: the summary and the text stay out of the event
             # stream (GET /v1/events returns every call_events row).
             payload={
@@ -295,9 +295,9 @@ async def send_call_transcribed(
         sent = await fanout_call_event(
             db,
             organization_id=call.organization_id,
-            event_type=WebhookEventType.CALL_TRANSCRIBED.value,
+            event_type=WebhookEventType.CALL_SUMMARIZED.value,
             event_id=call.id,
-            data=call_transcribed_data(call, transcript, summary),
+            data=call_summarized_data(call, transcript, summary),
             # The same rule as the pick (``listening``): a subscription
             # made or changed after the call ended gets no event for it.
             changed_before=call.ended_at,

@@ -1,12 +1,13 @@
-"""Rename the ``call.analyzed`` webhook to ``call.transcribed``.
+"""Rename the ``call.analyzed`` webhook to ``call.summarized``.
 
 The event's marker row in ``call_events`` moves from ``kind = 'analyzed'``
-to ``kind = 'transcribed'``, and the worker's claim from ``'analyzing'`` to
-``'transcribing'``. ``GET /v1/events`` shows the marker kind, so it matches
+to ``kind = 'summarized'``, and the worker's claim from ``'analyzing'`` to
+``'summarizing'``. ``GET /v1/events`` shows the marker kind, so it matches
 the event name. A partial index's predicate cannot be changed, so the
 unique index of 0082 is replaced: build the new one, move the rows, drop
-the old one. Subscriptions that list ``call.analyzed`` get
-``call.transcribed`` in its place. Their ``updated_at`` stays as it is, so
+the old one. Subscriptions that list ``call.analyzed`` (or
+``call.transcribed``, a name this change used before it merged) get
+``call.summarized`` in its place. Their ``updated_at`` stays as it is, so
 the calls they wait for are still sent.
 
 The indexes are built and dropped CONCURRENTLY so the voicebot keeps
@@ -28,7 +29,11 @@ branch_labels = None
 depends_on = None
 
 
-def _rename(old: tuple[str, str, str], new: tuple[str, str, str]) -> None:
+def _rename(
+    old: tuple[str, str, str],
+    new: tuple[str, str, str],
+    also_old_events: tuple[str, ...] = (),
+) -> None:
     """Move (marker kind, claim kind, event name) from ``old`` to ``new``."""
     (old_marker, old_claim, old_event), (new_marker, new_claim, new_event) = old, new
     with op.get_context().autocommit_block():
@@ -64,13 +69,14 @@ def _rename(old: tuple[str, str, str], new: tuple[str, str, str]) -> None:
             new_claim=new_claim,
         )
     )
-    op.execute(
-        text(
-            "UPDATE webhook_subscriptions"
-            " SET event_types = array_replace(event_types, :old, :new)"
-            " WHERE :old = ANY(event_types)"
-        ).bindparams(old=old_event, new=new_event)
-    )
+    for event in (old_event, *also_old_events):
+        op.execute(
+            text(
+                "UPDATE webhook_subscriptions"
+                " SET event_types = array_replace(event_types, :old, :new)"
+                " WHERE :old = ANY(event_types)"
+            ).bindparams(old=event, new=new_event)
+        )
     # Commit the moves before the old index goes.
     with op.get_context().autocommit_block():
         op.drop_index(
@@ -82,11 +88,11 @@ def _rename(old: tuple[str, str, str], new: tuple[str, str, str]) -> None:
 
 
 OLD = ("analyzed", "analyzing", "call.analyzed")
-NEW = ("transcribed", "transcribing", "call.transcribed")
+NEW = ("summarized", "summarizing", "call.summarized")
 
 
 def upgrade() -> None:
-    _rename(OLD, NEW)
+    _rename(OLD, NEW, also_old_events=("call.transcribed",))
 
 
 def downgrade() -> None:

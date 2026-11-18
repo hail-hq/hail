@@ -189,7 +189,7 @@ async def test_create_stamps_created_and_updated_at_alike(
         "/webhooks",
         json={
             "target_url": "https://example.com/h",
-            "event_types": ["call.transcribed"],
+            "event_types": ["call.summarized"],
         },
         headers=auth_headers,
     )
@@ -210,7 +210,7 @@ async def test_patch_and_rotation_bump_updated_at(
     auth_headers: dict[str, str],
     async_session: AsyncSession,
 ):
-    """call.transcribed sends only calls that ended after the subscription was
+    """call.summarized sends only calls that ended after the subscription was
     created or last changed (hailhq.core.call_analysis), so every change
     bumps updated_at. (The test cannot tell now() from statement_timestamp():
     both fall inside the request.)"""
@@ -224,7 +224,7 @@ async def test_patch_and_rotation_bump_updated_at(
     for change in (
         lambda: client.patch(
             f"/webhooks/{sub_id}",
-            json={"event_types": ["call.completed", "call.transcribed"]},
+            json={"event_types": ["call.completed", "call.summarized"]},
             headers=auth_headers,
         ),
         lambda: client.post(f"/webhooks/{sub_id}/rotate-secret", headers=auth_headers),

@@ -265,22 +265,23 @@ def test_hail_mail_head_is_globally_unique(empty_db: str) -> None:
         assert _index_def(conn, "email_domains_hail_mail_prefix_uq") is None
 
 
-def test_call_events_transcribed_marker_is_unique(empty_db: str) -> None:
-    """After 0083 a call has at most one ``transcribed`` call event, so the
-    call.transcribed webhook cannot be sent twice."""
+def test_call_events_summarized_marker_is_unique(empty_db: str) -> None:
+    """After 0083 a call has at most one ``summarized`` call event, so the
+    call.summarized webhook cannot be sent twice."""
     _run_alembic(empty_db, ["upgrade", "head"])
     with psycopg.connect(_to_libpq_url(to_sync_url(empty_db))) as conn:
-        indexdef = _index_def(conn, "call_events_transcribed_uniq")
-        assert indexdef is not None, "call_events_transcribed_uniq missing"
+        indexdef = _index_def(conn, "call_events_summarized_uniq")
+        assert indexdef is not None, "call_events_summarized_uniq missing"
         assert "UNIQUE" in indexdef
         assert "(call_id)" in indexdef
-        assert "'transcribed'" in indexdef
+        assert "'summarized'" in indexdef
         assert _index_def(conn, "call_events_analyzed_uniq") is None
 
 
 def test_0083_renames_call_analyzed(empty_db: str) -> None:
     """0083 moves the old marker and claim rows and the subscriptions that
-    list call.analyzed to the call.transcribed names, and back on downgrade."""
+    list call.analyzed (or call.transcribed, its name before merge) to the
+    call.summarized names, and the call.analyzed ones back on downgrade."""
     _run_alembic(empty_db, ["upgrade", "0082"])
     org = "11111111-1111-1111-1111-111111111111"
     url = _to_libpq_url(to_sync_url(empty_db))
@@ -303,6 +304,13 @@ def test_0083_renames_call_analyzed(empty_db: str) -> None:
             " ARRAY['call.completed', 'call.analyzed']) RETURNING id",
             (org,),
         ).fetchone()[0]
+        early_id = conn.execute(
+            "INSERT INTO webhook_subscriptions"
+            " (organization_id, target_url, secret_encrypted, event_types)"
+            " VALUES (%s, 'https://example.com/h', 'x',"
+            " ARRAY['call.transcribed']) RETURNING id",
+            (org,),
+        ).fetchone()[0]
 
     def state() -> tuple[list[str], list[str]]:
         with psycopg.connect(url) as conn:
@@ -321,9 +329,15 @@ def test_0083_renames_call_analyzed(empty_db: str) -> None:
 
     _run_alembic(empty_db, ["upgrade", "0083"])
     assert state() == (
-        ["transcribed", "transcribing", "user_turn"],
-        ["call.completed", "call.transcribed"],
+        ["summarized", "summarizing", "user_turn"],
+        ["call.completed", "call.summarized"],
     )
+    with psycopg.connect(url) as conn:
+        early = conn.execute(
+            "SELECT event_types FROM webhook_subscriptions WHERE id = %s",
+            (early_id,),
+        ).fetchone()[0]
+    assert early == ["call.summarized"]
     _run_alembic(empty_db, ["downgrade", "0082"])
     assert state() == (
         ["analyzed", "analyzing", "user_turn"],
