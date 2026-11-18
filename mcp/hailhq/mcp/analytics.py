@@ -1,7 +1,8 @@
 """Optional PostHog MCP analytics for the HTTP server.
 
 Off unless ``NEXT_PUBLIC_POSTHOG_KEY`` is set. Events carry tool names,
-timings, outcomes, client names and the calling model. Argument values, results, error
+timings, outcomes, client names, the calling model and, in oauth-rs mode, the
+caller's user id, email and name. Argument values, results, error
 messages and agent intent never leave the process: ``_keep_metadata`` drops
 every property not on ``_KEPT_PROPERTIES``. In oauth-rs mode the caller's
 user id (OAuth token or API key owner) becomes ``distinct_id``, the same
@@ -144,6 +145,9 @@ def _keep_metadata(event: dict[str, Any]) -> dict[str, Any] | None:
     if _REQUEST_IDENTITY not in properties:
         # The SDK swallows callback errors. Never emit its cached identity when
         # the request-specific enrichment failed; tool responses stay intact.
+        logger.warning(
+            "PostHog MCP event %s dropped: no request identity", event.get("event")
+        )
         return None
     # Ignore any sticky SDK identity; this event belongs to this request.
     identity = properties[_REQUEST_IDENTITY]

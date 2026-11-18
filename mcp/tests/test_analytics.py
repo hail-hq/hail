@@ -132,6 +132,7 @@ async def _session(
 
     monkeypatch.setattr("hailhq.mcp.hail_client.HailClient.whoami", whoami)
     monkeypatch.setattr("hailhq.mcp.tools._actor_cache", {})
+    monkeypatch.setattr("hailhq.mcp.tools._actor_lookups", {})
     # Analytics adds an optional llm_model input; the agent fills it.
     args = {"llm_model": _MODEL} if token else {}
     call = call or {"name": "list_number_regions", "arguments": args}
@@ -295,7 +296,7 @@ def test_keep_metadata_limits_person_properties():
     assert kept["properties"] == {"$set": {"email": _EMAIL, "name": _NAME}}
 
 
-def test_missing_request_identity_drops_sticky_sdk_profile():
+def test_missing_request_identity_drops_sticky_sdk_profile(caplog):
     # The SDK swallows event_properties callback errors. Without a snapshot,
     # its remaining identity could belong to a previous request.
     event = {
@@ -307,6 +308,8 @@ def test_missing_request_identity_drops_sticky_sdk_profile():
         },
     }
     assert analytics._keep_metadata(event) is None
+    # A broken callback must not stop analytics without a trace in our logs.
+    assert "dropped: no request identity" in caplog.text
 
 
 @pytest.mark.parametrize("name", ["$exception", "custom_event"])

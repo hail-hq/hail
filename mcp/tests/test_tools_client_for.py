@@ -20,6 +20,12 @@ from hailhq.mcp.hail_client import HailClient
 from hailhq.mcp.tools import _client_for
 
 
+@pytest.fixture(autouse=True)
+def _no_shared_lookups(monkeypatch):
+    # In-flight lookups belong to one test's event loop.
+    monkeypatch.setattr(tools, "_actor_lookups", {})
+
+
 def _ctx_with_bearer(bearer: str | None) -> SimpleNamespace:
     """Minimal MCPServer Context stand-in with the headers attribute the
     helper reaches into. Real MCPServer injects a richer Context object;
