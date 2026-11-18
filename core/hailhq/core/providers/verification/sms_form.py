@@ -508,6 +508,8 @@ def _fields_for(
 ) -> tuple[FieldSpec, ...]:
     """The shared form with the carrier's extra fields and limits."""
     subject = _PERSON_FIELDS if subject_type == "person" else _BUSINESS_FIELDS
+    if not provider.faster_lane:
+        subject = tuple(f for f in subject if f.name != "faster_lane_ok")
     extra = tuple(
         f for f in provider.extra_fields(subject_type) if f.name != "text_types"
     )
@@ -975,9 +977,11 @@ def low_volume(fields: dict[str, str], subject_type: SubjectType) -> bool:
 
 def faster_lane_ok(fields: dict[str, str], subject_type: SubjectType) -> bool:
     """True for a low-volume company that ticked the faster lane: Hail asks
-    for the brand's vetting when the carrier cannot verify it."""
-    return (
-        low_volume(fields, subject_type) and _answer(fields, "faster_lane_ok") == "YES"
+    for the brand's vetting when the carrier cannot verify it. The box is a
+    'choices' value, read as its check reads it (``picked``). The caller
+    checks the carrier has a faster lane (``faster_lane``)."""
+    return low_volume(fields, subject_type) and "YES" in picked(
+        fields.get("faster_lane_ok")
     )
 
 

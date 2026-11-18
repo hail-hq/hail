@@ -3116,7 +3116,7 @@ async def test_a_failure_after_the_low_volume_brand_owes_no_vetting() -> None:
 
 @pytest.mark.parametrize("owed", [False, True, None])
 @pytest.mark.parametrize("faster_lane_ok", [False, True])
-async def test_a_low_volume_brand_still_being_checked_is_never_vetted(
+async def test_a_low_volume_brand_still_being_checked_waits_a_day(
     owed, faster_lane_ok
 ) -> None:
     calls: list = []
@@ -3130,6 +3130,45 @@ async def test_a_low_volume_brand_still_being_checked_is_never_vetted(
         assert (await p.status(refs)).state == "pending"
     assert not any(m == "POST" for m, _ in calls)
     assert "needs_information" not in refs and "faster_lane_at" not in refs
+    assert datetime.fromisoformat(refs["identity_wait_since"]).tzinfo is not None
+
+
+@pytest.mark.parametrize("identity", ["SELF_DECLARED", None, "SOMETHING_NEW"])
+@pytest.mark.parametrize("faster_lane_ok", [False, True])
+async def test_a_brand_still_not_verified_after_a_day_takes_the_faster_lane_path(
+    identity, faster_lane_ok
+) -> None:
+    """Not verified a day after Telnyx registered it: never pending forever."""
+    calls: list = []
+    brand = {"status": "OK", **({"identityStatus": identity} if identity else {})}
+    p = _low_volume_brand(calls, [brand])
+    day_ago = datetime.now(timezone.utc) - timedelta(hours=25)
+    refs = _low_volume_refs(identity_wait_since=day_ago.isoformat())
+    if faster_lane_ok:
+        refs["faster_lane_ok"] = True
+    await p.status(refs)
+    if faster_lane_ok:
+        assert len(_vetting_calls(calls)) == 1 and refs["faster_lane_at"]
+    else:
+        assert refs["needs_information"] is True and _vetting_calls(calls) == []
+
+
+@pytest.mark.parametrize("identity", ["UNVERIFIED", "SELF_DECLARED"])
+async def test_the_faster_lane_waits_for_credit(identity) -> None:
+    """Not covered (``may_file_campaign`` False): nothing is bought; a
+    later pass with credit buys it."""
+    calls: list = []
+    p = _low_volume_brand(calls, [{"status": "OK", "identityStatus": identity}])
+    day_ago = datetime.now(timezone.utc) - timedelta(hours=25)
+    refs = _low_volume_refs(
+        faster_lane_ok=True, identity_wait_since=day_ago.isoformat()
+    )
+    st = await p.status(refs, may_file_campaign=False)
+    assert st.state == "pending"
+    assert not any(m == "POST" for m, _ in calls)
+    assert "faster_lane_at" not in refs and "needs_information" not in refs
+    await p.status(refs)
+    assert len(_vetting_calls(calls)) == 1 and refs["faster_lane_at"]
 
 
 async def test_an_unverified_low_volume_brand_offers_the_faster_lane() -> None:

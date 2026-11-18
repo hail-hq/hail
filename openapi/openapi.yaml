@@ -5803,7 +5803,11 @@ paths:
 
         carrier for the next filing. One that is under review cannot be
 
-        cancelled: wait for the result; if it is rejected, dismiss it.
+        cancelled: wait for the result; if it is rejected, dismiss it. A US SMS
+
+        registration that waits for your answers before its campaign is filed
+
+        (`step: needs_information`) can be cancelled.
 
 
         An accepted campaign waiting on runtime setup can be cancelled, as can

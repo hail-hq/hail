@@ -100,6 +100,9 @@ _AUTO_REPLIES = (
 # Auto-replies apply by the subscriber's country; 10DLC is US texting.
 _AUTO_REPLY_COUNTRY = "US"
 _VERIFIED = {"VERIFIED", "VETTED_VERIFIED"}
+# How long a low-volume company brand may stay not verified (and not
+# UNVERIFIED) before Hail treats it as final: the faster lane or a hold.
+_IDENTITY_WAIT = timedelta(hours=24)
 # Use cases filed with the picked purposes as sub-use-cases. MIXED takes 2
 # to 5; LOW_VOLUME (low volume mixed) takes 1 to 5; the form allows 1 to 5.
 _SUB_USE_CASES = frozenset({"MIXED", "SOLE_PROPRIETOR", "LOW_VOLUME"})
@@ -292,6 +295,8 @@ def _policy_links(text: dict) -> dict:
 class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
     name = "telnyx"
     campaign_ref = "campaign_id"
+    # A low-volume brand Telnyx cannot verify can be vetted afterwards.
+    faster_lane = True
     # subscriberOptin describes consent before sending, not keyword support.
     # Every self-service program requires consent and an actual confirmation.
     opt_in_message_required = True
@@ -714,6 +719,10 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                         return ProviderStatus(
                             state="pending", reason=LOW_VOLUME_FASTER_LANE
                         )
+                    if not may_file_campaign:
+                        # The credit does not cover the vetting yet: a later
+                        # pass buys it (the API checks it like a campaign).
+                        return ProviderStatus(state="pending")
                     # The fee rater charges the vetting from this mark. Both
                     # new keys outlive a failed request (the API keeps added
                     # keys), so the next pass asks again, once
@@ -1256,14 +1265,24 @@ def _vetted(refs: dict) -> bool:
 
 
 def _faster_lane_owed(refs: dict, brand: dict) -> bool:
-    """A low-volume company brand Telnyx could not verify, with no faster
-    lane asked yet. A brand still being checked (``SELF_DECLARED``) waits."""
-    return (
-        refs.get("subject_type") != "person"
-        and bool(refs.get("low_volume"))
-        and not refs.get("faster_lane_at")
-        and brand.get("identityStatus") == "UNVERIFIED"
-    )
+    """A low-volume company brand Telnyx did not verify, with no faster lane
+    asked yet. ``UNVERIFIED`` is a verdict. Telnyx does not document which
+    other values are final, so any other value that is not verified
+    (``SELF_DECLARED``, a missing or new one) counts once it has lasted
+    ``_IDENTITY_WAIT`` from the first pass that saw it
+    (``identity_wait_since``): never pending forever. The caller only asks
+    for a registered brand that is not verified."""
+    if (
+        refs.get("subject_type") == "person"
+        or not refs.get("low_volume")
+        or refs.get("faster_lane_at")
+    ):
+        return False
+    if brand.get("identityStatus") == "UNVERIFIED":
+        return True
+    now = datetime.now(timezone.utc)
+    since = refs.setdefault("identity_wait_since", now.isoformat())
+    return now - datetime.fromisoformat(since) >= _IDENTITY_WAIT
 
 
 def _billed(refs: dict) -> dict:

@@ -605,17 +605,40 @@ def _refs_time(key: str):
     )
 
 
+class _SmsStep(NamedTuple):
+    """A US texting row's uncharged step, with what prices it."""
+
+    provider: str
+    subject_type: str
+    low_volume: bool
+    # The faster lane is allowed and not bought yet (``_lane_owed``).
+    lane_owed: bool
+
+
+def _lane_owed(refs: dict | None) -> bool:
+    """A low-volume row whose faster lane (the brand's vetting) may still be
+    bought: the box is ticked and no ``faster_lane_at`` yet. The credit
+    checks count it as the worst case."""
+    refs = refs or {}
+    return bool(
+        refs.get("low_volume")
+        and refs.get("faster_lane_ok")
+        and not refs.get("faster_lane_at")
+    )
+
+
 async def _uncharged_sms_steps(
     db: AsyncSession, organization_id: UUID, step: str
-) -> list[tuple[str, str, bool]]:
-    """``(provider, subject_type, low_volume)`` of the organization's US texting rows
-    whose ``step`` ('submission' or 'review') happened in the last day with
+) -> list[_SmsStep]:
+    """The organization's US texting rows whose ``step`` ('submission',
+    'review' or 'faster_lane') happened in the last day with
     no ledger row yet: the website's rater charges each one shortly after.
     A step is settled by its debit (``sms_registration:<id>:<step>``), or by
     the one-time debit of a filing made before fees were charged per step.
     A submission happens at filing, except for a filing that reused a brand
-    (never charged one); a review once the campaign is filed. Exact refs,
-    so the ledger's (organization, ref) index is used."""
+    (never charged one); a review once the campaign is filed; a faster lane
+    at ``faster_lane_at``. Exact refs, so the ledger's (organization, ref)
+    index is used."""
     if step == "faster_lane":
         lane = _refs_time("faster_lane_at")
         happened = [lane > func.now() - text("interval '1 day'")]
@@ -635,6 +658,7 @@ async def _uncharged_sms_steps(
             CarrierVerification.provider,
             CarrierVerification.subject_type,
             CarrierVerification.provider_refs["low_volume"].astext == "true",
+            CarrierVerification.provider_refs,
         ).where(
             CarrierVerification.organization_id == organization_id,
             CarrierVerification.purpose == "sms",
@@ -648,15 +672,10 @@ async def _uncharged_sms_steps(
             .exists(),
         )
     )
-    return [(str(p), str(t), bool(low)) for p, t, low in found]
-
-
-async def _unsettled_sms_filings(
-    db: AsyncSession, organization_id: UUID
-) -> list[tuple[str, str, bool]]:
-    """US texting filings of the last day whose submission is not charged
-    yet (``_uncharged_sms_steps``)."""
-    return await _uncharged_sms_steps(db, organization_id, "submission")
+    return [
+        _SmsStep(str(p), str(t), bool(low), _lane_owed(refs))
+        for p, t, low, refs in found
+    ]
 
 
 async def _record_billed_refusal(
@@ -1126,20 +1145,49 @@ def _carrier_fee(
         return None
 
 
-async def _uncharged_cents(db: AsyncSession, organization_id: UUID) -> int:
+async def _uncharged_cents(
+    db: AsyncSession, organization_id: UUID, *, filing_default: int | None = None
+) -> int:
     """Carrier costs of the organization's US texting steps not charged yet
-    (``_uncharged_sms_steps``): new brands and filed campaigns. They count
-    against the balance, as unsettled filings do at filing, so one credit
-    does not pay for two steps."""
-    brands = await _uncharged_sms_steps(db, organization_id, "submission")
+    (``_uncharged_sms_steps``): new brands, filed campaigns and bought
+    faster lanes. They count against the balance, so one credit does not
+    pay for two steps.
+
+    ``filing_default`` given: the check before a new filing. Each uncharged
+    filing then counts whole, as the new one does (its brand, its campaign
+    review and, while it is owed, its faster lane: ``filing_fee_cents``); a
+    carrier with no fees counts ``filing_default``."""
+    filings = await _uncharged_sms_steps(db, organization_id, "submission")
+    lanes = sum(
+        _faster_lane_fee(s.provider)
+        for s in await _uncharged_sms_steps(db, organization_id, "faster_lane")
+    )
+    if filing_default is not None:
+        whole = 0
+        for s in filings:
+            try:
+                whole += sms_registration_fees.filing_fee_cents(
+                    s.provider,
+                    s.subject_type,
+                    low_volume=s.low_volume,
+                    faster_lane=s.lane_owed,
+                )
+            except KeyError:
+                whole += filing_default
+        return whole + lanes
     campaigns = await _uncharged_sms_steps(db, organization_id, "review")
-    lanes = await _uncharged_sms_steps(db, organization_id, "faster_lane")
     brand = sms_registration_fees.brand_fee_cents
     campaign = sms_registration_fees.campaign_fee_cents
     return (
-        sum(_carrier_fee(brand, p, t, low) or 0 for p, t, low in brands)
-        + sum(_carrier_fee(campaign, p, t, low) or 0 for p, t, low in campaigns)
-        + sum(_faster_lane_fee(p) for p, _, _ in lanes)
+        sum(
+            _carrier_fee(brand, s.provider, s.subject_type, s.low_volume) or 0
+            for s in filings
+        )
+        + sum(
+            _carrier_fee(campaign, s.provider, s.subject_type, s.low_volume) or 0
+            for s in campaigns
+        )
+        + lanes
     )
 
 
@@ -1235,6 +1283,11 @@ async def _campaign_unfunded(
             )
             if fee is None:
                 continue
+            if _lane_owed(row.provider_refs):
+                # The poll may buy the faster lane before the campaign: the
+                # worst case, as at filing. The plug-in buys neither unless
+                # this check lets it (``may_file_campaign``).
+                fee += _faster_lane_fee(row.provider)
             if left < fee:
                 waiting.append((row.id, fee))
             else:
@@ -2439,7 +2492,10 @@ async def _prepare_submission(
         # the brand's vetting. One decision: it prices the filing, goes to
         # the plug-in, and is written to the row (``sms_refs``).
         low = low_volume(sub.fields, sub.subject_type)
-        lane = faster_lane_ok(sub.fields, sub.subject_type)
+        # Only a carrier with a faster lane reads the box; others ignore it.
+        lane = bool(getattr(provider, "faster_lane", False)) and faster_lane_ok(
+            sub.fields, sub.subject_type
+        )
         if low:
             sms_refs["low_volume"] = True
             draft_kwargs["low_volume"] = True
@@ -2467,19 +2523,9 @@ async def _prepare_submission(
             # Filings the website has not charged yet (it charges a moment
             # later) count too, or an account could file again and again on
             # the same credit.
-            # Each at its own carrier cost: a low-volume filing costs less
-            # than a vetted one.
-            unsettled = sum(
-                _carrier_fee(sms_registration_fees.filing_fee_cents, p, t, lv)
-                or full_cents
-                for p, t, lv in await _unsettled_sms_filings(
-                    db, principal.organization_id
-                )
-            ) + sum(
-                _faster_lane_fee(p)
-                for p, _, _ in await _uncharged_sms_steps(
-                    db, principal.organization_id, "faster_lane"
-                )
+            # Each at its own carrier cost, its owed faster lane included.
+            unsettled = await _uncharged_cents(
+                db, principal.organization_id, filing_default=full_cents
             )
             if balance < floor_cents + unsettled:
                 raise HTTPException(
@@ -4308,7 +4354,11 @@ async def amend_sms_application(
             )
     if problems:
         raise _problems_422(problems, row.organization_id, row.provider)
-    lane = local and faster_lane_ok(body.fields, row.subject_type)
+    lane = (
+        local
+        and bool(getattr(provider, "faster_lane", False))
+        and faster_lane_ok(body.fields, row.subject_type)
+    )
     if (
         lane
         and not refs.get("faster_lane_ok")
@@ -4547,6 +4597,14 @@ def _can_cancel(row: CarrierVerification) -> bool:
             and refs.get("campaign_accepted") is True
             and refs.get("runtime_ready") is False
         )
+        # Held for the customer before any campaign (a low-volume brand the
+        # networks could not verify, answers to repair): no review is
+        # running, and the hold may only end with a new registration.
+        or (
+            row.state == "submitted"
+            and bool(refs.get("needs_information"))
+            and not refs.get("campaign_filed_at")
+        )
     )
 
 
@@ -4565,7 +4623,9 @@ async def cancel_verification(
     a rejected one. The draft is discarded either way, except a person's
     confirmed brand on a rejected US SMS registration: it stays at the
     carrier for the next filing. One that is under review cannot be
-    cancelled: wait for the result; if it is rejected, dismiss it.
+    cancelled: wait for the result; if it is rejected, dismiss it. A US SMS
+    registration that waits for your answers before its campaign is filed
+    (`step: needs_information`) can be cancelled.
 
     An accepted campaign waiting on runtime setup can be cancelled, as can
     an approved US SMS registration (`purpose=sms`):

@@ -750,21 +750,28 @@ def test_companies_say_their_daily_texts_and_persons_never_see_it(provider):
         ("UP_TO_2000", "Up to 2,000"),
         ("OVER_2000", "More than 2,000"),
     ]
-    lane = specs["faster_lane_ok"]
+    assert "$" not in daily.help
+    for carrier in ("Twilio", "Telnyx", "TCR", "T-Mobile"):
+        assert carrier not in daily.help
+    assert "Sending more later needs a carrier check." in daily.help
+    person = {f.name for f in sms_requirements(provider, "person").fields}
+    assert not {"daily_texts", "faster_lane_ok"} & person
+
+
+def test_only_a_carrier_with_a_faster_lane_asks_for_it():
+    lane = {f.name: f for f in sms_requirements(TELNYX, "business").fields}[
+        "faster_lane_ok"
+    ]
     assert not lane.required and lane.kind == "choices"
     assert lane.label == (
         "Move me to the faster lane automatically if the networks need more "
         "details about my company."
     )
     assert [o.key for o in lane.options] == ["YES"] and lane.max_choices == 1
-    # Friendly, carrier-neutral help with no prices.
-    for spec in (daily, lane):
-        assert "$" not in spec.help
-        for carrier in ("Twilio", "Telnyx", "TCR", "T-Mobile"):
-            assert carrier not in spec.help
-    assert "Sending more later needs a carrier check." in daily.help
-    person = {f.name for f in sms_requirements(provider, "person").fields}
-    assert not {"daily_texts", "faster_lane_ok"} & person
+    assert "$" not in lane.help and "Telnyx" not in lane.help
+    assert TELNYX.faster_lane and not TWILIO.faster_lane
+    twilio = {f.name for f in sms_requirements(TWILIO, "business").fields}
+    assert "faster_lane_ok" not in twilio
 
 
 def test_daily_texts_and_faster_lane_are_optional_but_checked():
@@ -797,7 +804,10 @@ def test_blank_not_sure_and_up_to_2000_are_low_volume(answer):
     assert two.use_case == "LOW_VOLUME"
     assert two.text_types == ["CUSTOMER_CARE", "MARKETING"]
     assert faster_lane_ok(fields, "business") is False
-    assert faster_lane_ok({**fields, "faster_lane_ok": "YES"}, "business") is True
+    # Read as a choices value, like its check: repeats and commas are fine.
+    for ticked in ("YES", "YES,", "YES, YES", " YES "):
+        assert faster_lane_ok({**fields, "faster_lane_ok": ticked}, "business")
+    assert not errors({**BUSINESS, "faster_lane_ok": "YES, YES"}, "business")
 
 
 def test_over_2000_and_persons_are_never_low_volume():

@@ -595,6 +595,7 @@ _NOT_ANSWER_REFS = {
     "identity_created",
     "identity_id",
     "identity_verified",
+    "identity_wait_since",  # when a low-volume brand was first seen not verified
     "low_volume",  # the fee rater prices the row from it
     "messaging_profile_id",
     "messaging_service_sid",

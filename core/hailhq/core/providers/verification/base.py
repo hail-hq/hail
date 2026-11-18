@@ -617,6 +617,10 @@ class SmsRegistrationProvider(VerificationProvider):
     field_limits: Mapping[str, int] = MappingProxyType({})
     # Some carriers require the actual subscription confirmation on every filing.
     opt_in_message_required: bool = False
+    # True when the carrier can vet a low-volume company brand it could not
+    # verify (the form's ``faster_lane_ok`` box). Only then does the form
+    # ask for it; otherwise the API ignores the answer.
+    faster_lane: bool = False
 
     def validate_application(
         self, fields: dict[str, str], address: Address | None, subject_type: SubjectType
