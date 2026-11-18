@@ -29,7 +29,7 @@ status: submitted
    Make the team profile public: profile in the header → **Hail** →
    **Team profile** → **Make my team's profile public**. Then **Edit Your
    Public Profile**: add the team description, website `https://hail.so`, and
-   the logo from `hail-website/public/assets/monogram-512.png`
+   the logo from `hail-website/public/assets/brand/logo/monogram-512.png`
    (**Upload profile photo**).
 2. Click **Workspaces** in the header → **Create**. Name it **Hail API**,
    choose **Internal** and **Blank workspace**, then **Create Workspace**.

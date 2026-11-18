@@ -67,7 +67,7 @@ curl -i https://mcp.hail.so/
 
 To publish a change: edit `mcp/server.json`, bump `version` (the registry refuses a version it already has), merge. Check the run under Actions, then confirm with step 7.
 
-Why not the laptop login any more: since 2026-10 the registry grants an org namespace only to org Owners, read through `GET /user/memberships/orgs` with the `read:org` scope. The token from `mcp-publisher login github` does not see the `hail-hq` org (verified 2026-10-18: publish returns 403 "You have permission to publish: io.github.r13i/*"), even after granting the OAuth app org access. A `gh auth token` does see it. Manual fallback, from `mcp/`, if the workflow is ever unavailable:
+Why not the laptop login any more: since 2026-10 the registry grants an org namespace only to org Owners, read through `GET /user/memberships/orgs` with the `read:org` scope. The token from `mcp-publisher login github` does not see the `hail-hq` org (verified 2026-10-18: publish returns 403 "You have permission to publish: io.github.r13i/\*"), even after granting the OAuth app org access. A `gh auth token` does see it. Manual fallback, from `mcp/`, if the workflow is ever unavailable:
 
 ```bash
 T=$(gh auth token)
@@ -139,49 +139,31 @@ Flip `status: submitted` (then `submitted (live)`) in this file's frontmatter an
 
 **One-liner** (for `description` / anywhere a short pitch is needed):
 
-> Phone, SMS and email for agents. One remote MCP endpoint, OAuth login, zero install.
+<!-- copy:short -->
+
+> Run your AI assistant with real phone numbers and email inboxes. Handle calls, texts, and email.
+
+<!-- /copy -->
 
 **Longer description** (for `websiteUrl` context / any registry aggregator that mirrors this listing with more room):
 
-> Hail is a self-hostable, AGPLv3 communication platform for AI agents: voice calls, SMS, and email, all reachable from one remote MCP server. No stdio, no local install, no API keys to juggle: paste `https://mcp.hail.so` into your client, click Allow, your agent gets call/email tools with OAuth-scoped access. Self-host the whole stack if you'd rather not touch Hail Cloud.
+<!-- copy:long -->
 
-**`server.json`**. **Corrected 2026-07-07: using GitHub-org naming (Path B), and a shortened description (the original 222-char version fails real schema validation, 100-char hard limit).** Ready, validated file at `mcp/server.json`:
+> Hail gives your AI assistant a real phone number and an email inbox. Your agent can do any work people do on the phone and in email.
+>
+> Run a support receptionist, answering service, or your own assistant on one account. It handles calls, texts, and email day and night, and passes calls to your phone when needed.
+>
+> Get a local or toll-free number in 120+ countries, even where you have no office. Hail helps with the paperwork some countries need. Send and receive email on your own domain.
+>
+> Webhooks send every call, text, and email to your app, so your own tools stay up to date.
+>
+> Connect Claude, ChatGPT, or Cursor over MCP in minutes, or build with the API. Hail is open source.
 
-```json
-{
-  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.hail-hq/hail-mcp",
-  "title": "Hail",
-  "description": "Phone, SMS and email for AI agents. One remote MCP endpoint, OAuth login, zero install.",
-  "websiteUrl": "https://hail.so/mcp",
-  "repository": {
-    "url": "https://github.com/hail-hq/hail",
-    "source": "github",
-    "subfolder": "mcp"
-  },
-  "version": "0.1.0",
-  "icons": [
-    {
-      "src": "https://hail.so/assets/monogram-512.png",
-      "sizes": ["512x512"],
-      "mimeType": "image/png"
-    },
-    {
-      "src": "https://hail.so/assets/monogram-1024.png",
-      "sizes": ["1024x1024"],
-      "mimeType": "image/png"
-    }
-  ],
-  "remotes": [
-    {
-      "type": "streamable-http",
-      "url": "https://mcp.hail.so"
-    }
-  ]
-}
-```
+<!-- /copy -->
 
-Asset source paths (already mirrored, confirmed resolving live at the URLs above): `hail-website/public/assets/monogram-512.png`, `hail-website/public/assets/monogram-1024.png`.
+**`server.json`**. **Corrected 2026-07-07: using GitHub-org naming (Path B), and a shortened description (the original 222-char version fails real schema validation, 100-char hard limit).** The live file is [`mcp/server.json`](../../mcp/server.json). Edit it there and bump `version`; merging publishes it.
+
+Asset source paths (already mirrored, confirmed resolving live at the URLs above): `hail-website/public/assets/brand/logo/monogram-512.png`, `hail-website/public/assets/brand/logo/monogram-1024.png`.
 
 **Tool inventory** (for reference / any listing field that asks what the server does. Not a `server.json` field, the schema has no tags/tools array. This is the literal, code-verified list from `mcp/hailhq/mcp/tools.py`, 11 tools):
 

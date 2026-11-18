@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 from hailhq.core import text_agent, threads
 from hailhq.core.models import AccountCredit, Agent, Call, CallEvent, PhoneNumber, Sms
-from hailhq.core.prompts import THREAD_TOOL_HINT_TEXT
+from hailhq.core.prompts import PRIVACY_REMINDER, THREAD_TOOL_HINT_TEXT
 from hailhq.core.sms_ingest import ingest_inbound_sms
 from sqlalchemy import literal_column, select, update
 
@@ -760,3 +760,40 @@ async def test_api_sent_text_is_in_text_agent_history_only(async_session) -> Non
 
     voice = await threads.thread_items(async_session, org, agent.id, PERSON)
     assert [i.text for i in voice if i.kind.startswith("text")] == ["now?"]
+
+
+async def test_a_reply_gets_the_date_and_time(async_session) -> None:
+    _, agent, _ = await _seed(async_session)
+    result = await _ingest(async_session, "Are you open now?", "SMclock")
+    row = await async_session.get(Sms, result.sms_id)
+    clock = text_agent.reply_clock(row)
+    assert clock is not None and clock.startswith("# Date and time")
+    assert "It is now:" in clock
+    assert "America/Los_Angeles" in clock  # the texted number, in California
+    assert "For the person texting: " in clock and "Europe/Paris" in clock
+    assert "The person texting is using +33 6 12 34 56 78." in clock
+    system = text_agent.build_chat_messages(agent, [], clock=clock)[0]["content"]
+    assert system.index("Book appointments.") < system.index("# Date and time")
+    assert system.endswith(PRIVACY_REMINDER)
+
+
+def test_a_failed_clock_never_fails_a_reply(monkeypatch) -> None:
+    def broken(**_):
+        raise ValueError("no clock")
+
+    monkeypatch.setattr("hailhq.core.prompts.clock_section", broken)
+    assert text_agent.reply_clock(Sms(from_e164=PERSON, to_e164=ORG_NUMBER)) is None
+
+
+def test_the_clock_says_when_the_text_arrived() -> None:
+    sms = Sms(
+        from_e164=PERSON,
+        to_e164=ORG_NUMBER,
+        requested_at=datetime(2026, 11, 18, 16, 58, tzinfo=timezone.utc),
+    )
+    clock = text_agent.reply_clock(sms)
+    assert clock is not None
+    assert (
+        "- The text you are answering arrived at: Wednesday, 18 November 2026, "
+        "16:58 UTC (08:58 where the business is)." in clock
+    )

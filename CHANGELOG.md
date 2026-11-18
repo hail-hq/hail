@@ -8,6 +8,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 - Agents can call your own API during calls, texts and email: add `http_tools` on `POST`/`PATCH /v1/agents` (CLI, SDK, MCP too). Each request is signed like a webhook. A tool `url` that is private or does not resolve is refused on save with `URL host is private or could not be resolved`.
 - Call agents know the date, time and time zone at the start of each call.
+- Text and email reply agents know the date, time and time zone too.
 - Calls: `GET /v1/calls/{id}` returns the call's transcript, and the new `call.analyzed` webhook sends the transcript and a short summary after each call.
 - Rejected number registrations can be fixed and sent again for 30 days with `POST /v1/verifications/{id}/resubmit` (MCP: `resubmit_verification`).
 - `sms.received` webhooks and `received` SMS events have a new `compliance_keyword` field: `STOP`, `START` or `HELP` when the text is one of those keywords, otherwise `null`.

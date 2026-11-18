@@ -46,6 +46,7 @@ from hailhq.core.text_agent import (
     build_chat_messages,
     claim_pending_reply,
     finish_reply,
+    reply_clock,
     retry_reply,
     thread_history_for_reply,
 )
@@ -154,7 +155,7 @@ async def _prepare(claimed: ClaimedReply) -> list[dict[str, Any]]:
     """Load the thread on a short session; nothing stays open afterwards."""
     async with session_scope() as db:
         history = await thread_history_for_reply(db, claimed.sms, claimed.agent)
-    return build_chat_messages(claimed.agent, history)
+    return build_chat_messages(claimed.agent, history, clock=reply_clock(claimed.sms))
 
 
 async def _settle(

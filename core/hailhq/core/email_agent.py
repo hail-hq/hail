@@ -33,11 +33,13 @@ from hailhq.core.email_mime import (
 )
 from hailhq.core.forward_targets import normalize_address
 from hailhq.core.jsonb import merge_object
-from hailhq.core.models import Agent, Email, EmailDomain, Sms
+from hailhq.core.models import Agent, Email, EmailDomain, PhoneNumber, Sms
 from hailhq.core.prompts import (
     TEAM_EMAIL_LABEL,
     SenderTrust,
     build_email_instructions,
+    number_with_one_zone,
+    safe_clock_section,
 )
 from hailhq.core.providers.email.ses import SES_NOT_ACCEPTED_FAILURES
 from hailhq.core.text_agent import (
@@ -60,6 +62,7 @@ from sqlalchemy import (
     true,
     update,
 )
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -83,6 +86,7 @@ __all__ = [
     "proves_sender",
     "queue_decision",
     "replies_in_thread",
+    "reply_clock",
     "reply_references",
     "reply_subject",
     "retry_reply",
@@ -788,12 +792,51 @@ def _plain_body(email: Email) -> str:
     return (body or "").strip()[:MAX_EMAIL_CHARS]
 
 
+async def reply_clock(
+    db: AsyncSession, agent: Agent, received_at: datetime | None = None
+) -> str | None:
+    """The date and time section for an email reply. An email has no phone
+    number, so the business's time zone comes from the active numbers the
+    agent answers calls or texts on, oldest first, skipping one with several
+    zones; without one the model gets UTC. A failure leaves the section out
+    instead of failing the reply, and a failed lookup is rolled back to a
+    savepoint so the rest of the caller's session still works."""
+    now = datetime.now(timezone.utc)
+    try:
+        async with db.begin_nested():
+            numbers = list(
+                (
+                    await db.execute(
+                        select(PhoneNumber.e164)
+                        .where(
+                            PhoneNumber.answered_by(agent.id),
+                            PhoneNumber.organization_id == agent.organization_id,
+                            PhoneNumber.provisioning_state == "active",
+                        )
+                        .order_by(PhoneNumber.created_at)
+                    )
+                ).scalars()
+            )
+    except DBAPIError as exc:
+        if exc.connection_invalidated:
+            raise  # the session is gone: let the reply fail here, clearly
+        logger.exception("could not look up the agent's numbers for the clock")
+        numbers = []
+    return safe_clock_section(
+        started_at=now,
+        channel="email",
+        business_number=number_with_one_zone(numbers, now),
+        received_at=received_at,
+    )
+
+
 def build_chat_messages(
     agent: Agent,
     thread: list[Email],
     *,
     trust: SenderTrust,
     sends_tried: bool = False,
+    clock: str | None = None,
 ) -> list[dict[str, Any]]:
     """OpenAI-style messages: the system message, then the thread. Mail from
     people is ``user``, labeled so the model reads it as mail, and only an
@@ -803,7 +846,7 @@ def build_chat_messages(
         {
             "role": "system",
             "content": build_email_instructions(
-                agent.system_prompt, trust=trust, sends_tried=sends_tried
+                agent.system_prompt, trust=trust, sends_tried=sends_tried, clock=clock
             ),
         }
     ]
