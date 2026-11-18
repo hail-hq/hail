@@ -37,7 +37,9 @@ from hailhq.core.telemetry_identity import (
     tag_context,
 )
 from hailhq.core.text_agent import (
+    EMPTY_REPLY_SKIP,
     MAX_REPLY_CHARS,
+    SKIP_REASONS,
     ClaimedReply,
     ReplyState,
     build_chat_messages,
@@ -130,13 +132,25 @@ async def _prepare(claimed: ClaimedReply) -> list[dict[str, Any]]:
 
 
 async def _settle(
-    claimed: ClaimedReply, state: ReplyState | None, *, retry: bool = False
+    claimed: ClaimedReply,
+    state: ReplyState | None,
+    *,
+    retry: bool = False,
+    reason: str | None = None,
+    detail: str | None = None,
 ) -> None:
     async with session_scope() as db:
         if retry:
             await retry_reply(db, claimed)
         elif state is not None:
-            await finish_reply(db, claimed.sms, state, attempt=claimed.attempt)
+            await finish_reply(
+                db,
+                claimed.sms,
+                state,
+                attempt=claimed.attempt,
+                reason=reason,
+                detail=detail,
+            )
 
 
 async def reply_once(api: AgentApiClient) -> bool:
@@ -213,7 +227,7 @@ async def _reply_claimed(api: AgentApiClient, claimed: ClaimedReply, span=None) 
         if span is not None:
             span.set_attribute("reply.state", "skipped")
         logger.info("sms_id=%s text agent wrote nothing; skipped", sms.id)
-        await _settle(claimed, "skipped")
+        await _settle(claimed, "skipped", reason=EMPTY_REPLY_SKIP)
         return True
     try:
         result = await api.post(
@@ -231,11 +245,29 @@ async def _reply_claimed(api: AgentApiClient, claimed: ClaimedReply, span=None) 
     state = str(result.get("state") or "failed")
     if state not in ("done", "skipped", "failed"):
         state = "failed"
+    reason = result.get("reason")
+    detail = result.get("detail")
+    # Known codes only: an older API sent a sentence or a carrier code here (a
+    # rolling deploy can pair this worker with it). Those are not stored.
+    code = reason if isinstance(reason, str) and reason in SKIP_REASONS else None
     if state != "done":
-        logger.info("sms_id=%s reply %s: %s", sms.id, state, result.get("reason"))
+        # An older API's sentence can hold the recipient's number: not logged.
+        logger.info(
+            "sms_id=%s reply %s: %s %s",
+            sms.id,
+            state,
+            code if code or reason is None else "[sentence hidden]",
+            detail or "",
+        )
     if span is not None:
         span.set_attribute("reply.state", state)
-    await _settle(claimed, state)  # type: ignore[arg-type]
+    # The reason is saved on the text, so the console can say why it got no reply.
+    await _settle(
+        claimed,
+        state,  # type: ignore[arg-type]
+        reason=code,
+        detail=str(detail) if code and detail else None,
+    )
     return True
 
 

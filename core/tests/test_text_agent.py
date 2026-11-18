@@ -9,7 +9,7 @@ from hailhq.core import text_agent, threads
 from hailhq.core.models import AccountCredit, Agent, Call, CallEvent, PhoneNumber, Sms
 from hailhq.core.prompts import THREAD_TOOL_HINT_TEXT
 from hailhq.core.sms_ingest import ingest_inbound_sms
-from sqlalchemy import select
+from sqlalchemy import literal_column, select, update
 
 ORG_NUMBER = "+14155550100"
 OTHER_NUMBER = "+14155550101"
@@ -233,7 +233,8 @@ async def test_claim_skips_when_routing_changed(async_session) -> None:
     row = await async_session.get(Sms, result.sms_id)
     await async_session.refresh(row)
     assert row.agent_reply_state == "skipped"
-    assert "skipped_reason" not in row.metadata_  # not an active-call skip
+    # The console names why; it is not an active-call skip.
+    assert row.metadata_["skipped_reason"] == "no_agent"
 
 
 async def test_claim_skips_unfunded_org_and_takes_the_next_row(
@@ -419,6 +420,7 @@ async def test_expired_lease_is_reclaimed_then_fails_after_max_attempts(
     assert await text_agent.claim_pending_reply(async_session) is None
     await async_session.refresh(row)
     assert row.agent_reply_state == "failed"
+    assert row.metadata_["skipped_reason"] == text_agent.REPLY_FAILED_SKIP
 
 
 async def test_retry_waits_for_backoff_then_gives_up(async_session) -> None:
@@ -446,6 +448,32 @@ async def test_retry_waits_for_backoff_then_gives_up(async_session) -> None:
     assert await text_agent.retry_reply(async_session, claimed) == "failed"
     await async_session.refresh(row)
     assert row.agent_reply_state == "failed"
+    assert row.metadata_["skipped_reason"] == text_agent.REPLY_FAILED_SKIP
+
+
+async def test_skip_reason_starts_from_json_null_and_drops_an_old_detail(
+    async_session,
+) -> None:
+    await _seed(async_session)
+    first = await _ingest(async_session, "one", "SM28")
+    second = await _ingest(async_session, "two", "SM29")
+    null_row = await async_session.get(Sms, first.sms_id)
+    detail_row = await async_session.get(Sms, second.sms_id)
+    await async_session.execute(
+        update(Sms)
+        .where(Sms.id == null_row.id)
+        .values(metadata_=literal_column("'null'::jsonb"))
+    )
+    detail_row.metadata_ = {"keep": "yes", "skipped_detail": "old"}
+    await async_session.commit()
+
+    for row in (null_row, detail_row):
+        await text_agent.finish_reply(
+            async_session, row, "skipped", reason=text_agent.THREAD_CAP_SKIP
+        )
+        await async_session.refresh(row)
+    assert null_row.metadata_ == {"skipped_reason": "thread_cap"}
+    assert detail_row.metadata_ == {"keep": "yes", "skipped_reason": "thread_cap"}
 
 
 async def test_stale_claim_does_not_overwrite_a_reclaimed_row(async_session) -> None:
@@ -484,7 +512,7 @@ async def test_old_pending_text_is_skipped_not_answered(
     assert claimed is not None and claimed.sms.id == fresh.sms_id
     await async_session.refresh(row)
     assert row.agent_reply_state == "skipped"
-    assert "skipped_reason" not in row.metadata_  # expiry is not a call skip
+    assert row.metadata_["skipped_reason"] == "expired"  # not a call skip
 
 
 async def test_inbound_text_carries_the_numbers_agent(async_session) -> None:

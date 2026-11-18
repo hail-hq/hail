@@ -111,7 +111,10 @@ async def test_skipped_and_failed_states_are_recorded(async_session, fake_llm) -
     )
     await textbot.reply_once(api)
     async_session.expire_all()
-    assert (await async_session.get(Sms, sms_id)).agent_reply_state == "skipped"
+    row = await async_session.get(Sms, sms_id)
+    assert row.agent_reply_state == "skipped"
+    # The reason is saved for the console.
+    assert row.metadata_["skipped_reason"] == "thread_cap"
 
 
 async def test_unfunded_org_reply_skipped_before_llm(
@@ -150,7 +153,9 @@ async def test_provider_error_marks_failed_without_posting(
     await textbot.reply_once(api)
     api.post.assert_not_awaited()
     async_session.expire_all()
-    assert (await async_session.get(Sms, sms_id)).agent_reply_state == "failed"
+    row = await async_session.get(Sms, sms_id)
+    assert row.agent_reply_state == "failed"
+    assert row.metadata_["skipped_reason"] == text_agent.REPLY_FAILED_SKIP
 
 
 async def test_generate_reply_builds_chat_from_thread(
@@ -446,6 +451,7 @@ async def test_transient_errors_fail_after_the_attempt_limit(
     async_session.expire_all()
     row = await async_session.get(Sms, sms_id)
     assert row.agent_reply_state == "failed"
+    assert row.metadata_["skipped_reason"] == text_agent.REPLY_FAILED_SKIP
     assert api.post.await_count == text_agent.MAX_ATTEMPTS
 
 
@@ -633,3 +639,59 @@ async def test_run_forever_frees_the_pool_even_if_the_api_client_fails_to_close(
     with pytest.raises(OSError):
         await asyncio.wait_for(textbot.run_forever(), timeout=2)
     disposed.assert_awaited_once()
+
+
+async def test_skip_detail_is_saved(async_session, fake_llm) -> None:
+    sms_id = await _seed(async_session)
+    detail = "US texting from this number needs SMS registration."
+    api = SimpleNamespace(
+        post=AsyncMock(
+            return_value={
+                "ok": False,
+                "state": "skipped",
+                "reason": "sms_registration",
+                "detail": detail,
+            }
+        )
+    )
+    await textbot.reply_once(api)
+    async_session.expire_all()
+    row = await async_session.get(Sms, sms_id)
+    assert row.metadata_["skipped_reason"] == "sms_registration"
+    assert row.metadata_["skipped_detail"] == detail
+
+
+async def test_sentence_reason_from_an_older_api_is_not_stored(
+    async_session, fake_llm
+) -> None:
+    sms_id = await _seed(async_session)
+    api = SimpleNamespace(
+        post=AsyncMock(
+            return_value={
+                "ok": False,
+                "state": "skipped",
+                "reason": "recipient '+15550100123' is suppressed (STOP)",
+            }
+        )
+    )
+    await textbot.reply_once(api)
+    async_session.expire_all()
+    row = await async_session.get(Sms, sms_id)
+    assert row.agent_reply_state == "skipped"
+    assert "skipped_reason" not in (row.metadata_ or {})
+
+
+async def test_failed_reply_without_a_code_records_reply_failed(
+    async_session, fake_llm
+) -> None:
+    """An older API sends the carrier's own code ("30007"): not stored, but the
+    failed text still says why."""
+    sms_id = await _seed(async_session)
+    api = SimpleNamespace(
+        post=AsyncMock(return_value={"ok": False, "state": "failed", "reason": "30007"})
+    )
+    await textbot.reply_once(api)
+    async_session.expire_all()
+    row = await async_session.get(Sms, sms_id)
+    assert row.agent_reply_state == "failed"
+    assert row.metadata_["skipped_reason"] == text_agent.REPLY_FAILED_SKIP

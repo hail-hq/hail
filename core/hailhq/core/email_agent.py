@@ -32,6 +32,7 @@ from hailhq.core.email_mime import (
     reply_subject,
 )
 from hailhq.core.forward_targets import normalize_address
+from hailhq.core.jsonb import merge_object
 from hailhq.core.models import Agent, Email, EmailDomain, Sms
 from hailhq.core.prompts import (
     TEAM_EMAIL_LABEL,
@@ -54,7 +55,6 @@ from sqlalchemy import (
     cast,
     false,
     func,
-    literal_column,
     or_,
     select,
     true,
@@ -190,13 +190,8 @@ def is_authenticated(email: Email) -> bool:
 
 
 def with_skip_reason(reason: str) -> ColumnElement[Any]:
-    """``metadata`` with this skip reason merged in. ``||`` on a JSON ``null``
-    makes an array and the key is lost, so that row starts from ``{}``."""
-    current = func.coalesce(
-        func.nullif(Email.metadata_, literal_column("'null'::jsonb")),
-        literal_column("'{}'::jsonb"),
-    )
-    return current.op("||")(func.jsonb_build_object("agent_skip_reason", reason))
+    """``metadata`` with this skip reason merged in."""
+    return merge_object(Email.metadata_, {"agent_skip_reason": reason})
 
 
 def _sender_blocked(sender: str, base_domain: str) -> bool:
