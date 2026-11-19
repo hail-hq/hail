@@ -3,7 +3,9 @@ package cmd
 import (
 	"encoding/json"
 	"net/http"
+	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -344,5 +346,91 @@ func TestAgentsCreate_LeavesEmailCallerOutUnlessGiven(t *testing.T) {
 	_ = json.Unmarshal(srv.lastBody, &body)
 	if _, present := body["email_caller_enabled"]; present {
 		t.Errorf("email_caller_enabled must be left out when not given: %v", body)
+	}
+}
+
+func TestAgentsCreate_HTTPToolsFileSendsTheList(t *testing.T) {
+	srv := newFakeServer(t, http.StatusCreated, sampleAgent())
+	path := t.TempDir() + "/tools.json"
+	tools := `[{"name": "lookup_order", "description": "Find an order.", "url": "https://api.example.com/orders"}]`
+	if err := os.WriteFile(path, []byte(tools), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"agents", "create", "Desk", "--prompt", "hi", "--http-tools-file", path,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var body map[string]any
+	_ = json.Unmarshal(srv.lastBody, &body)
+	list, _ := body["http_tools"].([]any)
+	if len(list) != 1 || list[0].(map[string]any)["name"] != "lookup_order" {
+		t.Errorf("http_tools: %v", body["http_tools"])
+	}
+}
+
+func TestAgentsCreate_HTTPToolsFileMustBeAnArray(t *testing.T) {
+	srv := newFakeServer(t, http.StatusCreated, sampleAgent())
+	path := t.TempDir() + "/tools.json"
+	commands := [][]string{
+		{"agents", "create", "Desk", "--prompt", "hi"},
+		{"agents", "update", "33333333-3333-3333-3333-333333333333"},
+	}
+	for _, content := range []string{`{"name": "x"}`, `null`} {
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		for _, command := range commands {
+			args := append(append([]string{}, command...), "--http-tools-file", path)
+			_, _, err := runRoot(t,
+				map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+				args...,
+			)
+			if err == nil {
+				t.Fatalf("%s %s must fail", command[1], content)
+			}
+		}
+	}
+	if hits := atomic.LoadInt32(&srv.hits); hits != 0 {
+		t.Errorf("a bad tools file must fail before any request, got %d", hits)
+	}
+}
+
+func TestAgentsUpdate_NoHTTPToolsSendsEmptyList(t *testing.T) {
+	srv := newFakeServer(t, http.StatusOK, sampleAgent())
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"agents", "update", "33333333-3333-3333-3333-333333333333", "--no-http-tools",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var body map[string]any
+	_ = json.Unmarshal(srv.lastBody, &body)
+	if list, ok := body["http_tools"].([]any); !ok || len(list) != 0 {
+		t.Errorf("http_tools must be []: %v", body)
+	}
+}
+
+func TestAgentsRotateToolSecret_PrintsTheSecretOnce(t *testing.T) {
+	agent := sampleAgent()
+	secret := "hts_example"
+	agent.HttpToolSecret = &secret
+	srv := newFakeServer(t, http.StatusOK, agent)
+	stdout, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"agents", "rotate-tool-secret", "33333333-3333-3333-3333-333333333333",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if srv.lastReq.Method != http.MethodPost ||
+		!strings.HasSuffix(srv.lastReq.URL.Path, "/agents/33333333-3333-3333-3333-333333333333/rotate-tool-secret") {
+		t.Fatalf("request: %s %s", srv.lastReq.Method, srv.lastReq.URL.Path)
+	}
+	if !strings.Contains(stdout, "hts_example") {
+		t.Errorf("stdout must show the secret: %s", stdout)
 	}
 }

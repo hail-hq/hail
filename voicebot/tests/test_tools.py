@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import dataclasses
+import json
 import uuid
 from unittest.mock import AsyncMock
 
-from hailhq.core.agent_tools import email_caller
+import hailhq.voicebot.tools as tools_mod
+from hailhq.core.agent_tools import email_caller, http_tool
+from hailhq.core.config import settings
+from hailhq.core.models import Agent, AgentHttpTool
+from hailhq.core.secret_cipher import SecretCipher, generate_key
 from hailhq.voicebot.tools import (
     SPOKEN_TOOL_FAILURE,
     _make_handler,
@@ -135,7 +140,6 @@ async def test_availability_failure_does_not_poison_session(db, monkeypatch):
     after the first failure, so the second check's execute() raises
     PendingRollbackError and a genuinely-available tool is silently lost.
     """
-    import hailhq.voicebot.tools as tools_mod
     from livekit.agents.llm.tool_context import get_raw_function_info
     from sqlalchemy import text
 
@@ -245,8 +249,6 @@ async def test_session_tool_that_must_not_wait_runs_at_once():
 
 
 async def test_end_call_keeps_the_call_when_they_talk_over_the_goodbye():
-    import dataclasses
-
     from hailhq.voicebot.tools import STILL_TALKING
 
     hung_up = []
@@ -327,6 +329,61 @@ async def _email_caller_names(monkeypatch, meta: dict) -> list[str]:
             await api.aclose()
 
 
+async def _seed_http_tool(session_factory, monkeypatch, **over):
+    """An agent with one HTTP tool; returns (org_id, agent_id)."""
+    key = generate_key()
+    monkeypatch.setattr(settings, "hail_provider_secret_key", key)
+    cipher = SecretCipher(key)
+    org_id, agent_id = uuid.uuid4(), uuid.uuid4()
+    async with session_factory() as s:
+        s.add(
+            Agent(
+                id=agent_id,
+                organization_id=org_id,
+                name="Desk",
+                system_prompt="Help.",
+                http_tool_secret_encrypted=cipher.encrypt("hts_x"),
+            )
+        )
+        await s.flush()
+        s.add(
+            AgentHttpTool(
+                agent_id=agent_id,
+                position=0,
+                name="lookup_order",
+                description="Find an order.",
+                url="https://api.example.com/orders",
+                parameters={"type": "object", "properties": {}},
+                headers_encrypted=cipher.encrypt(json.dumps({"Authorization": "t"})),
+                header_names=["Authorization"],
+                timeout_seconds=5,
+                wait_message="One moment.",
+                **over,
+            )
+        )
+        await s.commit()
+    return org_id, agent_id
+
+
+async def test_http_tools_load_for_the_calls_agent(db, session_factory, monkeypatch):
+    org_id, agent_id = await _seed_http_tool(session_factory, monkeypatch)
+    meta = {
+        "organization_id": str(org_id),
+        "agent_id": str(agent_id),
+        # `tools: []` turns off built-ins only; the agent's own tools stay.
+        "tools": [],
+    }
+    tools, api = await build_agent_tools(
+        meta, call_id=uuid.uuid4(), hangup=None, send_dtmf=None
+    )
+    try:
+        assert [t.info.name for t in tools] == ["lookup_order"]
+        assert tools[0].info.raw_schema["description"] == "Find an order."
+    finally:
+        if api is not None:
+            await api.aclose()
+
+
 _PHONE = {"direction": "outbound", "to_e164": "+14155550123"}
 
 
@@ -359,3 +416,63 @@ async def test_email_caller_needs_a_known_caller_number(db, monkeypatch) -> None
     assert "email_caller" in await _email_caller_names(
         monkeypatch, {**known, "email_caller_enabled": True}
     )
+
+
+async def test_http_tools_of_another_org_are_not_loaded(
+    db, session_factory, monkeypatch
+):
+    _org, agent_id = await _seed_http_tool(session_factory, monkeypatch)
+    meta = {
+        "organization_id": str(uuid.uuid4()),
+        "agent_id": str(agent_id),
+        "tools": [],
+    }
+    tools, _api = await build_agent_tools(
+        meta, call_id=uuid.uuid4(), hangup=None, send_dtmf=None
+    )
+    assert tools == []
+
+
+async def test_http_tool_load_failure_keeps_built_in_tools(db, monkeypatch):
+    async def broken(_session, _conv):
+        raise RuntimeError("db down")
+
+    # The loader catches the failure itself.
+    monkeypatch.setattr(http_tool, "http_tool_specs", broken)
+    tools, api = await build_agent_tools(
+        {"organization_id": str(uuid.uuid4()), "agent_id": str(uuid.uuid4())},
+        call_id=uuid.uuid4(),
+        hangup=None,
+        send_dtmf=None,
+    )
+    try:
+        assert "hail_settings_help" in [t.info.name for t in tools]
+    finally:
+        if api is not None:
+            await api.aclose()
+
+
+async def test_wait_message_is_said_without_waiting():
+    """The sentence plays while the request runs: say() is not awaited."""
+    import dataclasses
+
+    order: list[str] = []
+
+    class Session:
+        def say(self, text):
+            order.append(f"say:{text}")
+
+    rc = FakeRunContext()
+    rc.session = Session()
+
+    async def execute(_ctx, _args):
+        order.append("request")
+        return "shipped"
+
+    spec = dataclasses.replace(
+        _spec(name="lookup_order", tier="customer_api", execute=execute),
+        wait_message="One moment.",
+    )
+    assert await _make_handler(spec, _tctx())({}, rc) == "shipped"
+    assert order == ["say:One moment.", "request"]
+    assert rc.waited is False

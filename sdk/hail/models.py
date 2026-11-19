@@ -350,6 +350,19 @@ class PhoneNumberListResponse(BaseModel):
 AgentStatus = Literal["live", "paused"]
 
 
+class AgentHttpTool(BaseModel):
+    """One of your APIs an agent may call (``http_tools`` on an agent).
+    Header values are never returned, only their names."""
+
+    name: str
+    description: str
+    url: str
+    parameters: dict[str, Any] = Field(default_factory=dict)
+    header_names: list[str] = Field(default_factory=list)
+    timeout_seconds: int = 5
+    wait_message: str | None = None
+
+
 class AgentResponse(BaseModel):
     """Shape returned by the ``/agents`` endpoints: a saved brain a number
     answers with, and that ``calls.create(agent_id=...)`` can use."""
@@ -372,6 +385,10 @@ class AgentResponse(BaseModel):
     email_enabled: bool = True
     email_caller_enabled: bool = False
     status: AgentStatus = "live"
+    http_tools: list[AgentHttpTool] = Field(default_factory=list)
+    # Signs HTTP tool requests. Set only on the response that created or
+    # rotated it; store it then.
+    http_tool_secret: str | None = None
     created_at: datetime
     updated_at: datetime
 

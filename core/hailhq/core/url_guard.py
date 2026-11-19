@@ -1,9 +1,11 @@
 """SSRF guard for customer-supplied URLs.
 
-Two callers: the BYO openai-compatible LLM ``base_url``
-(``assert_public_https_url``; fetched at validation time and at call time)
-and webhook deliveries (``core/hailhq/core/http_post.py``). Without a
-guard, a customer could point either at cloud metadata (169.254.169.254),
+Three callers: the BYO openai-compatible LLM ``base_url``
+(``assert_public_https_url``; fetched at validation time and at call time),
+agent HTTP tool urls (``assert_public_https_url`` when saved;
+``agent_tools/http_tool.py`` checks each address again at connect time) and
+webhook deliveries (``core/hailhq/core/http_post.py``). Without a
+guard, a customer could point any of them at cloud metadata (169.254.169.254),
 loopback or internal hosts and turn the server into an SSRF proxy.
 
 ``assert_public_host`` resolves the host and refuses it unless every
@@ -25,6 +27,14 @@ pair converts non-ASCII names with IDNA 2003, which maps ``faß.example``
 to ``fass.example``; httpx uses IDNA 2008 (``xn--fa-hia.example``), a
 different host. Control characters (C0, DEL and C1) are refused before
 parsing: httpx itself refuses only the ASCII ones.
+
+HTTP tools are the exception: they connect with aiohttp, which parses the
+url with yarl, not httpx. yarl gives the same IDNA 2008 host for names like
+``faß.example``, but its parser differs: it accepts some hosts httpx
+refuses (it drops a zero-width joiner and maps ``Ⅸ`` to ``ix``). So for
+tools the save check here is a first filter, and the real guard is the
+resolver check in ``agent_tools/http_tool.py``, which judges every address
+aiohttp is about to connect to.
 
 Not covered: httpx resolves the host again when it connects, so a DNS
 rebind between the two lookups is still possible.
@@ -168,9 +178,11 @@ def assert_public_host(host: str, port: int) -> None:
         raise UnsafeUrlError(NOT_PUBLIC)
     try:
         infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
-    except (socket.gaierror, UnicodeError) as exc:
-        # UnicodeError: the stdlib idna codec refuses an empty or too-long
-        # label (``a..b.com``) before any DNS lookup.
+    except (OSError, UnicodeError) as exc:
+        # OSError: socket.gaierror, or a plain OSError for a resolver system
+        # error (too many open files). UnicodeError: the stdlib idna codec
+        # refuses an empty or too-long label (``a..b.com``) before any DNS
+        # lookup.
         logger.info("url guard: %s does not resolve: %s", host, exc)
         raise UnsafeUrlError(NOT_PUBLIC) from exc
     if not infos:

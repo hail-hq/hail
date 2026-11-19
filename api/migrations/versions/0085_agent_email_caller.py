@@ -12,8 +12,8 @@ while it builds; that cannot run in a transaction, hence the autocommit
 block. A partial unique index on ``call_events`` keeps one ``email_caller``
 event per send (rule 5: one table, several kinds of row).
 
-Revision ID: 0082
-Revises: 0081
+Revision ID: 0085
+Revises: 0084
 """
 
 from __future__ import annotations
@@ -21,8 +21,8 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0082"
-down_revision: str | None = "0081"
+revision: str = "0085"
+down_revision: str | None = "0084"
 branch_labels = None
 depends_on = None
 
