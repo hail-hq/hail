@@ -209,9 +209,15 @@ def _dialog(sock: socket.socket, dialog: Dialog, state: dict) -> tuple[int, str]
             if accepted:
                 return 1, f"ACCEPTED: {accepted.code} {accepted.reason}"
             if state["answered"]:
+                # The INVITE is still pending: cancel it so a late ring does
+                # not reach the number's agent after the probe exits.
+                _send(sock, dialog.cancel())
                 return 2, "INCONCLUSIVE: 100 Trying, then no final answer"
             # LiveKit drops what it takes for a flood without an answer.
-            return 0, "REFUSED: no answer to the INVITE (dropped)"
+            return 0, (
+                "REFUSED: no answer to the INVITE (dropped). Valid only if the "
+                "control run printed ACCEPTED from this network."
+            )
         if "INVITE" not in response.headers.get("cseq", ""):
             continue  # the answer to our CANCEL
         state["answered"] = True

@@ -855,6 +855,8 @@ async def set_voice_in_trunk_auth(username: str, password: str) -> None:
         )
     except DidwwApiError as exc:
         raise CarrierRequestError(carrier_status(exc)) from exc
+    except requests.RequestException as exc:
+        raise CarrierRequestError(502) from exc
 
 
 # --- call costs: DIDWW has no per-call lookup, so one outbound CDR export

@@ -109,6 +109,15 @@ async def unregister(db: AsyncSession, lk: LiveKitClient, number: PhoneNumber) -
     await db.flush()
 
 
+# livekit/protocol sip/sip.go, validateTrunkInbound.
+_TRUNK_CONFLICT = "Conflicting inbound SIP Trunks"
+
+# A SIP user name no call uses. A trunk with no numbers matches every dialed
+# number, so the shared trunk keeps this entry before a number leaves it.
+# Must equal ``shared_placeholder`` in infra/livekit/inbound-trunks.json.
+SHARED_TRUNK_PLACEHOLDER = "hail-placeholder-shared"
+
+
 async def _add_to_carrier_trunk(lk: LiveKitClient, trunk_id: str, e164: str) -> None:
     """Add, and once retry after a leftover shared-trunk entry is removed.
 
@@ -125,7 +134,12 @@ async def _add_to_carrier_trunk(lk: LiveKitClient, trunk_id: str, e164: str) -> 
         return
     except TwirpError as first:
         shared = settings.livekit_sip_inbound_trunk_id
-        if first.code != "invalid_argument" or not shared or shared == trunk_id:
+        if (
+            first.code != "invalid_argument"
+            or _TRUNK_CONFLICT not in first.message
+            or not shared
+            or shared == trunk_id
+        ):
             raise
         logger.warning(
             "number %s: carrier trunk refused the add, removing a shared-trunk "
@@ -149,6 +163,7 @@ async def _remove_from_shared_trunk(
     if not shared or shared == trunk_id:
         return
     try:
+        await lk.add_inbound_number(shared, SHARED_TRUNK_PLACEHOLDER)
         await lk.remove_inbound_number(shared, e164)
     except TwirpError as exc:
         if exc.code != "not_found":

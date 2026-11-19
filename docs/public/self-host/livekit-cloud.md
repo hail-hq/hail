@@ -55,16 +55,16 @@ Hail answers calls on a number once the number routes calls to an agent
 ([Agents](../agents.md)). LiveKit needs **one inbound trunk** and **one
 dispatch rule**. Hail adds and removes numbers on the trunk itself.
 
-1. Inbound trunk. One trunk for every carrier: LiveKit allows a single
-   wildcard (empty `numbers`) inbound trunk per project. Without `numbers`,
-   LiveKit needs `allowed_addresses` (or `auth_username`/`auth_password`,
-   which Twilio Elastic SIP does not send). The carrier pages say what each
-   carrier sends: [Twilio](./twilio.md#6-inbound-calls),
+1. Inbound trunk. One trunk for every carrier. Hail adds each number it
+   routes to the trunk's `numbers`. The trunk starts with a placeholder
+   entry: a trunk with empty `numbers` would match every dialed number,
+   including numbers on a locked per-carrier trunk (below). The carrier
+   pages say what each carrier sends: [Twilio](./twilio.md#6-inbound-calls),
    [Telnyx](./telnyx.md#inbound-calls), [DIDWW](./didww.md#inbound-calls).
 
    ```bash
    cat > inbound.json <<'JSON'
-   {"trunk": {"name": "hail-inbound", "numbers": [], "allowed_addresses": ["0.0.0.0/0"]}}
+   {"trunk": {"name": "hail-inbound", "numbers": ["hail-placeholder-shared"], "allowed_addresses": ["0.0.0.0/0"]}}
    JSON
    lk sip inbound create inbound.json
    # → ST_...  → LIVEKIT_SIP_INBOUND_TRUNK_ID

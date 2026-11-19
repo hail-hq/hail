@@ -224,10 +224,15 @@ async def test_shared_trunk_failure_does_not_block_unregister(
     assert number.inbound_registered_at is None
 
     lk.remove_inbound_number.reset_mock(side_effect=True)
-    lk.add_inbound_number.side_effect = [_conflict(), None]
+    lk.add_inbound_number.reset_mock()
+    lk.add_inbound_number.side_effect = [_conflict(), None, None]
     await inbound_routing.register(async_session, lk, number)
     lk.remove_inbound_number.assert_awaited_once_with("ST_shared", "+14155550100")
-    assert lk.add_inbound_number.await_count == 2
+    assert lk.add_inbound_number.await_args_list[1].args == (
+        "ST_shared",
+        inbound_routing.SHARED_TRUNK_PLACEHOLDER,
+    )
+    assert lk.add_inbound_number.await_count == 3
     assert number.inbound_registered_at is not None
 
 
@@ -251,10 +256,10 @@ async def test_register_after_the_shared_trunk_is_deleted(
 ) -> None:
     monkeypatch.setattr(settings, "livekit_sip_inbound_trunk_id", "ST_shared")
     lk = AsyncMock()
-    lk.add_inbound_number.side_effect = [_conflict(), None]
-    lk.remove_inbound_number.side_effect = TwirpError(
-        "not_found", "trunk not found", status=404
-    )
+    gone = TwirpError("not_found", "trunk not found", status=404)
+    # Carrier add refused, placeholder add on the deleted shared trunk, retry.
+    lk.add_inbound_number.side_effect = [_conflict(), gone, None]
+    lk.remove_inbound_number.side_effect = gone
     number = _number()
     async_session.add(number)
     await async_session.flush()
@@ -332,3 +337,40 @@ async def test_register_does_not_touch_the_shared_trunk_on_other_errors(
 
     lk.remove_inbound_number.assert_not_awaited()
     assert lk.add_inbound_number.await_count == 1
+
+
+async def test_shared_trunk_keeps_its_placeholder_before_a_number_leaves(
+    async_session, hooks, monkeypatch
+) -> None:
+    """A trunk with no numbers matches every dialed number, so the shared
+    trunk gets its placeholder before the last number leaves it."""
+    monkeypatch.setattr(settings, "livekit_sip_inbound_trunk_id", "ST_shared")
+    lk = AsyncMock()
+    number = _number()
+    number.inbound_registered_at = datetime.now(timezone.utc)
+    async_session.add(number)
+    await async_session.flush()
+
+    await inbound_routing.unregister(async_session, lk, number)
+
+    lk.add_inbound_number.assert_awaited_once_with(
+        "ST_shared", inbound_routing.SHARED_TRUNK_PLACEHOLDER
+    )
+
+
+async def test_other_invalid_argument_does_not_touch_the_shared_trunk(
+    async_session, hooks, monkeypatch
+) -> None:
+    monkeypatch.setattr(settings, "livekit_sip_inbound_trunk_id", "ST_shared")
+    lk = AsyncMock()
+    lk.add_inbound_number.side_effect = TwirpError(
+        "invalid_argument", "bad number", status=400
+    )
+    number = _number()
+    async_session.add(number)
+    await async_session.flush()
+
+    with pytest.raises(inbound_routing.InboundRoutingError):
+        await inbound_routing.register(async_session, lk, number)
+
+    lk.remove_inbound_number.assert_not_awaited()

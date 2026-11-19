@@ -152,13 +152,14 @@ def test_other_final_codes_say_nothing() -> None:
 
 
 def test_trying_then_silence_says_nothing() -> None:
-    port, _seen, thread = serve(
+    port, seen, thread = serve(
         lambda conn, inv: conn.sendall(_response(inv, 100, "Trying"))
     )
     code, verdict = probe.probe("127.0.0.1", port, NUMBER, timeout=0.5)
     thread.join(3)
     assert code == 2
     assert "100 Trying" in verdict
+    assert b"CANCEL " in b"".join(seen[1:])
 
 
 def test_reset_connection_says_nothing() -> None:

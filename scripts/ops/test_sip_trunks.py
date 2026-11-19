@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from hailhq.core.config import settings
+from hailhq.core.inbound_routing import SHARED_TRUNK_PLACEHOLDER
 from livekit import api
 
 HERE = Path(__file__).resolve().parent
@@ -334,3 +336,14 @@ async def test_move_stops_when_the_database_knows_no_number(monkeypatch) -> None
             drop_unknown=True,
         )
     assert "+14155550188" in sip.trunks["ST_shared"].numbers
+
+
+def test_shared_placeholder_matches_core() -> None:
+    """inbound_routing adds the same placeholder before a number leaves the
+    shared trunk, so an emptied shared trunk never matches every number."""
+    data = json.loads(
+        (
+            Path(__file__).resolve().parents[2] / "infra/livekit/inbound-trunks.json"
+        ).read_text()
+    )
+    assert data["shared_placeholder"] == SHARED_TRUNK_PLACEHOLDER
