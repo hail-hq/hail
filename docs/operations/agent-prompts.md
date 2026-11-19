@@ -173,6 +173,36 @@ be forwarded. This feature adds no upload control.
 The normal `read_email` tool uses the same checks. Ordinary phone calls cannot
 read email history. Neither caller ID nor an editable profile phone proves
 email ownership. Browser sessions use the signed-in account's verified email.
+
+`send_email` on a phone call (owner decision, 2026-11-19): caller ID may pick
+the caller's own address on file, with limits. Caller ID can be faked.
+
+- Only the reserved `recipient_name` `me` (also `caller`) uses it. On a
+  call, `you` and `sender` are names. The contact line in the call's
+  instructions tells the model to use `me`.
+- It reaches the one email saved for the caller's number, members first. No
+  single email means no send; it never falls back to a name lookup.
+- A name is looked up by name only, members first. Caller ID never breaks a
+  name tie, and never puts the caller's address in place of a name. The
+  caller's saved name is refused like an unknown name unless it resolves to
+  the caller's own address, so an older prompt cannot send the caller's
+  request to a member or contact of the same name.
+- Each email to the caller's address on file (by `me` or by a name that
+  resolves to it) gets a fixed subject start, first line
+  and footer (`caller_email_subject`, `caller_email_body`): sent because of a
+  phone call with the organization. These lines are English only for now.
+- One phone call sends at most 3 emails (`MAX_CALL_EMAILS`), counted under
+  the call row lock. The limit is per call; across calls only the org-wide
+  agent caps apply. Refusals for the cap and for no email on file write an
+  `agent.email.blocked` audit row.
+- An unknown name and a name shared by several people get one answer, so a
+  caller cannot probe the saved contacts.
+
+In an email run, `me` is the sender that DMARC proved. Like a name saved
+with their address, it sends its own email, and the run's reply still
+follows. With original files, it is the run's threaded reply instead. Email
+runs may still email saved contacts by name (owner decision, 2026-11-19).
+
 Stored transcripts contain spoken user/assistant text only. Send receipts
 mean provider acceptance, never delivery. Disabled providers expose no send
 tool. Inbox access requires the verified person associated with the call.

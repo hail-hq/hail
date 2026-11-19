@@ -9,6 +9,15 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 from hailhq.core.agent_tools.registry import all_tools
+from hailhq.core.agent_tools.send_email import (
+    EMAIL_RUN_SPEC,
+    MAX_ORG_NAME_CHARS,
+    MAX_SUBJECT_CHARS,
+    SELF_RECIPIENT,
+    caller_email_body,
+    caller_email_subject,
+    is_self_recipient,
+)
 from hailhq.core.agent_tools.spec import ToolContext
 from hailhq.core.config import settings
 from hailhq.core.models import (
@@ -270,6 +279,44 @@ async def test_send_email_posts_recipient_name_not_address():
     assert path == "/internal/agent/send-email"
     assert payload["recipient_name"] == "Sarah Chen"
     assert "@" not in str(payload.get("recipient_name"))
+
+
+def test_send_email_self_recipient_is_a_reserved_word_only():
+    for name in ("me", " ME ", "caller", "sender", "you"):
+        assert is_self_recipient(name)
+    for name in ("Sam Lee", "my email", "", "meg"):
+        assert not is_self_recipient(name)
+    # On a call "you" may mean the business: it is a name there.
+    assert is_self_recipient("Caller", on_call=True)
+    for name in ("you", "sender"):
+        assert not is_self_recipient(name, on_call=True)
+    # Both tool descriptions tell the model which word to use.
+    tools = {t.name: t for t in all_tools()}
+    for spec in (tools["send_email"], EMAIL_RUN_SPEC):
+        assert f'recipient_name to "{SELF_RECIPIENT}"' in spec.description
+
+
+def test_caller_email_body_has_fixed_lines_and_a_clean_org_name():
+    body = caller_email_body("  Your booking is at 3 pm. ", "North\u202egate\nDental")
+    assert body == (
+        "This email was sent because of a phone call with Northgate Dental.\n\n"
+        "Your booking is at 3 pm.\n\n"
+        "-- \n"
+        "You got this email because someone asked for it during a phone call"
+        " with Northgate Dental, on the phone number saved with this email"
+        " address. If that was not you, you can ignore it."
+    )
+    long = caller_email_body("Hi.", "N" * 300)
+    assert f"with {'N' * MAX_ORG_NAME_CHARS}." in long
+    assert caller_email_body("Hi.", None).startswith(
+        "This email was sent because of a phone call.\n"
+    )
+    assert (
+        caller_email_subject("Your\nbooking\u200b", "Northgate Dental")
+        == "From a phone call with Northgate Dental: Your booking"
+    )
+    assert caller_email_subject(" \n", None) == "From a phone call"
+    assert len(caller_email_subject("S" * 200, "N" * 300)) == MAX_SUBJECT_CHARS
 
 
 async def test_send_sms_empty_body_gets_tailored_error_and_never_posts():

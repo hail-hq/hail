@@ -4,6 +4,11 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+### Fixed
+
+- Agents: "email me" on a call reaches only the caller's own saved email.
+- Agents: one phone call sends at most 3 emails, and emails to the caller say they came from a phone call.
+
 ## [0.33.0] (2026-11-19)
 
 Agents can call your own API with HTTP tools, answer email, and know the
