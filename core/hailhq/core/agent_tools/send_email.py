@@ -80,23 +80,28 @@ def _is_flag_letter(c: str) -> bool:
 
 
 def _one_line(text: str) -> str:
-    """``text`` on one line, without characters that could disguise it."""
+    """``text`` on one line, without characters that could disguise it. A
+    joiner stays only between two letters or marks of a script that uses it."""
     kept: list[str] = []
-    for c in text:
+    for c in unicodedata.normalize("NFC", text):
         if c.isspace():
             kept.append(" ")
         elif c in _JOINERS:
             if kept and _keeps_joiner(kept[-1]):
                 kept.append(c)
         elif unicodedata.category(c) not in _HIDDEN:
+            if kept and kept[-1] in _JOINERS and not _keeps_joiner(c):
+                kept.pop()
             kept.append(c)
+    if kept and kept[-1] in _JOINERS:
+        kept.pop()
     return " ".join("".join(kept).split())
 
 
 def _splits_letter(text: str, at: int) -> bool:
     """True when a cut before ``text[at]`` would split one written letter: a
     combining mark or joiner follows, a virama, joiner or Thai leading vowel
-    comes before, or it falls inside a flag."""
+    comes before, or it falls inside a flag or before a skin tone."""
     after, before = text[at], text[at - 1]
     return (
         unicodedata.category(after).startswith("M")
@@ -105,12 +110,14 @@ def _splits_letter(text: str, at: int) -> bool:
         or before in _LEADING_VOWELS
         or unicodedata.combining(before) == 9  # virama
         or (_is_flag_letter(before) and _is_flag_letter(after))
+        or 0x1F3FB <= ord(after) <= 0x1F3FF  # emoji skin tone
     )
 
 
 def _cut(text: str, limit: int) -> str:
     """``text`` cut to ``limit`` characters, never inside a written letter
-    (Indic vowel signs, viramas and joiners, Thai vowels, flags)."""
+    (Indic vowel signs, viramas and joiners, Thai vowels, flags, skin
+    tones). Text is NFC, so Korean syllables are single characters."""
     if len(text) <= limit:
         return text
     while limit > 0 and _splits_letter(text, limit):
@@ -137,9 +144,8 @@ def caller_email_subject(
     fixed = len(lines.subject.replace("{org}", "")) + 2  # ": "
     name = _org_name(org_name, min(MAX_ORG_NAME_CHARS, MAX_SUBJECT_CHARS - fixed))
     prefix = _fill(lines.subject, lines.subject_unnamed, name)
-    words = _one_line(subject)
-    framed = f"{prefix}: {words}" if words else prefix
-    return _cut(framed, MAX_SUBJECT_CHARS)
+    words = _cut(_one_line(subject), MAX_SUBJECT_CHARS - len(prefix) - 2)
+    return f"{prefix}: {words}" if words else prefix
 
 
 def caller_email_body(

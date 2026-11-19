@@ -111,3 +111,19 @@ def test_a_cut_keeps_thai_vowels_and_flags_whole():
     flag = "\U0001f1ec\U0001f1e7"
     cut = caller_email_subject("x" * (room - 1) + flag, None)
     assert not cut.endswith("\U0001f1ec")
+
+
+def test_a_cut_keeps_skin_tones_and_korean_syllables_and_no_stray_colon():
+    prefix = caller_email_subject("", None)
+    room = MAX_SUBJECT_CHARS - len(prefix) - 2
+    thumb = caller_email_subject("x" * (room - 1) + "\U0001f44d\U0001f3fd", None)
+    assert thumb.endswith("x")
+    # Separate jamo become one syllable before the cut.
+    korean = caller_email_subject("x" * (room - 1) + "\u1100\u1161", None)
+    assert korean.endswith("\uac00")
+    assert caller_email_subject("\u0301" * 300, None) == "From a phone call"
+
+
+def test_a_joiner_never_sits_before_latin_or_at_the_end():
+    assert "\u200d" not in caller_email_subject("\u0915\u200dPassword", None)
+    assert "\u200d" not in caller_email_subject("Hi", "\u0915\u200d")
