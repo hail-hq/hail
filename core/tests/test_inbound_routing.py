@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import uuid
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock
 
 import pytest
@@ -177,3 +178,24 @@ async def test_livekit_failure_undoes_the_carrier_attach(async_session, hooks) -
     with pytest.raises(inbound_routing.InboundRoutingError):
         await inbound_routing.register(async_session, lk, number)
     hooks["detach"].assert_awaited_once_with("PN1", "+14155550100")
+
+
+async def test_unregister_also_clears_the_shared_trunk_while_numbers_move(
+    async_session, hooks, monkeypatch
+) -> None:
+    """Left on the shared trunk, a later register to the carrier's trunk
+    would be refused (LiveKit lists a number on one trunk only)."""
+    monkeypatch.setattr(settings, "livekit_sip_inbound_trunk_id", "ST_shared")
+    lk = AsyncMock()
+    number = _number()
+    number.inbound_registered_at = datetime.now(timezone.utc)
+    async_session.add(number)
+    await async_session.flush()
+
+    await inbound_routing.unregister(async_session, lk, number)
+
+    assert [c.args for c in lk.remove_inbound_number.await_args_list] == [
+        ("ST_in_tw", "+14155550100"),
+        ("ST_shared", "+14155550100"),
+    ]
+    assert number.inbound_registered_at is None

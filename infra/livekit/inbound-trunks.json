@@ -1,5 +1,5 @@
 {
-  "$comment": "LiveKit inbound SIP trunks, one per carrier. Applied by scripts/ops/sip_trunks.py; checked every Monday by scripts/ops/check_sip_allowlist.py. No trunk ids or secrets here. Runbook: docs/operations/inbound-trunk-lockdown.md",
+  "$comment": "LiveKit inbound SIP trunks, one per carrier. Applied by scripts/ops/sip_trunks.py; checked every Monday by scripts/ops/check_sip_allowlist.py. No trunk ids or secrets here (the DIDWW digest user name is not secret). Runbook: docs/operations/inbound-trunk-lockdown.md",
   "dispatch_rule": "hail-inbound",
   "shared_placeholder": "hail-placeholder-shared",
   "trunks": {

@@ -14,6 +14,7 @@ import logging
 from datetime import datetime, timezone
 
 from hailhq.core.carrier_routing import carrier
+from hailhq.core.config import settings
 from hailhq.core.livekit import LiveKitClient
 from hailhq.core.models import PhoneNumber
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -92,6 +93,19 @@ async def unregister(db: AsyncSession, lk: LiveKitClient, number: PhoneNumber) -
         # The carrier is already detached; the row stays registered so the
         # next unregister (idempotent at the carrier) finishes the removal.
         raise InboundRoutingError("livekit_remove", exc) from exc
+    shared = settings.livekit_sip_inbound_trunk_id
+    if shared and shared != trunk_id:
+        # While numbers move, a number may still be on the shared trunk.
+        # Left there, a later register to its carrier's trunk is refused.
+        try:
+            await lk.remove_inbound_number(shared, number.e164)
+        except Exception:
+            logger.exception(
+                "number %s: still listed on the shared inbound trunk; run "
+                "sip_trunks.py move --number %s --drop-unknown",
+                number.e164,
+                number.e164,
+            )
     number.inbound_registered_at = None
     await db.flush()
 

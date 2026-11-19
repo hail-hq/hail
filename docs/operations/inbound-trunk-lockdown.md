@@ -84,7 +84,7 @@ Run `move` right after the restart anyway: a number routed to an agent between t
 
       `move` lists numbers on the shared trunk with no live row (released, failed or unknown to the database) and leaves them; add `--drop-unknown` to take them off, after checking the list.
 
-   2. Copy `.env` to the VM and restart as in step 5. The carrier's calls start failing now.
+   2. Copy `.env` to the VM and restart as in step 5. Calls keep working: numbers not moved yet still arrive on the shared trunk, which Hail accepts.
    3. At once, move the owner's numbers, then call one of them from a phone. The agent must answer. If it does not, roll back that carrier (below) and stop.
 
       ```bash
@@ -92,7 +92,7 @@ Run `move` right after the restart anyway: a number routed to an agent between t
         --number +<owner's number> --yes
       ```
 
-   4. Move the rest at once. The carrier's calls work again when this ends.
+   4. Move the rest at once. Each number is on no trunk for one LiveKit request (well under a second) while it moves.
 
       ```bash
       uv run python scripts/ops/sip_trunks.py move --carrier twilio --yes

@@ -84,7 +84,8 @@ dispatch rule**. Hail adds and removes numbers on the trunk itself.
    trunk would match every dialed number, so each keeps a placeholder entry.
    Hail answers a call on the trunk of the number's carrier, and on the
    shared trunk while `LIVEKIT_SIP_INBOUND_TRUNK_ID` is set, so numbers
-   move with no refused call. Run `move` right after the restart. Steps and checks: the
+   move with no refused call (each number is on no trunk for one request
+   while it moves). Run `move` right after the restart. Steps and checks: the
    [runbook](https://github.com/hail-hq/hail/blob/main/docs/operations/inbound-trunk-lockdown.md).
 
    Upgrading with a per-carrier key already set: first add

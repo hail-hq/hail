@@ -394,6 +394,7 @@ async def test_another_carriers_trunk_is_refused_while_numbers_move(
 ) -> None:
     monkeypatch.setattr(settings, "livekit_sip_inbound_trunk_id", "ST_shared")
     monkeypatch.setattr(settings, "livekit_twilio_sip_inbound_trunk_id", "ST_in_tw")
+    monkeypatch.setattr(settings, "livekit_telnyx_sip_inbound_trunk_id", "ST_in_tx")
     await _seed(async_session)
     outcome = await inbound_calls.open_inbound_call(
         async_session, _attrs(trunk_id="ST_in_tx")

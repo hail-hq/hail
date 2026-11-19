@@ -174,7 +174,7 @@ async def apply(sip, data: dict, spec: Spec, yes: bool) -> list[str]:
         raise TrunkError(
             "the shared trunk lists no numbers (it matches every number). "
             f"Add {data['shared_placeholder']} and each routed number to it "
-            "by hand first (the runbook, step 2)"
+            "by hand first (lk sip inbound update --numbers), then run apply again"
         )
     if shared and shared_trunk is not None:
         # Emptied by unregister or move, the open shared trunk would match
