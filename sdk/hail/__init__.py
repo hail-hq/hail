@@ -22,6 +22,7 @@ from hail.client import Client
 from hail.models import (
     TERMINAL_CALL_STATUSES,
     TERMINAL_EMAIL_STATUSES,
+    AgentHttpTool,
     AgentListResponse,
     AgentResponse,
     CallCreate,
@@ -77,6 +78,7 @@ __all__ = [
     "SUPPORTED_RESOURCE_TYPES",
     "TERMINAL_CALL_STATUSES",
     "TERMINAL_EMAIL_STATUSES",
+    "AgentHttpTool",
     "AgentListResponse",
     "AgentResponse",
     # models

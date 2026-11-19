@@ -546,6 +546,9 @@ class Agent(Base):
         Boolean, server_default=text("TRUE"), nullable=False
     )
     status: Mapped[str] = mapped_column(Text, server_default="live", nullable=False)
+    # Signs this agent's HTTP tool requests (AgentHttpTool). Fernet ciphertext
+    # under HAIL_PROVIDER_SECRET_KEY; NULL until the agent gets its first one.
+    http_tool_secret_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         TS, server_default=text("now()"), nullable=False
     )
@@ -626,6 +629,51 @@ class AgentHandoverContact(Base):
             unique=True,
             postgresql_where=text("user_id IS NOT NULL"),
         ),
+    )
+
+
+class AgentHttpTool(Base):
+    """A customer API the agent may call mid-conversation (``agent_tools.
+    http_tool``). Hail POSTs the model's arguments, signed with the agent's
+    ``http_tool_secret_encrypted``, and gives the answer back to the model.
+
+    ``headers_encrypted`` is one Fernet token (HAIL_PROVIDER_SECRET_KEY) over
+    a JSON object of static headers; ``header_names`` is what responses show.
+    """
+
+    __tablename__ = "agent_http_tools"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    agent_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("agents.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    position: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    parameters: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    headers_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    header_names: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), server_default=text("'{}'"), nullable=False
+    )
+    timeout_seconds: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    wait_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint("agent_id", "name", name="agent_http_tools_agent_name_uq"),
+        CheckConstraint(
+            "timeout_seconds BETWEEN 1 AND 10", name="agent_http_tools_timeout_check"
+        ),
+        CheckConstraint("url LIKE 'https://%'", name="agent_http_tools_https_check"),
     )
 
 

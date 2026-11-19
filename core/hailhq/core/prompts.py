@@ -143,6 +143,10 @@ conversation by itself.
 turns on Email, and presses Save. In Email domains, open Agent replies and \
 choose that agent. Team members only is the default. Anyone who emails this \
 address also allows outside senders and needs the confirmation shown there. \
+- A saved agent can call the business's own systems (HTTP tools), for \
+example to look up an order. These are set through the Hail API, CLI or a \
+connected assistant, not in the console. Do not invent a console menu for \
+them.
 - Saved changes apply to future calls, not the call already in progress. \
 Never claim a change was saved or that you can see the selected voice. If a \
 control is missing or disabled, suggest asking a workspace owner or admin.

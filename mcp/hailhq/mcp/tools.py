@@ -2276,6 +2276,19 @@ _AGENT_HANDOVER_CONTACTS = _d(
     "to that person, such as ``billing questions``."
 )
 
+_AGENT_HTTP_TOOLS = _d(
+    "Up to ten customer APIs the agent may call during calls, texts and email. "
+    "Each entry: ``name`` (letters, digits, _), ``description`` (read by the "
+    "model), ``url`` (public https), optional ``parameters`` (JSON Schema, "
+    "type object), ``headers`` (static, stored encrypted, returned as names "
+    "only), ``timeout_seconds`` (1 to 10, default 5) and ``wait_message`` "
+    "(said on a call while waiting). The list replaces the saved one; an "
+    "empty list removes it. On update, an entry without ``headers`` keeps "
+    "the saved headers of the same name while the url keeps its host; a url "
+    "on a new host needs ``headers`` again. The first save returns "
+    "``http_tool_secret`` once; requests carry ``X-Hail-Signature`` signed "
+    "with it."
+)
 
 # --------------------------------------------------------------------------- #
 # MCPServer registration.
@@ -3134,6 +3147,7 @@ def register_tools(
         handover_contacts: Annotated[
             list[dict] | None, _AGENT_HANDOVER_CONTACTS
         ] = None,
+        http_tools: Annotated[list[dict] | None, _AGENT_HTTP_TOOLS] = None,
     ) -> dict[str, Any]:
         """Save an agent for calls, texts, and email replies.
 
@@ -3168,6 +3182,8 @@ def register_tools(
             fields["handover_max_duration_seconds"] = handover_max_duration_seconds
         if handover_contacts is not None:
             fields["handover_contacts"] = handover_contacts
+        if http_tools is not None:
+            fields["http_tools"] = http_tools
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await create_agent(client=client, **fields)
@@ -4268,6 +4284,7 @@ def register_tools(
                 "``note`` of 1 to 200 characters."
             ),
         ] = None,
+        http_tools: Annotated[list[dict] | None, _AGENT_HTTP_TOOLS] = None,
         clear_fields: Annotated[
             list[ClearableAgentField] | None,
             _d(
@@ -4310,6 +4327,7 @@ def register_tools(
                             "email_enabled": email_enabled,
                             "status": status,
                             "handover_contacts": handover_contacts,
+                            "http_tools": http_tools,
                         }.items()
                         if v is not None
                     },

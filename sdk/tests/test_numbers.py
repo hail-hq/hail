@@ -511,6 +511,49 @@ async def test_agents_create_list_update_delete(base_url: str, api_key: str) -> 
 
 
 @respx.mock
+async def test_agents_http_tools_and_secret(base_url: str, api_key: str) -> None:
+    tool = {
+        "name": "lookup_order",
+        "description": "Find an order.",
+        "url": "https://api.example.com/orders",
+    }
+    created = _agent_json(
+        http_tools=[
+            {
+                **tool,
+                "parameters": {"type": "object", "properties": {}},
+                "header_names": ["Authorization"],
+                "timeout_seconds": 5,
+                "wait_message": None,
+            }
+        ],
+        http_tool_secret="hts_first",
+    )
+    agent_id = created["id"]
+    create = respx.post(f"{base_url}/agents").mock(
+        return_value=httpx.Response(201, json=created)
+    )
+    rotate = respx.post(f"{base_url}/agents/{agent_id}/rotate-tool-secret").mock(
+        return_value=httpx.Response(
+            200, json=_agent_json(id=agent_id, http_tool_secret="hts_new")
+        )
+    )
+    async with Client(api_key=api_key, base_url=base_url) as client:
+        a = await client.agents.create(
+            name="Front desk",
+            system_prompt="Book appointments.",
+            http_tools=[{**tool, "headers": {"Authorization": "Bearer x"}}],
+        )
+        sent = json.loads(create.calls.last.request.content)
+        assert sent["http_tools"][0]["headers"] == {"Authorization": "Bearer x"}
+        assert a.http_tool_secret == "hts_first"
+        assert a.http_tools[0].header_names == ["Authorization"]
+        rotated = await client.agents.rotate_tool_secret(agent_id)
+        assert rotated.http_tool_secret == "hts_new"
+        assert rotate.called
+
+
+@respx.mock
 async def test_calls_create_with_agent_id(base_url: str, api_key: str) -> None:
     from tests.conftest import make_call_response
 
