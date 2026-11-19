@@ -200,8 +200,9 @@ the caller's own address on file, with limits. Caller ID can be faked.
 
 In an email run, `me` is the sender that DMARC proved. Like a name saved
 with their address, it sends its own email, and the run's reply still
-follows. With original files, it is the run's threaded reply instead. Email runs may still
-email saved contacts by name (owner decision, 2026-11-19).
+follows. With original files, it is the run's threaded reply instead. Email
+runs may still email saved contacts by name (owner decision, 2026-11-19).
+
 Stored transcripts contain spoken user/assistant text only. Send receipts
 mean provider acceptance, never delivery. Disabled providers expose no send
 tool. Inbox access requires the verified person associated with the call.

@@ -468,8 +468,9 @@ def _same_name(a: str, b: str) -> bool:
 
 async def _organization_name(db: AsyncSession, org: UUID) -> str | None:
     """The org's display name for the fixed lines of a caller email. One read
-    on this session, in a savepoint: the website-owned table is missing on a
-    pure self-host, and the lines then name no organization."""
+    on this session, in a savepoint. It only adds words, so it fails open:
+    the website-owned table is missing on a pure self-host, and a schema
+    change must not stop the email. The lines then name no organization."""
     try:
         async with db.begin_nested():
             return await db.scalar(
@@ -477,7 +478,7 @@ async def _organization_name(db: AsyncSession, org: UUID) -> str | None:
             )
     except ProgrammingError as exc:
         if getattr(exc.orig, "sqlstate", None) != "42P01":  # undefined_table
-            raise
+            logger.warning("organization name lookup failed: %s", exc)
         return None
 
 

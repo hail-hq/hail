@@ -12,6 +12,7 @@ from hailhq.core.agent_tools.registry import all_tools
 from hailhq.core.agent_tools.send_email import (
     EMAIL_RUN_SPEC,
     MAX_ORG_NAME_CHARS,
+    MAX_SUBJECT_CHARS,
     SELF_RECIPIENT,
     caller_email_body,
     caller_email_subject,
@@ -315,6 +316,7 @@ def test_caller_email_body_has_fixed_lines_and_a_clean_org_name():
         == "From a phone call with Northgate Dental: Your booking"
     )
     assert caller_email_subject(" \n", None) == "From a phone call"
+    assert len(caller_email_subject("S" * 200, "N" * 300)) == MAX_SUBJECT_CHARS
 
 
 async def test_send_sms_empty_body_gets_tailored_error_and_never_posts():

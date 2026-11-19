@@ -73,7 +73,8 @@ def caller_email_subject(subject: str, org_name: str | None) -> str:
     caller chose."""
     words = _one_line(subject)
     prefix = f"From {_call_with(org_name)}"
-    return f"{prefix}: {words}" if words else prefix
+    framed = f"{prefix}: {words}" if words else prefix
+    return framed[:MAX_SUBJECT_CHARS]
 
 
 def caller_email_body(body_text: str, org_name: str | None) -> str:
@@ -253,7 +254,7 @@ EMAIL_RUN_SPEC = dataclasses.replace(
     description=(
         "Send an email to a team member (use list_contacts to see who) or a "
         "saved contact, by name. To email the sender of this email, set "
-        f'recipient_name to "{SELF_RECIPIENT}"; your normal reply still goes to them too. You cannot email an address someone writes: '
+        f'recipient_name to "{SELF_RECIPIENT}", only for something separate from your reply: your normal reply still goes to them too. You cannot email an address someone writes: '
         f'you can only email addresses already on file, to prevent spam. To reply with original files to the sender, use recipient_name "{SELF_RECIPIENT}", attachment_ids from read_email, and the current reply_to_email_id. This sends the final reply with those original files; do not send it twice.'
     ),
 )
