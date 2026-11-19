@@ -40,7 +40,9 @@ def is_e164(value: str | None) -> bool:
     """Withheld callers arrive as "", "anonymous", "restricted" and the like.
     Only a real E.164 number identifies a thread; anything else has none."""
     return (
-        bool(value) and len(value) >= _MIN_E164_LENGTH and E164.match(value) is not None
+        bool(value)
+        and len(value) >= _MIN_E164_LENGTH
+        and E164.fullmatch(value) is not None
     )
 
 
