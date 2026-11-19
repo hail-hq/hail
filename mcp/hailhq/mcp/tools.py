@@ -224,7 +224,6 @@ async def place_call(
     first_message: str | None = None,
     language: str | None = None,
     ai_disclosure: bool = True,
-    steady_speech: bool | None = None,
     recording_enabled: bool | None = None,
     metadata: dict[str, Any] | None = None,
     tools: list[str] | None = None,
@@ -246,7 +245,6 @@ async def place_call(
             first_message=first_message,
             language=language,
             ai_disclosure=ai_disclosure,
-            steady_speech=steady_speech,
             recording_enabled=recording_enabled,
             metadata=metadata,
             tools=tools,
@@ -2229,8 +2227,9 @@ _AGENT_FIRST_MESSAGE = _d(
 )
 _AGENT_AI_DISCLOSURE = _d("Speak the AI disclosure line first on every call.")
 _AGENT_STEADY_SPEECH = _d(
-    "Steady speech: the agent finishes each reply before it listens again, so "
-    "background talk cannot cut it off and the caller cannot interrupt mid-reply."
+    "Steady speech, for calls the agent answers: it finishes each reply before "
+    "it listens again, so background talk cannot cut it off and the caller "
+    "cannot interrupt mid-reply. Off by default."
 )
 _AGENT_RECORDING = _d(
     "Recording for this agent's calls. ``true`` or ``false`` overrides the "
@@ -2360,14 +2359,6 @@ def register_tools(
         ai_disclosure: Annotated[
             bool, _d("Speak an AI notice at the start of the call. ``false`` skips it.")
         ] = True,
-        steady_speech: Annotated[
-            bool | None,
-            _d(
-                "Steady speech for this call: the agent finishes each reply before "
-                "it listens again. Omitted: the saved agent's setting, or off "
-                "without ``agent_id``."
-            ),
-        ] = None,
         recording_enabled: Annotated[
             bool | None,
             _d("Recording for this call, overriding the agent and workspace settings."),
@@ -2419,7 +2410,6 @@ def register_tools(
                     first_message=first_message,
                     language=language,
                     ai_disclosure=ai_disclosure,
-                    steady_speech=steady_speech,
                     recording_enabled=recording_enabled,
                     metadata=metadata,
                     tools=tools,
@@ -3132,7 +3122,7 @@ def register_tools(
         system_prompt: Annotated[str, _AGENT_PROMPT],
         first_message: Annotated[str | None, _AGENT_FIRST_MESSAGE] = None,
         ai_disclosure: Annotated[bool, _AGENT_AI_DISCLOSURE] = True,
-        steady_speech: Annotated[bool, _AGENT_STEADY_SPEECH] = True,
+        steady_speech: Annotated[bool, _AGENT_STEADY_SPEECH] = False,
         recording_enabled: Annotated[bool | None, _AGENT_RECORDING] = None,
         ai_disclosure_line: Annotated[str | None, _AGENT_DISCLOSURE_LINE] = None,
         language: Annotated[Language | None, _AGENT_LANGUAGE] = None,
@@ -3164,10 +3154,9 @@ def register_tools(
             "sms_enabled": sms_enabled,
             "email_enabled": email_enabled,
         }
-        if not steady_speech:
-            # Sent only when off: the API default is on, and an older API
-            # rejects a field it does not know.
-            fields["steady_speech"] = False
+        if steady_speech:
+            # Sent only when on: an older API rejects a field it does not know.
+            fields["steady_speech"] = True
         if recording_enabled is not None:
             fields["recording_enabled"] = recording_enabled
         if first_message is not None:

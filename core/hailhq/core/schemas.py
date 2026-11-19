@@ -273,16 +273,6 @@ class CallCreate(ConsentAttestationMixin):
             "itself as an AI if asked."
         ),
     )
-    steady_speech: bool = Field(
-        default=False,
-        description=(
-            "Steady speech: the agent finishes each reply before it listens "
-            "again. Speech and background talk on the other side during a "
-            "reply are ignored, so the other party cannot interrupt "
-            "mid-reply. Off by default for a call without agent_id; with "
-            "agent_id, the agent's setting applies unless you send this field."
-        ),
-    )
     voice_config: VoiceConfig = Field(
         default_factory=VoiceConfig,
         description=(
@@ -968,12 +958,14 @@ class AgentCreate(BaseModel):
         ),
     )
     steady_speech: bool = Field(
-        default=True,
+        default=False,
         description=(
-            "Steady speech: the agent finishes each reply before it listens "
-            "again. Speech and background talk on the caller's side during a "
-            "reply are ignored, so the caller cannot interrupt mid-reply. "
-            "Enabled by default."
+            "Steady speech, for calls this agent answers: the agent finishes "
+            "each reply before it listens again. From the moment it starts "
+            "preparing a reply until the reply has been spoken, it does not "
+            "hear the caller, so background talk cannot cut it off and the "
+            "caller cannot interrupt. Off by default. Calls the agent places "
+            "are not affected."
         ),
     )
     ai_disclosure_line: str | None = Field(
@@ -1066,7 +1058,7 @@ class AgentUpdate(BaseModel):
     )
     steady_speech: bool | None = Field(
         default=None,
-        description="Whether the agent finishes each reply before it listens again.",
+        description="Whether the agent finishes each reply before it listens again, on calls it answers.",
     )
     ai_disclosure_line: str | None = Field(
         default=None,
@@ -1132,7 +1124,7 @@ class AgentResponse(BaseModel):
     )
     ai_disclosure: bool = Field(description="Whether the AI line is spoken first.")
     steady_speech: bool = Field(
-        description="Whether the agent finishes each reply before it listens again."
+        description="Whether the agent finishes each reply before it listens again, on calls it answers."
     )
     ai_disclosure_line: str | None = Field(
         description="This agent's AI line template, or null for the workspace line."

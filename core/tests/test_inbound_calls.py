@@ -277,7 +277,7 @@ async def test_accepted_call_rings_and_returns_dispatch_metadata(async_session) 
     assert md["system_prompt"] == "Book appointments."
     assert md["first_message"] == "How can I help?"
     assert md["ai_disclosure"] is True
-    assert md["steady_speech"] is True
+    assert md["steady_speech"] is False
     assert md["ai_disclosure_line"] == "You reached {org}. I am an AI."
     assert md["org_name"] == "Acme Dental"
     assert md["tools"] == ["end_call"]

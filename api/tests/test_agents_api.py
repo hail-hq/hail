@@ -129,7 +129,7 @@ async def test_crud_round_trip(client: httpx.AsyncClient, org) -> None:
     _org_id, headers = org
     created = await _create_agent(client, headers)
     assert created["ai_disclosure"] is True
-    assert created["steady_speech"] is True
+    assert created["steady_speech"] is False
     assert created["status"] == "live"
     assert created["voice_config"]["tts"] == "cartesia"
 

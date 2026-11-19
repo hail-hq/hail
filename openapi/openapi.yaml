@@ -6316,10 +6316,12 @@ components:
           type: boolean
           title: Steady Speech
           description:
-            "Steady speech: the agent finishes each reply before it listens
-            again. Speech and background talk on the caller's side during a reply
-            are ignored, so the caller cannot interrupt mid-reply. Enabled by default."
-          default: true
+            "Steady speech, for calls this agent answers: the agent finishes
+            each reply before it listens again. From the moment it starts preparing
+            a reply until the reply has been spoken, it does not hear the caller,
+            so background talk cannot cut it off and the caller cannot interrupt.
+            Off by default. Calls the agent places are not affected."
+          default: false
         ai_disclosure_line:
           anyOf:
             - type: string
@@ -6461,7 +6463,9 @@ components:
         steady_speech:
           type: boolean
           title: Steady Speech
-          description: Whether the agent finishes each reply before it listens again.
+          description:
+            Whether the agent finishes each reply before it listens again,
+            on calls it answers.
         ai_disclosure_line:
           anyOf:
             - type: string
@@ -6594,7 +6598,9 @@ components:
             - type: boolean
             - type: "null"
           title: Steady Speech
-          description: Whether the agent finishes each reply before it listens again.
+          description:
+            Whether the agent finishes each reply before it listens again,
+            on calls it answers.
         ai_disclosure_line:
           anyOf:
             - type: string
@@ -6792,16 +6798,6 @@ components:
             \ jurisdictions have AI bot-disclosure laws. Hail does not verify this\
             \ for you. The agent still identifies itself as an AI if asked."
           default: true
-        steady_speech:
-          type: boolean
-          title: Steady Speech
-          description:
-            "Steady speech: the agent finishes each reply before it listens
-            again. Speech and background talk on the other side during a reply are
-            ignored, so the other party cannot interrupt mid-reply. Off by default
-            for a call without agent_id; with agent_id, the agent's setting applies
-            unless you send this field."
-          default: false
         voice_config:
           $ref: "#/components/schemas/VoiceConfig"
           description:

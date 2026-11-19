@@ -99,7 +99,6 @@ class _CallsResource:
         first_message: str | None = None,
         language: str | None = None,
         ai_disclosure: bool = True,
-        steady_speech: bool | None = None,
         recording_enabled: bool | None = None,
         metadata: dict[str, Any] | None = None,
         consent_source: str | None = None,
@@ -138,8 +137,6 @@ class _CallsResource:
             body["recording_enabled"] = recording_enabled
         if not ai_disclosure:
             body["ai_disclosure"] = False
-        if steady_speech is not None:
-            body["steady_speech"] = steady_speech
         if language is not None:
             body["voice_config"] = {"language": language}
         if metadata is not None:
@@ -856,7 +853,7 @@ class _AgentsResource:
         system_prompt: str,
         first_message: str | None = None,
         ai_disclosure: bool = True,
-        steady_speech: bool = True,
+        steady_speech: bool = False,
         recording_enabled: bool | None = None,
         ai_disclosure_line: str | None = None,
         language: str | None = None,
@@ -873,7 +870,7 @@ class _AgentsResource:
         ``ai_disclosure_line`` is a template; ``{org}`` becomes the
         organization name. ``max_duration_seconds`` is 60..3600.
         ``steady_speech`` makes the agent finish each reply before it
-        listens again (the caller cannot interrupt mid-reply)."""
+        listens again on calls it answers (the caller cannot interrupt)."""
         body: dict[str, Any] = {
             "name": name,
             "system_prompt": system_prompt,
@@ -884,10 +881,9 @@ class _AgentsResource:
             "email_enabled": email_enabled,
             "status": status,
         }
-        if not steady_speech:
-            # Sent only when off: the API default is on, and an older API
-            # rejects a field it does not know.
-            body["steady_speech"] = False
+        if steady_speech:
+            # Sent only when on: an older API rejects a field it does not know.
+            body["steady_speech"] = True
         if first_message is not None:
             body["first_message"] = first_message
         if ai_disclosure_line is not None:

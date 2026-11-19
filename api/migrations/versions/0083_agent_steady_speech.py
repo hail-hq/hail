@@ -1,8 +1,8 @@
 """Agents finish each reply before listening again: ``agents.steady_speech``.
 
 A per-agent call setting, next to ``ai_disclosure`` on ``agents`` (the table
-that already holds each agent's call settings as columns). Existing agents keep
-today's behavior (FALSE); agents created from now on default to TRUE.
+that already holds each agent's call settings as columns). Off (FALSE) unless
+the owner turns it on.
 
 Revision ID: 0083
 Revises: 0082
@@ -29,7 +29,6 @@ def upgrade() -> None:
             nullable=False,
         ),
     )
-    op.alter_column("agents", "steady_speech", server_default=sa.text("TRUE"))
 
 
 def downgrade() -> None:

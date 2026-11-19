@@ -1767,7 +1767,7 @@ type AgentCreate struct {
 	// Status 'paused' agents do not answer; calls to their numbers fail with end_reason 'no_agent'.
 	Status *AgentCreateStatus `json:"status,omitempty"`
 
-	// SteadySpeech Steady speech: the agent finishes each reply before it listens again. Speech and background talk on the caller's side during a reply are ignored, so the caller cannot interrupt mid-reply. Enabled by default.
+	// SteadySpeech Steady speech, for calls this agent answers: the agent finishes each reply before it listens again. From the moment it starts preparing a reply until the reply has been spoken, it does not hear the caller, so background talk cannot cut it off and the caller cannot interrupt. Off by default. Calls the agent places are not affected.
 	SteadySpeech *bool `json:"steady_speech,omitempty"`
 
 	// SystemPrompt Task instructions, sent as the agent's leading system message.
@@ -1834,7 +1834,7 @@ type AgentResponse struct {
 	// Status 'live' or 'paused'.
 	Status AgentResponseStatus `json:"status"`
 
-	// SteadySpeech Whether the agent finishes each reply before it listens again.
+	// SteadySpeech Whether the agent finishes each reply before it listens again, on calls it answers.
 	SteadySpeech bool `json:"steady_speech"`
 
 	// SystemPrompt Task instructions.
@@ -1893,7 +1893,7 @@ type AgentUpdate struct {
 	// Status 'live' or 'paused'.
 	Status *AgentUpdateStatus `json:"status,omitempty"`
 
-	// SteadySpeech Whether the agent finishes each reply before it listens again.
+	// SteadySpeech Whether the agent finishes each reply before it listens again, on calls it answers.
 	SteadySpeech *bool `json:"steady_speech,omitempty"`
 
 	// SystemPrompt New task instructions.
@@ -1952,9 +1952,6 @@ type CallCreate struct {
 
 	// RecordingEnabled Best-effort audio recording for this call. true records and false does not, whatever the workspace setting. Null inherits the agent, then the workspace. Recording failure never prevents the call. The recording-enabled call rate applies regardless of capture outcome.
 	RecordingEnabled *bool `json:"recording_enabled,omitempty"`
-
-	// SteadySpeech Steady speech: the agent finishes each reply before it listens again. Speech and background talk on the other side during a reply are ignored, so the other party cannot interrupt mid-reply. Off by default for a call without agent_id; with agent_id, the agent's setting applies unless you send this field.
-	SteadySpeech *bool `json:"steady_speech,omitempty"`
 
 	// SystemPrompt Task instructions for the agent, sent as its leading system message. At least one of system_prompt or llm is required; both together is also valid.
 	SystemPrompt *string `json:"system_prompt,omitempty"`

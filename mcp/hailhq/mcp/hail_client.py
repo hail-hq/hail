@@ -161,7 +161,6 @@ class HailClient:
         first_message: str | None = None,
         language: str | None = None,
         ai_disclosure: bool = True,
-        steady_speech: bool | None = None,
         recording_enabled: bool | None = None,
         metadata: dict[str, Any] | None = None,
         tools: list[str] | None = None,
@@ -197,8 +196,6 @@ class HailClient:
             fields["recording_enabled"] = recording_enabled
         if not ai_disclosure:
             fields["ai_disclosure"] = False
-        if steady_speech is not None:
-            fields["steady_speech"] = steady_speech
         if metadata is not None:
             fields["metadata"] = metadata
         if tools is not None:

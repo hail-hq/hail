@@ -131,7 +131,7 @@ func (f *agentFlags) bind(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&f.firstMessage, "first-message", "", "Opening line after the AI line ('' = wait for the other side)")
 	cmd.Flags().StringVar(&f.aiLine, "ai-line", "", "AI line template; {org} becomes the organization name ('' = workspace line)")
 	cmd.Flags().BoolVar(&f.noAILine, "no-ai-line", false, "Do not speak the AI line (you verified it is not required)")
-	cmd.Flags().BoolVar(&f.steadySpeech, "steady-speech", true, "Finish each reply before listening; --steady-speech=false lets callers interrupt")
+	cmd.Flags().BoolVar(&f.steadySpeech, "steady-speech", false, "On calls the agent answers, finish each reply before listening (callers cannot interrupt)")
 	cmd.Flags().StringVar(&f.voiceID, "voice", "", "TTS voice id")
 	cmd.Flags().StringVar(&f.language, "language", "", "Spoken language, ISO 639-1 (e.g. fr)")
 	cmd.Flags().IntVar(&f.maxMinutes, "max-minutes", 0, "Soft cap per call, 1..60 minutes (0 = workspace limit)")

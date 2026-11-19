@@ -286,8 +286,8 @@ async def test_post_calls_happy_path_201(
     assert dispatch_kwargs["metadata"]["system_prompt"] == "Be brief."
     # Disclosure defaults on and always reaches the voicebot explicitly.
     assert dispatch_kwargs["metadata"]["ai_disclosure"] is True
-    # A call without an agent keeps interruptions on.
-    assert dispatch_kwargs["metadata"]["steady_speech"] is False
+    # Steady speech is for calls the agent answers: never on a placed call.
+    assert "steady_speech" not in dispatch_kwargs["metadata"]
 
     # Dispatch alone is not audio readiness. The worker arms AMD before the dial.
     assert dispatch_kwargs["metadata"]["await_agent_ready"] is True
@@ -1891,8 +1891,6 @@ async def test_post_calls_with_agent_id_fills_defaults(
     assert md["system_prompt"] == "Screen the candidate."
     assert md["first_message"] == "Hi, is now a good time?"
     assert md["ai_disclosure"] is False
-    # The saved agent's steady speech (on by default) reaches the call.
-    assert md["steady_speech"] is True
     assert md["ai_disclosure_line"] == "AI for {org}."
     assert md["tools"] == ["end_call"]
     assert md["voice_config"]["voice_id"] == "v9"

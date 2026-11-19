@@ -6,7 +6,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Added
 
-- Agents: steady speech (`steady_speech`, on for new agents) makes an agent finish each reply before it listens again, so background talk cannot cut it off.
+- Agents: steady speech (`steady_speech`, off by default) makes an agent finish each reply before it listens again on calls it answers, so background talk cannot cut it off.
 - Call agents know the date, time and time zone at the start of each call.
 - Text and email reply agents know the date, time and time zone too.
 - Calls: `GET /v1/calls/{id}` returns the call's transcript, and the new `call.analyzed` webhook sends the transcript and a short summary after each call.
