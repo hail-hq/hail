@@ -182,16 +182,20 @@ the caller's own address on file, with limits. Caller ID can be faked.
 - It reaches the one email saved for the caller's number, members first. No
   single email means no send; it never falls back to a name lookup.
 - A name is looked up by name only, members first. Caller ID never breaks a
-  name tie, and never puts the caller's address in place of a name.
-- Each email to the caller's address gets a fixed first line and footer
-  (`caller_email_body`): sent because of a phone call with the organization.
+  name tie, and never puts the caller's address in place of a name. The name
+  the caller is saved under is refused with a hint to use `me`, so an older
+  prompt cannot send the caller's request to a member of the same name.
+- Each email to the caller's address gets a fixed subject start, first line
+  and footer (`caller_email_subject`, `caller_email_body`): sent because of a
+  phone call with the organization. These lines are English only for now.
 - One phone call sends at most 3 emails (`MAX_CALL_EMAILS`), counted under
-  the call row lock.
+  the call row lock. Refusals for the cap and for no email on file write an
+  `agent.email.blocked` audit row.
 - An unknown name and a name shared by several people get one answer, so a
   caller cannot probe the saved contacts.
 
 In an email run, `me` is the sender that DMARC proved, and that email is the
-run's threaded reply (no second reply follows). Email runs may still
+run's threaded reply (no second reply follows; a second `me` email is refused). Email runs may still
 email saved contacts by name (owner decision, 2026-11-19).
 Stored transcripts contain spoken user/assistant text only. Send receipts
 mean provider acceptance, never delivery. Disabled providers expose no send

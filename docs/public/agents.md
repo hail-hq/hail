@@ -46,8 +46,10 @@ When a caller says "email me", the agent sends to the email saved for the caller
 number. It never falls back to a name. Caller ID picks that address, and caller ID
 can be faked, so:
 
-- Each email to the caller starts and ends with fixed lines that say it was sent
-  because of a phone call with your organization.
+- Each email to the caller has a fixed subject start, first line and footer that
+  say it was sent because of a phone call with your organization.
+- If the agent names the caller instead, nothing is sent, and the agent is told
+  to use "me".
 - One call sends at most 3 emails.
 
 The words `me`, `caller`, `sender` and `you` always mean the person the agent

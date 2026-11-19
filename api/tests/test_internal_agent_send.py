@@ -489,7 +489,9 @@ async def test_send_email_me_reaches_the_callers_own_address(
 
     assert (await _send_email_to_name(client, call, name))["ok"] is True
     assert await _sent_to(async_session) == [["sam@northgate.test"]]
-    sent = (await async_session.execute(select(Email))).scalar_one().body_text
+    row = (await async_session.execute(select(Email))).scalar_one()
+    assert row.subject == "From a phone call with Northgate Dental: Call summary"
+    sent = row.body_text
     assert sent.startswith(
         "This email was sent because of a phone call with Northgate Dental.\n\n"
         "Hello from the call.\n\n-- \n"
@@ -517,11 +519,11 @@ async def test_send_email_me_names_no_org_without_the_org_table_row(
     assert sent.startswith("This email was sent because of a phone call.\n")
 
 
-async def test_send_email_to_the_callers_saved_name_goes_by_name_only(
+async def test_send_email_to_the_callers_saved_name_asks_for_me(
     client, async_session, email_mock, add_phone_number
 ):
-    """A name is looked up by name, members first, even when the caller is
-    saved under it: the caller's own address is never put in its place."""
+    """The caller's saved name is never resolved: not to the caller by caller
+    ID, and not to a member who shares it. The model is told to use "me"."""
     org = uuid.uuid4()
     call = await _email_ready_call(async_session, org, add_phone_number)
     await _add_member(async_session, org, "Sam Lee", "sam@team.test")
@@ -535,10 +537,23 @@ async def test_send_email_to_the_callers_saved_name_goes_by_name_only(
     )
     await async_session.commit()
 
+    data = await _send_email_to_name(client, call, " sam lee")
+    assert data["ok"] is False
+    assert 'recipient_name "me"' in data["spoken"]
+    assert await _sent_to(async_session) == []
+
+
+async def test_send_email_by_name_has_no_caller_lines(
+    client, async_session, email_mock, add_phone_number
+):
+    org = uuid.uuid4()
+    call = await _email_ready_call(async_session, org, add_phone_number)
+    await _add_member(async_session, org, "Sam Lee", "sam@team.test")
+    await async_session.commit()
+
     assert (await _send_email_to_name(client, call, "Sam Lee"))["ok"] is True
-    assert await _sent_to(async_session) == [["sam@team.test"]]
-    sent = (await async_session.execute(select(Email))).scalar_one().body_text
-    assert sent == "Hello from the call."
+    row = (await async_session.execute(select(Email))).scalar_one()
+    assert (row.subject, row.body_text) == ("Call summary", "Hello from the call.")
 
 
 async def test_send_email_to_a_shared_caller_name_is_refused(
@@ -584,6 +599,14 @@ async def test_send_email_me_without_an_email_on_file_never_falls_back(
     assert data["ok"] is False
     assert "no email address is on file for the person on this call" in (data["spoken"])
     assert await _sent_to(async_session) == []
+    audit = (
+        await async_session.execute(
+            select(AuditLog).where(AuditLog.organization_id == org)
+        )
+    ).scalars()
+    assert [(a.action, a.payload["reason"]) for a in audit] == [
+        ("agent.email.blocked", "no_caller_email")
+    ]
 
 
 async def test_send_email_me_from_an_unknown_number_is_refused(
@@ -658,6 +681,15 @@ async def test_send_email_caps_emails_per_call(
     assert data["ok"] is False
     assert "limit for one call" in data["spoken"]
     assert len(await _sent_to(async_session)) == 3
+    blocked = (
+        await async_session.execute(
+            select(AuditLog).where(
+                AuditLog.organization_id == org,
+                AuditLog.action == "agent.email.blocked",
+            )
+        )
+    ).scalar_one()
+    assert blocked.payload["reason"] == "call_email_limit"
 
 
 async def test_send_email_cap_leaves_out_handover_notices(

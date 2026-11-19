@@ -49,14 +49,26 @@ MAX_ORG_NAME_CHARS = 100
 _HIDDEN = frozenset({"Cc", "Cf", "Cs"})
 
 
-def _call_with(org_name: str | None) -> str:
+def _one_line(text: str) -> str:
+    """``text`` on one line, without characters that could disguise it."""
     kept = "".join(
         " " if c.isspace() else c
-        for c in org_name or ""
+        for c in text
         if c.isspace() or unicodedata.category(c) not in _HIDDEN
     )
-    name = " ".join(kept.split())[:MAX_ORG_NAME_CHARS].strip()
+    return " ".join(kept.split())
+
+
+def _call_with(org_name: str | None) -> str:
+    name = _one_line(org_name or "")[:MAX_ORG_NAME_CHARS].strip()
     return f"a phone call with {name}" if name else "a phone call"
+
+
+def caller_email_subject(subject: str, org_name: str | None) -> str:
+    """The subject of an email to the caller's own address on file: fixed
+    words first, so the email list shows why it came before any words the
+    caller chose."""
+    return f"From {_call_with(org_name)}: {_one_line(subject)}"
 
 
 def caller_email_body(body_text: str, org_name: str | None) -> str:

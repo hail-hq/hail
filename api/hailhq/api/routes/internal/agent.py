@@ -58,6 +58,7 @@ from hailhq.core.agent_tools.send_email import (
     MAX_RECIPIENT_NAME_CHARS,
     MAX_SUBJECT_CHARS,
     caller_email_body,
+    caller_email_subject,
     is_self_recipient,
 )
 from hailhq.core.agent_tools.send_sms import MAX_BODY_CHARS as SMS_MAX_BODY_CHARS
@@ -87,6 +88,7 @@ from hailhq.core.compliance_gate import (
 from hailhq.core.contact_ids import normalize_contact_id, parse_contact_id
 from hailhq.core.db import get_session, key_lock, org_lock
 from hailhq.core.directory import (
+    find_by_phone,
     resolve_caller_email,
     resolve_contact_emails,
     resolve_member_emails,
@@ -375,6 +377,14 @@ _SPOKEN_EMAIL_NO_SELF = (
     " You can only email people on file, to prevent spam. Offer to take a"
     " message."
 )
+_SPOKEN_EMAIL_USE_SELF = (
+    'Not sent: "{name}" is the person on this call. To email them, call'
+    ' send_email again with recipient_name "me".'
+)
+_SPOKEN_RUN_REPLIED = (
+    "Not sent: you already sent your reply to the sender of this email."
+    " Nothing more can go to them from this email."
+)
 _SPOKEN_CALL_EMAIL_LIMIT = (
     f"Not sent: this call already sent {MAX_CALL_EMAILS} emails, the limit for"
     " one call. Offer to take a message."
@@ -411,18 +421,37 @@ async def _known_email(
 
 
 async def _call_recipient(
-    db: AsyncSession, call: Call, name: str
+    db: AsyncSession, call: Call, name: str, meta: dict[str, str]
 ) -> str | AgentSendResponse:
     """The address for ``send_email`` on a phone call. The reserved
     self-reference reaches only the caller's own entry, found by their
     number; anything else is a name. Neither falls back to the other, so
-    "email me" never picks someone who shares the caller's name."""
+    "email me" never picks someone who shares the caller's name.
+
+    The name the caller is saved under is refused with a hint to use "me":
+    a model told to email them by name (an older prompt, or one that ignores
+    the tool text) would otherwise reach a member of the same name."""
     org = call.organization_id
-    if not is_self_recipient(name):
-        return await _known_email(db, org, name)
     phone = _other_party(call)
+    if not is_self_recipient(name):
+        caller = await find_by_phone(db, org, phone) if phone else None
+        if caller is not None and caller.name.strip().casefold() == (
+            name.strip().casefold()
+        ):
+            return AgentSendResponse(
+                ok=False, spoken=_SPOKEN_EMAIL_USE_SELF.format(name=_quoted_name(name))
+            )
+        return await _known_email(db, org, name)
     own = await resolve_caller_email(db, org, phone) if phone else None
-    return own or AgentSendResponse(ok=False, spoken=_SPOKEN_EMAIL_NO_SELF)
+    if own:
+        return own
+    return await _deny(
+        org,
+        action="agent.email.blocked",
+        resource_type="email",
+        spoken=_SPOKEN_EMAIL_NO_SELF,
+        payload={**meta, "reason": "no_caller_email"},
+    )
 
 
 async def _organization_name(db: AsyncSession, org: UUID) -> str | None:
@@ -434,7 +463,9 @@ async def _organization_name(db: AsyncSession, org: UUID) -> str | None:
             return await db.scalar(
                 select(Organization.name).where(Organization.id == org)
             )
-    except ProgrammingError:
+    except ProgrammingError as exc:
+        if getattr(exc.orig, "sqlstate", None) != "42P01":  # undefined_table
+            raise
         return None
 
 
@@ -1491,9 +1522,10 @@ async def agent_email_run_send_email(
         or body.reply_to_email_id
         or is_self_recipient(body.recipient_name)
     ):
-        existing = await prior_email_reply(db, inbound)
-        if existing is not None:
-            return _replayed_send(existing)
+        # A retry of this same send was answered in _email_run, so a reply
+        # found here is another send: it already used the run's one reply.
+        if await prior_email_reply(db, inbound) is not None:
+            return AgentSendResponse(ok=False, spoken=_SPOKEN_RUN_REPLIED)
         try:
             scope, source, files = await source_files(
                 db, inbound, body.reply_to_email_id or inbound.id, body.attachment_ids
@@ -1646,14 +1678,23 @@ async def agent_send_email(
         # the commit that writes the new row, so concurrent sends on one call
         # cannot both take the last slot.
         if await emails_sent_on_call(db, org, call.id) >= MAX_CALL_EMAILS:
-            return AgentSendResponse(ok=False, spoken=_SPOKEN_CALL_EMAIL_LIMIT)
-        recipient = await _call_recipient(db, call, body.recipient_name)
+            return await _deny(
+                org,
+                action="agent.email.blocked",
+                resource_type="email",
+                spoken=_SPOKEN_CALL_EMAIL_LIMIT,
+                payload={**_meta(body), "reason": "call_email_limit"},
+            )
+        recipient = await _call_recipient(db, call, body.recipient_name, _meta(body))
         if isinstance(recipient, AgentSendResponse):
             return recipient
-        body_text = body.body_text
+        subject, body_text = body.subject, body.body_text
         if is_self_recipient(body.recipient_name):
-            # Caller ID chose this address: fixed lines say why it came.
-            body_text = caller_email_body(body_text, await _organization_name(db, org))
+            # Caller ID chose this address, and can be faked: fixed words in
+            # the subject, first line and footer say why it came.
+            org_name = await _organization_name(db, org)
+            subject = caller_email_subject(subject, org_name)
+            body_text = caller_email_body(body_text, org_name)
         parent = None
         files = []
         meta = _meta(body)
@@ -1682,7 +1723,7 @@ async def agent_send_email(
             email_provider,
             org,
             recipient=recipient,
-            subject=body.subject,
+            subject=subject,
             body_text=body_text,
             meta=meta,
             agent_id=None,

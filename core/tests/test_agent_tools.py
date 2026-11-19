@@ -14,6 +14,7 @@ from hailhq.core.agent_tools.send_email import (
     MAX_ORG_NAME_CHARS,
     SELF_RECIPIENT,
     caller_email_body,
+    caller_email_subject,
     is_self_recipient,
 )
 from hailhq.core.agent_tools.spec import ToolContext
@@ -304,6 +305,10 @@ def test_caller_email_body_has_fixed_lines_and_a_clean_org_name():
     assert f"with {'N' * MAX_ORG_NAME_CHARS}." in long
     assert caller_email_body("Hi.", None).startswith(
         "This email was sent because of a phone call.\n"
+    )
+    assert (
+        caller_email_subject("Your\nbooking\u200b", "Northgate Dental")
+        == "From a phone call with Northgate Dental: Your booking"
     )
 
 

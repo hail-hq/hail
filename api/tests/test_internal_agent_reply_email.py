@@ -1290,6 +1290,13 @@ async def test_tool_email_me_reaches_the_proven_sender(
     assert sent.metadata_["reply_to_email_id"] == str(inbound.id)
     await _reply(client, inbound.id)
     assert email_mock.send_email.await_count == 1
+    # A second, different email to the sender is refused, not reported sent.
+    again = await _tool_email(
+        client, inbound.id, recipient_name="me", subject="Correction"
+    )
+    assert again["ok"] is False
+    assert "already sent your reply" in again["spoken"]
+    assert email_mock.send_email.await_count == 1
 
 
 async def test_tool_email_me_from_an_unproven_sender_sends_nothing(
