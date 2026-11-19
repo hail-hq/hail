@@ -15,6 +15,105 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
+@pytest.mark.asyncio
+async def test_receiver_authorization_is_encrypted_and_write_only(
+    client, auth_headers, async_session, webhook_secret_key
+):
+    authorization = "Bearer cursor_receiver_test_key"
+    created = await client.post(
+        "/webhooks",
+        headers=auth_headers,
+        json={
+            "target_url": "https://hooks.example.com/receive",
+            "event_types": ["call.completed"],
+            "authorization": authorization,
+        },
+    )
+    assert created.status_code == 201, created.text
+    sub_id = created.json()["id"]
+    assert created.json()["has_authorization"] is True
+    assert authorization not in created.text
+    sub = (
+        await async_session.execute(
+            select(WebhookSubscription).where(WebhookSubscription.id == sub_id)
+        )
+    ).scalar_one()
+    assert sub.authorization_encrypted != authorization
+    assert (
+        SecretCipher(webhook_secret_key).decrypt(sub.authorization_encrypted)
+        == authorization
+    )
+    for path in (f"/webhooks/{sub_id}", "/webhooks"):
+        response = await client.get(path, headers=auth_headers)
+        assert authorization not in response.text
+        assert sub.authorization_encrypted not in response.text
+
+    preserved = await client.patch(
+        f"/webhooks/{sub_id}", headers=auth_headers, json={"status": "disabled"}
+    )
+    assert preserved.json()["has_authorization"] is True
+    kept = await client.patch(
+        f"/webhooks/{sub_id}", headers=auth_headers, json={"authorization": None}
+    )
+    assert kept.json()["has_authorization"] is True
+    replacement = "Bearer replacement_receiver_key"
+    replaced = await client.patch(
+        f"/webhooks/{sub_id}", headers=auth_headers, json={"authorization": replacement}
+    )
+    assert replaced.status_code == 200, replaced.text
+    assert replacement not in replaced.text
+    await async_session.refresh(sub)
+    assert (
+        SecretCipher(webhook_secret_key).decrypt(sub.authorization_encrypted)
+        == replacement
+    )
+    changed = await client.patch(
+        f"/webhooks/{sub_id}",
+        headers=auth_headers,
+        json={"target_url": "https://other.example.com/hook"},
+    )
+    assert changed.status_code == 422
+    assert authorization not in changed.text
+    assert replacement not in changed.text
+    removed = await client.patch(
+        f"/webhooks/{sub_id}",
+        headers=auth_headers,
+        json={"target_url": "https://other.example.com/hook", "authorization": ""},
+    )
+    assert removed.status_code == 200, removed.text
+    assert removed.json()["has_authorization"] is False
+    assert removed.json()["status"] == "disabled"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "authorization",
+    [
+        "Bearer private_key\r\nX-Evil: yes",
+        "Bearer private_key\0",
+        "secret" * 400,
+        "Bearer private_key\u2603",
+        {"key": "private_key"},
+    ],
+    ids=["newline", "null-byte", "oversized", "unicode", "invalid-type"],
+)
+async def test_invalid_receiver_authorization_does_not_echo_credentials(
+    client, auth_headers, authorization
+):
+    response = await client.post(
+        "/webhooks",
+        headers=auth_headers,
+        json={
+            "target_url": "https://hooks.example.com/receive",
+            "event_types": ["call.completed"],
+            "authorization": authorization,
+        },
+    )
+    assert response.status_code == 422
+    assert "private_key" not in response.text
+    assert "secretsecret" not in response.text
+
+
 @pytest.fixture(autouse=True)
 def webhook_secret_key(monkeypatch: pytest.MonkeyPatch) -> str:
     """Set a real Fernet key so encrypt/decrypt round-trips in the route."""

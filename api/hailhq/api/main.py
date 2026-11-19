@@ -458,6 +458,19 @@ async def _cache_422_for_idempotent_retry(
     them — without this, a same-key retry of the same invalid body 409s
     "still processing" until the row expires. Store the 422 so retries
     replay it, then defer to FastAPI's stock handler for the response."""
+    if request.url.path.startswith(("/webhooks", "/v1/webhooks")):
+        # Validation errors normally echo rejected input. A malformed
+        # write-only receiver credential must never be returned or cached.
+        exc = RequestValidationError(
+            [
+                {
+                    key: value
+                    for key, value in error.items()
+                    if key not in {"input", "ctx"}
+                }
+                for error in exc.errors()
+            ]
+        )
     idem = getattr(request.state, "idempotency_ctx", None)
     if idem is not None:
         if idem.is_replay:

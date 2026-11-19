@@ -21,6 +21,49 @@ from hailhq.core.webhooks import RETRY_SCHEDULE_SECONDS
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("receiver_raises", [False, True])
+async def test_authenticated_receiver_gets_authorization_and_signed_event(
+    async_session, receiver_raises
+):
+    from hailhq.core.secret_cipher import SecretCipher, generate_key
+
+    cipher = SecretCipher(generate_key())
+    authorization = "Bearer cursor_receiver_test_key"
+    org_id = uuid.uuid4()
+    sub = WebhookSubscription(
+        organization_id=org_id,
+        target_url="https://hooks.example.com/h",
+        secret_encrypted=cipher.encrypt("signing_secret"),
+        authorization_encrypted=cipher.encrypt(authorization),
+        event_types=["call.completed"],
+    )
+    async_session.add(sub)
+    await async_session.commit()
+    delivery = WebhookDelivery(
+        subscription_id=sub.id,
+        event_type="call.completed",
+        event_id=uuid.uuid4(),
+        payload={"organization_id": str(org_id), "data": {}},
+    )
+    async_session.add(delivery)
+    await async_session.commit()
+
+    async def receiver(url, body, headers):
+        assert headers.get("Authorization") == authorization
+        assert headers["X-Hail-Signature"].startswith("t=")
+        if receiver_raises:
+            raise RuntimeError("x" * 4080 + authorization)
+        return 200, "echo: " + authorization + " / cursor_receiver_test_key"
+
+    worker = _build_worker(async_session, http_post=receiver, decrypt=cipher.decrypt)
+    assert await worker.tick() == 1
+    await async_session.refresh(delivery)
+    assert delivery.status == ("pending" if receiver_raises else "succeeded")
+    assert "cursor_receiver_test_key" not in delivery.response_body
+    assert "cursor_" not in delivery.response_body
+
+
 def _make_delivery(**kw) -> WebhookDelivery:
     return WebhookDelivery(
         id=uuid.uuid4(),
@@ -77,6 +120,81 @@ def _build_worker(
         concurrency=4,
         poll_interval=0.01,
     )
+
+
+@pytest.mark.asyncio
+async def test_worker_reaches_authenticated_http_receiver(async_session):
+    from functools import partial
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from threading import Thread
+
+    from hailhq.core.http_post import httpx_post
+    from hailhq.core.secret_cipher import SecretCipher, generate_key
+    from hailhq.core.webhooks import sign_payload
+
+    authorization = "Bearer local_receiver_test_key"
+    received = []
+
+    class Receiver(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_POST(self):
+            body = self.rfile.read(int(self.headers["Content-Length"]))
+            if self.headers.get("Authorization") != authorization:
+                self.send_response(401)
+                self.end_headers()
+                return
+            signature = self.headers["X-Hail-Signature"]
+            timestamp = int(signature.split(",")[0].split("=")[1])
+            assert signature == sign_payload(
+                body, "signing_secret", timestamp=timestamp
+            )
+            received.append(body)
+            self.send_response(204)
+            self.end_headers()
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Receiver)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        target = f"http://127.0.0.1:{server.server_port}/events"
+        post = partial(httpx_post, allow_private_networks=True)
+        status, _ = await post(target, b"{}", {})
+        assert status == 401
+        cipher = SecretCipher(generate_key())
+        org_id = uuid.uuid4()
+        sub = WebhookSubscription(
+            organization_id=org_id,
+            target_url=target,
+            secret_encrypted=cipher.encrypt("signing_secret"),
+            authorization_encrypted=cipher.encrypt(authorization),
+            event_types=["call.completed"],
+        )
+        async_session.add(sub)
+        await async_session.commit()
+        delivery = WebhookDelivery(
+            subscription_id=sub.id,
+            event_type="call.completed",
+            event_id=uuid.uuid4(),
+            payload={"organization_id": str(org_id), "data": {}},
+        )
+        async_session.add(delivery)
+        await async_session.commit()
+        assert (
+            await _build_worker(
+                async_session, http_post=post, decrypt=cipher.decrypt
+            ).tick()
+            == 1
+        )
+        await async_session.refresh(delivery)
+        assert delivery.status == "succeeded"
+        assert delivery.response_status == 204
+        assert len(received) == 1
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
 
 
 @pytest.mark.asyncio

@@ -181,10 +181,15 @@ class WebhookWorker:
                     # No HTTP attempt happened: preserve the last response and
                     # retry budget so the pending event can resume later.
                     return
-                target_url, secret_encrypted = resolved
+                target_url, secret_encrypted, authorization_encrypted = resolved
 
                 try:
                     secret = self._decrypt(secret_encrypted)
+                    authorization = (
+                        self._decrypt(authorization_encrypted)
+                        if authorization_encrypted
+                        else ""
+                    )
                 except Exception:
                     await self._record_failure(
                         session, row, None, "secret decrypt failed"
@@ -214,13 +219,22 @@ class WebhookWorker:
                 }
                 if row.email_domain_id:
                     headers["X-Hail-Email-Domain"] = str(row.email_domain_id)
+                if authorization:
+                    headers["Authorization"] = authorization
 
             # The session above has ended, so a slow customer server holds no
             # pooled connection. The claim's deferral keeps the row ours.
             try:
                 status, resp_body = await self._http_post(target_url, body, headers)
             except Exception as exc:  # pragma: no cover
-                status, resp_body = None, str(exc)[:RESPONSE_BODY_CAP]
+                status, resp_body = None, str(exc)
+
+            # A receiver or HTTP exception can reflect its request credentials.
+            # Keep those out of the delivery inspector and audit history.
+            if authorization:
+                for credential in (authorization, authorization.partition(" ")[2]):
+                    if credential:
+                        resp_body = (resp_body or "").replace(credential, "[redacted]")
 
             async with self._session_factory() as session:
                 if status is not None and 200 <= status < 300:
@@ -234,8 +248,8 @@ class WebhookWorker:
 
     async def _resolve_target_url(
         self, db: AsyncSession, row: WebhookDelivery
-    ) -> tuple[str, str] | None:
-        """Return (target_url, secret_encrypted) or None if undeliverable.
+    ) -> tuple[str, str, str | None] | None:
+        """Return target URL and encrypted signing/auth secrets, or None.
 
         Every delivery is owned by a subscription (DB CHECK
         ``webhook_deliveries_target_check``); a missing or inactive
@@ -250,7 +264,7 @@ class WebhookWorker:
         ).scalar_one_or_none()
         if sub is None or sub.status != "active":
             return None
-        return sub.target_url, sub.secret_encrypted
+        return sub.target_url, sub.secret_encrypted, sub.authorization_encrypted
 
     async def _record_success(
         self,

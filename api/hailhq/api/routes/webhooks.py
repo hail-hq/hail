@@ -46,7 +46,9 @@ from hailhq.core.schemas import (
     WebhookSubscriptionResponse,
 )
 from hailhq.core.secret_cipher import SecretCipher
+from hailhq.core.urls import canonical_url
 from hailhq.core.webhook_events import WebhookEventType
+from pydantic import SecretStr
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -62,6 +64,18 @@ def _new_secret() -> str:
     return "whs_" + _secrets.token_urlsafe(24)
 
 
+def _authorization_value(value: SecretStr | None) -> str | None:
+    if value is None:
+        return None
+    plain = value.get_secret_value()
+    if len(plain) > 2000 or any(not " " <= c <= "~" for c in plain):
+        raise unprocessable(
+            "Authorization header must use printable ASCII and at most 2000 characters.",
+            loc=["body", "authorization"],
+        )
+    return plain.strip()
+
+
 def _to_response(
     sub: WebhookSubscription, *, secret: str | None = None
 ) -> WebhookSubscriptionResponse:
@@ -72,12 +86,14 @@ def _to_response(
 
 
 async def _load_owned(
-    db: AsyncSession, sub_id: UUID, org_id: UUID
+    db: AsyncSession, sub_id: UUID, org_id: UUID, *, lock: bool = False
 ) -> WebhookSubscription:
     stmt = select(WebhookSubscription).where(
         WebhookSubscription.id == sub_id,
         WebhookSubscription.organization_id == org_id,
     )
+    if lock:
+        stmt = stmt.with_for_update()
     sub = (await db.execute(stmt)).scalar_one_or_none()
     if sub is None:
         raise HTTPException(
@@ -104,6 +120,7 @@ async def create_subscription(
     POST /v1/webhooks/{sub_id}/rotate-secret to get a new plaintext secret if
     it is lost or compromised.
     """
+    authorization = _authorization_value(body.authorization)
     try:
         # DNS lookup: keep it off the event loop.
         await asyncio.to_thread(
@@ -126,6 +143,9 @@ async def create_subscription(
         organization_id=principal.organization_id,
         target_url=body.target_url,
         secret_encrypted=cipher.encrypt(secret),
+        authorization_encrypted=(
+            cipher.encrypt(authorization) if authorization else None
+        ),
         event_types=list(body.event_types),
         created_at=stamp,
         updated_at=stamp,
@@ -225,7 +245,8 @@ async def patch_subscription(
     subscription that was auto-disabled after 50 straight delivery
     failures does not immediately re-disable itself.
     """
-    sub = await _load_owned(db, sub_id, principal.organization_id)
+    authorization = _authorization_value(body.authorization)
+    sub = await _load_owned(db, sub_id, principal.organization_id, lock=True)
     updates: dict = {}
     if body.target_url is not None:
         try:
@@ -238,6 +259,21 @@ async def patch_subscription(
         except ValueError as exc:
             raise unprocessable(str(exc), loc=["body", "target_url"]) from exc
         updates["target_url"] = body.target_url
+        if (
+            sub.authorization_encrypted is not None
+            and authorization is None
+            and canonical_url(body.target_url) != canonical_url(sub.target_url)
+        ):
+            raise unprocessable(
+                "Enter the Authorization header again or remove it when changing the target URL.",
+                loc=["body", "authorization"],
+            )
+    if authorization is not None:
+        updates["authorization_encrypted"] = (
+            SecretCipher(settings.hail_webhook_secret_key).encrypt(authorization)
+            if authorization
+            else None
+        )
     if body.event_types is not None:
         updates["event_types"] = list(body.event_types)
     if body.status is not None:
