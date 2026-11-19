@@ -289,7 +289,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if not E164.match(args.number):
         parser.error("--number must be E.164, like +14155550100")
-    code, verdict = probe(args.host, args.port, args.number)
+    try:
+        code, verdict = probe(args.host, args.port, args.number)
+    except Exception as exc:  # exit 1 means ACCEPTED: never use it for a bug
+        code, verdict = 2, f"INCONCLUSIVE: the probe failed ({exc!r})"
     print(verdict)
     return code
 

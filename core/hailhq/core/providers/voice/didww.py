@@ -842,7 +842,11 @@ def _set_voice_in_trunk_auth_sync(
             f"DIDWW voice IN trunk {trunk_id} did not keep the credentials"
         )
     kept = ("host", "port", "transport_protocol_id")
-    if any(got.get(key) != attrs.get(key) for key in kept):
+    # Only keys that were set before the write: DIDWW may fill a default.
+    if any(
+        attrs.get(key) is not None and str(got.get(key)) != str(attrs.get(key))
+        for key in kept
+    ):
         raise CarrierNotConfigured(
             f"DIDWW voice IN trunk {trunk_id} changed its host, port or transport"
         )

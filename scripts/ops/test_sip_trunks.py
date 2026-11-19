@@ -138,7 +138,7 @@ async def test_apply_only_adds_placeholders() -> None:
 
 
 async def test_didww_needs_the_password(monkeypatch) -> None:
-    sip = FakeSip(trunk("ST_shared", "shared"))
+    sip = FakeSip(trunk("ST_shared", "shared", ["+14155550100"]))
     with pytest.raises(st.TrunkError, match="DIDWW_SIP_INBOUND_PASSWORD"):
         await st.apply(sip, DATA, SPECS["didww"], yes=False)
 
@@ -473,7 +473,7 @@ async def test_didww_apply_prints_the_trunk_settings_first(monkeypatch, capsys) 
     write still leaves them on screen. Never the password."""
     monkeypatch.setattr(settings, "didww_sip_inbound_password", "new-secret")
     monkeypatch.setattr(settings, "didww_voice_in_trunk_id", "didww-trunk-1")
-    sip = FakeSip(trunk("ST_shared", "shared"))
+    sip = FakeSip(trunk("ST_shared", "shared", ["+14155550100"]))
     current = {
         "host": "example.sip.livekit.cloud",
         "port": 5060,
@@ -682,3 +682,13 @@ async def test_drop_unknown_clears_stale_entries_once_numbers_moved(
     )
     assert "+14155550199" not in sip.trunks["ST_shared"].numbers
     assert "removed +14155550199" in plan
+
+
+async def test_apply_refuses_a_shared_trunk_with_no_numbers(monkeypatch) -> None:
+    """A wildcard shared trunk takes every number: adding the placeholder
+    would cut calls to every number not listed on it."""
+    monkeypatch.setattr(settings, "livekit_sip_inbound_trunk_id", "ST_shared")
+    sip = FakeSip(trunk("ST_shared", "shared"))
+    with pytest.raises(st.TrunkError, match="lists no numbers"):
+        await st.apply(sip, DATA, SPECS["twilio"], yes=True)
+    assert sip.calls == []

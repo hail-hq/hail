@@ -148,6 +148,6 @@ The issue "SIP allow-list: carrier IPs changed" lists what differs. Calls from a
    ```
 
 3. `in our list, no longer published (review)`: nothing removes it automatically. Remove it in a PR only when the carrier confirms it is retired, then `apply` as above.
-4. `source version changed` with no address change: read the page, then update `source.version` in a PR.
+4. A `note: source version changed` line (no alert on its own): when convenient, update `source.version` in a PR.
 5. `could not fetch` or a new layout: fix the parser in [`check_sip_allowlist.py`](../../scripts/ops/check_sip_allowlist.py). Run it by hand with `uv run python scripts/ops/check_sip_allowlist.py` (the macOS python.org `python3` may fail with `CERTIFICATE_VERIFY_FAILED`).
 6. Close the issue once **Actions → sip-allowlist-check → Run workflow** is green.

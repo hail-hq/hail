@@ -1,8 +1,8 @@
 name: sip-allowlist-check
 
 # Weekly check of the carriers' published SIP signaling IPs against the
-# allow-list in infra/livekit/inbound-trunks.json. On any difference, a
-# source that changed, or a page it cannot read, it opens or updates the
+# allow-list in infra/livekit/inbound-trunks.json. On an address difference
+# or a page it cannot read, it opens or updates the
 # issue "SIP allow-list: carrier IPs changed" and fails. It changes no file
 # and no trunk, and holds no LiveKit keys. Runbook:
 # docs/operations/inbound-trunk-lockdown.md
@@ -66,7 +66,14 @@ jobs:
               state: 'open',
               labels: 'sip-allowlist',
             });
-            const existing = labelled.filter((i) => !i.pull_request && i.title === title);
+            let existing = labelled.filter((i) => !i.pull_request && i.title === title);
+            if (existing.length === 0) {
+              // The label may have been removed while triaging: match by title.
+              const { data: found } = await github.rest.search.issuesAndPullRequests({
+                q: `repo:${context.repo.owner}/${context.repo.repo} is:issue is:open in:title "${title}"`,
+              });
+              existing = found.items.filter((i) => i.title === title);
+            }
             if (existing.length > 0) {
               await github.rest.issues.update({
                 owner: context.repo.owner,

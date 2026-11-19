@@ -13,8 +13,8 @@ published list:
   range above it is not signaling. A bare address (no prefix) is a /32,
   unless it is inside a range the same region lists.
 
-Exit code 0: every list matches and no source changed its version. Exit 1:
-an address was added or removed, a source changed its version, or a page
+Exit code 0: every list matches (a source that only changed its version is
+a note in the report). Exit 1: an address was added or removed, or a page
 could not be fetched or read (no addresses, a changed layout). The report
 says which. The weekly workflow opens or updates a GitHub issue on exit 1.
 

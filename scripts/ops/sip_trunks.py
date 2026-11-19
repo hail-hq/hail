@@ -167,7 +167,15 @@ async def apply(sip, data: dict, spec: Spec, yes: bool) -> list[str]:
         print(didww_settings_line(didww_sip), flush=True)
     plan: list[str] = []
     shared = settings.livekit_sip_inbound_trunk_id
-    if shared and any(t.sip_trunk_id == shared for t in all_trunks):
+    shared_trunk = next((t for t in all_trunks if t.sip_trunk_id == shared), None)
+    if shared_trunk is not None and not list(shared_trunk.numbers):
+        # A trunk with no numbers matches every dialed number: adding the
+        # placeholder would stop calls to every number not listed on it.
+        raise TrunkError(
+            "the shared trunk lists no numbers (it matches every number): "
+            "add each routed number to it first, see the runbook"
+        )
+    if shared and shared_trunk is not None:
         # Emptied by unregister or move, the open shared trunk would match
         # every dialed number, including numbers on the locked trunks.
         plan.append(
@@ -495,6 +503,13 @@ async def retire_shared(
         raise TrunkError(f"{trunk.name} still lists {len(left)} number(s): move them")
     rule = await rule_named(sip, data["dispatch_rule"])
     plan = []
+    if yes:
+        # The app may have added a number since the check above. Checked
+        # before the first change, so a refusal leaves the rule as it was.
+        trunk = await trunk_by_id(sip, shared)
+        left = [n for n in trunk.numbers if n != data["shared_placeholder"]]
+        if left:
+            raise TrunkError(f"{trunk.name} now lists {len(left)} number(s): move them")
     if shared in rule.trunk_ids:
         if len(rule.trunk_ids) == 1:
             raise TrunkError(f"{rule.name} lists only the shared trunk: run apply")
@@ -505,11 +520,6 @@ async def retire_shared(
             )
     plan.append(f"delete trunk {trunk.name} ({shared})")
     if yes:
-        # The app may have added a number since the check above.
-        trunk = await trunk_by_id(sip, shared)
-        left = [n for n in trunk.numbers if n != data["shared_placeholder"]]
-        if left:
-            raise TrunkError(f"{trunk.name} now lists {len(left)} number(s): move them")
         await sip.delete_trunk(api.DeleteSIPTrunkRequest(sip_trunk_id=shared))
         plan.append("set in .env: LIVEKIT_SIP_INBOUND_TRUNK_ID= (empty)")
     return plan
