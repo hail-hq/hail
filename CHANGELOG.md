@@ -16,6 +16,7 @@ The MCP registry entry moves to 0.2.0. Database migrations run on deploy.
 
 ### Added
 
+- Agents can email your saved contacts by name, and the caller when their number is a saved contact. They never email an address someone says or types.
 - Agents can call your own API during calls, texts and email: add `http_tools` on `POST`/`PATCH /v1/agents` (CLI, SDK, MCP too). Each request is signed like a webhook. A tool `url` that is private or does not resolve is refused on save with `URL host is private or could not be resolved`.
 - Call agents know the date, time and time zone at the start of each call.
 - Text and email reply agents know the date, time and time zone too.
