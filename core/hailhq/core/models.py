@@ -1166,6 +1166,13 @@ class Sms(Base):
             "to_e164",
             "requested_at",
         ),
+        # Counts a workspace's trial texts; mirrors the migration so
+        # Base.metadata.create_all (tests) builds the same index.
+        Index(
+            "sms_trial_org_idx",
+            "organization_id",
+            postgresql_where=text("metadata ? 'sms_trial'"),
+        ),
     )
 
 
@@ -1228,6 +1235,83 @@ class SmsSenderIdentity(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         TS, server_default=text("now()"), nullable=False
+    )
+
+
+class SmsTrialPhone(Base):
+    """The one phone a workspace proved to receive US trial texts.
+
+    ``organization_id`` has no FK, matching SmsSenderIdentity (hail's DB does
+    not own the Organization table). The code is stored hashed. A phone can be
+    pending in many workspaces but verified in only one.
+
+    A verified workspace that asks for a code to a new phone keeps
+    ``phone_e164`` verified and stores the new one in ``pending_phone_e164``;
+    the confirm moves it into ``phone_e164``.
+    """
+
+    __tablename__ = "sms_trial_phones"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
+    phone_e164: Mapped[str] = mapped_column(Text, nullable=False)
+    # The phone the open code went to, while ``phone_e164`` stays verified.
+    pending_phone_e164: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(
+        Text, server_default=text("'pending'"), nullable=False
+    )
+    code_hash: Mapped[str | None] = mapped_column(Text)
+    code_expires_at: Mapped[datetime | None] = mapped_column(TS)
+    code_attempts: Mapped[int] = mapped_column(
+        Integer, server_default=text("0"), nullable=False
+    )
+    # One {"phone", "at"} entry per code text, pruned to the last 24 hours.
+    # Kept per phone so switching phones cannot reset a phone's send count.
+    code_send_log: Mapped[list] = mapped_column(
+        JSONB, server_default=text("'[]'::jsonb"), nullable=False
+    )
+    consent_version: Mapped[str] = mapped_column(Text, nullable=False)
+    consent_at: Mapped[datetime] = mapped_column(TS, nullable=False)
+    consent_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    verified_at: Mapped[datetime | None] = mapped_column(TS)
+    created_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint("organization_id", name="sms_trial_phones_org_uq"),
+        CheckConstraint(
+            "status IN ('pending','verified')",
+            name="sms_trial_phones_status_check",
+        ),
+        CheckConstraint(
+            r"phone_e164 ~ '^\+[1-9][0-9]{6,14}$'",
+            name="sms_trial_phones_phone_e164_check",
+        ),
+        CheckConstraint(
+            r"pending_phone_e164 ~ '^\+[1-9][0-9]{6,14}$'",
+            name="sms_trial_phones_pending_phone_e164_check",
+        ),
+        Index(
+            "sms_trial_phones_verified_phone_uq",
+            "phone_e164",
+            unique=True,
+            postgresql_where=text("status = 'verified'"),
+        ),
+        # Narrows the per-phone code count to rows holding that phone.
+        Index(
+            "sms_trial_phones_code_send_log_idx",
+            "code_send_log",
+            postgresql_using="gin",
+            postgresql_ops={"code_send_log": "jsonb_path_ops"},
+        ),
     )
 
 

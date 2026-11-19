@@ -197,6 +197,38 @@ def test_sms_create_validates_e164() -> None:
         SmsCreate(to="not-a-number", body="hi", recipient_consent=True)
 
 
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "+14155550142\n",
+        "+14155550142 ",
+        " +14155550142",
+        # Full-width digits: ``\d`` matches them unless the check is ASCII.
+        "+1\uff14\uff11\uff15\uff15\uff15\uff15\uff10\uff11\uff14\uff12",
+    ],
+)
+def test_e164_fields_refuse_extra_or_non_ascii_characters(bad) -> None:
+    """Python ``$`` matches before a trailing newline, and ``\\d`` matches
+    non-ASCII digits; the check must refuse both."""
+    from hailhq.core.schemas import SmsCreate, SmsTrialPhoneStart
+
+    with pytest.raises(ValidationError):
+        SmsCreate(to=bad, body="hi", recipient_consent=True)
+    with pytest.raises(ValidationError):
+        SmsTrialPhoneStart(phone=bad, recipient_consent=True, consent_version="v1")
+    with pytest.raises(ValidationError):
+        CallCreate(to=bad, system_prompt="Hi", recipient_consent=True)
+
+
+@pytest.mark.parametrize("bad", ["\uff11\uff12\uff13\uff14\uff15\uff16", "12345\uff16"])
+def test_trial_code_refuses_non_ascii_digits(bad) -> None:
+    from hailhq.core.schemas import SmsTrialPhoneConfirm
+
+    with pytest.raises(ValidationError):
+        SmsTrialPhoneConfirm(code=bad)
+    assert SmsTrialPhoneConfirm(code="123456").code == "123456"
+
+
 def test_sms_create_happy_path() -> None:
     from hailhq.core.schemas import SmsCreate
 

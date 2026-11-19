@@ -222,5 +222,13 @@ def test_is_e164_keeps_the_seven_digit_minimum():
     assert threads.is_e164("+33612345678")
     assert threads.is_e164("+1234567")
     assert not threads.is_e164("+123456")  # E164 allows it; not a real caller
-    for bad in ("", None, "anonymous", "0612345678", "+0123456789", "+" + "1" * 16):
+    for bad in (
+        "",
+        None,
+        "anonymous",
+        "0612345678",
+        "+0123456789",
+        "+" + "1" * 16,
+        "+14155550142\n",
+    ):
         assert not threads.is_e164(bad)
