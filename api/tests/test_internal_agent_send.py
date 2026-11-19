@@ -370,7 +370,7 @@ async def test_send_email_refuses_a_name_not_on_file(
 
     data = await _send_email_to_name(client, call, "stranger@example.com")
     assert data["ok"] is False
-    assert "only email addresses that are already on file" in data["spoken"]
+    assert "only email addresses already on file" in data["spoken"]
     rows = (await async_session.execute(Email.__table__.select())).fetchall()
     assert rows == []
 

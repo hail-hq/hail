@@ -342,11 +342,11 @@ async def _deny(
     return AgentSendResponse(ok=False, spoken=spoken)
 
 
-# Said when no member or saved contact has that name. The agent cannot
-# email an address it is told: only addresses the org saved can receive it.
+# Tool result for the model, not words for the caller: the model tells the
+# person in the call's language.
 _SPOKEN_EMAIL_UNKNOWN = (
-    "I couldn't find {name} among the team or saved contacts. To prevent spam,"
-    " I can only email addresses that are already on file."
+    "Not sent: no team member or saved contact is named {name}. Tell the"
+    " person you can only email addresses already on file, to prevent spam."
 )
 
 
