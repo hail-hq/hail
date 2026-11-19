@@ -84,7 +84,7 @@ def caller_email_body(body_text: str, org_name: str | None) -> str:
         f"{body_text.strip()}\n\n"
         "-- \n"
         f"You got this email because someone asked for it during {call},"
-        " from a phone number saved with this email address. If that was not"
+        " on the phone number saved with this email address. If that was not"
         " you, you can ignore it."
     )
 
@@ -160,9 +160,14 @@ async def _execute(ctx: ToolContext, args: dict[str, Any]) -> str:
             if args.get("reply_to_email_id") or args.get("attachment_ids")
             else ""
         )
+        # Every self word reaches the sender: one key, so a retried run that
+        # picks another word does not send twice.
+        key_name = (
+            SELF_RECIPIENT if is_self_recipient(recipient_name) else recipient_name
+        )
         invocation = uuid.uuid5(
             ctx.inbound_email_id,
-            f"send_email\x00{recipient_name}\x00{subject}\x00{body_text}" + files,
+            f"send_email\x00{key_name}\x00{subject}\x00{body_text}" + files,
         )
         path = "/internal/agent/email-run/send-email"
         source = {"inbound_email_id": str(ctx.inbound_email_id)}

@@ -298,7 +298,7 @@ def test_caller_email_body_has_fixed_lines_and_a_clean_org_name():
         "Your booking is at 3 pm.\n\n"
         "-- \n"
         "You got this email because someone asked for it during a phone call"
-        " with Northgate Dental, from a phone number saved with this email"
+        " with Northgate Dental, on the phone number saved with this email"
         " address. If that was not you, you can ignore it."
     )
     long = caller_email_body("Hi.", "N" * 300)
