@@ -809,6 +809,19 @@ def startup_capability_warnings() -> list[str]:
     return warnings
 
 
+# When the other party can stop the agent mid-reply.
+# - "adaptive": LiveKit's interruption model tells a nod ("okay", "mhmm") from
+#   a real interruption, so the agent keeps talking over the first and stops
+#   for the second. A self-hosted worker gets it only when asked for by name.
+# - It fails open. When the model is refused (request limit reached), errors,
+#   or does not fit the call's setup, the SDK logs it and the call goes on
+#   with the plain rule below. No call fails because of it.
+# - min_words: the plain rule. A transcribed word, not VAD energy alone, is
+#   needed to interrupt the agent.
+# https://docs.livekit.io/agents/logic/turns/adaptive-interruption-handling/
+INTERRUPTION: dict[str, Any] = {"mode": "adaptive", "min_words": 1}
+
+
 def build_session(
     llm_cfg: dict[str, Any] | None,
     vad: agents_vad.VAD,
@@ -905,8 +918,6 @@ def build_session(
         llm=build_llm(llm_cfg, org_cfgs.get("llm"), retry_on_chunk_sent=True),
         turn_handling=TurnHandlingOptions(
             turn_detection=turn_detection,
-            # Only the setting that differs from the SDK defaults: a transcribed
-            # word, not VAD energy alone, is needed to interrupt the agent.
-            interruption={"min_words": 1},
+            interruption=INTERRUPTION,
         ),
     )
