@@ -14,7 +14,9 @@ suppression-list membership or a member's address to the callee.
 The agent never supplies addresses: SMS always targets the call's
 counterpart (``calls.to_e164`` on outbound, ``calls.from_e164`` on inbound);
 email targets a member or saved contact by name, resolved here, scoped to
-the call's org. An address someone says or types is never a recipient.
+the call's org, or the person the agent talks to when the model passes the
+reserved ``SELF_RECIPIENT``. An address someone says or types is never a
+recipient.
 """
 
 from __future__ import annotations
@@ -55,6 +57,8 @@ from hailhq.core.agent_tools.send_email import (
 from hailhq.core.agent_tools.send_email import (
     MAX_RECIPIENT_NAME_CHARS,
     MAX_SUBJECT_CHARS,
+    caller_email_body,
+    is_self_recipient,
 )
 from hailhq.core.agent_tools.send_sms import MAX_BODY_CHARS as SMS_MAX_BODY_CHARS
 from hailhq.core.agent_tools.transfer_call import MAX_REASON_CHARS
@@ -93,6 +97,7 @@ from hailhq.core.email_agent import (
 )
 from hailhq.core.email_agent import (
     MAX_TOOL_SENDS,
+    emails_sent_on_call,
     reply_references,
     reply_subject,
     routed_agent,
@@ -129,6 +134,7 @@ from hailhq.core.models import (
     Email,
     EmailAttachment,
     EmailDomain,
+    Organization,
     PhoneNumber,
     Sms,
 )
@@ -163,6 +169,7 @@ from hailhq.core.threads import is_e164
 from hailhq.core.webhook_fanout import call_event_data, fanout_call_event
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 from sqlalchemy import select, update
+from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -349,39 +356,97 @@ async def _deny(
     return AgentSendResponse(ok=False, spoken=spoken)
 
 
-# Tool result for the model, not words for the caller: the model tells the
-# person in the call's language.
-_SPOKEN_EMAIL_UNKNOWN = (
-    "Not sent: no team member or saved contact is named {name}. Tell the"
-    " person you can only email addresses already on file, to prevent spam."
+# Emails one phone call may send with send_email, so one caller cannot turn a
+# call into a stream of email. Browser test calls have their own limit.
+MAX_CALL_EMAILS = 3
+# Longest recipient name quoted back to the model in a refusal.
+_MAX_QUOTED_NAME = 60
+
+# Tool results for the model, not words for the caller: the model tells the
+# person in the call's language. An unknown name and a name shared by several
+# people get the same answer, so a caller cannot probe the saved contacts.
+_SPOKEN_EMAIL_NO_MATCH = (
+    'Not sent: no single team member or saved contact matches "{name}".'
+    " You can only email people on file, to prevent spam. Ask for another"
+    " name or offer to take a message."
+)
+_SPOKEN_EMAIL_NO_SELF = (
+    "Not sent: no email address is on file for the person on this call."
+    " You can only email people on file, to prevent spam. Offer to take a"
+    " message."
+)
+_SPOKEN_CALL_EMAIL_LIMIT = (
+    f"Not sent: this call already sent {MAX_CALL_EMAILS} emails, the limit for"
+    " one call. Offer to take a message."
 )
 
 
+def _quoted_name(name: str) -> str:
+    """``name`` safe to quote back to the model: one line, no double quotes,
+    at most ``_MAX_QUOTED_NAME`` characters."""
+    text = "".join(c if c.isprintable() else " " for c in name).replace('"', "'")
+    text = " ".join(text.split())
+    if len(text) > _MAX_QUOTED_NAME:
+        return text[: _MAX_QUOTED_NAME - 1] + "…"
+    return text
+
+
 async def _known_email(
-    db: AsyncSession, org: UUID, name: str, *, caller_phone: str | None = None
+    db: AsyncSession, org: UUID, name: str
 ) -> str | AgentSendResponse:
-    """The one address on file for ``name``: the caller's own address when
-    ``name`` is the name their number is saved under, else a member, else a
-    saved contact. The answer to say instead when there is none, or when the
-    name matches more than one address. Members win over contacts, so a
-    customer saved under a team member's name never blocks or takes that
-    member's email."""
-    if caller_phone:
-        own = await resolve_caller_email(db, org, caller_phone, name)
-        if own:
-            return own
+    """The one address on file for ``name``: a member, else a saved contact.
+    Members win over contacts, so a customer saved under a team member's name
+    never blocks or takes that member's email. No match and more than one
+    match get the same answer."""
     matches = await resolve_member_emails(db, org, name)
     if not matches:
         matches = await resolve_contact_emails(db, org, name)
     # One address saved twice, in any letter case, is still one recipient.
     addresses = list(dict.fromkeys(m.lower() for m in matches))
-    if not addresses:
+    if len(addresses) != 1:
         return AgentSendResponse(
-            ok=False, spoken=_SPOKEN_EMAIL_UNKNOWN.format(name=name)
+            ok=False, spoken=_SPOKEN_EMAIL_NO_MATCH.format(name=_quoted_name(name))
         )
-    if len(addresses) > 1:
-        return _ambiguous_recipient(name)
     return next(m for m in matches if m.lower() == addresses[0])
+
+
+async def _call_recipient(
+    db: AsyncSession, call: Call, name: str
+) -> str | AgentSendResponse:
+    """The address for ``send_email`` on a phone call. The reserved
+    self-reference reaches only the caller's own entry, found by their
+    number; anything else is a name. Neither falls back to the other, so
+    "email me" never picks someone who shares the caller's name."""
+    org = call.organization_id
+    if not is_self_recipient(name):
+        return await _known_email(db, org, name)
+    phone = _other_party(call)
+    own = await resolve_caller_email(db, org, phone) if phone else None
+    return own or AgentSendResponse(ok=False, spoken=_SPOKEN_EMAIL_NO_SELF)
+
+
+async def _organization_name(db: AsyncSession, org: UUID) -> str | None:
+    """The org's display name for the fixed lines of a caller email. One read
+    on this session, in a savepoint: the website-owned table is missing on a
+    pure self-host, and the lines then name no organization."""
+    try:
+        async with db.begin_nested():
+            return await db.scalar(
+                select(Organization.name).where(Organization.id == org)
+            )
+    except ProgrammingError:
+        return None
+
+
+async def _run_recipient(
+    db: AsyncSession, inbound: Email, name: str
+) -> str | AgentSendResponse:
+    """The address for ``send_email`` in an email run. The self-reference is
+    the sender: ``_email_run`` already refused mail whose From address
+    ingest did not prove. Anything else is a name."""
+    if is_self_recipient(name):
+        return normalize_address(inbound.from_address)
+    return await _known_email(db, inbound.organization_id, name)
 
 
 async def _send_sms_to(
@@ -639,8 +704,8 @@ async def _send_email_to(
 
 
 async def _shared_denial(db: AsyncSession, call: Call) -> tuple[str, str] | None:
-    """The funds check shared by the send routes. Sends are not capped per
-    call: each is billed like any text or email.
+    """The funds check shared by the send routes. Each send is billed like
+    any text or email; phone-call emails also have ``MAX_CALL_EMAILS``.
 
     Returns ``(spoken, audit_reason)`` on denial or None when the send may
     proceed. The audit reason distinguishes which gate fired; the spoken
@@ -1432,12 +1497,9 @@ async def agent_email_run_send_email(
                 ok=False,
                 spoken="Those files are not available in this email thread. Nothing was sent.",
             )
-        if body.recipient_name.casefold() in ("sender", "you"):
-            recipient = scope.peer
-        else:
-            recipient = await _known_email(db, org, body.recipient_name)
-            if isinstance(recipient, AgentSendResponse):
-                return recipient
+        recipient = await _run_recipient(db, inbound, body.recipient_name)
+        if isinstance(recipient, AgentSendResponse):
+            return recipient
         if recipient.casefold() != scope.peer.casefold():
             return AgentSendResponse(
                 ok=False,
@@ -1453,7 +1515,7 @@ async def agent_email_run_send_email(
             "source_attachment_ids": [str(row.id) for row in files],
         }
     else:
-        recipient = await _known_email(db, org, body.recipient_name)
+        recipient = await _run_recipient(db, inbound, body.recipient_name)
         if isinstance(recipient, AgentSendResponse):
             return recipient
 
@@ -1574,6 +1636,18 @@ async def agent_send_email(
         )
 
     if call.transport != "browser":
+        # Counted under the call row lock (_load_call_for_update) and before
+        # the commit that writes the new row, so concurrent sends on one call
+        # cannot both take the last slot.
+        if await emails_sent_on_call(db, org, call.id) >= MAX_CALL_EMAILS:
+            return AgentSendResponse(ok=False, spoken=_SPOKEN_CALL_EMAIL_LIMIT)
+        recipient = await _call_recipient(db, call, body.recipient_name)
+        if isinstance(recipient, AgentSendResponse):
+            return recipient
+        body_text = body.body_text
+        if is_self_recipient(body.recipient_name):
+            # Caller ID chose this address: fixed lines say why it came.
+            body_text = caller_email_body(body_text, await _organization_name(db, org))
         parent = None
         files = []
         meta = _meta(body)
@@ -1587,15 +1661,6 @@ async def agent_send_email(
                     ok=False,
                     spoken="Those files are not available in this conversation.",
                 )
-            recipient = (
-                scope.peer
-                if body.recipient_name.casefold() in ("you", "sender")
-                else await _known_email(
-                    db, org, body.recipient_name, caller_phone=_other_party(call)
-                )
-            )
-            if isinstance(recipient, AgentSendResponse):
-                return recipient
             if recipient.casefold() != scope.peer.casefold():
                 return AgentSendResponse(
                     ok=False,
@@ -1606,19 +1671,13 @@ async def agent_send_email(
                 "source_attachment_ids": [str(row.id) for row in files],
                 "attachment_reply_to_email_id": str(parent.id),
             }
-        else:
-            recipient = await _known_email(
-                db, org, body.recipient_name, caller_phone=_other_party(call)
-            )
-            if isinstance(recipient, AgentSendResponse):
-                return recipient
         return await _send_email_to(
             db,
             email_provider,
             org,
             recipient=recipient,
             subject=body.subject,
-            body_text=body.body_text,
+            body_text=body_text,
             meta=meta,
             agent_id=None,
             consent_source="voice_call",

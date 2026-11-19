@@ -1267,7 +1267,33 @@ async def test_tool_says_when_a_name_is_unknown(
 ) -> None:
     _org, _agent, _domain, inbound = await _seed(async_session)
     data = await _tool_email(client, inbound.id, recipient_name="Nobody")
-    assert "no team member or saved contact is named Nobody" in data["spoken"]
+    assert 'no single team member or saved contact matches "Nobody"' in data["spoken"]
+
+
+@pytest.mark.parametrize("name", ["me", "Me ", "sender"])
+async def test_tool_email_me_reaches_the_proven_sender(
+    client, async_session, email_mock, name
+) -> None:
+    """In an email run "me" is the sender ingest proved, not a name lookup."""
+    _org, _agent, _domain, inbound = await _seed(
+        async_session, scope="anyone", sender="Sam@Northgate.test"
+    )
+    data = await _tool_email(client, inbound.id, recipient_name=name)
+    assert data == {"ok": True, "spoken": "Email sent."}
+    assert email_mock.send_email.await_args.kwargs["to_addresses"] == [
+        "sam@northgate.test"
+    ]
+
+
+async def test_tool_email_me_from_an_unproven_sender_sends_nothing(
+    client, async_session, email_mock
+) -> None:
+    _org, _agent, _domain, inbound = await _seed(
+        async_session, scope="anyone", sender="sam@northgate.test", dmarc="FAIL"
+    )
+    data = await _tool_email(client, inbound.id, recipient_name="me")
+    assert data["ok"] is False
+    email_mock.send_email.assert_not_awaited()
 
 
 async def test_tool_sms_with_no_phone_says_so(client, async_session, sms_mock) -> None:

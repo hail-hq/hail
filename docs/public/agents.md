@@ -39,9 +39,19 @@ in [`openapi/openapi.yaml`](../../openapi/openapi.yaml).
 ## Who the agent can email
 
 `send_email` reaches addresses you have on file, by name: your team members and
-your saved contacts (`POST /v1/contacts`, MCP `create_contact`). When the caller's
-number matches a saved contact or member with an email, "email me" goes to that
-address. The agent never emails an address someone says or types. It answers
+your saved contacts (`POST /v1/contacts`, MCP `create_contact`). A name shared by
+two people, or not on file, sends nothing, and both get the same answer.
+
+When a caller says "email me", the agent sends to the email saved for the caller's
+number. It never falls back to a name. Caller ID picks that address, and caller ID
+can be faked, so:
+
+- Each email to the caller starts and ends with fixed lines that say it was sent
+  because of a phone call with your organization.
+- One call sends at most 3 emails.
+
+In an email conversation, "email me" goes to the sender, whose address is proven
+by DMARC. The agent never emails an address someone says or types. It answers
 that it can only email addresses on file, to prevent spam.
 
 ## Hand over to a person

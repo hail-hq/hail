@@ -373,8 +373,9 @@ def other_party_section(name: str, *, can_email: bool) -> str:
     )
     if can_email:
         line += (
-            f' Any email for them goes to "{name}": never ask who to email'
-            ' when they want it sent to themselves ("me", "my email").'
+            ' When they want an email sent to themselves ("me", "my'
+            ' email"), call send_email with recipient_name "me": never ask'
+            " who to email or use their name for it."
             " If they only ask you to send something, ask once: by text or by"
             " email?"
         )

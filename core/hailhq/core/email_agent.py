@@ -80,6 +80,7 @@ __all__ = [
     "claim_pending_reply",
     "email_history_filter",
     "email_thread",
+    "emails_sent_on_call",
     "finish_reply",
     "is_authenticated",
     "prior_reply",
@@ -880,6 +881,20 @@ async def tool_sends_for_reply(db: AsyncSession, inbound: Email) -> int:
             stmt = stmt.where(_may_have_reached_someone())
         total += int((await db.execute(stmt)).scalar_one() or 0)
     return total
+
+
+async def emails_sent_on_call(
+    db: AsyncSession, organization_id: uuid.UUID, call_id: uuid.UUID
+) -> int:
+    """Emails a voice agent sent with ``send_email`` on this call. An email
+    that SES proved it never took stays out: it reached nobody."""
+    stmt = select(func.count(Email.id)).where(
+        Email.organization_id == organization_id,
+        Email.direction == "outbound",
+        Email.metadata_["call_id"].astext == str(call_id),
+        _may_have_reached_someone(),
+    )
+    return int((await db.execute(stmt)).scalar_one() or 0)
 
 
 @dataclass(frozen=True)

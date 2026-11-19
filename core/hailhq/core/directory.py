@@ -136,7 +136,8 @@ _UNDEFINED_TABLE = "42P01"
 def _reraise_unless_no_member_tables(exc: ProgrammingError) -> None:
     if getattr(exc.orig, "sqlstate", None) != _UNDEFINED_TABLE:
         raise exc
-    logger.warning("no users/members tables, members skipped: %s", exc)
+    # Normal on a pure self-host, and it runs on every lookup: debug only.
+    logger.debug("no users/members tables, members skipped: %s", exc)
 
 
 async def is_verified_member(
@@ -209,13 +210,14 @@ async def find_by_phone(
 
 
 async def resolve_caller_email(
-    session: AsyncSession, organization_id: uuid.UUID, phone_e164: str, name: str
+    session: AsyncSession, organization_id: uuid.UUID, phone_e164: str
 ) -> str | None:
-    """The email of the person on the call, when ``name`` is the name their
-    number is saved under (:func:`find_by_phone`). "Email me" then reaches
-    the caller even when a member or another contact shares their name."""
+    """The one email saved for the person on the call, found by their number
+    (:func:`find_by_phone`, members first). Only for an explicit "email me":
+    a name the caller is saved under is never used to pick this address.
+    None when the number names nobody or that entry has no single email."""
     entry = await find_by_phone(session, organization_id, phone_e164)
-    if entry is None or entry.name.strip().lower() != name.strip().lower():
+    if entry is None:
         return None
     if entry.source == "member":
         stmt: Any = (

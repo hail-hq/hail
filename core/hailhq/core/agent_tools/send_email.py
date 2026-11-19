@@ -1,7 +1,8 @@
 """send_email — email a member or saved contact by name. outbound_send tier.
 
 Recipients are names of org members (see ``list_contacts``) or saved
-contacts with an email address. A spoken or typed address is never
+contacts with an email address, or :data:`SELF_RECIPIENT` for the person
+on the call or the sender of the email. A spoken or typed address is never
 accepted: nothing proves the person owns it, and it would let anyone use
 the org's domain to send spam. Resolution, gate, cap, and billing run server-side in
 ``/internal/agent/send-email``.
@@ -11,6 +12,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import unicodedata
 import uuid
 from typing import Any
 
@@ -28,7 +30,49 @@ MAX_RECIPIENT_NAME_CHARS = 200
 MAX_SUBJECT_CHARS = 200
 MAX_BODY_CHARS = 5000
 
+# recipient_name for the person the agent talks to: the caller's own address
+# on file on a call, the proven sender in an email run. Never a name lookup.
+SELF_RECIPIENT = "me"
+# "sender" and "you" are older spellings an email run already used.
+_SELF_NAMES = frozenset({SELF_RECIPIENT, "caller", "sender", "you"})
+
+
+def is_self_recipient(name: str) -> bool:
+    """True when ``recipient_name`` means the person the agent talks to."""
+    return name.strip().casefold() in _SELF_NAMES
+
+
 _UNAVAILABLE = "Email is not available right now."
+# Longest org name in the fixed lines of an email to the caller.
+MAX_ORG_NAME_CHARS = 100
+# Control, format and surrogate characters: they could break or disguise text.
+_HIDDEN = frozenset({"Cc", "Cf", "Cs"})
+
+
+def _call_with(org_name: str | None) -> str:
+    kept = "".join(
+        " " if c.isspace() else c
+        for c in org_name or ""
+        if c.isspace() or unicodedata.category(c) not in _HIDDEN
+    )
+    name = " ".join(kept.split())[:MAX_ORG_NAME_CHARS].strip()
+    return f"a phone call with {name}" if name else "a phone call"
+
+
+def caller_email_body(body_text: str, org_name: str | None) -> str:
+    """The body of an email to the caller's own address on file: a fixed
+    first line and footer around the agent's text. Caller ID picked the
+    address and can be faked, so the reader learns why it came and that
+    they can ignore it."""
+    call = _call_with(org_name)
+    return (
+        f"This email was sent because of {call}.\n\n"
+        f"{body_text.strip()}\n\n"
+        "--\n"
+        f"You got this email because someone asked for it during {call},"
+        " from a phone number saved with this email address. If that was not"
+        " you, you can ignore it."
+    )
 
 
 async def _is_available(organization_id: uuid.UUID, session: AsyncSession) -> bool:
@@ -134,7 +178,9 @@ SPEC = ToolSpec(
     name="send_email",
     description=(
         "Send an email to a team member (use list_contacts to see who) or a "
-        "saved contact, by name. It cannot email an address someone says or "
+        "saved contact, by name. When the person on the call wants it sent to "
+        f'themselves ("me", "my email"), set recipient_name to "{SELF_RECIPIENT}". '
+        "It cannot email an address someone says or "
         "types. If asked to, politely say you can only email addresses already "
         "on file, to prevent spam. When the person on the call asks "
         "for the email, send it right away; their request is the "
@@ -160,7 +206,10 @@ SPEC = ToolSpec(
             },
             "recipient_name": {
                 "type": "string",
-                "description": "The name of a team member or saved contact.",
+                "description": (
+                    "The name of a team member or saved contact, or "
+                    f'"{SELF_RECIPIENT}" for the person you are talking to.'
+                ),
             },
             "subject": {"type": "string", "maxLength": MAX_SUBJECT_CHARS},
             "body_text": {
@@ -181,7 +230,8 @@ EMAIL_RUN_SPEC = dataclasses.replace(
     SPEC,
     description=(
         "Send an email to a team member (use list_contacts to see who) or a "
-        "saved contact, by name. You cannot email an address someone writes: "
+        "saved contact, by name. To email the sender of this email, set "
+        f'recipient_name to "{SELF_RECIPIENT}". You cannot email an address someone writes: '
         "you can only email addresses already on file, to prevent spam. To reply with original files to the authenticated sender, use recipient_name=sender, attachment_ids from read_email, and the current reply_to_email_id. This sends the final reply with those original files; do not send it twice."
     ),
 )

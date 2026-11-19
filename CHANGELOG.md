@@ -37,6 +37,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Fixed
 
+- Agents: "email me" on a call reaches only the caller's own saved email, with a fixed line saying why it came, and a call sends at most 3 emails. A name is never swapped for the caller's address.
 - Call agents no longer pause before saying a person's name.
 - MCP: `preview_sms_application` no longer fails with "the API and this MCP version differ" on a US texting form that lists its consent methods.
 - Email: informational mail no longer carries `List-Unsubscribe` headers, so an email agent no longer skips it as list mail. Marketing mail still does.

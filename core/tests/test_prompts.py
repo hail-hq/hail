@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 import pytest
 from hailhq.core import prompts
+from hailhq.core.agent_tools.send_email import SELF_RECIPIENT
 
 
 def test_framing_leads_and_instructions_follow() -> None:
@@ -85,7 +86,8 @@ def test_other_party_goes_last() -> None:
     out = prompts.build_voice_instructions("Be kind.", "inbound", other_party=section)
     assert out.endswith(f"{section}\n\n{prompts.PRIVACY_REMINDER}")
     assert section.startswith("# The person on this call")
-    assert 'Any email for them goes to "Sam"' in section
+    assert f'recipient_name "{SELF_RECIPIENT}"' in section
+    assert 'goes to "Sam"' not in section
     assert "my email" not in prompts.other_party_section("Sam", can_email=False)
 
 
