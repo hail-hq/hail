@@ -418,7 +418,7 @@ class Settings(BaseSettings):
     @field_validator("hail_sms_trial_number")
     @classmethod
     def _trial_number_e164(cls, value: str) -> str:
-        if value and not re.fullmatch(r"\+[1-9]\d{6,14}", value):
+        if value and not re.fullmatch(r"\+[1-9][0-9]{6,14}", value):
             raise ValueError("HAIL_SMS_TRIAL_NUMBER must be empty or E.164")
         return value
 

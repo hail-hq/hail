@@ -77,7 +77,13 @@ async def _trial_status(db: AsyncSession, organization_id: UUID) -> SmsTrialResp
     number = await trial_number(db)
     return SmsTrialResponse(
         configured=number is not None,
-        available=await trial_sender_of(db, number) is not None,
+        # The trial number's owner sends from it as its own number, never
+        # as trial texts.
+        available=(
+            number is not None
+            and number.organization_id != organization_id
+            and await trial_sender_of(db, number) is not None
+        ),
         status=row.status if row is not None else "none",
         phone=row.phone_e164 if row is not None else None,
         pending_phone=row.pending_phone_e164 if row is not None else None,

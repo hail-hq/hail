@@ -253,7 +253,14 @@ async def start_phone_proof(
     if not is_us(phone):
         raise PhoneNotUs()
     is_hail = await db.execute(
-        select(PhoneNumber.id).where(PhoneNumber.e164 == phone).limit(1)
+        select(PhoneNumber.id)
+        .where(
+            PhoneNumber.e164 == phone,
+            # A released number goes back to the carrier and can become a
+            # person's mobile.
+            PhoneNumber.provisioning_state.not_in(("released", "failed")),
+        )
+        .limit(1)
     )
     if is_hail.first() is not None:
         raise PhoneIsHailNumber()
