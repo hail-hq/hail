@@ -51,15 +51,32 @@ _UNAVAILABLE = "Email is not available right now."
 MAX_ORG_NAME_CHARS = 100
 # Control, format and surrogate characters: they could break or disguise text.
 _HIDDEN = frozenset({"Cc", "Cf", "Cs"})
-# Format characters some scripts need to draw letters (Indic, Persian):
-# zero width non-joiner and joiner. Kept only right after a letter or mark
-# of a non-Latin script, so they cannot hide inside Latin words.
+# Format characters some scripts need to draw letters: zero width
+# non-joiner and joiner. Kept only right after a letter or mark of a script
+# that uses them (Arabic and Persian, Indic), so they cannot hide inside
+# Latin words.
 _JOINERS = frozenset({"\u200c", "\u200d"})
-_LATIN_END = 0x024F
+_JOINER_SCRIPTS = (
+    (0x0600, 0x08FF),  # Arabic, Syriac, Thaana, Arabic Extended
+    (0x0900, 0x0DFF),  # Devanagari to Sinhala
+    (0xFB50, 0xFDFF),  # Arabic Presentation Forms-A
+    (0xFE70, 0xFEFF),  # Arabic Presentation Forms-B
+)
+# Thai and Lao vowels written before their consonant.
+_LEADING_VOWELS = frozenset(
+    "\u0e40\u0e41\u0e42\u0e43\u0e44\u0ec0\u0ec1\u0ec2\u0ec3\u0ec4"
+)
 
 
 def _keeps_joiner(prev: str) -> bool:
-    return ord(prev) > _LATIN_END and unicodedata.category(prev)[0] in "LM"
+    code = ord(prev)
+    return unicodedata.category(prev)[0] in "LM" and any(
+        low <= code <= high for low, high in _JOINER_SCRIPTS
+    )
+
+
+def _is_flag_letter(c: str) -> bool:
+    return 0x1F1E6 <= ord(c) <= 0x1F1FF
 
 
 def _one_line(text: str) -> str:
@@ -78,19 +95,22 @@ def _one_line(text: str) -> str:
 
 def _splits_letter(text: str, at: int) -> bool:
     """True when a cut before ``text[at]`` would split one written letter: a
-    combining mark or joiner follows, or a virama or joiner comes before."""
+    combining mark or joiner follows, a virama, joiner or Thai leading vowel
+    comes before, or it falls inside a flag."""
     after, before = text[at], text[at - 1]
     return (
         unicodedata.category(after).startswith("M")
         or after in _JOINERS
         or before in _JOINERS
+        or before in _LEADING_VOWELS
         or unicodedata.combining(before) == 9  # virama
+        or (_is_flag_letter(before) and _is_flag_letter(after))
     )
 
 
 def _cut(text: str, limit: int) -> str:
     """``text`` cut to ``limit`` characters, never inside a written letter
-    (a vowel sign, virama or joiner in Indic scripts, Thai vowels)."""
+    (Indic vowel signs, viramas and joiners, Thai vowels, flags)."""
     if len(text) <= limit:
         return text
     while limit > 0 and _splits_letter(text, limit):

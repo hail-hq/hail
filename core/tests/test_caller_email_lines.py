@@ -84,6 +84,13 @@ def test_joiners_only_stay_inside_non_latin_words():
         "From a phone call: Password"
     )
     assert caller_email_subject("Hi", "\u200d") == "From a phone call: Hi"
+    # Accented, Vietnamese and fullwidth Latin are Latin too.
+    for word in ("Pa\u0301\u200dss", "Vi\u1ec7\u200dt", "\uff30\u200dass"):
+        assert "\u200d" not in caller_email_subject(word, None)
+    # Persian keeps its non-joiner.
+    assert "\u200c" in caller_email_subject(
+        "\u0645\u06cc\u200c\u062e\u0648\u0627\u0645", None, "en"
+    )
 
 
 def test_a_cut_never_leaves_a_half_letter():
@@ -94,3 +101,13 @@ def test_a_cut_never_leaves_a_half_letter():
     subject = caller_email_subject(words, None, "mr")
     assert subject.endswith("क")
     assert len(subject) == MAX_SUBJECT_CHARS - 3
+
+
+def test_a_cut_keeps_thai_vowels_and_flags_whole():
+    prefix = caller_email_subject("", None, "th")
+    room = MAX_SUBJECT_CHARS - len(prefix) - 2
+    thai = caller_email_subject("ก" * (room - 1) + "\u0e40\u0e01", None, "th")
+    assert thai.endswith("ก") and not thai.endswith("\u0e40")
+    flag = "\U0001f1ec\U0001f1e7"
+    cut = caller_email_subject("x" * (room - 1) + flag, None)
+    assert not cut.endswith("\U0001f1ec")

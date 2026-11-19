@@ -172,7 +172,7 @@ from hailhq.core.threads import is_e164
 from hailhq.core.webhook_fanout import call_event_data, fanout_call_event
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 from sqlalchemy import select, update
-from sqlalchemy.exc import ProgrammingError
+from sqlalchemy.exc import ProgrammingError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -488,8 +488,8 @@ async def _call_language(db: AsyncSession, call: Call) -> str | None:
     else the org's saved TTS language (an inbound call copies the agent's
     voice_config, which may have none). The voicebot reads the TTS language
     at call start; a change during the call shows here. It only picks the
-    words of the caller email's fixed lines, so a bad shape or a missing
-    table means None (English)."""
+    words of the caller email's fixed lines, so a bad shape or a failed
+    read means None (English); the savepoint keeps the send's transaction."""
     config = call.voice_config if isinstance(call.voice_config, dict) else {}
     language = config.get("language")
     if isinstance(language, str) and language:
@@ -497,9 +497,8 @@ async def _call_language(db: AsyncSession, call: Call) -> str | None:
     try:
         async with db.begin_nested():
             tts = (await load_org_provider_configs(db, call.organization_id)).get("tts")
-    except ProgrammingError as exc:
-        if getattr(exc.orig, "sqlstate", None) != "42P01":  # undefined_table
-            logger.warning("call language lookup failed: %s", exc)
+    except SQLAlchemyError as exc:
+        logger.warning("call language lookup failed: %s", exc)
         return None
     params = tts.params if tts is not None else None
     language = params.get("language") if isinstance(params, dict) else None
