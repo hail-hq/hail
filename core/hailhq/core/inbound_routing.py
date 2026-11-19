@@ -98,8 +98,9 @@ async def unregister(db: AsyncSession, lk: LiveKitClient, number: PhoneNumber) -
         await _remove_from_shared_trunk(lk, trunk_id, number.e164)
     except Exception:
         # The carrier is detached and the carrier trunk cleared: the number
-        # is unregistered and the carrier sends it no calls. The leftover is
-        # removed by the next register, or by sip_trunks.py move.
+        # is unregistered and the carrier sends it no calls. The next
+        # register removes the leftover; sip_trunks.py move would instead
+        # move it onto the carrier's locked trunk.
         logger.exception(
             "number %s: removal from the shared inbound trunk failed",
             number.e164,
@@ -116,16 +117,27 @@ async def _add_to_carrier_trunk(lk: LiveKitClient, trunk_id: str, e164: str) -> 
     number registered before its carrier got its own trunk can still be on
     the shared trunk, and LiveKit lists a number on one trunk only, so the
     add is refused. An unregistered number takes no calls, so removing the
-    leftover loses nothing. The shared trunk is touched only after a refusal."""
+    leftover loses nothing. The shared trunk is touched only after LiveKit
+    refuses the add as a conflict (``invalid_argument``, "Conflicting inbound
+    SIP Trunks" in livekit/protocol sip/sip.go)."""
     try:
         await lk.add_inbound_number(trunk_id, e164)
         return
-    except Exception:
+    except TwirpError as first:
         shared = settings.livekit_sip_inbound_trunk_id
-        if not shared or shared == trunk_id:
+        if first.code != "invalid_argument" or not shared or shared == trunk_id:
             raise
-    await _remove_from_shared_trunk(lk, trunk_id, e164)
-    await lk.add_inbound_number(trunk_id, e164)
+        logger.warning(
+            "number %s: carrier trunk refused the add, removing a shared-trunk "
+            "leftover and retrying",
+            e164,
+            exc_info=True,
+        )
+        try:
+            await _remove_from_shared_trunk(lk, trunk_id, e164)
+            await lk.add_inbound_number(trunk_id, e164)
+        except Exception as exc:
+            raise exc from first
 
 
 async def _remove_from_shared_trunk(

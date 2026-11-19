@@ -175,7 +175,13 @@ async def test_move_takes_only_the_carriers_numbers(monkeypatch) -> None:
         trunk("ST_tx", "hail-inbound-telnyx", ["hail-placeholder-telnyx"]),
     )
     plan = await st.move(
-        sip, DATA, SPECS["telnyx"], back=False, yes=True, carriers_of=_carriers
+        sip,
+        DATA,
+        SPECS["telnyx"],
+        back=False,
+        yes=True,
+        carriers_of=_carriers,
+        drop_unknown=True,
     )
     assert list(sip.trunks["ST_tx"].numbers) == [
         "hail-placeholder-telnyx",
@@ -296,3 +302,35 @@ async def test_apply_skips_a_deleted_shared_trunk() -> None:
         line.startswith("WARNING: LIVEKIT_SIP_INBOUND_TRUNK_ID") for line in plan
     )
     assert list(sip.trunks["ST_other"].numbers) == []
+
+
+async def test_unknown_numbers_stay_unless_asked(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "livekit_telnyx_sip_inbound_trunk_id", "ST_tx")
+    sip = FakeSip(
+        trunk("ST_shared", "shared", ["+14155550100", "+14155550199"]),
+        trunk("ST_tx", "hail-inbound-telnyx", ["hail-placeholder-telnyx"]),
+    )
+    await st.move(
+        sip, DATA, SPECS["telnyx"], back=False, yes=True, carriers_of=_carriers
+    )
+    assert "+14155550199" in sip.trunks["ST_shared"].numbers
+
+
+async def test_move_stops_when_the_database_knows_no_number(monkeypatch) -> None:
+    """A laptop .env pointing at a dev database must not empty the trunk."""
+    monkeypatch.setattr(settings, "livekit_telnyx_sip_inbound_trunk_id", "ST_tx")
+    sip = FakeSip(
+        trunk("ST_shared", "shared", ["+14155550188", "hail-placeholder-twilio"]),
+        trunk("ST_tx", "hail-inbound-telnyx", ["hail-placeholder-telnyx"]),
+    )
+    with pytest.raises(st.TrunkError, match="DATABASE_URL"):
+        await st.move(
+            sip,
+            DATA,
+            SPECS["telnyx"],
+            back=False,
+            yes=True,
+            carriers_of=_carriers,
+            drop_unknown=True,
+        )
+    assert "+14155550188" in sip.trunks["ST_shared"].numbers

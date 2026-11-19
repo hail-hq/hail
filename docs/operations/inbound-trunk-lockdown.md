@@ -55,7 +55,15 @@ Run every command from the repo root of the main checkout, whose `.env` holds th
      docker compose -f docker-compose.yml -f docker-compose.prod.yml
    ```
 
-5. Move one carrier, test it, then the next. Telnyx first, then DIDWW, then Twilio:
+5. Control run of the probe, before any number moves: point it at a Hail-owned number with an agent, still on the open shared trunk _(chat)_. The short call shows in that workspace's call log. It must print `ACCEPTED` (exit 1; it cancels the call at once). Any other verdict means the probe cannot see an open trunk from this network, so step 7 would prove nothing: fix that first.
+
+   ```bash
+   python3 scripts/ops/sip_invite_probe.py \
+     --host <project>.sip.livekit.cloud \
+     --number +<E.164 number on the shared trunk>
+   ```
+
+6. Move one carrier, test it, then the next. Telnyx first, then DIDWW, then Twilio:
 
    ```bash
    uv run python scripts/ops/sip_trunks.py move --carrier telnyx
@@ -63,9 +71,9 @@ Run every command from the repo root of the main checkout, whose `.env` holds th
    uv run python scripts/ops/sip_trunks.py status
    ```
 
-   `move` also takes numbers with no live row (released) off the shared trunk. Then call a Hail-owned number of that carrier _(chat)_ from a phone. The agent must answer. If it does not, roll back that carrier (below) before the next one.
+   `move` lists numbers on the shared trunk with no live row (released, failed or unknown to the database) and leaves them; add `--drop-unknown` to take them off, after checking the list. Then call a Hail-owned number of that carrier _(chat)_ from a phone. The agent must answer. If it does not, roll back that carrier (below) before the next one.
 
-6. Negative test, once per carrier, from a laptop (not a carrier address), at a Hail-owned number on that carrier's trunk _(chat)_:
+7. Negative test, once per carrier, from a laptop (not a carrier address), at a Hail-owned number on that carrier's trunk _(chat)_:
 
    ```bash
    python3 scripts/ops/sip_invite_probe.py \
@@ -77,7 +85,7 @@ Run every command from the repo root of the main checkout, whose `.env` holds th
    - `ACCEPTED` (exit 1): the trunk took a call from a non-carrier address. For Twilio or Telnyx this means LiveKit does not check `allowed_addresses` on this project, so those trunks are not locked. Leave the numbers where they are (no worse than before) and stop: the owner decides the next step.
    - `NO CONNECTION` or `INCONCLUSIVE` (exit 2): no connection to port 5060 over TCP, a dropped connection, or another answer (printed). The test says nothing; try again, or from another network.
 
-7. When all three carriers pass, retire the shared trunk and stop accepting it:
+8. When all three carriers pass, retire the shared trunk and stop accepting it:
 
    ```bash
    uv run python scripts/ops/sip_trunks.py retire-shared

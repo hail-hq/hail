@@ -237,7 +237,13 @@ async def live_carriers(numbers: list[str]) -> dict[str, str]:
 
 
 async def move(
-    sip, data: dict, spec: Spec, back: bool, yes: bool, carriers_of=live_carriers
+    sip,
+    data: dict,
+    spec: Spec,
+    back: bool,
+    yes: bool,
+    carriers_of=live_carriers,
+    drop_unknown: bool = False,
 ) -> list[str]:
     shared = settings.livekit_sip_inbound_trunk_id
     own = carrier_trunk_id(spec.carrier)
@@ -249,7 +255,9 @@ async def move(
     if own_trunk.name != spec.name:
         raise TrunkError(f"{env_key(spec.carrier)} is not the {spec.name} trunk")
     shared_trunk = await trunk_by_id(sip, shared)
-    placeholders = {data["shared_placeholder"], spec.placeholder}
+    placeholders = {data["shared_placeholder"]} | {
+        t["placeholder"] for t in data["trunks"].values()
+    }
     if back:
         src, dst = own_trunk, shared_trunk
         movable = [n for n in src.numbers if n not in placeholders]
@@ -258,6 +266,11 @@ async def move(
         src, dst = shared_trunk, own_trunk
         candidates = [n for n in src.numbers if n not in placeholders]
         found = await carriers_of(candidates)
+        if candidates and not found:
+            raise TrunkError(
+                f"none of the {len(candidates)} number(s) on {src.name} has a "
+                "live row: is DATABASE_URL the production database?"
+            )
         movable = [n for n in candidates if found.get(n) == spec.carrier]
         skipped = [n for n in candidates if n not in found]
     src_placeholder = spec.placeholder if back else data["shared_placeholder"]
@@ -266,8 +279,14 @@ async def move(
         f"move {len(movable)} {spec.carrier} number(s) from {src.name} to {dst.name}",
     ]
     plan.extend(f"  {n}" for n in movable)
-    # A released number takes no calls: it should be on no trunk at all.
-    plan.extend(f"remove {n} from {src.name}: no live number row" for n in skipped)
+    # A released or failed number takes no calls: it belongs on no trunk.
+    # Removed only on request: a wrong DATABASE_URL would list live numbers.
+    action = "remove" if drop_unknown else "skip (add --drop-unknown to remove)"
+    plan.extend(
+        f"{action} {n} on {src.name}: no live number row (released, failed or "
+        "unknown)"
+        for n in skipped
+    )
     if not yes:
         return plan
     # Without an entry the source trunk would match every dialed number.
@@ -286,10 +305,11 @@ async def move(
             await _recover(sip, number, src, dst)
             raise
         plan.append(f"moved {number}")
-    for number in skipped:
+    for number in skipped if drop_unknown else []:
         await sip.update_inbound_trunk_fields(
             src.sip_trunk_id, numbers=ListUpdate(remove=[number])
         )
+        print(f"removed {number} from {src.name}", file=sys.stderr)
         plan.append(f"removed {number}")
     return plan
 
@@ -393,7 +413,9 @@ async def run(args: argparse.Namespace) -> list[str]:
         spec = specs[args.carrier]
         if args.command == "apply":
             return await apply(lk.sip, data, spec, args.yes)
-        return await move(lk.sip, data, spec, args.back, args.yes)
+        return await move(
+            lk.sip, data, spec, args.back, args.yes, drop_unknown=args.drop_unknown
+        )
     finally:
         await lk.aclose()
         await dispose_engine()
@@ -410,6 +432,11 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--yes", action="store_true", help="make the changes")
         if name == "move":
             p.add_argument("--back", action="store_true", help="carrier -> shared")
+            p.add_argument(
+                "--drop-unknown",
+                action="store_true",
+                help="also remove numbers with no live row from the shared trunk",
+            )
     retire = sub.add_parser("retire-shared")
     retire.add_argument("--yes", action="store_true", help="make the changes")
     args = parser.parse_args(argv)

@@ -32,6 +32,10 @@ def hooks(monkeypatch: pytest.MonkeyPatch) -> dict[str, AsyncMock]:
     return {"attach": attach, "detach": detach}
 
 
+def _conflict() -> TwirpError:
+    return TwirpError("invalid_argument", "Conflicting inbound SIP Trunks", status=400)
+
+
 def _number() -> PhoneNumber:
     return PhoneNumber(
         organization_id=uuid.uuid4(),
@@ -220,7 +224,7 @@ async def test_shared_trunk_failure_does_not_block_unregister(
     assert number.inbound_registered_at is None
 
     lk.remove_inbound_number.reset_mock(side_effect=True)
-    lk.add_inbound_number.side_effect = [RuntimeError("number on another trunk"), None]
+    lk.add_inbound_number.side_effect = [_conflict(), None]
     await inbound_routing.register(async_session, lk, number)
     lk.remove_inbound_number.assert_awaited_once_with("ST_shared", "+14155550100")
     assert lk.add_inbound_number.await_count == 2
@@ -247,7 +251,7 @@ async def test_register_after_the_shared_trunk_is_deleted(
 ) -> None:
     monkeypatch.setattr(settings, "livekit_sip_inbound_trunk_id", "ST_shared")
     lk = AsyncMock()
-    lk.add_inbound_number.side_effect = [RuntimeError("refused"), None]
+    lk.add_inbound_number.side_effect = [_conflict(), None]
     lk.remove_inbound_number.side_effect = TwirpError(
         "not_found", "trunk not found", status=404
     )
@@ -265,7 +269,7 @@ async def test_register_fails_when_the_shared_trunk_cannot_let_go(
 ) -> None:
     monkeypatch.setattr(settings, "livekit_sip_inbound_trunk_id", "ST_shared")
     lk = AsyncMock()
-    lk.add_inbound_number.side_effect = RuntimeError("number on another trunk")
+    lk.add_inbound_number.side_effect = _conflict()
     lk.remove_inbound_number.side_effect = RuntimeError("timeout")
     number = _number()
     async_session.add(number)
@@ -311,3 +315,20 @@ async def test_unregister_skips_the_shared_trunk_when_it_is_the_carrier_trunk(
     await inbound_routing.unregister(async_session, lk, number)
 
     lk.remove_inbound_number.assert_awaited_once_with("ST_in_tw", "+14155550100")
+
+
+async def test_register_does_not_touch_the_shared_trunk_on_other_errors(
+    async_session, hooks, monkeypatch
+) -> None:
+    monkeypatch.setattr(settings, "livekit_sip_inbound_trunk_id", "ST_shared")
+    lk = AsyncMock()
+    lk.add_inbound_number.side_effect = TimeoutError()
+    number = _number()
+    async_session.add(number)
+    await async_session.flush()
+
+    with pytest.raises(inbound_routing.InboundRoutingError):
+        await inbound_routing.register(async_session, lk, number)
+
+    lk.remove_inbound_number.assert_not_awaited()
+    assert lk.add_inbound_number.await_count == 1
