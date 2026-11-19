@@ -9,6 +9,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 Agents can call your own API with HTTP tools, answer email, and know the
 date and time. Calls return their transcript and a summary. Number
 verification can read documents before filing and resubmit after a rejection.
+A workspace can send up to 25 trial texts to its own verified US phone.
 
 Component versions cut alongside this release:
 **`cli-v0.32.0`** (Homebrew + GitHub Releases) and **`sdk-v0.23.0`** (PyPI).
