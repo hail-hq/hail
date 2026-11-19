@@ -12,13 +12,16 @@ so ``has_phone`` reflects the real column instead of a hardcoded False.
 Cross-org isolation rule (load-bearing): every query starts from the
 call's ``organization_id`` — a user/contact is reachable only via
 membership in (or ownership by) that org. Raw addresses leave this
-module only through ``resolve_member_emails``, which only the API
+module only through ``resolve_member_emails`` and
+``resolve_contact_emails``, which only the API
 service calls; the voicebot sees names and channel presence, never
 addresses.
 
-Agent sends reach members only, so ``list_directory`` (what the agent
-reads in ``list_contacts``) lists members only. Manual contacts are used
-to name the other party on a call (``find_by_phone``), not as recipients.
+Agent emails reach members and manual contacts with an email address
+(``resolve_contact_emails``); agent texts reach members only.
+``list_directory`` (what the agent reads in ``list_contacts``) lists
+members only, so the agent never reads the customer list to an outsider.
+Manual contacts also name the other party on a call (``find_by_phone``).
 """
 
 from __future__ import annotations
@@ -76,6 +79,22 @@ async def resolve_member_emails(
     policies (the internal route refuses ambiguous sends).
     """
     return await _members_named(session, organization_id, name, User.email)
+
+
+async def resolve_contact_emails(
+    session: AsyncSession, organization_id: uuid.UUID, name: str
+) -> list[str]:
+    """Emails of the org's manual contacts named ``name``, case-insensitively.
+
+    Contacts with no email are left out. Same policy as
+    :func:`resolve_member_emails`: the caller owns 0 and >1 matches.
+    """
+    stmt = select(Contact.email).where(
+        Contact.organization_id == organization_id,
+        Contact.email.is_not(None),
+        func.lower(Contact.name) == name.strip().lower(),
+    )
+    return [email for email in (await session.execute(stmt)).scalars().all() if email]
 
 
 async def resolve_member_phones(
@@ -171,6 +190,7 @@ __all__ = [
     "find_by_phone",
     "is_verified_member",
     "list_directory",
+    "resolve_contact_emails",
     "resolve_member_emails",
     "resolve_member_phones",
 ]

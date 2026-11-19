@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from hailhq.core.directory import (
     find_by_phone,
     list_directory,
+    resolve_contact_emails,
     resolve_member_emails,
 )
 from hailhq.core.models import Contact, OrganizationMember, User
@@ -143,3 +144,15 @@ async def test_find_by_phone_names_nobody_for_a_shared_number(async_session):
     )
 
     assert await find_by_phone(async_session, org, "+15550001111") is None
+
+
+async def test_resolve_contact_emails_by_name_in_org_only(async_session):
+    org, other = uuid.uuid4(), uuid.uuid4()
+    await _add_contact(async_session, org, "Sam Lee", email="sam@example.com")
+    await _add_contact(async_session, org, "Sam Lee", phone_e164="+14155550142")
+    await _add_contact(async_session, other, "Sam Lee", email="sam@other.example")
+    # The contact with no email is left out; the other org's never shows.
+    assert await resolve_contact_emails(async_session, org, "  sam lee ") == [
+        "sam@example.com"
+    ]
+    assert await resolve_contact_emails(async_session, org, "Nobody") == []

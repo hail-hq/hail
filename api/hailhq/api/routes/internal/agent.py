@@ -13,8 +13,8 @@ suppression-list membership or a member's address to the callee.
 
 The agent never supplies addresses: SMS always targets the call's
 counterpart (``calls.to_e164`` on outbound, ``calls.from_e164`` on inbound);
-email targets a directory name resolved
-here, scoped to the call's org.
+email targets a member or saved contact by name, resolved here, scoped to
+the call's org. An address someone says or types is never a recipient.
 """
 
 from __future__ import annotations
@@ -82,7 +82,11 @@ from hailhq.core.compliance_gate import (
 )
 from hailhq.core.contact_ids import normalize_contact_id, parse_contact_id
 from hailhq.core.db import get_session, key_lock, org_lock
-from hailhq.core.directory import resolve_member_emails, resolve_member_phones
+from hailhq.core.directory import (
+    resolve_contact_emails,
+    resolve_member_emails,
+    resolve_member_phones,
+)
 from hailhq.core.email_agent import (
     MAX_REPLY_CHARS as EMAIL_MAX_REPLY_CHARS,
 )
@@ -337,19 +341,31 @@ async def _deny(
     return AgentSendResponse(ok=False, spoken=spoken)
 
 
-async def _member_email(
+# Said when no member or saved contact has that name. The agent cannot
+# email an address it is told: only addresses the org saved can receive it.
+_SPOKEN_EMAIL_UNKNOWN = (
+    "I couldn't find {name} among the team or saved contacts. To prevent spam,"
+    " I can only email addresses that are already on file."
+)
+
+
+async def _known_email(
     db: AsyncSession, org: UUID, name: str
 ) -> str | AgentSendResponse:
-    """The one member named ``name``, or the answer when there is none or
-    more than one."""
+    """The one address on file for ``name``: a member or a saved contact.
+    The answer to say instead when there is none, or when the name matches
+    more than one address."""
     matches = await resolve_member_emails(db, org, name)
-    if not matches:
+    matches += await resolve_contact_emails(db, org, name)
+    # A person saved as both a member and a contact is still one recipient.
+    addresses = list(dict.fromkeys(m.casefold() for m in matches))
+    if not addresses:
         return AgentSendResponse(
-            ok=False, spoken=f"I couldn't find {name} in the directory."
+            ok=False, spoken=_SPOKEN_EMAIL_UNKNOWN.format(name=name)
         )
-    if len(matches) > 1:
+    if len(addresses) > 1:
         return _ambiguous_recipient(name)
-    return matches[0]
+    return next(m for m in matches if m.casefold() == addresses[0])
 
 
 async def _send_sms_to(
@@ -1311,7 +1327,8 @@ async def agent_email_run_send_email(
     db: Annotated[AsyncSession, Depends(get_session)],
     email_provider: Annotated[EmailProvider, Depends(get_email_provider)],
 ) -> AgentSendResponse:
-    """The ``send_email`` tool in an email run: a member by directory name."""
+    """The ``send_email`` tool in an email run: a member or saved contact by
+    name."""
     run = await _email_run(
         db, body, model=Email, action="agent.email.blocked", resource_type="email"
     )
@@ -1339,7 +1356,7 @@ async def agent_email_run_send_email(
         if body.recipient_name.casefold() in ("sender", "you"):
             recipient = scope.peer
         else:
-            recipient = await _member_email(db, org, body.recipient_name)
+            recipient = await _known_email(db, org, body.recipient_name)
             if isinstance(recipient, AgentSendResponse):
                 return recipient
         if recipient.casefold() != scope.peer.casefold():
@@ -1357,7 +1374,7 @@ async def agent_email_run_send_email(
             "source_attachment_ids": [str(row.id) for row in files],
         }
     else:
-        recipient = await _member_email(db, org, body.recipient_name)
+        recipient = await _known_email(db, org, body.recipient_name)
         if isinstance(recipient, AgentSendResponse):
             return recipient
 
@@ -1494,7 +1511,7 @@ async def agent_send_email(
             recipient = (
                 scope.peer
                 if body.recipient_name.casefold() in ("you", "sender")
-                else await _member_email(db, org, body.recipient_name)
+                else await _known_email(db, org, body.recipient_name)
             )
             if isinstance(recipient, AgentSendResponse):
                 return recipient
@@ -1509,7 +1526,7 @@ async def agent_send_email(
                 "attachment_reply_to_email_id": str(parent.id),
             }
         else:
-            recipient = await _member_email(db, org, body.recipient_name)
+            recipient = await _known_email(db, org, body.recipient_name)
             if isinstance(recipient, AgentSendResponse):
                 return recipient
         return await _send_email_to(

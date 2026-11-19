@@ -23,6 +23,7 @@ from hailhq.core.models import (
     AuditLog,
     Call,
     CarrierVerification,
+    Contact,
     Email,
     EmailDomain,
     Organization,
@@ -313,6 +314,116 @@ async def test_send_email_happy_path_stamps_call_id(
     assert rows[0].to_addresses == ["sarah@a.test"]
     assert rows[0].metadata["call_id"] == str(call.id)
     assert email_mock.send_email.await_args.kwargs["organization_id"] == org
+
+
+async def _email_ready_call(async_session, org, add_phone_number):
+    call = await _insert_live_call(async_session, org, add_phone_number)
+    async_session.add(
+        EmailDomain(
+            organization_id=org,
+            kind="custom",
+            domain="mail.a.test",
+            verification_status="verified",
+        )
+    )
+    return call
+
+
+async def _send_email_to_name(client, call, name):
+    payload = json.dumps(
+        {
+            "call_id": str(call.id),
+            "tool_invocation_id": str(uuid.uuid4()),
+            "recipient_name": name,
+            "subject": "Call summary",
+            "body_text": "Hello from the call.",
+        }
+    ).encode()
+    resp = await client.post(
+        "/internal/agent/send-email", content=payload, headers=_signed(payload)
+    )
+    return resp.json()
+
+
+async def test_send_email_reaches_a_saved_contact_by_name(
+    client, async_session, email_mock, add_phone_number
+):
+    org = uuid.uuid4()
+    call = await _email_ready_call(async_session, org, add_phone_number)
+    async_session.add(
+        Contact(organization_id=org, name="Sam Lee", email="sam@northgate.test")
+    )
+    await async_session.commit()
+
+    assert (await _send_email_to_name(client, call, "sam lee"))["ok"] is True
+    rows = (await async_session.execute(Email.__table__.select())).fetchall()
+    assert [r.to_addresses for r in rows] == [["sam@northgate.test"]]
+
+
+async def test_send_email_refuses_a_name_not_on_file(
+    client, async_session, email_mock, add_phone_number
+):
+    """A spoken address is not a name on file: nothing is sent."""
+    org = uuid.uuid4()
+    call = await _email_ready_call(async_session, org, add_phone_number)
+    await async_session.commit()
+
+    data = await _send_email_to_name(client, call, "stranger@example.com")
+    assert data["ok"] is False
+    assert "only email addresses that are already on file" in data["spoken"]
+    rows = (await async_session.execute(Email.__table__.select())).fetchall()
+    assert rows == []
+
+
+async def test_send_email_one_person_as_member_and_contact_is_one_recipient(
+    client, async_session, email_mock, add_phone_number
+):
+    org = uuid.uuid4()
+    call = await _email_ready_call(async_session, org, add_phone_number)
+    user = User(
+        id=uuid.uuid4(),
+        name="Sam Lee",
+        email="Sam@Northgate.test",
+        created_at=datetime.now(timezone.utc),
+    )
+    async_session.add(user)
+    async_session.add(
+        OrganizationMember(
+            id=uuid.uuid4(),
+            user_id=user.id,
+            organization_id=org,
+            role="member",
+            created_at=datetime.now(timezone.utc),
+        )
+    )
+    async_session.add(
+        Contact(organization_id=org, name="Sam Lee", email="sam@northgate.test")
+    )
+    await async_session.commit()
+
+    assert (await _send_email_to_name(client, call, "Sam Lee"))["ok"] is True
+    rows = (await async_session.execute(Email.__table__.select())).fetchall()
+    assert [r.to_addresses for r in rows] == [["Sam@Northgate.test"]]
+
+
+async def test_send_email_refuses_a_name_shared_by_two_addresses(
+    client, async_session, email_mock, add_phone_number
+):
+    org = uuid.uuid4()
+    call = await _email_ready_call(async_session, org, add_phone_number)
+    async_session.add_all(
+        [
+            Contact(organization_id=org, name="Sam Lee", email="sam@northgate.test"),
+            Contact(organization_id=org, name="Sam Lee", email="sam@harbor.test"),
+        ]
+    )
+    await async_session.commit()
+
+    data = await _send_email_to_name(client, call, "Sam Lee")
+    assert data["ok"] is False
+    assert "More than one person" in data["spoken"]
+    rows = (await async_session.execute(Email.__table__.select())).fetchall()
+    assert rows == []
 
 
 async def test_send_sms_concurrent_same_invocation_sends_once(

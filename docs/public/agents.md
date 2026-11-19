@@ -36,6 +36,14 @@ SDK: `client.agents.create(...)`, `client.numbers.route(...)`.
 Schemas: `AgentCreate`, `AgentUpdate`, `AgentResponse`, `PhoneNumberRoutingUpdate`
 in [`openapi/openapi.yaml`](../../openapi/openapi.yaml).
 
+## Who the agent can email
+
+`send_email` reaches addresses you have on file, by name: your team members and
+your saved contacts (`POST /v1/contacts`, MCP `create_contact`). When the caller's
+number matches a saved contact or member with an email, "email me" goes to that
+address. The agent never emails an address someone says or types. It answers
+that it can only email addresses on file, to prevent spam.
+
 ## Hand over to a person
 
 Let the agent pass a live call to a person you picked: a team member with a
@@ -326,8 +334,8 @@ A skipped row names why in `metadata.agent_skip_reason`. Replies bill as outboun
 carry `agent_id`.
 
 An agent answering email can use `list_contacts`, `send_email`, and `send_sms`, unless its
-`tools` list leaves them out. Each send names a person in the directory, and each email allows
-at most 3 sends.
+`tools` list leaves them out. Each text names a team member, each email names a team member or
+saved contact, and each email allows at most 3 sends.
 
 ## Threads
 
