@@ -272,25 +272,25 @@ model writes, the text is skipped with the same reason.
 
 A text that gets no reply names why in `metadata.skipped_reason`:
 
-| Reason               | Meaning                                                                                                       |
-| -------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `insufficient_funds` | The workspace has no credits.                                                                                 |
-| `no_agent`           | The number has no live text agent any more.                                                                   |
-| `expired`            | The text waited longer than `HAIL_TEXT_REPLY_MAX_AGE_SECONDS`.                                                |
-| `empty_reply`        | The model wrote no reply.                                                                                     |
-| `thread_cap`         | The thread reached its reply limit.                                                                           |
-| `send_blocked`       | A send check refused the reply (opt-out, blocked number, rate limit, or texting suspended for the workspace). |
-| `sms_registration`   | The number needs registration before it can text this person. `metadata.skipped_detail` says how.             |
-| `agent_caps`         | The agent reached its sending limit.                                                                          |
-| `active_call`        | A call with this person was in progress. The text is answered after the call.                                 |
+| Reason | Meaning |
+| --- | --- |
+| `insufficient_funds` | The workspace has no credits. |
+| `no_agent` | The number has no live text agent any more. |
+| `expired` | The text waited longer than `HAIL_TEXT_REPLY_MAX_AGE_SECONDS`. |
+| `empty_reply` | The model wrote no reply. |
+| `thread_cap` | The thread reached its reply limit. |
+| `send_blocked` | A send check refused the reply (opt-out, blocked number, rate limit, or texting suspended for the workspace). |
+| `sms_registration` | The number needs registration before it can text this person. `metadata.skipped_detail` says how. |
+| `agent_caps` | The agent reached its sending limit. |
+| `active_call` | A call with this person was in progress. The text is answered after the call. |
 
 A failed reply can also carry a `skipped_reason` from the send step:
 
-| Reason             | Meaning                                                                                   |
-| ------------------ | ----------------------------------------------------------------------------------------- |
-| `provider_error`   | The carrier could not be reached to send the reply.                                       |
-| `carrier_rejected` | The carrier refused the reply. The reply's `error_code` holds the carrier's code.         |
-| `reply_failed`     | The reply failed for another reason: model or send errors after 3 tries, or no model key. |
+| Reason | Meaning |
+| --- | --- |
+| `provider_error` | The carrier could not be reached to send the reply. |
+| `carrier_rejected` | The carrier refused the reply. The reply's `error_code` holds the carrier's code. |
+| `reply_failed` | The reply failed for another reason: model or send errors after 3 tries, or no model key. |
 
 ## Answer email with an agent
 
