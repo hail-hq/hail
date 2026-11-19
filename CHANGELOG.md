@@ -35,8 +35,8 @@ The MCP registry entry moves to 0.2.0. Database migrations run on deploy.
 - Carrier call rates per minute, by country and line type, in `costs/voice.json` (Twilio, refreshed weekly; Telnyx, added by hand).
 - `POST /v1/numbers/quotes` takes an optional `subject_type` (`person` or `business`) and returns each offer's `paperwork` for it.
 - Number paperwork says when the address can be in any country: the new `address_any_country` item, from DIDWW.
-- Email agents: route an address to an agent, and it answers inbound mail in the thread (CLI `hail email domain route`, MCP `route_email_domain`).
-- CLI: `--http-tools-file` and `--no-http-tools` on `hail agents create|update`, and `hail agents rotate-tool-secret <id>`.
+- Email agents: route an address to an agent, and it answers inbound mail in the thread (CLI `hail email domain route`, MCP `route_email_domain`). Turn it off per agent with `--no-email` or `email_enabled=False`.
+- CLI: `--http-tools-file` on `hail agents create|update`, `--no-http-tools` on `update`, and `hail agents rotate-tool-secret <id>`.
 - `hail-sdk`: `http_tools`, `agents.rotate_tool_secret()`, call `transcript`, and `email_agent_id` on `email_domains.patch()`.
 - Number verification: `POST /v1/verifications/document-check` (MCP `check_verification_documents`) reads uploaded documents with AI to fill the form and warn.
 - US texting: read and correct a saved registration with `GET`/`PATCH /v1/verifications/{id}/application` (CLI `hail numbers amend-sms`, MCP `amend_sms_application`).
