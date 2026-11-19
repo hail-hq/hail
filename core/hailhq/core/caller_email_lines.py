@@ -7,7 +7,8 @@ came from a phone call with the organization (see
 reads them, so they follow the call's language like the voicebot's fixed
 spoken lines. Unknown or missing language: English. Each line has a form
 with ``{org}``, the organization's display name, and one for when the name
-did not resolve. Where a verb would mark the reader's gender, the line uses
+did not resolve. The subject never opens with ``{org}``: the email list
+must show the phone call words first. Where a verb would mark the reader's gender, the line uses
 a form that does not.
 """
 
@@ -70,7 +71,7 @@ CALLER_EMAIL_LINES: dict[str, CallerEmailLines] = {
         " сте били вие, можете да го пренебрегнете.",
     ),
     "bn": CallerEmailLines(
-        "{org}-এর সঙ্গে ফোন কলের সূত্রে",
+        "ফোন কলের সূত্রে ({org})",
         "একটি ফোন কলের সূত্রে",
         "এই ইমেইলটি {org}-এর সঙ্গে একটি ফোন কলের কারণে পাঠানো হয়েছে।",
         "এই ইমেইলটি একটি ফোন কলের কারণে পাঠানো হয়েছে।",
@@ -170,7 +171,7 @@ CALLER_EMAIL_LINES: dict[str, CallerEmailLines] = {
         " e-mail. Si ce n'était pas vous, vous pouvez l'ignorer.",
     ),
     "gu": CallerEmailLines(
-        "{org} સાથેના ફોન કૉલ પરથી",
+        "ફોન કૉલ પરથી ({org})",
         "એક ફોન કૉલ પરથી",
         "આ ઇમેઇલ {org} સાથેના એક ફોન કૉલને કારણે મોકલવામાં આવ્યો છે.",
         "આ ઇમેઇલ એક ફોન કૉલને કારણે મોકલવામાં આવ્યો છે.",
@@ -193,7 +194,7 @@ CALLER_EMAIL_LINES: dict[str, CallerEmailLines] = {
         " ששמור עם כתובת האימייל הזו. אם הבקשה לא הייתה שלך, אפשר להתעלם ממנו.",
     ),
     "hi": CallerEmailLines(
-        "{org} के साथ फ़ोन कॉल से",
+        "फ़ोन कॉल से ({org})",
         "एक फ़ोन कॉल से",
         "यह ईमेल {org} के साथ हुई एक फ़ोन कॉल की वजह से भेजा गया है।",
         "यह ईमेल एक फ़ोन कॉल की वजह से भेजा गया है।",
@@ -217,7 +218,7 @@ CALLER_EMAIL_LINES: dict[str, CallerEmailLines] = {
         " nije bio vaš zahtjev, možete je zanemariti.",
     ),
     "hu": CallerEmailLines(
-        "{org} szervezettel folytatott telefonhívás alapján",
+        "Telefonhívás alapján ({org})",
         "Telefonhívás alapján",
         "Ezt az e-mailt egy {org} szervezettel folytatott telefonhívás miatt"
         " küldtük.",
@@ -254,7 +255,7 @@ CALLER_EMAIL_LINES: dict[str, CallerEmailLines] = {
         " Se non ha fatto Lei questa richiesta, può ignorarla.",
     ),
     "ja": CallerEmailLines(
-        "{org}との通話より",
+        "通話より（{org}）",
         "通話より",
         "このメールは、{org}との通話をきっかけに送信されました。",
         "このメールは、通話をきっかけに送信されました。",
@@ -266,7 +267,7 @@ CALLER_EMAIL_LINES: dict[str, CallerEmailLines] = {
         "このメールを無視してください。",
     ),
     "kn": CallerEmailLines(
-        "{org} ಜೊತೆಗಿನ ಫೋನ್ ಕರೆಯಿಂದ",
+        "ಫೋನ್ ಕರೆಯಿಂದ ({org})",
         "ಒಂದು ಫೋನ್ ಕರೆಯಿಂದ",
         "ಈ ಇಮೇಲ್ ಅನ್ನು {org} ಜೊತೆಗಿನ ಒಂದು ಫೋನ್ ಕರೆಯ ಕಾರಣದಿಂದ ಕಳುಹಿಸಲಾಗಿದೆ.",
         "ಈ ಇಮೇಲ್ ಅನ್ನು ಒಂದು ಫೋನ್ ಕರೆಯ ಕಾರಣದಿಂದ ಕಳುಹಿಸಲಾಗಿದೆ.",
@@ -278,7 +279,7 @@ CALLER_EMAIL_LINES: dict[str, CallerEmailLines] = {
         " ನಿಮ್ಮದಲ್ಲದಿದ್ದರೆ, ಇದನ್ನು ನಿರ್ಲಕ್ಷಿಸಬಹುದು.",
     ),
     "ko": CallerEmailLines(
-        "{org} 통화 관련 안내",
+        "전화 통화 관련 안내 ({org})",
         "전화 통화 관련 안내",
         "이 이메일은 {org}의 전화 통화와 관련하여 발송되었습니다.",
         "이 이메일은 전화 통화와 관련하여 발송되었습니다.",
@@ -290,7 +291,7 @@ CALLER_EMAIL_LINES: dict[str, CallerEmailLines] = {
         " 됩니다.",
     ),
     "mr": CallerEmailLines(
-        "{org} सोबतच्या फोन कॉलमधून",
+        "फोन कॉलमधून ({org})",
         "एका फोन कॉलमधून",
         "हा ईमेल {org} सोबतच्या एका फोन कॉलमुळे पाठवला आहे.",
         "हा ईमेल एका फोन कॉलमुळे पाठवला आहे.",
@@ -413,7 +414,7 @@ CALLER_EMAIL_LINES: dict[str, CallerEmailLines] = {
         " e-postadressen. Om det inte var du kan du ignorera det.",
     ),
     "ta": CallerEmailLines(
-        "{org} உடனான தொலைபேசி அழைப்பிலிருந்து",
+        "தொலைபேசி அழைப்பிலிருந்து ({org})",
         "ஒரு தொலைபேசி அழைப்பிலிருந்து",
         "இந்த மின்னஞ்சல் {org} உடனான ஒரு தொலைபேசி அழைப்பின் காரணமாக அனுப்பப்பட்டது.",
         "இந்த மின்னஞ்சல் ஒரு தொலைபேசி அழைப்பின் காரணமாக அனுப்பப்பட்டது.",
@@ -427,7 +428,7 @@ CALLER_EMAIL_LINES: dict[str, CallerEmailLines] = {
         " புறக்கணிக்கலாம்.",
     ),
     "te": CallerEmailLines(
-        "{org}తో ఫోన్ కాల్ నుండి",
+        "ఫోన్ కాల్ నుండి ({org})",
         "ఒక ఫోన్ కాల్ నుండి",
         "ఈ ఈమెయిల్ {org}తో జరిగిన ఒక ఫోన్ కాల్ కారణంగా పంపబడింది.",
         "ఈ ఈమెయిల్ ఒక ఫోన్ కాల్ కారణంగా పంపబడింది.",
@@ -465,7 +466,7 @@ CALLER_EMAIL_LINES: dict[str, CallerEmailLines] = {
         " na ito. Kung hindi ikaw iyon, maaari mo itong balewalain.",
     ),
     "tr": CallerEmailLines(
-        "{org} ile yapılan telefon görüşmesi üzerine",
+        "Telefon görüşmesi üzerine ({org})",
         "Telefon görüşmesi üzerine",
         "Bu e-posta, {org} ile yapılan bir telefon görüşmesi nedeniyle gönderildi.",
         "Bu e-posta, bir telefon görüşmesi nedeniyle gönderildi.",

@@ -20,6 +20,8 @@ def test_language_has_every_line_with_the_org_slot(language):
     lines = CALLER_EMAIL_LINES[language]
     for named in (lines.subject, lines.first_line, lines.footer):
         assert named.count("{org}") == 1
+    # The email list shows the phone call words before a long org name.
+    assert not lines.subject.startswith("{org}")
     for unnamed in (lines.subject_unnamed, lines.first_line_unnamed):
         assert unnamed and "{" not in unnamed
     assert lines.footer_unnamed and "{" not in lines.footer_unnamed
@@ -75,3 +77,20 @@ def test_joiners_stay_and_a_cut_never_splits_a_letter():
     # "कि" is a consonant and a vowel sign: the cut falls before the pair.
     subject = caller_email_subject("क" * (room - 1) + "कि", None, "hi")
     assert subject.endswith("क") and len(subject) == MAX_SUBJECT_CHARS - 1
+
+
+def test_joiners_only_stay_inside_non_latin_words():
+    assert caller_email_subject("P\u200dassword", None) == (
+        "From a phone call: Password"
+    )
+    assert caller_email_subject("Hi", "\u200d") == "From a phone call: Hi"
+
+
+def test_a_cut_never_leaves_a_half_letter():
+    prefix = caller_email_subject("", None, "mr")
+    room = MAX_SUBJECT_CHARS - len(prefix) - 2
+    # Eyelash ra (ra, virama, joiner) then ya: the cut keeps none of it.
+    words = "क" * (room - 3) + "र\u094d\u200dया"
+    subject = caller_email_subject(words, None, "mr")
+    assert subject.endswith("क")
+    assert len(subject) == MAX_SUBJECT_CHARS - 3

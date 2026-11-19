@@ -52,26 +52,48 @@ MAX_ORG_NAME_CHARS = 100
 # Control, format and surrogate characters: they could break or disguise text.
 _HIDDEN = frozenset({"Cc", "Cf", "Cs"})
 # Format characters some scripts need to draw letters (Indic, Persian):
-# zero width non-joiner and joiner. They cannot reorder text.
+# zero width non-joiner and joiner. Kept only right after a letter or mark
+# of a non-Latin script, so they cannot hide inside Latin words.
 _JOINERS = frozenset({"\u200c", "\u200d"})
+_LATIN_END = 0x024F
+
+
+def _keeps_joiner(prev: str) -> bool:
+    return ord(prev) > _LATIN_END and unicodedata.category(prev)[0] in "LM"
 
 
 def _one_line(text: str) -> str:
     """``text`` on one line, without characters that could disguise it."""
-    kept = "".join(
-        " " if c.isspace() else c
-        for c in text
-        if c.isspace() or c in _JOINERS or unicodedata.category(c) not in _HIDDEN
+    kept: list[str] = []
+    for c in text:
+        if c.isspace():
+            kept.append(" ")
+        elif c in _JOINERS:
+            if kept and _keeps_joiner(kept[-1]):
+                kept.append(c)
+        elif unicodedata.category(c) not in _HIDDEN:
+            kept.append(c)
+    return " ".join("".join(kept).split())
+
+
+def _splits_letter(text: str, at: int) -> bool:
+    """True when a cut before ``text[at]`` would split one written letter: a
+    combining mark or joiner follows, or a virama or joiner comes before."""
+    after, before = text[at], text[at - 1]
+    return (
+        unicodedata.category(after).startswith("M")
+        or after in _JOINERS
+        or before in _JOINERS
+        or unicodedata.combining(before) == 9  # virama
     )
-    return " ".join(kept.split())
 
 
 def _cut(text: str, limit: int) -> str:
-    """``text`` cut to ``limit`` characters, never between a letter and its
-    combining marks (a vowel sign or virama in Indic scripts, Thai vowels)."""
+    """``text`` cut to ``limit`` characters, never inside a written letter
+    (a vowel sign, virama or joiner in Indic scripts, Thai vowels)."""
     if len(text) <= limit:
         return text
-    while limit > 0 and unicodedata.category(text[limit]).startswith("M"):
+    while limit > 0 and _splits_letter(text, limit):
         limit -= 1
     return text[:limit].rstrip()
 

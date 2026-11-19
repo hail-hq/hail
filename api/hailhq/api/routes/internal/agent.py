@@ -486,18 +486,24 @@ async def _organization_name(db: AsyncSession, org: UUID) -> str | None:
 async def _call_language(db: AsyncSession, call: Call) -> str | None:
     """The call's language, as the voicebot picks it: ``voice_config.language``,
     else the org's saved TTS language (an inbound call copies the agent's
-    voice_config, which may have none). Fails open to None (English): it
-    only picks the words of the caller email's fixed lines."""
-    language = (call.voice_config or {}).get("language")
-    if language:
+    voice_config, which may have none). The voicebot reads the TTS language
+    at call start; a change during the call shows here. It only picks the
+    words of the caller email's fixed lines, so a bad shape or a missing
+    table means None (English)."""
+    config = call.voice_config if isinstance(call.voice_config, dict) else {}
+    language = config.get("language")
+    if isinstance(language, str) and language:
         return language
     try:
         async with db.begin_nested():
             tts = (await load_org_provider_configs(db, call.organization_id)).get("tts")
     except ProgrammingError as exc:
-        logger.warning("call language lookup failed: %s", exc)
+        if getattr(exc.orig, "sqlstate", None) != "42P01":  # undefined_table
+            logger.warning("call language lookup failed: %s", exc)
         return None
-    return (tts.params or {}).get("language") if tts is not None else None
+    params = tts.params if tts is not None else None
+    language = params.get("language") if isinstance(params, dict) else None
+    return language if isinstance(language, str) else None
 
 
 async def _run_recipient(
