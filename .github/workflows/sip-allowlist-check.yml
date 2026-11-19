@@ -68,11 +68,15 @@ jobs:
             });
             let existing = labelled.filter((i) => !i.pull_request && i.title === title);
             if (existing.length === 0) {
-              // The label may have been removed while triaging: match by title.
+              // The label may have been removed while triaging: match by
+              // title, but only an issue this workflow opened (the repo is
+              // public, so anyone can open an issue with the same title).
               const { data: found } = await github.rest.search.issuesAndPullRequests({
                 q: `repo:${context.repo.owner}/${context.repo.repo} is:issue is:open in:title "${title}"`,
               });
-              existing = found.items.filter((i) => i.title === title);
+              existing = found.items.filter(
+                (i) => i.title === title && i.user?.login === 'github-actions[bot]',
+              );
             }
             if (existing.length > 0) {
               await github.rest.issues.update({
