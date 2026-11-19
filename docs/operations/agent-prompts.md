@@ -191,7 +191,7 @@ the caller's own address on file, with limits. Caller ID can be faked.
   resolves to it) gets a fixed subject start, first line
   and footer (`caller_email_subject`, `caller_email_body`): sent because of a
   phone call with the organization. They are in the call's language
-  (`hailhq.core.caller_email_lines`, 39 languages): the call's
+  (`hailhq.core.caller_email_lines`, every language in `SUPPORTED_LANGUAGES`): the call's
   `voice_config.language`, else the org's saved TTS language, as the
   voicebot picks it. Unknown language: English. A long org name is cut so
   the fixed subject words always fit.

@@ -11,6 +11,7 @@ import httpx
 import pytest
 from hailhq.api.main import app
 from hailhq.api.numbers import resolve_sms_number
+from hailhq.api.routes.internal import agent as agent_route
 from hailhq.api.routes.internal.agent import _SPOKEN_SMS_UNCONFIGURED
 from hailhq.core import hmac_signing
 from hailhq.core.agent_caps import AGENT_OUTBOUND_DISABLED_FLAG
@@ -36,6 +37,7 @@ from hailhq.core.models import (
 )
 from hailhq.core.providers.email.ses import SES_NOT_ACCEPTED_FAILURES
 from sqlalchemy import select
+from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .conftest import approve_us_sms
@@ -540,6 +542,32 @@ async def test_send_email_me_uses_the_call_language(
         " Northgate Dental.\n\n"
     )
     assert "If that was not you" not in row.body_text
+
+
+async def test_send_email_me_is_english_when_the_language_lookup_fails(
+    client, async_session, email_mock, add_phone_number, monkeypatch
+):
+    """The language only picks words: a failed lookup still sends, in English."""
+
+    async def _fail(*_args, **_kwargs):
+        raise ProgrammingError("SELECT", {}, Exception("missing table"))
+
+    monkeypatch.setattr(agent_route, "load_org_provider_configs", _fail)
+    org = uuid.uuid4()
+    call = await _email_ready_call(async_session, org, add_phone_number)
+    async_session.add(
+        Contact(
+            organization_id=org,
+            name="Sam Lee",
+            email="sam@northgate.test",
+            phone_e164=call.to_e164,
+        )
+    )
+    await async_session.commit()
+
+    assert (await _send_email_to_name(client, call, "me"))["ok"] is True
+    row = (await async_session.execute(select(Email))).scalar_one()
+    assert row.subject == "From a phone call: Call summary"
 
 
 async def test_send_email_me_names_no_org_without_the_org_table_row(

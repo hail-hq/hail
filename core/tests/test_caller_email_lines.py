@@ -61,3 +61,17 @@ def test_unknown_language_is_english():
         assert caller_email_subject("Hi", "Northgate Dental", language) == (
             "From a phone call with Northgate Dental: Hi"
         )
+
+
+def test_joiners_stay_and_a_cut_never_splits_a_letter():
+    # Marathi eyelash ra needs the zero width joiner.
+    assert caller_email_subject("र\u094d\u200dया", None, "mr").endswith(
+        ": र\u094d\u200dया"
+    )
+    # Bidi overrides still go.
+    assert "\u202e" not in caller_email_subject("a\u202eb", None)
+    prefix = caller_email_subject("", None, "hi")
+    room = MAX_SUBJECT_CHARS - len(prefix) - 2
+    # "कि" is a consonant and a vowel sign: the cut falls before the pair.
+    subject = caller_email_subject("क" * (room - 1) + "कि", None, "hi")
+    assert subject.endswith("क") and len(subject) == MAX_SUBJECT_CHARS - 1

@@ -172,7 +172,7 @@ from hailhq.core.threads import is_e164
 from hailhq.core.webhook_fanout import call_event_data, fanout_call_event
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 from sqlalchemy import select, update
-from sqlalchemy.exc import ProgrammingError, SQLAlchemyError
+from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -494,7 +494,7 @@ async def _call_language(db: AsyncSession, call: Call) -> str | None:
     try:
         async with db.begin_nested():
             tts = (await load_org_provider_configs(db, call.organization_id)).get("tts")
-    except SQLAlchemyError as exc:
+    except ProgrammingError as exc:
         logger.warning("call language lookup failed: %s", exc)
         return None
     return (tts.params or {}).get("language") if tts is not None else None

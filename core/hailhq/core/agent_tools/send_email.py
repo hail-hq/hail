@@ -51,6 +51,9 @@ _UNAVAILABLE = "Email is not available right now."
 MAX_ORG_NAME_CHARS = 100
 # Control, format and surrogate characters: they could break or disguise text.
 _HIDDEN = frozenset({"Cc", "Cf", "Cs"})
+# Format characters some scripts need to draw letters (Indic, Persian):
+# zero width non-joiner and joiner. They cannot reorder text.
+_JOINERS = frozenset({"\u200c", "\u200d"})
 
 
 def _one_line(text: str) -> str:
@@ -58,13 +61,23 @@ def _one_line(text: str) -> str:
     kept = "".join(
         " " if c.isspace() else c
         for c in text
-        if c.isspace() or unicodedata.category(c) not in _HIDDEN
+        if c.isspace() or c in _JOINERS or unicodedata.category(c) not in _HIDDEN
     )
     return " ".join(kept.split())
 
 
+def _cut(text: str, limit: int) -> str:
+    """``text`` cut to ``limit`` characters, never between a letter and its
+    combining marks (a vowel sign or virama in Indic scripts, Thai vowels)."""
+    if len(text) <= limit:
+        return text
+    while limit > 0 and unicodedata.category(text[limit]).startswith("M"):
+        limit -= 1
+    return text[:limit].rstrip()
+
+
 def _org_name(org_name: str | None, limit: int = MAX_ORG_NAME_CHARS) -> str:
-    return _one_line(org_name or "")[:limit].strip()
+    return _cut(_one_line(org_name or ""), limit).strip()
 
 
 def _fill(named: str, unnamed: str, name: str) -> str:
@@ -84,7 +97,7 @@ def caller_email_subject(
     prefix = _fill(lines.subject, lines.subject_unnamed, name)
     words = _one_line(subject)
     framed = f"{prefix}: {words}" if words else prefix
-    return framed[:MAX_SUBJECT_CHARS]
+    return _cut(framed, MAX_SUBJECT_CHARS)
 
 
 def caller_email_body(

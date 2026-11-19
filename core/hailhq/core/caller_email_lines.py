@@ -415,7 +415,7 @@ CALLER_EMAIL_LINES: dict[str, CallerEmailLines] = {
     "ta": CallerEmailLines(
         "{org} உடனான தொலைபேசி அழைப்பிலிருந்து",
         "ஒரு தொலைபேசி அழைப்பிலிருந்து",
-        "இந்த மின்னஞ்சல் {org} உடனான ஒரு தொலைபேசி அழைப்பின் காரணமாக" " அனுப்பப்பட்டது.",
+        "இந்த மின்னஞ்சல் {org} உடனான ஒரு தொலைபேசி அழைப்பின் காரணமாக அனுப்பப்பட்டது.",
         "இந்த மின்னஞ்சல் ஒரு தொலைபேசி அழைப்பின் காரணமாக அனுப்பப்பட்டது.",
         "யாரோ ஒருவர் {org} உடனான தொலைபேசி அழைப்பின்போது, இந்த மின்னஞ்சல்"
         " முகவரியுடன் சேமிக்கப்பட்ட தொலைபேசி எண்ணிலிருந்து கேட்டதால், இந்த"
@@ -467,7 +467,7 @@ CALLER_EMAIL_LINES: dict[str, CallerEmailLines] = {
     "tr": CallerEmailLines(
         "{org} ile yapılan telefon görüşmesi üzerine",
         "Telefon görüşmesi üzerine",
-        "Bu e-posta, {org} ile yapılan bir telefon görüşmesi nedeniyle" " gönderildi.",
+        "Bu e-posta, {org} ile yapılan bir telefon görüşmesi nedeniyle gönderildi.",
         "Bu e-posta, bir telefon görüşmesi nedeniyle gönderildi.",
         "Bu e-postayı, biri {org} ile yapılan bir telefon görüşmesi sırasında bu"
         " e-posta adresiyle kayıtlı telefon numarasından istediği için aldınız."
