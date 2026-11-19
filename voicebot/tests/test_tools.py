@@ -433,12 +433,11 @@ async def test_http_tools_of_another_org_are_not_loaded(
     assert tools == []
 
 
-async def test_http_tool_with_a_built_in_name_gives_way_to_it(
+async def test_http_tool_with_a_built_in_name_is_never_offered(
     db, session_factory, monkeypatch
 ):
     """An HTTP tool saved as email_caller before the name was reserved must
-    not give LiveKit two tools with one name. The built-in wins when it is
-    offered; when it is not, the HTTP tool stays."""
+    not give LiveKit two tools with one name, nor stand in for the built-in."""
     org_id, agent_id = await _seed_http_tool(
         session_factory, monkeypatch, name="email_caller"
     )
@@ -464,9 +463,9 @@ async def test_http_tool_with_a_built_in_name_gives_way_to_it(
         )
         try:
             kept = [t for t in tools if t.info.name == "email_caller"]
-            assert len(kept) == 1, offered
-            is_http = kept[0].info.raw_schema["description"] == "Find an order."
-            assert is_http is not offered
+            assert len(kept) == int(offered), offered
+            for t in kept:
+                assert t.info.raw_schema["description"] != "Find an order."
         finally:
             if api is not None:
                 await api.aclose()

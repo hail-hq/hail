@@ -36,6 +36,7 @@ from hailhq.core.agent_tools.spec import ToolContext, ToolSpec
 from hailhq.core.db import session_scope
 from hailhq.core.models import Agent, AgentHttpTool
 from hailhq.core.provider_config import provider_cipher
+from hailhq.core.schemas import RESERVED_TOOL_NAMES
 from hailhq.core.secret_cipher import SecretKeyMissing
 from hailhq.core.url_guard import ip_is_public
 from hailhq.core.webhooks import sign_payload
@@ -319,7 +320,17 @@ async def http_tool_specs(session: AsyncSession, conv: Conversation) -> list[Too
     tools = await load_runtime_http_tools(
         session, agent_id=conv.agent_id, organization_id=conv.organization_id
     )
-    return [tool_spec(t, conv) for t in tools]
+    specs = []
+    for t in tools:
+        # Saved before its name was reserved (email_caller): two tools with one
+        # name break the conversation, and the built-in must win.
+        if t.name in RESERVED_TOOL_NAMES:
+            logger.warning(
+                "agent %s http tool %s skipped: built-in name", conv.agent_id, t.name
+            )
+            continue
+        specs.append(tool_spec(t, conv))
+    return specs
 
 
 async def load_http_tool_specs(conv: Conversation) -> list[ToolSpec]:
