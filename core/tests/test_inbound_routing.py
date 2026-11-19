@@ -12,6 +12,7 @@ from hailhq.core import carrier_routing, inbound_routing
 from hailhq.core.config import settings
 from hailhq.core.models import PhoneNumber
 from hailhq.core.providers.voice.base import CarrierNotConfigured
+from livekit.api import TwirpError
 
 
 @pytest.fixture()
@@ -217,3 +218,40 @@ async def test_failed_shared_trunk_removal_keeps_the_row_registered(
 
     assert err.value.stage == "livekit_remove"
     assert number.inbound_registered_at is not None
+
+
+async def test_register_clears_a_stale_shared_entry_first(
+    async_session, hooks, monkeypatch
+) -> None:
+    monkeypatch.setattr(settings, "livekit_sip_inbound_trunk_id", "ST_shared")
+    lk = AsyncMock()
+    number = _number()
+    async_session.add(number)
+    await async_session.flush()
+
+    await inbound_routing.register(async_session, lk, number)
+
+    lk.remove_inbound_number.assert_awaited_once_with("ST_shared", "+14155550100")
+    lk.add_inbound_number.assert_awaited_once_with("ST_in_tw", "+14155550100")
+    assert number.inbound_registered_at is not None
+
+
+async def test_unregister_after_the_shared_trunk_is_retired(
+    async_session, hooks, monkeypatch
+) -> None:
+    """Between retire-shared and the restart that empties its key, the
+    shared trunk is gone: not found there is done."""
+    monkeypatch.setattr(settings, "livekit_sip_inbound_trunk_id", "ST_shared")
+    lk = AsyncMock()
+    lk.remove_inbound_number.side_effect = [
+        None,
+        TwirpError("not_found", "trunk not found", status=404),
+    ]
+    number = _number()
+    number.inbound_registered_at = datetime.now(timezone.utc)
+    async_session.add(number)
+    await async_session.flush()
+
+    await inbound_routing.unregister(async_session, lk, number)
+
+    assert number.inbound_registered_at is None

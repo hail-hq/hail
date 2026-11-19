@@ -17,6 +17,7 @@ from hailhq.core.carrier_routing import carrier
 from hailhq.core.config import settings
 from hailhq.core.livekit import LiveKitClient
 from hailhq.core.models import PhoneNumber
+from livekit.api import TwirpError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -52,6 +53,9 @@ async def register(db: AsyncSession, lk: LiveKitClient, number: PhoneNumber) -> 
             "carrier_attach", exc, config=_is_config_error(exc)
         ) from exc
     try:
+        # A stale entry on the shared trunk would make LiveKit refuse the add
+        # (a number is listed on one trunk only).
+        await _remove_from_shared(lk, trunk_id, number.e164)
         await lk.add_inbound_number(trunk_id, number.e164)
     except Exception as exc:
         # Do not leave the carrier pointing at a LiveKit trunk that refuses
@@ -93,17 +97,28 @@ async def unregister(db: AsyncSession, lk: LiveKitClient, number: PhoneNumber) -
         # The carrier is already detached; the row stays registered so the
         # next unregister (idempotent at the carrier) finishes the removal.
         raise InboundRoutingError("livekit_remove", exc) from exc
-    shared = settings.livekit_sip_inbound_trunk_id
-    if shared and shared != trunk_id:
+    try:
         # While numbers move, a number may still be on the shared trunk.
         # Left there, a later register to its carrier's trunk is refused.
-        try:
-            await lk.remove_inbound_number(shared, number.e164)
-        except Exception as exc:
-            # The row stays registered, so the next unregister retries.
-            raise InboundRoutingError("livekit_remove", exc) from exc
+        await _remove_from_shared(lk, trunk_id, number.e164)
+    except Exception as exc:
+        # The row stays registered, so the next unregister retries.
+        raise InboundRoutingError("livekit_remove", exc) from exc
     number.inbound_registered_at = None
     await db.flush()
+
+
+async def _remove_from_shared(lk: LiveKitClient, trunk_id: str, e164: str) -> None:
+    """Drop ``e164`` from the shared trunk when its carrier has its own trunk.
+    A shared trunk already deleted (retired) holds nothing: that is done."""
+    shared = settings.livekit_sip_inbound_trunk_id
+    if not shared or shared == trunk_id:
+        return
+    try:
+        await lk.remove_inbound_number(shared, e164)
+    except TwirpError as exc:
+        if exc.code != "not_found":
+            raise
 
 
 def _is_config_error(exc: Exception) -> bool:

@@ -122,7 +122,7 @@ Run `move` right after the restart anyway: a number routed to an agent between t
 
 ## Rollback
 
-- One carrier, before `retire-shared`. No call is refused: the shared trunk is accepted throughout.
+- One carrier, before `retire-shared`. Calls to moved numbers keep working: the shared trunk is accepted throughout. A number routed between steps 1 and 2 is refused after the restart until step 3, so run step 3 right after the restart.
   1. Move its numbers back:
 
      ```bash

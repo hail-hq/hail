@@ -153,8 +153,9 @@ async def open_inbound_call(
     except ValueError:
         expected_trunk = None
     shared = settings.livekit_sip_inbound_trunk_id
-    accepted = {expected_trunk, shared} - {None, ""}
-    if attrs.trunk_id == shared and expected_trunk not in (None, shared):
+    # The shared trunk counts only for a carrier Hail can route.
+    accepted = {expected_trunk, shared} - {None, ""} if expected_trunk else set()
+    if shared and attrs.trunk_id == shared and expected_trunk not in (None, shared):
         # Expected only for a number not moved yet. After the move, a call
         # here means the shared trunk matched a moved number: check that it
         # still lists its placeholder (sip_trunks.py status).
