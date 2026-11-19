@@ -129,6 +129,8 @@ class Reader:
 
     def next(self) -> Response | None:
         while True:
+            # A bare CRLF is a keep-alive (RFC 5626), not the start of a message.
+            self.buf = self.buf.lstrip(b"\r\n")
             head_end = self.buf.find(b"\r\n\r\n")
             if head_end >= 0:
                 head = self.buf[:head_end].decode("utf-8", "replace")
@@ -188,6 +190,13 @@ def probe(host: str, port: int, number: str, timeout: float = ANSWER_TIMEOUT):
             if accepted:
                 return 1, f"ACCEPTED: {accepted.code} {accepted.reason}"
             return 2, f"INCONCLUSIVE: the connection failed ({exc})"
+        except ValueError as exc:
+            # A garbled status line or Content-Length. A traceback would exit
+            # 1, the ACCEPTED code.
+            accepted = state["accepted"]
+            if accepted:
+                return 1, f"ACCEPTED: {accepted.code} {accepted.reason}"
+            return 2, f"INCONCLUSIVE: an answer this probe cannot read ({exc})"
 
 
 def _dialog(sock: socket.socket, dialog: Dialog, state: dict) -> tuple[int, str]:

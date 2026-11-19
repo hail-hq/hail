@@ -82,8 +82,11 @@ dispatch rule**. Hail adds and removes numbers on the trunk itself.
    `move` moves numbers already registered. DIDWW needs
    `DIDWW_SIP_INBOUND_PASSWORD`. A trunk never has empty `numbers`: that
    trunk would match every dialed number, so each keeps a placeholder entry.
-   Steps and checks: the
-   [runbook](../../operations/inbound-trunk-lockdown.md).
+   This includes the shared trunk: while `LIVEKIT_SIP_INBOUND_TRUNK_ID` is
+   set, Hail also answers calls that arrive on it, so an empty, open shared
+   trunk would let any address reach numbers on the locked trunks. Steps and
+   checks: the
+   [runbook](https://github.com/hail-hq/hail/blob/main/docs/operations/inbound-trunk-lockdown.md).
 
    LiveKit Cloud does not check `allowed_addresses` until LiveKit support
    turns the check on for your project ([inbound trunk docs](https://docs.livekit.io/telephony/accepting-calls/inbound-trunk/)).

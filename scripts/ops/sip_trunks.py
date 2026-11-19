@@ -195,9 +195,16 @@ async def apply(sip, data: dict, spec: Spec, yes: bool) -> list[str]:
             trunk_id = created.sip_trunk_id
     else:
         trunk_id = existing.sip_trunk_id
+        # An empty JSON list sends no update (the SDK drops an empty set),
+        # so the trunk keeps what it has: say so instead of "N -> 0".
+        addresses = (
+            f"{len(existing.allowed_addresses)} -> {len(spec.allowed_addresses)}"
+            if spec.allowed_addresses
+            else f"{len(existing.allowed_addresses)} kept (the JSON lists none)"
+        )
         plan.append(
             f"update trunk {spec.name} ({trunk_id}): allowed addresses "
-            f"{len(existing.allowed_addresses)} -> {len(spec.allowed_addresses)}, "
+            f"{addresses}, "
             f"digest auth {'on' if password else 'off'}, "
             f"placeholder {spec.placeholder}"
         )
@@ -348,8 +355,15 @@ async def retire_shared(
     if not shared:
         raise TrunkError("LIVEKIT_SIP_INBOUND_TRUNK_ID is empty: nothing to retire")
     missing = [env_key(c) for c in specs if not carrier_trunk_id(c)]
-    if missing:
+    if len(missing) == len(specs):
         raise TrunkError(f"set {', '.join(missing)} in .env first")
+    if missing:
+        # A carrier this setup does not use has no trunk. The empty-trunk
+        # check below still stops a retire while any number is left.
+        print(
+            f"warning: {', '.join(missing)} empty: that carrier gets no inbound calls",
+            file=sys.stderr,
+        )
     trunk = await trunk_by_id(sip, shared)
     left = [n for n in trunk.numbers if n != data["shared_placeholder"]]
     if left:

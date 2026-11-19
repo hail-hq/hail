@@ -44,9 +44,9 @@ Run every command from the repo root of the main checkout, whose `.env` holds th
    uv run python scripts/ops/sip_trunks.py apply --carrier didww --yes
    ```
 
-   Each prints `LIVEKIT_<CARRIER>_SIP_INBOUND_TRUNK_ID=ST_...` _(chat)_. Put the three values in `.env`.
+   Each prints `LIVEKIT_<CARRIER>_SIP_INBOUND_TRUNK_ID=ST_...` _(chat)_. Keep the three values for step 6. Do not put them in `.env` yet: a key that is set sends that carrier's newly routed numbers to its trunk, before the trunk is tested.
 
-4. Copy `.env` to the VM _(chat)_, then on the VM restart the two services that read it:
+4. The restart used in steps 6 and 8, on the VM after `.env` is copied there _(chat)_:
 
    ```bash
    docker compose -f docker-compose.yml -f docker-compose.prod.yml \
@@ -63,7 +63,9 @@ Run every command from the repo root of the main checkout, whose `.env` holds th
      --number +<E.164 number on the shared trunk>
    ```
 
-6. Move one carrier, test it, then the next. Telnyx first, then DIDWW, then Twilio:
+6. Move one carrier, test it, then the next. Telnyx first, then DIDWW, then Twilio. For each carrier:
+   1. Put only that carrier's `LIVEKIT_<CARRIER>_SIP_INBOUND_TRUNK_ID` from step 3 in `.env`, copy `.env` to the VM, and restart as in step 4.
+   2. Move its numbers:
 
    ```bash
    uv run python scripts/ops/sip_trunks.py move --carrier telnyx
@@ -121,5 +123,5 @@ The issue "SIP allow-list: carrier IPs changed" lists what differs. Calls from a
 
 3. `in our list, no longer published (review)`: nothing removes it automatically. Remove it in a PR only when the carrier confirms it is retired, then `apply` as above.
 4. `source version changed` with no address change: read the page, then update `source.version` in a PR.
-5. `could not fetch` or a new layout: fix the parser in [`check_sip_allowlist.py`](../../scripts/ops/check_sip_allowlist.py). Run it by hand with `python3 scripts/ops/check_sip_allowlist.py`.
+5. `could not fetch` or a new layout: fix the parser in [`check_sip_allowlist.py`](../../scripts/ops/check_sip_allowlist.py). Run it by hand with `uv run python scripts/ops/check_sip_allowlist.py` (the macOS python.org `python3` may fail with `CERTIFICATE_VERIFY_FAILED`).
 6. Close the issue once **Actions → sip-allowlist-check → Run workflow** is green.
