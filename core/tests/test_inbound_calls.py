@@ -258,6 +258,21 @@ async def test_shared_trunk_reads_reuse_one_client(async_session, shared_trunk) 
     )
 
 
+async def test_close_livekit_client_closes_once_and_rebuilds(
+    async_session, shared_trunk
+) -> None:
+    shared_trunk.numbers = ["hail-placeholder-shared", DIALED]
+    await _seed(async_session)
+    await inbound_calls.open_inbound_call(async_session, _attrs(trunk_id="ST_shared"))
+    await inbound_calls.close_livekit_client()
+    await inbound_calls.close_livekit_client()  # no client left: a no-op
+    assert (shared_trunk.built, shared_trunk.closed) == (1, 1)
+    await inbound_calls.open_inbound_call(
+        async_session, _attrs(trunk_id="ST_shared", provider_call_sid="sip-call-2")
+    )
+    assert shared_trunk.built == 2
+
+
 async def test_shared_trunk_is_refused_when_livekit_is_slow(
     async_session, shared_trunk, monkeypatch, caplog
 ) -> None:

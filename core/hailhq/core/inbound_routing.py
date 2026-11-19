@@ -141,12 +141,20 @@ async def _add_to_carrier_trunk(lk: LiveKitClient, trunk_id: str, e164: str) -> 
         return
     except TwirpError as first:
         shared = settings.livekit_sip_inbound_trunk_id
+        if first.code != "invalid_argument":
+            raise
         if (
-            first.code != "invalid_argument"
-            or not shared
+            not shared
             or shared == trunk_id
             or not await _shared_trunk_conflict(lk, shared, e164, first)
         ):
+            logger.error(
+                "number %s: LiveKit refused the add to trunk %s (%s: %s)",
+                e164,
+                trunk_id,
+                first.code,
+                first.message,
+            )
             raise
         logger.warning(
             "number %s: carrier trunk refused the add (%s: %s), removing a "
@@ -167,11 +175,11 @@ async def _shared_trunk_conflict(
 ) -> bool:
     """True when ``refused`` is the one-trunk-per-number conflict with the
     shared trunk: LiveKit's message says so, or the shared trunk lists
-    ``e164``. Otherwise logs LiveKit's own message, for the caller to re-raise."""
+    ``e164``. A failed read counts as no conflict."""
     if _TRUNK_CONFLICT in refused.message:
         return True
     try:
-        listed = e164 in await lk.inbound_trunk_numbers(shared)
+        return e164 in await lk.inbound_trunk_numbers(shared)
     except Exception:
         logger.warning(
             "number %s: could not read the shared inbound trunk %s",
@@ -179,17 +187,7 @@ async def _shared_trunk_conflict(
             shared,
             exc_info=True,
         )
-        listed = False
-    if not listed:
-        logger.error(
-            "number %s: LiveKit refused the add (%s: %s), and the shared "
-            "inbound trunk %s does not list the number",
-            e164,
-            refused.code,
-            refused.message,
-            shared,
-        )
-    return listed
+        return False
 
 
 async def _remove_from_shared_trunk(

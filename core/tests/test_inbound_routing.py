@@ -459,3 +459,32 @@ async def test_unreadable_shared_trunk_keeps_the_original_error(
 
     assert err.value.__cause__ is refused
     lk.remove_inbound_number.assert_not_awaited()
+
+
+@pytest.mark.parametrize("shared", ["", "ST_in_tw"])
+async def test_refused_add_without_a_separate_shared_trunk_is_logged(
+    async_session, hooks, monkeypatch, caplog, shared
+) -> None:
+    """After retire-shared (key empty), or when the shared trunk is the
+    carrier's: no shared-trunk read, LiveKit's message is logged, re-raised."""
+    monkeypatch.setattr(settings, "livekit_sip_inbound_trunk_id", shared)
+    lk = AsyncMock()
+    refused = TwirpError(
+        "invalid_argument", "Conflicting inbound SIP Trunks", status=400
+    )
+    lk.add_inbound_number.side_effect = refused
+    number = _number()
+    async_session.add(number)
+    await async_session.flush()
+
+    with (
+        caplog.at_level("ERROR", logger="hailhq.core.inbound_routing"),
+        pytest.raises(inbound_routing.InboundRoutingError) as err,
+    ):
+        await inbound_routing.register(async_session, lk, number)
+
+    assert err.value.__cause__ is refused
+    lk.inbound_trunk_numbers.assert_not_awaited()
+    lk.remove_inbound_number.assert_not_awaited()
+    [record] = [r for r in caplog.records if r.levelname == "ERROR"]
+    assert "invalid_argument: Conflicting inbound SIP Trunks" in record.getMessage()

@@ -55,7 +55,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["Accepted", "Rejected", "SipAttributes", "open_inbound_call"]
+__all__ = [
+    "Accepted",
+    "Rejected",
+    "SipAttributes",
+    "close_livekit_client",
+    "open_inbound_call",
+]
 
 
 @dataclass(frozen=True)
@@ -188,8 +194,9 @@ async def open_inbound_call(
 SHARED_TRUNK_READ_TIMEOUT_SECONDS = 2.0
 
 # One client per process (see ``LiveKitClient``), built on first use inside
-# the running event loop (its aiohttp session needs one). Rebuilt only when
-# the loop changes; the process exit closes it.
+# the running event loop (its aiohttp session needs one), rebuilt only when
+# the loop changes. The voicebot closes it on job shutdown
+# (``close_livekit_client``).
 _livekit: LiveKitClient | None = None
 _livekit_loop: asyncio.AbstractEventLoop | None = None
 
@@ -201,6 +208,14 @@ def _livekit_client() -> LiveKitClient:
         _livekit = LiveKitClient()
         _livekit_loop = loop
     return _livekit
+
+
+async def close_livekit_client() -> None:
+    """Close the shared client, if one was built. Safe to call again."""
+    global _livekit, _livekit_loop
+    lk, _livekit, _livekit_loop = _livekit, None, None
+    if lk is not None:
+        await lk.aclose()
 
 
 async def _trunk_accepted(
