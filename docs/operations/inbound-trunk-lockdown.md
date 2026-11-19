@@ -28,7 +28,7 @@ Run every command from the repo root of the main checkout, whose `.env` holds th
 
 Hail answers a call only on the trunk of the number's carrier ([`inbound_calls.py`](../../core/hailhq/core/inbound_calls.py)). While a carrier's key is empty, that is the shared trunk. Once the key is set and the services restart, that carrier's numbers still on the shared trunk are refused until `move` puts them on the carrier's trunk.
 
-**So each carrier's inbound calls can fail for about 1 to 2 minutes**: from the restart until the last `move --yes` ends, test call included. Run each carrier at a quiet hour. The other carriers are not affected.
+**So each carrier's inbound calls can fail for about 1 to 2 minutes**: from the restart until the last `move --yes` ends, test call included. Run each carrier at a quiet hour. The other carriers are not affected. A number routed or unrouted to an agent inside that window can be left on the wrong trunk: run `status` after the last `move` and move any leftover with `move --number`.
 
 1. Merge the PR. The Deploy workflow builds and rolls `api`, `voicebot` and `mcp`. Wait until it is green. Merge changes no call behavior while the carrier keys are empty.
 2. Update the checkout and look at the current state:

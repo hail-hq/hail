@@ -277,6 +277,7 @@ async def test_move_takes_only_the_carriers_numbers(monkeypatch) -> None:
     assert "+14155550199" not in sip.trunks["ST_shared"].numbers
     assert "removed +14155550199" in plan
 
+    monkeypatch.setattr(settings, "livekit_telnyx_sip_inbound_trunk_id", "")
     await st.move(sip, DATA, SPECS["telnyx"], back=True, yes=True)
     assert list(sip.trunks["ST_tx"].numbers) == ["hail-placeholder-telnyx"]
     assert "+14155550100" in sip.trunks["ST_shared"].numbers
@@ -512,6 +513,7 @@ async def test_move_only_the_listed_numbers(monkeypatch) -> None:
     )
     assert "+14155550100" in sip.trunks["ST_tx"].numbers
     # --back --number moves only that one back.
+    monkeypatch.setattr(settings, "livekit_telnyx_sip_inbound_trunk_id", "")
     await st.move(
         sip, DATA, SPECS["telnyx"], back=True, yes=True, only=["+14155550100"]
     )
@@ -563,6 +565,7 @@ async def test_move_back_refuses_a_number_not_on_the_carrier_trunk(
         trunk("ST_shared", "shared", ["+14155550100"]),
         trunk("ST_tx", "hail-inbound-telnyx", ["hail-placeholder-telnyx"]),
     )
+    monkeypatch.setattr(settings, "livekit_telnyx_sip_inbound_trunk_id", "")
     with pytest.raises(st.TrunkError, match="not on hail-inbound-telnyx"):
         await st.move(
             sip, DATA, SPECS["telnyx"], back=True, yes=True, only=["+14155550100"]
@@ -596,3 +599,43 @@ def test_main_passes_the_numbers(monkeypatch) -> None:
     argv = ["move", "--carrier", "twilio", "--number", "+14155550100"]
     assert st.main([*argv, "--number", "+14155550101"]) == 0
     assert seen["number"] == ["+14155550100", "+14155550101"]
+
+
+async def test_move_back_refuses_while_the_carrier_key_is_set(monkeypatch) -> None:
+    """The running app takes the carrier's calls only on its own trunk while
+    the key is set, so moving numbers back first would refuse them all."""
+    monkeypatch.setattr(settings, "livekit_telnyx_sip_inbound_trunk_id", "ST_tx")
+    sip = FakeSip(
+        trunk("ST_shared", "shared", ["hail-placeholder-shared"]),
+        trunk(
+            "ST_tx", "hail-inbound-telnyx", ["hail-placeholder-telnyx", "+14155550100"]
+        ),
+    )
+    with pytest.raises(st.TrunkError, match="restart first"):
+        await st.move(sip, DATA, SPECS["telnyx"], back=True, yes=True)
+    assert sip.calls == []
+
+
+async def test_drop_unknown_clears_stale_entries_once_numbers_moved(
+    monkeypatch,
+) -> None:
+    """Only stale entries left on the shared trunk: --drop-unknown removes
+    them when the database knows the numbers already on the carrier trunk."""
+    monkeypatch.setattr(settings, "livekit_telnyx_sip_inbound_trunk_id", "ST_tx")
+    sip = FakeSip(
+        trunk("ST_shared", "shared", ["hail-placeholder-shared", "+14155550199"]),
+        trunk(
+            "ST_tx", "hail-inbound-telnyx", ["hail-placeholder-telnyx", "+14155550100"]
+        ),
+    )
+    plan = await st.move(
+        sip,
+        DATA,
+        SPECS["telnyx"],
+        back=False,
+        yes=True,
+        carriers_of=_carriers,
+        drop_unknown=True,
+    )
+    assert "+14155550199" not in sip.trunks["ST_shared"].numbers
+    assert "removed +14155550199" in plan

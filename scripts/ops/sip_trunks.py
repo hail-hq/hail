@@ -299,6 +299,13 @@ async def move(
         raise TrunkError("LIVEKIT_SIP_INBOUND_TRUNK_ID is empty: nothing to move")
     if only and drop_unknown:
         raise TrunkError("--drop-unknown cannot be used with --number")
+    if own and back:
+        # The running app accepts this carrier's calls only on its own trunk
+        # while the key is set: moving numbers back first refuses them all.
+        raise TrunkError(
+            f"empty {env_key(spec.carrier)} in .env, copy it to the VM and "
+            "restart first, then run --back"
+        )
     if own:
         own_trunk = await trunk_by_id(sip, own)
         if own_trunk.name != spec.name:
@@ -330,19 +337,26 @@ async def move(
         movable = candidates
     else:
         found = await carriers_of(candidates)
-        if candidates and not found:
-            raise TrunkError(
-                f"none of the {len(candidates)} number(s) on {src.name} has a "
-                "live row: is DATABASE_URL the production database?"
-            )
-        movable = [n for n in candidates if found.get(n) == spec.carrier]
         if only:
             other = [n for n in candidates if found.get(n) != spec.carrier]
             if other:
                 raise TrunkError(
                     f"not a live {spec.carrier} number: {', '.join(other)}"
                 )
-        else:
+        elif (
+            candidates
+            and not found
+            and not (
+                drop_unknown and await _database_knows(carriers_of, dst, placeholders)
+            )
+        ):
+            raise TrunkError(
+                f"none of the {len(candidates)} number(s) on {src.name} has a "
+                "live row: is DATABASE_URL the production database? "
+                "(--drop-unknown removes them once you have checked)"
+            )
+        movable = [n for n in candidates if found.get(n) == spec.carrier]
+        if not only:
             skipped = [n for n in candidates if n not in found]
     src_placeholder = spec.placeholder if back else data["shared_placeholder"]
     plan = [
@@ -410,6 +424,14 @@ async def _recover(sip, number: str, src, dst) -> None:
             file=sys.stderr,
         )
         raise
+
+
+async def _database_knows(carriers_of, trunk, placeholders: set[str]) -> bool:
+    """True when the database knows a number already on ``trunk``: then a
+    shared trunk whose numbers it does not know holds only stale entries,
+    not numbers of another database (a laptop .env on a dev database)."""
+    listed = [n for n in trunk.numbers if n not in placeholders]
+    return bool(listed) and bool(await carriers_of(listed))
 
 
 async def retire_shared(

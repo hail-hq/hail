@@ -136,7 +136,8 @@ class Reader:
             if head_end >= 0:
                 head = self.buf[:head_end].decode("utf-8", "replace")
                 headers = _headers(head)
-                length = int(headers.get("content-length", "0") or 0)
+                # "l" is the compact form of Content-Length (RFC 3261 §7.3.3).
+                length = int(headers.get("content-length", headers.get("l", "0")) or 0)
                 total = head_end + 4 + length
                 if len(self.buf) >= total:
                     self.buf = self.buf[total:]
@@ -176,7 +177,12 @@ def _contact(headers: dict[str, str]) -> str | None:
 def probe(host: str, port: int, number: str, timeout: float = ANSWER_TIMEOUT):
     """Returns (exit code, verdict line)."""
     try:
-        sock = socket.create_connection((host, port), timeout=CONNECT_TIMEOUT)
+        # IPv4 only: the INVITE writes the local address into Via, Contact
+        # and an "IN IP4" SDP line.
+        address = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)[0][
+            4
+        ]
+        sock = socket.create_connection(address, timeout=CONNECT_TIMEOUT)
     except OSError as exc:
         return 2, f"NO CONNECTION to {host}:{port} ({exc}): the test says nothing"
     with sock:
