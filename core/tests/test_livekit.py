@@ -244,3 +244,26 @@ async def test_add_and_remove_inbound_number(client: LiveKitClient) -> None:
     await client.remove_inbound_number("ST_in", "+14155550100")
     _, kwargs = client._lkapi.sip.update_inbound_trunk_fields.await_args
     assert list(kwargs["numbers"].remove) == ["+14155550100"]
+
+
+async def test_inbound_trunk_numbers_reads_the_named_trunk(
+    client: LiveKitClient,
+) -> None:
+    client._lkapi.sip.list_inbound_trunk = AsyncMock(
+        return_value=api.ListSIPInboundTrunkResponse(
+            items=[
+                # A server that ignores the filter returns every trunk.
+                api.SIPInboundTrunkInfo(sip_trunk_id="ST_other", numbers=["+1"]),
+                api.SIPInboundTrunkInfo(
+                    sip_trunk_id="ST_in", numbers=["hail-placeholder-shared"]
+                ),
+            ]
+        )
+    )
+    assert await client.inbound_trunk_numbers("ST_in") == ["hail-placeholder-shared"]
+    (req,), _ = client._lkapi.sip.list_inbound_trunk.await_args
+    assert isinstance(req, api.ListSIPInboundTrunkRequest)
+    assert list(req.trunk_ids) == ["ST_in"]
+
+    with pytest.raises(LookupError):
+        await client.inbound_trunk_numbers("ST_gone")

@@ -26,7 +26,7 @@ How LiveKit picks a trunk ([`sip.go`](https://github.com/livekit/protocol/blob/m
 
 Run every command from the repo root of the main checkout, whose `.env` holds the production values. Values marked _(chat)_ are not written here: the trunk ids, the LiveKit SIP host, the test numbers and the VM path.
 
-1. Merge the PR. The Deploy workflow builds and rolls `api`, `voicebot` and `mcp`. Wait until it is green. From then on, a call on the shared trunk or on the carrier's own trunk is answered ([`inbound_calls.py`](../../core/hailhq/core/inbound_calls.py)).
+1. Merge the PR. The Deploy workflow builds and rolls `api`, `voicebot` and `mcp`. Wait until it is green. From then on, a call on the carrier's own trunk is answered, and a call on the shared trunk is answered only for a number the shared trunk lists ([`inbound_calls.py`](../../core/hailhq/core/inbound_calls.py), one LiveKit read per such call; refused if the read fails).
 2. Update the checkout and look at the current state:
 
    ```bash
@@ -99,14 +99,22 @@ Run every command from the repo root of the main checkout, whose `.env` holds th
 ## Rollback
 
 - One carrier, before `retire-shared`:
+  1. Move its numbers back:
 
-  ```bash
-  uv run python scripts/ops/sip_trunks.py move --carrier telnyx --back --yes
-  ```
+     ```bash
+     uv run python scripts/ops/sip_trunks.py move --carrier telnyx --back --yes
+     ```
 
-  Then empty its `LIVEKIT_<CARRIER>_SIP_INBOUND_TRUNK_ID=` in `.env`, copy it to the VM, and restart as in step 4. The carrier trunk can stay; it lists only its placeholder.
+  2. Empty its `LIVEKIT_<CARRIER>_SIP_INBOUND_TRUNK_ID=` in `.env`, copy it to the VM, and restart as in step 4.
+  3. Run the same `move --back` again. Numbers routed between steps 1 and 2 went to the carrier trunk and are refused there now. With the key empty, `move --back` finds the carrier trunk by its name in the JSON.
 
-- After `retire-shared`: create an open shared trunk again ([LiveKit Cloud §4](../public/self-host/livekit-cloud.md#4-inbound-calls), with `"numbers": ["hail-placeholder-shared"]`), add it to the `hail-inbound` dispatch rule, set `LIVEKIT_SIP_INBOUND_TRUNK_ID`, restart, then `move --back` and empty the carrier key as above.
+     ```bash
+     uv run python scripts/ops/sip_trunks.py move --carrier telnyx --back --yes
+     ```
+
+  The carrier trunk can stay; it lists only its placeholder.
+
+- After `retire-shared`: create an open shared trunk again ([LiveKit Cloud §4](../public/self-host/livekit-cloud.md#4-inbound-calls), with `"numbers": ["hail-placeholder-shared"]`), add it to the `hail-inbound` dispatch rule, set `LIVEKIT_SIP_INBOUND_TRUNK_ID`, restart, then do steps 1 to 3 of the rollback above.
 - DIDWW credentials can stay on the DIDWW trunk. To remove them: [my.didww.com](https://my.didww.com) → **Voice → Inbound Trunks** → the trunk → **Authorization** off.
 
 ## When the weekly check fails

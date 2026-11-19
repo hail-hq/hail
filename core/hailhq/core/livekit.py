@@ -209,6 +209,17 @@ class LiveKitClient:
             trunk_id, numbers=ListUpdate(add=[e164])
         )
 
+    async def inbound_trunk_numbers(self, trunk_id: str) -> list[str]:
+        """The ``numbers`` listed on one inbound trunk. A ``LookupError``
+        when LiveKit has no trunk with that id."""
+        result = await self._lkapi.sip.list_inbound_trunk(
+            api.ListSIPInboundTrunkRequest(trunk_ids=[trunk_id])
+        )
+        for trunk in result.items:
+            if trunk.sip_trunk_id == trunk_id:
+                return list(trunk.numbers)
+        raise LookupError(f"no LiveKit inbound trunk {trunk_id}")
+
     async def remove_inbound_number(self, trunk_id: str, e164: str) -> None:
         """Drop ``e164`` from an inbound trunk; a number not listed is a no-op."""
         await self._lkapi.sip.update_inbound_trunk_fields(

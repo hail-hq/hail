@@ -32,7 +32,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 - Webhooks to CGNAT addresses (`100.64.0.0/10`, used by Tailscale), multicast, IPv6 site-local, or hosts that do not resolve are now refused, and existing ones fail on delivery. Self-hosters can allow them with `HAIL_WEBHOOK_ALLOW_PRIVATE_NETWORKS=true`.
 - A webhook `target_url` or BYO LLM `base_url` whose host is private or does not resolve is refused with one error text, which ends in `URL host is private or could not be resolved`.
-- Self-host: inbound calls can use one LiveKit trunk per carrier, locked to Twilio's and Telnyx's signaling IPs and to a DIDWW password (`LIVEKIT_<CARRIER>_SIP_INBOUND_TRUNK_ID`, `DIDWW_SIP_INBOUND_PASSWORD`, [LiveKit Cloud §4](docs/public/self-host/livekit-cloud.md#4-inbound-calls)) Upgrading with a per-carrier key set: add `hail-placeholder-shared` to the shared trunk's numbers first, or empty `LIVEKIT_SIP_INBOUND_TRUNK_ID`, because a shared trunk with no numbers takes calls to every number.
+- Self-host: inbound calls can use one LiveKit trunk per carrier, locked to that carrier ([LiveKit Cloud §4](docs/public/self-host/livekit-cloud.md#4-inbound-calls)).
 
 ### Fixed
 

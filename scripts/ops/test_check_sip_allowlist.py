@@ -83,6 +83,24 @@ def test_twilio_reads_the_signaling_section_only() -> None:
     assert got.version == "2026-01-01T00:00:00.000Z"
 
 
+def test_twilio_reads_bare_addresses_as_single_hosts() -> None:
+    """A region may list addresses with no range: each is a /32. An address
+    inside a range the region lists is part of that range."""
+    page = TWILIO.replace(
+        "### Europe Ireland gateways",
+        "### Asia-Pacific Tokyo gateways\n\n    203.0.113.7\n    203.0.113.9.\n"
+        "\n### Europe Ireland gateways",
+    ).replace("    192.0.2.0\n", "    192.0.2.0\n    192.0.2.200\n")
+    got = check.parse_twilio(page)
+    assert got.networks == {
+        "192.0.2.0/30",
+        "192.0.2.200/32",
+        "198.51.100.0/30",
+        "203.0.113.7/32",
+        "203.0.113.9/32",
+    }
+
+
 def test_match_is_clean() -> None:
     result = check.compare(
         "twilio",
@@ -126,7 +144,7 @@ def test_new_layout_or_empty_page_is_reported() -> None:
     assert result.problems
     empty_region = TWILIO.replace("198.51.100.0/30 which", "which")
     result = check.compare("twilio", trunk([]), fetcher=lambda _url: empty_region)
-    assert "lists no address range" in result.problems[0]
+    assert "lists no address" in result.problems[0]
 
 
 def test_fetch_failure_is_reported() -> None:

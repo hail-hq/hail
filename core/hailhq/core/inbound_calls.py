@@ -7,7 +7,10 @@ voicebot reads the SIP participant's attributes and calls
 
 * unknown or pool number: dropped, no row (same as inbound SMS);
 * known number on the wrong trunk, or without voice: ``Call`` failed with
-  ``end_reason = carrier_route_failed`` (logged at WARNING);
+  ``end_reason = carrier_route_failed`` (logged at WARNING). During the
+  move to per-carrier trunks, the shared trunk counts for a carrier with its
+  own trunk only for numbers it lists (one LiveKit read, see
+  ``_trunk_accepted``);
 * no live voice agent: ``Call`` failed with ``end_reason = no_agent``;
 * no credits or voice suspended: ``Call`` failed with ``insufficient_funds``
   (or ``user_rejected`` when the channel is suspended);
@@ -35,6 +38,7 @@ from hailhq.core.config import SELF_HOSTED_ORG_ID, settings
 from hailhq.core.db import session_scope
 from hailhq.core.handover import handover_limit, handover_targets
 from hailhq.core.internal_webhook import fetch_organization_name
+from hailhq.core.livekit import LiveKitClient
 from hailhq.core.models import (
     Agent,
     Call,
@@ -151,8 +155,9 @@ async def open_inbound_call(
         expected_trunk = None
     if (
         not attrs.trunk_id
-        or attrs.trunk_id not in _accepted_trunks(expected_trunk)
+        or not expected_trunk
         or "voice" not in number.capabilities
+        or not await _trunk_accepted(attrs.trunk_id, expected_trunk, number.e164)
     ):
         # A real number of a real customer: keep a failed Call (and its event
         # and webhook) so the customer sees the missed call.
@@ -179,14 +184,36 @@ async def open_inbound_call(
         org_name.cancel()  # no-op once it has finished (refusals never await it)
 
 
-def _accepted_trunks(expected: str | None) -> set[str]:
-    """The carrier's own trunk, plus the shared ``LIVEKIT_SIP_INBOUND_TRUNK_ID``
-    while numbers move from the shared trunk to per-carrier trunks one carrier
-    at a time (docs/operations/inbound-trunk-lockdown.md). Temporary: once
-    the shared key is empty, only the carrier's own trunk is accepted."""
-    if not expected:
-        return set()
-    return {expected, settings.livekit_sip_inbound_trunk_id} - {""}
+async def _trunk_accepted(trunk_id: str, expected: str, e164: str) -> bool:
+    """The carrier's own trunk is accepted. While numbers move from the
+    shared ``LIVEKIT_SIP_INBOUND_TRUNK_ID`` to per-carrier trunks
+    (docs/operations/inbound-trunk-lockdown.md; removal: issue #475), the
+    shared trunk is also accepted for a carrier with its own trunk, but only
+    for a number the shared trunk lists by name. A wildcard shared trunk
+    (no ``numbers``) matches any INVITE, including a spoofed one to a number
+    on a locked trunk; it never lists that number, so the call is refused."""
+    if trunk_id == expected:
+        return True
+    shared = settings.livekit_sip_inbound_trunk_id
+    if not shared or trunk_id != shared:
+        return False
+    try:
+        lk = LiveKitClient()
+        try:
+            listed = await lk.inbound_trunk_numbers(shared)
+        finally:
+            await lk.aclose()
+    except Exception:
+        # A security check: without the list, refuse.
+        logger.error(
+            "inbound call to %s on the shared trunk %s refused: could not "
+            "read the trunk's numbers from LiveKit",
+            e164,
+            shared,
+            exc_info=True,
+        )
+        return False
+    return e164 in listed
 
 
 async def _organization_name(org_id: UUID) -> str | None:

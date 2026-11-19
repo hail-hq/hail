@@ -21,7 +21,8 @@ Every command except ``status`` prints its plan and changes nothing until
   (Hail manages them).
 * ``move``: moves the carrier's numbers from the shared trunk
   (``LIVEKIT_SIP_INBOUND_TRUNK_ID``) to the carrier's trunk, one at a time
-  (LiveKit lists a number on one trunk only). ``--back`` reverses it.
+  (LiveKit lists a number on one trunk only). ``--back`` reverses it; with
+  the carrier key empty it finds the carrier trunk by its JSON name.
 * ``retire-shared``: once the shared trunk holds no number, takes it out of
   the dispatch rule and deletes it.
 
@@ -43,6 +44,7 @@ from hailhq.core.config import settings
 from hailhq.core.db import dispose_engine, session_scope
 from hailhq.core.models import PhoneNumber
 from hailhq.core.providers.voice import didww
+from hailhq.core.providers.voice.base import CarrierNotConfigured, CarrierRequestError
 from livekit import api
 from livekit.protocol.models import ListUpdate
 from sqlalchemy import select
@@ -131,7 +133,10 @@ async def rule_named(sip, name: str):
 
 async def apply(sip, data: dict, spec: Spec, yes: bool) -> list[str]:
     """Plan, and with ``yes`` do. Returns the plan lines."""
+    # Every check runs before the first change, dry run or not.
     password = password_for(spec)
+    if password and not settings.didww_voice_in_trunk_id:
+        raise TrunkError("DIDWW_VOICE_IN_TRUNK_ID is empty in .env")
     if spec.carrier != "didww" and not spec.allowed_addresses:
         raise TrunkError(f"{spec.carrier}: no allowed addresses in the JSON")
     rule = await rule_named(sip, data["dispatch_rule"])
@@ -141,6 +146,9 @@ async def apply(sip, data: dict, spec: Spec, yes: bool) -> list[str]:
         existing.sip_trunk_id == settings.livekit_sip_inbound_trunk_id
     ):
         raise TrunkError(f"{spec.name} is the shared trunk; rename it first")
+    own = carrier_trunk_id(spec.carrier)
+    if own and (existing is None or existing.sip_trunk_id != own):
+        raise TrunkError(f"{env_key(spec.carrier)} is not the {spec.name} trunk")
     plan: list[str] = []
     shared = settings.livekit_sip_inbound_trunk_id
     if shared and any(t.sip_trunk_id == shared for t in all_trunks):
@@ -256,11 +264,21 @@ async def move(
     own = carrier_trunk_id(spec.carrier)
     if not shared:
         raise TrunkError("LIVEKIT_SIP_INBOUND_TRUNK_ID is empty: nothing to move")
-    if not own:
+    if own:
+        own_trunk = await trunk_by_id(sip, own)
+        if own_trunk.name != spec.name:
+            raise TrunkError(f"{env_key(spec.carrier)} is not the {spec.name} trunk")
+    elif back:
+        # Rollback runs --back again after the carrier key is emptied and
+        # the services restarted: numbers routed before the restart are
+        # still on the carrier trunk. Find it by its JSON name.
+        own_trunk = by_name(await trunks(sip), spec.name)
+        if own_trunk is None:
+            raise TrunkError(f"no LiveKit inbound trunk named {spec.name}")
+        if own_trunk.sip_trunk_id == shared:
+            raise TrunkError(f"{spec.name} is the shared trunk")
+    else:
         raise TrunkError(f"set {env_key(spec.carrier)} in .env first")
-    own_trunk = await trunk_by_id(sip, own)
-    if own_trunk.name != spec.name:
-        raise TrunkError(f"{env_key(spec.carrier)} is not the {spec.name} trunk")
     shared_trunk = await trunk_by_id(sip, shared)
     placeholders = {data["shared_placeholder"]} | {
         t["placeholder"] for t in data["trunks"].values()
@@ -456,7 +474,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         lines = asyncio.run(run(args))
-    except TrunkError as exc:
+    except (TrunkError, CarrierNotConfigured, CarrierRequestError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
     print("\n".join(lines))

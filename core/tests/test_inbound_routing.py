@@ -208,10 +208,11 @@ async def test_unregister_also_clears_the_shared_trunk(
 
 
 async def test_shared_trunk_failure_does_not_block_unregister(
-    async_session, hooks, monkeypatch
+    async_session, hooks, monkeypatch, caplog
 ) -> None:
     """The carrier is already detached: the number is unregistered. The
-    leftover entry is removed when a later register is refused for it."""
+    leftover entry is logged as an error and removed when a later register
+    is refused for it."""
     monkeypatch.setattr(settings, "livekit_sip_inbound_trunk_id", "ST_shared")
     lk = AsyncMock()
     lk.remove_inbound_number.side_effect = [None, RuntimeError("timeout")]
@@ -220,8 +221,15 @@ async def test_shared_trunk_failure_does_not_block_unregister(
     async_session.add(number)
     await async_session.flush()
 
-    await inbound_routing.unregister(async_session, lk, number)
+    with caplog.at_level("ERROR", logger="hailhq.core.inbound_routing"):
+        await inbound_routing.unregister(async_session, lk, number)
     assert number.inbound_registered_at is None
+    [record] = [r for r in caplog.records if r.levelname == "ERROR"]
+    message = record.getMessage()
+    assert "+14155550100: still listed on the shared inbound trunk ST_shared" in (
+        message
+    )
+    assert "sip_trunks.py move --carrier twilio --yes" in message
 
     lk.remove_inbound_number.reset_mock(side_effect=True)
     lk.add_inbound_number.reset_mock()

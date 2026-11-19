@@ -10,7 +10,8 @@ published list:
   calls from these. ``uac`` is SIP Attach, which Hail does not use.
 * Twilio: the "Regional signaling IP gateways" section of
   https://www.twilio.com/docs/sip-trunking/ip-addresses.md. The global media
-  range above it is not signaling.
+  range above it is not signaling. A bare address (no prefix) is a /32,
+  unless it is inside a range the same region lists.
 
 Exit code 0: every list matches and no source changed its version. Exit 1:
 an address was added or removed, a source changed its version, or a page
@@ -38,7 +39,8 @@ SETTINGS = ROOT / "infra" / "livekit" / "inbound-trunks.json"
 USER_AGENT = "hail-sip-allowlist-check/1"
 TIMEOUT_SECONDS = 30
 TWILIO_SECTION = "## Regional signaling IP gateways"
-CIDR = re.compile(r"\b(\d{1,3}(?:\.\d{1,3}){3}/\d{1,2})\b")
+# An IPv4 address with an optional prefix; a bare address is a /32.
+ADDRESS = re.compile(r"(?<![\d.])(\d{1,3}(?:\.\d{1,3}){3})(/\d{1,2})?(?!\.?\d)")
 # A wider range than this is not a signaling gateway list: refuse it.
 MIN_PREFIX = 16
 
@@ -121,10 +123,20 @@ def parse_twilio(text: str) -> Published:
     networks: set[str] = set()
     for region in regions:
         name = region.splitlines()[0].strip()
-        found = CIDR.findall(region)
+        found = [
+            ipaddress.ip_network(_network(ip + (prefix or "/32")))
+            for ip, prefix in ADDRESS.findall(region)
+        ]
         if not found:
-            raise SourceError(f"Twilio region {name!r} lists no address range")
-        networks.update(_network(c) for c in found)
+            raise SourceError(f"Twilio region {name!r} lists no address")
+        # The page lists each range, then every address in it: an address
+        # inside a listed range is not a new entry.
+        ranges = [n for n in found if n.prefixlen < 32]
+        networks.update(
+            str(n)
+            for n in found
+            if n.prefixlen < 32 or not any(n.subnet_of(r) for r in ranges)
+        )
     return Published(networks, version)
 
 

@@ -181,24 +181,118 @@ async def test_shared_trunk_serves_every_carrier(async_session, monkeypatch) -> 
     assert isinstance(outcome, inbound_calls.Accepted)
 
 
-async def test_shared_trunk_is_accepted_while_numbers_move(
-    async_session, monkeypatch
+class FakeLiveKit:
+    """Stands in for ``LiveKitClient``: the shared trunk lists ``numbers``."""
+
+    numbers: list[str] = []
+    error: Exception | None = None
+    reads = 0
+    closed = 0
+
+    async def inbound_trunk_numbers(self, trunk_id: str) -> list[str]:
+        assert trunk_id == "ST_shared"
+        type(self).reads += 1
+        if self.error is not None:
+            raise self.error
+        return list(self.numbers)
+
+    async def aclose(self) -> None:
+        type(self).closed += 1
+
+
+@pytest.fixture()
+def shared_trunk(monkeypatch: pytest.MonkeyPatch) -> type[FakeLiveKit]:
+    """Cutover: Twilio has its own trunk while the shared trunk is still set."""
+    monkeypatch.setattr(settings, "livekit_sip_inbound_trunk_id", "ST_shared")
+    monkeypatch.setattr(FakeLiveKit, "numbers", [])
+    monkeypatch.setattr(FakeLiveKit, "error", None)
+    monkeypatch.setattr(FakeLiveKit, "reads", 0)
+    monkeypatch.setattr(FakeLiveKit, "closed", 0)
+    monkeypatch.setattr(inbound_calls, "LiveKitClient", FakeLiveKit)
+    return FakeLiveKit
+
+
+async def test_shared_trunk_is_accepted_for_a_number_it_lists(
+    async_session, shared_trunk
 ) -> None:
     """Cutover: the carrier has its own trunk, but its numbers may still sit
     on the shared trunk until they are moved."""
-    monkeypatch.setattr(settings, "livekit_sip_inbound_trunk_id", "ST_shared")
+    shared_trunk.numbers = ["hail-placeholder-shared", DIALED]
     await _seed(async_session)
-    for trunk in ("ST_shared", "ST_in_tw"):
+    outcome = await inbound_calls.open_inbound_call(
+        async_session, _attrs(trunk_id="ST_shared")
+    )
+    assert isinstance(outcome, inbound_calls.Accepted)
+    assert (shared_trunk.reads, shared_trunk.closed) == (1, 1)
+
+
+@pytest.mark.parametrize(
+    "numbers",
+    [
+        [],  # a wildcard shared trunk matches every INVITE
+        ["hail-placeholder-shared"],
+        ["hail-placeholder-shared", "+14155550199"],
+    ],
+)
+async def test_shared_trunk_is_refused_for_a_number_it_does_not_list(
+    async_session, shared_trunk, numbers
+) -> None:
+    """A spoofed INVITE to a number on a locked trunk lands on an open shared
+    trunk: refused, because the shared trunk does not list that number."""
+    shared_trunk.numbers = numbers
+    await _seed(async_session)
+    outcome = await inbound_calls.open_inbound_call(
+        async_session, _attrs(trunk_id="ST_shared")
+    )
+    assert isinstance(outcome, inbound_calls.Rejected)
+    assert outcome.reason == "carrier_route_failed"
+    assert shared_trunk.reads == 1
+
+
+async def test_shared_trunk_is_refused_when_livekit_cannot_be_read(
+    async_session, shared_trunk, caplog
+) -> None:
+    shared_trunk.error = RuntimeError("livekit down")
+    await _seed(async_session)
+    with caplog.at_level("ERROR", logger="hailhq.core.inbound_calls"):
         outcome = await inbound_calls.open_inbound_call(
-            async_session, _attrs(trunk_id=trunk, provider_call_sid=f"sip-{trunk}")
+            async_session, _attrs(trunk_id="ST_shared")
         )
-        assert isinstance(outcome, inbound_calls.Accepted), trunk
-    # Another carrier's own trunk is still refused.
+    assert isinstance(outcome, inbound_calls.Rejected)
+    assert outcome.reason == "carrier_route_failed"
+    assert shared_trunk.closed == 1
+    assert any(
+        r.levelname == "ERROR" and "could not read" in r.getMessage()
+        for r in caplog.records
+    )
+
+
+async def test_own_trunk_needs_no_livekit_read(async_session, shared_trunk) -> None:
+    shared_trunk.error = AssertionError("no read on the carrier's own trunk")
+    await _seed(async_session)
+    outcome = await inbound_calls.open_inbound_call(async_session, _attrs())
+    assert isinstance(outcome, inbound_calls.Accepted)
+    # Another carrier's own trunk is still refused, with no read either.
     outcome = await inbound_calls.open_inbound_call(
         async_session, _attrs(trunk_id="ST_in_tx", provider_call_sid="sip-tx")
     )
     assert isinstance(outcome, inbound_calls.Rejected)
     assert outcome.reason == "carrier_route_failed"
+    assert shared_trunk.reads == 0
+
+
+async def test_shared_trunk_without_a_carrier_key_needs_no_read(
+    async_session, shared_trunk, monkeypatch
+) -> None:
+    """No carrier key: config.py folds the shared id in, so the shared trunk
+    is the carrier's own trunk, wildcard or not."""
+    monkeypatch.setattr(settings, "livekit_twilio_sip_inbound_trunk_id", "ST_shared")
+    await _seed(async_session)
+    outcome = await inbound_calls.open_inbound_call(
+        async_session, _attrs(trunk_id="ST_shared")
+    )
+    assert isinstance(outcome, inbound_calls.Accepted)
+    assert shared_trunk.reads == 0
 
 
 async def test_missing_trunk_id_is_refused(async_session) -> None:

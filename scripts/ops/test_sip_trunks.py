@@ -96,6 +96,7 @@ def env(monkeypatch):
     for c in st.CARRIERS:
         monkeypatch.setattr(settings, f"livekit_{c}_sip_inbound_trunk_id", "ST_shared")
     monkeypatch.setattr(settings, "didww_sip_inbound_password", "")
+    monkeypatch.setattr(settings, "didww_voice_in_trunk_id", "")
 
 
 async def test_dry_run_changes_nothing() -> None:
@@ -144,6 +145,7 @@ async def test_didww_needs_the_password(monkeypatch) -> None:
         await st.apply(sip, DATA, SPECS["didww"], yes=False)
 
     monkeypatch.setattr(settings, "didww_sip_inbound_password", "pw")
+    monkeypatch.setattr(settings, "didww_voice_in_trunk_id", "didww-trunk-1")
     seen = []
 
     async def fake_auth(user, password):
@@ -157,6 +159,60 @@ async def test_didww_needs_the_password(monkeypatch) -> None:
     assert created.auth_username == "hail-didww"
     assert created.auth_password == "pw"
     assert seen == [("hail-didww", "pw")]
+
+
+async def test_didww_needs_its_trunk_id_before_any_change(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "didww_sip_inbound_password", "pw")
+    sip = FakeSip(trunk("ST_shared", "shared", ["+14155550100"]))
+    for yes in (False, True):
+        with pytest.raises(st.TrunkError, match="DIDWW_VOICE_IN_TRUNK_ID"):
+            await st.apply(sip, DATA, SPECS["didww"], yes=yes)
+    assert sip.calls == []
+
+
+async def test_apply_refuses_a_key_that_points_at_another_trunk(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(settings, "livekit_twilio_sip_inbound_trunk_id", "ST_tx")
+    sip = FakeSip(
+        trunk("ST_shared", "shared", ["+14155550100"]),
+        trunk("ST_tw", "hail-inbound-twilio", ["hail-placeholder-twilio"]),
+        trunk("ST_tx", "hail-inbound-telnyx", ["hail-placeholder-telnyx"]),
+    )
+    with pytest.raises(st.TrunkError, match="not the hail-inbound-twilio trunk"):
+        await st.apply(sip, DATA, SPECS["twilio"], yes=True)
+    assert sip.calls == []
+    # A key set while no trunk has the name would create a second trunk.
+    del sip.trunks["ST_tw"]
+    with pytest.raises(st.TrunkError, match="not the hail-inbound-twilio trunk"):
+        await st.apply(sip, DATA, SPECS["twilio"], yes=True)
+    assert sip.calls == []
+
+
+async def test_apply_accepts_the_matching_key(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "livekit_twilio_sip_inbound_trunk_id", "ST_tw")
+    sip = FakeSip(
+        trunk("ST_shared", "shared", ["+14155550100"]),
+        trunk("ST_tw", "hail-inbound-twilio", ["hail-placeholder-twilio"]),
+    )
+    plan = await st.apply(sip, DATA, SPECS["twilio"], yes=True)
+    assert plan[-1] == f"set in .env: {st.env_key('twilio')}=ST_tw"
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        st.CarrierNotConfigured("DIDWW voice IN trunk is not a SIP trunk"),
+        st.CarrierRequestError(422),
+    ],
+)
+def test_main_prints_carrier_errors(monkeypatch, capsys, error) -> None:
+    async def fail(_args):
+        raise error
+
+    monkeypatch.setattr(st, "run", fail)
+    assert st.main(["apply", "--carrier", "didww", "--yes"]) == 2
+    assert capsys.readouterr().err == f"ERROR: {error}\n"
 
 
 async def test_move_needs_the_carrier_key_first() -> None:
@@ -199,6 +255,32 @@ async def test_move_takes_only_the_carriers_numbers(monkeypatch) -> None:
     await st.move(sip, DATA, SPECS["telnyx"], back=True, yes=True)
     assert list(sip.trunks["ST_tx"].numbers) == ["hail-placeholder-telnyx"]
     assert "+14155550100" in sip.trunks["ST_shared"].numbers
+
+
+async def test_move_back_finds_the_carrier_trunk_by_name_without_the_key() -> None:
+    """Rollback: after the key is emptied and the services restart, numbers
+    routed in between are still on the carrier trunk. A second --back moves
+    them; a forward move still needs the key."""
+    sip = FakeSip(
+        trunk("ST_shared", "shared", ["hail-placeholder-shared"]),
+        trunk(
+            "ST_tx", "hail-inbound-telnyx", ["hail-placeholder-telnyx", "+14155550100"]
+        ),
+    )
+    await st.move(sip, DATA, SPECS["telnyx"], back=True, yes=True)
+    assert list(sip.trunks["ST_tx"].numbers) == ["hail-placeholder-telnyx"]
+    assert "+14155550100" in sip.trunks["ST_shared"].numbers
+    with pytest.raises(st.TrunkError, match="LIVEKIT_TELNYX_SIP_INBOUND_TRUNK_ID"):
+        await st.move(sip, DATA, SPECS["telnyx"], back=False, yes=False)
+
+
+async def test_move_back_without_the_key_needs_the_named_trunk() -> None:
+    sip = FakeSip(trunk("ST_shared", "shared", ["hail-placeholder-shared"]))
+    with pytest.raises(st.TrunkError, match="no LiveKit inbound trunk named"):
+        await st.move(sip, DATA, SPECS["telnyx"], back=True, yes=False)
+    sip = FakeSip(trunk("ST_shared", "hail-inbound-telnyx"))
+    with pytest.raises(st.TrunkError, match="is the shared trunk"):
+        await st.move(sip, DATA, SPECS["telnyx"], back=True, yes=False)
 
 
 async def test_failed_add_puts_the_number_back(monkeypatch) -> None:
