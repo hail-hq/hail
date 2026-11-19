@@ -159,7 +159,7 @@ async def open_inbound_call(
         # Expected only for a number not moved yet. After the move, a call
         # here means the shared trunk matched a moved number: check that it
         # still lists its placeholder (sip_trunks.py status).
-        logger.warning(
+        logger.info(
             "inbound call to %s answered on the shared trunk; its carrier "
             "%s has its own trunk",
             attrs.dialed,

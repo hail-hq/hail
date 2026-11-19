@@ -100,7 +100,8 @@ def parse_telnyx(text: str) -> Published:
         for key in ("primary", "secondary"):
             if not region.get(key):
                 raise SourceError(f"voice.json region {name} has no {key} address")
-            networks.add(_network(f"{region[key]}/32"))
+            value = str(region[key])
+            networks.add(_network(value if "/" in value else f"{value}/32"))
         for cidr in region.get("allowlistCidrs") or []:
             networks.add(_network(cidr))
     return Published(networks, version)

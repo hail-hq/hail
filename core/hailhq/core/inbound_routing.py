@@ -54,8 +54,16 @@ async def register(db: AsyncSession, lk: LiveKitClient, number: PhoneNumber) -> 
         ) from exc
     try:
         # A stale entry on the shared trunk would make LiveKit refuse the add
-        # (a number is listed on one trunk only).
-        await _remove_from_shared(lk, trunk_id, number.e164)
+        # (a number is listed on one trunk only). Best effort: a shared-trunk
+        # problem must not stop the add; a refused add is handled below.
+        try:
+            await _remove_from_shared(lk, trunk_id, number.e164)
+        except Exception:
+            logger.warning(
+                "number %s: could not clear it from the shared inbound trunk",
+                number.e164,
+                exc_info=True,
+            )
         await lk.add_inbound_number(trunk_id, number.e164)
     except Exception as exc:
         # Do not leave the carrier pointing at a LiveKit trunk that refuses

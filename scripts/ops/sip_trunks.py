@@ -371,7 +371,8 @@ async def move(
             raise TrunkError(
                 f"none of the {len(candidates)} number(s) on {src.name} has a "
                 "live row: is DATABASE_URL the production database? "
-                "(--drop-unknown removes them once you have checked)"
+                "(--drop-unknown removes them once the carrier trunk lists a "
+                "moved number; before that, remove them with lk sip inbound update)"
             )
         movable = [n for n in candidates if found.get(n) == spec.carrier]
         if not only:

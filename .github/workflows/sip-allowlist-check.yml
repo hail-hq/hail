@@ -60,7 +60,7 @@ jobs:
 
             // The issues API also returns pull requests: keep only the issue
             // with this exact title, in case the label is reused.
-            const { data: labelled } = await github.rest.issues.listForRepo({
+            const labelled = await github.paginate(github.rest.issues.listForRepo, {
               owner: context.repo.owner,
               repo: context.repo.repo,
               state: 'open',
