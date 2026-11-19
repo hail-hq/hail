@@ -44,7 +44,7 @@ The MCP registry entry moves to 0.2.0. Database migrations run on deploy.
 - US texting: companies outside the US and Canada can register with their own tax or company number.
 - Email: turn off sending from a custom domain with `sends_enabled: false`; inbound mail still arrives.
 - Hail Cloud: a new workspace can talk to its saved agent in the browser before it buys a number, with 5 free minutes.
-- MCP: with `NEXT_PUBLIC_POSTHOG_KEY` set, the HTTP server sends PostHog tool names, timings, the calling model and, for signed-in callers, their user id, email and name. Arguments and results are never sent.
+- MCP: with `NEXT_PUBLIC_POSTHOG_KEY` set, the HTTP server sends PostHog tool and argument names, timings, client and model names, and for signed-in callers their user id, email, name and organization id. Tools then take an optional `llm_model` input. Argument values and results are never sent.
 
 ### Changed
 
