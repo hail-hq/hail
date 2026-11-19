@@ -59,7 +59,8 @@ SPEC = ToolSpec(
     description=(
         "List the people you may send messages to: members of the "
         "organization that set up this call. Shows names and whether each "
-        "person can receive email or text — never their actual addresses."
+        "person can receive email or text — never their actual addresses. "
+        "Saved contacts are not listed, but send_email can reach them by name."
     ),
     parameters={"type": "object", "properties": {}, "required": []},
     risk_tier="read_only",
@@ -73,6 +74,7 @@ EMAIL_RUN_SPEC = dataclasses.replace(
     description=(
         "List the people you may send messages to: members of the organization "
         "you work for. Shows names and whether each person can receive email or "
-        "text, never their actual addresses."
+        "text, never their actual addresses. Saved contacts are not listed, but "
+        "send_email can reach them by name."
     ),
 )
