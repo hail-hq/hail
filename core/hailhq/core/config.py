@@ -233,6 +233,13 @@ class Settings(BaseSettings):
     livekit_telnyx_sip_inbound_trunk_id: str = ""
     livekit_didww_sip_inbound_trunk_id: str = ""
 
+    # LiveKit's adaptive interruption model on calls (tells a nod from a real
+    # interruption). LiveKit meters it per request for self-hosted workers.
+    # false: every call uses the plain one-word rule and sends no requests.
+    # Not in .env.example (working default); see
+    # docs/public/self-host/livekit-cloud.md.
+    hail_adaptive_interruption: bool = True
+
     # Optional recording: deploy capability, separately from workspace consent.
     hail_recording_enabled: bool = False
     hail_recording_retention_days: int = 30

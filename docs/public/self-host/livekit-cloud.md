@@ -59,6 +59,12 @@ available, calls go on with the plain rule: one transcribed word stops the
 agent. Current numbers:
 [Quotas and limits](https://docs.livekit.io/deploy/admin/quotas-and-limits/),
 and your project's own limits under Settings in LiveKit Cloud.
+
+```bash
+# Worker environment. Turns the model off: no requests are sent, and every
+# call uses the plain rule. Restart the voice worker after changing it.
+HAIL_ADAPTIVE_INTERRUPTION=false
+```
 Run the API and voicebot worker from the same release.
 
 ## 4. Inbound calls

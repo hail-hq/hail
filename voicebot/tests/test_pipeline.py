@@ -14,12 +14,13 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import pytest
+from hailhq.core.config import settings
 from hailhq.voicebot.pipeline import (
-    INTERRUPTION,
     ResolvedLayer,
     build_llm,
     build_session,
     build_stt,
+    interruption_options,
 )
 from livekit.agents import AgentSession
 from livekit.agents.llm import FallbackAdapter
@@ -822,12 +823,24 @@ def test_elevenlabs_tagalog_sends_the_filipino_code() -> None:
     assert {inst._opts.language.language for inst in eleven} == {"fil"}
 
 
-def test_session_asks_for_the_interruption_model_and_keeps_the_one_word_rule() -> None:
+def test_session_asks_for_the_interruption_model_and_keeps_the_one_word_rule(
+    monkeypatch,
+) -> None:
     # The model is used only when a self-hosted worker names it. The one-word
     # rule is what the call falls back to when the model is refused or errors.
-    assert INTERRUPTION == {"mode": "adaptive", "min_words": 1}
+    monkeypatch.setattr(settings, "hail_adaptive_interruption", True)
+    assert interruption_options() == {"mode": "adaptive", "min_words": 1}
     session = build_session(None, MagicMock())
     assert session.interruption_detection == "adaptive"
-    assert session.options.interruption["mode"] == "adaptive"
     assert session.options.interruption["min_words"] == 1
     assert session.options.interruption["enabled"] is True
+
+
+def test_the_off_switch_keeps_the_one_word_rule_and_sends_no_requests(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(settings, "hail_adaptive_interruption", False)
+    assert interruption_options() == {"mode": "vad", "min_words": 1}
+    session = build_session(None, MagicMock())
+    assert session.interruption_detection == "vad"
+    assert session.options.interruption["min_words"] == 1
