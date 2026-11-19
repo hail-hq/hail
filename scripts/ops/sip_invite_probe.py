@@ -32,6 +32,7 @@ import re
 import secrets
 import socket
 import sys
+import time
 from dataclasses import dataclass, field
 
 CALLER = "+12025550100"
@@ -127,8 +128,12 @@ class Reader:
     def __init__(self, sock: socket.socket) -> None:
         self.sock = sock
         self.buf = b""
+        # The whole wait for one answer, not each recv: keep-alives and
+        # server requests must not extend it.
+        self.timeout = sock.gettimeout()
 
     def next(self) -> Response | None:
+        deadline = None if self.timeout is None else time.monotonic() + self.timeout
         while True:
             # A bare CRLF is a keep-alive (RFC 5626), not the start of a message.
             self.buf = self.buf.lstrip(b"\r\n")
@@ -136,8 +141,7 @@ class Reader:
             if head_end >= 0:
                 head = self.buf[:head_end].decode("utf-8", "replace")
                 headers = _headers(head)
-                # "l" is the compact form of Content-Length (RFC 3261 §7.3.3).
-                length = int(headers.get("content-length", headers.get("l", "0")) or 0)
+                length = int(headers.get("content-length", "0") or 0)
                 total = head_end + 4 + length
                 if len(self.buf) >= total:
                     self.buf = self.buf[total:]
@@ -146,6 +150,11 @@ class Reader:
                         continue  # a request from the server: not ours to answer
                     _, code, *reason = first.split(" ", 2)
                     return Response(int(code), " ".join(reason), headers)
+            if deadline is not None:
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    return None
+                self.sock.settimeout(left)
             try:
                 chunk = self.sock.recv(65536)
             except TimeoutError:
@@ -155,12 +164,24 @@ class Reader:
             self.buf += chunk
 
 
+# Compact header names (RFC 3261 §7.3.3) mapped to their long names.
+_COMPACT = {
+    "t": "to",
+    "f": "from",
+    "m": "contact",
+    "i": "call-id",
+    "v": "via",
+    "l": "content-length",
+}
+
+
 def _headers(head: str) -> dict[str, str]:
     out: dict[str, str] = {}
     for line in head.split("\r\n")[1:]:
         if ":" in line:
             key, value = line.split(":", 1)
-            out.setdefault(key.strip().lower(), value.strip())
+            key = key.strip().lower()
+            out.setdefault(_COMPACT.get(key, key), value.strip())
     return out
 
 

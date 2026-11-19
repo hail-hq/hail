@@ -143,8 +143,9 @@ async def open_inbound_call(
         logger.info("inbound call to unknown/pool number %s dropped", attrs.dialed)
         return Rejected("unknown_number")
     # The INVITE must arrive on the LiveKit inbound trunk configured for the
-    # number's carrier. Carriers may share one trunk (one wildcard inbound
-    # trunk is all LiveKit allows) or have one each; both pass this check.
+    # number's carrier: its own trunk when its key is set, else the shared
+    # one. Each trunk keeps a placeholder entry, because a trunk with no
+    # numbers matches every dialed number.
     try:
         expected_trunk = inbound_trunk(number.provider)
     except ValueError:

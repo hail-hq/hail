@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import ipaddress
 import json
 import sys
 from dataclasses import dataclass
@@ -267,8 +268,15 @@ def didww_settings_line(sip_attrs: dict) -> str:
     return f"DIDWW_VOICE_IN_TRUNK_ID now: {shown}"
 
 
+def _networks(addresses) -> set:
+    """LiveKit may store ``1.2.3.4`` for ``1.2.3.4/32``: compare networks."""
+    return {ipaddress.ip_network(a, strict=False) for a in addresses}
+
+
 async def live_carriers(numbers: list[str]) -> dict[str, str]:
-    """e164 -> carrier of the live (not released, not failed) row."""
+    """e164 -> carrier of the live (not released, not failed) row that Hail
+    has registered for inbound calls. A number unrouted inside the window
+    is left where it is."""
     if not numbers:
         return {}
     async with session_scope() as db:
@@ -276,6 +284,7 @@ async def live_carriers(numbers: list[str]) -> dict[str, str]:
             select(PhoneNumber.e164, PhoneNumber.provider).where(
                 PhoneNumber.e164.in_(numbers),
                 PhoneNumber.provisioning_state.notin_(("released", "failed")),
+                PhoneNumber.inbound_registered_at.is_not(None),
             )
         )
         return dict(rows.all())
@@ -487,7 +496,8 @@ async def status(sip, data: dict, specs: dict[str, Spec]) -> list[str]:
         spec = specs.get(role)
         addresses = (
             "matches the JSON"
-            if spec and sorted(t.allowed_addresses) == sorted(spec.allowed_addresses)
+            if spec
+            and _networks(t.allowed_addresses) == _networks(spec.allowed_addresses)
             else f"{len(t.allowed_addresses)}"
         )
         lines.append(
