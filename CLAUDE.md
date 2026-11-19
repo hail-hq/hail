@@ -121,6 +121,8 @@ Shared runtime instructions live in `core/hailhq/core/prompts.py`. Keep them out
 Customer-authored instructions remain editable. Do not restore the retired prompt-template endpoint or full-prompt preview.
 When changing call or agent settings, update `VOICE_CONFIGURATION_HELP`, its tests, and the matching console labels together.
 Follow [docs/operations/agent-prompts.md](docs/operations/agent-prompts.md) for the privacy boundary and conversational checks.
+Agents talk in many languages. Never hardcode a sentence that the voicebot speaks word for word (`session.say`): add it to `voicebot/hailhq/voicebot/spoken_lines.py` with every supported language.
+A tool result (the `spoken` field) is text for the model, not for the caller: the model says it in the call's language. Keep it short and plain so it translates well.
 
 ## Style
 
