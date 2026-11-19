@@ -325,7 +325,7 @@ async def test_didww_trunk_auth_fails_when_the_trunk_lost_its_host(
     client = MagicMock()
     client.get.side_effect = lambda path, **kw: next(reads)
     monkeypatch.setattr(didww, "didww_client", lambda: client)
-    with pytest.raises(CarrierNotConfigured, match="host or port"):
+    with pytest.raises(CarrierNotConfigured, match="host, port or transport"):
         await didww.set_voice_in_trunk_auth("hail-didww", "s3cret")
 
 
