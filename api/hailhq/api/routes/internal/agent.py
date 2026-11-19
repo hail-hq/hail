@@ -385,11 +385,6 @@ _SPOKEN_RUN_REPLIED = (
     "Not sent: the reply to this email was already sent or tried. Nothing"
     " more can go to the sender as that reply."
 )
-_SPOKEN_EMAIL_CALLER_NAME = (
-    'Not sent: "{name}" is also the name saved for the person on this call,'
-    " so it cannot pick a recipient. You can only email people on file, to"
-    " prevent spam."
-)
 _SPOKEN_CALL_EMAIL_LIMIT = (
     f"Not sent: this call already sent {MAX_CALL_EMAILS} emails, the limit for"
     " one call. Offer to take a message."
@@ -459,9 +454,9 @@ async def _call_recipient(
     if caller is not None and _same_name(caller.name, name):
         return AgentSendResponse(
             ok=False,
-            spoken=(
-                _SPOKEN_EMAIL_USE_SELF if own else _SPOKEN_EMAIL_CALLER_NAME
-            ).format(name=_quoted_name(name)),
+            # One answer with or without an email on file, so a caller
+            # cannot learn whether this number's entry has one.
+            spoken=_SPOKEN_EMAIL_USE_SELF.format(name=_quoted_name(name)),
         )
     if isinstance(recipient, AgentSendResponse):
         return recipient

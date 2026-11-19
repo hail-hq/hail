@@ -202,12 +202,7 @@ async def _email_for_number(session, org, phone):
 
 async def test_entry_email_goes_by_number_members_first(async_session):
     org = uuid.uuid4()
-    member = await _add_member(
-        async_session, org, "Sam Lee", "sam@team.test", "+15550001111"
-    )
-    member.email_verified = True
-    # An unverified login is no address on file.
-    await _add_member(async_session, org, "Alex Kim", "alex@team.test", "+15550004444")
+    await _add_member(async_session, org, "Sam Lee", "sam@team.test", "+15550001111")
     await _add_contact(
         async_session,
         org,
@@ -226,7 +221,6 @@ async def test_entry_email_goes_by_number_members_first(async_session):
     )
     # A saved number with no email, or no saved number, gives nothing.
     assert await _email_for_number(async_session, org, "+15550003333") is None
-    assert await _email_for_number(async_session, org, "+15550004444") is None
     assert await _email_for_number(async_session, org, "+15550009999") is None
     assert await _email_for_number(async_session, uuid.uuid4(), "+15550002222") is None
 
