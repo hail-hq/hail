@@ -133,6 +133,8 @@ SDK: `client.agents.update(agent_id, email_caller_enabled=True)`.
   - 3 emails to one address in any 24 hours, from any caller;
   - 100 emails per organization in any 24 hours.
 
+  Each cap counts only your organization's emails.
+
   Each check takes the stricter reading. The per-address cap counts email
   inboxes:
   `+tags` are ignored, and Gmail dots too (`n.ame+1@gmail.com` is

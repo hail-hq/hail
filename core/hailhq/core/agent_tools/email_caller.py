@@ -32,11 +32,13 @@ MAX_ADDRESS_CHARS = 254
 MAX_BODY_CHARS = 2000
 # Emails to the person on one call, all to one address.
 MAX_EMAILS_PER_CALL = 2
-# Per caller phone number, over any 24 hours, across all calls.
+# Per caller phone number, over any 24 hours, across the organization's
+# calls.
 MAX_EMAILS_PER_CALLER_PER_DAY = 3
 MAX_ADDRESSES_PER_CALLER_PER_DAY = 2
-# Per recipient address, over any 24 hours, across all callers: caller ID
-# can be faked, so the per-number caps alone do not protect one inbox.
+# Per recipient address, over any 24 hours, across the organization's
+# callers: caller ID can be faked, so the per-number caps alone do not
+# protect one inbox. Each organization counts on its own.
 MAX_EMAILS_PER_ADDRESS_PER_DAY = 3
 # Per organization, over any 24 hours.
 MAX_EMAILS_PER_ORG_PER_DAY = 100
