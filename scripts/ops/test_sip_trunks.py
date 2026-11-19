@@ -373,7 +373,11 @@ async def test_retire_shared_skips_a_carrier_with_no_routed_number(
     async def in_use():
         return {"twilio", "telnyx"}
 
-    await st.retire_shared(sip, DATA, SPECS, yes=True, carriers_in_use=in_use)
+    with pytest.raises(st.TrunkError, match="--allow-missing"):
+        await st.retire_shared(sip, DATA, SPECS, yes=True, carriers_in_use=in_use)
+    await st.retire_shared(
+        sip, DATA, SPECS, yes=True, carriers_in_use=in_use, allow_missing=True
+    )
     assert "ST_shared" not in sip.trunks
 
 
@@ -692,3 +696,35 @@ async def test_apply_refuses_a_shared_trunk_with_no_numbers(monkeypatch) -> None
     with pytest.raises(st.TrunkError, match="lists no numbers"):
         await st.apply(sip, DATA, SPECS["twilio"], yes=True)
     assert sip.calls == []
+
+
+async def test_drop_unknown_keeps_a_number_routed_after_the_plan(monkeypatch) -> None:
+    """The row of a number routed during the run commits after LiveKit lists
+    it: the removal reads the database again and keeps it."""
+    monkeypatch.setattr(settings, "livekit_telnyx_sip_inbound_trunk_id", "ST_tx")
+    sip = FakeSip(
+        trunk("ST_shared", "shared", ["hail-placeholder-shared", "+14155550198"]),
+        trunk(
+            "ST_tx", "hail-inbound-telnyx", ["hail-placeholder-telnyx", "+14155550100"]
+        ),
+    )
+    calls = {"n": 0}
+
+    async def carriers(numbers):
+        calls["n"] += 1
+        known = {"+14155550100": "telnyx"}
+        if calls["n"] > 2:  # routed after the plan was made
+            known["+14155550198"] = "twilio"
+        return {n: known[n] for n in numbers if n in known}
+
+    plan = await st.move(
+        sip,
+        DATA,
+        SPECS["telnyx"],
+        back=False,
+        yes=True,
+        carriers_of=carriers,
+        drop_unknown=True,
+    )
+    assert "+14155550198" in sip.trunks["ST_shared"].numbers
+    assert "kept +14155550198: it is routed now" in plan

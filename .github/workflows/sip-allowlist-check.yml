@@ -71,11 +71,14 @@ jobs:
               // The label may have been removed while triaging: match by
               // title, but only an issue this workflow opened (the repo is
               // public, so anyone can open an issue with the same title).
-              const { data: found } = await github.rest.search.issuesAndPullRequests({
-                q: `repo:${context.repo.owner}/${context.repo.repo} is:issue is:open in:title "${title}"`,
+              const open = await github.paginate(github.rest.issues.listForRepo, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                state: 'open',
+                creator: 'github-actions[bot]',
               });
-              existing = found.items.filter(
-                (i) => i.title === title && i.user?.login === 'github-actions[bot]',
+              existing = open.filter(
+                (i) => !i.pull_request && i.title === title && i.user?.login === 'github-actions[bot]',
               );
             }
             if (existing.length > 0) {

@@ -172,8 +172,9 @@ async def apply(sip, data: dict, spec: Spec, yes: bool) -> list[str]:
         # A trunk with no numbers matches every dialed number: adding the
         # placeholder would stop calls to every number not listed on it.
         raise TrunkError(
-            "the shared trunk lists no numbers (it matches every number): "
-            "add each routed number to it first, see the runbook"
+            "the shared trunk lists no numbers (it matches every number). "
+            f"Add {data['shared_placeholder']} and each routed number to it "
+            "by hand first (the runbook, step 2)"
         )
     if shared and shared_trunk is not None:
         # Emptied by unregister or move, the open shared trunk would match
@@ -415,6 +416,11 @@ async def move(
             raise
         plan.append(f"moved {number}")
     for number in skipped if drop_unknown else []:
+        # The app may have routed it since the plan: its row commits after
+        # LiveKit lists it. Read again right before the removal.
+        if await carriers_of([number]):
+            plan.append(f"kept {number}: it is routed now")
+            continue
         await sip.update_inbound_trunk_fields(
             src.sip_trunk_id, numbers=ListUpdate(remove=[number])
         )
@@ -478,6 +484,7 @@ async def retire_shared(
     specs: dict[str, Spec],
     yes: bool,
     carriers_in_use=routed_carriers,
+    allow_missing: bool = False,
 ) -> list[str]:
     shared = settings.livekit_sip_inbound_trunk_id
     if not shared:
@@ -491,8 +498,14 @@ async def retire_shared(
         # That carrier still falls back to the shared trunk: deleting it
         # would break its routed numbers.
         raise TrunkError(f"set {', '.join(blocked)} in .env first")
+    if missing and not allow_missing:
+        # Without the shared trunk that carrier has no inbound trunk at all,
+        # so a number routed later fails. Say so explicitly.
+        raise TrunkError(
+            f"{', '.join(missing)} empty: add --allow-missing if this setup "
+            "never takes inbound calls on that carrier"
+        )
     if missing:
-        # A carrier with no routed number needs no trunk.
         print(
             f"warning: {', '.join(missing)} empty: that carrier gets no inbound calls",
             file=sys.stderr,
@@ -564,7 +577,9 @@ async def run(args: argparse.Namespace) -> list[str]:
         if args.command == "status":
             return await status(lk.sip, data, specs)
         if args.command == "retire-shared":
-            return await retire_shared(lk.sip, data, specs, args.yes)
+            return await retire_shared(
+                lk.sip, data, specs, args.yes, allow_missing=args.allow_missing
+            )
         spec = specs[args.carrier]
         if args.command == "apply":
             return await apply(lk.sip, data, spec, args.yes)
@@ -606,6 +621,11 @@ def main(argv: list[str] | None = None) -> int:
             )
     retire = sub.add_parser("retire-shared")
     retire.add_argument("--yes", action="store_true", help="make the changes")
+    retire.add_argument(
+        "--allow-missing",
+        action="store_true",
+        help="retire even if a carrier has no own trunk (it then takes no inbound calls)",
+    )
     args = parser.parse_args(argv)
     try:
         lines = asyncio.run(run(args))
