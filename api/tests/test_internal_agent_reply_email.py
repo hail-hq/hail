@@ -1280,9 +1280,16 @@ async def test_tool_email_me_reaches_the_proven_sender(
     )
     data = await _tool_email(client, inbound.id, recipient_name=name)
     assert data == {"ok": True, "spoken": "Email sent."}
-    assert email_mock.send_email.await_args.kwargs["to_addresses"] == [
-        "sam@northgate.test"
-    ]
+    kwargs = email_mock.send_email.await_args.kwargs
+    assert kwargs["to_addresses"] == ["sam@northgate.test"]
+    # It is the run's reply: threaded, and the reply step sends nothing more.
+    sent = (
+        await async_session.execute(select(Email).where(Email.direction == "outbound"))
+    ).scalar_one()
+    assert sent.in_reply_to == inbound.message_id
+    assert sent.metadata_["reply_to_email_id"] == str(inbound.id)
+    await _reply(client, inbound.id)
+    assert email_mock.send_email.await_count == 1
 
 
 async def test_tool_email_me_from_an_unproven_sender_sends_nothing(

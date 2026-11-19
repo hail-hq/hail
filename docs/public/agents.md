@@ -50,8 +50,9 @@ can be faked, so:
   because of a phone call with your organization.
 - One call sends at most 3 emails.
 
-In an email conversation, "email me" goes to the sender, whose address is proven
-by DMARC. The agent never emails an address someone says or types. It answers
+The words `me`, `caller`, `sender` and `you` always mean the person the agent
+talks to, never a contact with that name. In an email conversation, "email me"
+is the agent's reply to the sender, whose address is proven by DMARC. The agent never emails an address someone says or types. It answers
 that it can only email addresses on file, to prevent spam.
 
 ## Hand over to a person

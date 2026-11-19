@@ -1484,7 +1484,13 @@ async def agent_email_run_send_email(
     parent = None
     files = []
     meta = _email_run_meta(body, agent, inbound)
-    if body.attachment_ids or body.reply_to_email_id:
+    # An email to the sender is the run's reply itself, threaded and from the
+    # inbound's domain: the reply endpoint sees it and sends no second email.
+    if (
+        body.attachment_ids
+        or body.reply_to_email_id
+        or is_self_recipient(body.recipient_name)
+    ):
         existing = await prior_email_reply(db, inbound)
         if existing is not None:
             return _replayed_send(existing)

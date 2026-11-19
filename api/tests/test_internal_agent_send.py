@@ -492,7 +492,7 @@ async def test_send_email_me_reaches_the_callers_own_address(
     sent = (await async_session.execute(select(Email))).scalar_one().body_text
     assert sent.startswith(
         "This email was sent because of a phone call with Northgate Dental.\n\n"
-        "Hello from the call.\n\n--\n"
+        "Hello from the call.\n\n-- \n"
     )
     assert "If that was not you, you can ignore it." in sent
 
@@ -658,6 +658,39 @@ async def test_send_email_caps_emails_per_call(
     assert data["ok"] is False
     assert "limit for one call" in data["spoken"]
     assert len(await _sent_to(async_session)) == 3
+
+
+async def test_send_email_cap_leaves_out_handover_notices(
+    client, async_session, email_mock, add_phone_number
+):
+    """Handover notice emails carry the call id but are not send_email sends."""
+    org = uuid.uuid4()
+    call = await _email_ready_call(async_session, org, add_phone_number)
+    await _contacts_for_cap(async_session, org, 1)
+    domain = (await async_session.execute(select(EmailDomain))).scalar_one()
+    async_session.add_all(
+        [
+            Email(
+                organization_id=org,
+                email_domain_id=domain.id,
+                from_address="agent@mail.a.test",
+                to_addresses=[f"team{i}@north.test"],
+                subject="Call handover",
+                body_text="A caller is waiting.",
+                status="sent",
+                provider="ses",
+                metadata_={
+                    "call_id": str(call.id),
+                    "tool_invocation_id": str(uuid.uuid4()),
+                    "handover_contact_id": str(uuid.uuid4()),
+                },
+            )
+            for i in range(3)
+        ]
+    )
+    await async_session.commit()
+
+    assert (await _send_email_to_name(client, call, "Contact 0"))["ok"] is True
 
 
 async def test_send_email_failed_before_ses_took_it_does_not_count(

@@ -68,7 +68,7 @@ def caller_email_body(body_text: str, org_name: str | None) -> str:
     return (
         f"This email was sent because of {call}.\n\n"
         f"{body_text.strip()}\n\n"
-        "--\n"
+        "-- \n"
         f"You got this email because someone asked for it during {call},"
         " from a phone number saved with this email address. If that was not"
         " you, you can ignore it."
@@ -231,7 +231,7 @@ EMAIL_RUN_SPEC = dataclasses.replace(
     description=(
         "Send an email to a team member (use list_contacts to see who) or a "
         "saved contact, by name. To email the sender of this email, set "
-        f'recipient_name to "{SELF_RECIPIENT}". You cannot email an address someone writes: '
+        f'recipient_name to "{SELF_RECIPIENT}": that email is your reply, in this thread, so do not reply again. You cannot email an address someone writes: '
         "you can only email addresses already on file, to prevent spam. To reply with original files to the authenticated sender, use recipient_name=sender, attachment_ids from read_email, and the current reply_to_email_id. This sends the final reply with those original files; do not send it twice."
     ),
 )
