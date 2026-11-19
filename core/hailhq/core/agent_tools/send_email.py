@@ -243,7 +243,7 @@ EMAIL_RUN_SPEC = dataclasses.replace(
     description=(
         "Send an email to a team member (use list_contacts to see who) or a "
         "saved contact, by name. To email the sender of this email, set "
-        f'recipient_name to "{SELF_RECIPIENT}": that email is your reply, in this thread and with its subject, so do not reply again. You cannot email an address someone writes: '
+        f'recipient_name to "{SELF_RECIPIENT}"; your normal reply still goes to them too. You cannot email an address someone writes: '
         f'you can only email addresses already on file, to prevent spam. To reply with original files to the sender, use recipient_name "{SELF_RECIPIENT}", attachment_ids from read_email, and the current reply_to_email_id. This sends the final reply with those original files; do not send it twice.'
     ),
 )

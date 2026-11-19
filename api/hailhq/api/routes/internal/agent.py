@@ -369,7 +369,7 @@ _MAX_QUOTED_NAME = 60
 # people get the same answer, so a caller cannot probe the saved contacts.
 _SPOKEN_EMAIL_NO_MATCH = (
     'Not sent: no single team member or saved contact matches "{name}".'
-    " You can only email people on file, to prevent spam. Ask who they mean."
+    " You can only email people on file, to prevent spam."
 )
 _SPOKEN_EMAIL_NO_SELF = (
     "Not sent: no email address is on file for the person on this call."
@@ -382,8 +382,8 @@ _SPOKEN_EMAIL_USE_SELF = (
     " who they mean."
 )
 _SPOKEN_RUN_REPLIED = (
-    "Not sent: you already sent your reply to the sender of this email."
-    " Nothing more can go to them from this email."
+    "Not sent: you already sent your reply with files to the sender of this"
+    " email. Nothing more can go to them as that reply."
 )
 _SPOKEN_CALL_EMAIL_LIMIT = (
     f"Not sent: this call already sent {MAX_CALL_EMAILS} emails, the limit for"
@@ -454,7 +454,11 @@ async def _call_recipient(
     if caller is not None and _same_name(caller.name, name):
         return AgentSendResponse(
             ok=False,
-            spoken=_SPOKEN_EMAIL_USE_SELF.format(name=_quoted_name(name)),
+            spoken=(
+                _SPOKEN_EMAIL_USE_SELF.format(name=_quoted_name(name))
+                if own
+                else _SPOKEN_EMAIL_NO_SELF
+            ),
         )
     if isinstance(recipient, AgentSendResponse):
         return recipient
@@ -462,7 +466,8 @@ async def _call_recipient(
 
 
 def _same_name(a: str, b: str) -> bool:
-    return a.strip().casefold() == b.strip().casefold()
+    # lower(), like the SQL name lookups in hailhq.core.directory.
+    return a.strip().lower() == b.strip().lower()
 
 
 async def _organization_name(db: AsyncSession, org: UUID) -> str | None:
@@ -1526,13 +1531,13 @@ async def agent_email_run_send_email(
     parent = None
     files = []
     meta = _email_run_meta(body, agent, inbound)
-    # An email to the sender is the run's reply itself, threaded and from the
-    # inbound's domain: the reply endpoint sees it and sends no second email.
-    if (
-        body.attachment_ids
-        or body.reply_to_email_id
-        or is_self_recipient(body.recipient_name)
-    ):
+    recipient = await _run_recipient(db, inbound, body.recipient_name)
+    if isinstance(recipient, AgentSendResponse):
+        return recipient
+    # A send with original files is the run's reply itself: threaded, from
+    # the inbound's domain, and seen by the reply endpoint, which then sends
+    # no second email. Any other send, also to the sender, is its own email.
+    if body.attachment_ids or body.reply_to_email_id:
         # A retry of this same send was answered in _email_run, so a reply
         # found here is another send: it already used the run's one reply.
         # One that failed is reported as failed, so the model says so.
@@ -1541,40 +1546,29 @@ async def agent_email_run_send_email(
             if existing.status in ("failed", "bounced"):
                 return _replayed_send(existing)
             return AgentSendResponse(ok=False, spoken=_SPOKEN_RUN_REPLIED)
-        recipient = await _run_recipient(db, inbound, body.recipient_name)
-        if isinstance(recipient, AgentSendResponse):
-            return recipient
-        if body.attachment_ids or body.reply_to_email_id:
-            try:
-                scope, source, files = await source_files(
-                    db,
-                    inbound,
-                    body.reply_to_email_id or inbound.id,
-                    body.attachment_ids,
-                )
-            except ValueError:
-                return AgentSendResponse(
-                    ok=False,
-                    spoken="Those files are not available in this email thread. Nothing was sent.",
-                )
-            if recipient.casefold() != scope.peer.casefold():
-                return AgentSendResponse(
-                    ok=False,
-                    spoken="Original files can only return to this email's sender.",
-                )
-            meta = {
-                **meta,
-                "attachment_reply_to_email_id": str(source.id),
-                "source_attachment_ids": [str(row.id) for row in files],
-            }
-        # This send is the automatic reply itself. The normal reply endpoint
-        # observes this row and does not send a second email.
+        try:
+            scope, source, files = await source_files(
+                db, inbound, body.reply_to_email_id or inbound.id, body.attachment_ids
+            )
+        except ValueError:
+            return AgentSendResponse(
+                ok=False,
+                spoken="Those files are not available in this email thread. Nothing was sent.",
+            )
+        if normalize_address(recipient) != scope.peer:
+            return AgentSendResponse(
+                ok=False,
+                spoken="Original files can only return to this email's sender.",
+            )
         parent = inbound
-        meta = {**meta, "reply_to_email_id": str(inbound.id)}
-    else:
-        recipient = await _run_recipient(db, inbound, body.recipient_name)
-        if isinstance(recipient, AgentSendResponse):
-            return recipient
+        # prior_reply matches the normalized sender address exactly.
+        recipient = scope.peer
+        meta = {
+            **meta,
+            "reply_to_email_id": str(inbound.id),
+            "attachment_reply_to_email_id": str(source.id),
+            "source_attachment_ids": [str(row.id) for row in files],
+        }
 
     if await tool_sends_for_reply(db, inbound) >= MAX_TOOL_SENDS:
         return AgentSendResponse(ok=False, spoken=_SPOKEN_RUN_LIMIT)

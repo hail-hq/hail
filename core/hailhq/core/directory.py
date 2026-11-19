@@ -209,25 +209,16 @@ async def find_by_phone(
     )
 
 
-async def resolve_caller_email(
-    session: AsyncSession, organization_id: uuid.UUID, phone_e164: str
-) -> str | None:
-    """The one email saved for the person on the call, found by their number
-    (:func:`find_by_phone`, members first). Only for an explicit "email me":
-    a name the caller is saved under is never used to pick this address.
-    None when the number names nobody or that entry has no single email."""
-    entry = await find_by_phone(session, organization_id, phone_e164)
-    return await entry_email(session, organization_id, phone_e164, entry)
-
-
 async def entry_email(
     session: AsyncSession,
     organization_id: uuid.UUID,
     phone_e164: str,
     entry: DirectoryEntry | None,
 ) -> str | None:
-    """The one email of ``entry``, the :func:`find_by_phone` result for
-    ``phone_e164``. For a caller that already has that result."""
+    """The one email saved for the person on a call: ``entry`` is the
+    :func:`find_by_phone` result for their number (members first). Only for
+    an explicit "email me", never to pick an address for a name. None when
+    the number names nobody or that entry has no single email."""
     if entry is None:
         return None
     if entry.source == "member":
@@ -255,7 +246,6 @@ __all__ = [
     "find_by_phone",
     "is_verified_member",
     "list_directory",
-    "resolve_caller_email",
     "resolve_contact_emails",
     "resolve_member_emails",
     "resolve_member_phones",

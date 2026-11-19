@@ -558,7 +558,7 @@ async def test_send_email_caller_name_without_email_never_reaches_a_namesake(
 
     data = await _send_email_to_name(client, call, "Sam Lee")
     assert data["ok"] is False
-    assert 'recipient_name "me"' in data["spoken"]
+    assert "no email address is on file for the person on this call" in (data["spoken"])
     assert await _sent_to(async_session) == []
 
 

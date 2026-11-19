@@ -54,7 +54,7 @@ can be faked, so:
 
 The words `me`, `caller`, `sender` and `you` always mean the person the agent
 talks to, never a contact with that name. In an email conversation, "email me"
-is the agent's reply to the sender, whose address is proven by DMARC. The agent never emails an address someone says or types. It answers
+goes to the sender, whose address is proven by DMARC. The agent never emails an address someone says or types. It answers
 that it can only email addresses on file, to prevent spam.
 
 ## Hand over to a person

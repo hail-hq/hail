@@ -9,9 +9,9 @@ from datetime import datetime, timezone
 
 import pytest
 from hailhq.core.directory import (
+    entry_email,
     find_by_phone,
     list_directory,
-    resolve_caller_email,
     resolve_contact_emails,
     resolve_member_emails,
 )
@@ -193,7 +193,13 @@ async def test_member_lookup_raises_other_sql_errors():
         await resolve_member_emails(_FailingSession("42703"), uuid.uuid4(), "Sam")
 
 
-async def test_resolve_caller_email_goes_by_number_members_first(async_session):
+async def resolve_caller_email(session, org, phone):
+    return await entry_email(
+        session, org, phone, await find_by_phone(session, org, phone)
+    )
+
+
+async def test_entry_email_goes_by_number_members_first(async_session):
     org = uuid.uuid4()
     await _add_member(async_session, org, "Sam Lee", "sam@team.test", "+15550001111")
     await _add_contact(

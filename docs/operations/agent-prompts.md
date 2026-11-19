@@ -197,8 +197,9 @@ the caller's own address on file, with limits. Caller ID can be faked.
 - An unknown name and a name shared by several people get one answer, so a
   caller cannot probe the saved contacts.
 
-In an email run, `me` is the sender that DMARC proved, and that email is the
-run's threaded reply (no second reply follows; a second `me` email is refused). Email runs may still
+In an email run, `me` is the sender that DMARC proved. Like a name saved
+with their address, it sends its own email, and the run's reply still
+follows. With original files, it is the run's threaded reply instead. Email runs may still
 email saved contacts by name (owner decision, 2026-11-19).
 Stored transcripts contain spoken user/assistant text only. Send receipts
 mean provider acceptance, never delivery. Disabled providers expose no send
