@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import contextlib
 import uuid
 from datetime import datetime, timezone
 
+import pytest
 from hailhq.core.directory import (
     find_by_phone,
     list_directory,
@@ -12,6 +14,7 @@ from hailhq.core.directory import (
     resolve_member_emails,
 )
 from hailhq.core.models import Contact, OrganizationMember, User
+from sqlalchemy.exc import ProgrammingError
 
 
 async def _add_member(session, org_id, name, email, phone_number=None):
@@ -156,3 +159,33 @@ async def test_resolve_contact_emails_by_name_in_org_only(async_session):
         "sam@example.com"
     ]
     assert await resolve_contact_emails(async_session, org, "Nobody") == []
+
+
+class _SqlError(Exception):
+    def __init__(self, sqlstate):
+        super().__init__(sqlstate)
+        self.sqlstate = sqlstate
+
+
+class _FailingSession:
+    """Every query fails with ``sqlstate``; 42P01 is a self-host with no
+    website-owned member tables."""
+
+    def __init__(self, sqlstate):
+        self.sqlstate = sqlstate
+
+    def begin_nested(self):
+        return contextlib.nullcontext()
+
+    async def execute(self, _stmt):
+        raise ProgrammingError("SELECT", {}, _SqlError(self.sqlstate))
+
+
+async def test_member_lookup_is_empty_without_member_tables():
+    session = _FailingSession("42P01")
+    assert await resolve_member_emails(session, uuid.uuid4(), "Sam Lee") == []
+
+
+async def test_member_lookup_raises_other_sql_errors():
+    with pytest.raises(ProgrammingError):
+        await resolve_member_emails(_FailingSession("42703"), uuid.uuid4(), "Sam")

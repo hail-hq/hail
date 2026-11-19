@@ -352,11 +352,13 @@ _SPOKEN_EMAIL_UNKNOWN = (
 async def _known_email(
     db: AsyncSession, org: UUID, name: str
 ) -> str | AgentSendResponse:
-    """The one address on file for ``name``: a member or a saved contact.
+    """The one address on file for ``name``: a member, else a saved contact.
     The answer to say instead when there is none, or when the name matches
-    more than one address."""
+    more than one address. Members win, so a customer saved under a team
+    member's name never blocks or takes that member's email."""
     matches = await resolve_member_emails(db, org, name)
-    matches += await resolve_contact_emails(db, org, name)
+    if not matches:
+        matches = await resolve_contact_emails(db, org, name)
     # A person saved as both a member and a contact is still one recipient.
     addresses = list(dict.fromkeys(m.casefold() for m in matches))
     if not addresses:

@@ -52,8 +52,8 @@ async def list_directory(
 ) -> list[DirectoryEntry]:
     """The org's members, name-sorted, addresses omitted.
 
-    Members only: agent sends cannot reach manual contacts, so listing them
-    would offer the agent names it cannot message.
+    Members only: saved contacts are the customer list, so the agent never
+    reads them out. ``send_email`` still reaches a contact by name.
     """
     stmt = (
         select(User.name, User.phone_number)
@@ -109,7 +109,9 @@ async def resolve_member_phones(
 async def _members_named(
     session: AsyncSession, organization_id: uuid.UUID, name: str, column: Any
 ) -> list[Any]:
-    """``column`` of every member named ``name``, case-insensitively."""
+    """``column`` of every member named ``name``, case-insensitively. Empty
+    when the website-owned member tables are missing (pure self-host), so
+    saved contacts can still be found."""
     stmt = (
         select(column)
         .join(OrganizationMember, OrganizationMember.user_id == User.id)
@@ -118,7 +120,23 @@ async def _members_named(
             func.lower(User.name) == name.strip().lower(),
         )
     )
-    return list((await session.execute(stmt)).scalars().all())
+    try:
+        async with session.begin_nested():
+            return list((await session.execute(stmt)).scalars().all())
+    except ProgrammingError as exc:
+        _reraise_unless_no_member_tables(exc)
+        return []
+
+
+# Postgres "undefined_table": a self-host without the website-owned
+# users/members tables. Any other ProgrammingError is a real error.
+_UNDEFINED_TABLE = "42P01"
+
+
+def _reraise_unless_no_member_tables(exc: ProgrammingError) -> None:
+    if getattr(exc.orig, "sqlstate", None) != _UNDEFINED_TABLE:
+        raise exc
+    logger.debug("no users/members tables, members skipped: %s", exc)
 
 
 async def is_verified_member(
@@ -165,7 +183,12 @@ async def find_by_phone(
         )
         .limit(2)
     )
-    names = (await session.execute(member_stmt)).scalars().all()
+    try:
+        async with session.begin_nested():
+            names = (await session.execute(member_stmt)).scalars().all()
+    except ProgrammingError as exc:
+        _reraise_unless_no_member_tables(exc)
+        names = []
     if len(names) > 1:
         return None
     if names and names[0]:

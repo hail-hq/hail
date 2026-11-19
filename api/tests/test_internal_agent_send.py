@@ -406,6 +406,37 @@ async def test_send_email_one_person_as_member_and_contact_is_one_recipient(
     assert [r.to_addresses for r in rows] == [["Sam@Northgate.test"]]
 
 
+async def test_send_email_member_wins_over_a_contact_of_the_same_name(
+    client, async_session, email_mock, add_phone_number
+):
+    org = uuid.uuid4()
+    call = await _email_ready_call(async_session, org, add_phone_number)
+    user = User(
+        id=uuid.uuid4(),
+        name="Sam Lee",
+        email="sam@team.test",
+        created_at=datetime.now(timezone.utc),
+    )
+    async_session.add(user)
+    async_session.add(
+        OrganizationMember(
+            id=uuid.uuid4(),
+            user_id=user.id,
+            organization_id=org,
+            role="member",
+            created_at=datetime.now(timezone.utc),
+        )
+    )
+    async_session.add(
+        Contact(organization_id=org, name="Sam Lee", email="sam@northgate.test")
+    )
+    await async_session.commit()
+
+    assert (await _send_email_to_name(client, call, "Sam Lee"))["ok"] is True
+    rows = (await async_session.execute(Email.__table__.select())).fetchall()
+    assert [r.to_addresses for r in rows] == [["sam@team.test"]]
+
+
 async def test_send_email_refuses_a_name_shared_by_two_addresses(
     client, async_session, email_mock, add_phone_number
 ):
