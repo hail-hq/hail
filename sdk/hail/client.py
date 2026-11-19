@@ -853,7 +853,6 @@ class _AgentsResource:
         system_prompt: str,
         first_message: str | None = None,
         ai_disclosure: bool = True,
-        steady_speech: bool = False,
         recording_enabled: bool | None = None,
         ai_disclosure_line: str | None = None,
         language: str | None = None,
@@ -864,13 +863,16 @@ class _AgentsResource:
         sms_enabled: bool = True,
         email_enabled: bool = True,
         status: str = "live",
+        http_tools: list[dict[str, Any]] | None = None,
     ) -> AgentResponse:
         """Save an agent. Route a number to it with ``client.numbers.route``
         or place calls with ``client.calls.create(agent_id=...)``.
         ``ai_disclosure_line`` is a template; ``{org}`` becomes the
         organization name. ``max_duration_seconds`` is 60..3600.
-        ``steady_speech`` makes the agent finish each reply before it
-        listens again on calls it answers (the caller cannot interrupt)."""
+        ``http_tools`` lists your APIs the agent may call (name, description,
+        url, parameters, headers, timeout_seconds, wait_message); the
+        response's ``http_tool_secret`` signs their requests and is shown
+        only once."""
         body: dict[str, Any] = {
             "name": name,
             "system_prompt": system_prompt,
@@ -881,9 +883,6 @@ class _AgentsResource:
             "email_enabled": email_enabled,
             "status": status,
         }
-        if steady_speech:
-            # Sent only when on: an older API rejects a field it does not know.
-            body["steady_speech"] = True
         if first_message is not None:
             body["first_message"] = first_message
         if ai_disclosure_line is not None:
@@ -897,6 +896,8 @@ class _AgentsResource:
             body["tools"] = tools
         if max_duration_seconds is not None:
             body["max_duration_seconds"] = max_duration_seconds
+        if http_tools is not None:
+            body["http_tools"] = http_tools
         data = await self._http.request("POST", "/agents", json=body)
         return AgentResponse.model_validate(data)
 
@@ -911,13 +912,22 @@ class _AgentsResource:
     async def update(self, agent_id: str | UUID, **fields: Any) -> AgentResponse:
         """``PATCH /agents/{id}``: pass only the fields to change; ``None``
         clears first_message, ai_disclosure_line, tools or
-        max_duration_seconds."""
+        max_duration_seconds. ``http_tools`` replaces the list; a tool sent
+        without ``headers`` keeps the saved headers of the same name."""
         data = await self._http.request("PATCH", f"/agents/{agent_id}", json=fields)
         return AgentResponse.model_validate(data)
 
     async def delete(self, agent_id: str | UUID) -> None:
         """Delete an agent; its numbers ring out again."""
         await self._http.request("DELETE", f"/agents/{agent_id}")
+
+    async def rotate_tool_secret(self, agent_id: str | UUID) -> AgentResponse:
+        """New secret for the agent's HTTP tool requests. The response's
+        ``http_tool_secret`` is the only time it is shown."""
+        data = await self._http.request(
+            "POST", f"/agents/{agent_id}/rotate-tool-secret"
+        )
+        return AgentResponse.model_validate(data)
 
 
 class _WebhooksResource:

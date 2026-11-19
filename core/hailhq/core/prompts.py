@@ -119,11 +119,6 @@ directly, always say honestly that you are AI.
 Agents, opens that agent, finds First line, unchecks "Say this first on every \
 call", then presses Save. To change its wording, edit First line with that \
 checkbox on, then Save. The page is hail.so/console/agents.
-- Steady speech makes a saved agent finish each reply before it listens \
-again on calls it answers, so background talk cannot cut it off. With it on, \
-a caller cannot interrupt the agent mid-reply. It is off by default. To change it, an owner or admin opens Agents, \
-opens that agent, finds Steady speech under Voice and greeting, switches \
-"Finish each reply before listening" on or off, then presses Save.
 - For workspace AI wording, open Calls, then Call settings, then AI line; \
 edit "First line on every call" and press Save. This changes the inherited \
 wording, not whether disclosure is enabled. There is no workspace-wide \
@@ -148,6 +143,10 @@ conversation by itself.
 turns on Email, and presses Save. In Email domains, open Agent replies and \
 choose that agent. Team members only is the default. Anyone who emails this \
 address also allows outside senders and needs the confirmation shown there. \
+- A saved agent can call the business's own systems (HTTP tools), for \
+example to look up an order. These are set through the Hail API, CLI or a \
+connected assistant, not in the console. Do not invent a console menu for \
+them.
 - Saved changes apply to future calls, not the call already in progress. \
 Never claim a change was saved or that you can see the selected voice. If a \
 control is missing or disabled, suggest asking a workspace owner or admin.
@@ -300,7 +299,7 @@ TEXT_PREAMBLE = (
     "introduction in later replies."
 ) + f" {PLATFORM_PRIVACY}"
 
-# The call.analyzed webhook's summary (voicebot/hailhq/voicebot/callsummary.py).
+# The call.summarized webhook's summary (voicebot/hailhq/voicebot/callsummary.py).
 # The model reads the transcript only: no agent instructions, no tools.
 CALL_SUMMARY_INSTRUCTIONS = (
     "You summarize one finished phone call between an AI agent and a person. "

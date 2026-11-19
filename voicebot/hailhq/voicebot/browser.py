@@ -272,7 +272,6 @@ async def run_browser_session(
             prompt = call.initial_prompt or "Help the caller with their question."
             org_id = call.organization_id
             capabilities = call.metadata_.get("browser_capabilities", {})
-            steady_speech = call.metadata_.get("steady_speech") is True
             seconds = deadline_seconds(call)
             await bind_browser_context(db, call, actor_kind="agent")
             logger.info(
@@ -310,7 +309,6 @@ async def run_browser_session(
             org_cfgs=configs,
             voice_id_override=cfg.get("voice_id"),
             language=language,
-            steady_speech=steady_speech,
         )
 
         event_tasks = attach_handlers(session, call_id)

@@ -281,3 +281,25 @@ def test_refused_even_when_wrapping_a_public_ipv4(ip: str) -> None:
     # Fixed rules, not CPython's private list (which lacks these ranges
     # before 3.11.10 / 3.12.4).
     assert not guard.ip_is_public(ip)
+
+
+def test_a_resolver_system_error_is_an_unsafe_url(monkeypatch) -> None:
+    def fake_getaddrinfo(host, *args, **kwargs):
+        raise OSError(24, "Too many open files")
+
+    monkeypatch.setattr(guard.socket, "getaddrinfo", fake_getaddrinfo)
+    with pytest.raises(UnsafeUrlError):
+        assert_public_https_url("https://api.example.com/v1")
+
+
+def test_a_unicode_space_in_the_host_is_refused() -> None:
+    with pytest.raises(UnsafeUrlError):
+        assert_public_https_url("https://a\u00a0b.com/v1")  # no-break space
+
+
+def test_a_label_too_long_to_look_up_is_refused() -> None:
+    # httpx accepts a 64-character label; the stdlib idna codec in
+    # getaddrinfo refuses it with UnicodeError before any DNS lookup.
+    with pytest.raises(UnsafeUrlError) as exc_info:
+        assert_public_https_url("https://" + "a" * 64 + ".com/v1")
+    assert isinstance(exc_info.value.__cause__, UnicodeError)

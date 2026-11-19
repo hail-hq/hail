@@ -18,7 +18,7 @@ from hailhq.core.agent_tools.client import AgentApiClient
 from hailhq.core.threads import ThreadScope
 from sqlalchemy.ext.asyncio import AsyncSession
 
-RiskTier = Literal["read_only", "session_control", "outbound_send"]
+RiskTier = Literal["read_only", "session_control", "outbound_send", "customer_api"]
 
 # Shared spoken fallback when the internal route's response carries no
 # ``spoken`` text (defensive: the route always sets one today). Both send
@@ -107,6 +107,9 @@ class ToolSpec:
     # True when the caller talking over the agent's sentence must not cancel
     # the tool: transfer_call would never start the dial.
     uninterruptible: bool = False
+    # Said on a call while the tool runs (customer HTTP tools). The voicebot
+    # speaks it without waiting for it to finish.
+    wait_message: str | None = None
 
 
 __all__ = [

@@ -5,6 +5,7 @@ GET    /agents          list (newest first)
 GET    /agents/{id}     detail
 PATCH  /agents/{id}     partial update
 DELETE /agents/{id}     delete; its numbers are unregistered for inbound first
+POST   /agents/{id}/rotate-tool-secret   new HTTP tool signing secret, shown once
 
 Numbers pick their agent on ``PATCH /numbers/{id}`` (``voice_agent_id``,
 ``sms_agent_id``). ``POST /calls`` places outbound calls with ``agent_id``.
@@ -12,6 +13,7 @@ Numbers pick their agent on ``PATCH /numbers/{id}`` (``voice_agent_id``,
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Annotated
@@ -35,15 +37,25 @@ from hailhq.core.handover import (
     replace_handover,
     validate_handover,
 )
+from hailhq.core.http_tools import (
+    HttpToolHeadersNeeded,
+    load_http_tools,
+    new_tool_secret,
+    replace_http_tools,
+)
 from hailhq.core.livekit import LiveKitClient
 from hailhq.core.models import Agent, EmailDomain, PhoneNumber
+from hailhq.core.provider_config import provider_cipher
 from hailhq.core.schemas import (
     AgentCreate,
     AgentListResponse,
     AgentResponse,
     AgentUpdate,
     HandoverContactOut,
+    HttpToolIn,
 )
+from hailhq.core.secret_cipher import SecretKeyMissing
+from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -125,14 +137,44 @@ async def _check_handover(
     return parsed
 
 
-async def _respond(db: AsyncSession, agents: list[Agent]) -> list[AgentResponse]:
-    links = await load_handover(db, [a.id for a in agents])
+async def _check_http_tools(items: list[HttpToolIn] | None) -> None:
+    """Each URL must resolve to public addresses now; the agent checks again
+    on every request. The lookups run side by side."""
+    items = items or []
+    results = await asyncio.gather(
+        *(asyncio.to_thread(assert_public_https_url, item.url) for item in items),
+        return_exceptions=True,
+    )
+    for index, result in enumerate(results):
+        if isinstance(result, UnsafeUrlError):
+            raise unprocessable(
+                str(result), loc=["body", "http_tools", index, "url"]
+            ) from result
+        if isinstance(result, BaseException):
+            raise result
+
+
+def _no_secret_key() -> HTTPException:
+    return HTTPException(
+        status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="this server cannot store HTTP tools: HAIL_PROVIDER_SECRET_KEY is not set",
+    )
+
+
+async def _respond(
+    db: AsyncSession, agents: list[Agent], *, http_tool_secret: str | None = None
+) -> list[AgentResponse]:
+    ids = [a.id for a in agents]
+    links = await load_handover(db, ids)
+    tools = await load_http_tools(db, ids)
     return [
         AgentResponse.model_validate(a).model_copy(
             update={
                 "handover_contacts": [
                     HandoverContactOut(**link) for link in links.get(a.id, [])
-                ]
+                ],
+                "http_tools": tools.get(a.id, []),
+                "http_tool_secret": http_tool_secret,
             }
         )
         for a in agents
@@ -163,6 +205,7 @@ async def create_agent(
     """Create an agent. Route numbers to it with PATCH /numbers/{id}, or
     place calls with it via ``agent_id`` on POST /calls."""
     _check_tools(body.tools)
+    await _check_http_tools(body.http_tools)
     handover = await _check_handover(
         db, principal.organization_id, body.handover_contacts
     )
@@ -172,7 +215,6 @@ async def create_agent(
         system_prompt=body.system_prompt,
         first_message=body.first_message,
         ai_disclosure=body.ai_disclosure,
-        steady_speech=body.steady_speech,
         recording_enabled=body.recording_enabled,
         ai_disclosure_line=body.ai_disclosure_line,
         voice_config=body.voice_config.model_dump(mode="json"),
@@ -188,10 +230,14 @@ async def create_agent(
     try:
         await db.flush()
         await replace_handover(db, agent.id, handover)
+        secret = await replace_http_tools(db, agent, body.http_tools)
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
         raise _save_conflict(exc) from exc
+    except SecretKeyMissing as exc:
+        await db.rollback()
+        raise _no_secret_key() from exc
     await db.refresh(agent)
     actor_user_id, actor_kind = actor_of(principal)
     await write_audit_log(
@@ -204,7 +250,7 @@ async def create_agent(
         actor_user_id=actor_user_id,
         actor_kind=actor_kind,
     )
-    return (await _respond(db, [agent]))[0]
+    return (await _respond(db, [agent], http_tool_secret=secret))[0]
 
 
 @router.get("", response_model=AgentListResponse)
@@ -263,13 +309,14 @@ async def update_agent(
     agent = await _load_owned(db, agent_id, principal.organization_id)
     changes = body.model_dump(exclude_unset=True)
     changes.pop("handover_contacts", None)
+    changes.pop("http_tools", None)
     if "tools" in changes:
         _check_tools(changes["tools"])
+    await _check_http_tools(body.http_tools)
     for field in (
         "name",
         "system_prompt",
         "ai_disclosure",
-        "steady_speech",
         "voice_config",
         "voice_enabled",
         "sms_enabled",
@@ -312,6 +359,9 @@ async def update_agent(
         setattr(agent, field, value)
     if items is not None:
         changes["handover_contacts"] = True
+    if body.http_tools is not None:
+        changes["http_tools"] = True
+    secret = None
     if changes:
         agent.updated_at = datetime.now(timezone.utc)
         try:
@@ -319,10 +369,20 @@ async def update_agent(
                 await replace_handover(db, agent.id, items)
             else:
                 await prune_departed_members(db, agent.id)
+            if body.http_tools is not None:
+                secret = await replace_http_tools(db, agent, body.http_tools)
             await db.commit()
         except IntegrityError as exc:
             await db.rollback()
             raise _save_conflict(exc) from exc
+        except SecretKeyMissing as exc:
+            await db.rollback()
+            raise _no_secret_key() from exc
+        except HttpToolHeadersNeeded as exc:
+            await db.rollback()
+            raise unprocessable(
+                str(exc), loc=["body", "http_tools", exc.index, "headers"]
+            ) from exc
         await db.refresh(agent)
         actor_user_id, actor_kind = actor_of(principal)
         await write_audit_log(
@@ -335,7 +395,44 @@ async def update_agent(
             actor_user_id=actor_user_id,
             actor_kind=actor_kind,
         )
-    return (await _respond(db, [agent]))[0]
+    return (await _respond(db, [agent], http_tool_secret=secret))[0]
+
+
+@router.post(
+    "/{agent_id}/rotate-tool-secret",
+    response_model=AgentResponse,
+    responses={503: {"description": "HAIL_PROVIDER_SECRET_KEY is not set."}},
+)
+async def rotate_tool_secret(
+    agent_id: UUID,
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> AgentResponse:
+    """Make a new secret for this agent's HTTP tool requests. The response's
+    ``http_tool_secret`` is the only time it is shown. The old secret stops
+    signing at once; live calls keep the one they started with."""
+    agent = await _load_owned(db, agent_id, principal.organization_id)
+    secret = new_tool_secret()
+    try:
+        agent.http_tool_secret_encrypted = provider_cipher().encrypt(secret)
+    except SecretKeyMissing as exc:
+        raise _no_secret_key() from exc
+    agent.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(agent)
+    actor_user_id, actor_kind = actor_of(principal)
+    # Log the rotation only, never the secret.
+    await write_audit_log(
+        organization_id=principal.organization_id,
+        api_key_id=principal.api_key_id,
+        action="agent.rotate_tool_secret",
+        resource_type="agent",
+        resource_id=agent.id,
+        payload={},
+        actor_user_id=actor_user_id,
+        actor_kind=actor_kind,
+    )
+    return (await _respond(db, [agent], http_tool_secret=secret))[0]
 
 
 @router.delete(

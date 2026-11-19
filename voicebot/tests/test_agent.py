@@ -1259,15 +1259,6 @@ async def test_speak_greeting_first_message_cannot_precede_disclosure() -> None:
     assert allow_interruptions is True
 
 
-async def test_speak_greeting_with_steady_speech_cannot_be_interrupted() -> None:
-    """Steady speech covers the opening lines, with and without a greeting."""
-    session = FakeAnnouncingSession()
-    await speak_greeting(session, {"steady_speech": True})
-    await speak_greeting(session, {"steady_speech": True, "first_message": "Hello."})
-
-    assert [allowed for _, allowed in session.say_calls] == [False, False]
-
-
 async def test_speak_greeting_names_the_org_when_dispatch_metadata_has_it() -> None:
     """org_name (server-resolved, not caller-supplied) is spoken in the
     disclosure, 47 CFR 64.1200(b)(1) wants the initiating business named."""

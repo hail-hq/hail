@@ -39,6 +39,7 @@ Create one, then point a number at it:
 	cmd.AddCommand(newAgentsCreateCmd(opts))
 	cmd.AddCommand(newAgentsUpdateCmd(opts))
 	cmd.AddCommand(newAgentsDeleteCmd(opts))
+	cmd.AddCommand(newAgentsRotateToolSecretCmd(opts))
 	return cmd
 }
 
@@ -111,7 +112,6 @@ type agentFlags struct {
 	firstMessage    string
 	aiLine          string
 	noAILine        bool
-	steadySpeech    bool
 	voiceID         string
 	language        string
 	maxMinutes      int
@@ -123,6 +123,7 @@ type agentFlags struct {
 	status          string
 	name            string
 	handover        []string
+	httpToolsFile   string
 }
 
 func (f *agentFlags) bind(cmd *cobra.Command) {
@@ -131,7 +132,6 @@ func (f *agentFlags) bind(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&f.firstMessage, "first-message", "", "Opening line after the AI line ('' = wait for the other side)")
 	cmd.Flags().StringVar(&f.aiLine, "ai-line", "", "AI line template; {org} becomes the organization name ('' = workspace line)")
 	cmd.Flags().BoolVar(&f.noAILine, "no-ai-line", false, "Do not speak the AI line (you verified it is not required)")
-	cmd.Flags().BoolVar(&f.steadySpeech, "steady-speech", false, "On calls the agent answers, finish each reply before listening (callers cannot interrupt)")
 	cmd.Flags().StringVar(&f.voiceID, "voice", "", "TTS voice id")
 	cmd.Flags().StringVar(&f.language, "language", "", "Spoken language, ISO 639-1 (e.g. fr)")
 	cmd.Flags().IntVar(&f.maxMinutes, "max-minutes", 0, "Soft cap per call, 1..60 minutes (0 = workspace limit)")
@@ -142,6 +142,25 @@ func (f *agentFlags) bind(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&f.noCalls, "no-calls", false, "Do not answer calls")
 	cmd.Flags().StringVar(&f.status, "status", "", "live or paused")
 	cmd.Flags().StringArrayVar(&f.handover, "handover", nil, "Person the agent may hand a live call to: <contact_id>=<note>, where contact_id is a contact id or member:<user id> (repeatable, max 10; replaces the list)")
+	cmd.Flags().StringVar(&f.httpToolsFile, "http-tools-file", "", "JSON file with a list of HTTP tools the agent may call (max 10; replaces the list). See docs/public/agents.md")
+}
+
+// readHTTPTools reads --http-tools-file: a JSON array of tool objects, sent
+// as is. The API checks each field.
+func (f *agentFlags) readHTTPTools() ([]any, error) {
+	data, err := os.ReadFile(f.httpToolsFile)
+	if err != nil {
+		return nil, fmt.Errorf("read --http-tools-file: %w", err)
+	}
+	var tools []any
+	if err := json.Unmarshal(data, &tools); err != nil {
+		return nil, fmt.Errorf("--http-tools-file must hold a JSON array of tools: %w", err)
+	}
+	if tools == nil {
+		// `null` would read as "leave the list"; [] clears it.
+		return nil, fmt.Errorf("--http-tools-file must hold a JSON array of tools, got null (use [] for no tools)")
+	}
+	return tools, nil
 }
 
 func (f *agentFlags) readPrompt() (string, bool, error) {
@@ -203,9 +222,6 @@ func (f *agentFlags) body(cmd *cobra.Command, create bool, voice map[string]any)
 	if changed("no-ai-line") {
 		b["ai_disclosure"] = !f.noAILine
 	}
-	if changed("steady-speech") {
-		b["steady_speech"] = f.steadySpeech
-	}
 	if changed("no-sms") {
 		b["sms_enabled"] = !f.noSms
 	}
@@ -250,6 +266,13 @@ func (f *agentFlags) body(cmd *cobra.Command, create bool, voice map[string]any)
 			contacts = append(contacts, map[string]string{"contact_id": id, "note": strings.TrimSpace(note)})
 		}
 		b["handover_contacts"] = contacts
+	}
+	if changed("http-tools-file") {
+		tools, err := f.readHTTPTools()
+		if err != nil {
+			return nil, err
+		}
+		b["http_tools"] = tools
 	}
 	if changed("voice") || changed("language") {
 		vc := map[string]any{}
@@ -337,7 +360,7 @@ Example:
 
 func newAgentsUpdateCmd(opts *Options) *cobra.Command {
 	f := &agentFlags{}
-	var allTools, noHandover bool
+	var allTools, noHandover, noHTTPTools bool
 	cmd := &cobra.Command{
 		Use:   "update <id>",
 		Short: "Change an agent (only the flags you pass change)",
@@ -367,6 +390,9 @@ func newAgentsUpdateCmd(opts *Options) *cobra.Command {
 			if noHandover {
 				body["handover_contacts"] = []map[string]string{} // []: clear the list
 			}
+			if noHTTPTools {
+				body["http_tools"] = []any{} // []: remove every HTTP tool
+			}
 			if len(body) == 0 {
 				return fmt.Errorf("nothing to change: pass at least one flag")
 			}
@@ -388,8 +414,40 @@ func newAgentsUpdateCmd(opts *Options) *cobra.Command {
 	cmd.Flags().BoolVar(&allTools, "all-tools", false, "Allow every tool again (clears --tools)")
 	cmd.Flags().BoolVar(&noHandover, "no-handover", false, "Remove all handover contacts")
 	cmd.MarkFlagsMutuallyExclusive("tools", "all-tools")
+	cmd.Flags().BoolVar(&noHTTPTools, "no-http-tools", false, "Remove all HTTP tools")
 	cmd.MarkFlagsMutuallyExclusive("handover", "no-handover")
+	cmd.MarkFlagsMutuallyExclusive("http-tools-file", "no-http-tools")
 	return cmd
+}
+
+func newAgentsRotateToolSecretCmd(opts *Options) *cobra.Command {
+	return &cobra.Command{
+		Use:   "rotate-tool-secret <id>",
+		Short: "Make a new secret for the agent's HTTP tool requests (shown once)",
+		Args:  argsOrHelp(1, "<id>"),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id, err := uuid.Parse(args[0])
+			if err != nil {
+				return fmt.Errorf("agent id must be a UUID: %w", err)
+			}
+			apiClient, err := opts.newClient()
+			if err != nil {
+				return err
+			}
+			resp, err := apiClient.RotateToolSecretV1AgentsAgentIdRotateToolSecretPostWithResponse(
+				cmd.Context(), openapi_types.UUID(id), &client.RotateToolSecretV1AgentsAgentIdRotateToolSecretPostParams{})
+			if err != nil {
+				return fmt.Errorf("agents API: %w", err)
+			}
+			if resp.HTTPResponse.StatusCode == http.StatusNotFound {
+				return fmt.Errorf("agent %s not found (or not in your org)", id)
+			}
+			if resp.HTTPResponse.StatusCode != http.StatusOK || resp.JSON200 == nil {
+				return apiError(resp.HTTPResponse.StatusCode, resp.Body)
+			}
+			return printAgent(opts, resp.JSON200, true)
+		},
+	}
 }
 
 func newAgentsDeleteCmd(opts *Options) *cobra.Command {
@@ -521,7 +579,6 @@ func printAgent(opts *Options, a *client.AgentResponse, banner bool) error {
 	}
 	fmt.Fprintf(opts.Stdout, "  Status:        %s\n", a.Status)
 	fmt.Fprintf(opts.Stdout, "  AI line:       %s\n", describeAILine(a))
-	fmt.Fprintf(opts.Stdout, "  Steady speech: %s\n", onOff(a.SteadySpeech))
 	if a.FirstMessage != nil && *a.FirstMessage != "" {
 		fmt.Fprintf(opts.Stdout, "  First message: %s\n", *a.FirstMessage)
 	} else {
@@ -535,6 +592,17 @@ func printAgent(opts *Options, a *client.AgentResponse, banner bool) error {
 	}
 	if a.Tools != nil {
 		fmt.Fprintf(opts.Stdout, "  Tools:         %s\n", strings.Join(*a.Tools, ", "))
+	}
+	if a.HttpTools != nil && len(*a.HttpTools) > 0 {
+		names := make([]string, 0, len(*a.HttpTools))
+		for _, t := range *a.HttpTools {
+			names = append(names, t.Name)
+		}
+		fmt.Fprintf(opts.Stdout, "  HTTP tools:    %s\n", strings.Join(names, ", "))
+	}
+	if a.HttpToolSecret != nil {
+		fmt.Fprintf(opts.Stdout, "  Tool secret:   %s\n", *a.HttpToolSecret)
+		fmt.Fprintf(opts.Stdout, "                 (shown once: store it to verify X-Hail-Signature)\n")
 	}
 	fmt.Fprintf(opts.Stdout, "  Instructions:\n")
 	for _, line := range strings.Split(a.SystemPrompt, "\n") {
@@ -551,13 +619,6 @@ func describeAILine(a *client.AgentResponse) string {
 		return *a.AiDisclosureLine
 	}
 	return "workspace default"
-}
-
-func onOff(b bool) string {
-	if b {
-		return "on"
-	}
-	return "off"
 }
 
 func yesNo(b bool) string {

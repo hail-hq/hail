@@ -289,7 +289,6 @@ async def _answer_or_refuse(
             "first_message": agent.first_message,
             "ai_disclosure": agent.ai_disclosure,
             "ai_disclosure_line": disclosure_line,
-            "steady_speech": agent.steady_speech,
             "tools": agent.tools,
             "handover_targets": await handover_targets(db, agent.id, attrs.caller),
             "handover_max_duration_seconds": handover_limit(agent),

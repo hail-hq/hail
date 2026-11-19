@@ -286,8 +286,6 @@ async def test_post_calls_happy_path_201(
     assert dispatch_kwargs["metadata"]["system_prompt"] == "Be brief."
     # Disclosure defaults on and always reaches the voicebot explicitly.
     assert dispatch_kwargs["metadata"]["ai_disclosure"] is True
-    # Steady speech is for calls the agent answers: never on a placed call.
-    assert "steady_speech" not in dispatch_kwargs["metadata"]
 
     # Dispatch alone is not audio readiness. The worker arms AMD before the dial.
     assert dispatch_kwargs["metadata"]["await_agent_ready"] is True

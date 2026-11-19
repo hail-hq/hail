@@ -19,7 +19,6 @@ from pydantic import ValidationError
 def test_agent_create_defaults():
     a = AgentCreate(name="Front desk", system_prompt="Be kind.")
     assert a.ai_disclosure is True
-    assert a.steady_speech is False
     assert a.ai_disclosure_line is None
     assert a.first_message is None
     assert a.tools is None
