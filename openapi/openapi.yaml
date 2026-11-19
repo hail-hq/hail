@@ -6080,7 +6080,9 @@ paths:
 
         registration that waits for your answers before its campaign is filed
 
-        (`step: needs_information`) can be cancelled.
+        (`step: needs_information`) can be cancelled. So can a toll-free
+
+        registration that waits for your answers.
 
 
         An accepted campaign waiting on runtime setup can be cancelled, as can

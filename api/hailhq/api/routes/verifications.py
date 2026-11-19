@@ -618,13 +618,16 @@ class _SmsStep(NamedTuple):
 
 def _lane_owed(refs: dict | None) -> bool:
     """A low-volume row whose faster lane (the brand's vetting) may still be
-    bought: the box is ticked and no ``faster_lane_at`` yet. The credit
-    checks count it as the worst case."""
+    bought: the box is ticked, no ``faster_lane_at`` yet, and the networks
+    have not verified the brand (``brand_verified``, which the plug-in
+    writes; once verified the lane is never bought). The credit checks
+    count it as the worst case."""
     refs = refs or {}
     return bool(
         refs.get("low_volume")
         and refs.get("faster_lane_ok")
         and not refs.get("faster_lane_at")
+        and not refs.get("brand_verified")
     )
 
 
@@ -1208,6 +1211,21 @@ def _filed_daily_texts(refs: dict) -> str:
     return "UP_TO_2000" if refs.get("low_volume") else "OVER_2000"
 
 
+def _carrier_daily_texts(
+    provider: str, fields: dict[str, str], subject_type: str
+) -> dict[str, str]:
+    """``fields`` as the carrier files them. A carrier with no low-volume
+    filing (``sms_registration_fees.has_low_volume``) files a company that
+    chose low volume as a vetted brand, so its answer becomes "more than
+    2,000": the fee check, the plug-in's brand and campaign, and the saved
+    answers then agree."""
+    if low_volume(fields, subject_type) and not sms_registration_fees.has_low_volume(
+        provider
+    ):
+        return {**fields, "daily_texts": "OVER_2000"}
+    return fields
+
+
 def _faster_lane_fee(provider: str) -> int:
     """The carrier's faster lane fee; 0 for a carrier with none."""
     try:
@@ -1296,7 +1314,8 @@ async def _campaign_unfunded(
             if _lane_owed(row.provider_refs):
                 # The poll may buy the faster lane before the campaign: the
                 # worst case, as at filing. The plug-in buys neither unless
-                # this check lets it (``may_file_campaign``).
+                # this check lets it (``may_file_campaign``). Not once the
+                # brand is verified: the lane is no longer owed.
                 fee += _faster_lane_fee(row.provider)
             if left < fee:
                 waiting.append((row.id, fee))
@@ -2500,7 +2519,9 @@ async def _prepare_submission(
         # A low-volume company files an unvetted brand: its own, lower
         # carrier cost. With the faster lane allowed, the worst case adds
         # the brand's vetting. One decision: it prices the filing, goes to
-        # the plug-in, and is written to the row (``sms_refs``).
+        # the plug-in, and is written to the row (``sms_refs``). A carrier
+        # with no low-volume filing files the vetted brand.
+        sub.fields = _carrier_daily_texts(provider_name, sub.fields, sub.subject_type)
         low = low_volume(sub.fields, sub.subject_type)
         # Only a carrier with a faster lane reads the box; others ignore it.
         lane = bool(getattr(provider, "faster_lane", False)) and faster_lane_ok(
@@ -4345,6 +4366,16 @@ async def amend_sms_application(
         body = body.model_copy(
             update={"fields": {**body.fields, "daily_texts": _filed_daily_texts(refs)}}
         )
+    if local and not refs.get("low_volume"):
+        # A vetted brand filed at a carrier with no low-volume filing keeps
+        # its answer, as at filing.
+        body = body.model_copy(
+            update={
+                "fields": _carrier_daily_texts(
+                    row.provider, body.fields, row.subject_type
+                )
+            }
+        )
     problems = length_problems(requirements, body.fields, {})
     problems.extend(
         provider.validate_application(body.fields, body.address, row.subject_type)
@@ -4373,6 +4404,7 @@ async def amend_sms_application(
         lane
         and not refs.get("faster_lane_ok")
         and not refs.get("faster_lane_at")
+        and not refs.get("brand_verified")
         and principal.auth_kind != "shared"
     ):
         # Turning the faster lane on may start a paid step: the brand's
@@ -4610,6 +4642,8 @@ def _can_cancel(row: CarrierVerification) -> bool:
         # Held for the customer before any campaign (a low-volume brand the
         # networks could not verify, answers to repair): no review is
         # running, and the hold may only end with a new registration.
+        # Toll-free rows too: they never set ``campaign_filed_at``, so one
+        # held after a rejection the customer may edit can be cancelled.
         or (
             row.state == "submitted"
             and bool(refs.get("needs_information"))
@@ -4635,7 +4669,8 @@ async def cancel_verification(
     carrier for the next filing. One that is under review cannot be
     cancelled: wait for the result; if it is rejected, dismiss it. A US SMS
     registration that waits for your answers before its campaign is filed
-    (`step: needs_information`) can be cancelled.
+    (`step: needs_information`) can be cancelled. So can a toll-free
+    registration that waits for your answers.
 
     An accepted campaign waiting on runtime setup can be cancelled, as can
     an approved US SMS registration (`purpose=sms`):

@@ -575,6 +575,7 @@ _NOT_ANSWER_REFS = {
     "brand_id",
     "brand_reused",
     "brand_sid",
+    "brand_verified",  # the networks verified a low-volume brand; a flag
     "bundle_sid",
     "campaign_accepted",
     "campaign_filed_at",

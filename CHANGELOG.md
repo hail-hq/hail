@@ -12,6 +12,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 - Text and email reply agents know the date, time and time zone too.
 - Calls: `GET /v1/calls/{id}` returns the call's transcript, and the new `call.summarized` webhook sends the transcript and a short summary after each call.
 - US texting registration: companies register at low volume (up to 2,000 texts a day, lower fees) unless they set `daily_texts` to `OVER_2000`.
+- US texting registration: when the faster lane still cannot verify your company, the registration waits for you (`step: needs_information`) and can be cancelled, so you can register again.
 - US trial texting: a workspace can send up to 25 texts, ever, to its own verified phone from a Hail number, with no US registration needed. Set it up in the console under Numbers.
 - Rejected number registrations can be fixed and sent again for 30 days with `POST /v1/verifications/{id}/resubmit` (MCP: `resubmit_verification`).
 - `sms.received` webhooks and `received` SMS events have a new `compliance_keyword` field: `STOP`, `START` or `HELP` when the text is one of those keywords, otherwise `null`.

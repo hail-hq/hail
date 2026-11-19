@@ -90,3 +90,23 @@ def test_a_ticked_faster_lane_raises_the_filing_floor_to_the_worst_case() -> Non
     assert fees.filing_fee_cents(
         "telnyx", "business", faster_lane=True
     ) == fees.filing_fee_cents("telnyx", "business")
+
+
+def test_a_carrier_with_no_low_volume_row_prices_the_vetted_brand(
+    monkeypatch,
+) -> None:
+    """No ``business_low_volume`` row: the company files the vetted brand,
+    so low volume is priced at the business row, never a KeyError."""
+    loaded = fees._load()
+    plain = {k: v for k, v in loaded["twilio"].items() if k != "business_low_volume"}
+    monkeypatch.setattr(fees, "_load", lambda: {**loaded, "plain": plain})
+    assert fees.has_low_volume("twilio") is True
+    assert fees.has_low_volume("plain") is False
+    assert fees.has_low_volume("didww") is False
+    for fee in (fees.brand_fee_cents, fees.campaign_fee_cents):
+        assert fee("plain", "business", low_volume=True) == fee("plain", "business")
+    assert fees.filing_fee_cents(
+        "plain", "business", low_volume=True, faster_lane=True
+    ) == fees.filing_fee_cents("plain", "business")
+    with pytest.raises(KeyError):
+        fees.faster_lane_fee_cents("plain")

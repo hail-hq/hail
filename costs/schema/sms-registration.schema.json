@@ -65,7 +65,7 @@
         "person": { "$ref": "#/$defs/fees" },
         "business": { "$ref": "#/$defs/fees" },
         "business_low_volume": {
-          "description": "A company that chose low volume: a brand with no secondary vetting and a LOW_VOLUME campaign. Absent means the carrier has no low-volume filing.",
+          "description": "A company that chose low volume: a brand with no secondary vetting and a LOW_VOLUME campaign. Absent means the carrier has no low-volume filing: such a company files the vetted brand and pays the business prices.",
           "$ref": "#/$defs/fees"
         }
       }

@@ -30,13 +30,23 @@ def providers() -> list[str]:
     return list(_load())
 
 
+def has_low_volume(provider: str) -> bool:
+    """True when the carrier has a low-volume filing (a
+    ``business_low_volume`` row). A company that chose low volume at a
+    carrier without one files the vetted brand. False for a carrier with
+    no SMS registration."""
+    row = _load().get(provider)
+    return row is not None and "business_low_volume" in row
+
+
 def _fees(provider: str, subject_type: str, low_volume: bool) -> dict:
     """The fee row: ``business_low_volume`` for a company that chose low
     volume (no brand vetting, LOW_VOLUME campaign), else the subject's own.
-    A person has no low-volume row. Raises KeyError for a carrier with no
-    SMS registration."""
+    A person has no low-volume row, and a carrier without one prices low
+    volume as ``business`` (the vetted brand it files instead). Raises
+    KeyError for a carrier with no SMS registration."""
     row = _load()[provider]
-    if low_volume and subject_type == "business":
+    if low_volume and subject_type == "business" and "business_low_volume" in row:
         return row["business_low_volume"]
     return row[subject_type]
 
