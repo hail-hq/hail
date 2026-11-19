@@ -1,5 +1,5 @@
 import pytest
-from validate_submission import ValidationError, validate
+from validate_submission import ValidationError, load_master, validate
 
 GOOD = """---
 target: "Official MCP Registry"
@@ -20,7 +20,7 @@ status: drafted
 2. Run `mcp-publisher publish`
 
 ## Content
-Hail gives your agents a phone number, inbox, and SMS line.
+Hail gives your agents a phone number, email inbox, and SMS line.
 
 ## Notes
 Requires DNS access to hail.so.
@@ -62,3 +62,53 @@ def test_missing_section_fails():
     bad = GOOD.replace("## Notes\nRequires DNS access to hail.so.\n", "")
     with pytest.raises(ValidationError, match="missing sections"):
         validate(bad)
+
+
+def test_bare_inbox_fails():
+    with pytest.raises(ValidationError, match="email inbox"):
+        validate(GOOD.replace("email inbox", "inbox"))
+
+
+def test_inbox_in_a_path_passes():
+    validate(GOOD.replace("## Notes", "See `/console/inbox`.\n\n## Notes"))
+
+
+def test_bare_plural_inboxes_fails():
+    with pytest.raises(ValidationError, match="line 20"):
+        validate(GOOD.replace("email inbox", "inboxes"))
+
+
+def test_email_inbox_across_a_line_break_passes():
+    validate(GOOD.replace("email inbox", "email\ninbox"))
+
+
+MASTER = {"tagline": "Give your AI a phone number and an email inbox."}
+
+
+def test_copy_block_matching_master_passes():
+    text = GOOD.replace(
+        "## Notes",
+        "<!-- copy:tagline -->\n> Give your AI a phone number and an email inbox.\n<!-- /copy -->\n\n## Notes",
+    )
+    validate(text, master=MASTER)
+
+
+def test_copy_block_that_drifted_fails():
+    text = GOOD.replace(
+        "## Notes",
+        "<!-- copy:tagline -->\nGive your AI a phone and an email inbox.\n<!-- /copy -->\n\n## Notes",
+    )
+    with pytest.raises(ValidationError, match="differs"):
+        validate(text, master=MASTER)
+
+
+def test_unknown_copy_block_fails():
+    text = GOOD.replace(
+        "## Notes", "<!-- copy:slogan -->\nHi\n<!-- /copy -->\n\n## Notes"
+    )
+    with pytest.raises(ValidationError, match="no master"):
+        validate(text, master=MASTER)
+
+
+def test_readme_has_every_master_block():
+    assert set(load_master()) >= {"tagline", "short", "medium", "long"}

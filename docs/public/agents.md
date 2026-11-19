@@ -99,6 +99,105 @@ MCP: `create_agent(handover_contacts=[{"contact_id": "...", "note": "..."}])` se
   contact's side has spoken and stayed on the line for 10 seconds.
 - `PATCH` with `[]` clears the list; omit the field (or send `null`) to leave it.
 
+## Call your API (HTTP tools)
+
+Let the agent call your own API in the middle of a call, text or email, for
+example to look up an order. Hail POSTs the arguments the model chose, signed,
+and gives your answer back to the model.
+
+```bash
+curl -X PATCH "$HAIL_API_URL/v1/agents/$AGENT_ID" -H "Authorization: Bearer $HAIL_API_KEY" \
+  -H 'Content-Type: application/json' -d '{
+    "http_tools": [{
+      "name": "lookup_order",
+      "description": "Look up an order by its number. Use it when the caller asks where an order is.",
+      "url": "https://api.example.com/hail/orders",
+      "parameters": {
+        "type": "object",
+        "properties": {"order_number": {"type": "string", "description": "The order number."}},
+        "required": ["order_number"]
+      },
+      "headers": {"Authorization": "Bearer sk_live_example"},
+      "timeout_seconds": 5,
+      "wait_message": "One moment, let me check."
+    }]
+  }'
+# → {..., "http_tools": [...], "http_tool_secret": "hts_..."}  (store the secret now)
+```
+
+CLI: `hail agents update <id> --http-tools-file ./tools.json` (a JSON array;
+`--no-http-tools` clears it), `hail agents rotate-tool-secret <id>`.
+MCP: `create_agent(http_tools=[...])`, `update_agent(agent_id, http_tools=[...])`.
+SDK: `client.agents.create(..., http_tools=[...])`, `client.agents.rotate_tool_secret(id)`.
+Schema: `HttpToolIn` in [`openapi/openapi.yaml`](../../openapi/openapi.yaml).
+
+Your endpoint receives:
+
+```json
+{
+  "id": "6b0e…",
+  "type": "tool.call",
+  "created_at": "2026-11-18T10:00:00+00:00",
+  "tool": "lookup_order",
+  "arguments": { "order_number": "A1001" },
+  "agent_id": "a1b2…",
+  "organization_id": "…",
+  "channel": "call",
+  "call_id": "0d9c…",
+  "sms_id": null,
+  "email_id": null
+}
+```
+
+`channel` is `call`, `sms` or `email`; the matching id is the call, or the
+inbound text or email the agent is answering. Headers: `X-Hail-Signature`,
+`X-Hail-Tool` (the tool name), `X-Hail-Request` (the `id`), and your own
+static headers. Verify the signature exactly like a
+[webhook](webhooks.md#verify-the-signature-python), with the agent's
+`http_tool_secret`:
+
+```python
+import hashlib, hmac, time
+
+def verify(secret: str, signature_header: str, raw_body: bytes) -> bool:
+    parts = dict(p.split("=", 1) for p in signature_header.split(","))
+    if abs(time.time() - int(parts["t"])) > 300:  # refuse old requests
+        return False
+    mac = hmac.new(secret.encode(), f"{parts['t']}.".encode() + raw_body, hashlib.sha256)
+    return hmac.compare_digest(mac.hexdigest(), parts["v1"])
+```
+
+- Up to 10 tools per agent. `name`: a letter, then letters, digits or `_`;
+  built-in tool names are refused. `parameters`: a JSON Schema of type
+  `object` (the supported keywords are listed on `HttpToolIn`).
+- `url` must be `https` and resolve to public addresses. Private, loopback,
+  link-local and carrier-NAT addresses are refused on save and checked again
+  on every request, at connect time. Redirects are not followed.
+  A `url` whose host is private or does not resolve gets a 422 on save with
+  the same text either way: `URL host is private or could not be resolved`.
+- `headers` are stored encrypted; responses show only `header_names`. A
+  `PATCH` replaces the whole list; a tool sent without `headers` keeps the
+  saved headers of the tool with the same name, and `{}` removes them.
+  Saved headers are kept only while the `url` keeps its scheme, host and
+  port; a `url` on a new host needs `headers` again (422 otherwise).
+  A renamed tool is a new tool: send its `headers` again.
+- Answer with JSON or text. The model gets up to 4,000 characters. A non-2xx
+  status, a timeout (`timeout_seconds`, 1..10, default 5) or an unreachable
+  host gives the model a short error; the call goes on.
+- `wait_message` is said on calls while Hail waits, not in texts or email.
+- HTTP tools are on whatever `tools` says; `tools` lists built-in tools only.
+- A request can repeat when a text or email reply is retried, with a new
+  `id`, and the arguments can differ the second time. Make lookups safe to
+  run twice. For a tool that changes something, check on your side whether
+  that change (for example, the same order number) was already made for that
+  `sms_id` or `email_id`.
+- `http_tool_secret` is returned once: on the first save with HTTP tools, and
+  by `POST /v1/agents/{id}/rotate-tool-secret`. Live calls keep the secret
+  they started with.
+- The server needs `HAIL_PROVIDER_SECRET_KEY` (self-host); without it, saving
+  HTTP tools returns 503.
+- Code: [`http_tool.py`](../../core/hailhq/core/agent_tools/http_tool.py).
+
 ## What happens on an inbound call
 
 1. The carrier sends the call to LiveKit. LiveKit creates a room and
@@ -119,7 +218,9 @@ MCP: `create_agent(handover_contacts=[{"contact_id": "...", "note": "..."}])` se
    sentence of `first_message`, then `I'm an AI assistant for {org}.`, then
    the rest. `call.answered` and
    `call.completed` follow as on outbound calls. Each answered minute costs
-   the same as an outbound minute.
+   the same as an outbound minute. After the call,
+   [`call.summarized`](webhooks.md#call-summarized) sends the transcript and a
+   short summary, and `GET /v1/calls/{id}` returns the transcript.
 
 The AI line on inbound calls defaults to
 `Hi, this is an AI assistant answering on behalf of {org}.` (or the short
@@ -159,7 +260,29 @@ retried up to 3 times with backoff; a text still unanswered after
 credits gets no reply. If the balance is under 1 cent when the worker picks
 the text up, it is skipped before the model runs, with
 `metadata.skipped_reason: "insufficient_funds"`. If credits run out while the
-model writes, the text is skipped without that key.
+model writes, the text is skipped with the same reason.
+
+A text that gets no reply names why in `metadata.skipped_reason`:
+
+| Reason | Meaning |
+| --- | --- |
+| `insufficient_funds` | The workspace has no credits. |
+| `no_agent` | The number has no live text agent any more. |
+| `expired` | The text waited longer than `HAIL_TEXT_REPLY_MAX_AGE_SECONDS`. |
+| `empty_reply` | The model wrote no reply. |
+| `thread_cap` | The thread reached its reply limit. |
+| `send_blocked` | A send check refused the reply (opt-out, blocked number, rate limit, or texting suspended for the workspace). |
+| `sms_registration` | The number needs registration before it can text this person. `metadata.skipped_detail` says how. |
+| `agent_caps` | The agent reached its sending limit. |
+| `active_call` | A call with this person was in progress. The text is answered after the call. |
+
+A failed reply can also carry a `skipped_reason` from the send step:
+
+| Reason | Meaning |
+| --- | --- |
+| `provider_error` | The carrier could not be reached to send the reply. |
+| `carrier_rejected` | The carrier refused the reply. The reply's `error_code` holds the carrier's code. |
+| `reply_failed` | The reply failed for another reason: model or send errors after 3 tries, or no model key. |
 
 ## Answer email with an agent
 

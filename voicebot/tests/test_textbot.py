@@ -12,7 +12,10 @@ from unittest.mock import AsyncMock
 import pytest
 from hailhq.core import db as core_db
 from hailhq.core import text_agent
-from hailhq.core.models import AccountCredit, Agent, PhoneNumber, Sms
+from hailhq.core.agent_tools import http_tool
+from hailhq.core.config import settings
+from hailhq.core.models import AccountCredit, Agent, AgentHttpTool, PhoneNumber, Sms
+from hailhq.core.secret_cipher import SecretCipher, generate_key
 from hailhq.core.sms_ingest import ingest_inbound_sms
 from hailhq.voicebot import textbot
 from hailhq.voicebot.pipeline import ProviderKeyError
@@ -111,7 +114,10 @@ async def test_skipped_and_failed_states_are_recorded(async_session, fake_llm) -
     )
     await textbot.reply_once(api)
     async_session.expire_all()
-    assert (await async_session.get(Sms, sms_id)).agent_reply_state == "skipped"
+    row = await async_session.get(Sms, sms_id)
+    assert row.agent_reply_state == "skipped"
+    # The reason is saved for the console.
+    assert row.metadata_["skipped_reason"] == "thread_cap"
 
 
 async def test_unfunded_org_reply_skipped_before_llm(
@@ -150,7 +156,9 @@ async def test_provider_error_marks_failed_without_posting(
     await textbot.reply_once(api)
     api.post.assert_not_awaited()
     async_session.expire_all()
-    assert (await async_session.get(Sms, sms_id)).agent_reply_state == "failed"
+    row = await async_session.get(Sms, sms_id)
+    assert row.agent_reply_state == "failed"
+    assert row.metadata_["skipped_reason"] == text_agent.REPLY_FAILED_SKIP
 
 
 async def test_generate_reply_builds_chat_from_thread(
@@ -281,6 +289,58 @@ async def test_tool_loop_reads_the_thread_then_answers(
     assert "order 4411" in second[-1].output
     assert second[-1].call_id == second[-2].call_id
     assert llm.aclosed
+
+
+async def test_text_agent_calls_an_http_tool(
+    async_session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The agent's HTTP tools reach the text model, bound to this text."""
+    key = generate_key()
+    monkeypatch.setattr(settings, "hail_provider_secret_key", key)
+    sms_id = await _seed(async_session)
+    sms = await async_session.get(Sms, sms_id)
+    agent = await async_session.get(Agent, sms.agent_id)
+    agent.http_tool_secret_encrypted = SecretCipher(key).encrypt("hts_x")
+    async_session.add(
+        AgentHttpTool(
+            agent_id=agent.id,
+            position=0,
+            name="lookup_order",
+            description="Find an order.",
+            url="https://api.example.com/orders",
+            parameters={"type": "object", "properties": {}},
+            timeout_seconds=5,
+        )
+    )
+    await async_session.commit()
+    seen: dict = {}
+
+    async def fake_call(tool, conv, args):
+        seen.update(tool=tool.name, conv=conv, args=args)
+        return '{"status":"shipped"}'
+
+    monkeypatch.setattr(http_tool, "call_http_tool", fake_call)
+    llm = ScriptedLLM(
+        [
+            ("tool", "lookup_order", '{"order_number": "4411"}'),
+            ("text", "It has shipped."),
+        ]
+    )
+    _use(monkeypatch, llm)
+
+    text = await textbot.generate_reply(
+        _claimed(sms.organization_id, sms.agent_id), _MESSAGES  # type: ignore[arg-type]
+    )
+
+    assert text == "It has shipped."
+    assert [t.info.name for t in llm.calls[0]["tools"]] == [
+        "thread_history",
+        "lookup_order",
+    ]
+    assert seen["args"] == {"order_number": "4411"}
+    assert seen["conv"].channel == "sms"
+    assert seen["conv"].agent_id == sms.agent_id
+    assert '"shipped"' in llm.calls[1]["items"][-1].output
 
 
 async def test_tool_scope_comes_from_the_text_not_the_model(
@@ -446,6 +506,7 @@ async def test_transient_errors_fail_after_the_attempt_limit(
     async_session.expire_all()
     row = await async_session.get(Sms, sms_id)
     assert row.agent_reply_state == "failed"
+    assert row.metadata_["skipped_reason"] == text_agent.REPLY_FAILED_SKIP
     assert api.post.await_count == text_agent.MAX_ATTEMPTS
 
 
@@ -633,3 +694,59 @@ async def test_run_forever_frees_the_pool_even_if_the_api_client_fails_to_close(
     with pytest.raises(OSError):
         await asyncio.wait_for(textbot.run_forever(), timeout=2)
     disposed.assert_awaited_once()
+
+
+async def test_skip_detail_is_saved(async_session, fake_llm) -> None:
+    sms_id = await _seed(async_session)
+    detail = "US texting from this number needs SMS registration."
+    api = SimpleNamespace(
+        post=AsyncMock(
+            return_value={
+                "ok": False,
+                "state": "skipped",
+                "reason": "sms_registration",
+                "detail": detail,
+            }
+        )
+    )
+    await textbot.reply_once(api)
+    async_session.expire_all()
+    row = await async_session.get(Sms, sms_id)
+    assert row.metadata_["skipped_reason"] == "sms_registration"
+    assert row.metadata_["skipped_detail"] == detail
+
+
+async def test_sentence_reason_from_an_older_api_is_not_stored(
+    async_session, fake_llm
+) -> None:
+    sms_id = await _seed(async_session)
+    api = SimpleNamespace(
+        post=AsyncMock(
+            return_value={
+                "ok": False,
+                "state": "skipped",
+                "reason": "recipient '+15550100123' is suppressed (STOP)",
+            }
+        )
+    )
+    await textbot.reply_once(api)
+    async_session.expire_all()
+    row = await async_session.get(Sms, sms_id)
+    assert row.agent_reply_state == "skipped"
+    assert "skipped_reason" not in (row.metadata_ or {})
+
+
+async def test_failed_reply_without_a_code_records_reply_failed(
+    async_session, fake_llm
+) -> None:
+    """An older API sends the carrier's own code ("30007"): not stored, but the
+    failed text still says why."""
+    sms_id = await _seed(async_session)
+    api = SimpleNamespace(
+        post=AsyncMock(return_value={"ok": False, "state": "failed", "reason": "30007"})
+    )
+    await textbot.reply_once(api)
+    async_session.expire_all()
+    row = await async_session.get(Sms, sms_id)
+    assert row.agent_reply_state == "failed"
+    assert row.metadata_["skipped_reason"] == text_agent.REPLY_FAILED_SKIP

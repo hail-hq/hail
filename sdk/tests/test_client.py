@@ -255,6 +255,29 @@ async def test_calls_get_happy_path(base_url: str, api_key: str) -> None:
         call = await c.calls.get(cid)
     assert str(call.id) == cid
     assert route.called
+    assert call.transcript is None
+
+
+@respx.mock
+async def test_calls_get_parses_transcript(base_url: str, api_key: str) -> None:
+    payload = make_call_response()
+    payload["transcript"] = [
+        {
+            "role": "assistant",
+            "text": "Hi, this is Acme.",
+            "at": "2026-11-17T12:00:01Z",
+        },
+        {"role": "user", "text": "Hello!", "at": "2026-11-17T12:00:03Z"},
+    ]
+    respx.get(f"{base_url}/calls/{payload['id']}").mock(
+        return_value=httpx.Response(200, json=payload)
+    )
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        call = await c.calls.get(payload["id"])
+    assert [(t.role, t.text) for t in call.transcript] == [
+        ("assistant", "Hi, this is Acme."),
+        ("user", "Hello!"),
+    ]
 
 
 @respx.mock

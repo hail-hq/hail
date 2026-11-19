@@ -22,6 +22,8 @@ dependencies = [
     "regex>=2026.4.4",
     "didww>=3.1",
     "logfire[aiohttp-client,httpx,requests,sqlalchemy]>=5.6.0",
+    "aiohttp>=3.13.5",
+    "yarl>=1.23.0",
 ]
 
 [project.optional-dependencies]

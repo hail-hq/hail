@@ -14,7 +14,7 @@ status: drafted
 - [ ] Confirm there is no self-serve submission form anywhere on opentools.com before booking a call — re-check `/registry` and any footer/nav "submit" or "list your server" link in case that's changed
 - [ ] Find the actual scheduling link/contact (no public booking URL located during drafting — check site footer, `/about`, `/contact`, and any listed team email or Calendly/Cal.com link)
 - [ ] Draft copy reviewed against the feature-claim policy (voice/email present-tense and vendor-accurate; SMS flagged as not yet shipped) — done below
-- [ ] Logo asset ready — `hail-website/public/assets/hail-monogram.svg` (square mark) or `avatar-1024.png` (raster) in case the call requires an emailed asset in advance
+- [ ] Logo asset ready — `hail-website/public/assets/brand/logo/hail-monogram.svg` (square mark) or `avatar-1024.png` (raster) in case the call requires an emailed asset in advance
 - [ ] Call scheduled
 - [ ] Call held — capture whatever undocumented requirements/criteria they state, and record here
 - [ ] Submitted (however the call determines — form, email follow-up, etc.)
@@ -34,10 +34,21 @@ status: drafted
 
 **Name:** Hail
 
-**One-liner:** Phone, SMS & email — for agents.
+**One-liner:**
+
+<!-- copy:tagline -->
+
+Give your AI a real phone number and an email inbox.
+
+<!-- /copy -->
 
 **Description:**
-Hail is a self-hostable, AGPLv3 communication platform built for AI agents. It gives an agent a real phone number and inbox — place and receive calls, send and receive email, and read back structured delivery events — all through one remote MCP server. No local install: point a client at `https://mcp.hail.so`, authorize once via OAuth, and the agent gets tools immediately. Self-hosters run the same server with a static API key instead of OAuth. Also available via CLI, a Python SDK, and OpenAPI for non-MCP integrations.
+
+<!-- copy:medium -->
+
+Give your AI assistant a real phone number and an email inbox. Run a support receptionist, answering service, or your assistant on one account. Get a number in 120+ countries and email on your own domain, with MCP, API, and webhook support for your app.
+
+<!-- /copy -->
 
 **Server URL:** `https://mcp.hail.so` (Hail Cloud) / `http://<your-host>:8081` (self-hosted)
 
@@ -66,12 +77,14 @@ Hail is a self-hostable, AGPLv3 communication platform built for AI agents. It g
 | `get_email_stats` | Aggregate email delivery/deliverability stats |
 | `get_events` | Page through the account-wide event stream |
 
-**Logo asset:** `hail-website/public/assets/hail-monogram.svg` (square mark; `avatar-1024.png` as a raster fallback)
+**Logo asset:** `hail-website/public/assets/brand/logo/hail-monogram.svg` (square mark; `avatar-1024.png` as a raster fallback)
 
 ## Notes
 
+- 2026-11-16: Hail is not in the Communication category of <https://opentools.com/registry/communication> (21 servers). `/registry/hail` returns 404. The site now leads with its "Agent Usability Rating" product. No submit form or contribution repo was found. Next check: <https://github.com/opentools> or the OpenTools Discord at <https://opentools.com/discord>.
+
 - OpenTools has no documented self-serve submission form for the registry — listing requires scheduling a call with the team, and their acceptance requirements are not published; treat whatever they state on the call as authoritative and record it here afterward for future re-submissions.
 - No scheduling link or contact address was located during drafting. This needs live discovery at submission time — check the site's footer, an `/about` or `/contact` page, and any embedded scheduler.
-- **SMS is roadmap, not shipped — don't let any verbal or written follow-up imply otherwise.** `core/hailhq/core/providers/` has `voice/` and `email/` subpackages but no `sms/` — no SMS provider is wired to any carrier. The README's own capability checklist confirms this: under "SMS," both Outbound → Twilio and Inbound → Twilio are unchecked. There is no `hail sms` CLI command, no SMS route in the OpenAPI spec, and no `send_sms`/`list_sms` MCP tool. The one-liner "Phone, SMS & email" mirrors Hail's own README tagline (brand voice, product-level pitch) — if asked to elaborate live on the call, say SMS is "coming soon," not shipped.
+- 2026-11-16: SMS is shipped. The MCP server exposes `send_sms`, `get_sms` and `list_sms` (`mcp/hailhq/mcp/tools.py`). Earlier notes that said SMS was not shipped were removed.
 - Voice is Twilio-backed (`core/hailhq/core/providers/voice/twilio.py`); email is AWS SES-backed (`core/hailhq/core/providers/email/ses.py`). No other carrier/vendor is wired up yet — don't name any other provider (e.g. Telnyx, an unchecked README roadmap item) as already integrated.
 - No review turnaround time is published; expect it to depend on the outcome of the call. Update this section with actual turnaround once experienced.

@@ -1,0 +1,43 @@
+name: Copy checks
+
+# Checks the directory submission files (frontmatter, sections, copy blocks
+# that must match docs/submissions/README.md) and the "email inbox" rule on
+# public text: never "inbox" alone.
+on:
+  pull_request:
+    paths:
+      - "docs/submissions/**"
+      - "docs/public/**"
+      - "README.md"
+      - "mcp/server.json"
+      - ".cursor-plugin/**"
+      - ".github/workflows/submissions.yml"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          python-version: "3.12"
+          enable-cache: false
+      - name: Validator tests
+        working-directory: docs/submissions
+        run: uvx pytest -q test_validate_submission.py
+      - name: Validate every submission file
+        working-directory: docs/submissions
+        run: |
+          for f in *.md
+          do
+            case "$f" in README.md|_TEMPLATE.md) continue ;; esac
+            python validate_submission.py "$f"
+          done
+      - name: Email inbox rule on public text
+        run: |
+          python docs/submissions/validate_submission.py --inbox-only \
+            README.md \
+            mcp/server.json \
+            .cursor-plugin/plugin.json \
+            $(git ls-files 'docs/public/*.md' 'docs/public/**/*.md')

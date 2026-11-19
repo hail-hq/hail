@@ -50,7 +50,13 @@ status: submitted
 
 **Repo link:** `https://github.com/hail-hq/hail`
 
-**One-liner (for the PR description, not the README line):** Phone, SMS & email — for agents.
+**One-liner (for the PR description, not the README line):**
+
+<!-- copy:tagline -->
+
+Give your AI a real phone number and an email inbox.
+
+<!-- /copy -->
 
 **Category (target's internal taxonomy):** Communication
 
@@ -67,5 +73,6 @@ status: submitted
 - **Vendor accuracy:** voice is Twilio-backed, email is SES-backed (`core/hailhq/core/providers/voice/twilio.py`, `core/hailhq/core/providers/email/ses.py`). No other carrier/vendor is wired up — the README line above names no vendor at all, so this doesn't need a "coming soon" note here, but don't add one if asked to expand the copy.
 - No published review-turnaround SLA; standard open-source PR review cadence applies. Track the PR number here once opened.
 - **Submitted 2026-07-07:** PR opened at https://github.com/punkpeye/awesome-mcp-servers/pull/9561 (fork: `r13i/awesome-mcp-servers`, branch `add-hail-mcp-server`), title includes the 🤖🤖🤖 agent fast-track marker per this file's own guidance. Awaiting maintainer review.
+- **2026-11-18:** PR #9561 was closed without a merge on 2026-08-29. The open entry is <https://github.com/punkpeye/awesome-mcp-servers/pull/17107> ("Add hail-hq/hail to Communication", opened 2026-10-20), with no maintainer review yet.
 - **Deprioritized 2026-07-07:** the repo's `glama-check` bot now requires a Glama score badge before merge (see PR #9561 comments). Glama listing/verification was abandoned (see `glama-mcp-registry.md`) — not pursuing the badge further. PR #9561 is left open as-is; may stall or get closed by the maintainer without the badge. Not actively worked further unless the bot requirement changes or the maintainer merges anyway.
 - **Resumed 2026-07-07:** added the requested badge anyway (`commit 89abc62a`) — `[![hail MCP server](https://glama.ai/mcp/servers/hail-hq/hail/badges/score.svg)](https://glama.ai/mcp/servers/hail-hq/hail)`, placed right after the repo link per the file's actual established convention (100+ existing entries), not literally "after the description" per the bot's wording. The badge is a live dynamic image — it'll render whatever Glama's current state is (including "pending"/unscored) whenever viewed; not blocked on Glama's Build & Release check actually passing. Awaiting maintainer review again.

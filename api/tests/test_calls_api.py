@@ -835,6 +835,64 @@ async def test_get_call_by_id_returns_200_for_owner(
     )
     assert resp.status_code == 200
     assert resp.json()["id"] == call_id
+    assert resp.json()["transcript"] == []
+    # Create responses carry no transcript.
+    assert create.json()["transcript"] is None
+
+
+async def test_get_call_returns_the_transcript(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    org_and_key: tuple[str, ApiKey, str],
+    add_phone_number,
+) -> None:
+    org_id, _, plain = org_and_key
+    await add_phone_number(async_session, org_id)
+    headers = {"Authorization": f"Bearer {plain}"}
+    create = await client.post(
+        "/calls",
+        json={"to": "+14155559999", "system_prompt": "hi", "recipient_consent": True},
+        headers=headers,
+    )
+    call_id = uuid.UUID(create.json()["id"])
+    t0 = datetime(2026, 11, 17, 12, 0, tzinfo=timezone.utc)
+    async_session.add_all(
+        [
+            CallEvent(
+                call_id=call_id,
+                kind="agent_turn",
+                payload={"role": "assistant", "text": "Hi, this is Acme."},
+                occurred_at=t0,
+            ),
+            CallEvent(
+                call_id=call_id,
+                kind="voice_metrics",
+                payload={"role": "assistant"},
+                occurred_at=t0,
+            ),
+            CallEvent(
+                call_id=call_id,
+                kind="user_turn",
+                payload={"role": "user", "text": "Hello!"},
+                occurred_at=t0.replace(second=3),
+            ),
+        ]
+    )
+    await async_session.commit()
+
+    resp = await client.get(f"/calls/{call_id}", headers=headers)
+    assert resp.status_code == 200
+    assert resp.json()["transcript"] == [
+        {
+            "role": "assistant",
+            "text": "Hi, this is Acme.",
+            "at": "2026-11-17T12:00:00Z",
+        },
+        {"role": "user", "text": "Hello!", "at": "2026-11-17T12:00:03Z"},
+    ]
+    # Lists leave it out.
+    listed = await client.get("/calls", headers=headers)
+    assert listed.json()["items"][0]["transcript"] is None
 
 
 async def test_get_call_by_id_returns_404_for_other_org(

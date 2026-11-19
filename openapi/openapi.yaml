@@ -321,6 +321,70 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
+  /v1/agents/{agent_id}/rotate-tool-secret:
+    post:
+      tags:
+        - agents
+      summary: Rotate Tool Secret
+      description:
+        "Make a new secret for this agent's HTTP tool requests. The response's
+
+        ``http_tool_secret`` is the only time it is shown. The old secret stops
+
+        signing at once; live calls keep the one they started with."
+      operationId: rotate_tool_secret_v1_agents__agent_id__rotate_tool_secret_post
+      parameters:
+        - name: agent_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Agent Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "503":
+          description: HAIL_PROVIDER_SECRET_KEY is not set.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
   /v1/calls:
     post:
       tags:
@@ -329,10 +393,11 @@ paths:
       description:
         "Place an outbound AI voice call.\n\nThe call is placed asynchronously\
         \ \u2014 this returns as soon as the call is\nqueued, not when it completes.\
-        \ Poll GET /v1/calls/{call_id} or configure a\nwebhook to get the final status\
-        \ and transcript. Requires\nrecipient_consent=true on the request body; Hail\
-        \ does not verify lawful\nbasis to contact the recipient, the caller warrants\
-        \ it."
+        \ Poll GET /v1/calls/{call_id} for the final\nstatus and the transcript, or\
+        \ subscribe to webhooks: call.completed (and\nthe other call.* events) for\
+        \ the status, call.summarized for the transcript\nand a short summary. Requires\
+        \ recipient_consent=true on the request body;\nHail does not verify lawful\
+        \ basis to contact the recipient, the caller\nwarrants it."
       operationId: create_call_v1_calls_post
       parameters:
         - name: authorization
@@ -504,14 +569,19 @@ paths:
         - calls
       summary: Get Call
       description:
-        "Fetch one call by id, including its current status and end reason.
+        "Fetch one call by id, including its current status, end reason
+        and
+
+        transcript.
 
 
         Org-scoped: returns 404 for a call belonging to a different organization
 
         (not 403, to avoid confirming the id exists). Use this to poll for the
 
-        final outcome of a call placed with POST /v1/calls."
+        final outcome of a call placed with POST /v1/calls. The transcript grows
+
+        while the call runs."
       operationId: get_call_v1_calls__call_id__get
       parameters:
         - name: call_id
@@ -6387,6 +6457,16 @@ components:
           description:
             People the agent may hand a live call to, in order. The agent
             never sees their numbers.
+        http_tools:
+          items:
+            $ref: "#/components/schemas/HttpToolIn"
+          type: array
+          maxItems: 10
+          title: Http Tools
+          description:
+            Your APIs the agent may call during calls, texts and email
+            (up to 10). Each request is signed with the agent's http_tool_secret;
+            see docs/public/agents.md.
       additionalProperties: false
       type: object
       required:
@@ -6507,6 +6587,21 @@ components:
           type: array
           title: Handover Contacts
           description: People the agent may hand a live call to.
+        http_tools:
+          items:
+            $ref: "#/components/schemas/HttpToolOut"
+          type: array
+          title: Http Tools
+          description: Your APIs the agent may call.
+        http_tool_secret:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Http Tool Secret
+          description:
+            Secret that signs this agent's HTTP tool requests (X-Hail-Signature).
+            Returned only when Hail creates it (the first save with HTTP tools) or
+            rotates it (POST /agents/{id}/rotate-tool-secret). Store it then.
         created_at:
           type: string
           format: date-time
@@ -6652,6 +6747,18 @@ components:
           description:
             New handover list; replaces the old one. [] removes all; null
             leaves it.
+        http_tools:
+          anyOf:
+            - items:
+                $ref: "#/components/schemas/HttpToolIn"
+              type: array
+              maxItems: 10
+            - type: "null"
+          title: Http Tools
+          description:
+            New HTTP tool list; replaces the old one. [] removes all; null
+            leaves it. A tool sent without headers keeps the saved headers of the
+            tool with the same name.
       additionalProperties: false
       type: object
       title: AgentUpdate
@@ -6984,6 +7091,17 @@ components:
           description:
             Human-readable explanation for a failed call. Null for other
             statuses.
+        transcript:
+          anyOf:
+            - items:
+                $ref: "#/components/schemas/CallTranscriptTurn"
+              type: array
+            - type: "null"
+          title: Transcript
+          description:
+            "What was said on the call, in the order it was said. Set only by
+            GET /v1/calls/{call_id}: an empty list until someone speaks. Null in POST
+            /v1/calls and GET /v1/calls responses."
       type: object
       required:
         - id
@@ -7002,6 +7120,31 @@ components:
         - answered_at
         - ended_at
       title: CallResponse
+    CallTranscriptTurn:
+      properties:
+        role:
+          type: string
+          enum:
+            - user
+            - assistant
+          title: Role
+          description: "'assistant' is the Hail agent. 'user' is the person (or
+            answering machine) on the other end of the line."
+        text:
+          type: string
+          title: Text
+          description: What was said in this turn.
+        at:
+          type: string
+          format: date-time
+          title: At
+          description: When the speaker started this turn, ISO 8601. When that is not known, when Hail recorded the turn.
+      type: object
+      required:
+        - role
+        - text
+        - at
+      title: CallTranscriptTurn
     ConfirmRequest:
       properties:
         code:
@@ -9226,6 +9369,134 @@ components:
         - phone_e164
         - note
       title: HandoverContactOut
+    HttpToolIn:
+      properties:
+        name:
+          type: string
+          title: Name
+          description:
+            "Function name the model calls: a letter, then letters, digits
+            or _ (up to 64). Unique per agent; built-in tool names are not allowed."
+          examples:
+            - lookup_order
+        description:
+          type: string
+          maxLength: 1000
+          minLength: 1
+          title: Description
+          description: What the tool does and when to use it. Read by the model.
+          examples:
+            - Look up an order's status by its order number.
+        url:
+          type: string
+          maxLength: 2000
+          title: Url
+          description:
+            HTTPS endpoint Hail POSTs to. It must resolve to a public address;
+            private, loopback and link-local addresses are refused.
+          examples:
+            - https://api.example.com/hail/orders
+        parameters:
+          additionalProperties: true
+          type: object
+          title: Parameters
+          description:
+            "JSON Schema (type object) of the arguments the model fills
+            in. Supported keywords: type (one of string, number, integer, boolean,
+            array, object), description, enum (strings), items, properties, required,
+            minimum, maximum, minLength, maxLength, minItems, maxItems."
+          examples:
+            - properties:
+                order_number:
+                  description: The order number the caller gives.
+                  type: string
+              required:
+                - order_number
+              type: object
+        headers:
+          anyOf:
+            - additionalProperties:
+                type: string
+              type: object
+            - type: "null"
+          title: Headers
+          description:
+            Static headers sent with every request, e.g. an Authorization
+            token (up to 10). Stored encrypted; responses show only the names. On
+            PATCH, null or left out keeps the saved values of the tool with the same
+            name while its url keeps the same scheme, host and port; a url on a new
+            host needs the headers again. {} removes them.
+          examples:
+            - Authorization: Bearer sk_live_example
+        timeout_seconds:
+          type: integer
+          maximum: 10.0
+          minimum: 1.0
+          title: Timeout Seconds
+          description: Seconds to wait for the answer (1..10). Default 5.
+          default: 5
+        wait_message:
+          anyOf:
+            - type: string
+              maxLength: 200
+            - type: "null"
+          title: Wait Message
+          description:
+            Sentence the agent says on a call while it waits, e.g. 'One
+            moment, let me check.' Not used for texts and email.
+      additionalProperties: false
+      type: object
+      required:
+        - name
+        - description
+        - url
+      title: HttpToolIn
+      description: One customer API the agent may call during a call, text or email.
+    HttpToolOut:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: Function name the model calls.
+        description:
+          type: string
+          title: Description
+          description: What the tool does. Read by the model.
+        url:
+          type: string
+          title: Url
+          description: HTTPS endpoint Hail POSTs to.
+        parameters:
+          additionalProperties: true
+          type: object
+          title: Parameters
+          description: JSON Schema of the arguments.
+        header_names:
+          items:
+            type: string
+          type: array
+          title: Header Names
+          description: Names of the saved static headers. Values are never returned.
+        timeout_seconds:
+          type: integer
+          title: Timeout Seconds
+          description: Seconds Hail waits for the answer.
+        wait_message:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Wait Message
+          description: Sentence said on a call while waiting, or null.
+      type: object
+      required:
+        - name
+        - description
+        - url
+        - parameters
+        - header_names
+        - timeout_seconds
+        - wait_message
+      title: HttpToolOut
     KeptDocumentAnswer:
       properties:
         option:
@@ -11131,7 +11402,8 @@ components:
         given_names:
           type: string
           title: Given Names
-          description: The given names of the person the document is about or addressed
+          description:
+            The given names of the person the document is about or addressed
             to, never a person who signs for the issuer.
         surnames:
           type: string
@@ -11152,8 +11424,9 @@ components:
         business_name:
           type: string
           title: Business Name
-          description: The name of the company the document is about or addressed to,
-            never the company that issued it.
+          description:
+            The name of the company the document is about or addressed
+            to, never the company that issued it.
       type: object
       required:
         - given_names
@@ -11676,6 +11949,7 @@ components:
         - call.busy
         - call.no_answer
         - call.transferred
+        - call.summarized
       title: WebhookEventType
     WebhookSubscriptionCreate:
       properties:
