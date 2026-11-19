@@ -72,7 +72,8 @@ jobs:
                 body,
               });
               // GitHub sends no notification for a body edit; a comment
-              // notifies the issue's subscribers.
+              // notifies the issue's subscribers. The failed run itself
+              // emails whoever last changed this workflow's schedule.
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,

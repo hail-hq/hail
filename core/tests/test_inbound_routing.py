@@ -203,11 +203,11 @@ async def test_unregister_also_clears_the_shared_trunk(
     assert number.inbound_registered_at is None
 
 
-async def test_shared_trunk_failure_keeps_the_number_registered(
+async def test_shared_trunk_failure_does_not_block_unregister(
     async_session, hooks, monkeypatch
 ) -> None:
-    """Left on the shared trunk, the number could never be registered on its
-    carrier trunk again: the row stays registered so a retry removes it."""
+    """The carrier is already detached: the number is unregistered, and the
+    next register removes the leftover entry first."""
     monkeypatch.setattr(settings, "livekit_sip_inbound_trunk_id", "ST_shared")
     lk = AsyncMock()
     lk.remove_inbound_number.side_effect = [None, RuntimeError("timeout")]
@@ -216,11 +216,32 @@ async def test_shared_trunk_failure_keeps_the_number_registered(
     async_session.add(number)
     await async_session.flush()
 
-    with pytest.raises(inbound_routing.InboundRoutingError) as err:
-        await inbound_routing.unregister(async_session, lk, number)
+    await inbound_routing.unregister(async_session, lk, number)
+    assert number.inbound_registered_at is None
 
-    assert err.value.stage == "livekit_remove"
-    assert number.inbound_registered_at is not None
+    lk.remove_inbound_number.side_effect = None
+    await inbound_routing.register(async_session, lk, number)
+    lk.remove_inbound_number.assert_awaited_with("ST_shared", "+14155550100")
+    lk.add_inbound_number.assert_awaited_once_with("ST_in_tw", "+14155550100")
+
+
+async def test_register_fails_when_the_shared_trunk_cannot_let_go(
+    async_session, hooks, monkeypatch
+) -> None:
+    monkeypatch.setattr(settings, "livekit_sip_inbound_trunk_id", "ST_shared")
+    lk = AsyncMock()
+    lk.remove_inbound_number.side_effect = RuntimeError("timeout")
+    number = _number()
+    async_session.add(number)
+    await async_session.flush()
+
+    with pytest.raises(inbound_routing.InboundRoutingError) as err:
+        await inbound_routing.register(async_session, lk, number)
+
+    assert err.value.stage == "livekit_add"
+    lk.add_inbound_number.assert_not_awaited()
+    hooks["detach"].assert_awaited_once()
+    assert number.inbound_registered_at is None
 
 
 async def test_deleted_shared_trunk_does_not_block_unregister(

@@ -212,19 +212,28 @@ def _dialog(sock: socket.socket, dialog: Dialog, state: dict) -> tuple[int, str]
         if response.code < 200:
             if accepted is None:
                 state["accepted"] = response
-                sock.sendall(dialog.cancel())
+                _send(sock, dialog.cancel())
             continue
+        # The verdict is known now; a failed ACK or BYE must not change it.
         if response.code < 300:
             target = _contact(response.headers)
-            sock.sendall(dialog.ack(to_tag, True, target))
-            sock.sendall(dialog.bye(to_tag, target))
+            _send(sock, dialog.ack(to_tag, True, target), dialog.bye(to_tag, target))
             return 1, f"ACCEPTED: {response.code} {response.reason} (hung up)"
-        sock.sendall(dialog.ack(to_tag, False))
+        _send(sock, dialog.ack(to_tag, False))
         if accepted:
             return 1, f"ACCEPTED: {accepted.code} {accepted.reason} (cancelled)"
         if response.code in REFUSED_CODES:
             return 0, f"REFUSED: {response.code} {response.reason}"
         return 2, f"INCONCLUSIVE: {response.code} {response.reason}"
+
+
+def _send(sock: socket.socket, *messages: bytes) -> None:
+    """Best effort: the server may already have closed the connection."""
+    try:
+        for message in messages:
+            sock.sendall(message)
+    except OSError:
+        pass
 
 
 def main(argv: list[str] | None = None) -> int:

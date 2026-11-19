@@ -179,3 +179,18 @@ def test_closed_connection_says_nothing() -> None:
     thread.join(3)
     assert code == 2
     assert "closed by the server" in verdict
+
+
+def test_answer_then_reset_is_still_accepted() -> None:
+    """A trunk that answered is unlocked, even if the hang-up cannot be sent."""
+
+    def answer_and_reset(conn, inv):
+        conn.sendall(_response(inv, 200, "OK"))
+        conn.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+        conn.close()
+
+    port, _seen, thread = serve(answer_and_reset)
+    code, verdict = probe.probe("127.0.0.1", port, NUMBER, timeout=2)
+    thread.join(3)
+    assert code == 1
+    assert verdict.startswith("ACCEPTED: 200")

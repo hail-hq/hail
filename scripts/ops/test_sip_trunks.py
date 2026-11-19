@@ -261,3 +261,33 @@ async def test_interrupted_move_puts_the_number_back(monkeypatch) -> None:
             sip, DATA, SPECS["telnyx"], back=False, yes=True, carriers_of=_carriers
         )
     assert "+14155550100" in sip.trunks["ST_shared"].numbers
+
+
+async def test_interrupted_remove_is_found_and_put_back(monkeypatch) -> None:
+    """Ctrl-C after LiveKit applied the removal: the number goes back."""
+    monkeypatch.setattr(settings, "livekit_telnyx_sip_inbound_trunk_id", "ST_tx")
+    sip = FakeSip(
+        trunk("ST_shared", "shared", ["+14155550100"]),
+        trunk("ST_tx", "hail-inbound-telnyx", ["hail-placeholder-telnyx"]),
+    )
+    original = sip.update_inbound_trunk_fields
+
+    async def applied_then_cancelled(trunk_id, **fields):
+        result = await original(trunk_id, **fields)
+        numbers = fields.get("numbers")
+        if numbers is not None and "+14155550100" in numbers.remove:
+            raise KeyboardInterrupt
+        return result
+
+    sip.update_inbound_trunk_fields = applied_then_cancelled
+    with pytest.raises(KeyboardInterrupt):
+        await st.move(
+            sip, DATA, SPECS["telnyx"], back=False, yes=True, carriers_of=_carriers
+        )
+    assert "+14155550100" in sip.trunks["ST_shared"].numbers
+
+
+async def test_apply_skips_a_deleted_shared_trunk() -> None:
+    sip = FakeSip(trunk("ST_other", "other"), rule_trunks=())
+    plan = await st.apply(sip, DATA, SPECS["twilio"], yes=True)
+    assert not any("shared trunk" in line for line in plan)

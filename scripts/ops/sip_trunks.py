@@ -135,14 +135,15 @@ async def apply(sip, data: dict, spec: Spec, yes: bool) -> list[str]:
     if spec.carrier != "didww" and not spec.allowed_addresses:
         raise TrunkError(f"{spec.carrier}: no allowed addresses in the JSON")
     rule = await rule_named(sip, data["dispatch_rule"])
-    existing = by_name(await trunks(sip), spec.name)
+    all_trunks = await trunks(sip)
+    existing = by_name(all_trunks, spec.name)
     if existing is not None and (
         existing.sip_trunk_id == settings.livekit_sip_inbound_trunk_id
     ):
         raise TrunkError(f"{spec.name} is the shared trunk; rename it first")
     plan: list[str] = []
     shared = settings.livekit_sip_inbound_trunk_id
-    if shared:
+    if shared and any(t.sip_trunk_id == shared for t in all_trunks):
         # Emptied by unregister or move, the open shared trunk would match
         # every dialed number, including numbers on the locked trunks.
         plan.append(
@@ -153,11 +154,17 @@ async def apply(sip, data: dict, spec: Spec, yes: bool) -> list[str]:
                 shared, numbers=ListUpdate(add=[data["shared_placeholder"]])
             )
     if password:
-        # DIDWW first: it sends the password only when LiveKit asks, so this
-        # is safe before the LiveKit trunk asks; the other order is not.
+        # DIDWW first: it sends the password only when LiveKit asks. For a
+        # new trunk nothing asks yet. A changed password fails DIDWW calls
+        # on the existing LiveKit trunk until the update below is done.
         plan.append(
             f"set digest user {spec.auth_username} and the password on "
             "DIDWW_VOICE_IN_TRUNK_ID"
+            + (
+                " (a changed password fails DIDWW calls until the next step)"
+                if existing is not None
+                else ""
+            )
         )
         if yes:
             await didww.set_voice_in_trunk_auth(spec.auth_username, password)
@@ -262,28 +269,45 @@ async def move(
         src.sip_trunk_id, numbers=ListUpdate(add=[src_placeholder])
     )
     for number in movable:
-        await sip.update_inbound_trunk_fields(
-            src.sip_trunk_id, numbers=ListUpdate(remove=[number])
-        )
         try:
+            await sip.update_inbound_trunk_fields(
+                src.sip_trunk_id, numbers=ListUpdate(remove=[number])
+            )
             await sip.update_inbound_trunk_fields(
                 dst.sip_trunk_id, numbers=ListUpdate(add=[number])
             )
         except BaseException:  # Ctrl-C too: never leave a number on no trunk
-            try:
-                await sip.update_inbound_trunk_fields(
-                    src.sip_trunk_id, numbers=ListUpdate(add=[number])
-                )
-            except BaseException:
-                print(
-                    f"STRANDED: {number} is on no trunk. Add it to {src.name} "
-                    f"or {dst.name} by hand now.",
-                    file=sys.stderr,
-                )
-                raise
+            await _recover(sip, number, src, dst)
             raise
         plan.append(f"moved {number}")
     return plan
+
+
+async def _recover(sip, number: str, src, dst) -> None:
+    """After a failed or interrupted step, find where ``number`` is (LiveKit
+    may have applied a request whose answer was lost) and put it back on the
+    source trunk if it is on neither. Prints the outcome either way."""
+    try:
+        listed = {
+            t.sip_trunk_id
+            for t in await trunks(sip)
+            if t.sip_trunk_id in (src.sip_trunk_id, dst.sip_trunk_id)
+            and number in t.numbers
+        }
+        if not listed:
+            await sip.update_inbound_trunk_fields(
+                src.sip_trunk_id, numbers=ListUpdate(add=[number])
+            )
+            listed = {src.sip_trunk_id}
+        where = src.name if src.sip_trunk_id in listed else dst.name
+        print(f"STOPPED at {number}: it is on {where}.", file=sys.stderr)
+    except BaseException:
+        print(
+            f"STRANDED: {number} may be on no trunk. Run status, then add it "
+            f"to {src.name} by hand.",
+            file=sys.stderr,
+        )
+        raise
 
 
 async def retire_shared(

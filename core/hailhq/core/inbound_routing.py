@@ -53,6 +53,7 @@ async def register(db: AsyncSession, lk: LiveKitClient, number: PhoneNumber) -> 
             "carrier_attach", exc, config=_is_config_error(exc)
         ) from exc
     try:
+        await _remove_from_shared_trunk(lk, trunk_id, number.e164)
         await lk.add_inbound_number(trunk_id, number.e164)
     except Exception as exc:
         # Do not leave the carrier pointing at a LiveKit trunk that refuses
@@ -94,7 +95,16 @@ async def unregister(db: AsyncSession, lk: LiveKitClient, number: PhoneNumber) -
         # The carrier is already detached; the row stays registered so the
         # next unregister (idempotent at the carrier) finishes the removal.
         raise InboundRoutingError("livekit_remove", exc) from exc
-    await _remove_from_shared_trunk(lk, trunk_id, number.e164)
+    try:
+        await _remove_from_shared_trunk(lk, trunk_id, number.e164)
+    except Exception:
+        # The carrier is detached and the carrier trunk cleared: the number
+        # is unregistered. The next register removes this leftover first.
+        logger.warning(
+            "number %s: removal from the shared inbound trunk failed",
+            number.e164,
+            exc_info=True,
+        )
     number.inbound_registered_at = None
     await db.flush()
 
@@ -103,11 +113,14 @@ async def _remove_from_shared_trunk(
     lk: LiveKitClient, trunk_id: str, e164: str
 ) -> None:
     """Temporary, while numbers move to per-carrier trunks
-    (docs/operations/inbound-trunk-lockdown.md): a number registered before
-    its carrier got its own trunk is still listed on the shared trunk. Left
-    there, the next ``register`` would fail, because LiveKit lists a number
-    on one trunk only, so a failure keeps the row registered for a retry.
-    A deleted shared trunk (``not_found``) holds nothing: that is done."""
+    (docs/operations/inbound-trunk-lockdown.md; removal: issue #475). A
+    number registered before its carrier got its own trunk is still listed
+    on the shared trunk, and LiveKit lists a number on one trunk only.
+    ``register`` calls this first, so a leftover entry never blocks the add
+    (an unregistered number takes no calls, so nothing is lost).
+    ``unregister`` calls it too, best effort: a deleted shared trunk
+    (``not_found``) holds nothing, and any leftover is removed by the next
+    ``register``."""
     shared = settings.livekit_sip_inbound_trunk_id
     if not shared or shared == trunk_id:
         return
@@ -115,10 +128,8 @@ async def _remove_from_shared_trunk(
         await lk.remove_inbound_number(shared, e164)
     except TwirpError as exc:
         if exc.code != "not_found":
-            raise InboundRoutingError("livekit_remove", exc) from exc
+            raise
         logger.warning("number %s: shared inbound trunk %s is gone", e164, shared)
-    except Exception as exc:
-        raise InboundRoutingError("livekit_remove", exc) from exc
 
 
 def _is_config_error(exc: Exception) -> bool:
