@@ -270,6 +270,7 @@ A checked box is a released feature. Per-artifact changelogs (GitHub Releases fo
 - Inbound
   - [x] AWS SES
   - [x] Custom domains (receive on verified domains)
+  - [x] Answered by an [agent](docs/public/agents.md)
 
 ### Voice pipeline
 
