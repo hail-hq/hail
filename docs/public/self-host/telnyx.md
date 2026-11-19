@@ -100,7 +100,10 @@ blank, or answers `NOT_SURE` or `UP_TO_2000`, gets no external vetting and a
 `LOW_VOLUME` campaign: about 2,000 texts a day to T-Mobile users and no trust
 score. If Telnyx does not verify that company, Hail asks for vetting when
 `faster_lane_ok=YES` and the credit covers it; otherwise the registration
-waits for the customer to turn it on or cancel. Until an organization is approved,
+waits for the customer to turn it on or cancel. A company Telnyx verifies never
+gets that vetting. If the vetting ends and Telnyx still does not verify the
+company, the registration waits for the customer to cancel and register again.
+Until an organization is approved,
 texts from its US long codes to US numbers return 422. Telnyx answers `STOP` and
 `HELP` itself; Hail sets the replies on the organization's messaging profile
 to the texts filed with the campaign. Keep

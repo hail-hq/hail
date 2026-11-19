@@ -8677,3 +8677,31 @@ async def test_a_carrier_with_no_low_volume_filing_files_the_vetted_brand(
     assert draft["fields"]["daily_texts"] == "OVER_2000"
     refs = await _stored_refs(async_session, resp.json()["id"])
     assert "low_volume" not in refs and "faster_lane_ok" not in refs
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_an_amendment_at_a_carrier_with_no_low_volume_filing_stays_vetted(
+    client, org_and_key, sms_carrier, async_session, monkeypatch, tmp_path
+) -> None:
+    """A vetted brand filed because the carrier has no low-volume filing:
+    a low-volume answer on the amendment keeps it vetted, not a 422."""
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 10_000)
+    vid, answers = await _held_application(
+        client, key, sms_carrier, async_session, monkeypatch, {}
+    )
+    path = tmp_path / "sms-registration.json"
+    data = json.loads(path.read_text())
+    for row in data["providers"]:
+        row.pop("business_low_volume", None)
+    path.write_text(json.dumps(data))
+    sms_registration_fees._load.cache_clear()
+    resp = await client.patch(
+        f"/verifications/{vid}/application",
+        headers=_auth(key),
+        json=_answers_with(answers, daily_texts="UP_TO_2000"),
+    )
+    assert resp.status_code == 200, resp.text
+    stored = await _stored_refs(async_session, vid)
+    assert stored["campaign"]["use_case"] != "LOW_VOLUME"
+    assert "low_volume" not in stored
