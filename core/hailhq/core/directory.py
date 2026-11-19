@@ -133,11 +133,20 @@ async def _members_named(
 _UNDEFINED_TABLE = "42P01"
 
 
+_warned_no_member_tables = False
+
+
 def _reraise_unless_no_member_tables(exc: ProgrammingError) -> None:
+    global _warned_no_member_tables
     if getattr(exc.orig, "sqlstate", None) != _UNDEFINED_TABLE:
         raise exc
-    # Normal on a pure self-host, and it runs on every lookup: debug only.
-    logger.debug("no users/members tables, members skipped: %s", exc)
+    # Normal on a pure self-host, and it runs on every lookup: warn once per
+    # process, so a broken hosted schema still shows, then debug only.
+    if _warned_no_member_tables:
+        logger.debug("no users/members tables, members skipped: %s", exc)
+        return
+    _warned_no_member_tables = True
+    logger.warning("no users/members tables, members skipped: %s", exc)
 
 
 async def is_verified_member(
@@ -205,7 +214,7 @@ async def find_by_phone(
         return None
     name, email = row
     return DirectoryEntry(
-        name=name, has_email=email is not None, has_phone=True, source="contact"
+        name=name, has_email=bool(email), has_phone=True, source="contact"
     )
 
 

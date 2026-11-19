@@ -310,6 +310,7 @@ def test_caller_email_body_has_fixed_lines_and_a_clean_org_name():
         caller_email_subject("Your\nbooking\u200b", "Northgate Dental")
         == "From a phone call with Northgate Dental: Your booking"
     )
+    assert caller_email_subject(" \n", None) == "From a phone call"
 
 
 async def test_send_sms_empty_body_gets_tailored_error_and_never_posts():

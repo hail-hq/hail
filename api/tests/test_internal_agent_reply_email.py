@@ -1282,6 +1282,8 @@ async def test_tool_email_me_reaches_the_proven_sender(
     assert data == {"ok": True, "spoken": "Email sent."}
     kwargs = email_mock.send_email.await_args.kwargs
     assert kwargs["to_addresses"] == ["sam@northgate.test"]
+    # From the address the sender wrote to.
+    assert kwargs["from_address"] == ADDRESS
 
 
 async def test_tool_email_me_from_an_unproven_sender_sends_nothing(

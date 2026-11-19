@@ -8,6 +8,7 @@ import uuid
 from datetime import datetime, timezone
 
 import pytest
+from hailhq.core import directory
 from hailhq.core.directory import (
     entry_email,
     find_by_phone,
@@ -193,7 +194,7 @@ async def test_member_lookup_raises_other_sql_errors():
         await resolve_member_emails(_FailingSession("42703"), uuid.uuid4(), "Sam")
 
 
-async def resolve_caller_email(session, org, phone):
+async def _email_for_number(session, org, phone):
     return await entry_email(
         session, org, phone, await find_by_phone(session, org, phone)
     )
@@ -212,23 +213,22 @@ async def test_entry_email_goes_by_number_members_first(async_session):
     await _add_contact(async_session, org, "Alex Kim", phone_e164="+15550003333")
 
     assert (
-        await resolve_caller_email(async_session, org, "+15550001111")
-        == "sam@team.test"
+        await _email_for_number(async_session, org, "+15550001111") == "sam@team.test"
     )
     assert (
-        await resolve_caller_email(async_session, org, "+15550002222")
+        await _email_for_number(async_session, org, "+15550002222")
         == "sam@northgate.test"
     )
     # A saved number with no email, or no saved number, gives nothing.
-    assert await resolve_caller_email(async_session, org, "+15550003333") is None
-    assert await resolve_caller_email(async_session, org, "+15550009999") is None
-    assert (
-        await resolve_caller_email(async_session, uuid.uuid4(), "+15550002222") is None
-    )
+    assert await _email_for_number(async_session, org, "+15550003333") is None
+    assert await _email_for_number(async_session, org, "+15550009999") is None
+    assert await _email_for_number(async_session, uuid.uuid4(), "+15550002222") is None
 
 
-async def test_missing_member_tables_log_no_warning(caplog):
+async def test_missing_member_tables_warn_once_per_process(caplog, monkeypatch):
+    monkeypatch.setattr(directory, "_warned_no_member_tables", False)
     with caplog.at_level(logging.DEBUG, logger="hailhq.core.directory"):
-        await resolve_member_emails(_FailingSession("42P01"), uuid.uuid4(), "Sam")
-    assert caplog.records
-    assert all(r.levelno < logging.WARNING for r in caplog.records)
+        for _ in range(3):
+            await resolve_member_emails(_FailingSession("42P01"), uuid.uuid4(), "Sam")
+    levels = [r.levelno for r in caplog.records]
+    assert levels == [logging.WARNING, logging.DEBUG, logging.DEBUG]

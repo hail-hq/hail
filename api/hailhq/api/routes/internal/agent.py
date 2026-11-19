@@ -382,8 +382,13 @@ _SPOKEN_EMAIL_USE_SELF = (
     " who they mean."
 )
 _SPOKEN_RUN_REPLIED = (
-    "Not sent: you already sent your reply with files to the sender of this"
-    " email. Nothing more can go to them as that reply."
+    "Not sent: the reply to this email was already sent or tried. Nothing"
+    " more can go to the sender as that reply."
+)
+_SPOKEN_EMAIL_CALLER_NAME = (
+    'Not sent: "{name}" is also the name saved for the person on this call,'
+    " so it cannot pick a recipient. You can only email people on file, to"
+    " prevent spam."
 )
 _SPOKEN_CALL_EMAIL_LIMIT = (
     f"Not sent: this call already sent {MAX_CALL_EMAILS} emails, the limit for"
@@ -455,10 +460,8 @@ async def _call_recipient(
         return AgentSendResponse(
             ok=False,
             spoken=(
-                _SPOKEN_EMAIL_USE_SELF.format(name=_quoted_name(name))
-                if own
-                else _SPOKEN_EMAIL_NO_SELF
-            ),
+                _SPOKEN_EMAIL_USE_SELF if own else _SPOKEN_EMAIL_CALLER_NAME
+            ).format(name=_quoted_name(name)),
         )
     if isinstance(recipient, AgentSendResponse):
         return recipient
@@ -1541,10 +1544,7 @@ async def agent_email_run_send_email(
         # A retry of this same send was answered in _email_run, so a reply
         # found here is another send: it already used the run's one reply.
         # One that failed is reported as failed, so the model says so.
-        existing = await prior_email_reply(db, inbound)
-        if existing is not None:
-            if existing.status in ("failed", "bounced"):
-                return _replayed_send(existing)
+        if await prior_email_reply(db, inbound) is not None:
             return AgentSendResponse(ok=False, spoken=_SPOKEN_RUN_REPLIED)
         try:
             scope, source, files = await source_files(
@@ -1583,9 +1583,11 @@ async def agent_email_run_send_email(
         agent_id=agent.id,
         consent_source="inbound_email",
         reply_parent=parent,
+        # Mail to the sender comes from the address they wrote to.
         reply_domain=(
             await db.get(EmailDomain, inbound.email_domain_id)
             if parent is not None
+            or normalize_address(recipient) == normalize_address(inbound.from_address)
             else None
         ),
         attachment_rows=files,

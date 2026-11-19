@@ -68,7 +68,9 @@ def caller_email_subject(subject: str, org_name: str | None) -> str:
     """The subject of an email to the caller's own address on file: fixed
     words first, so the email list shows why it came before any words the
     caller chose."""
-    return f"From {_call_with(org_name)}: {_one_line(subject)}"
+    words = _one_line(subject)
+    prefix = f"From {_call_with(org_name)}"
+    return f"{prefix}: {words}" if words else prefix
 
 
 def caller_email_body(body_text: str, org_name: str | None) -> str:
