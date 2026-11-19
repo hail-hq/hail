@@ -433,25 +433,43 @@ async def test_http_tools_of_another_org_are_not_loaded(
     assert tools == []
 
 
-async def test_http_tool_with_a_built_in_name_is_skipped(
+async def test_http_tool_with_a_built_in_name_gives_way_to_it(
     db, session_factory, monkeypatch
 ):
     """An HTTP tool saved as email_caller before the name was reserved must
-    not give LiveKit two tools with one name."""
+    not give LiveKit two tools with one name. The built-in wins when it is
+    offered; when it is not, the HTTP tool stays."""
     org_id, agent_id = await _seed_http_tool(
         session_factory, monkeypatch, name="email_caller"
     )
-    names = await _email_caller_names(
-        monkeypatch,
-        {
-            **_PHONE,
-            "organization_id": str(org_id),
-            "agent_id": str(agent_id),
-            "email_caller_enabled": True,
-            "tools": [],
-        },
-    )
-    assert names.count("email_caller") == 1
+    meta = {
+        **_PHONE,
+        "organization_id": str(org_id),
+        "agent_id": str(agent_id),
+        "email_caller_enabled": True,
+        "tools": [],
+    }
+    for offered in (True, False):
+
+        async def _avail(_org, _session, offered=offered):
+            return offered
+
+        monkeypatch.setattr(
+            email_caller,
+            "SPEC",
+            dataclasses.replace(email_caller.SPEC, is_available=_avail),
+        )
+        tools, api = await build_agent_tools(
+            meta, call_id=uuid.uuid4(), hangup=None, send_dtmf=None
+        )
+        try:
+            kept = [t for t in tools if t.info.name == "email_caller"]
+            assert len(kept) == 1, offered
+            is_http = kept[0].info.raw_schema["description"] == "Find an order."
+            assert is_http is not offered
+        finally:
+            if api is not None:
+                await api.aclose()
 
 
 async def test_http_tool_load_failure_keeps_built_in_tools(db, monkeypatch):

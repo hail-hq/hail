@@ -228,19 +228,9 @@ async def build_agent_tools(
     ):
         specs.append(email_caller.SPEC.bind(metadata))
     # The agent's own HTTP tools are not built-ins: a `tools` list does not
-    # name them, and they stay on with `tools: []`. One saved before its name
-    # was reserved (email_caller) is skipped: LiveKit refuses duplicate names.
-    taken = {s.name for s in specs}
-    for http_spec in await _http_tools(metadata, call_id, organization_id):
-        if http_spec.name in taken:
-            logger.warning(
-                "call_id=%s http tool %s skipped: built-in name",
-                call_id,
-                http_spec.name,
-            )
-            continue
-        specs.append(http_spec)
-    if not specs:
+    # name them, and they stay on with `tools: []`.
+    http_specs = await _http_tools(metadata, call_id, organization_id)
+    if not specs and not http_specs:
         return [], None
 
     api: AgentApiClient | None = None
@@ -272,6 +262,18 @@ async def build_agent_tools(
                 # is_available check raises PendingRollbackError and gets
                 # swallowed too, silently disabling available tools.
                 await session.rollback()
+    # One saved before its name was reserved (email_caller) gives way to an
+    # offered built-in of that name: LiveKit refuses duplicate names.
+    taken = {s.name for s in available}
+    for http_spec in http_specs:
+        if http_spec.name in taken:
+            logger.warning(
+                "call_id=%s http tool %s skipped: built-in name",
+                call_id,
+                http_spec.name,
+            )
+            continue
+        available.append(http_spec)
 
     return [wrap_tool(s, tctx) for s in available], api
 
