@@ -349,10 +349,32 @@ async def test_retire_shared_only_when_empty(monkeypatch) -> None:
     assert list(sip.rule.trunk_ids) == ["ST_0", "ST_1", "ST_2"]
 
 
-async def test_retire_shared_needs_every_carrier_key() -> None:
+async def test_retire_shared_needs_the_key_of_every_carrier_in_use() -> None:
     sip = FakeSip(trunk("ST_shared", "shared"))
+
+    async def in_use():
+        return {"twilio"}
+
     with pytest.raises(st.TrunkError, match="LIVEKIT_TWILIO_SIP_INBOUND_TRUNK_ID"):
-        await st.retire_shared(sip, DATA, SPECS, yes=False)
+        await st.retire_shared(sip, DATA, SPECS, yes=False, carriers_in_use=in_use)
+
+
+async def test_retire_shared_skips_a_carrier_with_no_routed_number(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(settings, "livekit_twilio_sip_inbound_trunk_id", "ST_0")
+    monkeypatch.setattr(settings, "livekit_telnyx_sip_inbound_trunk_id", "ST_1")
+    monkeypatch.setattr(settings, "livekit_didww_sip_inbound_trunk_id", "")
+    sip = FakeSip(
+        trunk("ST_shared", "shared", ["hail-placeholder-shared"]),
+        rule_trunks=("ST_shared", "ST_0", "ST_1"),
+    )
+
+    async def in_use():
+        return {"twilio", "telnyx"}
+
+    await st.retire_shared(sip, DATA, SPECS, yes=True, carriers_in_use=in_use)
+    assert "ST_shared" not in sip.trunks
 
 
 async def test_interrupted_move_puts_the_number_back(monkeypatch) -> None:
@@ -525,8 +547,8 @@ async def test_move_only_the_listed_numbers(monkeypatch) -> None:
     ("number", "error"),
     [
         ("+14155550177", "not on shared: \\+14155550177"),
-        ("+14155550101", "not a live telnyx number: \\+14155550101"),
-        ("+14155550199", "not a live telnyx number: \\+14155550199"),
+        ("+14155550101", "not a live, routed telnyx number: \\+14155550101"),
+        ("+14155550199", "not a live, routed telnyx number: \\+14155550199"),
     ],
 )
 @pytest.mark.parametrize("yes", [False, True])
@@ -573,19 +595,40 @@ async def test_move_back_refuses_a_number_not_on_the_carrier_trunk(
     assert sip.calls == []
 
 
-async def test_number_and_drop_unknown_do_not_mix(monkeypatch) -> None:
+async def test_number_with_drop_unknown_removes_an_unrouted_leftover(
+    monkeypatch,
+) -> None:
+    """A number unrouted inside the window stays on the shared trunk; it can
+    be removed by name, while a live number of another carrier is refused."""
     monkeypatch.setattr(settings, "livekit_telnyx_sip_inbound_trunk_id", "ST_tx")
-    sip = FakeSip(trunk("ST_shared", "shared", ["+14155550100"]))
-    with pytest.raises(st.TrunkError, match="--drop-unknown"):
+    sip = FakeSip(
+        trunk("ST_shared", "shared", ["+14155550199", "+14155550101"]),
+        trunk("ST_tx", "hail-inbound-telnyx", ["hail-placeholder-telnyx"]),
+    )
+    with pytest.raises(st.TrunkError, match="not a live, routed telnyx"):
         await st.move(
             sip,
             DATA,
             SPECS["telnyx"],
             back=False,
-            yes=False,
+            yes=True,
+            carriers_of=_carriers,
             drop_unknown=True,
-            only=["+14155550100"],
+            only=["+14155550101"],
         )
+    plan = await st.move(
+        sip,
+        DATA,
+        SPECS["telnyx"],
+        back=False,
+        yes=True,
+        carriers_of=_carriers,
+        drop_unknown=True,
+        only=["+14155550199"],
+    )
+    assert "+14155550199" not in sip.trunks["ST_shared"].numbers
+    assert "+14155550199" not in sip.trunks["ST_tx"].numbers
+    assert "removed +14155550199" in plan
 
 
 def test_main_passes_the_numbers(monkeypatch) -> None:

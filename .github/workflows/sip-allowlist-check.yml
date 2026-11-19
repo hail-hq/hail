@@ -96,5 +96,5 @@ jobs:
         if: steps.check.outputs.exit != '0'
         run: |
           cat /tmp/sip-report.md
-          echo "::error::Carrier SIP IPs differ from infra/livekit/inbound-trunks.json (see the issue)"
+          echo "::error::SIP allow-list check needs attention (see the issue)"
           exit 1

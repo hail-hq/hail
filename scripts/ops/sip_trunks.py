@@ -306,8 +306,6 @@ async def move(
     own = carrier_trunk_id(spec.carrier)
     if not shared:
         raise TrunkError("LIVEKIT_SIP_INBOUND_TRUNK_ID is empty: nothing to move")
-    if only and drop_unknown:
-        raise TrunkError("--drop-unknown cannot be used with --number")
     if own and back:
         # The running app accepts this carrier's calls only on its own trunk
         # while the key is set: moving numbers back first refuses them all.
@@ -347,11 +345,20 @@ async def move(
     else:
         found = await carriers_of(candidates)
         if only:
-            other = [n for n in candidates if found.get(n) != spec.carrier]
+            # With --drop-unknown, a listed number with no routed row (it was
+            # unrouted inside the window) is removed from the source trunk.
+            other = [
+                n
+                for n in candidates
+                if found.get(n) != spec.carrier
+                and not (drop_unknown and n not in found)
+            ]
             if other:
                 raise TrunkError(
-                    f"not a live {spec.carrier} number: {', '.join(other)}"
+                    f"not a live, routed {spec.carrier} number: {', '.join(other)}"
+                    " (--drop-unknown removes one with no routed row)"
                 )
+            skipped = [n for n in candidates if n not in found]
         elif (
             candidates
             and not found
@@ -443,8 +450,26 @@ async def _database_knows(carriers_of, trunk, placeholders: set[str]) -> bool:
     return bool(listed) and bool(await carriers_of(listed))
 
 
+async def routed_carriers() -> set[str]:
+    """Carriers with at least one number Hail has routed for inbound calls."""
+    async with session_scope() as db:
+        rows = await db.execute(
+            select(PhoneNumber.provider)
+            .where(
+                PhoneNumber.provisioning_state.notin_(("released", "failed")),
+                PhoneNumber.inbound_registered_at.is_not(None),
+            )
+            .distinct()
+        )
+        return set(rows.scalars().all())
+
+
 async def retire_shared(
-    sip, data: dict, specs: dict[str, Spec], yes: bool
+    sip,
+    data: dict,
+    specs: dict[str, Spec],
+    yes: bool,
+    carriers_in_use=routed_carriers,
 ) -> list[str]:
     shared = settings.livekit_sip_inbound_trunk_id
     if not shared:
@@ -452,9 +477,14 @@ async def retire_shared(
     missing = [env_key(c) for c in specs if not carrier_trunk_id(c)]
     if len(missing) == len(specs):
         raise TrunkError(f"set {', '.join(missing)} in .env first")
+    in_use = await carriers_in_use() if missing else set()
+    blocked = [env_key(c) for c in specs if not carrier_trunk_id(c) and c in in_use]
+    if blocked:
+        # That carrier still falls back to the shared trunk: deleting it
+        # would break its routed numbers.
+        raise TrunkError(f"set {', '.join(blocked)} in .env first")
     if missing:
-        # A carrier this setup does not use has no trunk. The empty-trunk
-        # check below still stops a retire while any number is left.
+        # A carrier with no routed number needs no trunk.
         print(
             f"warning: {', '.join(missing)} empty: that carrier gets no inbound calls",
             file=sys.stderr,
@@ -475,6 +505,11 @@ async def retire_shared(
             )
     plan.append(f"delete trunk {trunk.name} ({shared})")
     if yes:
+        # The app may have added a number since the check above.
+        trunk = await trunk_by_id(sip, shared)
+        left = [n for n in trunk.numbers if n != data["shared_placeholder"]]
+        if left:
+            raise TrunkError(f"{trunk.name} now lists {len(left)} number(s): move them")
         await sip.delete_trunk(api.DeleteSIPTrunkRequest(sip_trunk_id=shared))
         plan.append("set in .env: LIVEKIT_SIP_INBOUND_TRUNK_ID= (empty)")
     return plan

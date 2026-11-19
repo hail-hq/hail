@@ -124,13 +124,16 @@ def test_new_and_dropped_ranges_are_reported() -> None:
     assert changed
 
 
-def test_version_change_alone_is_reported() -> None:
+def test_version_change_alone_is_a_note_not_an_alert() -> None:
+    """A page edit with the same addresses needs no action."""
     result = check.compare(
         "telnyx",
         trunk(sorted(check.parse_telnyx(json.dumps(TELNYX)).networks), version="old"),
         fetcher=lambda _url: json.dumps(TELNYX),
     )
-    assert result.problems and "version" in result.problems[0]
+    assert not result.problems and "version" in result.notes[0]
+    text, changed = check.report([result])
+    assert not changed and "note:" in text
 
 
 def test_new_layout_or_empty_page_is_reported() -> None:

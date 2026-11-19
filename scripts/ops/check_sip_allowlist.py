@@ -61,6 +61,8 @@ class Result:
     problems: list[str] = field(default_factory=list)
     added: list[str] = field(default_factory=list)
     removed: list[str] = field(default_factory=list)
+    # Shown in the report, but no action: a page edit with the same addresses.
+    notes: list[str] = field(default_factory=list)
 
 
 def _network(value: str) -> str:
@@ -161,7 +163,7 @@ def compare(carrier: str, trunk: dict, fetcher: Callable[[str], str] = fetch) ->
     result.added = sorted(published.networks - committed)
     result.removed = sorted(committed - published.networks)
     if published.version != source["version"]:
-        result.problems.append(
+        result.notes.append(
             f"source version changed: committed {source['version']}, "
             f"published {published.version}"
         )
@@ -175,10 +177,12 @@ def report(results: list[Result]) -> tuple[str, bool]:
     for r in results:
         if not (r.problems or r.added or r.removed):
             lines.append(f"- {r.carrier}: matches the published list.")
+            lines.extend(f"  - note: {n}" for n in r.notes)
             continue
         changed = True
         lines.append(f"- {r.carrier}: action needed.")
         lines.extend(f"  - {p}" for p in r.problems)
+        lines.extend(f"  - note: {n}" for n in r.notes)
         lines.extend(f"  - published, not in our list (add): `{a}`" for a in r.added)
         lines.extend(
             f"  - in our list, no longer published (review): `{a}`" for a in r.removed
