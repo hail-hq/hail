@@ -12,6 +12,7 @@ from hailhq.core import carrier_routing, inbound_routing
 from hailhq.core.config import settings
 from hailhq.core.models import PhoneNumber
 from hailhq.core.providers.voice.base import CarrierNotConfigured
+from livekit.api.twirp_client import TwirpError
 
 
 @pytest.fixture()
@@ -202,12 +203,35 @@ async def test_unregister_also_clears_the_shared_trunk(
     assert number.inbound_registered_at is None
 
 
-async def test_shared_trunk_failure_does_not_block_unregister(
+async def test_shared_trunk_failure_keeps_the_number_registered(
+    async_session, hooks, monkeypatch
+) -> None:
+    """Left on the shared trunk, the number could never be registered on its
+    carrier trunk again: the row stays registered so a retry removes it."""
+    monkeypatch.setattr(settings, "livekit_sip_inbound_trunk_id", "ST_shared")
+    lk = AsyncMock()
+    lk.remove_inbound_number.side_effect = [None, RuntimeError("timeout")]
+    number = _number()
+    number.inbound_registered_at = datetime.now(timezone.utc)
+    async_session.add(number)
+    await async_session.flush()
+
+    with pytest.raises(inbound_routing.InboundRoutingError) as err:
+        await inbound_routing.unregister(async_session, lk, number)
+
+    assert err.value.stage == "livekit_remove"
+    assert number.inbound_registered_at is not None
+
+
+async def test_deleted_shared_trunk_does_not_block_unregister(
     async_session, hooks, monkeypatch
 ) -> None:
     monkeypatch.setattr(settings, "livekit_sip_inbound_trunk_id", "ST_shared")
     lk = AsyncMock()
-    lk.remove_inbound_number.side_effect = [None, RuntimeError("trunk deleted")]
+    lk.remove_inbound_number.side_effect = [
+        None,
+        TwirpError("not_found", "trunk not found", status=404),
+    ]
     number = _number()
     number.inbound_registered_at = datetime.now(timezone.utc)
     async_session.add(number)

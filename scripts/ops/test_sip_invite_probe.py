@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import socket
+import struct
 import sys
 import threading
 from pathlib import Path
@@ -53,6 +54,9 @@ def serve(script):
             invite = conn.recv(65536)
             seen.append(invite)
             script(conn, invite)
+            if conn.fileno() < 0:
+                srv.close()
+                return
             try:
                 while chunk := conn.recv(65536):
                     seen.append(chunk)
@@ -134,3 +138,44 @@ def test_no_connection_says_nothing() -> None:
     code, verdict = probe.probe("127.0.0.1", port, NUMBER, timeout=1)
     assert code == 2
     assert verdict.startswith("NO CONNECTION")
+
+
+def test_other_final_codes_say_nothing() -> None:
+    """486 can be Hail refusing a call LiveKit accepted: not proof of a lock."""
+    port, _seen, thread = serve(
+        lambda conn, inv: conn.sendall(_response(inv, 486, "Busy Here"))
+    )
+    code, verdict = probe.probe("127.0.0.1", port, NUMBER, timeout=2)
+    thread.join(3)
+    assert code == 2
+    assert verdict == "INCONCLUSIVE: 486 Busy Here"
+
+
+def test_trying_then_silence_says_nothing() -> None:
+    port, _seen, thread = serve(
+        lambda conn, inv: conn.sendall(_response(inv, 100, "Trying"))
+    )
+    code, verdict = probe.probe("127.0.0.1", port, NUMBER, timeout=0.5)
+    thread.join(3)
+    assert code == 2
+    assert "100 Trying" in verdict
+
+
+def test_reset_connection_says_nothing() -> None:
+    def reset(conn, _inv):
+        conn.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+        conn.close()
+
+    port, _seen, thread = serve(reset)
+    code, verdict = probe.probe("127.0.0.1", port, NUMBER, timeout=2)
+    thread.join(3)
+    assert code == 2
+    assert verdict.startswith("INCONCLUSIVE")
+
+
+def test_closed_connection_says_nothing() -> None:
+    port, _seen, thread = serve(lambda conn, _inv: conn.close())
+    code, verdict = probe.probe("127.0.0.1", port, NUMBER, timeout=2)
+    thread.join(3)
+    assert code == 2
+    assert "closed by the server" in verdict

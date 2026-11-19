@@ -15,9 +15,10 @@ Every command except ``status`` prints its plan and changes nothing until
 * ``apply``: creates or updates the trunk named in
   ``infra/livekit/inbound-trunks.json`` (its allowed addresses, its digest
   username and password, a placeholder entry), adds it to the dispatch rule,
-  and for DIDWW sets the same credentials on ``DIDWW_VOICE_IN_TRUNK_ID``.
-  Prints the trunk id for ``LIVEKIT_<CARRIER>_SIP_INBOUND_TRUNK_ID``.
-  It changes no other trunk, and adds numbers only (Hail manages them).
+  and for DIDWW first sets the same credentials on ``DIDWW_VOICE_IN_TRUNK_ID``.
+  Prints the trunk id for ``LIVEKIT_<CARRIER>_SIP_INBOUND_TRUNK_ID``. On the
+  shared trunk it only adds the shared placeholder. It adds numbers only
+  (Hail manages them).
 * ``move``: moves the carrier's numbers from the shared trunk
   (``LIVEKIT_SIP_INBOUND_TRUNK_ID``) to the carrier's trunk, one at a time
   (LiveKit lists a number on one trunk only). ``--back`` reverses it.
@@ -140,6 +141,26 @@ async def apply(sip, data: dict, spec: Spec, yes: bool) -> list[str]:
     ):
         raise TrunkError(f"{spec.name} is the shared trunk; rename it first")
     plan: list[str] = []
+    shared = settings.livekit_sip_inbound_trunk_id
+    if shared:
+        # Emptied by unregister or move, the open shared trunk would match
+        # every dialed number, including numbers on the locked trunks.
+        plan.append(
+            f"keep placeholder {data['shared_placeholder']} on the shared trunk"
+        )
+        if yes:
+            await sip.update_inbound_trunk_fields(
+                shared, numbers=ListUpdate(add=[data["shared_placeholder"]])
+            )
+    if password:
+        # DIDWW first: it sends the password only when LiveKit asks, so this
+        # is safe before the LiveKit trunk asks; the other order is not.
+        plan.append(
+            f"set digest user {spec.auth_username} and the password on "
+            "DIDWW_VOICE_IN_TRUNK_ID"
+        )
+        if yes:
+            await didww.set_voice_in_trunk_auth(spec.auth_username, password)
     if existing is None:
         plan.append(
             f"create trunk {spec.name}: {len(spec.allowed_addresses)} allowed "
@@ -165,7 +186,7 @@ async def apply(sip, data: dict, spec: Spec, yes: bool) -> list[str]:
         plan.append(
             f"update trunk {spec.name} ({trunk_id}): allowed addresses "
             f"{len(existing.allowed_addresses)} -> {len(spec.allowed_addresses)}, "
-            f"digest auth {'on' if password else 'unchanged'}, "
+            f"digest auth {'on' if password else 'off'}, "
             f"placeholder {spec.placeholder}"
         )
         if yes:
@@ -173,8 +194,10 @@ async def apply(sip, data: dict, spec: Spec, yes: bool) -> list[str]:
                 trunk_id,
                 numbers=ListUpdate(add=[spec.placeholder]),
                 allowed_addresses=spec.allowed_addresses or None,
-                auth_username=spec.auth_username if password else None,
-                auth_password=password or None,
+                # "" clears a digest user set by hand: Twilio and Telnyx
+                # would fail its challenge.
+                auth_username=spec.auth_username if password else "",
+                auth_password=password,
             )
     if rule.trunk_ids and trunk_id not in rule.trunk_ids:
         plan.append(f"add trunk {spec.name} to dispatch rule {rule.name}")
@@ -182,13 +205,6 @@ async def apply(sip, data: dict, spec: Spec, yes: bool) -> list[str]:
             await sip.update_dispatch_rule_fields(
                 rule.sip_dispatch_rule_id, trunk_ids=ListUpdate(add=[trunk_id])
             )
-    if password:
-        plan.append(
-            f"set digest user {spec.auth_username} and the password on "
-            "DIDWW_VOICE_IN_TRUNK_ID"
-        )
-        if yes:
-            await didww.set_voice_in_trunk_auth(spec.auth_username, password)
     if yes:
         plan.append(f"set in .env: {env_key(spec.carrier)}={trunk_id}")
     return plan
@@ -253,10 +269,18 @@ async def move(
             await sip.update_inbound_trunk_fields(
                 dst.sip_trunk_id, numbers=ListUpdate(add=[number])
             )
-        except Exception:
-            await sip.update_inbound_trunk_fields(
-                src.sip_trunk_id, numbers=ListUpdate(add=[number])
-            )
+        except BaseException:  # Ctrl-C too: never leave a number on no trunk
+            try:
+                await sip.update_inbound_trunk_fields(
+                    src.sip_trunk_id, numbers=ListUpdate(add=[number])
+                )
+            except BaseException:
+                print(
+                    f"STRANDED: {number} is on no trunk. Add it to {src.name} "
+                    f"or {dst.name} by hand now.",
+                    file=sys.stderr,
+                )
+                raise
             raise
         plan.append(f"moved {number}")
     return plan

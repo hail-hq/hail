@@ -184,10 +184,9 @@ def _accepted_trunks(expected: str | None) -> set[str]:
     while numbers move from the shared trunk to per-carrier trunks one carrier
     at a time (docs/operations/inbound-trunk-lockdown.md). Temporary: once
     the shared key is empty, only the carrier's own trunk is accepted."""
-    accepted = {expected} if expected else set()
-    if settings.livekit_sip_inbound_trunk_id:
-        accepted.add(settings.livekit_sip_inbound_trunk_id)
-    return accepted
+    if not expected:
+        return set()
+    return {expected, settings.livekit_sip_inbound_trunk_id} - {""}
 
 
 async def _organization_name(org_id: UUID) -> str | None:

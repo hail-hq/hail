@@ -100,7 +100,7 @@ async def test_dry_run_changes_nothing() -> None:
     sip = FakeSip(trunk("ST_shared", "shared", ["+14155550100"]))
     plan = await st.apply(sip, DATA, SPECS["twilio"], yes=False)
     assert sip.calls == []
-    assert plan[0].startswith("create trunk hail-inbound-twilio")
+    assert any(line.startswith("create trunk hail-inbound-twilio") for line in plan)
 
 
 async def test_apply_creates_a_locked_trunk_with_a_placeholder() -> None:
@@ -118,14 +118,22 @@ async def test_apply_creates_a_locked_trunk_with_a_placeholder() -> None:
     assert len(sip.trunks) == 2
 
 
-async def test_apply_never_touches_the_shared_trunk_numbers() -> None:
+async def test_apply_only_adds_placeholders() -> None:
+    """Numbers are Hail's; the shared trunk gets its placeholder so it can
+    never become a trunk that matches every number. A digest user set by
+    hand on the Twilio trunk is cleared: Twilio cannot answer it."""
     sip = FakeSip(
         trunk("ST_shared", "shared", ["+14155550100"]),
         trunk("ST_tw", "hail-inbound-twilio", ["hail-placeholder-twilio", "+1"]),
     )
+    sip.trunks["ST_tw"].auth_username = "by-hand"
     await st.apply(sip, DATA, SPECS["twilio"], yes=True)
-    assert list(sip.trunks["ST_shared"].numbers) == ["+14155550100"]
+    assert list(sip.trunks["ST_shared"].numbers) == [
+        "+14155550100",
+        "hail-placeholder-shared",
+    ]
     assert list(sip.trunks["ST_tw"].numbers) == ["hail-placeholder-twilio", "+1"]
+    assert sip.trunks["ST_tw"].auth_username == ""
 
 
 async def test_didww_needs_the_password(monkeypatch) -> None:
@@ -137,6 +145,8 @@ async def test_didww_needs_the_password(monkeypatch) -> None:
     seen = []
 
     async def fake_auth(user, password):
+        # DIDWW gets the password before LiveKit starts asking for it.
+        assert st.by_name(list(sip.trunks.values()), "hail-inbound-didww") is None
         seen.append((user, password))
 
     monkeypatch.setattr(st.didww, "set_voice_in_trunk_auth", fake_auth)
@@ -225,3 +235,29 @@ async def test_retire_shared_needs_every_carrier_key() -> None:
     sip = FakeSip(trunk("ST_shared", "shared"))
     with pytest.raises(st.TrunkError, match="LIVEKIT_TWILIO_SIP_INBOUND_TRUNK_ID"):
         await st.retire_shared(sip, DATA, SPECS, yes=False)
+
+
+async def test_interrupted_move_puts_the_number_back(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "livekit_telnyx_sip_inbound_trunk_id", "ST_tx")
+    sip = FakeSip(
+        trunk("ST_shared", "shared", ["+14155550100"]),
+        trunk("ST_tx", "hail-inbound-telnyx", ["hail-placeholder-telnyx"]),
+    )
+    original = sip.update_inbound_trunk_fields
+
+    async def ctrl_c(trunk_id, **fields):
+        numbers = fields.get("numbers")
+        if (
+            trunk_id == "ST_tx"
+            and numbers is not None
+            and "+14155550100" in numbers.add
+        ):
+            raise KeyboardInterrupt
+        return await original(trunk_id, **fields)
+
+    sip.update_inbound_trunk_fields = ctrl_c
+    with pytest.raises(KeyboardInterrupt):
+        await st.move(
+            sip, DATA, SPECS["telnyx"], back=False, yes=True, carriers_of=_carriers
+        )
+    assert "+14155550100" in sip.trunks["ST_shared"].numbers

@@ -10,12 +10,16 @@ on a locked trunk. The INVITE goes over TCP to port 5060, from caller
 
 Verdicts and exit codes:
 
-* 0 REFUSED: a final answer of 300 or more (401 and 407 ask for a password
-  this probe does not have), or no answer at all. The trunk is locked.
+* 0 REFUSED: LiveKit's refusal (403, 404 "Does not match any SIP Trunks" or
+  "No trunk found", or 401/407 asking for a password this probe does not
+  have), or no answer at all (LiveKit drops what it takes for a flood).
+  Check that the number is listed on the trunk: a mistyped number gets the
+  same 404.
 * 1 ACCEPTED: the call rang (18x) or was answered (2xx). The trunk is not
   locked. The probe cancels or hangs up the call at once, but it may reach
   the number's agent and show in its call log for a moment.
-* 2 the probe could not connect, so the test says nothing.
+* 2 the test says nothing: no connection, a connection that failed, another
+  final code (printed), or 100 Trying with no final answer.
 
 Standard library only.
 """
@@ -33,6 +37,10 @@ CALLER = "+12025550100"
 E164 = re.compile(r"^\+[1-9]\d{6,14}$")
 CONNECT_TIMEOUT = 10.0
 ANSWER_TIMEOUT = 15.0
+# What LiveKit answers a call no trunk accepts (livekit/sip, pkg/sip/inbound.go):
+# 404 "Does not match any SIP Trunks" or "No trunk found", 403 "Auth failure",
+# and 401/407 to ask for a password.
+REFUSED_CODES = frozenset({401, 403, 404, 407})
 
 
 @dataclass
@@ -139,7 +147,7 @@ class Reader:
             except TimeoutError:
                 return None
             if not chunk:
-                return None
+                raise ConnectionError("closed by the server")
             self.buf += chunk
 
 
@@ -172,34 +180,51 @@ def probe(host: str, port: int, number: str, timeout: float = ANSWER_TIMEOUT):
         sock.settimeout(timeout)
         local_ip, local_port = sock.getsockname()[:2]
         dialog = Dialog(host, port, number, local_ip, local_port)
-        sock.sendall(dialog.invite())
-        reader = Reader(sock)
-        accepted: Response | None = None
-        while True:
-            response = reader.next()
-            if response is None:
-                if accepted:
-                    return 1, f"ACCEPTED: {accepted.code} {accepted.reason}"
-                return 0, "REFUSED: no answer to the INVITE (dropped)"
-            if "INVITE" not in response.headers.get("cseq", ""):
-                continue  # the answer to our CANCEL
-            if response.code < 180:
-                continue
-            to_tag = _tag(response.headers.get("to", ""))
-            if response.code < 200:
-                if accepted is None:
-                    accepted = response
-                    sock.sendall(dialog.cancel())
-                continue
-            if response.code < 300:
-                target = _contact(response.headers)
-                sock.sendall(dialog.ack(to_tag, True, target))
-                sock.sendall(dialog.bye(to_tag, target))
-                return 1, f"ACCEPTED: {response.code} {response.reason} (hung up)"
-            sock.sendall(dialog.ack(to_tag, False))
+        state = {"accepted": None, "answered": False}
+        try:
+            return _dialog(sock, dialog, state)
+        except OSError as exc:
+            accepted = state["accepted"]
             if accepted:
-                return 1, f"ACCEPTED: {accepted.code} {accepted.reason} (cancelled)"
+                return 1, f"ACCEPTED: {accepted.code} {accepted.reason}"
+            return 2, f"INCONCLUSIVE: the connection failed ({exc})"
+
+
+def _dialog(sock: socket.socket, dialog: Dialog, state: dict) -> tuple[int, str]:
+    sock.sendall(dialog.invite())
+    reader = Reader(sock)
+    while True:
+        response = reader.next()
+        accepted = state["accepted"]
+        if response is None:
+            if accepted:
+                return 1, f"ACCEPTED: {accepted.code} {accepted.reason}"
+            if state["answered"]:
+                return 2, "INCONCLUSIVE: 100 Trying, then no final answer"
+            # LiveKit drops what it takes for a flood without an answer.
+            return 0, "REFUSED: no answer to the INVITE (dropped)"
+        if "INVITE" not in response.headers.get("cseq", ""):
+            continue  # the answer to our CANCEL
+        state["answered"] = True
+        if response.code < 180:
+            continue
+        to_tag = _tag(response.headers.get("to", ""))
+        if response.code < 200:
+            if accepted is None:
+                state["accepted"] = response
+                sock.sendall(dialog.cancel())
+            continue
+        if response.code < 300:
+            target = _contact(response.headers)
+            sock.sendall(dialog.ack(to_tag, True, target))
+            sock.sendall(dialog.bye(to_tag, target))
+            return 1, f"ACCEPTED: {response.code} {response.reason} (hung up)"
+        sock.sendall(dialog.ack(to_tag, False))
+        if accepted:
+            return 1, f"ACCEPTED: {accepted.code} {accepted.reason} (cancelled)"
+        if response.code in REFUSED_CODES:
             return 0, f"REFUSED: {response.code} {response.reason}"
+        return 2, f"INCONCLUSIVE: {response.code} {response.reason}"
 
 
 def main(argv: list[str] | None = None) -> int:

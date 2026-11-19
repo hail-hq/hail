@@ -73,9 +73,9 @@ Run every command from the repo root of the main checkout, whose `.env` holds th
      --number +<E.164 number on the trunk>
    ```
 
-   - `REFUSED` (exit 0): the trunk is locked. DIDWW answers `401` or `407`.
+   - `REFUSED` (exit 0): the trunk is locked. Twilio and Telnyx trunks answer `404` (no trunk matches the address) or `403`; DIDWW answers `401` or `407`. A mistyped number also gets `404`, so take the number from the `move` output.
    - `ACCEPTED` (exit 1): the trunk took a call from a non-carrier address. For Twilio or Telnyx this means LiveKit does not check `allowed_addresses` on this project, so those trunks are not locked. Leave the numbers where they are (no worse than before) and stop: the owner decides the next step.
-   - `NO CONNECTION` (exit 2): the laptop cannot reach port 5060 over TCP. The test says nothing; try another network.
+   - `NO CONNECTION` or `INCONCLUSIVE` (exit 2): no connection to port 5060 over TCP, a dropped connection, or another answer (printed). The test says nothing; try again, or from another network.
 
 7. When all three carriers pass, retire the shared trunk and stop accepting it:
 
@@ -84,7 +84,7 @@ Run every command from the repo root of the main checkout, whose `.env` holds th
    uv run python scripts/ops/sip_trunks.py retire-shared --yes
    ```
 
-   Empty `LIVEKIT_SIP_INBOUND_TRUNK_ID=` in `.env`, copy it to the VM, and repeat the restart in step 4. Then remove the temporary shared-trunk code (follow-up issue linked from the PR).
+   Empty `LIVEKIT_SIP_INBOUND_TRUNK_ID=` in `.env`, copy it to the VM, and repeat the restart in step 4. Then remove the temporary shared-trunk code (issue #475).
 
 ## Rollback
 

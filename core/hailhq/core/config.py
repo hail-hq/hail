@@ -135,7 +135,7 @@ class Settings(BaseSettings):
     didww_voice_in_trunk_id: str = ""
     # Digest password DIDWW sends to the DIDWW LiveKit inbound trunk. Only the
     # operator script reads it (scripts/ops/sip_trunks.py); it sets the same
-    # password on both trunks. Empty = no password on either trunk.
+    # password on both trunks, and refuses to run for DIDWW without it.
     didww_sip_inbound_password: str = ""
 
     # AWS, used today for SES (outbound email). boto3 falls back to its

@@ -71,12 +71,13 @@ jobs:
                 issue_number: existing[0].number,
                 body,
               });
-              // GitHub sends no notification for a body edit.
+              // GitHub sends no notification for a body edit; a comment
+              // notifies the issue's subscribers.
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: existing[0].number,
-                body: '@r13i the SIP allow-list check failed again. Report updated above.',
+                body: 'The SIP allow-list check failed again. Report updated above.',
               });
             } else {
               await github.rest.issues.create({
@@ -85,7 +86,6 @@ jobs:
                 title,
                 body,
                 labels: ['sip-allowlist'],
-                assignees: ['r13i'],
               });
             }
       - name: Fail loudly
