@@ -26,14 +26,17 @@ from pydantic import (
     model_validator,
 )
 
-E164 = re.compile(r"^\+[1-9]\d{1,14}$")
+# ``[0-9]``, not ``\d``: ``\d`` also matches non-ASCII digits, and this
+# pattern is reused where Python flags do not carry (pydantic ``pattern=``).
+E164 = re.compile(r"^\+[1-9][0-9]{1,14}$", re.ASCII)
 
 
 def _e164_or_error(v: str | None) -> str | None:
     """Shared to/from validator for the phone-channel create schemas
     (``CallCreate``, ``SmsCreate``) — one place to tighten the rule or
     reword the error."""
-    if v is not None and not E164.match(v):
+    # fullmatch: ``$`` with ``match`` also accepts a trailing newline.
+    if v is not None and not E164.fullmatch(v):
         raise ValueError("must be E.164 (e.g. +14155551234)")
     return v
 
@@ -495,7 +498,11 @@ class SmsCreate(ConsentAttestationMixin):
             "always use 'HAIL', depending on the carrier. Every other destination, "
             "including the US and Canada, "
             "uses the organization's oldest active SMS-capable number; if none "
-            "exists the request fails with 422. SMS never uses the shared pool."
+            "exists the request fails with 422. SMS never uses the shared pool. "
+            "Trial texts (up to 25, only to the workspace's verified trial "
+            "phone): with no from, Hail uses one when the workspace's own "
+            "number cannot text that US phone; set from to the trial number "
+            "to use one directly."
         ),
     )
     body: str = Field(
@@ -507,11 +514,22 @@ class SmsCreate(ConsentAttestationMixin):
         default_factory=dict,
         description=(
             "Free-form JSON object attached to the message and echoed back "
-            "on reads. Not interpreted by Hail."
+            "on reads. Not interpreted by Hail. The key 'sms_trial' is "
+            "reserved and rejected."
         ),
     )
 
     _validate_e164 = field_validator("to", "from_")(_e164_or_error)
+
+    @field_validator("metadata")
+    @classmethod
+    def _metadata_has_no_reserved_keys(cls, v: dict) -> dict:
+        # Trial texts are counted by this key (sms_trial.SMS_TRIAL_META_KEY;
+        # a literal here because models imports this module). A caller must
+        # not be able to plant it.
+        if "sms_trial" in v:
+            raise ValueError("metadata keys are reserved: sms_trial")
+        return v
 
 
 SmsStatus = Literal["queued", "sent", "delivered", "failed", "undelivered", "received"]
@@ -608,6 +626,77 @@ class SenderIdResponse(BaseModel):
             "The platform's alphanumeric sender id, used on eligible "
             "corridors when custom_sender_id is null."
         ),
+    )
+
+
+class SmsTrialResponse(BaseModel):
+    configured: bool = Field(
+        description="True when this Hail deployment has a trial number set up."
+    )
+    available: bool = Field(
+        description=(
+            "True when trial texts can be sent now. False while the trial "
+            "number waits for carrier approval."
+        )
+    )
+    status: Literal["none", "pending", "verified"] = Field(
+        description=(
+            "The workspace's trial phone: 'none' (no phone yet), 'pending' "
+            "(code sent, not confirmed) or 'verified' (receives trial texts)."
+        )
+    )
+    phone: str | None = Field(
+        description="The trial phone in E.164. Null when status is 'none'."
+    )
+    pending_phone: str | None = Field(
+        description=(
+            "A new phone in E.164 that got a code and is not confirmed yet. "
+            "Until it is, the verified phone keeps getting trial texts. Null "
+            "when no new phone waits."
+        )
+    )
+    code_expires_at: datetime | None = Field(
+        description=(
+            "When the open code expires, for pending_phone when set, else for "
+            "phone. Null when no code is open."
+        )
+    )
+    texts_used: int = Field(description="Trial texts this workspace has sent.")
+    texts_limit: int = Field(description="Trial texts a workspace can send, ever.")
+    texts_left: int = Field(description="Trial texts this workspace can still send.")
+
+
+class SmsTrialPhoneStart(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    phone: str = Field(
+        description=(
+            "Your own US mobile in E.164 (e.g. +14155551234). Hail texts a "
+            "6-digit code to it."
+        )
+    )
+    recipient_consent: Literal[True] = Field(
+        description=(
+            "Must be true: the phone's owner agreed to get the code and the "
+            "trial texts."
+        )
+    )
+    consent_version: str = Field(
+        min_length=1,
+        max_length=40,
+        description="Version of the consent wording the person agreed to.",
+    )
+
+    _validate_e164 = field_validator("phone")(_e164_or_error)
+
+
+class SmsTrialPhoneConfirm(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: str = Field(
+        # ``[0-9]``: ``\d`` also matches non-ASCII digits.
+        pattern=r"^[0-9]{6}$",
+        description="The 6-digit code Hail texted to the trial phone.",
     )
 
 

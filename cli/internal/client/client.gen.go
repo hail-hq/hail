@@ -1053,6 +1053,27 @@ func (e SmsResponseStatus) Valid() bool {
 	}
 }
 
+// Defines values for SmsTrialResponseStatus.
+const (
+	SmsTrialResponseStatusNone     SmsTrialResponseStatus = "none"
+	SmsTrialResponseStatusPending  SmsTrialResponseStatus = "pending"
+	SmsTrialResponseStatusVerified SmsTrialResponseStatus = "verified"
+)
+
+// Valid indicates whether the value is a known member of the SmsTrialResponseStatus enum.
+func (e SmsTrialResponseStatus) Valid() bool {
+	switch e {
+	case SmsTrialResponseStatusNone:
+		return true
+	case SmsTrialResponseStatusPending:
+		return true
+	case SmsTrialResponseStatusVerified:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for SubjectOptionCapabilities.
 const (
 	SubjectOptionCapabilitiesSms   SubjectOptionCapabilities = "sms"
@@ -1649,28 +1670,28 @@ func (e GetNumberOptionsV1NumbersOptionsGetParamsCapabilities) Valid() bool {
 
 // Defines values for ListSmsV1SmsGetParamsStatus.
 const (
-	ListSmsV1SmsGetParamsStatusDelivered   ListSmsV1SmsGetParamsStatus = "delivered"
-	ListSmsV1SmsGetParamsStatusFailed      ListSmsV1SmsGetParamsStatus = "failed"
-	ListSmsV1SmsGetParamsStatusQueued      ListSmsV1SmsGetParamsStatus = "queued"
-	ListSmsV1SmsGetParamsStatusReceived    ListSmsV1SmsGetParamsStatus = "received"
-	ListSmsV1SmsGetParamsStatusSent        ListSmsV1SmsGetParamsStatus = "sent"
-	ListSmsV1SmsGetParamsStatusUndelivered ListSmsV1SmsGetParamsStatus = "undelivered"
+	Delivered   ListSmsV1SmsGetParamsStatus = "delivered"
+	Failed      ListSmsV1SmsGetParamsStatus = "failed"
+	Queued      ListSmsV1SmsGetParamsStatus = "queued"
+	Received    ListSmsV1SmsGetParamsStatus = "received"
+	Sent        ListSmsV1SmsGetParamsStatus = "sent"
+	Undelivered ListSmsV1SmsGetParamsStatus = "undelivered"
 )
 
 // Valid indicates whether the value is a known member of the ListSmsV1SmsGetParamsStatus enum.
 func (e ListSmsV1SmsGetParamsStatus) Valid() bool {
 	switch e {
-	case ListSmsV1SmsGetParamsStatusDelivered:
+	case Delivered:
 		return true
-	case ListSmsV1SmsGetParamsStatusFailed:
+	case Failed:
 		return true
-	case ListSmsV1SmsGetParamsStatusQueued:
+	case Queued:
 		return true
-	case ListSmsV1SmsGetParamsStatusReceived:
+	case Received:
 		return true
-	case ListSmsV1SmsGetParamsStatusSent:
+	case Sent:
 		return true
-	case ListSmsV1SmsGetParamsStatusUndelivered:
+	case Undelivered:
 		return true
 	default:
 		return false
@@ -3659,13 +3680,13 @@ type SmsCreate struct {
 	// ConsentSource Where/how consent was obtained (e.g. 'signup form', 'prior customer relationship'). Required (non-empty) when message_type is 'marketing'.
 	ConsentSource *string `json:"consent_source,omitempty"`
 
-	// From Sender phone number, E.164 format. Must be an active number owned by the organization with the SMS capability. Omitted: destinations where the sender-ID carrier delivers a dynamic alphanumeric sender ID unchanged (about 110 countries: most of Europe, Africa, the Middle East, Asia-Pacific and the Caribbean; one table per carrier in core/hailhq/core/sender_id_corridors.py) use the organization's sender ID, or the platform default 'HAIL' when none is set; Australia (+61) may always use 'HAIL', depending on the carrier. Every other destination, including the US and Canada, uses the organization's oldest active SMS-capable number; if none exists the request fails with 422. SMS never uses the shared pool.
+	// From Sender phone number, E.164 format. Must be an active number owned by the organization with the SMS capability. Omitted: destinations where the sender-ID carrier delivers a dynamic alphanumeric sender ID unchanged (about 110 countries: most of Europe, Africa, the Middle East, Asia-Pacific and the Caribbean; one table per carrier in core/hailhq/core/sender_id_corridors.py) use the organization's sender ID, or the platform default 'HAIL' when none is set; Australia (+61) may always use 'HAIL', depending on the carrier. Every other destination, including the US and Canada, uses the organization's oldest active SMS-capable number; if none exists the request fails with 422. SMS never uses the shared pool. Trial texts (up to 25, only to the workspace's verified trial phone): with no from, Hail uses one when the workspace's own number cannot text that US phone; set from to the trial number to use one directly.
 	From *string `json:"from,omitempty"`
 
 	// MessageType 'marketing' additionally requires a non-empty consent_source. Use 'informational' for transactional/service communications.
 	MessageType *SmsCreateMessageType `json:"message_type,omitempty"`
 
-	// Metadata Free-form JSON object attached to the message and echoed back on reads. Not interpreted by Hail.
+	// Metadata Free-form JSON object attached to the message and echoed back on reads. Not interpreted by Hail. The key 'sms_trial' is reserved and rejected.
 	Metadata *map[string]interface{} `json:"metadata,omitempty"`
 
 	// RecipientConsent Attestation that you have obtained the lawful consent required to contact this recipient. Hail does not verify consent itself — you are responsible for a lawful basis under TCPA/ePrivacy/PECR/CAN-SPAM/GDPR as applicable. Rejected (422) if not true.
@@ -3752,6 +3773,57 @@ type SmsResponseDirection string
 
 // SmsResponseStatus Delivery status: 'queued', 'sent', 'delivered', 'failed', 'undelivered', or 'received' (inbound messages).
 type SmsResponseStatus string
+
+// SmsTrialPhoneConfirm defines model for SmsTrialPhoneConfirm.
+type SmsTrialPhoneConfirm struct {
+	// Code The 6-digit code Hail texted to the trial phone.
+	Code string `json:"code"`
+}
+
+// SmsTrialPhoneStart defines model for SmsTrialPhoneStart.
+type SmsTrialPhoneStart struct {
+	// ConsentVersion Version of the consent wording the person agreed to.
+	ConsentVersion string `json:"consent_version"`
+
+	// Phone Your own US mobile in E.164 (e.g. +14155551234). Hail texts a 6-digit code to it.
+	Phone string `json:"phone"`
+
+	// RecipientConsent Must be true: the phone's owner agreed to get the code and the trial texts.
+	RecipientConsent bool `json:"recipient_consent"`
+}
+
+// SmsTrialResponse defines model for SmsTrialResponse.
+type SmsTrialResponse struct {
+	// Available True when trial texts can be sent now. False while the trial number waits for carrier approval.
+	Available bool `json:"available"`
+
+	// CodeExpiresAt When the open code expires, for pending_phone when set, else for phone. Null when no code is open.
+	CodeExpiresAt *time.Time `json:"code_expires_at"`
+
+	// Configured True when this Hail deployment has a trial number set up.
+	Configured bool `json:"configured"`
+
+	// PendingPhone A new phone in E.164 that got a code and is not confirmed yet. Until it is, the verified phone keeps getting trial texts. Null when no new phone waits.
+	PendingPhone *string `json:"pending_phone"`
+
+	// Phone The trial phone in E.164. Null when status is 'none'.
+	Phone *string `json:"phone"`
+
+	// Status The workspace's trial phone: 'none' (no phone yet), 'pending' (code sent, not confirmed) or 'verified' (receives trial texts).
+	Status SmsTrialResponseStatus `json:"status"`
+
+	// TextsLeft Trial texts this workspace can still send.
+	TextsLeft int `json:"texts_left"`
+
+	// TextsLimit Trial texts a workspace can send, ever.
+	TextsLimit int `json:"texts_limit"`
+
+	// TextsUsed Trial texts this workspace has sent.
+	TextsUsed int `json:"texts_used"`
+}
+
+// SmsTrialResponseStatus The workspace's trial phone: 'none' (no phone yet), 'pending' (code sent, not confirmed) or 'verified' (receives trial texts).
+type SmsTrialResponseStatus string
 
 // SubjectOption The best way for one subject (person or business) to get one type.
 type SubjectOption struct {
@@ -4691,6 +4763,21 @@ type DeleteSmsSuppressionV1SmsSuppressionsNumberDeleteParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
+// GetSmsTrialV1SmsTrialGetParams defines parameters for GetSmsTrialV1SmsTrialGet.
+type GetSmsTrialV1SmsTrialGetParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// StartSmsTrialPhoneV1SmsTrialPhonePostParams defines parameters for StartSmsTrialPhoneV1SmsTrialPhonePost.
+type StartSmsTrialPhoneV1SmsTrialPhonePostParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostParams defines parameters for ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPost.
+type ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
 // GetSmsV1SmsSmsIdGetParams defines parameters for GetSmsV1SmsSmsIdGet.
 type GetSmsV1SmsSmsIdGetParams struct {
 	Authorization *string `json:"authorization,omitempty"`
@@ -4927,6 +5014,12 @@ type CreateSmsV1SmsPostJSONRequestBody = SmsCreate
 
 // PatchSenderIdV1SmsSenderIdPatchJSONRequestBody defines body for PatchSenderIdV1SmsSenderIdPatch for application/json ContentType.
 type PatchSenderIdV1SmsSenderIdPatchJSONRequestBody = SenderIdPatch
+
+// StartSmsTrialPhoneV1SmsTrialPhonePostJSONRequestBody defines body for StartSmsTrialPhoneV1SmsTrialPhonePost for application/json ContentType.
+type StartSmsTrialPhoneV1SmsTrialPhonePostJSONRequestBody = SmsTrialPhoneStart
+
+// ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostJSONRequestBody defines body for ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPost for application/json ContentType.
+type ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostJSONRequestBody = SmsTrialPhoneConfirm
 
 // UnsubscribeV1UnsubscribePostFormdataRequestBody defines body for UnsubscribeV1UnsubscribePost for application/x-www-form-urlencoded ContentType.
 type UnsubscribeV1UnsubscribePostFormdataRequestBody UnsubscribeV1UnsubscribePostFormdataBody
@@ -5528,6 +5621,19 @@ type ClientInterface interface {
 
 	// DeleteSmsSuppressionV1SmsSuppressionsNumberDelete request
 	DeleteSmsSuppressionV1SmsSuppressionsNumberDelete(ctx context.Context, number string, params *DeleteSmsSuppressionV1SmsSuppressionsNumberDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetSmsTrialV1SmsTrialGet request
+	GetSmsTrialV1SmsTrialGet(ctx context.Context, params *GetSmsTrialV1SmsTrialGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// StartSmsTrialPhoneV1SmsTrialPhonePostWithBody request with any body
+	StartSmsTrialPhoneV1SmsTrialPhonePostWithBody(ctx context.Context, params *StartSmsTrialPhoneV1SmsTrialPhonePostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	StartSmsTrialPhoneV1SmsTrialPhonePost(ctx context.Context, params *StartSmsTrialPhoneV1SmsTrialPhonePostParams, body StartSmsTrialPhoneV1SmsTrialPhonePostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostWithBody request with any body
+	ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostWithBody(ctx context.Context, params *ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPost(ctx context.Context, params *ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostParams, body ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetSmsV1SmsSmsIdGet request
 	GetSmsV1SmsSmsIdGet(ctx context.Context, smsId openapi_types.UUID, params *GetSmsV1SmsSmsIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -6529,6 +6635,66 @@ func (c *Client) ListSmsSuppressionsV1SmsSuppressionsGet(ctx context.Context, pa
 
 func (c *Client) DeleteSmsSuppressionV1SmsSuppressionsNumberDelete(ctx context.Context, number string, params *DeleteSmsSuppressionV1SmsSuppressionsNumberDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewDeleteSmsSuppressionV1SmsSuppressionsNumberDeleteRequest(c.Server, number, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetSmsTrialV1SmsTrialGet(ctx context.Context, params *GetSmsTrialV1SmsTrialGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetSmsTrialV1SmsTrialGetRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) StartSmsTrialPhoneV1SmsTrialPhonePostWithBody(ctx context.Context, params *StartSmsTrialPhoneV1SmsTrialPhonePostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewStartSmsTrialPhoneV1SmsTrialPhonePostRequestWithBody(c.Server, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) StartSmsTrialPhoneV1SmsTrialPhonePost(ctx context.Context, params *StartSmsTrialPhoneV1SmsTrialPhonePostParams, body StartSmsTrialPhoneV1SmsTrialPhonePostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewStartSmsTrialPhoneV1SmsTrialPhonePostRequest(c.Server, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostWithBody(ctx context.Context, params *ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostRequestWithBody(c.Server, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPost(ctx context.Context, params *ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostParams, body ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostRequest(c.Server, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -10549,6 +10715,158 @@ func NewDeleteSmsSuppressionV1SmsSuppressionsNumberDeleteRequest(server string, 
 	return req, nil
 }
 
+// NewGetSmsTrialV1SmsTrialGetRequest generates requests for GetSmsTrialV1SmsTrialGet
+func NewGetSmsTrialV1SmsTrialGetRequest(server string, params *GetSmsTrialV1SmsTrialGetParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/sms/trial")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewStartSmsTrialPhoneV1SmsTrialPhonePostRequest calls the generic StartSmsTrialPhoneV1SmsTrialPhonePost builder with application/json body
+func NewStartSmsTrialPhoneV1SmsTrialPhonePostRequest(server string, params *StartSmsTrialPhoneV1SmsTrialPhonePostParams, body StartSmsTrialPhoneV1SmsTrialPhonePostJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewStartSmsTrialPhoneV1SmsTrialPhonePostRequestWithBody(server, params, "application/json", bodyReader)
+}
+
+// NewStartSmsTrialPhoneV1SmsTrialPhonePostRequestWithBody generates requests for StartSmsTrialPhoneV1SmsTrialPhonePost with any type of body
+func NewStartSmsTrialPhoneV1SmsTrialPhonePostRequestWithBody(server string, params *StartSmsTrialPhoneV1SmsTrialPhonePostParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/sms/trial/phone")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostRequest calls the generic ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPost builder with application/json body
+func NewConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostRequest(server string, params *ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostParams, body ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostRequestWithBody(server, params, "application/json", bodyReader)
+}
+
+// NewConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostRequestWithBody generates requests for ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPost with any type of body
+func NewConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostRequestWithBody(server string, params *ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/sms/trial/phone/confirm")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
 // NewGetSmsV1SmsSmsIdGetRequest generates requests for GetSmsV1SmsSmsIdGet
 func NewGetSmsV1SmsSmsIdGetRequest(server string, smsId openapi_types.UUID, params *GetSmsV1SmsSmsIdGetParams) (*http.Request, error) {
 	var err error
@@ -12526,6 +12844,19 @@ type ClientWithResponsesInterface interface {
 	// DeleteSmsSuppressionV1SmsSuppressionsNumberDeleteWithResponse request
 	DeleteSmsSuppressionV1SmsSuppressionsNumberDeleteWithResponse(ctx context.Context, number string, params *DeleteSmsSuppressionV1SmsSuppressionsNumberDeleteParams, reqEditors ...RequestEditorFn) (*DeleteSmsSuppressionV1SmsSuppressionsNumberDeleteResponse, error)
 
+	// GetSmsTrialV1SmsTrialGetWithResponse request
+	GetSmsTrialV1SmsTrialGetWithResponse(ctx context.Context, params *GetSmsTrialV1SmsTrialGetParams, reqEditors ...RequestEditorFn) (*GetSmsTrialV1SmsTrialGetResponse, error)
+
+	// StartSmsTrialPhoneV1SmsTrialPhonePostWithBodyWithResponse request with any body
+	StartSmsTrialPhoneV1SmsTrialPhonePostWithBodyWithResponse(ctx context.Context, params *StartSmsTrialPhoneV1SmsTrialPhonePostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*StartSmsTrialPhoneV1SmsTrialPhonePostResponse, error)
+
+	StartSmsTrialPhoneV1SmsTrialPhonePostWithResponse(ctx context.Context, params *StartSmsTrialPhoneV1SmsTrialPhonePostParams, body StartSmsTrialPhoneV1SmsTrialPhonePostJSONRequestBody, reqEditors ...RequestEditorFn) (*StartSmsTrialPhoneV1SmsTrialPhonePostResponse, error)
+
+	// ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostWithBodyWithResponse request with any body
+	ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostWithBodyWithResponse(ctx context.Context, params *ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostResponse, error)
+
+	ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostWithResponse(ctx context.Context, params *ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostParams, body ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostJSONRequestBody, reqEditors ...RequestEditorFn) (*ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostResponse, error)
+
 	// GetSmsV1SmsSmsIdGetWithResponse request
 	GetSmsV1SmsSmsIdGetWithResponse(ctx context.Context, smsId openapi_types.UUID, params *GetSmsV1SmsSmsIdGetParams, reqEditors ...RequestEditorFn) (*GetSmsV1SmsSmsIdGetResponse, error)
 
@@ -13958,6 +14289,73 @@ func (r DeleteSmsSuppressionV1SmsSuppressionsNumberDeleteResponse) StatusCode() 
 	return 0
 }
 
+type GetSmsTrialV1SmsTrialGetResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *SmsTrialResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r GetSmsTrialV1SmsTrialGetResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetSmsTrialV1SmsTrialGetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type StartSmsTrialPhoneV1SmsTrialPhonePostResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *SmsTrialResponse
+}
+
+// Status returns HTTPResponse.Status
+func (r StartSmsTrialPhoneV1SmsTrialPhonePostResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r StartSmsTrialPhoneV1SmsTrialPhonePostResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *SmsTrialResponse
+}
+
+// Status returns HTTPResponse.Status
+func (r ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type GetSmsV1SmsSmsIdGetResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -15321,6 +15719,49 @@ func (c *ClientWithResponses) DeleteSmsSuppressionV1SmsSuppressionsNumberDeleteW
 		return nil, err
 	}
 	return ParseDeleteSmsSuppressionV1SmsSuppressionsNumberDeleteResponse(rsp)
+}
+
+// GetSmsTrialV1SmsTrialGetWithResponse request returning *GetSmsTrialV1SmsTrialGetResponse
+func (c *ClientWithResponses) GetSmsTrialV1SmsTrialGetWithResponse(ctx context.Context, params *GetSmsTrialV1SmsTrialGetParams, reqEditors ...RequestEditorFn) (*GetSmsTrialV1SmsTrialGetResponse, error) {
+	rsp, err := c.GetSmsTrialV1SmsTrialGet(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetSmsTrialV1SmsTrialGetResponse(rsp)
+}
+
+// StartSmsTrialPhoneV1SmsTrialPhonePostWithBodyWithResponse request with arbitrary body returning *StartSmsTrialPhoneV1SmsTrialPhonePostResponse
+func (c *ClientWithResponses) StartSmsTrialPhoneV1SmsTrialPhonePostWithBodyWithResponse(ctx context.Context, params *StartSmsTrialPhoneV1SmsTrialPhonePostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*StartSmsTrialPhoneV1SmsTrialPhonePostResponse, error) {
+	rsp, err := c.StartSmsTrialPhoneV1SmsTrialPhonePostWithBody(ctx, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseStartSmsTrialPhoneV1SmsTrialPhonePostResponse(rsp)
+}
+
+func (c *ClientWithResponses) StartSmsTrialPhoneV1SmsTrialPhonePostWithResponse(ctx context.Context, params *StartSmsTrialPhoneV1SmsTrialPhonePostParams, body StartSmsTrialPhoneV1SmsTrialPhonePostJSONRequestBody, reqEditors ...RequestEditorFn) (*StartSmsTrialPhoneV1SmsTrialPhonePostResponse, error) {
+	rsp, err := c.StartSmsTrialPhoneV1SmsTrialPhonePost(ctx, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseStartSmsTrialPhoneV1SmsTrialPhonePostResponse(rsp)
+}
+
+// ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostWithBodyWithResponse request with arbitrary body returning *ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostResponse
+func (c *ClientWithResponses) ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostWithBodyWithResponse(ctx context.Context, params *ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostResponse, error) {
+	rsp, err := c.ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostWithBody(ctx, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostResponse(rsp)
+}
+
+func (c *ClientWithResponses) ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostWithResponse(ctx context.Context, params *ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostParams, body ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostJSONRequestBody, reqEditors ...RequestEditorFn) (*ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostResponse, error) {
+	rsp, err := c.ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPost(ctx, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostResponse(rsp)
 }
 
 // GetSmsV1SmsSmsIdGetWithResponse request returning *GetSmsV1SmsSmsIdGetResponse
@@ -17490,6 +17931,91 @@ func ParseDeleteSmsSuppressionV1SmsSuppressionsNumberDeleteResponse(rsp *http.Re
 			return nil, err
 		}
 		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetSmsTrialV1SmsTrialGetResponse parses an HTTP response from a GetSmsTrialV1SmsTrialGetWithResponse call
+func ParseGetSmsTrialV1SmsTrialGetResponse(rsp *http.Response) (*GetSmsTrialV1SmsTrialGetResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetSmsTrialV1SmsTrialGetResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest SmsTrialResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseStartSmsTrialPhoneV1SmsTrialPhonePostResponse parses an HTTP response from a StartSmsTrialPhoneV1SmsTrialPhonePostWithResponse call
+func ParseStartSmsTrialPhoneV1SmsTrialPhonePostResponse(rsp *http.Response) (*StartSmsTrialPhoneV1SmsTrialPhonePostResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &StartSmsTrialPhoneV1SmsTrialPhonePostResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest SmsTrialResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostResponse parses an HTTP response from a ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostWithResponse call
+func ParseConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostResponse(rsp *http.Response) (*ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest SmsTrialResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
 
 	}
 

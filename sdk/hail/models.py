@@ -23,14 +23,14 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-E164 = re.compile(r"^\+[1-9]\d{1,14}$")
+E164 = re.compile(r"^\+[1-9][0-9]{1,14}$", re.ASCII)
 
 
 def _e164_or_error(v: str | None) -> str | None:
     """Shared to/from validator for the phone-channel create schemas
     (``CallCreate``, ``SmsCreate``) — one place to tighten the rule or
     reword the error. Mirrors ``core.schemas._e164_or_error``."""
-    if v is not None and not E164.match(v):
+    if v is not None and not E164.fullmatch(v):
         raise ValueError("must be E.164 (e.g. +14155551234)")
     return v
 
@@ -187,6 +187,14 @@ class SmsCreate(BaseModel):
     message_type: Literal["marketing", "informational"] = "informational"
 
     _validate_e164 = field_validator("to", "from_")(_e164_or_error)
+
+    @field_validator("metadata")
+    @classmethod
+    def _metadata_has_no_reserved_keys(cls, v: dict[str, Any]) -> dict[str, Any]:
+        """Mirrors ``core.schemas.SmsCreate``: ``sms_trial`` is reserved."""
+        if "sms_trial" in v:
+            raise ValueError("metadata keys are reserved: sms_trial")
+        return v
 
 
 SmsStatus = Literal["queued", "sent", "delivered", "failed", "undelivered", "received"]

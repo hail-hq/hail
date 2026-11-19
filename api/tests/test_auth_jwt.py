@@ -17,7 +17,7 @@ from fastapi import Depends, FastAPI
 from hailhq.api import auth, deps
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.core.db import get_session
-from hailhq.core.models import OrganizationMember
+from hailhq.core.models import Organization, OrganizationMember
 from sqlalchemy.ext.asyncio import AsyncSession
 
 _AUTH_URL = "https://issuer.example.com"
@@ -391,6 +391,43 @@ async def test_jwt_principal_carries_sub_as_user_id(
         resp = await client.get("/whoami", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200, resp.text
     assert resp.json()["user_id"] == str(user_id)
+
+
+@pytest.mark.parametrize(
+    "extra,console_session",
+    [
+        ({}, True),
+        ({"azp": "mcp-client"}, False),
+        ({"superadmin": True}, True),
+    ],
+    ids=["console", "oauth_azp", "superadmin_console"],
+)
+async def test_jwt_principal_console_session_needs_no_azp(
+    monkeypatch,
+    jwks_client_factory,
+    base_claims,
+    sign_jwt,
+    jwt_member_pair,
+    async_session: AsyncSession,
+    extra,
+    console_session,
+):
+    """Only a first-party console token (no ``azp``) is a console session.
+    MCP OAuth tokens are JWTs too and always carry ``azp``."""
+    _configure_env(monkeypatch)
+    _install_test_jwks(monkeypatch, jwks_client_factory)
+    user_id, organization_id = jwt_member_pair
+    claims = base_claims(sub=str(user_id), aud="https://api.example.com")
+    claims.update(extra)
+    if extra.get("superadmin"):
+        # The superadmin branch opens the org named by the token.
+        async_session.add(Organization(id=organization_id, origin="human"))
+        await async_session.commit()
+        claims["activeOrganizationId"] = str(organization_id)
+
+    principal = await deps._principal_from_jwt(sign_jwt(claims), async_session)
+    assert principal.console_session is console_session
+    assert principal.organization_id == organization_id
 
 
 async def test_jwt_path_accepts_trailing_slash_audience(
