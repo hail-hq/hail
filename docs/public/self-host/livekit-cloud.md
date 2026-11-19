@@ -87,9 +87,8 @@ dispatch rule**. Hail adds and removes numbers on the trunk itself.
    shared trunk lists the dialed number. Steps and checks: the
    [runbook](https://github.com/hail-hq/hail/blob/main/docs/operations/inbound-trunk-lockdown.md).
 
-   Upgrading a setup whose shared trunk has empty `numbers`: before you set a
-   `LIVEKIT_<CARRIER>_SIP_INBOUND_TRUNK_ID`, run `apply` (it adds
-   `hail-placeholder-shared` to the shared trunk's numbers), or empty
+   Upgrading with a per-carrier key already set: first add
+   `hail-placeholder-shared` to the shared trunk's `numbers`, or empty
    `LIVEKIT_SIP_INBOUND_TRUNK_ID`. A shared trunk with no numbers takes
    calls to every number.
 
