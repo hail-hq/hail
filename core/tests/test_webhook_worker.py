@@ -162,6 +162,100 @@ async def test_tick_failure_schedules_retry(async_session):
 
 
 @pytest.mark.asyncio
+async def test_paused_delivery_preserves_failure_and_resumes_remaining_attempt(
+    async_session,
+):
+    org_id = uuid.uuid4()
+    failed_at = datetime.now(timezone.utc) - timedelta(hours=1)
+    due_at = failed_at + timedelta(minutes=1)
+    sub = WebhookSubscription(
+        organization_id=org_id,
+        target_url="https://hooks.example.com/h",
+        secret_encrypted="plain",
+        event_types=["call.completed"],
+        status="disabled",
+        last_failure_at=failed_at,
+    )
+    async_session.add(sub)
+    await async_session.commit()
+    delivery = WebhookDelivery(
+        subscription_id=sub.id,
+        event_type="call.completed",
+        event_id=uuid.uuid4(),
+        payload={"organization_id": str(org_id), "data": {}},
+        attempt=6,
+        response_status=401,
+        response_body="receiver authentication required",
+        next_attempt_at=due_at,
+    )
+    async_session.add(delivery)
+    await async_session.commit()
+
+    async def accept_delivery(_url, _body, _headers):
+        return 204, ""
+
+    worker = _build_worker(async_session, http_post=accept_delivery)
+    assert await worker.tick() == 0
+
+    await async_session.refresh(delivery)
+    await async_session.refresh(sub)
+    assert delivery.status == "pending"
+    assert delivery.attempt == 6
+    assert delivery.response_status == 401
+    assert delivery.response_body == "receiver authentication required"
+    assert delivery.next_attempt_at == due_at
+    assert sub.last_failure_at == failed_at
+
+    sub.status = "active"
+    await async_session.commit()
+    assert await worker.tick() == 1
+    await async_session.refresh(delivery)
+    assert delivery.status == "succeeded"
+    assert delivery.attempt == 7
+    assert delivery.response_status == 204
+
+
+@pytest.mark.asyncio
+async def test_disable_after_claim_preserves_last_http_failure(async_session):
+    org_id = uuid.uuid4()
+    sub = WebhookSubscription(
+        organization_id=org_id,
+        target_url="https://hooks.example.com/h",
+        secret_encrypted="plain",
+        event_types=["call.completed"],
+    )
+    async_session.add(sub)
+    await async_session.commit()
+    delivery = WebhookDelivery(
+        subscription_id=sub.id,
+        event_type="call.completed",
+        event_id=uuid.uuid4(),
+        payload={"organization_id": str(org_id), "data": {}},
+        attempt=4,
+        response_status=401,
+        response_body="receiver authentication required",
+    )
+    async_session.add(delivery)
+    await async_session.commit()
+
+    async def unexpected_delivery(_url, _body, _headers):
+        pytest.fail("A paused webhook must not send an HTTP request")
+
+    worker = _build_worker(async_session, http_post=unexpected_delivery)
+    assert await worker._claim_batch(async_session) == [delivery.id]
+    sub.status = "disabled"
+    await async_session.commit()
+    await worker._sem.acquire()
+    await worker._deliver(delivery.id)
+
+    await async_session.refresh(delivery)
+    assert delivery.status == "pending"
+    assert delivery.attempt == 4
+    assert delivery.response_status == 401
+    assert delivery.response_body == "receiver authentication required"
+
+
+@pytest.mark.asyncio
 async def test_tick_dead_after_last_retry_bumps_subscription(async_session):
     org_id = uuid.uuid4()
     sub = WebhookSubscription(
