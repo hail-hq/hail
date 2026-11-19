@@ -326,7 +326,11 @@ async def http_tool_specs(session: AsyncSession, conv: Conversation) -> list[Too
         # name break the conversation, and the built-in must win.
         if t.name in RESERVED_TOOL_NAMES:
             logger.warning(
-                "agent %s http tool %s skipped: built-in name", conv.agent_id, t.name
+                "%s %s: agent %s http tool %s skipped: built-in name",
+                conv.channel,
+                conv.id,
+                conv.agent_id,
+                t.name,
             )
             continue
         specs.append(tool_spec(t, conv))
