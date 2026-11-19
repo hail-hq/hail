@@ -815,9 +815,14 @@ def startup_capability_warnings() -> list[str]:
 #   for the second. A self-hosted worker gets it only when asked for by name.
 # - It fails open. When the model is refused (request limit reached), errors,
 #   or does not fit the call's setup, the SDK logs it and the call goes on
-#   with the plain rule below. No call fails because of it.
-# - min_words: the plain rule. A transcribed word, not VAD energy alone, is
-#   needed to interrupt the agent.
+#   with the plain rule below. No call fails because of it. A connection
+#   error is retried for a few seconds first; until the fallback runs, the
+#   other party cannot stop the agent.
+# - min_words: the plain rule, in both modes. A transcribed word, not VAD
+#   energy alone, is needed to interrupt the agent, also after the model says
+#   "interruption".
+# - LiveKit meters the model per request for self-hosted workers: see
+#   docs/public/self-host/livekit-cloud.md.
 # https://docs.livekit.io/agents/logic/turns/adaptive-interruption-handling/
 INTERRUPTION: dict[str, Any] = {"mode": "adaptive", "min_words": 1}
 
