@@ -47,6 +47,24 @@ Hail API dispatches it into a room for each call.
 For the full flow, refer to [Architecture](../architecture.md).
 
 Noise filtering, interruption handling, and call recovery are enabled automatically.
+
+Interruption handling uses LiveKit's
+[adaptive interruption model](https://docs.livekit.io/agents/logic/turns/adaptive-interruption-handling/):
+the agent keeps talking over a short "okay" and stops for a real interruption.
+LiveKit meters it for self-hosted workers: a request is one check, sent while
+the other party speaks over the agent, with a monthly development allowance
+(40,000 requests when this was written). Past the allowance, the free plan
+stops the model and paid plans bill per request. Whenever the model is not
+available, calls go on with the plain rule: one transcribed word stops the
+agent. Current numbers:
+[Quotas and limits](https://docs.livekit.io/deploy/admin/quotas-and-limits/),
+and your project's own limits under Settings in LiveKit Cloud.
+
+```bash
+# Worker environment. Turns the model off: no requests are sent, and every
+# call uses the plain rule. Restart the voice worker after changing it.
+HAIL_ADAPTIVE_INTERRUPTION=false
+```
 Run the API and voicebot worker from the same release.
 
 ## 4. Inbound calls
