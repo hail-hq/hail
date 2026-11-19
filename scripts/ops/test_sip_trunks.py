@@ -184,7 +184,9 @@ async def test_move_takes_only_the_carriers_numbers(monkeypatch) -> None:
     # The shared trunk keeps a placeholder, so it never matches every number.
     assert "hail-placeholder-shared" in sip.trunks["ST_shared"].numbers
     assert "+14155550101" in sip.trunks["ST_shared"].numbers
-    assert any("skip +14155550199" in line for line in plan)
+    # No live row: a released number leaves the shared trunk.
+    assert "+14155550199" not in sip.trunks["ST_shared"].numbers
+    assert "removed +14155550199" in plan
 
     await st.move(sip, DATA, SPECS["telnyx"], back=True, yes=True)
     assert list(sip.trunks["ST_tx"].numbers) == ["hail-placeholder-telnyx"]
@@ -290,4 +292,7 @@ async def test_interrupted_remove_is_found_and_put_back(monkeypatch) -> None:
 async def test_apply_skips_a_deleted_shared_trunk() -> None:
     sip = FakeSip(trunk("ST_other", "other"), rule_trunks=())
     plan = await st.apply(sip, DATA, SPECS["twilio"], yes=True)
-    assert not any("shared trunk" in line for line in plan)
+    assert any(
+        line.startswith("WARNING: LIVEKIT_SIP_INBOUND_TRUNK_ID") for line in plan
+    )
+    assert list(sip.trunks["ST_other"].numbers) == []

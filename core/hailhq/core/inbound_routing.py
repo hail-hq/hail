@@ -53,8 +53,7 @@ async def register(db: AsyncSession, lk: LiveKitClient, number: PhoneNumber) -> 
             "carrier_attach", exc, config=_is_config_error(exc)
         ) from exc
     try:
-        await _remove_from_shared_trunk(lk, trunk_id, number.e164)
-        await lk.add_inbound_number(trunk_id, number.e164)
+        await _add_to_carrier_trunk(lk, trunk_id, number.e164)
     except Exception as exc:
         # Do not leave the carrier pointing at a LiveKit trunk that refuses
         # the number: callers would hear a failure tone until someone retries.
@@ -99,28 +98,41 @@ async def unregister(db: AsyncSession, lk: LiveKitClient, number: PhoneNumber) -
         await _remove_from_shared_trunk(lk, trunk_id, number.e164)
     except Exception:
         # The carrier is detached and the carrier trunk cleared: the number
-        # is unregistered. The next register removes this leftover first.
-        logger.warning(
+        # is unregistered and the carrier sends it no calls. The leftover is
+        # removed by the next register, or by sip_trunks.py move.
+        logger.exception(
             "number %s: removal from the shared inbound trunk failed",
             number.e164,
-            exc_info=True,
         )
     number.inbound_registered_at = None
     await db.flush()
 
 
+async def _add_to_carrier_trunk(lk: LiveKitClient, trunk_id: str, e164: str) -> None:
+    """Add, and once retry after a leftover shared-trunk entry is removed.
+
+    Temporary, while numbers move to per-carrier trunks
+    (docs/operations/inbound-trunk-lockdown.md; removal: issue #475). A
+    number registered before its carrier got its own trunk can still be on
+    the shared trunk, and LiveKit lists a number on one trunk only, so the
+    add is refused. An unregistered number takes no calls, so removing the
+    leftover loses nothing. The shared trunk is touched only after a refusal."""
+    try:
+        await lk.add_inbound_number(trunk_id, e164)
+        return
+    except Exception:
+        shared = settings.livekit_sip_inbound_trunk_id
+        if not shared or shared == trunk_id:
+            raise
+    await _remove_from_shared_trunk(lk, trunk_id, e164)
+    await lk.add_inbound_number(trunk_id, e164)
+
+
 async def _remove_from_shared_trunk(
     lk: LiveKitClient, trunk_id: str, e164: str
 ) -> None:
-    """Temporary, while numbers move to per-carrier trunks
-    (docs/operations/inbound-trunk-lockdown.md; removal: issue #475). A
-    number registered before its carrier got its own trunk is still listed
-    on the shared trunk, and LiveKit lists a number on one trunk only.
-    ``register`` calls this first, so a leftover entry never blocks the add
-    (an unregistered number takes no calls, so nothing is lost).
-    ``unregister`` calls it too, best effort: a deleted shared trunk
-    (``not_found``) holds nothing, and any leftover is removed by the next
-    ``register``."""
+    """Drop ``e164`` from the shared trunk when a carrier has its own trunk.
+    A deleted shared trunk (``not_found``) holds nothing: that is done."""
     shared = settings.livekit_sip_inbound_trunk_id
     if not shared or shared == trunk_id:
         return

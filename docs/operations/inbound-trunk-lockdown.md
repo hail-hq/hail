@@ -63,7 +63,7 @@ Run every command from the repo root of the main checkout, whose `.env` holds th
    uv run python scripts/ops/sip_trunks.py status
    ```
 
-   Then call a Hail-owned number of that carrier _(chat)_ from a phone. The agent must answer. If it does not, roll back that carrier (below) before the next one.
+   `move` also takes numbers with no live row (released) off the shared trunk. Then call a Hail-owned number of that carrier _(chat)_ from a phone. The agent must answer. If it does not, roll back that carrier (below) before the next one.
 
 6. Negative test, once per carrier, from a laptop (not a carrier address), at a Hail-owned number on that carrier's trunk _(chat)_:
 

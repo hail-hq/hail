@@ -153,6 +153,11 @@ async def apply(sip, data: dict, spec: Spec, yes: bool) -> list[str]:
             await sip.update_inbound_trunk_fields(
                 shared, numbers=ListUpdate(add=[data["shared_placeholder"]])
             )
+    elif shared:
+        plan.append(
+            f"WARNING: LIVEKIT_SIP_INBOUND_TRUNK_ID {shared} is not a LiveKit "
+            "trunk: no shared placeholder set. Empty the key if it was retired."
+        )
     if password:
         # DIDWW first: it sends the password only when LiveKit asks. For a
         # new trunk nothing asks yet. A changed password fails DIDWW calls
@@ -261,7 +266,8 @@ async def move(
         f"move {len(movable)} {spec.carrier} number(s) from {src.name} to {dst.name}",
     ]
     plan.extend(f"  {n}" for n in movable)
-    plan.extend(f"skip {n}: no live number row (left on {src.name})" for n in skipped)
+    # A released number takes no calls: it should be on no trunk at all.
+    plan.extend(f"remove {n} from {src.name}: no live number row" for n in skipped)
     if not yes:
         return plan
     # Without an entry the source trunk would match every dialed number.
@@ -280,6 +286,11 @@ async def move(
             await _recover(sip, number, src, dst)
             raise
         plan.append(f"moved {number}")
+    for number in skipped:
+        await sip.update_inbound_trunk_fields(
+            src.sip_trunk_id, numbers=ListUpdate(remove=[number])
+        )
+        plan.append(f"removed {number}")
     return plan
 
 
