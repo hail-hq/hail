@@ -16,15 +16,31 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("original_target", "target_change"),
+    [
+        ("https://hooks.example.com/receive", "https://other.example.com/hook"),
+        ("https://hooks.example.com/receive", "https://hooks.example.com/receive/"),
+        (
+            "https://hooks.example.com/receive?value=one",
+            "https://hooks.example.com/receive?value=one/",
+        ),
+    ],
+)
 async def test_receiver_authorization_is_encrypted_and_write_only(
-    client, auth_headers, async_session, webhook_secret_key
+    client,
+    auth_headers,
+    async_session,
+    webhook_secret_key,
+    original_target,
+    target_change,
 ):
     authorization = "Bearer cursor_receiver_test_key"
     created = await client.post(
         "/webhooks",
         headers=auth_headers,
         json={
-            "target_url": "https://hooks.example.com/receive",
+            "target_url": original_target,
             "event_types": ["call.completed"],
             "authorization": authorization,
         },
@@ -70,7 +86,7 @@ async def test_receiver_authorization_is_encrypted_and_write_only(
     changed = await client.patch(
         f"/webhooks/{sub_id}",
         headers=auth_headers,
-        json={"target_url": "https://other.example.com/hook"},
+        json={"target_url": target_change},
     )
     assert changed.status_code == 422
     assert authorization not in changed.text

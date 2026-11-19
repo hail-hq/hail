@@ -46,7 +46,7 @@ from hailhq.core.schemas import (
     WebhookSubscriptionResponse,
 )
 from hailhq.core.secret_cipher import SecretCipher
-from hailhq.core.urls import canonical_url
+from hailhq.core.urls import same_request_url
 from hailhq.core.webhook_events import WebhookEventType
 from pydantic import SecretStr
 from sqlalchemy import func, select, update
@@ -262,7 +262,7 @@ async def patch_subscription(
         if (
             sub.authorization_encrypted is not None
             and authorization is None
-            and canonical_url(body.target_url) != canonical_url(sub.target_url)
+            and not same_request_url(body.target_url, sub.target_url)
         ):
             raise unprocessable(
                 "Enter the Authorization header again or remove it when changing the target URL.",

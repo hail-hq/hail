@@ -56,3 +56,10 @@ build passed. Fixture rendering and interactions passed at 1500px, 390px, and
 320px under both color preferences; screenshots inspected. The current console
 uses its existing light palette under both preferences. No production writes or
 live Cursor requests were made. Independent committed-branch review follows.
+
+Review fixes: request-target comparison now preserves path and query slashes,
+while treating equivalent root URLs alike. Token redaction handles multiple
+scheme separators. Explicit receiver Authorization takes precedence over legacy
+URL Basic credentials. All three regressions failed before their fixes and passed
+afterward. Focused backend checks: 69 passed; API/idempotency: 39 passed; console:
+65 passed. The full core suite is being rerun on the final transport change.

@@ -232,7 +232,8 @@ class WebhookWorker:
             # A receiver or HTTP exception can reflect its request credentials.
             # Keep those out of the delivery inspector and audit history.
             if authorization:
-                for credential in (authorization, authorization.partition(" ")[2]):
+                parts = authorization.split(None, 1)
+                for credential in (authorization, parts[-1]):
                     if credential:
                         resp_body = (resp_body or "").replace(credential, "[redacted]")
 

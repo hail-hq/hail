@@ -23,13 +23,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("receiver_raises", [False, True])
+@pytest.mark.parametrize("spacing", [" ", "  "])
 async def test_authenticated_receiver_gets_authorization_and_signed_event(
-    async_session, receiver_raises
+    async_session, receiver_raises, spacing
 ):
     from hailhq.core.secret_cipher import SecretCipher, generate_key
 
     cipher = SecretCipher(generate_key())
-    authorization = "Bearer cursor_receiver_test_key"
+    authorization = "Bearer" + spacing + "cursor_receiver_test_key"
     org_id = uuid.uuid4()
     sub = WebhookSubscription(
         organization_id=org_id,
@@ -54,7 +55,7 @@ async def test_authenticated_receiver_gets_authorization_and_signed_event(
         assert headers["X-Hail-Signature"].startswith("t=")
         if receiver_raises:
             raise RuntimeError("x" * 4080 + authorization)
-        return 200, "echo: " + authorization + " / cursor_receiver_test_key"
+        return 200, "echo:" + authorization + '\n{"token":"cursor_receiver_test_key"}'
 
     worker = _build_worker(async_session, http_post=receiver, decrypt=cipher.decrypt)
     assert await worker.tick() == 1
@@ -123,7 +124,8 @@ def _build_worker(
 
 
 @pytest.mark.asyncio
-async def test_worker_reaches_authenticated_http_receiver(async_session):
+@pytest.mark.parametrize("url_userinfo", ["", "unused:password@"])
+async def test_worker_reaches_authenticated_http_receiver(async_session, url_userinfo):
     from functools import partial
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
     from threading import Thread
@@ -158,7 +160,7 @@ async def test_worker_reaches_authenticated_http_receiver(async_session):
     thread = Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
-        target = f"http://127.0.0.1:{server.server_port}/events"
+        target = f"http://{url_userinfo}127.0.0.1:{server.server_port}/events"
         post = partial(httpx_post, allow_private_networks=True)
         status, _ = await post(target, b"{}", {})
         assert status == 401

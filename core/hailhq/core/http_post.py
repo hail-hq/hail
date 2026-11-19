@@ -74,5 +74,12 @@ async def httpx_post(
         except UnsafeUrlError as exc:
             raise PrivateNetworkBlockedError(str(exc)) from exc
     async with httpx.AsyncClient(timeout=timeout_seconds) as client:
-        resp = await client.post(url, content=body, headers=headers)
+        # An explicit receiver header takes precedence over Basic credentials
+        # embedded in a legacy target URL. HTTPX otherwise overwrites it.
+        auth = (
+            httpx.Auth()
+            if any(name.lower() == "authorization" for name in headers)
+            else httpx.USE_CLIENT_DEFAULT
+        )
+        resp = await client.post(url, content=body, headers=headers, auth=auth)
         return resp.status_code, resp.text

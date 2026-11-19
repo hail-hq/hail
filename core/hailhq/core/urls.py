@@ -22,6 +22,8 @@ comparison, reach for these helpers. URLs are not strings.
 
 from __future__ import annotations
 
+import httpx
+
 
 def canonical_url(url: str) -> str:
     """Strip every trailing ``/`` from a URL. The canonical form for storage."""
@@ -52,4 +54,25 @@ def join_url(base: str, path: str) -> str:
     return f"{canonical_url(base)}/{path.lstrip('/')}"
 
 
-__all__ = ["canonical_url", "join_url", "url_variants"]
+def same_request_url(left: str, right: str) -> bool:
+    """Compare credential destinations without dropping path/query slashes.
+
+    HTTPX normalizes the host, port and root path as it does when sending.
+    Configuration canonicalization is unsuitable for credential binding.
+    """
+    try:
+        urls = [httpx.URL(value) for value in (left, right)]
+    except (httpx.InvalidURL, ValueError):
+        return False
+    if any(
+        not url.is_absolute_url or url.scheme not in {"http", "https"} for url in urls
+    ):
+        return False
+    targets = [
+        (url.scheme, url.host, url.port, url.userinfo, url.raw_path, url.fragment)
+        for url in urls
+    ]
+    return targets[0] == targets[1]
+
+
+__all__ = ["canonical_url", "join_url", "same_request_url", "url_variants"]
