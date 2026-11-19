@@ -654,7 +654,9 @@ async def test_move_back_works_while_the_carrier_key_is_set(monkeypatch) -> None
     monkeypatch.setattr(settings, "livekit_telnyx_sip_inbound_trunk_id", "ST_tx")
     sip = FakeSip(
         trunk("ST_shared", "shared", ["hail-placeholder-shared"]),
-        trunk("ST_tx", "hail-inbound-telnyx", ["hail-placeholder-telnyx", "+14155550100"]),
+        trunk(
+            "ST_tx", "hail-inbound-telnyx", ["hail-placeholder-telnyx", "+14155550100"]
+        ),
     )
     await st.move(sip, DATA, SPECS["telnyx"], back=True, yes=True)
     assert "+14155550100" in sip.trunks["ST_shared"].numbers
