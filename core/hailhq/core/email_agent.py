@@ -33,14 +33,7 @@ from hailhq.core.email_mime import (
 )
 from hailhq.core.forward_targets import normalize_address
 from hailhq.core.jsonb import merge_object
-from hailhq.core.models import (
-    CALLER_EMAIL_MARK,
-    Agent,
-    Email,
-    EmailDomain,
-    PhoneNumber,
-    Sms,
-)
+from hailhq.core.models import Agent, Email, EmailDomain, PhoneNumber, Sms
 from hailhq.core.prompts import (
     TEAM_EMAIL_LABEL,
     SenderTrust,
@@ -89,7 +82,6 @@ __all__ = [
     "email_thread",
     "finish_reply",
     "is_authenticated",
-    "may_have_reached_someone",
     "prior_reply",
     "proves_sender",
     "queue_decision",
@@ -240,7 +232,7 @@ async def sender_refusal(
     return None
 
 
-def may_have_reached_someone():
+def _may_have_reached_someone():
     """Any email row but one SES proved it never took."""
     return or_(
         Email.status != "failed",
@@ -282,7 +274,7 @@ async def replies_in_thread(
             and_(
                 Email.metadata_["thread_sender"].astext == sender,
                 not_this_run(Email),
-                may_have_reached_someone(),
+                _may_have_reached_someone(),
             ),
         ),
     )
@@ -685,9 +677,6 @@ def email_history_filter(sender: str, *, allow_call_mail: bool = False):
                 Email.metadata_["call_id"].astext.is_not(None),
                 ~has_key("forwarded_from"),
                 ~has_key("system_kind"),
-                # A caller email holds text the caller dictated: history
-                # must not quote it back as the team's own mail.
-                ~has_key(CALLER_EMAIL_MARK),
             ),
         )
     return and_(
@@ -888,7 +877,7 @@ async def tool_sends_for_reply(db: AsyncSession, inbound: Email) -> int:
             model.metadata_["inbound_email_id"].astext == str(inbound.id),
         )
         if model is Email:
-            stmt = stmt.where(may_have_reached_someone())
+            stmt = stmt.where(_may_have_reached_someone())
         total += int((await db.execute(stmt)).scalar_one() or 0)
     return total
 

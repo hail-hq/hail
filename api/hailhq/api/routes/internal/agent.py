@@ -14,9 +14,7 @@ suppression-list membership or a member's address to the callee.
 The agent never supplies addresses: SMS always targets the call's
 counterpart (``calls.to_e164`` on outbound, ``calls.from_e164`` on inbound);
 email targets a directory name resolved
-here, scoped to the call's org. The one exception is ``/email-caller``:
-an agent that opted in may email the person on the call at an address they
-gave and confirmed, one address and a few emails per call.
+here, scoped to the call's org.
 """
 
 from __future__ import annotations
@@ -26,7 +24,7 @@ import logging
 import re
 from datetime import datetime, timedelta, timezone
 from math import ceil
-from typing import Annotated, Any, Literal, NamedTuple
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -51,7 +49,6 @@ from hailhq.api.routes.emails import (
 from hailhq.api.routes.internal.auth import verify_internal_request
 from hailhq.api.routes.sms import deliver_sms
 from hailhq.core.agent_caps import check_agent_send_allowed
-from hailhq.core.agent_tools import email_caller
 from hailhq.core.agent_tools.send_email import (
     MAX_BODY_CHARS as EMAIL_MAX_BODY_CHARS,
 )
@@ -81,8 +78,6 @@ from hailhq.core.compliance_gate import (
     check_email_allowed,
     check_handover_allowed,
     check_sms_allowed,
-    inbox_suppressed,
-    mailbox_key,
     normalize_recipient,
 )
 from hailhq.core.contact_ids import normalize_contact_id, parse_contact_id
@@ -93,7 +88,6 @@ from hailhq.core.email_agent import (
 )
 from hailhq.core.email_agent import (
     MAX_TOOL_SENDS,
-    may_have_reached_someone,
     reply_references,
     reply_subject,
     routed_agent,
@@ -123,8 +117,6 @@ from hailhq.core.handover import (
 )
 from hailhq.core.internal_webhook import quote_call_price, quotes_enabled
 from hailhq.core.models import (
-    CALLER_EMAIL_MARK,
-    CALLER_EMAIL_ROWS_SQL,
     Agent,
     AgentHandoverContact,
     Call,
@@ -132,7 +124,6 @@ from hailhq.core.models import (
     Email,
     EmailAttachment,
     EmailDomain,
-    Organization,
     PhoneNumber,
     Sms,
 )
@@ -157,11 +148,10 @@ from hailhq.core.text_agent import (
     replies_in_thread,
     thread_lock_key,
 )
-from hailhq.core.threads import is_e164, phone_counterpart
+from hailhq.core.threads import is_e164
 from hailhq.core.webhook_fanout import call_event_data, fanout_call_event
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field
-from sqlalchemy import select, text, update
-from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -271,7 +261,7 @@ def _other_party(call: Call) -> str | None:
     """The person on the line: the caller on inbound, the callee on outbound."""
     if call.transport == "browser":
         return call.metadata_.get("browser_contacts", {}).get("sms")
-    return phone_counterpart(call.direction, call.from_e164, call.to_e164)
+    return call.from_e164 if call.direction == "inbound" else call.to_e164
 
 
 async def _prior_send(
@@ -314,20 +304,6 @@ async def _record_browser_outcome(db, call_id, invocation_id, message):
     ]
     call.metadata_ = meta
     await db.commit()
-
-
-def _email_replay(prior: Email) -> AgentSendResponse:
-    """The answer to a retried email send, from the row the first try wrote.
-    queued: in flight, never send again. failed or bounced: not delivered."""
-    ok = prior.status not in ("failed", "bounced")
-    return AgentSendResponse(
-        ok=ok,
-        spoken=(
-            "The email is still being submitted. Do not send it again."
-            if prior.status == "queued"
-            else _SPOKEN_EMAIL_SENT if ok else _SPOKEN_EMAIL_FAILED
-        ),
-    )
 
 
 def _ambiguous_recipient(name: str) -> AgentSendResponse:
@@ -496,7 +472,7 @@ async def _send_sms_to(
     return AgentSendResponse(ok=True, spoken=sent)
 
 
-async def _send_email_row(
+async def _send_email_to(
     db: AsyncSession,
     email_provider: EmailProvider,
     org: UUID,
@@ -510,21 +486,18 @@ async def _send_email_row(
     reply_parent: Email | None = None,
     reply_domain: EmailDomain | None = None,
     attachment_rows: list[EmailAttachment] | None = None,
-) -> tuple[AgentSendResponse, Email | None]:
+) -> AgentSendResponse:
     """Gate, cap, pick the sender, write the row, audit, and deliver one
-    email to the ``recipient`` the caller chose: a member resolved from the
-    directory, or the person on the call (``/email-caller``). Returns the
-    answer and the row, or None when nothing was written."""
+    email to a member the caller resolved from the directory."""
     gate = await check_email_allowed(db, org, [recipient])
     if not gate.allowed:
-        denied = await _deny(
+        return await _deny(
             org,
             action="agent.email.blocked",
             resource_type="email",
             spoken=_SPOKEN_NOT_ALLOWED,
             payload={**meta, "reason": gate.reason, "checks": gate.checks},
         )
-        return denied, None
 
     # Same agent-caps gate as the public /emails route — one normalized
     # recipient for voicebot sends (no cc/bcc fan-out on this path).
@@ -532,14 +505,13 @@ async def _send_email_row(
         db, org, "email", [normalize_recipient(recipient)]
     )
     if cap_denial is not None:
-        denied = await _deny(
+        return await _deny(
             org,
             action="agent.email.blocked",
             resource_type="email",
             spoken=_SPOKEN_NOT_ALLOWED,
             payload={**meta, "reason": "agent_caps", "detail": cap_denial.reason},
         )
-        return denied, None
 
     try:
         # An agent cannot name a sending domain. With several verified custom
@@ -548,7 +520,7 @@ async def _send_email_row(
         # hail-mail address, as it does on POST /emails.
         sd = reply_domain or await resolve_sender(db, org, None, allow_ambiguous=True)
     except HTTPException:
-        return AgentSendResponse(ok=False, spoken=_SPOKEN_EMAIL_UNCONFIGURED), None
+        return AgentSendResponse(ok=False, spoken=_SPOKEN_EMAIL_UNCONFIGURED)
 
     email = Email(
         organization_id=org,
@@ -605,8 +577,8 @@ async def _send_email_row(
             payload={**meta, "end_reason": err},
             actor_kind="system",
         )
-        return AgentSendResponse(ok=False, spoken=_SPOKEN_EMAIL_FAILED), email
-    return AgentSendResponse(ok=True, spoken=_SPOKEN_EMAIL_SENT), email
+        return AgentSendResponse(ok=False, spoken=_SPOKEN_EMAIL_FAILED)
+    return AgentSendResponse(ok=True, spoken=_SPOKEN_EMAIL_SENT)
 
 
 async def _shared_denial(db: AsyncSession, call: Call) -> tuple[str, str] | None:
@@ -1391,7 +1363,7 @@ async def agent_email_run_send_email(
 
     if await tool_sends_for_reply(db, inbound) >= MAX_TOOL_SENDS:
         return AgentSendResponse(ok=False, spoken=_SPOKEN_RUN_LIMIT)
-    response, _ = await _send_email_row(
+    return await _send_email_to(
         db,
         email_provider,
         org,
@@ -1409,7 +1381,6 @@ async def agent_email_run_send_email(
         ),
         attachment_rows=files,
     )
-    return response
 
 
 @router.post("/email-run/send-sms", response_model=AgentSendResponse)
@@ -1482,7 +1453,15 @@ async def agent_send_email(
         # bounce means the message didn't reach the recipient. "complained"
         # stays ok: the send itself succeeded, the recipient just flagged it
         # afterward. Mirrors the SMS path's failed/undelivered exclusion.
-        return _email_replay(prior)
+        ok = prior.status not in ("failed", "bounced")
+        return AgentSendResponse(
+            ok=ok,
+            spoken=(
+                "The email is still being submitted. Do not send it again."
+                if prior.status == "queued"
+                else _SPOKEN_EMAIL_SENT if ok else _SPOKEN_EMAIL_FAILED
+            ),
+        )
 
     if call.status != "in_progress":
         return AgentSendResponse(ok=False, spoken=_SPOKEN_CALL_UNAVAILABLE)
@@ -1533,7 +1512,7 @@ async def agent_send_email(
             recipient = await _member_email(db, org, body.recipient_name)
             if isinstance(recipient, AgentSendResponse):
                 return recipient
-        response, _ = await _send_email_row(
+        return await _send_email_to(
             db,
             email_provider,
             org,
@@ -1546,7 +1525,6 @@ async def agent_send_email(
             reply_parent=parent,
             attachment_rows=files,
         )
-        return response
 
     if call.transport == "browser":
         if not await email_provider_ready():
@@ -1722,254 +1700,6 @@ async def agent_send_email(
         )
         return AgentSendResponse(ok=False, spoken=_SPOKEN_EMAIL_FAILED)
     return AgentSendResponse(ok=True, spoken=_SPOKEN_EMAIL_SENT)
-
-
-class AgentEmailCallerRequest(AgentSendBase):
-    to_address: str = Field(
-        min_length=3,
-        max_length=email_caller.MAX_ADDRESS_CHARS,
-        pattern=email_caller.ADDRESS_PATTERN,
-    )
-    subject: str = Field(min_length=1, max_length=MAX_SUBJECT_CHARS)
-    body_text: str = Field(min_length=1, max_length=email_caller.MAX_BODY_CHARS)
-    # From the dispatch metadata. Missing: the mirrored organizations table.
-    org_name: str | None = Field(default=None, max_length=500)
-
-
-# The caps count marked rows; the predicate is the partial index's own SQL
-# (models.CALLER_EMAIL_ROWS_SQL) so the planner uses the index.
-_CAP_WINDOW = timedelta(hours=24)
-
-
-async def _record_caller_email(
-    db: AsyncSession, call_id: UUID, invocation: UUID, row: Email
-) -> None:
-    """Write the call's ``email_caller`` event for this send, once: the
-    partial unique index ``call_events_email_caller_uq`` drops a second
-    write (a retry), so no lock is needed. The address is not copied into
-    this event: ``email_id`` leads to the email row. (The spoken turns still
-    hold what the caller said, as for any call.)
-    ``status`` is the status right after the send; the email's own events
-    carry what happens later."""
-    await db.execute(
-        pg_insert(CallEvent)
-        .values(
-            call_id=call_id,
-            kind=email_caller.EVENT_KIND,
-            payload={
-                "tool_invocation_id": str(invocation),
-                "email_id": str(row.id),
-                "subject": row.subject,
-                "status": row.status,
-            },
-        )
-        .on_conflict_do_nothing()
-    )
-    await db.commit()
-
-
-async def _record_caller_email_safely(
-    db: AsyncSession, call_id: UUID, invocation: UUID, row: Email
-) -> None:
-    """``_record_caller_email`` after the email was handed over: a failure
-    is logged, never reported as a failed send (the agent would send
-    again)."""
-    try:
-        await _record_caller_email(db, call_id, invocation, row)
-    except Exception:
-        logger.warning(
-            "email_caller event not written for call_id=%s", call_id, exc_info=True
-        )
-        await db.rollback()
-
-
-class _CallerEmailRow(NamedTuple):
-    """One caller email of the last 24 hours, as the caps read it."""
-
-    address: str  # lowercased
-    status: str
-    call_id: str | None
-    caller_e164: str | None
-
-
-def _caller_cap_denial(
-    rows: list[_CallerEmailRow],
-    *,
-    call_id: UUID,
-    caller: str,
-    recipient: str,
-) -> tuple[str, str] | None:
-    """``(spoken, audit_reason)`` when a cap stops this send, else None.
-
-    ``rows`` are the org's caller emails of the last 24 hours that may have
-    gone out. Each check uses the stricter comparison: an address is new
-    to a call or a caller when its lowercased form is new (so ``a+x@`` and
-    ``a@``, maybe two inboxes, are two addresses); the per-address cap
-    counts by ``mailbox_key`` (so ``+tags`` and Gmail dots are one inbox). A
-    bounced email counts toward the totals but does not hold its address.
-    One address per call: the agent reads it back and gets a yes first."""
-    if len(rows) >= email_caller.MAX_EMAILS_PER_ORG_PER_DAY:
-        return "I can't send more emails right now.", "org_daily_cap"
-    # This call's own rules first, so the refusal names the rule it broke.
-    this_call = [r for r in rows if r.call_id == str(call_id)]
-    if len(this_call) >= email_caller.MAX_EMAILS_PER_CALL:
-        return "That is the limit of emails for one call.", "call_cap"
-    if any(r.address != recipient for r in this_call if r.status != "bounced"):
-        return (
-            "I can only email the address I already used on this call.",
-            "one_address",
-        )
-    mine = [r for r in rows if r.caller_e164 == caller]
-    if len(mine) >= email_caller.MAX_EMAILS_PER_CALLER_PER_DAY:
-        return "I can't send you more emails today.", "caller_daily_cap"
-    addresses = {r.address for r in mine if r.status != "bounced"} | {recipient}
-    if len(addresses) > email_caller.MAX_ADDRESSES_PER_CALLER_PER_DAY:
-        return (
-            "I can't email another address today.",
-            "caller_daily_addresses",
-        )
-    # Caller ID can be faked, so the per-number caps alone do not protect
-    # one inbox from many calls.
-    inbox = mailbox_key(recipient)
-    to_inbox = [r for r in rows if mailbox_key(r.address) == inbox]
-    if len(to_inbox) >= email_caller.MAX_EMAILS_PER_ADDRESS_PER_DAY:
-        return "I can't send more emails to that address today.", "address_daily_cap"
-    return None
-
-
-@router.post("/email-caller", response_model=AgentSendResponse)
-async def agent_email_caller(
-    body: AgentEmailCallerRequest,
-    db: Annotated[AsyncSession, Depends(get_session)],
-    email_provider: Annotated[EmailProvider, Depends(get_email_provider)],
-) -> AgentSendResponse:
-    """Email the person on the call at an address they gave and confirmed.
-
-    Opt-in per agent (``agents.email_caller_enabled``), checked on every
-    send. Caps (``email_caller``): per call, per caller number per day, per
-    org per day. The body is wrapped in fixed lines the agent cannot change.
-    The send itself is the directory send's path: suppression, velocity and
-    agent caps, the org's sending domain, and normal email billing.
-    """
-    call = await _load_call_for_update(db, body.call_id)
-    await _tag_call(db, call)
-    if call is None:
-        return AgentSendResponse(ok=False, spoken=_SPOKEN_CALL_UNAVAILABLE)
-    org = call.organization_id
-
-    # Idempotent replay first, as on /send-email: the original can still be
-    # sending when the call ends.
-    prior = await _prior_send(db, Email, org, body.tool_invocation_id)
-    if prior is not None:
-        # Answer from the row before the event write: a rollback there
-        # expires it.
-        replay = _email_replay(prior)
-        if prior.status != "queued":
-            # The original may have stopped before writing the call event.
-            await _record_caller_email_safely(
-                db, call.id, body.tool_invocation_id, prior
-            )
-        return replay
-
-    if call.status != "in_progress":
-        return AgentSendResponse(ok=False, spoken=_SPOKEN_CALL_UNAVAILABLE)
-    agent = await db.get(Agent, call.agent_id) if call.agent_id else None
-    # The per-caller caps key on the caller's number: a hidden number cannot
-    # be capped, so it gets no email.
-    caller = _other_party(call)
-    if (
-        call.transport == "browser"
-        or agent is None
-        or agent.organization_id != org
-        or agent.status != "live"
-        or not agent.email_caller_enabled
-        or not caller
-        or not is_e164(caller)
-    ):
-        return AgentSendResponse(ok=False, spoken=_SPOKEN_NOT_ALLOWED)
-
-    if mailbox_key(body.to_address).startswith("@"):
-        # The request model already checked the pattern and length; only an
-        # empty email inbox key (+tag only, Gmail dots only) is left.
-        return AgentSendResponse(
-            ok=False, spoken="I need a full email address before I can send the email."
-        )
-    if not email_caller.clean_subject(body.subject) or not email_caller.clean_body(
-        body.body_text
-    ):
-        return AgentSendResponse(
-            ok=False,
-            spoken="I need a subject and a message before I can send the email.",
-        )
-    meta = {**_meta(body), CALLER_EMAIL_MARK: True, "caller_e164": caller}
-    denial = await _shared_denial(db, call)
-    if denial is None:
-        # Serializes caller emails across this org's calls until the row is
-        # committed, so two calls cannot both pass a cap with one slot left.
-        # Its own key: org_lock is held through slow carrier work.
-        await key_lock(db, f"email-caller:{org}")
-        rows = await db.execute(
-            select(
-                Email.to_addresses,
-                Email.status,
-                Email.metadata_["call_id"].astext,
-                Email.metadata_["caller_e164"].astext,
-            ).where(
-                Email.organization_id == org,
-                text(CALLER_EMAIL_ROWS_SQL),
-                Email.requested_at >= datetime.now(timezone.utc) - _CAP_WINDOW,
-                # Only a send SES surely never took is free. After a timeout
-                # SES may have sent it, so it counts.
-                may_have_reached_someone(),
-            )
-        )
-        denial = _caller_cap_denial(
-            [
-                _CallerEmailRow(normalize_recipient(to[0] if to else ""), st, c, e)
-                for to, st, c, e in rows
-            ],
-            call_id=call.id,
-            caller=caller,
-            recipient=normalize_recipient(body.to_address),
-        )
-    if denial is None and await inbox_suppressed(db, org, body.to_address):
-        # The send's own gate matches the exact spelling. This one matches
-        # the email inbox on both sides, so a +tag or Gmail-dot spelling of
-        # a suppressed address (either way round) is refused too.
-        denial = _SPOKEN_NOT_ALLOWED, "suppressed_inbox"
-    if denial is not None:
-        spoken, reason = denial
-        return await _deny(
-            org,
-            action="agent.email.blocked",
-            resource_type="email",
-            spoken=spoken,
-            payload={**meta, "reason": reason},
-        )
-
-    # The name for the fixed lines: the dispatch's copy, else one indexed
-    # read on this session. Never a network call while the locks are held.
-    org_name = (body.org_name or "").strip() or await db.scalar(
-        select(Organization.name).where(Organization.id == org)
-    )
-    result, row = await _send_email_row(
-        db,
-        email_provider,
-        org,
-        recipient=body.to_address,
-        subject=email_caller.framed_subject(body.subject, org_name),
-        body_text=email_caller.framed_body(body.body_text, org_name),
-        meta=meta,
-        # None, as on /send-email. Thread history leaves these rows out by
-        # their mark (email_agent.email_history_filter): the text is the
-        # caller's, so it is never quoted back as the team's mail.
-        agent_id=None,
-        consent_source="voice_call",
-    )
-    if row is not None:
-        # Shows the send in the call's activity next to the transcript.
-        await _record_caller_email_safely(db, call.id, body.tool_invocation_id, row)
-    return result
 
 
 _SPOKEN_HANDOVER_UNAVAILABLE = "I can't connect you to that person right now."

@@ -931,7 +931,6 @@ class HandoverContactOut(BaseModel):
 RESERVED_TOOL_NAMES = frozenset(
     {
         "cancel_transfer",
-        "email_caller",
         "end_call",
         "hail_settings_help",
         "list_contacts",
@@ -1316,20 +1315,6 @@ class AgentCreate(BaseModel):
         default=True,
         description="Answer email on addresses that route email to this agent.",
     )
-    email_caller_enabled: bool = Field(
-        default=False,
-        description=(
-            "Let the agent email the person on a call, at an address they "
-            "give and confirm on the call. Plain text and links, no "
-            "attachments, with a fixed line saying it was asked for on the "
-            "call. Anyone who can call the number can ask for an email to any "
-            "address, so Hail caps it: 2 per call to one address, 3 per "
-            "caller number and at most 2 addresses per caller number in 24 "
-            "hours, 3 per recipient address and 100 per organization in 24 "
-            "hours. The `tools` list does "
-            "not affect it. Off by default."
-        ),
-    )
     status: AgentStatus = Field(
         default="live",
         description="'paused' agents do not answer; calls to their numbers fail with end_reason 'no_agent'.",
@@ -1420,10 +1405,6 @@ class AgentUpdate(BaseModel):
     email_enabled: bool | None = Field(
         default=None, description="Whether the agent answers email."
     )
-    email_caller_enabled: bool | None = Field(
-        default=None,
-        description="Whether the agent may email the person on a call at an address they confirm.",
-    )
     status: AgentStatus | None = Field(default=None, description="'live' or 'paused'.")
     handover_contacts: list[HandoverContactIn] | None = Field(
         default=None,
@@ -1484,10 +1465,6 @@ class AgentResponse(BaseModel):
     sms_enabled: bool = Field(description="Whether the agent answers texts.")
     email_enabled: bool = Field(
         default=True, description="Whether the agent answers email."
-    )
-    email_caller_enabled: bool = Field(
-        default=False,
-        description="Whether the agent may email the person on a call at an address they confirm.",
     )
     status: AgentStatus = Field(description="'live' or 'paused'.")
     handover_contacts: list[HandoverContactOut] = Field(
@@ -1795,10 +1772,6 @@ RESERVED_EMAIL_METADATA_KEYS = frozenset(
         "reply_to_email_id",
         "inbound_email_id",
         "thread_sender",
-        # The email_caller tool's caps count rows with this key, and thread
-        # history leaves them out: a forged key could use up the caps or hide
-        # mail from history.
-        "email_caller",
     }
 )
 
@@ -2249,8 +2222,8 @@ class EmailCreate(ConsentAttestationMixin):
             "Free-form JSON object attached to the email and echoed back on "
             "reads. Not interpreted by Hail. The keys 'forwarded_from', "
             "'forward_headers', 'system_kind', 'reply_to_email_id', "
-            "'inbound_email_id', 'thread_sender' and 'email_caller' are "
-            "reserved for Hail's own bookkeeping and are rejected."
+            "'inbound_email_id' and 'thread_sender' are reserved for Hail's own "
+            "bookkeeping and are rejected."
         ),
     )
     attachment_ids: list[UUID] | None = Field(

@@ -545,11 +545,6 @@ class Agent(Base):
     email_enabled: Mapped[bool] = mapped_column(
         Boolean, server_default=text("TRUE"), nullable=False
     )
-    # The email_caller tool: on a call, email the person on the line an
-    # address they give. Off by default.
-    email_caller_enabled: Mapped[bool] = mapped_column(
-        Boolean, server_default=text("FALSE"), nullable=False
-    )
     status: Mapped[str] = mapped_column(Text, server_default="live", nullable=False)
     # Signs this agent's HTTP tool requests (AgentHttpTool). Fernet ciphertext
     # under HAIL_PROVIDER_SECRET_KEY; NULL until the agent gets its first one.
@@ -984,14 +979,6 @@ class CallEvent(Base):
             "call_id",
             unique=True,
             postgresql_where=text("kind = 'summarized'"),
-        ),
-        # One email_caller event per send (the tool's invocation id).
-        Index(
-            "call_events_email_caller_uq",
-            "call_id",
-            text("(payload ->> 'tool_invocation_id')"),
-            unique=True,
-            postgresql_where=text("kind = 'email_caller'"),
         ),
     )
 
@@ -1667,14 +1654,6 @@ class EmailForwardTarget(Base):
     )
 
 
-# Emails the email_caller tool sent (``metadata.email_caller = true``). Its
-# caps count these rows through ``emails_caller_email_idx``, whose predicate
-# must stay this exact SQL for the planner to use it; thread history leaves
-# them out.
-CALLER_EMAIL_MARK = "email_caller"
-CALLER_EMAIL_ROWS_SQL = f"(metadata ->> '{CALLER_EMAIL_MARK}') = 'true'"
-
-
 class Email(Base):
     """A single email message, outbound or inbound.
 
@@ -1793,14 +1772,6 @@ class Email(Base):
             "emails_agent_idx",
             "agent_id",
             postgresql_where=text("agent_id IS NOT NULL"),
-        ),
-        # Caller emails (CALLER_EMAIL_MARK): the email_caller caps count
-        # these rows of the last 24 hours.
-        Index(
-            "emails_caller_email_idx",
-            "organization_id",
-            "requested_at",
-            postgresql_where=text(CALLER_EMAIL_ROWS_SQL),
         ),
         CheckConstraint(
             "status IN ('queued','sent','delivered','failed','bounced',"

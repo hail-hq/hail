@@ -133,7 +133,7 @@ SPEC = ToolSpec(
     name="send_email",
     description=(
         "Send an email to a member of the organization's team directory "
-        "(use list_contacts to see who). This tool cannot email arbitrary "
+        "(use list_contacts to see who). You cannot email arbitrary "
         "addresses, only directory names. When the person on the call asks "
         "for the email, send it right away; their request is the "
         "confirmation. Reattach original files with their attachment_ids and reply_to_email_id from this person’s email thread. Never invent file IDs. Then say it is sent. Ask one short question only when "

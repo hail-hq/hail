@@ -17,14 +17,13 @@ import time
 from typing import Any
 from uuid import UUID
 
-from hailhq.core.agent_tools import email_caller, hail_help, transfer_call
+from hailhq.core.agent_tools import hail_help, transfer_call
 from hailhq.core.agent_tools.client import AgentApiClient
 from hailhq.core.agent_tools.http_tool import Conversation, load_http_tool_specs
 from hailhq.core.agent_tools.registry import all_tools
 from hailhq.core.agent_tools.spec import SPOKEN_FALLBACK, ToolContext, ToolSpec
 from hailhq.core.config import settings
 from hailhq.core.db import session_scope
-from hailhq.core.threads import is_e164, phone_counterpart
 from hailhq.voicebot.attachment_reader import inspect_tool_file
 from livekit.agents.llm import function_tool
 from livekit.agents.voice import RunContext
@@ -214,19 +213,8 @@ async def build_agent_tools(
             specs.append(transfer_call.CANCEL_SPEC)
     # The settings guide is loaded by tool, not carried in the prompt. No
     # `tools` list names it, so every call gets it here, as cancel_transfer is.
-    if allowed != []:  # `tools: []` opts out of every tool above
+    if allowed != []:  # `tools: []` opts out of every tool
         specs.append(hail_help.SPEC)
-    # Opt-in per agent, apart from `tools` (even `[]`): only the agent's switch (an
-    # explicit true) turns it on, on a phone call with a known number. The
-    # API checks all of it again on every send.
-    if metadata.get(email_caller.METADATA_KEY) is True and is_e164(
-        phone_counterpart(
-            metadata.get("direction"),
-            metadata.get("from_e164"),
-            metadata.get("to_e164"),
-        )
-    ):
-        specs.append(email_caller.SPEC.bind(metadata))
     # The agent's own HTTP tools are not built-ins: a `tools` list does not
     # name them, and they stay on with `tools: []`.
     specs.extend(await _http_tools(metadata, call_id, organization_id))

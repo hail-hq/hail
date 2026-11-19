@@ -383,7 +383,6 @@ class AgentResponse(BaseModel):
     voice_enabled: bool = True
     sms_enabled: bool = True
     email_enabled: bool = True
-    email_caller_enabled: bool = False
     status: AgentStatus = "live"
     http_tools: list[AgentHttpTool] = Field(default_factory=list)
     # Signs HTTP tool requests. Set only on the response that created or

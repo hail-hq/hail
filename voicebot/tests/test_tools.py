@@ -8,7 +8,7 @@ import uuid
 from unittest.mock import AsyncMock
 
 import hailhq.voicebot.tools as tools_mod
-from hailhq.core.agent_tools import email_caller, http_tool
+from hailhq.core.agent_tools import http_tool
 from hailhq.core.config import settings
 from hailhq.core.models import Agent, AgentHttpTool
 from hailhq.core.secret_cipher import SecretCipher, generate_key
@@ -307,28 +307,6 @@ async def test_connected_handover_asks_for_no_reply():
     assert await _make_handler(spec, _tctx())({}, FakeRunContext()) is None
 
 
-async def _email_caller_names(monkeypatch, meta: dict) -> list[str]:
-    async def _avail(_org, _session):
-        return True
-
-    monkeypatch.setattr(
-        email_caller,
-        "SPEC",
-        dataclasses.replace(email_caller.SPEC, is_available=_avail),
-    )
-    tools, api = await build_agent_tools(
-        {"organization_id": str(uuid.uuid4()), **meta},
-        call_id=uuid.uuid4(),
-        hangup=None,
-        send_dtmf=None,
-    )
-    try:
-        return [t.info.name for t in tools]
-    finally:
-        if api is not None:
-            await api.aclose()
-
-
 async def _seed_http_tool(session_factory, monkeypatch, **over):
     """An agent with one HTTP tool; returns (org_id, agent_id)."""
     key = generate_key()
@@ -350,7 +328,7 @@ async def _seed_http_tool(session_factory, monkeypatch, **over):
             AgentHttpTool(
                 agent_id=agent_id,
                 position=0,
-                name=over.pop("name", "lookup_order"),
+                name="lookup_order",
                 description="Find an order.",
                 url="https://api.example.com/orders",
                 parameters={"type": "object", "properties": {}},
@@ -384,40 +362,6 @@ async def test_http_tools_load_for_the_calls_agent(db, session_factory, monkeypa
             await api.aclose()
 
 
-_PHONE = {"direction": "outbound", "to_e164": "+14155550123"}
-
-
-async def test_email_caller_is_off_unless_the_agent_opted_in(db, monkeypatch) -> None:
-    assert "email_caller" not in await _email_caller_names(monkeypatch, _PHONE)
-    assert "email_caller" not in await _email_caller_names(
-        monkeypatch, {**_PHONE, "email_caller_enabled": "true"}
-    )
-    assert "email_caller" in await _email_caller_names(
-        monkeypatch, {**_PHONE, "email_caller_enabled": True}
-    )
-
-
-async def test_email_caller_follows_the_switch_not_the_tools_list(
-    db, monkeypatch
-) -> None:
-    on = {**_PHONE, "email_caller_enabled": True}
-    for tools in (["end_call"], [], None):
-        assert "email_caller" in await _email_caller_names(
-            monkeypatch, {**on, "tools": tools}
-        ), tools
-
-
-async def test_email_caller_needs_a_known_caller_number(db, monkeypatch) -> None:
-    hidden = {"direction": "inbound", "from_e164": "anonymous"}
-    assert "email_caller" not in await _email_caller_names(
-        monkeypatch, {**hidden, "email_caller_enabled": True}
-    )
-    known = {"direction": "inbound", "from_e164": "+14155550123"}
-    assert "email_caller" in await _email_caller_names(
-        monkeypatch, {**known, "email_caller_enabled": True}
-    )
-
-
 async def test_http_tools_of_another_org_are_not_loaded(
     db, session_factory, monkeypatch
 ):
@@ -431,44 +375,6 @@ async def test_http_tools_of_another_org_are_not_loaded(
         meta, call_id=uuid.uuid4(), hangup=None, send_dtmf=None
     )
     assert tools == []
-
-
-async def test_http_tool_with_a_built_in_name_is_never_offered(
-    db, session_factory, monkeypatch
-):
-    """An HTTP tool saved as email_caller before the name was reserved must
-    not give LiveKit two tools with one name, nor stand in for the built-in."""
-    org_id, agent_id = await _seed_http_tool(
-        session_factory, monkeypatch, name="email_caller"
-    )
-    meta = {
-        **_PHONE,
-        "organization_id": str(org_id),
-        "agent_id": str(agent_id),
-        "email_caller_enabled": True,
-        "tools": [],
-    }
-    for offered in (True, False):
-
-        async def _avail(_org, _session, offered=offered):
-            return offered
-
-        monkeypatch.setattr(
-            email_caller,
-            "SPEC",
-            dataclasses.replace(email_caller.SPEC, is_available=_avail),
-        )
-        tools, api = await build_agent_tools(
-            meta, call_id=uuid.uuid4(), hangup=None, send_dtmf=None
-        )
-        try:
-            kept = [t for t in tools if t.info.name == "email_caller"]
-            assert len(kept) == int(offered), offered
-            for t in kept:
-                assert t.info.raw_schema["description"] != "Find an order."
-        finally:
-            if api is not None:
-                await api.aclose()
 
 
 async def test_http_tool_load_failure_keeps_built_in_tools(db, monkeypatch):

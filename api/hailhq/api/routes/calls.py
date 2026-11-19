@@ -727,7 +727,6 @@ async def create_call(
                 "ai_disclosure": body.ai_disclosure,
                 "ai_disclosure_line": ai_disclosure_line,
                 "tools": body.tools,
-                "email_caller_enabled": bool(agent and agent.email_caller_enabled),
                 "handover_targets": await handover_targets(
                     db, agent.id if agent else None, call.to_e164
                 ),

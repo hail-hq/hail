@@ -36,7 +36,7 @@ from uuid import UUID
 from cryptography.fernet import InvalidToken
 from google.protobuf.duration_pb2 import Duration
 from hailhq.core import threads
-from hailhq.core.agent_tools import email_caller, transfer_call
+from hailhq.core.agent_tools import transfer_call
 from hailhq.core.agent_tools.client import AgentApiClient
 from hailhq.core.agent_tools.send_dtmf import DTMF_CODES
 from hailhq.core.agent_tools.spec import BridgeOutcome, BridgeRoute
@@ -78,7 +78,6 @@ from hailhq.core.telemetry_identity import (
     set_identity,
     tag_context,
 )
-from hailhq.core.threads import phone_counterpart
 from hailhq.core.url_guard import assert_public_https_url
 from hailhq.core.webhook_fanout import fanout_call_event
 from hailhq.voicebot import text_watch
@@ -365,7 +364,7 @@ async def other_party(call_id: UUID) -> DirectoryEntry | None:
             if row is None:
                 return None
             organization_id, direction, from_e164, to_e164 = row
-            number = phone_counterpart(direction, from_e164, to_e164)
+            number = from_e164 if direction == "inbound" else to_e164
             if not number:
                 return None
             entry = await find_by_phone(session, organization_id, number)
@@ -2186,16 +2185,6 @@ def attach_event_handlers(
                 parsed = _cap(json.loads(raw)) if raw else {}
             except ValueError:
                 parsed = {"_raw": _cap(raw)}
-            if c.name == email_caller.SPEC.name:
-                # Allowlist: only the subject. The tool's record does not copy
-                # the address or the dictated text (the email row holds them;
-                # the spoken turns hold what was said). A raw string that did
-                # not parse may hold them, so it is dropped.
-                parsed = (
-                    {k: parsed[k] for k in ("subject",) if k in parsed}
-                    if isinstance(parsed, dict) and "_raw" not in parsed
-                    else {}
-                )
             calls.append({"name": c.name, "args": parsed})
         _spawn(
             "tool_call",

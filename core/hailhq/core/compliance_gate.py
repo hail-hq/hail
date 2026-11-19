@@ -30,7 +30,7 @@ from uuid import UUID
 
 from hailhq.core.config import settings
 from hailhq.core.models import ChannelSuspension, Sms, Suppression, UsageEvent
-from sqlalchemy import case, delete, func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -42,8 +42,6 @@ __all__ = [
     "check_email_allowed",
     "check_national_dnc",
     "check_sms_allowed",
-    "inbox_suppressed",
-    "mailbox_key",
     "normalize_recipient",
     "remove_suppression",
 ]
@@ -68,55 +66,6 @@ def normalize_recipient(recipient: str) -> str:
     its own copy.
     """
     return recipient.strip().lower() if "@" in recipient else recipient.strip()
-
-
-_GMAIL_DOMAINS = ("gmail.com", "googlemail.com")
-
-
-def mailbox_key(address: str) -> str:
-    """The email inbox an address may reach: lowercase, without a ``+tag``,
-    and for Gmail without dots (googlemail.com is gmail.com). For checks it
-    makes stricter only: on other domains ``a+x@`` and ``a@`` may be
-    different email inboxes. Mail still goes to the address as given."""
-    local, _, domain = normalize_recipient(address).rpartition("@")
-    local = local.split("+", 1)[0]
-    if domain in _GMAIL_DOMAINS:
-        domain = "gmail.com"
-        local = local.replace(".", "")
-    return f"{local}@{domain}"
-
-
-def _mailbox_key_sql(column):
-    """``mailbox_key`` in SQL, for stored rows."""
-    local = func.split_part(func.split_part(column, "@", 1), "+", 1)
-    domain = func.split_part(column, "@", 2)
-    gmail = domain.in_(_GMAIL_DOMAINS)
-    return case(
-        (gmail, func.replace(local, ".", "") + "@gmail.com"),
-        else_=local + "@" + domain,
-    )
-
-
-async def inbox_suppressed(
-    db: AsyncSession, organization_id: UUID, address: str
-) -> bool:
-    """True when any suppression row for email reaches the same email inbox
-    as ``address`` (``mailbox_key`` on both sides), so a ``+tag`` or Gmail
-    dot spelling cannot reach an inbox that opted out under another one."""
-    stmt = (
-        select(Suppression.id)
-        .where(Suppression.channel.in_(["email", "all"]))
-        .where(Suppression.recipient.contains("@"))
-        .where(
-            or_(
-                Suppression.organization_id == organization_id,
-                Suppression.organization_id.is_(None),
-            )
-        )
-        .where(_mailbox_key_sql(Suppression.recipient) == mailbox_key(address))
-        .limit(1)
-    )
-    return (await db.execute(stmt)).first() is not None
 
 
 async def _suppression_hit(

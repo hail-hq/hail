@@ -1740,9 +1740,6 @@ type AgentCreate struct {
 	// AiDisclosureLine The AI line this agent speaks. '{org}' is replaced by the organization's name. Omitted: the workspace line, else Hail's built-in line for the call's direction.
 	AiDisclosureLine *string `json:"ai_disclosure_line,omitempty"`
 
-	// EmailCallerEnabled Let the agent email the person on a call, at an address they give and confirm on the call. Plain text and links, no attachments, with a fixed line saying it was asked for on the call. Anyone who can call the number can ask for an email to any address, so Hail caps it: 2 per call to one address, 3 per caller number and at most 2 addresses per caller number in 24 hours, 3 per recipient address and 100 per organization in 24 hours. The `tools` list does not affect it. Off by default.
-	EmailCallerEnabled *bool `json:"email_caller_enabled,omitempty"`
-
 	// EmailEnabled Answer email on addresses that route email to this agent.
 	EmailEnabled *bool `json:"email_enabled,omitempty"`
 
@@ -1803,9 +1800,6 @@ type AgentResponse struct {
 
 	// CreatedAt ISO 8601 timestamp.
 	CreatedAt time.Time `json:"created_at"`
-
-	// EmailCallerEnabled Whether the agent may email the person on a call at an address they confirm.
-	EmailCallerEnabled *bool `json:"email_caller_enabled,omitempty"`
 
 	// EmailEnabled Whether the agent answers email.
 	EmailEnabled *bool `json:"email_enabled,omitempty"`
@@ -1874,9 +1868,6 @@ type AgentUpdate struct {
 
 	// AiDisclosureLine New AI line template ('{org}' = organization name); null returns to the workspace line.
 	AiDisclosureLine *string `json:"ai_disclosure_line,omitempty"`
-
-	// EmailCallerEnabled Whether the agent may email the person on a call at an address they confirm.
-	EmailCallerEnabled *bool `json:"email_caller_enabled,omitempty"`
 
 	// EmailEnabled Whether the agent answers email.
 	EmailEnabled *bool `json:"email_enabled,omitempty"`
@@ -2315,7 +2306,7 @@ type EmailCreate struct {
 	// MessageType 'marketing' additionally requires a non-empty consent_source. Use 'informational' for transactional/service communications.
 	MessageType *EmailCreateMessageType `json:"message_type,omitempty"`
 
-	// Metadata Free-form JSON object attached to the email and echoed back on reads. Not interpreted by Hail. The keys 'forwarded_from', 'forward_headers', 'system_kind', 'reply_to_email_id', 'inbound_email_id', 'thread_sender' and 'email_caller' are reserved for Hail's own bookkeeping and are rejected.
+	// Metadata Free-form JSON object attached to the email and echoed back on reads. Not interpreted by Hail. The keys 'forwarded_from', 'forward_headers', 'system_kind', 'reply_to_email_id', 'inbound_email_id' and 'thread_sender' are reserved for Hail's own bookkeeping and are rejected.
 	Metadata *map[string]interface{} `json:"metadata,omitempty"`
 
 	// RecipientConsent Attestation that you have obtained the lawful consent required to contact this recipient. Hail does not verify consent itself — you are responsible for a lawful basis under TCPA/ePrivacy/PECR/CAN-SPAM/GDPR as applicable. Rejected (422) if not true.

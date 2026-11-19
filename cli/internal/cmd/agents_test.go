@@ -312,43 +312,6 @@ func TestAgentsCreate_HandoverRejectsBadMember(t *testing.T) {
 	}
 }
 
-func TestAgentsUpdate_EmailCallerSetsTheSwitch(t *testing.T) {
-	for _, tc := range []struct {
-		flag string
-		want bool
-	}{{"--email-caller", true}, {"--email-caller=false", false}} {
-		srv := newFakeServer(t, http.StatusOK, sampleAgent())
-		_, _, err := runRoot(t,
-			map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
-			"agents", "update", "33333333-3333-3333-3333-333333333333", tc.flag,
-		)
-		if err != nil {
-			t.Fatalf("%s: unexpected error: %v", tc.flag, err)
-		}
-		var body map[string]any
-		_ = json.Unmarshal(srv.lastBody, &body)
-		if body["email_caller_enabled"] != tc.want || len(body) != 1 {
-			t.Errorf("%s: body: %s", tc.flag, srv.lastBody)
-		}
-	}
-}
-
-func TestAgentsCreate_LeavesEmailCallerOutUnlessGiven(t *testing.T) {
-	srv := newFakeServer(t, http.StatusCreated, sampleAgent())
-	_, _, err := runRoot(t,
-		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
-		"agents", "create", "Front desk", "--prompt", "Book appointments.",
-	)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	var body map[string]any
-	_ = json.Unmarshal(srv.lastBody, &body)
-	if _, present := body["email_caller_enabled"]; present {
-		t.Errorf("email_caller_enabled must be left out when not given: %v", body)
-	}
-}
-
 func TestAgentsCreate_HTTPToolsFileSendsTheList(t *testing.T) {
 	srv := newFakeServer(t, http.StatusCreated, sampleAgent())
 	path := t.TempDir() + "/tools.json"

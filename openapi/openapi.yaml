@@ -6434,18 +6434,6 @@ components:
           title: Email Enabled
           description: Answer email on addresses that route email to this agent.
           default: true
-        email_caller_enabled:
-          type: boolean
-          title: Email Caller Enabled
-          description:
-            "Let the agent email the person on a call, at an address they
-            give and confirm on the call. Plain text and links, no attachments, with
-            a fixed line saying it was asked for on the call. Anyone who can call
-            the number can ask for an email to any address, so Hail caps it: 2 per
-            call to one address, 3 per caller number and at most 2 addresses per caller
-            number in 24 hours, 3 per recipient address and 100 per organization in
-            24 hours. The `tools` list does not affect it. Off by default."
-          default: false
         status:
           type: string
           enum:
@@ -6582,13 +6570,6 @@ components:
           title: Email Enabled
           description: Whether the agent answers email.
           default: true
-        email_caller_enabled:
-          type: boolean
-          title: Email Caller Enabled
-          description:
-            Whether the agent may email the person on a call at an address
-            they confirm.
-          default: false
         status:
           type: string
           enum:
@@ -6742,14 +6723,6 @@ components:
             - type: "null"
           title: Email Enabled
           description: Whether the agent answers email.
-        email_caller_enabled:
-          anyOf:
-            - type: boolean
-            - type: "null"
-          title: Email Caller Enabled
-          description:
-            Whether the agent may email the person on a call at an address
-            they confirm.
         status:
           anyOf:
             - type: string
@@ -7713,8 +7686,8 @@ components:
           description:
             Free-form JSON object attached to the email and echoed back
             on reads. Not interpreted by Hail. The keys 'forwarded_from', 'forward_headers',
-            'system_kind', 'reply_to_email_id', 'inbound_email_id', 'thread_sender'
-            and 'email_caller' are reserved for Hail's own bookkeeping and are rejected.
+            'system_kind', 'reply_to_email_id', 'inbound_email_id' and 'thread_sender'
+            are reserved for Hail's own bookkeeping and are rejected.
         attachment_ids:
           anyOf:
             - items:
