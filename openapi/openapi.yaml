@@ -321,6 +321,70 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
+  /v1/agents/{agent_id}/rotate-tool-secret:
+    post:
+      tags:
+        - agents
+      summary: Rotate Tool Secret
+      description:
+        "Make a new secret for this agent's HTTP tool requests. The response's
+
+        ``http_tool_secret`` is the only time it is shown. The old secret stops
+
+        signing at once; live calls keep the one they started with."
+      operationId: rotate_tool_secret_v1_agents__agent_id__rotate_tool_secret_post
+      parameters:
+        - name: agent_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Agent Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "503":
+          description: HAIL_PROVIDER_SECRET_KEY is not set.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
   /v1/calls:
     post:
       tags:
@@ -329,10 +393,11 @@ paths:
       description:
         "Place an outbound AI voice call.\n\nThe call is placed asynchronously\
         \ \u2014 this returns as soon as the call is\nqueued, not when it completes.\
-        \ Poll GET /v1/calls/{call_id} or configure a\nwebhook to get the final status\
-        \ and transcript. Requires\nrecipient_consent=true on the request body; Hail\
-        \ does not verify lawful\nbasis to contact the recipient, the caller warrants\
-        \ it."
+        \ Poll GET /v1/calls/{call_id} for the final\nstatus and the transcript, or\
+        \ subscribe to webhooks: call.completed (and\nthe other call.* events) for\
+        \ the status, call.summarized for the transcript\nand a short summary. Requires\
+        \ recipient_consent=true on the request body;\nHail does not verify lawful\
+        \ basis to contact the recipient, the caller\nwarrants it."
       operationId: create_call_v1_calls_post
       parameters:
         - name: authorization
@@ -504,14 +569,19 @@ paths:
         - calls
       summary: Get Call
       description:
-        "Fetch one call by id, including its current status and end reason.
+        "Fetch one call by id, including its current status, end reason
+        and
+
+        transcript.
 
 
         Org-scoped: returns 404 for a call belonging to a different organization
 
         (not 403, to avoid confirming the id exists). Use this to poll for the
 
-        final outcome of a call placed with POST /v1/calls."
+        final outcome of a call placed with POST /v1/calls. The transcript grows
+
+        while the call runs."
       operationId: get_call_v1_calls__call_id__get
       parameters:
         - name: call_id
@@ -3608,6 +3678,206 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
+  /v1/sms/trial:
+    get:
+      tags:
+        - sms
+      summary: Get Sms Trial
+      description: "Read the workspace's US trial texting status.
+
+
+        Shows whether trial texting is set up and can send now, the workspace's
+
+        trial phone and its status, and how many of the 25 trial texts are left."
+      operationId: get_sms_trial_v1_sms_trial_get
+      parameters:
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SmsTrialResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /v1/sms/trial/phone:
+    post:
+      tags:
+        - sms
+      summary: Start Sms Trial Phone
+      description: "Text a 6-digit code to the workspace's own US mobile.
+
+
+        The code expires in 10 minutes. A new code replaces the old one. A
+
+        verified phone keeps getting trial texts until the new phone is
+
+        confirmed; until then the new phone shows as pending_phone. Asking
+
+        again for the verified phone drops the waiting new phone. A
+
+        workspace or a phone gets at most 5 codes in 24 hours. Code texts are
+
+        free and do not count toward the 25 trial texts. Console sessions only."
+      operationId: start_sms_trial_phone_v1_sms_trial_phone_post
+      parameters:
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SmsTrialPhoneStart"
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SmsTrialResponse"
+        "429":
+          description:
+            The workspace asked for, or the phone got, 5 codes in the last
+            24 hours. Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "403":
+          description: Only a signed-in console session can set the phone.
+        "409":
+          description:
+            Trial texting is not available yet, or another workspace uses
+            this phone.
+        "422":
+          description:
+            The phone is not a US number, is a Hail number, replied STOP
+            to Hail, or could not be texted.
+        "502":
+          description:
+            Hail could not reach the carrier. The code may still arrive
+            and counts toward the 5 codes.
+  /v1/sms/trial/phone/confirm:
+    post:
+      tags:
+        - sms
+      summary: Confirm Sms Trial Phone
+      description: "Confirm the workspace's trial phone with the texted code.
+
+
+        On success the phone receives trial texts. Each code allows 5 tries.
+
+        A phone can be the trial phone of only one workspace. Console sessions
+
+        only."
+      operationId: confirm_sms_trial_phone_v1_sms_trial_phone_confirm_post
+      parameters:
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SmsTrialPhoneConfirm"
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SmsTrialResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "403":
+          description: Only a signed-in console session can set the phone.
+        "409":
+          description:
+            Another workspace uses this phone for trial texts. Use a different
+            phone.
+        "422":
+          description:
+            No code is open, the code expired, or the code is not correct.
+            After 5 wrong tries, send a new code.
   /v1/sms:
     post:
       tags:
@@ -3621,7 +3891,10 @@ paths:
         \ otherwise Hail\npicks an alphanumeric sender ID where the destination corridor\
         \ allows\nit, or requires a dedicated SMS-capable number otherwise. Requires\n\
         recipient_consent=true on the request body; Hail does not verify\nlawful basis\
-        \ to contact the recipient, the caller warrants it."
+        \ to contact the recipient, the caller warrants it.\n\nTrial texts (up to\
+        \ 25, only to the workspace's verified trial phone):\nwith no from, Hail uses\
+        \ one when the workspace's own number cannot text\nthat US phone; set from\
+        \ to the trial number to use one directly."
       operationId: create_sms_v1_sms_post
       parameters:
         - name: authorization
@@ -6383,6 +6656,16 @@ components:
           description:
             People the agent may hand a live call to, in order. The agent
             never sees their numbers.
+        http_tools:
+          items:
+            $ref: "#/components/schemas/HttpToolIn"
+          type: array
+          maxItems: 10
+          title: Http Tools
+          description:
+            Your APIs the agent may call during calls, texts and email
+            (up to 10). Each request is signed with the agent's http_tool_secret;
+            see docs/public/agents.md.
       additionalProperties: false
       type: object
       required:
@@ -6503,6 +6786,21 @@ components:
           type: array
           title: Handover Contacts
           description: People the agent may hand a live call to.
+        http_tools:
+          items:
+            $ref: "#/components/schemas/HttpToolOut"
+          type: array
+          title: Http Tools
+          description: Your APIs the agent may call.
+        http_tool_secret:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Http Tool Secret
+          description:
+            Secret that signs this agent's HTTP tool requests (X-Hail-Signature).
+            Returned only when Hail creates it (the first save with HTTP tools) or
+            rotates it (POST /agents/{id}/rotate-tool-secret). Store it then.
         created_at:
           type: string
           format: date-time
@@ -6648,6 +6946,18 @@ components:
           description:
             New handover list; replaces the old one. [] removes all; null
             leaves it.
+        http_tools:
+          anyOf:
+            - items:
+                $ref: "#/components/schemas/HttpToolIn"
+              type: array
+              maxItems: 10
+            - type: "null"
+          title: Http Tools
+          description:
+            New HTTP tool list; replaces the old one. [] removes all; null
+            leaves it. A tool sent without headers keeps the saved headers of the
+            tool with the same name.
       additionalProperties: false
       type: object
       title: AgentUpdate
@@ -6980,6 +7290,17 @@ components:
           description:
             Human-readable explanation for a failed call. Null for other
             statuses.
+        transcript:
+          anyOf:
+            - items:
+                $ref: "#/components/schemas/CallTranscriptTurn"
+              type: array
+            - type: "null"
+          title: Transcript
+          description:
+            "What was said on the call, in the order it was said. Set only
+            by GET /v1/calls/{call_id}: an empty list until someone speaks. Null in
+            POST /v1/calls and GET /v1/calls responses."
       type: object
       required:
         - id
@@ -6998,6 +7319,33 @@ components:
         - answered_at
         - ended_at
       title: CallResponse
+    CallTranscriptTurn:
+      properties:
+        role:
+          type: string
+          enum:
+            - user
+            - assistant
+          title: Role
+          description: "'assistant' is the Hail agent. 'user' is the person (or
+            answering machine) on the other end of the line."
+        text:
+          type: string
+          title: Text
+          description: What was said in this turn.
+        at:
+          type: string
+          format: date-time
+          title: At
+          description:
+            When the speaker started this turn, ISO 8601. When that is
+            not known, when Hail recorded the turn.
+      type: object
+      required:
+        - role
+        - text
+        - at
+      title: CallTranscriptTurn
     ConfirmRequest:
       properties:
         code:
@@ -9222,6 +9570,134 @@ components:
         - phone_e164
         - note
       title: HandoverContactOut
+    HttpToolIn:
+      properties:
+        name:
+          type: string
+          title: Name
+          description:
+            "Function name the model calls: a letter, then letters, digits
+            or _ (up to 64). Unique per agent; built-in tool names are not allowed."
+          examples:
+            - lookup_order
+        description:
+          type: string
+          maxLength: 1000
+          minLength: 1
+          title: Description
+          description: What the tool does and when to use it. Read by the model.
+          examples:
+            - Look up an order's status by its order number.
+        url:
+          type: string
+          maxLength: 2000
+          title: Url
+          description:
+            HTTPS endpoint Hail POSTs to. It must resolve to a public address;
+            private, loopback and link-local addresses are refused.
+          examples:
+            - https://api.example.com/hail/orders
+        parameters:
+          additionalProperties: true
+          type: object
+          title: Parameters
+          description:
+            "JSON Schema (type object) of the arguments the model fills
+            in. Supported keywords: type (one of string, number, integer, boolean,
+            array, object), description, enum (strings), items, properties, required,
+            minimum, maximum, minLength, maxLength, minItems, maxItems."
+          examples:
+            - properties:
+                order_number:
+                  description: The order number the caller gives.
+                  type: string
+              required:
+                - order_number
+              type: object
+        headers:
+          anyOf:
+            - additionalProperties:
+                type: string
+              type: object
+            - type: "null"
+          title: Headers
+          description:
+            Static headers sent with every request, e.g. an Authorization
+            token (up to 10). Stored encrypted; responses show only the names. On
+            PATCH, null or left out keeps the saved values of the tool with the same
+            name while its url keeps the same scheme, host and port; a url on a new
+            host needs the headers again. {} removes them.
+          examples:
+            - Authorization: Bearer sk_live_example
+        timeout_seconds:
+          type: integer
+          maximum: 10.0
+          minimum: 1.0
+          title: Timeout Seconds
+          description: Seconds to wait for the answer (1..10). Default 5.
+          default: 5
+        wait_message:
+          anyOf:
+            - type: string
+              maxLength: 200
+            - type: "null"
+          title: Wait Message
+          description:
+            Sentence the agent says on a call while it waits, e.g. 'One
+            moment, let me check.' Not used for texts and email.
+      additionalProperties: false
+      type: object
+      required:
+        - name
+        - description
+        - url
+      title: HttpToolIn
+      description: One customer API the agent may call during a call, text or email.
+    HttpToolOut:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: Function name the model calls.
+        description:
+          type: string
+          title: Description
+          description: What the tool does. Read by the model.
+        url:
+          type: string
+          title: Url
+          description: HTTPS endpoint Hail POSTs to.
+        parameters:
+          additionalProperties: true
+          type: object
+          title: Parameters
+          description: JSON Schema of the arguments.
+        header_names:
+          items:
+            type: string
+          type: array
+          title: Header Names
+          description: Names of the saved static headers. Values are never returned.
+        timeout_seconds:
+          type: integer
+          title: Timeout Seconds
+          description: Seconds Hail waits for the answer.
+        wait_message:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Wait Message
+          description: Sentence said on a call while waiting, or null.
+      type: object
+      required:
+        - name
+        - description
+        - url
+        - parameters
+        - header_names
+        - timeout_seconds
+        - wait_message
+      title: HttpToolOut
     KeptDocumentAnswer:
       properties:
         option:
@@ -10398,7 +10874,10 @@ components:
             none is set; Australia (+61) may always use 'HAIL', depending on the
             carrier. Every other destination, including the US and Canada, uses the
             organization's oldest active SMS-capable number; if none exists the request
-            fails with 422. SMS never uses the shared pool."
+            fails with 422. SMS never uses the shared pool. Trial texts (up to 25,
+            only to the workspace's verified trial phone): with no from, Hail uses
+            one when the workspace's own number cannot text that US phone; set from
+            to the trial number to use one directly."
         body:
           type: string
           maxLength: 1600
@@ -10411,7 +10890,8 @@ components:
           title: Metadata
           description:
             Free-form JSON object attached to the message and echoed back
-            on reads. Not interpreted by Hail.
+            on reads. Not interpreted by Hail. The key 'sms_trial' is reserved and
+            rejected.
       additionalProperties: false
       type: object
       required:
@@ -10576,6 +11056,116 @@ components:
         - requested_at
         - sent_at
       title: SmsResponse
+    SmsTrialPhoneConfirm:
+      properties:
+        code:
+          type: string
+          pattern: ^[0-9]{6}$
+          title: Code
+          description: The 6-digit code Hail texted to the trial phone.
+      additionalProperties: false
+      type: object
+      required:
+        - code
+      title: SmsTrialPhoneConfirm
+    SmsTrialPhoneStart:
+      properties:
+        phone:
+          type: string
+          title: Phone
+          description:
+            Your own US mobile in E.164 (e.g. +14155551234). Hail texts
+            a 6-digit code to it.
+        recipient_consent:
+          type: boolean
+          const: true
+          title: Recipient Consent
+          description:
+            "Must be true: the phone's owner agreed to get the code and
+            the trial texts."
+        consent_version:
+          type: string
+          maxLength: 40
+          minLength: 1
+          title: Consent Version
+          description: Version of the consent wording the person agreed to.
+      additionalProperties: false
+      type: object
+      required:
+        - phone
+        - recipient_consent
+        - consent_version
+      title: SmsTrialPhoneStart
+    SmsTrialResponse:
+      properties:
+        configured:
+          type: boolean
+          title: Configured
+          description: True when this Hail deployment has a trial number set up.
+        available:
+          type: boolean
+          title: Available
+          description:
+            True when trial texts can be sent now. False while the trial
+            number waits for carrier approval.
+        status:
+          type: string
+          enum:
+            - none
+            - pending
+            - verified
+          title: Status
+          description:
+            "The workspace's trial phone: 'none' (no phone yet), 'pending'
+            (code sent, not confirmed) or 'verified' (receives trial texts)."
+        phone:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Phone
+          description: The trial phone in E.164. Null when status is 'none'.
+        pending_phone:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Pending Phone
+          description:
+            A new phone in E.164 that got a code and is not confirmed yet.
+            Until it is, the verified phone keeps getting trial texts. Null when no
+            new phone waits.
+        code_expires_at:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: "null"
+          title: Code Expires At
+          description:
+            When the open code expires, for pending_phone when set, else
+            for phone. Null when no code is open.
+        texts_used:
+          type: integer
+          title: Texts Used
+          description: Trial texts this workspace has sent.
+        texts_limit:
+          type: integer
+          title: Texts Limit
+          description: Trial texts a workspace can send, ever.
+        texts_left:
+          type: integer
+          title: Texts Left
+          description: Trial texts this workspace can still send.
+      type: object
+      required:
+        - configured
+        - available
+        - status
+        - phone
+        - pending_phone
+        - code_expires_at
+        - texts_used
+        - texts_limit
+        - texts_left
+      title: SmsTrialResponse
     SubjectOption:
       properties:
         allowed:
@@ -11127,7 +11717,8 @@ components:
         given_names:
           type: string
           title: Given Names
-          description: The given names of the person the document is about or addressed
+          description:
+            The given names of the person the document is about or addressed
             to, never a person who signs for the issuer.
         surnames:
           type: string
@@ -11148,8 +11739,9 @@ components:
         business_name:
           type: string
           title: Business Name
-          description: The name of the company the document is about or addressed to,
-            never the company that issued it.
+          description:
+            The name of the company the document is about or addressed
+            to, never the company that issued it.
       type: object
       required:
         - given_names
@@ -11672,6 +12264,7 @@ components:
         - call.busy
         - call.no_answer
         - call.transferred
+        - call.summarized
       title: WebhookEventType
     WebhookSubscriptionCreate:
       properties:

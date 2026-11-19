@@ -25,6 +25,7 @@ from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
 from hailhq.api.pagination import fetch_cursor_page
 from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
+from hailhq.core.call_analysis import CLAIM_KIND
 from hailhq.core.db import get_session
 from hailhq.core.models import Call, CallEvent, Email, EmailEvent, Sms, SmsEvent
 from hailhq.core.schemas import (
@@ -67,6 +68,8 @@ def _call_select(kind: str | None):
         CallEvent.payload.label("payload"),
         CallEvent.occurred_at.label("occurred_at"),
     )
+    # Claim rows are the call.summarized worker's job state, not call events.
+    stmt = stmt.where(CallEvent.kind != CLAIM_KIND)
     if kind is not None:
         stmt = stmt.where(CallEvent.kind == kind)
     return stmt

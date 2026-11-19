@@ -19,6 +19,7 @@ from uuid import UUID
 
 from hailhq.core.agent_tools import hail_help, transfer_call
 from hailhq.core.agent_tools.client import AgentApiClient
+from hailhq.core.agent_tools.http_tool import Conversation, load_http_tool_specs
 from hailhq.core.agent_tools.registry import all_tools
 from hailhq.core.agent_tools.spec import SPOKEN_FALLBACK, ToolContext, ToolSpec
 from hailhq.core.config import settings
@@ -94,6 +95,17 @@ def _make_handler(spec: ToolSpec, tctx: ToolContext):
                         "call_id=%s end_call skipped: still talking", tctx.call_id
                     )
                     return STILL_TALKING
+            if spec.wait_message:
+                # Not awaited: the request runs while the sentence plays. A
+                # session that cannot speak still runs the tool.
+                try:
+                    context.session.say(spec.wait_message)
+                except Exception:
+                    logger.warning(
+                        "call_id=%s wait message for %s not said",
+                        tctx.call_id,
+                        spec.name,
+                    )
             # None means no reply turn (a transfer that started ringing).
             result = await spec.execute(tctx, raw_arguments)
             if spec.name in ("read_email", "read_browser_inbox"):
@@ -117,6 +129,29 @@ def wrap_tool(spec: ToolSpec, tctx: ToolContext):
             "description": spec.description,
             "parameters": spec.parameters,
         },
+    )
+
+
+async def _http_tools(
+    metadata: dict[str, Any], call_id: UUID, organization_id: UUID
+) -> list[ToolSpec]:
+    """The saved agent's HTTP tools. A failure here loses only these, never
+    the built-in tools."""
+    raw_agent = metadata.get("agent_id")
+    if not raw_agent:
+        return []  # a call placed with an inline prompt has no saved agent
+    try:
+        agent_id = UUID(str(raw_agent))
+    except ValueError:
+        logger.warning("call_id=%s malformed agent_id; no http tools", call_id)
+        return []
+    return await load_http_tool_specs(
+        Conversation(
+            channel="call",
+            id=call_id,
+            agent_id=agent_id,
+            organization_id=organization_id,
+        )
     )
 
 
@@ -180,6 +215,9 @@ async def build_agent_tools(
     # `tools` list names it, so every call gets it here, as cancel_transfer is.
     if allowed != []:  # `tools: []` opts out of every tool
         specs.append(hail_help.SPEC)
+    # The agent's own HTTP tools are not built-ins: a `tools` list does not
+    # name them, and they stay on with `tools: []`.
+    specs.extend(await _http_tools(metadata, call_id, organization_id))
     if not specs:
         return [], None
 

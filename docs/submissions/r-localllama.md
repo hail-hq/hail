@@ -43,7 +43,7 @@ When the blocker clears, the showcase post (not a listing/announcement) should f
 - **Title**: states the concrete local models used (STT/LLM/TTS + quantization), not "Hail" as the headline.
 - **Body**: one paragraph on the use case demoed, the exact local model/quant/hardware for each of STT/LLM/TTS, the benchmark table (latency to first audio, end-to-end turn latency, tokens/sec, WER), a link to the config/docs so it's reproducible, and a link to the AGPLv3 repo — in that order of prominence, repo link last.
 - **Required benchmark table columns**: stage, model+quant, hardware, metric, result — filled from a real run, never estimated.
-- **Asset paths** (for a linked landing page only, never as the post's main image — this sub wants terminal/benchmark screenshots, not brand art): `/Users/r/playground/hail-website/public/assets/hail-monogram.svg` (dark bg), `hail-monogram-inverted.svg` (light bg), `og-card-1200x630.png` (share card if linking out).
+- **Asset paths** (for a linked landing page only, never as the post's main image — this sub wants terminal/benchmark screenshots, not brand art): `/Users/r/playground/hail-website/public/assets/brand/logo/hail-monogram.svg` (dark bg), `hail-monogram-inverted.svg` (light bg), `og-card-1200x630.png` (share card if linking out).
 - **Flair**: "Resources" or "Tutorial | Guide" (confirm exact current options on the sub before posting).
 
 ## Notes

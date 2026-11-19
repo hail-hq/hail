@@ -16,6 +16,7 @@ from hailhq.core.models import (
     Email,
     EmailDomain,
     OrganizationMember,
+    PhoneNumber,
     Sms,
     User,
 )
@@ -1582,3 +1583,56 @@ def test_thread_does_not_match_unrelated_or_malformed_ses_references(reference):
     )
     reply = Email(id=uuid.uuid4(), in_reply_to=reference)
     assert not email_agent.same_thread(original, reply)
+
+
+@pytest.mark.asyncio
+async def test_an_email_reply_gets_the_time_where_the_agent_answers_calls(
+    async_session,
+):
+    org, agent, _ = await _seed(async_session)
+    assert "- For this business: unknown. Go by UTC" in (
+        await email_agent.reply_clock(async_session, agent)
+    )
+    # The oldest number is US toll-free (several zones): the London one is used.
+    for e164, country, kind in (
+        ("+18005550100", "US", "toll_free"),
+        ("+442079460000", "GB", "local"),
+    ):
+        async_session.add(
+            PhoneNumber(
+                organization_id=org,
+                e164=e164,
+                country_code=country,
+                number_type=kind,
+                provisioning_state="active",
+                provider_resource_id=f"PN{e164}",
+                voice_agent_id=agent.id,
+            )
+        )
+        await async_session.commit()
+    clock = await email_agent.reply_clock(async_session, agent)
+    assert clock is not None and "It is now:" in clock
+    assert "Europe/London)." in clock
+    assert "person texting" not in clock and "caller" not in clock
+    system = email_agent.build_chat_messages(agent, [], trust="member", clock=clock)[0][
+        "content"
+    ]
+    assert system.index("Help the team.") < system.index("# Date and time")
+
+
+@pytest.mark.asyncio
+async def test_a_failed_number_lookup_leaves_the_session_usable(
+    async_session, monkeypatch
+):
+    _, agent, _ = await _seed(async_session)
+    real = async_session.execute
+
+    async def failing_once(statement, *args, **kwargs):
+        monkeypatch.setattr(async_session, "execute", real)
+        await real(text("select 1/0"))  # aborts the savepoint, like a timeout
+
+    monkeypatch.setattr(async_session, "execute", failing_once)
+    clock = await email_agent.reply_clock(async_session, agent)
+    assert clock is not None and "For this business: unknown." in clock
+    # The caller's next query still runs.
+    assert (await async_session.execute(text("select 1"))).scalar_one() == 1

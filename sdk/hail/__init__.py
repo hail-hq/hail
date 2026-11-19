@@ -22,6 +22,7 @@ from hail.client import Client
 from hail.models import (
     TERMINAL_CALL_STATUSES,
     TERMINAL_EMAIL_STATUSES,
+    AgentHttpTool,
     AgentListResponse,
     AgentResponse,
     CallCreate,
@@ -29,6 +30,7 @@ from hail.models import (
     CallListResponse,
     CallResponse,
     CallStatus,
+    CallTranscriptTurn,
     DkimRecord,
     DmarcCheck,
     DnsProvider,
@@ -69,13 +71,14 @@ from hail.models import (
     WhoamiResponse,
 )
 
-__version__ = "0.22.0"
+__version__ = "0.23.0"
 
 __all__ = [
     # helpers
     "SUPPORTED_RESOURCE_TYPES",
     "TERMINAL_CALL_STATUSES",
     "TERMINAL_EMAIL_STATUSES",
+    "AgentHttpTool",
     "AgentListResponse",
     "AgentResponse",
     # models
@@ -84,6 +87,7 @@ __all__ = [
     "CallListResponse",
     "CallResponse",
     "CallStatus",
+    "CallTranscriptTurn",
     "Client",
     "DkimRecord",
     "DmarcCheck",

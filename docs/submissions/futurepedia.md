@@ -14,7 +14,7 @@ status: drafted
 - [ ] Decide whether the $247/$497 spend is worth it before doing anything else — this is a paid-only submission, no free tier (see Notes)
 - [ ] Confirm which tier to buy: Basic ($247, 7-day publish, currently sold out per last check) or Verified ($497, 2-business-day publish, verified checkmark)
 - [ ] Get sign-off from whoever owns marketing spend to actually run the checkout
-- [ ] Logo asset ready: `hail-website/public/assets/monogram-512.png` (square) or `hail-website/public/assets/avatar-1024.png`
+- [ ] Logo asset ready: `hail-website/public/assets/brand/logo/monogram-512.png` (square) or `hail-website/public/assets/brand/logo/avatar-1024.png`
 - [ ] Screenshot/demo asset prepared if the paid tier's form asks for one (not confirmed — form fields beyond pricing weren't fully enumerated; verify at checkout)
 - [ ] Draft copy reviewed against the feature-claim policy (see Notes on SMS/vendor accuracy)
 - [ ] Account created on futurepedia.io if checkout requires one
@@ -31,7 +31,7 @@ status: drafted
 6. Paste the **long description** from **Content** below into the main description field.
 7. Select a **category**: closest match is "Productivity" or "AI Agents" / "Developer Tools" — pick whichever the category picker actually offers; there is no "communications" category confirmed to exist.
 8. Add **tags/keywords** from **Content** below if a tags field is offered.
-9. Upload the **logo** from `hail-website/public/assets/monogram-512.png`.
+9. Upload the **logo** from `hail-website/public/assets/brand/logo/monogram-512.png`.
 10. If a video-upload field appears (both paid tiers mention "add a video to your page"), skip it — no demo video exists yet. Leave it blank rather than link a placeholder.
 11. Check the agreement checkbox for the Futurepedia Terms of Service, HubSpot Website Terms of Use, and Privacy Policy — read them once before checking, don't blind-accept.
 12. Proceed to checkout and pay for the chosen tier. This is a hard paywall — there is no way to submit without payment.
@@ -45,10 +45,29 @@ status: drafted
 
 **Tool URL:** `https://hail.so`
 
-**One-liner:** Phone, SMS & email — for agents.
+**One-liner:**
+
+<!-- copy:tagline -->
+
+Give your AI a real phone number and an email inbox.
+
+<!-- /copy -->
 
 **Description (long):**
-Hail is a self-hostable, AGPLv3 communication platform built for AI agents. It gives an agent a real phone number, inbox, and messaging line — place and receive calls, send and receive SMS, send and receive email, and read back structured events and analytics — all through one remote MCP server (Streamable HTTP, no local install or stdio package). Connect a client to `https://mcp.hail.so`, authorize once via OAuth, and the agent gets tools immediately. Self-hosters run the same server with a static API key instead of OAuth. Also available via CLI (`hail`), a Python SDK, and OpenAPI for non-MCP integrations. Deliverability tooling and per-channel analytics are built in, not bolted on.
+
+<!-- copy:long -->
+
+Hail gives your AI assistant a real phone number and an email inbox. Your agent can do any work people do on the phone and in email.
+
+Run a support receptionist, answering service, or your own assistant on one account. It handles calls, texts, and email day and night, and passes calls to your phone when needed.
+
+Get a local or toll-free number in 120+ countries, even where you have no office. Hail helps with the paperwork some countries need. Send and receive email on your own domain.
+
+Webhooks send every call, text, and email to your app, so your own tools stay up to date.
+
+Connect Claude, ChatGPT, or Cursor over MCP in minutes, or build with the API. Hail is open source.
+
+<!-- /copy -->
 
 **Category:** AI Agents / Developer Tools / Productivity (pick closest available on the form — see Steps)
 
@@ -56,7 +75,7 @@ Hail is a self-hostable, AGPLv3 communication platform built for AI agents. It g
 
 **License:** AGPL-3.0-or-later — [`LICENSE`](../../LICENSE)
 
-**Logo asset:** `hail-website/public/assets/monogram-512.png` (square mark; `hail-website/public/assets/avatar-1024.png` as an alternate raster)
+**Logo asset:** `hail-website/public/assets/brand/logo/monogram-512.png` (square mark; `hail-website/public/assets/brand/logo/avatar-1024.png` as an alternate raster)
 
 **Contact email (if requested):** `hi@hail.so`
 

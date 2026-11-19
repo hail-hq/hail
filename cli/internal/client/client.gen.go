@@ -147,6 +147,24 @@ func (e CallResponseStatus) Valid() bool {
 	}
 }
 
+// Defines values for CallTranscriptTurnRole.
+const (
+	Assistant CallTranscriptTurnRole = "assistant"
+	User      CallTranscriptTurnRole = "user"
+)
+
+// Valid indicates whether the value is a known member of the CallTranscriptTurnRole enum.
+func (e CallTranscriptTurnRole) Valid() bool {
+	switch e {
+	case Assistant:
+		return true
+	case User:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ContactEntryKind.
 const (
 	Manual ContactEntryKind = "manual"
@@ -1035,6 +1053,27 @@ func (e SmsResponseStatus) Valid() bool {
 	}
 }
 
+// Defines values for SmsTrialResponseStatus.
+const (
+	SmsTrialResponseStatusNone     SmsTrialResponseStatus = "none"
+	SmsTrialResponseStatusPending  SmsTrialResponseStatus = "pending"
+	SmsTrialResponseStatusVerified SmsTrialResponseStatus = "verified"
+)
+
+// Valid indicates whether the value is a known member of the SmsTrialResponseStatus enum.
+func (e SmsTrialResponseStatus) Valid() bool {
+	switch e {
+	case SmsTrialResponseStatusNone:
+		return true
+	case SmsTrialResponseStatusPending:
+		return true
+	case SmsTrialResponseStatusVerified:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for SubjectOptionCapabilities.
 const (
 	SubjectOptionCapabilitiesSms   SubjectOptionCapabilities = "sms"
@@ -1379,6 +1418,7 @@ const (
 	CallFailed              WebhookEventType = "call.failed"
 	CallNoAnswer            WebhookEventType = "call.no_answer"
 	CallReceived            WebhookEventType = "call.received"
+	CallSummarized          WebhookEventType = "call.summarized"
 	CallTransferred         WebhookEventType = "call.transferred"
 	EmailBounced            WebhookEventType = "email.bounced"
 	EmailClicked            WebhookEventType = "email.clicked"
@@ -1409,6 +1449,8 @@ func (e WebhookEventType) Valid() bool {
 	case CallNoAnswer:
 		return true
 	case CallReceived:
+		return true
+	case CallSummarized:
 		return true
 	case CallTransferred:
 		return true
@@ -1628,28 +1670,28 @@ func (e GetNumberOptionsV1NumbersOptionsGetParamsCapabilities) Valid() bool {
 
 // Defines values for ListSmsV1SmsGetParamsStatus.
 const (
-	ListSmsV1SmsGetParamsStatusDelivered   ListSmsV1SmsGetParamsStatus = "delivered"
-	ListSmsV1SmsGetParamsStatusFailed      ListSmsV1SmsGetParamsStatus = "failed"
-	ListSmsV1SmsGetParamsStatusQueued      ListSmsV1SmsGetParamsStatus = "queued"
-	ListSmsV1SmsGetParamsStatusReceived    ListSmsV1SmsGetParamsStatus = "received"
-	ListSmsV1SmsGetParamsStatusSent        ListSmsV1SmsGetParamsStatus = "sent"
-	ListSmsV1SmsGetParamsStatusUndelivered ListSmsV1SmsGetParamsStatus = "undelivered"
+	Delivered   ListSmsV1SmsGetParamsStatus = "delivered"
+	Failed      ListSmsV1SmsGetParamsStatus = "failed"
+	Queued      ListSmsV1SmsGetParamsStatus = "queued"
+	Received    ListSmsV1SmsGetParamsStatus = "received"
+	Sent        ListSmsV1SmsGetParamsStatus = "sent"
+	Undelivered ListSmsV1SmsGetParamsStatus = "undelivered"
 )
 
 // Valid indicates whether the value is a known member of the ListSmsV1SmsGetParamsStatus enum.
 func (e ListSmsV1SmsGetParamsStatus) Valid() bool {
 	switch e {
-	case ListSmsV1SmsGetParamsStatusDelivered:
+	case Delivered:
 		return true
-	case ListSmsV1SmsGetParamsStatusFailed:
+	case Failed:
 		return true
-	case ListSmsV1SmsGetParamsStatusQueued:
+	case Queued:
 		return true
-	case ListSmsV1SmsGetParamsStatusReceived:
+	case Received:
 		return true
-	case ListSmsV1SmsGetParamsStatusSent:
+	case Sent:
 		return true
-	case ListSmsV1SmsGetParamsStatusUndelivered:
+	case Undelivered:
 		return true
 	default:
 		return false
@@ -1731,6 +1773,9 @@ type AgentCreate struct {
 	// HandoverMaxDurationSeconds Call limit in seconds (60..3600) once a handover contact answers, counted from the answer. Omitted: 1800 (30 minutes).
 	HandoverMaxDurationSeconds *int `json:"handover_max_duration_seconds,omitempty"`
 
+	// HttpTools Your APIs the agent may call during calls, texts and email (up to 10). Each request is signed with the agent's http_tool_secret; see docs/public/agents.md.
+	HttpTools *[]HttpToolIn `json:"http_tools,omitempty"`
+
 	// MaxDurationSeconds Soft cap per call in seconds (60..3600). Omitted: the workspace limit.
 	MaxDurationSeconds *int `json:"max_duration_seconds,omitempty"`
 
@@ -1788,6 +1833,12 @@ type AgentResponse struct {
 
 	// HandoverMaxDurationSeconds Call limit after a handover contact answers; null means 1800 (30 minutes).
 	HandoverMaxDurationSeconds *int `json:"handover_max_duration_seconds"`
+
+	// HttpToolSecret Secret that signs this agent's HTTP tool requests (X-Hail-Signature). Returned only when Hail creates it (the first save with HTTP tools) or rotates it (POST /agents/{id}/rotate-tool-secret). Store it then.
+	HttpToolSecret *string `json:"http_tool_secret,omitempty"`
+
+	// HttpTools Your APIs the agent may call.
+	HttpTools *[]HttpToolOut `json:"http_tools,omitempty"`
 
 	// Id Unique identifier for this agent.
 	Id openapi_types.UUID `json:"id"`
@@ -1850,6 +1901,9 @@ type AgentUpdate struct {
 
 	// HandoverMaxDurationSeconds New call limit after a handover contact answers; null returns to 1800 (30 minutes).
 	HandoverMaxDurationSeconds *int `json:"handover_max_duration_seconds,omitempty"`
+
+	// HttpTools New HTTP tool list; replaces the old one. [] removes all; null leaves it. A tool sent without headers keeps the saved headers of the tool with the same name.
+	HttpTools *[]HttpToolIn `json:"http_tools,omitempty"`
 
 	// MaxDurationSeconds New soft cap per call; null returns to the workspace limit.
 	MaxDurationSeconds *int `json:"max_duration_seconds,omitempty"`
@@ -2007,6 +2061,9 @@ type CallResponse struct {
 
 	// ToE164 Recipient phone number, E.164 format.
 	ToE164 string `json:"to_e164"`
+
+	// Transcript What was said on the call, in the order it was said. Set only by GET /v1/calls/{call_id}: an empty list until someone speaks. Null in POST /v1/calls and GET /v1/calls responses.
+	Transcript *[]CallTranscriptTurn `json:"transcript,omitempty"`
 }
 
 // CallResponseDirection 'outbound' for calls Hail placed, 'inbound' for calls received.
@@ -2014,6 +2071,21 @@ type CallResponseDirection string
 
 // CallResponseStatus Current call-progress state: 'queued', 'dialing', 'ringing', 'in_progress', or one of the terminal states 'completed', 'failed', 'busy', 'no_answer', 'canceled'.
 type CallResponseStatus string
+
+// CallTranscriptTurn defines model for CallTranscriptTurn.
+type CallTranscriptTurn struct {
+	// At When the speaker started this turn, ISO 8601. When that is not known, when Hail recorded the turn.
+	At time.Time `json:"at"`
+
+	// Role 'assistant' is the Hail agent. 'user' is the person (or answering machine) on the other end of the line.
+	Role CallTranscriptTurnRole `json:"role"`
+
+	// Text What was said in this turn.
+	Text string `json:"text"`
+}
+
+// CallTranscriptTurnRole 'assistant' is the Hail agent. 'user' is the person (or answering machine) on the other end of the line.
+type CallTranscriptTurnRole string
 
 // ConfirmRequest defines model for ConfirmRequest.
 type ConfirmRequest struct {
@@ -3033,6 +3105,54 @@ type HandoverContactOut struct {
 	PhoneE164 *string `json:"phone_e164"`
 }
 
+// HttpToolIn One customer API the agent may call during a call, text or email.
+type HttpToolIn struct {
+	// Description What the tool does and when to use it. Read by the model.
+	Description string `json:"description"`
+
+	// Headers Static headers sent with every request, e.g. an Authorization token (up to 10). Stored encrypted; responses show only the names. On PATCH, null or left out keeps the saved values of the tool with the same name while its url keeps the same scheme, host and port; a url on a new host needs the headers again. {} removes them.
+	Headers *map[string]string `json:"headers,omitempty"`
+
+	// Name Function name the model calls: a letter, then letters, digits or _ (up to 64). Unique per agent; built-in tool names are not allowed.
+	Name string `json:"name"`
+
+	// Parameters JSON Schema (type object) of the arguments the model fills in. Supported keywords: type (one of string, number, integer, boolean, array, object), description, enum (strings), items, properties, required, minimum, maximum, minLength, maxLength, minItems, maxItems.
+	Parameters *map[string]interface{} `json:"parameters,omitempty"`
+
+	// TimeoutSeconds Seconds to wait for the answer (1..10). Default 5.
+	TimeoutSeconds *int `json:"timeout_seconds,omitempty"`
+
+	// Url HTTPS endpoint Hail POSTs to. It must resolve to a public address; private, loopback and link-local addresses are refused.
+	Url string `json:"url"`
+
+	// WaitMessage Sentence the agent says on a call while it waits, e.g. 'One moment, let me check.' Not used for texts and email.
+	WaitMessage *string `json:"wait_message,omitempty"`
+}
+
+// HttpToolOut defines model for HttpToolOut.
+type HttpToolOut struct {
+	// Description What the tool does. Read by the model.
+	Description string `json:"description"`
+
+	// HeaderNames Names of the saved static headers. Values are never returned.
+	HeaderNames []string `json:"header_names"`
+
+	// Name Function name the model calls.
+	Name string `json:"name"`
+
+	// Parameters JSON Schema of the arguments.
+	Parameters map[string]interface{} `json:"parameters"`
+
+	// TimeoutSeconds Seconds Hail waits for the answer.
+	TimeoutSeconds int `json:"timeout_seconds"`
+
+	// Url HTTPS endpoint Hail POSTs to.
+	Url string `json:"url"`
+
+	// WaitMessage Sentence said on a call while waiting, or null.
+	WaitMessage *string `json:"wait_message"`
+}
+
 // KeptDocumentAnswer A document slot's saved choice on a number registration.
 type KeptDocumentAnswer struct {
 	// Fields The document's typed fields.
@@ -3560,13 +3680,13 @@ type SmsCreate struct {
 	// ConsentSource Where/how consent was obtained (e.g. 'signup form', 'prior customer relationship'). Required (non-empty) when message_type is 'marketing'.
 	ConsentSource *string `json:"consent_source,omitempty"`
 
-	// From Sender phone number, E.164 format. Must be an active number owned by the organization with the SMS capability. Omitted: destinations where the sender-ID carrier delivers a dynamic alphanumeric sender ID unchanged (about 110 countries: most of Europe, Africa, the Middle East, Asia-Pacific and the Caribbean; one table per carrier in core/hailhq/core/sender_id_corridors.py) use the organization's sender ID, or the platform default 'HAIL' when none is set; Australia (+61) may always use 'HAIL', depending on the carrier. Every other destination, including the US and Canada, uses the organization's oldest active SMS-capable number; if none exists the request fails with 422. SMS never uses the shared pool.
+	// From Sender phone number, E.164 format. Must be an active number owned by the organization with the SMS capability. Omitted: destinations where the sender-ID carrier delivers a dynamic alphanumeric sender ID unchanged (about 110 countries: most of Europe, Africa, the Middle East, Asia-Pacific and the Caribbean; one table per carrier in core/hailhq/core/sender_id_corridors.py) use the organization's sender ID, or the platform default 'HAIL' when none is set; Australia (+61) may always use 'HAIL', depending on the carrier. Every other destination, including the US and Canada, uses the organization's oldest active SMS-capable number; if none exists the request fails with 422. SMS never uses the shared pool. Trial texts (up to 25, only to the workspace's verified trial phone): with no from, Hail uses one when the workspace's own number cannot text that US phone; set from to the trial number to use one directly.
 	From *string `json:"from,omitempty"`
 
 	// MessageType 'marketing' additionally requires a non-empty consent_source. Use 'informational' for transactional/service communications.
 	MessageType *SmsCreateMessageType `json:"message_type,omitempty"`
 
-	// Metadata Free-form JSON object attached to the message and echoed back on reads. Not interpreted by Hail.
+	// Metadata Free-form JSON object attached to the message and echoed back on reads. Not interpreted by Hail. The key 'sms_trial' is reserved and rejected.
 	Metadata *map[string]interface{} `json:"metadata,omitempty"`
 
 	// RecipientConsent Attestation that you have obtained the lawful consent required to contact this recipient. Hail does not verify consent itself — you are responsible for a lawful basis under TCPA/ePrivacy/PECR/CAN-SPAM/GDPR as applicable. Rejected (422) if not true.
@@ -3653,6 +3773,57 @@ type SmsResponseDirection string
 
 // SmsResponseStatus Delivery status: 'queued', 'sent', 'delivered', 'failed', 'undelivered', or 'received' (inbound messages).
 type SmsResponseStatus string
+
+// SmsTrialPhoneConfirm defines model for SmsTrialPhoneConfirm.
+type SmsTrialPhoneConfirm struct {
+	// Code The 6-digit code Hail texted to the trial phone.
+	Code string `json:"code"`
+}
+
+// SmsTrialPhoneStart defines model for SmsTrialPhoneStart.
+type SmsTrialPhoneStart struct {
+	// ConsentVersion Version of the consent wording the person agreed to.
+	ConsentVersion string `json:"consent_version"`
+
+	// Phone Your own US mobile in E.164 (e.g. +14155551234). Hail texts a 6-digit code to it.
+	Phone string `json:"phone"`
+
+	// RecipientConsent Must be true: the phone's owner agreed to get the code and the trial texts.
+	RecipientConsent bool `json:"recipient_consent"`
+}
+
+// SmsTrialResponse defines model for SmsTrialResponse.
+type SmsTrialResponse struct {
+	// Available True when trial texts can be sent now. False while the trial number waits for carrier approval.
+	Available bool `json:"available"`
+
+	// CodeExpiresAt When the open code expires, for pending_phone when set, else for phone. Null when no code is open.
+	CodeExpiresAt *time.Time `json:"code_expires_at"`
+
+	// Configured True when this Hail deployment has a trial number set up.
+	Configured bool `json:"configured"`
+
+	// PendingPhone A new phone in E.164 that got a code and is not confirmed yet. Until it is, the verified phone keeps getting trial texts. Null when no new phone waits.
+	PendingPhone *string `json:"pending_phone"`
+
+	// Phone The trial phone in E.164. Null when status is 'none'.
+	Phone *string `json:"phone"`
+
+	// Status The workspace's trial phone: 'none' (no phone yet), 'pending' (code sent, not confirmed) or 'verified' (receives trial texts).
+	Status SmsTrialResponseStatus `json:"status"`
+
+	// TextsLeft Trial texts this workspace can still send.
+	TextsLeft int `json:"texts_left"`
+
+	// TextsLimit Trial texts a workspace can send, ever.
+	TextsLimit int `json:"texts_limit"`
+
+	// TextsUsed Trial texts this workspace has sent.
+	TextsUsed int `json:"texts_used"`
+}
+
+// SmsTrialResponseStatus The workspace's trial phone: 'none' (no phone yet), 'pending' (code sent, not confirmed) or 'verified' (receives trial texts).
+type SmsTrialResponseStatus string
 
 // SubjectOption The best way for one subject (person or business) to get one type.
 type SubjectOption struct {
@@ -3926,10 +4097,10 @@ type VerificationDocumentWarningKind string
 
 // VerificationPrintedName The name printed on a document, as read. Empty strings when not printed.
 type VerificationPrintedName struct {
-	// BusinessName A company's name.
+	// BusinessName The name of the company the document is about or addressed to, never the company that issued it.
 	BusinessName string `json:"business_name"`
 
-	// GivenNames A person's given names.
+	// GivenNames The given names of the person the document is about or addressed to, never a person who signs for the issuer.
 	GivenNames string `json:"given_names"`
 
 	// LatinGivenNames The given names in Latin letters as the document prints them (its machine-readable zone or a transliteration), or empty.
@@ -3938,7 +4109,7 @@ type VerificationPrintedName struct {
 	// LatinSurnames The surnames in Latin letters, the same way.
 	LatinSurnames *string `json:"latin_surnames,omitempty"`
 
-	// Surnames A person's surnames.
+	// Surnames That person's surnames.
 	Surnames string `json:"surnames"`
 }
 
@@ -4272,6 +4443,11 @@ type UpdateAgentV1AgentsAgentIdPatchParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
+// RotateToolSecretV1AgentsAgentIdRotateToolSecretPostParams defines parameters for RotateToolSecretV1AgentsAgentIdRotateToolSecretPost.
+type RotateToolSecretV1AgentsAgentIdRotateToolSecretPostParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
 // ListCallsV1CallsGetParams defines parameters for ListCallsV1CallsGet.
 type ListCallsV1CallsGetParams struct {
 	Cursor        *string                          `form:"cursor,omitempty" json:"cursor,omitempty"`
@@ -4587,6 +4763,21 @@ type DeleteSmsSuppressionV1SmsSuppressionsNumberDeleteParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
+// GetSmsTrialV1SmsTrialGetParams defines parameters for GetSmsTrialV1SmsTrialGet.
+type GetSmsTrialV1SmsTrialGetParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// StartSmsTrialPhoneV1SmsTrialPhonePostParams defines parameters for StartSmsTrialPhoneV1SmsTrialPhonePost.
+type StartSmsTrialPhoneV1SmsTrialPhonePostParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostParams defines parameters for ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPost.
+type ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
 // GetSmsV1SmsSmsIdGetParams defines parameters for GetSmsV1SmsSmsIdGet.
 type GetSmsV1SmsSmsIdGetParams struct {
 	Authorization *string `json:"authorization,omitempty"`
@@ -4823,6 +5014,12 @@ type CreateSmsV1SmsPostJSONRequestBody = SmsCreate
 
 // PatchSenderIdV1SmsSenderIdPatchJSONRequestBody defines body for PatchSenderIdV1SmsSenderIdPatch for application/json ContentType.
 type PatchSenderIdV1SmsSenderIdPatchJSONRequestBody = SenderIdPatch
+
+// StartSmsTrialPhoneV1SmsTrialPhonePostJSONRequestBody defines body for StartSmsTrialPhoneV1SmsTrialPhonePost for application/json ContentType.
+type StartSmsTrialPhoneV1SmsTrialPhonePostJSONRequestBody = SmsTrialPhoneStart
+
+// ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostJSONRequestBody defines body for ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPost for application/json ContentType.
+type ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostJSONRequestBody = SmsTrialPhoneConfirm
 
 // UnsubscribeV1UnsubscribePostFormdataRequestBody defines body for UnsubscribeV1UnsubscribePost for application/x-www-form-urlencoded ContentType.
 type UnsubscribeV1UnsubscribePostFormdataRequestBody UnsubscribeV1UnsubscribePostFormdataBody
@@ -5239,6 +5436,9 @@ type ClientInterface interface {
 
 	UpdateAgentV1AgentsAgentIdPatch(ctx context.Context, agentId openapi_types.UUID, params *UpdateAgentV1AgentsAgentIdPatchParams, body UpdateAgentV1AgentsAgentIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// RotateToolSecretV1AgentsAgentIdRotateToolSecretPost request
+	RotateToolSecretV1AgentsAgentIdRotateToolSecretPost(ctx context.Context, agentId openapi_types.UUID, params *RotateToolSecretV1AgentsAgentIdRotateToolSecretPostParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ListCallsV1CallsGet request
 	ListCallsV1CallsGet(ctx context.Context, params *ListCallsV1CallsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -5421,6 +5621,19 @@ type ClientInterface interface {
 
 	// DeleteSmsSuppressionV1SmsSuppressionsNumberDelete request
 	DeleteSmsSuppressionV1SmsSuppressionsNumberDelete(ctx context.Context, number string, params *DeleteSmsSuppressionV1SmsSuppressionsNumberDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetSmsTrialV1SmsTrialGet request
+	GetSmsTrialV1SmsTrialGet(ctx context.Context, params *GetSmsTrialV1SmsTrialGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// StartSmsTrialPhoneV1SmsTrialPhonePostWithBody request with any body
+	StartSmsTrialPhoneV1SmsTrialPhonePostWithBody(ctx context.Context, params *StartSmsTrialPhoneV1SmsTrialPhonePostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	StartSmsTrialPhoneV1SmsTrialPhonePost(ctx context.Context, params *StartSmsTrialPhoneV1SmsTrialPhonePostParams, body StartSmsTrialPhoneV1SmsTrialPhonePostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostWithBody request with any body
+	ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostWithBody(ctx context.Context, params *ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPost(ctx context.Context, params *ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostParams, body ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetSmsV1SmsSmsIdGet request
 	GetSmsV1SmsSmsIdGet(ctx context.Context, smsId openapi_types.UUID, params *GetSmsV1SmsSmsIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -5618,6 +5831,18 @@ func (c *Client) UpdateAgentV1AgentsAgentIdPatchWithBody(ctx context.Context, ag
 
 func (c *Client) UpdateAgentV1AgentsAgentIdPatch(ctx context.Context, agentId openapi_types.UUID, params *UpdateAgentV1AgentsAgentIdPatchParams, body UpdateAgentV1AgentsAgentIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewUpdateAgentV1AgentsAgentIdPatchRequest(c.Server, agentId, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) RotateToolSecretV1AgentsAgentIdRotateToolSecretPost(ctx context.Context, agentId openapi_types.UUID, params *RotateToolSecretV1AgentsAgentIdRotateToolSecretPostParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRotateToolSecretV1AgentsAgentIdRotateToolSecretPostRequest(c.Server, agentId, params)
 	if err != nil {
 		return nil, err
 	}
@@ -6420,6 +6645,66 @@ func (c *Client) DeleteSmsSuppressionV1SmsSuppressionsNumberDelete(ctx context.C
 	return c.Client.Do(req)
 }
 
+func (c *Client) GetSmsTrialV1SmsTrialGet(ctx context.Context, params *GetSmsTrialV1SmsTrialGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetSmsTrialV1SmsTrialGetRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) StartSmsTrialPhoneV1SmsTrialPhonePostWithBody(ctx context.Context, params *StartSmsTrialPhoneV1SmsTrialPhonePostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewStartSmsTrialPhoneV1SmsTrialPhonePostRequestWithBody(c.Server, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) StartSmsTrialPhoneV1SmsTrialPhonePost(ctx context.Context, params *StartSmsTrialPhoneV1SmsTrialPhonePostParams, body StartSmsTrialPhoneV1SmsTrialPhonePostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewStartSmsTrialPhoneV1SmsTrialPhonePostRequest(c.Server, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostWithBody(ctx context.Context, params *ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostRequestWithBody(c.Server, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPost(ctx context.Context, params *ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostParams, body ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostRequest(c.Server, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 func (c *Client) GetSmsV1SmsSmsIdGet(ctx context.Context, smsId openapi_types.UUID, params *GetSmsV1SmsSmsIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetSmsV1SmsSmsIdGetRequest(c.Server, smsId, params)
 	if err != nil {
@@ -7153,6 +7438,55 @@ func NewUpdateAgentV1AgentsAgentIdPatchRequestWithBody(server string, agentId op
 	}
 
 	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewRotateToolSecretV1AgentsAgentIdRotateToolSecretPostRequest generates requests for RotateToolSecretV1AgentsAgentIdRotateToolSecretPost
+func NewRotateToolSecretV1AgentsAgentIdRotateToolSecretPostRequest(server string, agentId openapi_types.UUID, params *RotateToolSecretV1AgentsAgentIdRotateToolSecretPostParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "agent_id", agentId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/agents/%s/rotate-tool-secret", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
 
 	if params != nil {
 
@@ -10381,6 +10715,158 @@ func NewDeleteSmsSuppressionV1SmsSuppressionsNumberDeleteRequest(server string, 
 	return req, nil
 }
 
+// NewGetSmsTrialV1SmsTrialGetRequest generates requests for GetSmsTrialV1SmsTrialGet
+func NewGetSmsTrialV1SmsTrialGetRequest(server string, params *GetSmsTrialV1SmsTrialGetParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/sms/trial")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewStartSmsTrialPhoneV1SmsTrialPhonePostRequest calls the generic StartSmsTrialPhoneV1SmsTrialPhonePost builder with application/json body
+func NewStartSmsTrialPhoneV1SmsTrialPhonePostRequest(server string, params *StartSmsTrialPhoneV1SmsTrialPhonePostParams, body StartSmsTrialPhoneV1SmsTrialPhonePostJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewStartSmsTrialPhoneV1SmsTrialPhonePostRequestWithBody(server, params, "application/json", bodyReader)
+}
+
+// NewStartSmsTrialPhoneV1SmsTrialPhonePostRequestWithBody generates requests for StartSmsTrialPhoneV1SmsTrialPhonePost with any type of body
+func NewStartSmsTrialPhoneV1SmsTrialPhonePostRequestWithBody(server string, params *StartSmsTrialPhoneV1SmsTrialPhonePostParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/sms/trial/phone")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostRequest calls the generic ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPost builder with application/json body
+func NewConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostRequest(server string, params *ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostParams, body ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostRequestWithBody(server, params, "application/json", bodyReader)
+}
+
+// NewConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostRequestWithBody generates requests for ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPost with any type of body
+func NewConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostRequestWithBody(server string, params *ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/sms/trial/phone/confirm")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
 // NewGetSmsV1SmsSmsIdGetRequest generates requests for GetSmsV1SmsSmsIdGet
 func NewGetSmsV1SmsSmsIdGetRequest(server string, smsId openapi_types.UUID, params *GetSmsV1SmsSmsIdGetParams) (*http.Request, error) {
 	var err error
@@ -12172,6 +12658,9 @@ type ClientWithResponsesInterface interface {
 
 	UpdateAgentV1AgentsAgentIdPatchWithResponse(ctx context.Context, agentId openapi_types.UUID, params *UpdateAgentV1AgentsAgentIdPatchParams, body UpdateAgentV1AgentsAgentIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateAgentV1AgentsAgentIdPatchResponse, error)
 
+	// RotateToolSecretV1AgentsAgentIdRotateToolSecretPostWithResponse request
+	RotateToolSecretV1AgentsAgentIdRotateToolSecretPostWithResponse(ctx context.Context, agentId openapi_types.UUID, params *RotateToolSecretV1AgentsAgentIdRotateToolSecretPostParams, reqEditors ...RequestEditorFn) (*RotateToolSecretV1AgentsAgentIdRotateToolSecretPostResponse, error)
+
 	// ListCallsV1CallsGetWithResponse request
 	ListCallsV1CallsGetWithResponse(ctx context.Context, params *ListCallsV1CallsGetParams, reqEditors ...RequestEditorFn) (*ListCallsV1CallsGetResponse, error)
 
@@ -12354,6 +12843,19 @@ type ClientWithResponsesInterface interface {
 
 	// DeleteSmsSuppressionV1SmsSuppressionsNumberDeleteWithResponse request
 	DeleteSmsSuppressionV1SmsSuppressionsNumberDeleteWithResponse(ctx context.Context, number string, params *DeleteSmsSuppressionV1SmsSuppressionsNumberDeleteParams, reqEditors ...RequestEditorFn) (*DeleteSmsSuppressionV1SmsSuppressionsNumberDeleteResponse, error)
+
+	// GetSmsTrialV1SmsTrialGetWithResponse request
+	GetSmsTrialV1SmsTrialGetWithResponse(ctx context.Context, params *GetSmsTrialV1SmsTrialGetParams, reqEditors ...RequestEditorFn) (*GetSmsTrialV1SmsTrialGetResponse, error)
+
+	// StartSmsTrialPhoneV1SmsTrialPhonePostWithBodyWithResponse request with any body
+	StartSmsTrialPhoneV1SmsTrialPhonePostWithBodyWithResponse(ctx context.Context, params *StartSmsTrialPhoneV1SmsTrialPhonePostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*StartSmsTrialPhoneV1SmsTrialPhonePostResponse, error)
+
+	StartSmsTrialPhoneV1SmsTrialPhonePostWithResponse(ctx context.Context, params *StartSmsTrialPhoneV1SmsTrialPhonePostParams, body StartSmsTrialPhoneV1SmsTrialPhonePostJSONRequestBody, reqEditors ...RequestEditorFn) (*StartSmsTrialPhoneV1SmsTrialPhonePostResponse, error)
+
+	// ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostWithBodyWithResponse request with any body
+	ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostWithBodyWithResponse(ctx context.Context, params *ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostResponse, error)
+
+	ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostWithResponse(ctx context.Context, params *ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostParams, body ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostJSONRequestBody, reqEditors ...RequestEditorFn) (*ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostResponse, error)
 
 	// GetSmsV1SmsSmsIdGetWithResponse request
 	GetSmsV1SmsSmsIdGetWithResponse(ctx context.Context, smsId openapi_types.UUID, params *GetSmsV1SmsSmsIdGetParams, reqEditors ...RequestEditorFn) (*GetSmsV1SmsSmsIdGetResponse, error)
@@ -12595,6 +13097,29 @@ func (r UpdateAgentV1AgentsAgentIdPatchResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r UpdateAgentV1AgentsAgentIdPatchResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type RotateToolSecretV1AgentsAgentIdRotateToolSecretPostResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *AgentResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r RotateToolSecretV1AgentsAgentIdRotateToolSecretPostResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RotateToolSecretV1AgentsAgentIdRotateToolSecretPostResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -13764,6 +14289,73 @@ func (r DeleteSmsSuppressionV1SmsSuppressionsNumberDeleteResponse) StatusCode() 
 	return 0
 }
 
+type GetSmsTrialV1SmsTrialGetResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *SmsTrialResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r GetSmsTrialV1SmsTrialGetResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetSmsTrialV1SmsTrialGetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type StartSmsTrialPhoneV1SmsTrialPhonePostResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *SmsTrialResponse
+}
+
+// Status returns HTTPResponse.Status
+func (r StartSmsTrialPhoneV1SmsTrialPhonePostResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r StartSmsTrialPhoneV1SmsTrialPhonePostResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *SmsTrialResponse
+}
+
+// Status returns HTTPResponse.Status
+func (r ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type GetSmsV1SmsSmsIdGetResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -14541,6 +15133,15 @@ func (c *ClientWithResponses) UpdateAgentV1AgentsAgentIdPatchWithResponse(ctx co
 	return ParseUpdateAgentV1AgentsAgentIdPatchResponse(rsp)
 }
 
+// RotateToolSecretV1AgentsAgentIdRotateToolSecretPostWithResponse request returning *RotateToolSecretV1AgentsAgentIdRotateToolSecretPostResponse
+func (c *ClientWithResponses) RotateToolSecretV1AgentsAgentIdRotateToolSecretPostWithResponse(ctx context.Context, agentId openapi_types.UUID, params *RotateToolSecretV1AgentsAgentIdRotateToolSecretPostParams, reqEditors ...RequestEditorFn) (*RotateToolSecretV1AgentsAgentIdRotateToolSecretPostResponse, error) {
+	rsp, err := c.RotateToolSecretV1AgentsAgentIdRotateToolSecretPost(ctx, agentId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRotateToolSecretV1AgentsAgentIdRotateToolSecretPostResponse(rsp)
+}
+
 // ListCallsV1CallsGetWithResponse request returning *ListCallsV1CallsGetResponse
 func (c *ClientWithResponses) ListCallsV1CallsGetWithResponse(ctx context.Context, params *ListCallsV1CallsGetParams, reqEditors ...RequestEditorFn) (*ListCallsV1CallsGetResponse, error) {
 	rsp, err := c.ListCallsV1CallsGet(ctx, params, reqEditors...)
@@ -15120,6 +15721,49 @@ func (c *ClientWithResponses) DeleteSmsSuppressionV1SmsSuppressionsNumberDeleteW
 	return ParseDeleteSmsSuppressionV1SmsSuppressionsNumberDeleteResponse(rsp)
 }
 
+// GetSmsTrialV1SmsTrialGetWithResponse request returning *GetSmsTrialV1SmsTrialGetResponse
+func (c *ClientWithResponses) GetSmsTrialV1SmsTrialGetWithResponse(ctx context.Context, params *GetSmsTrialV1SmsTrialGetParams, reqEditors ...RequestEditorFn) (*GetSmsTrialV1SmsTrialGetResponse, error) {
+	rsp, err := c.GetSmsTrialV1SmsTrialGet(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetSmsTrialV1SmsTrialGetResponse(rsp)
+}
+
+// StartSmsTrialPhoneV1SmsTrialPhonePostWithBodyWithResponse request with arbitrary body returning *StartSmsTrialPhoneV1SmsTrialPhonePostResponse
+func (c *ClientWithResponses) StartSmsTrialPhoneV1SmsTrialPhonePostWithBodyWithResponse(ctx context.Context, params *StartSmsTrialPhoneV1SmsTrialPhonePostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*StartSmsTrialPhoneV1SmsTrialPhonePostResponse, error) {
+	rsp, err := c.StartSmsTrialPhoneV1SmsTrialPhonePostWithBody(ctx, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseStartSmsTrialPhoneV1SmsTrialPhonePostResponse(rsp)
+}
+
+func (c *ClientWithResponses) StartSmsTrialPhoneV1SmsTrialPhonePostWithResponse(ctx context.Context, params *StartSmsTrialPhoneV1SmsTrialPhonePostParams, body StartSmsTrialPhoneV1SmsTrialPhonePostJSONRequestBody, reqEditors ...RequestEditorFn) (*StartSmsTrialPhoneV1SmsTrialPhonePostResponse, error) {
+	rsp, err := c.StartSmsTrialPhoneV1SmsTrialPhonePost(ctx, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseStartSmsTrialPhoneV1SmsTrialPhonePostResponse(rsp)
+}
+
+// ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostWithBodyWithResponse request with arbitrary body returning *ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostResponse
+func (c *ClientWithResponses) ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostWithBodyWithResponse(ctx context.Context, params *ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostResponse, error) {
+	rsp, err := c.ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostWithBody(ctx, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostResponse(rsp)
+}
+
+func (c *ClientWithResponses) ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostWithResponse(ctx context.Context, params *ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostParams, body ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostJSONRequestBody, reqEditors ...RequestEditorFn) (*ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostResponse, error) {
+	rsp, err := c.ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPost(ctx, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostResponse(rsp)
+}
+
 // GetSmsV1SmsSmsIdGetWithResponse request returning *GetSmsV1SmsSmsIdGetResponse
 func (c *ClientWithResponses) GetSmsV1SmsSmsIdGetWithResponse(ctx context.Context, smsId openapi_types.UUID, params *GetSmsV1SmsSmsIdGetParams, reqEditors ...RequestEditorFn) (*GetSmsV1SmsSmsIdGetResponse, error) {
 	rsp, err := c.GetSmsV1SmsSmsIdGet(ctx, smsId, params, reqEditors...)
@@ -15623,6 +16267,39 @@ func ParseUpdateAgentV1AgentsAgentIdPatchResponse(rsp *http.Response) (*UpdateAg
 	}
 
 	response := &UpdateAgentV1AgentsAgentIdPatchResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest AgentResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseRotateToolSecretV1AgentsAgentIdRotateToolSecretPostResponse parses an HTTP response from a RotateToolSecretV1AgentsAgentIdRotateToolSecretPostWithResponse call
+func ParseRotateToolSecretV1AgentsAgentIdRotateToolSecretPostResponse(rsp *http.Response) (*RotateToolSecretV1AgentsAgentIdRotateToolSecretPostResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RotateToolSecretV1AgentsAgentIdRotateToolSecretPostResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -17254,6 +17931,91 @@ func ParseDeleteSmsSuppressionV1SmsSuppressionsNumberDeleteResponse(rsp *http.Re
 			return nil, err
 		}
 		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetSmsTrialV1SmsTrialGetResponse parses an HTTP response from a GetSmsTrialV1SmsTrialGetWithResponse call
+func ParseGetSmsTrialV1SmsTrialGetResponse(rsp *http.Response) (*GetSmsTrialV1SmsTrialGetResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetSmsTrialV1SmsTrialGetResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest SmsTrialResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseStartSmsTrialPhoneV1SmsTrialPhonePostResponse parses an HTTP response from a StartSmsTrialPhoneV1SmsTrialPhonePostWithResponse call
+func ParseStartSmsTrialPhoneV1SmsTrialPhonePostResponse(rsp *http.Response) (*StartSmsTrialPhoneV1SmsTrialPhonePostResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &StartSmsTrialPhoneV1SmsTrialPhonePostResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest SmsTrialResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostResponse parses an HTTP response from a ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostWithResponse call
+func ParseConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostResponse(rsp *http.Response) (*ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ConfirmSmsTrialPhoneV1SmsTrialPhoneConfirmPostResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest SmsTrialResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
 
 	}
 

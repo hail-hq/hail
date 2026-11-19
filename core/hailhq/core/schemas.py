@@ -1,4 +1,5 @@
 import base64
+import json
 import re
 from datetime import datetime
 from functools import cache
@@ -25,14 +26,17 @@ from pydantic import (
     model_validator,
 )
 
-E164 = re.compile(r"^\+[1-9]\d{1,14}$")
+# ``[0-9]``, not ``\d``: ``\d`` also matches non-ASCII digits, and this
+# pattern is reused where Python flags do not carry (pydantic ``pattern=``).
+E164 = re.compile(r"^\+[1-9][0-9]{1,14}$", re.ASCII)
 
 
 def _e164_or_error(v: str | None) -> str | None:
     """Shared to/from validator for the phone-channel create schemas
     (``CallCreate``, ``SmsCreate``) — one place to tighten the rule or
     reword the error."""
-    if v is not None and not E164.match(v):
+    # fullmatch: ``$`` with ``match`` also accepts a trailing newline.
+    if v is not None and not E164.fullmatch(v):
         raise ValueError("must be E.164 (e.g. +14155551234)")
     return v
 
@@ -367,6 +371,22 @@ NumberType = Literal["local", "mobile", "toll_free", "national"]
 Capability = Literal["voice", "sms"]
 
 
+class CallTranscriptTurn(BaseModel):
+    role: Literal["user", "assistant"] = Field(
+        description=(
+            "'assistant' is the Hail agent. 'user' is the person (or "
+            "answering machine) on the other end of the line."
+        )
+    )
+    text: str = Field(description="What was said in this turn.")
+    at: datetime = Field(
+        description=(
+            "When the speaker started this turn, ISO 8601. When that is not "
+            "known, when Hail recorded the turn."
+        )
+    )
+
+
 class CallResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -440,6 +460,14 @@ class CallResponse(BaseModel):
         default=None,
         description="Human-readable explanation for a failed call. Null for other statuses.",
     )
+    transcript: list[CallTranscriptTurn] | None = Field(
+        default=None,
+        description=(
+            "What was said on the call, in the order it was said. Set only by "
+            "GET /v1/calls/{call_id}: an empty list until someone speaks. "
+            "Null in POST /v1/calls and GET /v1/calls responses."
+        ),
+    )
 
 
 class CallListResponse(BaseModel):
@@ -470,7 +498,11 @@ class SmsCreate(ConsentAttestationMixin):
             "always use 'HAIL', depending on the carrier. Every other destination, "
             "including the US and Canada, "
             "uses the organization's oldest active SMS-capable number; if none "
-            "exists the request fails with 422. SMS never uses the shared pool."
+            "exists the request fails with 422. SMS never uses the shared pool. "
+            "Trial texts (up to 25, only to the workspace's verified trial "
+            "phone): with no from, Hail uses one when the workspace's own "
+            "number cannot text that US phone; set from to the trial number "
+            "to use one directly."
         ),
     )
     body: str = Field(
@@ -482,11 +514,22 @@ class SmsCreate(ConsentAttestationMixin):
         default_factory=dict,
         description=(
             "Free-form JSON object attached to the message and echoed back "
-            "on reads. Not interpreted by Hail."
+            "on reads. Not interpreted by Hail. The key 'sms_trial' is "
+            "reserved and rejected."
         ),
     )
 
     _validate_e164 = field_validator("to", "from_")(_e164_or_error)
+
+    @field_validator("metadata")
+    @classmethod
+    def _metadata_has_no_reserved_keys(cls, v: dict) -> dict:
+        # Trial texts are counted by this key (sms_trial.SMS_TRIAL_META_KEY;
+        # a literal here because models imports this module). A caller must
+        # not be able to plant it.
+        if "sms_trial" in v:
+            raise ValueError("metadata keys are reserved: sms_trial")
+        return v
 
 
 SmsStatus = Literal["queued", "sent", "delivered", "failed", "undelivered", "received"]
@@ -583,6 +626,77 @@ class SenderIdResponse(BaseModel):
             "The platform's alphanumeric sender id, used on eligible "
             "corridors when custom_sender_id is null."
         ),
+    )
+
+
+class SmsTrialResponse(BaseModel):
+    configured: bool = Field(
+        description="True when this Hail deployment has a trial number set up."
+    )
+    available: bool = Field(
+        description=(
+            "True when trial texts can be sent now. False while the trial "
+            "number waits for carrier approval."
+        )
+    )
+    status: Literal["none", "pending", "verified"] = Field(
+        description=(
+            "The workspace's trial phone: 'none' (no phone yet), 'pending' "
+            "(code sent, not confirmed) or 'verified' (receives trial texts)."
+        )
+    )
+    phone: str | None = Field(
+        description="The trial phone in E.164. Null when status is 'none'."
+    )
+    pending_phone: str | None = Field(
+        description=(
+            "A new phone in E.164 that got a code and is not confirmed yet. "
+            "Until it is, the verified phone keeps getting trial texts. Null "
+            "when no new phone waits."
+        )
+    )
+    code_expires_at: datetime | None = Field(
+        description=(
+            "When the open code expires, for pending_phone when set, else for "
+            "phone. Null when no code is open."
+        )
+    )
+    texts_used: int = Field(description="Trial texts this workspace has sent.")
+    texts_limit: int = Field(description="Trial texts a workspace can send, ever.")
+    texts_left: int = Field(description="Trial texts this workspace can still send.")
+
+
+class SmsTrialPhoneStart(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    phone: str = Field(
+        description=(
+            "Your own US mobile in E.164 (e.g. +14155551234). Hail texts a "
+            "6-digit code to it."
+        )
+    )
+    recipient_consent: Literal[True] = Field(
+        description=(
+            "Must be true: the phone's owner agreed to get the code and the "
+            "trial texts."
+        )
+    )
+    consent_version: str = Field(
+        min_length=1,
+        max_length=40,
+        description="Version of the consent wording the person agreed to.",
+    )
+
+    _validate_e164 = field_validator("phone")(_e164_or_error)
+
+
+class SmsTrialPhoneConfirm(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: str = Field(
+        # ``[0-9]``: ``\d`` also matches non-ASCII digits.
+        pattern=r"^[0-9]{6}$",
+        description="The 6-digit code Hail texted to the trial phone.",
     )
 
 
@@ -900,6 +1014,319 @@ class HandoverContactOut(BaseModel):
     note: str = Field(description="When the agent hands over to this person.")
 
 
+# Customer HTTP tools (agent_tools.http_tool). Names the model already has
+# from Hail; an HTTP tool may not take one. tests/test_http_tool_schemas.py
+# checks this covers every built-in tool.
+RESERVED_TOOL_NAMES = frozenset(
+    {
+        "cancel_transfer",
+        "end_call",
+        "hail_settings_help",
+        "list_contacts",
+        "read_browser_inbox",
+        "read_browser_texts",
+        "read_email",
+        "send_dtmf",
+        "send_email",
+        "send_sms",
+        "thread_history",
+        "transfer_call",
+    }
+)
+HTTP_TOOLS_MAX = 10
+HTTP_TOOL_TIMEOUT_DEFAULT = 5
+HTTP_TOOL_TIMEOUT_MAX = 10
+_HTTP_TOOL_NAME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_]{0,63}$")
+_HEADER_NAME_RE = re.compile(r"^[A-Za-z0-9-]{1,64}$")
+# Headers Hail sets itself, or that would break the request.
+_RESERVED_HEADERS = frozenset(
+    {
+        "host",
+        "content-length",
+        "content-type",
+        "transfer-encoding",
+        "connection",
+        "user-agent",
+    }
+)
+_HTTP_TOOL_HEADERS_MAX = 10
+# One type per node, no "null" and no additionalProperties/pattern/format:
+# Gemini (in the house fallback chain) rejects those in function schemas.
+_PARAM_TYPES = frozenset({"string", "number", "integer", "boolean", "array", "object"})
+_PARAM_KEYS = frozenset(
+    {
+        "type",
+        "description",
+        "enum",
+        "items",
+        "properties",
+        "required",
+        "minimum",
+        "maximum",
+        "minLength",
+        "maxLength",
+        "minItems",
+        "maxItems",
+    }
+)
+_PARAM_NUMBER_KEYS = ("minimum", "maximum")
+_PARAM_COUNT_KEYS = ("minLength", "maxLength", "minItems", "maxItems")
+_PARAM_NAME_RE = re.compile(r"^[a-zA-Z0-9_.-]{1,64}$")
+_PARAMS_MAX_CHARS = 8000
+_PARAMS_MAX_DEPTH = 4
+
+
+def _check_param_schema(node: Any, path: str, depth: int) -> None:
+    """A small JSON Schema subset every LLM provider accepts. A schema a
+    provider rejects would fail every model turn, not only this tool."""
+    if type(node) is not dict:  # a ValueError, so pydantic reports it
+        raise ValueError(f"{path} must be an object")
+    if depth > _PARAMS_MAX_DEPTH:
+        raise ValueError(f"{path} nests deeper than {_PARAMS_MAX_DEPTH} levels")
+    unknown = sorted(set(node) - _PARAM_KEYS)
+    if unknown:
+        raise ValueError(f"{path} has unsupported keywords: {', '.join(unknown)}")
+    kind = node.get("type")
+    if not isinstance(kind, str) or kind not in _PARAM_TYPES:
+        raise ValueError(
+            f"{path}.type must be one of {', '.join(sorted(_PARAM_TYPES))}"
+        )
+    if "description" in node and not isinstance(node["description"], str):
+        raise ValueError(f"{path}.description must be a string")
+    if "enum" in node:
+        enum = node["enum"]
+        if (
+            not isinstance(enum, list)
+            or not enum
+            or not all(isinstance(e, str) for e in enum)
+        ):
+            raise ValueError(f"{path}.enum must be a non-empty list of strings")
+    for key in _PARAM_NUMBER_KEYS:
+        value = node.get(key)
+        if key in node and (
+            isinstance(value, bool) or not isinstance(value, (int, float))
+        ):
+            raise ValueError(f"{path}.{key} must be a number")
+    for key in _PARAM_COUNT_KEYS:
+        value = node.get(key)
+        if key in node and (
+            isinstance(value, bool) or not isinstance(value, int) or value < 0
+        ):
+            raise ValueError(f"{path}.{key} must be a whole number of 0 or more")
+    if "items" in node and kind != "array":
+        raise ValueError(f"{path}.items is only for type array")
+    if "properties" in node and kind != "object":
+        raise ValueError(f"{path}.properties is only for type object")
+    if "items" in node:
+        _check_param_schema(node["items"], f"{path}.items", depth + 1)
+    props = node.get("properties")
+    if props is not None:
+        if not isinstance(props, dict):
+            raise ValueError(f"{path}.properties must be an object")
+        for name, sub in props.items():
+            if not _PARAM_NAME_RE.match(name):
+                raise ValueError(
+                    f"{path}.properties has an invalid name {name!r} "
+                    "(letters, digits, _ . -; up to 64)"
+                )
+            _check_param_schema(sub, f"{path}.properties.{name}", depth + 1)
+    required = node.get("required")
+    if required is not None:
+        if not isinstance(required, list) or not all(
+            isinstance(r, str) for r in required
+        ):
+            raise ValueError(f"{path}.required must be a list of names")
+        missing = sorted(set(required) - set(props or {}))
+        if missing:
+            raise ValueError(
+                f"{path}.required names unknown properties: {', '.join(missing)}"
+            )
+
+
+def validate_http_tool_url(v: str) -> str:
+    """Shape only (no DNS): https, a host, no credentials. The API resolves
+    the host on save and the agent again on every request. Returns the url
+    with a lowercase scheme (the table checks ``url LIKE 'https://%'``)."""
+    if v[:8].lower() != "https://":
+        raise ValueError("url must use https")
+    v = "https://" + v[8:]
+    parts = urlsplit(v)
+    if not parts.hostname:
+        raise ValueError("url must include a host")
+    if parts.username or parts.password:
+        raise ValueError("url must not contain a user name or password")
+    if parts.fragment:
+        raise ValueError("url must not contain a fragment (#...)")
+    return v
+
+
+class HttpToolIn(BaseModel):
+    """One customer API the agent may call during a call, text or email."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(
+        description=(
+            "Function name the model calls: a letter, then letters, digits or "
+            "_ (up to 64). Unique per agent; built-in tool names are not allowed."
+        ),
+        examples=["lookup_order"],
+    )
+    description: str = Field(
+        min_length=1,
+        max_length=1000,
+        description="What the tool does and when to use it. Read by the model.",
+        examples=["Look up an order's status by its order number."],
+    )
+    url: str = Field(
+        max_length=2000,
+        description=(
+            "HTTPS endpoint Hail POSTs to. It must resolve to a public "
+            "address; private, loopback and link-local addresses are refused."
+        ),
+        examples=["https://api.example.com/hail/orders"],
+    )
+    parameters: dict[str, Any] = Field(
+        default_factory=lambda: {"type": "object", "properties": {}},
+        description=(
+            "JSON Schema (type object) of the arguments the model fills in. "
+            "Supported keywords: type (one of string, number, integer, "
+            "boolean, array, object), description, enum (strings), items, "
+            "properties, required, minimum, maximum, minLength, maxLength, "
+            "minItems, maxItems."
+        ),
+        examples=[
+            {
+                "type": "object",
+                "properties": {
+                    "order_number": {
+                        "type": "string",
+                        "description": "The order number the caller gives.",
+                    }
+                },
+                "required": ["order_number"],
+            }
+        ],
+    )
+    headers: dict[str, str] | None = Field(
+        default=None,
+        description=(
+            "Static headers sent with every request, e.g. an Authorization "
+            "token (up to 10). Stored encrypted; responses show only the "
+            "names. On PATCH, null or left out keeps the saved values of the "
+            "tool with the same name while its url keeps the same scheme, host "
+            "and port; a url on a new host needs the headers again. {} removes "
+            "them."
+        ),
+        examples=[{"Authorization": "Bearer sk_live_example"}],
+    )
+    timeout_seconds: int = Field(
+        default=HTTP_TOOL_TIMEOUT_DEFAULT,
+        ge=1,
+        le=HTTP_TOOL_TIMEOUT_MAX,
+        description="Seconds to wait for the answer (1..10). Default 5.",
+    )
+    wait_message: str | None = Field(
+        default=None,
+        max_length=200,
+        description=(
+            "Sentence the agent says on a call while it waits, e.g. 'One "
+            "moment, let me check.' Not used for texts and email."
+        ),
+    )
+
+    @field_validator("name")
+    @classmethod
+    def _tool_name(cls, v: str) -> str:
+        if not _HTTP_TOOL_NAME_RE.match(v):
+            raise ValueError(
+                "name must start with a letter and use only letters, digits "
+                "and _ (up to 64)"
+            )
+        if v in RESERVED_TOOL_NAMES:
+            raise ValueError(f"{v} is a built-in tool name")
+        return v
+
+    @field_validator("description")
+    @classmethod
+    def _description_not_blank(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("description must not be blank")
+        return v
+
+    @field_validator("url")
+    @classmethod
+    def _url(cls, v: str) -> str:
+        return validate_http_tool_url(v)
+
+    @field_validator("parameters")
+    @classmethod
+    def _parameters(cls, v: dict[str, Any]) -> dict[str, Any]:
+        if v.get("type") != "object":
+            raise ValueError("parameters.type must be 'object'")
+        _check_param_schema(v, "parameters", 1)
+        if len(json.dumps(v)) > _PARAMS_MAX_CHARS:
+            raise ValueError(
+                f"parameters is longer than {_PARAMS_MAX_CHARS} characters"
+            )
+        return v
+
+    @field_validator("headers")
+    @classmethod
+    def _headers(cls, v: dict[str, str] | None) -> dict[str, str] | None:
+        if v is None:
+            return v
+        if len(v) > _HTTP_TOOL_HEADERS_MAX:
+            raise ValueError(f"at most {_HTTP_TOOL_HEADERS_MAX} headers")
+        seen: set[str] = set()
+        for name, value in v.items():
+            low = name.lower()
+            if not _HEADER_NAME_RE.match(name):
+                raise ValueError(f"invalid header name {name!r}")
+            if low in _RESERVED_HEADERS or low.startswith("x-hail-"):
+                raise ValueError(f"header {name} is set by Hail")
+            if low in seen:
+                raise ValueError(f"header {name} is given twice")
+            seen.add(low)
+            if len(value) > 2000 or any(c in value for c in "\r\n\0"):
+                raise ValueError(
+                    f"header {name} must be one line of at most 2000 characters"
+                )
+        return v
+
+    @field_validator("wait_message")
+    @classmethod
+    def _wait_message(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return v.strip() or None
+
+
+class HttpToolOut(BaseModel):
+    name: str = Field(description="Function name the model calls.")
+    description: str = Field(description="What the tool does. Read by the model.")
+    url: str = Field(description="HTTPS endpoint Hail POSTs to.")
+    parameters: dict[str, Any] = Field(description="JSON Schema of the arguments.")
+    header_names: list[str] = Field(
+        description="Names of the saved static headers. Values are never returned."
+    )
+    timeout_seconds: int = Field(description="Seconds Hail waits for the answer.")
+    wait_message: str | None = Field(
+        description="Sentence said on a call while waiting, or null."
+    )
+
+
+def _unique_tool_names(tools: list[HttpToolIn] | None) -> None:
+    if not tools:
+        return
+    seen: set[str] = set()
+    for tool in tools:
+        if tool.name in seen:
+            raise ValueError(f"http_tools has two tools named {tool.name}")
+        seen.add(tool.name)
+
+
 class AgentCreate(BaseModel):
     """A saved agent: what a number answers with, and what POST /calls can
     place calls with via ``agent_id``."""
@@ -986,6 +1413,15 @@ class AgentCreate(BaseModel):
         max_length=10,
         description="People the agent may hand a live call to, in order. The agent never sees their numbers.",
     )
+    http_tools: list[HttpToolIn] = Field(
+        default_factory=list,
+        max_length=HTTP_TOOLS_MAX,
+        description=(
+            "Your APIs the agent may call during calls, texts and email (up "
+            "to 10). Each request is signed with the agent's "
+            "http_tool_secret; see docs/public/agents.md."
+        ),
+    )
 
     @field_validator("name")
     @classmethod
@@ -994,6 +1430,11 @@ class AgentCreate(BaseModel):
         if not v:
             raise ValueError("name must not be blank")
         return v
+
+    @model_validator(mode="after")
+    def _http_tool_names(self):
+        _unique_tool_names(self.http_tools)
+        return self
 
 
 class AgentUpdate(BaseModel):
@@ -1059,6 +1500,20 @@ class AgentUpdate(BaseModel):
         max_length=10,
         description="New handover list; replaces the old one. [] removes all; null leaves it.",
     )
+    http_tools: list[HttpToolIn] | None = Field(
+        default=None,
+        max_length=HTTP_TOOLS_MAX,
+        description=(
+            "New HTTP tool list; replaces the old one. [] removes all; null "
+            "leaves it. A tool sent without headers keeps the saved headers "
+            "of the tool with the same name."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _http_tool_names(self):
+        _unique_tool_names(self.http_tools)
+        return self
 
     @field_validator("name")
     @classmethod
@@ -1103,6 +1558,18 @@ class AgentResponse(BaseModel):
     status: AgentStatus = Field(description="'live' or 'paused'.")
     handover_contacts: list[HandoverContactOut] = Field(
         default_factory=list, description="People the agent may hand a live call to."
+    )
+    http_tools: list[HttpToolOut] = Field(
+        default_factory=list, description="Your APIs the agent may call."
+    )
+    http_tool_secret: str | None = Field(
+        default=None,
+        description=(
+            "Secret that signs this agent's HTTP tool requests "
+            "(X-Hail-Signature). Returned only when Hail creates it (the "
+            "first save with HTTP tools) or rotates it "
+            "(POST /agents/{id}/rotate-tool-secret). Store it then."
+        ),
     )
     created_at: datetime = Field(description="ISO 8601 timestamp.")
     updated_at: datetime = Field(description="ISO 8601 timestamp.")
