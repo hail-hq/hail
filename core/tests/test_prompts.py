@@ -88,6 +88,7 @@ def test_other_party_goes_last() -> None:
     assert section.startswith("# The person on this call")
     assert f'recipient_name "{SELF_RECIPIENT}"' in section
     assert 'goes to "Sam"' not in section
+    assert 'If they told you a different name, they are not "Sam"' in section
     assert "my email" not in prompts.other_party_section("Sam", can_email=False)
 
 

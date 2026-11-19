@@ -1583,7 +1583,7 @@ async def agent_email_run_send_email(
         agent_id=agent.id,
         consent_source="inbound_email",
         reply_parent=parent,
-        # Mail to the sender comes from the address they wrote to.
+        # Mail to the sender comes from the domain they wrote to.
         reply_domain=(
             await db.get(EmailDomain, inbound.email_domain_id)
             if parent is not None

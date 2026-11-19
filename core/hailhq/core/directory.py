@@ -231,12 +231,15 @@ async def entry_email(
     if entry is None:
         return None
     if entry.source == "member":
+        # Anyone can sign up with an address they do not own: an unverified
+        # login is no address on file.
         stmt: Any = (
             select(User.email)
             .join(OrganizationMember, OrganizationMember.user_id == User.id)
             .where(
                 OrganizationMember.organization_id == organization_id,
                 User.phone_number == phone_e164,
+                User.email_verified.is_(True),
             )
             .limit(2)
         )
