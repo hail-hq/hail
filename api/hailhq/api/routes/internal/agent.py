@@ -376,15 +376,13 @@ _SPOKEN_EMAIL_NO_SELF = (
     " You can only email people on file, to prevent spam. Offer to take a"
     " message."
 )
-# On a call every name refusal also says how to email the caller, so the
-# answer for the caller's own saved name looks like any other.
-_SPOKEN_CALL_NO_MATCH = (
-    _SPOKEN_EMAIL_NO_MATCH
-    + ' To email the person on this call, use recipient_name "me".'
-)
+
 _SPOKEN_RUN_REPLIED = (
-    "Not sent: the reply to this email was already sent or tried. Nothing"
-    " more can go to the sender as that reply."
+    "Your reply to this email was already sent. Nothing more was sent."
+)
+_SPOKEN_RUN_REPLY_FAILED = (
+    "Not sent: your reply to this email already failed. Nothing more can go"
+    " to the sender as that reply."
 )
 _SPOKEN_CALL_EMAIL_LIMIT = (
     f"Not sent: this call already sent {MAX_CALL_EMAILS} emails, the limit for"
@@ -431,8 +429,9 @@ async def _call_recipient(
     shares the caller's name.
 
     A name the caller is saved under that does not resolve to the caller's
-    own address is refused like an unknown name, with a hint to use "me",
-    whether or not their entry has an email: a model that emails them
+    own address is refused like an unknown name, whether or not their entry
+    has an email (the contact line tells the model to use "me"): a model
+    that emails them
     by name (an older prompt, or one that ignores the tool text) would
     otherwise send the caller's request to a member or contact of the same
     name."""
@@ -457,7 +456,7 @@ async def _call_recipient(
         caller is not None and _same_name(caller.name, name)
     ):
         return AgentSendResponse(
-            ok=False, spoken=_SPOKEN_CALL_NO_MATCH.format(name=_quoted_name(name))
+            ok=False, spoken=_SPOKEN_EMAIL_NO_MATCH.format(name=_quoted_name(name))
         )
     return recipient, False
 
@@ -1538,8 +1537,11 @@ async def agent_email_run_send_email(
         # A retry of this same send was answered in _email_run, so a reply
         # found here is another send: it already used the run's one reply.
         # One that failed is reported as failed, so the model says so.
-        if await prior_email_reply(db, inbound) is not None:
-            return AgentSendResponse(ok=False, spoken=_SPOKEN_RUN_REPLIED)
+        existing = await prior_email_reply(db, inbound)
+        if existing is not None:
+            if existing.status in ("failed", "bounced"):
+                return AgentSendResponse(ok=False, spoken=_SPOKEN_RUN_REPLY_FAILED)
+            return AgentSendResponse(ok=True, spoken=_SPOKEN_RUN_REPLIED)
         try:
             scope, source, files = await source_files(
                 db, inbound, body.reply_to_email_id or inbound.id, body.attachment_ids

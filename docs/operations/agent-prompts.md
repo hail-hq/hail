@@ -178,13 +178,14 @@ email ownership. Browser sessions use the signed-in account's verified email.
 the caller's own address on file, with limits. Caller ID can be faked.
 
 - Only the reserved `recipient_name` `me` (also `caller`) uses it. On a
-  call, `you` and `sender` are names. The contact line in the call's instructions tells the model to.
+  call, `you` and `sender` are names. The contact line in the call's
+  instructions tells the model to use `me`.
 - It reaches the one email saved for the caller's number, members first. No
   single email means no send; it never falls back to a name lookup.
 - A name is looked up by name only, members first. Caller ID never breaks a
   name tie, and never puts the caller's address in place of a name. The
-  caller's saved name is refused with a hint to use `me` unless it resolves
-  to the caller's own address, so an older prompt cannot send the caller's
+  caller's saved name is refused like an unknown name unless it resolves to
+  the caller's own address, so an older prompt cannot send the caller's
   request to a member or contact of the same name.
 - Each email to the caller's address on file (by `me` or by a name that
   resolves to it) gets a fixed subject start, first line

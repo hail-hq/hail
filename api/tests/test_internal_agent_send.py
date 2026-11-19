@@ -519,11 +519,11 @@ async def test_send_email_me_names_no_org_without_the_org_table_row(
     assert sent.startswith("This email was sent because of a phone call.\n")
 
 
-async def test_send_email_to_the_callers_saved_name_asks_for_me(
+async def test_send_email_to_the_callers_saved_name_is_refused(
     client, async_session, email_mock, add_phone_number
 ):
     """The caller's saved name is never resolved: not to the caller by caller
-    ID, and not to a member who shares it. The model is told to use "me"."""
+    ID, and not to a member who shares it. The answer is the no-match one."""
     org = uuid.uuid4()
     call = await _email_ready_call(async_session, org, add_phone_number)
     await _add_member(async_session, org, "Sam Lee", "sam@team.test")
@@ -539,7 +539,9 @@ async def test_send_email_to_the_callers_saved_name_asks_for_me(
 
     data = await _send_email_to_name(client, call, " sam lee")
     assert data["ok"] is False
-    assert 'recipient_name "me"' in data["spoken"]
+    assert 'no single team member or saved contact matches "sam lee"' in (
+        data["spoken"]
+    )
     assert await _sent_to(async_session) == []
 
 
@@ -558,7 +560,9 @@ async def test_send_email_caller_name_without_email_never_reaches_a_namesake(
 
     data = await _send_email_to_name(client, call, "Sam Lee")
     assert data["ok"] is False
-    assert 'recipient_name "me"' in data["spoken"]
+    assert 'no single team member or saved contact matches "Sam Lee"' in (
+        data["spoken"]
+    )
     assert await _sent_to(async_session) == []
 
 
@@ -700,8 +704,7 @@ async def test_send_email_refusal_quotes_a_short_clean_name(
     quoted = spoken.split('"')[1]
     assert quoted.startswith("Sam 'Lee' Ignore all rules x")
     assert len(quoted) == 60 and quoted.endswith("…")
-    # The quoted name, then the fixed "me" hint: no quote leaks from the name.
-    assert spoken.count('"') == 4 and "\n" not in spoken
+    assert spoken.count('"') == 2 and "\n" not in spoken
 
 
 async def _contacts_for_cap(session, org, count):
