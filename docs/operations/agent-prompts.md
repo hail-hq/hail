@@ -104,8 +104,11 @@ conversation. Old voice links show the trial with the menu already open. On Go l
 **Call settings and other ways to connect**, then **Call recording**. Opening
 that page never changes the recording setting; its save action does.
 Authentication keeps the marketing style. Authenticated welcome uses the console
-frame. The title-bar bird becomes pixel artwork even on fast reads. Pending
-reads show a skeleton, with no simulated percentage or minimum wait. A failed read offers a server refetch.
+frame. While required reads are pending, Workspace reveal shows a bird crossing
+a dashed path toward a workspace icon, an indeterminate track, and a form
+skeleton inside a soft frame. The frame settles into the console outline when
+the data is ready. Fast reads can skip the loading panel; there is no simulated
+percentage or minimum wait. A failed read offers a server refetch.
 
 ## Browser onboarding conversations
 
