@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from hailhq.core.agent_tools import hail_help, transfer_call
+from hailhq.core.agent_tools import email_caller, hail_help, transfer_call
 from hailhq.core.agent_tools.registry import all_tools
 from hailhq.core.schemas import (
     RESERVED_TOOL_NAMES,
@@ -33,7 +33,11 @@ def _tool(**over):
 
 def test_reserved_names_cover_every_built_in_tool() -> None:
     names = {s.name for s in all_tools()}
-    names |= {hail_help.SPEC.name, transfer_call.CANCEL_SPEC.name}
+    names |= {
+        hail_help.SPEC.name,
+        transfer_call.CANCEL_SPEC.name,
+        email_caller.SPEC.name,
+    }
     assert names <= RESERVED_TOOL_NAMES
 
 

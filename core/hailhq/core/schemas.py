@@ -931,6 +931,7 @@ class HandoverContactOut(BaseModel):
 RESERVED_TOOL_NAMES = frozenset(
     {
         "cancel_transfer",
+        "email_caller",
         "end_call",
         "hail_settings_help",
         "list_contacts",
