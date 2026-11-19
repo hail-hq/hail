@@ -159,7 +159,7 @@ def test_prompt_text_is_pinned() -> None:
         "37e9a0b5058e8c60355db926a963a8fba59c0fc4dd43d9ede4c7116e464e9e8b"
     )
     assert _sha(prompts.VOICE_CONFIGURATION_HELP) == (
-        "fdefb6425916789c4b7b8fdbeb616e018979e054a164a1a0d7c0fc1be46e45bc"
+        "dbe21de6cd47912c8f0174faf95f17c989cf95b74d61ed0c12784dd6f4e00bd6"
     )
 
 
@@ -176,4 +176,5 @@ def test_onboarding_voice_help_names_the_optional_trial_settings():
     assert "Choose a language and voice" not in guide
     assert "During onboarding, open Voice and instructions" in guide
     assert "Language and voice" in guide
+    assert "without leaving the trial" in guide
     assert "next conversation" in guide

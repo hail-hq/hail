@@ -97,14 +97,15 @@ complete global checklist.
 
 The welcome flow has three primary stages: Your agent, Try it, and Go live.
 Saving the task opens the browser trial. Voice selection, recording settings,
-and attribution remain optional pages; existing direct links continue to work.
-On Try it, open **Voice and instructions**, then **Language and voice**. Saving
-returns to the trial and affects the next conversation. On Go live, open
+and attribution remain optional. On Try it, open **Voice and instructions** to
+show the language picker, voice choices, and samples inside the menu. Press
+**Save language and voice** without leaving the trial; it affects the next
+conversation. Old voice links show the trial with the menu already open. On Go live, open
 **Call settings and other ways to connect**, then **Call recording**. Opening
 that page never changes the recording setting; its save action does.
 Authentication keeps the marketing style. Authenticated welcome uses the console
-frame. A pixel bird appears only while the real server reads are pending, with
-no simulated percentage or minimum wait. A failed read offers a server refetch.
+frame. The title-bar bird becomes pixel artwork even on fast reads. Pending
+reads show a skeleton, with no simulated percentage or minimum wait. A failed read offers a server refetch.
 
 ## Browser onboarding conversations
 
