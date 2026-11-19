@@ -9,8 +9,8 @@ voicebot reads the SIP participant's attributes and calls
 * known number on the wrong trunk, or without voice: ``Call`` failed with
   ``end_reason = carrier_route_failed`` (logged at WARNING). During the
   move to per-carrier trunks, the shared trunk counts for a carrier with its
-  own trunk only for numbers it lists (one LiveKit read, see
-  ``_trunk_accepted``);
+  own trunk only for numbers it lists (one LiveKit read of at most 2
+  seconds, see ``_trunk_accepted``);
 * no live voice agent: ``Call`` failed with ``end_reason = no_agent``;
 * no credits or voice suspended: ``Call`` failed with ``insufficient_funds``
   (or ``user_rejected`` when the channel is suspended);
@@ -157,7 +157,7 @@ async def open_inbound_call(
         not attrs.trunk_id
         or not expected_trunk
         or "voice" not in number.capabilities
-        or not await _trunk_accepted(attrs.trunk_id, expected_trunk, number.e164)
+        or not await _trunk_accepted(db, attrs.trunk_id, expected_trunk, number.e164)
     ):
         # A real number of a real customer: keep a failed Call (and its event
         # and webhook) so the customer sees the missed call.
@@ -184,32 +184,57 @@ async def open_inbound_call(
         org_name.cancel()  # no-op once it has finished (refusals never await it)
 
 
-async def _trunk_accepted(trunk_id: str, expected: str, e164: str) -> bool:
+# The caller is on the line: a slow LiveKit read must not hold the call.
+SHARED_TRUNK_READ_TIMEOUT_SECONDS = 2.0
+
+# One client per process (see ``LiveKitClient``), built on first use inside
+# the running event loop (its aiohttp session needs one). Rebuilt only when
+# the loop changes; the process exit closes it.
+_livekit: LiveKitClient | None = None
+_livekit_loop: asyncio.AbstractEventLoop | None = None
+
+
+def _livekit_client() -> LiveKitClient:
+    global _livekit, _livekit_loop
+    loop = asyncio.get_running_loop()
+    if _livekit is None or _livekit_loop is not loop:
+        _livekit = LiveKitClient()
+        _livekit_loop = loop
+    return _livekit
+
+
+async def _trunk_accepted(
+    db: AsyncSession, trunk_id: str, expected: str, e164: str
+) -> bool:
     """The carrier's own trunk is accepted. While numbers move from the
     shared ``LIVEKIT_SIP_INBOUND_TRUNK_ID`` to per-carrier trunks
     (docs/operations/inbound-trunk-lockdown.md; removal: issue #475), the
     shared trunk is also accepted for a carrier with its own trunk, but only
     for a number the shared trunk lists by name. A wildcard shared trunk
     (no ``numbers``) matches any INVITE, including a spoofed one to a number
-    on a locked trunk; it never lists that number, so the call is refused."""
+    on a locked trunk; it never lists that number, so the call is refused.
+    The LiveKit read is bounded by ``SHARED_TRUNK_READ_TIMEOUT_SECONDS``."""
     if trunk_id == expected:
         return True
     shared = settings.livekit_sip_inbound_trunk_id
     if not shared or trunk_id != shared:
         return False
+    # Only the number lookup ran so far (no writes): end its transaction so
+    # no DB connection is held during the LiveKit read.
+    await db.commit()
     try:
-        lk = LiveKitClient()
-        try:
-            listed = await lk.inbound_trunk_numbers(shared)
-        finally:
-            await lk.aclose()
-    except Exception:
+        listed = await asyncio.wait_for(
+            _livekit_client().inbound_trunk_numbers(shared),
+            timeout=SHARED_TRUNK_READ_TIMEOUT_SECONDS,
+        )
+    except Exception:  # TimeoutError included
         # A security check: without the list, refuse.
         logger.exception(
             "inbound call to %s on the shared trunk %s refused: could not "
-            "read the trunk's numbers from LiveKit",
+            "read the trunk's numbers from LiveKit within %ss",
             e164,
             shared,
+            SHARED_TRUNK_READ_TIMEOUT_SECONDS,
         )
         return False
     return e164 in listed

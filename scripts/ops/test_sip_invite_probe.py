@@ -93,12 +93,15 @@ def test_password_challenge_passes() -> None:
     assert "407" in verdict
 
 
-def test_silence_counts_as_refused() -> None:
+def test_silence_says_nothing() -> None:
+    """LiveKit also drops INVITEs it takes for a flood: no answer is not a
+    refusal."""
     port, _seen, thread = serve(lambda conn, inv: None)
     code, verdict = probe.probe("127.0.0.1", port, NUMBER, timeout=0.5)
     thread.join(3)
-    assert code == 0
-    assert "no answer" in verdict
+    assert code == 2
+    assert verdict.startswith("INCONCLUSIVE: no answer")
+    assert "wait a minute" in verdict
 
 
 def test_ringing_fails_and_is_cancelled() -> None:

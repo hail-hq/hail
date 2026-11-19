@@ -791,23 +791,32 @@ async def detach_inbound_number(resource_id: str | None, e164: str) -> None:
 _READ_ONLY_SIP_ATTRS = frozenset({"incoming_auth_username", "incoming_auth_password"})
 
 
-def _set_voice_in_trunk_auth_sync(trunk_id: str, username: str, password: str) -> None:
-    """Digest credentials DIDWW answers LiveKit's challenge with. The PATCH
-    sends the trunk's whole SIP configuration back with the three auth fields
-    changed: DIDWW's docs do not say a partial configuration keeps the rest
-    (host, port, transport). Read back afterwards; a mismatch raises."""
-    client = didww_client()
-    trunk = client.get(f"voice_in_trunks/{trunk_id}")["data"]
+def _voice_in_sip_attrs_sync(trunk_id: str) -> dict:
+    """The trunk's writable SIP configuration; raises when it is not a SIP
+    trunk. Read only."""
+    trunk = didww_client().get(f"voice_in_trunks/{trunk_id}")["data"]
     config = (trunk.get("attributes") or {}).get("configuration") or {}
     if config.get("type") != "sip_configurations":
         raise CarrierNotConfigured(
             f"DIDWW voice IN trunk {trunk_id} is not a SIP trunk"
         )
-    attrs = {
+    return {
         k: v
         for k, v in (config.get("attributes") or {}).items()
         if k not in _READ_ONLY_SIP_ATTRS
     }
+
+
+def _set_voice_in_trunk_auth_sync(
+    trunk_id: str, current: dict, username: str, password: str
+) -> None:
+    """Digest credentials DIDWW answers LiveKit's challenge with. The PATCH
+    sends the trunk's whole SIP configuration (``current``, from
+    ``_voice_in_sip_attrs_sync``) back with the three auth fields changed:
+    DIDWW's docs do not say a partial configuration keeps the rest (host,
+    port, transport). Read back afterwards; a mismatch raises."""
+    client = didww_client()
+    attrs = dict(current)
     attrs.update(auth_enabled=True, auth_user=username, auth_password=password)
     client.patch(
         f"voice_in_trunks/{trunk_id}",
@@ -838,18 +847,45 @@ def _set_voice_in_trunk_auth_sync(trunk_id: str, username: str, password: str) -
         )
 
 
-async def set_voice_in_trunk_auth(username: str, password: str) -> None:
-    """Set digest credentials on ``DIDWW_VOICE_IN_TRUNK_ID`` so DIDWW can
-    answer the DIDWW LiveKit inbound trunk's challenge. Operator step, run
-    by scripts/ops/sip_trunks.py, never per call or per number."""
+def _require_voice_in_auth(username: str, password: str) -> None:
     if not settings.didww_voice_in_trunk_id:
         raise CarrierNotConfigured("DIDWW_VOICE_IN_TRUNK_ID is not set")
     if not username or not password:
         raise CarrierNotConfigured("DIDWW inbound username or password is empty")
+
+
+async def check_voice_in_trunk(username: str, password: str) -> dict:
+    """Every check of ``set_voice_in_trunk_auth`` that can fail before it
+    writes: the settings, and a read of ``DIDWW_VOICE_IN_TRUNK_ID`` that must
+    be a SIP trunk. Changes nothing. Returns the trunk's writable SIP
+    configuration for ``set_voice_in_trunk_auth``."""
+    _require_voice_in_auth(username, password)
+    try:
+        return await asyncio.to_thread(
+            _voice_in_sip_attrs_sync, settings.didww_voice_in_trunk_id
+        )
+    except DidwwApiError as exc:
+        raise CarrierRequestError(carrier_status(exc)) from exc
+    except requests.RequestException as exc:
+        raise CarrierRequestError(502) from exc
+
+
+async def set_voice_in_trunk_auth(
+    username: str, password: str, current: dict | None = None
+) -> None:
+    """Set digest credentials on ``DIDWW_VOICE_IN_TRUNK_ID`` so DIDWW can
+    answer the DIDWW LiveKit inbound trunk's challenge. Operator step, run
+    by scripts/ops/sip_trunks.py, never per call or per number. ``current``
+    is what ``check_voice_in_trunk`` returned; without it the trunk is read
+    first."""
+    _require_voice_in_auth(username, password)
+    if current is None:
+        current = await check_voice_in_trunk(username, password)
     try:
         await asyncio.to_thread(
             _set_voice_in_trunk_auth_sync,
             settings.didww_voice_in_trunk_id,
+            current,
             username,
             password,
         )

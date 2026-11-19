@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from typing import ClassVar
 
@@ -187,12 +188,19 @@ class FakeLiveKit:
 
     numbers: ClassVar[list[str]] = []
     error: ClassVar[Exception | None] = None
+    delay: ClassVar[float] = 0.0
     reads: ClassVar[int] = 0
+    built: ClassVar[int] = 0
     closed: ClassVar[int] = 0
+
+    def __init__(self) -> None:
+        type(self).built += 1
 
     async def inbound_trunk_numbers(self, trunk_id: str) -> list[str]:
         assert trunk_id == "ST_shared"
         type(self).reads += 1
+        if self.delay:
+            await asyncio.sleep(self.delay)
         if self.error is not None:
             raise self.error
         return list(self.numbers)
@@ -205,11 +213,18 @@ class FakeLiveKit:
 def shared_trunk(monkeypatch: pytest.MonkeyPatch) -> type[FakeLiveKit]:
     """Cutover: Twilio has its own trunk while the shared trunk is still set."""
     monkeypatch.setattr(settings, "livekit_sip_inbound_trunk_id", "ST_shared")
-    monkeypatch.setattr(FakeLiveKit, "numbers", [])
-    monkeypatch.setattr(FakeLiveKit, "error", None)
-    monkeypatch.setattr(FakeLiveKit, "reads", 0)
-    monkeypatch.setattr(FakeLiveKit, "closed", 0)
+    for name, value in (
+        ("numbers", []),
+        ("error", None),
+        ("delay", 0.0),
+        ("reads", 0),
+        ("built", 0),
+        ("closed", 0),
+    ):
+        monkeypatch.setattr(FakeLiveKit, name, value)
     monkeypatch.setattr(inbound_calls, "LiveKitClient", FakeLiveKit)
+    monkeypatch.setattr(inbound_calls, "_livekit", None)
+    monkeypatch.setattr(inbound_calls, "_livekit_loop", None)
     return FakeLiveKit
 
 
@@ -224,7 +239,66 @@ async def test_shared_trunk_is_accepted_for_a_number_it_lists(
         async_session, _attrs(trunk_id="ST_shared")
     )
     assert isinstance(outcome, inbound_calls.Accepted)
-    assert (shared_trunk.reads, shared_trunk.closed) == (1, 1)
+    assert (shared_trunk.reads, shared_trunk.closed) == (1, 0)
+
+
+async def test_shared_trunk_reads_reuse_one_client(async_session, shared_trunk) -> None:
+    """One LiveKitClient per process: it owns an aiohttp session."""
+    shared_trunk.numbers = ["hail-placeholder-shared", DIALED]
+    await _seed(async_session)
+    for sid in ("sip-call-1", "sip-call-2"):
+        outcome = await inbound_calls.open_inbound_call(
+            async_session, _attrs(trunk_id="ST_shared", provider_call_sid=sid)
+        )
+        assert isinstance(outcome, inbound_calls.Accepted)
+    assert (shared_trunk.built, shared_trunk.reads, shared_trunk.closed) == (
+        1,
+        2,
+        0,
+    )
+
+
+async def test_shared_trunk_is_refused_when_livekit_is_slow(
+    async_session, shared_trunk, monkeypatch, caplog
+) -> None:
+    """The caller is on the line: a read that takes too long refuses."""
+    monkeypatch.setattr(inbound_calls, "SHARED_TRUNK_READ_TIMEOUT_SECONDS", 0.05)
+    shared_trunk.numbers = ["hail-placeholder-shared", DIALED]
+    shared_trunk.delay = 1.0
+    await _seed(async_session)
+    with caplog.at_level("ERROR", logger="hailhq.core.inbound_calls"):
+        outcome = await inbound_calls.open_inbound_call(
+            async_session, _attrs(trunk_id="ST_shared")
+        )
+    assert isinstance(outcome, inbound_calls.Rejected)
+    assert outcome.reason == "carrier_route_failed"
+    assert any(
+        r.levelname == "ERROR" and "could not read" in r.getMessage()
+        for r in caplog.records
+    )
+    call = (await async_session.execute(select(Call))).scalar_one()
+    assert call.end_reason == "carrier_route_failed"
+
+
+async def test_shared_trunk_read_holds_no_transaction(
+    async_session, shared_trunk, monkeypatch
+) -> None:
+    """The number lookup's transaction ends before the LiveKit read."""
+    shared_trunk.numbers = ["hail-placeholder-shared", DIALED]
+    await _seed(async_session)
+    seen: list[bool] = []
+    read = FakeLiveKit.inbound_trunk_numbers
+
+    async def spy(self, trunk_id: str) -> list[str]:
+        seen.append(async_session.in_transaction())
+        return await read(self, trunk_id)
+
+    monkeypatch.setattr(FakeLiveKit, "inbound_trunk_numbers", spy)
+    outcome = await inbound_calls.open_inbound_call(
+        async_session, _attrs(trunk_id="ST_shared")
+    )
+    assert isinstance(outcome, inbound_calls.Accepted)
+    assert seen == [False]
 
 
 @pytest.mark.parametrize(
@@ -261,7 +335,7 @@ async def test_shared_trunk_is_refused_when_livekit_cannot_be_read(
         )
     assert isinstance(outcome, inbound_calls.Rejected)
     assert outcome.reason == "carrier_route_failed"
-    assert shared_trunk.closed == 1
+    assert shared_trunk.closed == 0
     assert any(
         r.levelname == "ERROR" and "could not read" in r.getMessage()
         for r in caplog.records

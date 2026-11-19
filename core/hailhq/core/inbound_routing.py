@@ -133,8 +133,9 @@ async def _add_to_carrier_trunk(lk: LiveKitClient, trunk_id: str, e164: str) -> 
     the shared trunk, and LiveKit lists a number on one trunk only, so the
     add is refused. An unregistered number takes no calls, so removing the
     leftover loses nothing. The shared trunk is touched only after LiveKit
-    refuses the add as a conflict (``invalid_argument``, "Conflicting inbound
-    SIP Trunks" in livekit/protocol sip/sip.go)."""
+    refuses the add with ``invalid_argument`` and either says so ("Conflicting
+    inbound SIP Trunks" in livekit/protocol sip/sip.go) or the shared trunk
+    lists the number (the message text can change)."""
     try:
         await lk.add_inbound_number(trunk_id, e164)
         return
@@ -142,22 +143,53 @@ async def _add_to_carrier_trunk(lk: LiveKitClient, trunk_id: str, e164: str) -> 
         shared = settings.livekit_sip_inbound_trunk_id
         if (
             first.code != "invalid_argument"
-            or _TRUNK_CONFLICT not in first.message
             or not shared
             or shared == trunk_id
+            or not await _shared_trunk_conflict(lk, shared, e164, first)
         ):
             raise
         logger.warning(
-            "number %s: carrier trunk refused the add, removing a shared-trunk "
-            "leftover and retrying",
+            "number %s: carrier trunk refused the add (%s: %s), removing a "
+            "shared-trunk leftover and retrying",
             e164,
-            exc_info=True,
+            first.code,
+            first.message,
         )
         try:
             await _remove_from_shared_trunk(lk, trunk_id, e164)
             await lk.add_inbound_number(trunk_id, e164)
         except Exception as exc:
             raise exc from first
+
+
+async def _shared_trunk_conflict(
+    lk: LiveKitClient, shared: str, e164: str, refused: TwirpError
+) -> bool:
+    """True when ``refused`` is the one-trunk-per-number conflict with the
+    shared trunk: LiveKit's message says so, or the shared trunk lists
+    ``e164``. Otherwise logs LiveKit's own message, for the caller to re-raise."""
+    if _TRUNK_CONFLICT in refused.message:
+        return True
+    try:
+        listed = e164 in await lk.inbound_trunk_numbers(shared)
+    except Exception:
+        logger.warning(
+            "number %s: could not read the shared inbound trunk %s",
+            e164,
+            shared,
+            exc_info=True,
+        )
+        listed = False
+    if not listed:
+        logger.error(
+            "number %s: LiveKit refused the add (%s: %s), and the shared "
+            "inbound trunk %s does not list the number",
+            e164,
+            refused.code,
+            refused.message,
+            shared,
+        )
+    return listed
 
 
 async def _remove_from_shared_trunk(

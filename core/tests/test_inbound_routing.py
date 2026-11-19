@@ -367,18 +367,95 @@ async def test_shared_trunk_keeps_its_placeholder_before_a_number_leaves(
 
 
 async def test_other_invalid_argument_does_not_touch_the_shared_trunk(
-    async_session, hooks, monkeypatch
+    async_session, hooks, monkeypatch, caplog
 ) -> None:
     monkeypatch.setattr(settings, "livekit_sip_inbound_trunk_id", "ST_shared")
     lk = AsyncMock()
-    lk.add_inbound_number.side_effect = TwirpError(
-        "invalid_argument", "bad number", status=400
-    )
+    refused = TwirpError("invalid_argument", "bad number", status=400)
+    lk.add_inbound_number.side_effect = refused
+    lk.inbound_trunk_numbers.return_value = [
+        inbound_routing.SHARED_TRUNK_PLACEHOLDER,
+        "+14155550199",
+    ]
     number = _number()
     async_session.add(number)
     await async_session.flush()
 
-    with pytest.raises(inbound_routing.InboundRoutingError):
+    with (
+        caplog.at_level("ERROR", logger="hailhq.core.inbound_routing"),
+        pytest.raises(inbound_routing.InboundRoutingError) as err,
+    ):
         await inbound_routing.register(async_session, lk, number)
 
+    assert err.value.__cause__ is refused
+    lk.inbound_trunk_numbers.assert_awaited_once_with("ST_shared")
+    lk.remove_inbound_number.assert_not_awaited()
+    assert lk.add_inbound_number.await_count == 1
+    [record] = [r for r in caplog.records if r.levelname == "ERROR"]
+    assert "invalid_argument: bad number" in record.getMessage()
+
+
+async def test_conflict_with_new_wording_is_found_by_the_shared_trunk_list(
+    async_session, hooks, monkeypatch
+) -> None:
+    """LiveKit may reword the conflict message: a number the shared trunk
+    lists is still a leftover to remove."""
+    monkeypatch.setattr(settings, "livekit_sip_inbound_trunk_id", "ST_shared")
+    lk = AsyncMock()
+    lk.add_inbound_number.side_effect = [
+        TwirpError("invalid_argument", "number is on trunk ST_shared", status=400),
+        None,  # the shared placeholder
+        None,  # the retry
+    ]
+    lk.inbound_trunk_numbers.return_value = [
+        inbound_routing.SHARED_TRUNK_PLACEHOLDER,
+        "+14155550100",
+    ]
+    number = _number()
+    async_session.add(number)
+    await async_session.flush()
+
+    await inbound_routing.register(async_session, lk, number)
+
+    lk.inbound_trunk_numbers.assert_awaited_once_with("ST_shared")
+    lk.remove_inbound_number.assert_awaited_once_with("ST_shared", "+14155550100")
+    assert lk.add_inbound_number.await_args_list[-1].args == (
+        "ST_in_tw",
+        "+14155550100",
+    )
+    assert number.inbound_registered_at is not None
+
+
+async def test_known_conflict_text_needs_no_shared_trunk_read(
+    async_session, hooks, monkeypatch
+) -> None:
+    monkeypatch.setattr(settings, "livekit_sip_inbound_trunk_id", "ST_shared")
+    lk = AsyncMock()
+    lk.add_inbound_number.side_effect = [_conflict(), None, None]
+    number = _number()
+    async_session.add(number)
+    await async_session.flush()
+
+    await inbound_routing.register(async_session, lk, number)
+
+    lk.inbound_trunk_numbers.assert_not_awaited()
+    assert number.inbound_registered_at is not None
+
+
+async def test_unreadable_shared_trunk_keeps_the_original_error(
+    async_session, hooks, monkeypatch
+) -> None:
+    monkeypatch.setattr(settings, "livekit_sip_inbound_trunk_id", "ST_shared")
+    lk = AsyncMock()
+    refused = TwirpError("invalid_argument", "something else", status=400)
+    lk.add_inbound_number.side_effect = refused
+    lk.inbound_trunk_numbers.side_effect = LookupError("no LiveKit inbound trunk")
+    number = _number()
+    async_session.add(number)
+    await async_session.flush()
+
+    with pytest.raises(inbound_routing.InboundRoutingError) as err:
+        await inbound_routing.register(async_session, lk, number)
+
+    assert err.value.__cause__ is refused
     lk.remove_inbound_number.assert_not_awaited()

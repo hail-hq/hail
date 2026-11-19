@@ -10,16 +10,17 @@ on a locked trunk. The INVITE goes over TCP to port 5060, from caller
 
 Verdicts and exit codes:
 
-* 0 REFUSED: LiveKit's refusal (403, 404 "Does not match any SIP Trunks" or
-  "No trunk found", or 401/407 asking for a password this probe does not
-  have), or no answer at all (LiveKit drops what it takes for a flood).
-  Check that the number is listed on the trunk: a mistyped number gets the
-  same 404.
+* 0 REFUSED: a clear refusal from LiveKit (403, 404 "Does not match any SIP
+  Trunks" or "No trunk found", or 401/407 asking for a password this probe
+  does not have). Check that the number is listed on the trunk: a mistyped
+  number gets the same 404.
 * 1 ACCEPTED: the call rang (18x) or was answered (2xx). The trunk is not
   locked. The probe cancels or hangs up the call at once, but it may reach
   the number's agent and show in its call log for a moment.
-* 2 the test says nothing: no connection, a connection that failed, another
-  final code (printed), or 100 Trying with no final answer.
+* 2 the test says nothing: no connection, a connection that failed, no
+  answer at all (LiveKit also drops what it takes for a flood, so a silent
+  trunk proves nothing), another final code (printed), or 100 Trying with
+  no final answer.
 
 Standard library only.
 """
@@ -213,10 +214,12 @@ def _dialog(sock: socket.socket, dialog: Dialog, state: dict) -> tuple[int, str]
                 # not reach the number's agent after the probe exits.
                 _send(sock, dialog.cancel())
                 return 2, "INCONCLUSIVE: 100 Trying, then no final answer"
-            # LiveKit drops what it takes for a flood without an answer.
-            return 0, (
-                "REFUSED: no answer to the INVITE (dropped). Valid only if the "
-                "control run printed ACCEPTED from this network."
+            # Silence is not a refusal: LiveKit also drops what it takes for
+            # a flood (a rate limit), from any address.
+            return 2, (
+                "INCONCLUSIVE: no answer to the INVITE. LiveKit may be rate "
+                "limiting this address: wait a minute, or use another network, "
+                "and run again."
             )
         if "INVITE" not in response.headers.get("cseq", ""):
             continue  # the answer to our CANCEL

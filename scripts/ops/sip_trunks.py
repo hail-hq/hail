@@ -15,7 +15,8 @@ Every command except ``status`` prints its plan and changes nothing until
 * ``apply``: creates or updates the trunk named in
   ``infra/livekit/inbound-trunks.json`` (its allowed addresses, its digest
   username and password, a placeholder entry), adds it to the dispatch rule,
-  and for DIDWW first sets the same credentials on ``DIDWW_VOICE_IN_TRUNK_ID``.
+  and for DIDWW first sets the same credentials on ``DIDWW_VOICE_IN_TRUNK_ID``
+  (read and checked before any change, dry run too).
   Prints the trunk id for ``LIVEKIT_<CARRIER>_SIP_INBOUND_TRUNK_ID``. On the
   shared trunk it only adds the shared placeholder. It adds numbers only
   (Hail manages them).
@@ -149,6 +150,12 @@ async def apply(sip, data: dict, spec: Spec, yes: bool) -> list[str]:
     own = carrier_trunk_id(spec.carrier)
     if own and (existing is None or existing.sip_trunk_id != own):
         raise TrunkError(f"{env_key(spec.carrier)} is not the {spec.name} trunk")
+    # DIDWW, read only: its voice IN trunk must be a SIP trunk.
+    didww_sip = (
+        await didww.check_voice_in_trunk(spec.auth_username, password)
+        if password
+        else None
+    )
     plan: list[str] = []
     shared = settings.livekit_sip_inbound_trunk_id
     if shared and any(t.sip_trunk_id == shared for t in all_trunks):
@@ -180,7 +187,7 @@ async def apply(sip, data: dict, spec: Spec, yes: bool) -> list[str]:
             )
         )
         if yes:
-            await didww.set_voice_in_trunk_auth(spec.auth_username, password)
+            await didww.set_voice_in_trunk_auth(spec.auth_username, password, didww_sip)
     if existing is None:
         plan.append(
             f"create trunk {spec.name}: {len(spec.allowed_addresses)} allowed "

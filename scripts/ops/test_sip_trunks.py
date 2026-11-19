@@ -148,17 +148,44 @@ async def test_didww_needs_the_password(monkeypatch) -> None:
     monkeypatch.setattr(settings, "didww_voice_in_trunk_id", "didww-trunk-1")
     seen = []
 
-    async def fake_auth(user, password):
+    async def fake_check(user, password):
+        assert sip.calls == []  # read before any LiveKit change
+        return {"host": "example.sip.livekit.cloud"}
+
+    async def fake_auth(user, password, current):
         # DIDWW gets the password before LiveKit starts asking for it.
         assert st.by_name(list(sip.trunks.values()), "hail-inbound-didww") is None
-        seen.append((user, password))
+        seen.append((user, password, current))
 
+    monkeypatch.setattr(st.didww, "check_voice_in_trunk", fake_check)
     monkeypatch.setattr(st.didww, "set_voice_in_trunk_auth", fake_auth)
     await st.apply(sip, DATA, SPECS["didww"], yes=True)
     created = st.by_name(list(sip.trunks.values()), "hail-inbound-didww")
     assert created.auth_username == "hail-didww"
     assert created.auth_password == "pw"
-    assert seen == [("hail-didww", "pw")]
+    assert seen == [("hail-didww", "pw", {"host": "example.sip.livekit.cloud"})]
+
+
+@pytest.mark.parametrize("yes", [False, True])
+async def test_failed_didww_check_changes_nothing(monkeypatch, yes) -> None:
+    """A DIDWW voice IN trunk that is not a SIP trunk (or a failed read)
+    stops apply before the shared placeholder or any other change."""
+    monkeypatch.setattr(settings, "didww_sip_inbound_password", "pw")
+    monkeypatch.setattr(settings, "didww_voice_in_trunk_id", "didww-trunk-1")
+    sip = FakeSip(trunk("ST_shared", "shared", ["+14155550100"]))
+
+    async def fail_check(_user, _password):
+        raise st.CarrierNotConfigured("DIDWW voice IN trunk is not a SIP trunk")
+
+    async def no_auth(*_args):
+        raise AssertionError("no DIDWW write after a failed check")
+
+    monkeypatch.setattr(st.didww, "check_voice_in_trunk", fail_check)
+    monkeypatch.setattr(st.didww, "set_voice_in_trunk_auth", no_auth)
+    with pytest.raises(st.CarrierNotConfigured):
+        await st.apply(sip, DATA, SPECS["didww"], yes=yes)
+    assert sip.calls == []
+    assert list(sip.trunks["ST_shared"].numbers) == ["+14155550100"]
 
 
 async def test_didww_needs_its_trunk_id_before_any_change(monkeypatch) -> None:

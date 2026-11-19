@@ -329,6 +329,32 @@ async def test_didww_trunk_auth_fails_when_the_trunk_lost_its_host(
         await didww.set_voice_in_trunk_auth("hail-didww", "s3cret")
 
 
+async def test_didww_trunk_check_reads_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    """sip_trunks.py apply runs this before any change: a read, no write."""
+    monkeypatch.setattr(settings, "didww_api_key", "key")
+    monkeypatch.setattr(settings, "didww_voice_in_trunk_id", "trunk-1")
+    client = MagicMock()
+    client.get.side_effect = lambda path, **kw: _sip_trunk(
+        host="example.sip.livekit.cloud", port=5060, incoming_auth_username="x"
+    )
+    monkeypatch.setattr(didww, "didww_client", lambda: client)
+
+    current = await didww.check_voice_in_trunk("hail-didww", "s3cret")
+
+    assert current == {"host": "example.sip.livekit.cloud", "port": 5060}
+    client.patch.assert_not_called()
+
+    client.get.side_effect = lambda path, **kw: {
+        "data": {
+            "id": "trunk-1",
+            "attributes": {"configuration": {"type": "pstn_configurations"}},
+        }
+    }
+    with pytest.raises(CarrierNotConfigured, match="not a SIP trunk"):
+        await didww.check_voice_in_trunk("hail-didww", "s3cret")
+    client.patch.assert_not_called()
+
+
 async def test_didww_trunk_auth_needs_a_trunk_and_a_password(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -338,3 +364,5 @@ async def test_didww_trunk_auth_needs_a_trunk_and_a_password(
     monkeypatch.setattr(settings, "didww_voice_in_trunk_id", "trunk-1")
     with pytest.raises(CarrierNotConfigured, match="password"):
         await didww.set_voice_in_trunk_auth("hail-didww", "")
+    with pytest.raises(CarrierNotConfigured, match="password"):
+        await didww.check_voice_in_trunk("hail-didww", "")

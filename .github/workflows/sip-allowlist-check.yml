@@ -58,12 +58,15 @@ jobs:
               `_Last updated: ${new Date().toISOString().slice(0, 10)}._`,
             ].join('\n');
 
-            const { data: existing } = await github.rest.issues.listForRepo({
+            // The issues API also returns pull requests: keep only the issue
+            // with this exact title, in case the label is reused.
+            const { data: labelled } = await github.rest.issues.listForRepo({
               owner: context.repo.owner,
               repo: context.repo.repo,
               state: 'open',
               labels: 'sip-allowlist',
             });
+            const existing = labelled.filter((i) => !i.pull_request && i.title === title);
             if (existing.length > 0) {
               await github.rest.issues.update({
                 owner: context.repo.owner,

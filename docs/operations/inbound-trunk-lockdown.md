@@ -26,7 +26,7 @@ How LiveKit picks a trunk ([`sip.go`](https://github.com/livekit/protocol/blob/m
 
 Run every command from the repo root of the main checkout, whose `.env` holds the production values. Values marked _(chat)_ are not written here: the trunk ids, the LiveKit SIP host, the test numbers and the VM path.
 
-1. Merge the PR. The Deploy workflow builds and rolls `api`, `voicebot` and `mcp`. Wait until it is green. From then on, a call on the carrier's own trunk is answered, and a call on the shared trunk is answered only for a number the shared trunk lists ([`inbound_calls.py`](../../core/hailhq/core/inbound_calls.py), one LiveKit read per such call; refused if the read fails).
+1. Merge the PR. The Deploy workflow builds and rolls `api`, `voicebot` and `mcp`. Wait until it is green. From then on, a call on the carrier's own trunk is answered, and a call on the shared trunk is answered only for a number the shared trunk lists ([`inbound_calls.py`](../../core/hailhq/core/inbound_calls.py), one LiveKit read per such call; refused if the read fails or takes more than 2 seconds).
 2. Update the checkout and look at the current state:
 
    ```bash
@@ -36,7 +36,7 @@ Run every command from the repo root of the main checkout, whose `.env` holds th
    uv run python scripts/ops/sip_trunks.py status
    ```
 
-3. Create the three trunks. Run each without `--yes` first and read the plan. `apply --carrier didww` also sets the digest user and password on `DIDWW_VOICE_IN_TRUNK_ID`; DIDWW sends them only when LiveKit asks.
+3. Create the three trunks. Run each without `--yes` first and read the plan. `apply --carrier didww` also sets the digest user and password on `DIDWW_VOICE_IN_TRUNK_ID`; DIDWW sends them only when LiveKit asks. It reads that DIDWW trunk before any change, dry run too, and stops if it is not a SIP trunk.
 
    ```bash
    uv run python scripts/ops/sip_trunks.py apply --carrier twilio --yes
@@ -75,7 +75,7 @@ Run every command from the repo root of the main checkout, whose `.env` holds th
 
    `move` lists numbers on the shared trunk with no live row (released, failed or unknown to the database) and leaves them; add `--drop-unknown` to take them off, after checking the list. Then call a Hail-owned number of that carrier _(chat)_ from a phone. The agent must answer. If it does not, roll back that carrier (below) before the next one.
 
-7. Negative test, once per carrier, from a laptop (not a carrier address), at a Hail-owned number on that carrier's trunk _(chat)_:
+7. Negative test, once per carrier, from a laptop (not a carrier address), at a Hail-owned number on that carrier's trunk _(chat)_. Wait about a minute after the step 5 control run, or use another network: LiveKit may drop INVITEs from an address it takes for a flood, and the probe then prints `INCONCLUSIVE`.
 
    ```bash
    python3 scripts/ops/sip_invite_probe.py \
@@ -83,9 +83,9 @@ Run every command from the repo root of the main checkout, whose `.env` holds th
      --number +<E.164 number on the trunk>
    ```
 
-   - `REFUSED` (exit 0): the trunk is locked. Twilio and Telnyx trunks answer `404` (no trunk matches the address) or `403`; DIDWW answers `401` or `407`. A mistyped number also gets `404`, so take the number from the `move` output.
+   - `REFUSED` (exit 0), only on a clear `401`, `403`, `404` or `407` answer: the trunk is locked. Twilio and Telnyx trunks answer `404` (no trunk matches the address) or `403`; DIDWW answers `401` or `407`. A mistyped number also gets `404`, so take the number from the `move` output.
    - `ACCEPTED` (exit 1): the trunk took a call from a non-carrier address. For Twilio or Telnyx this means LiveKit does not check `allowed_addresses` on this project, so those trunks are not locked. Leave the numbers where they are (no worse than before) and stop: the owner decides the next step.
-   - `NO CONNECTION` or `INCONCLUSIVE` (exit 2): no connection to port 5060 over TCP, a dropped connection, or another answer (printed). The test says nothing; try again, or from another network.
+   - `NO CONNECTION` or `INCONCLUSIVE` (exit 2): no connection to port 5060 over TCP, a dropped connection, no answer at all, or another answer (printed). The test says nothing; wait a minute and try again, or run it from another network.
 
 8. When all three carriers pass, retire the shared trunk and stop accepting it:
 
