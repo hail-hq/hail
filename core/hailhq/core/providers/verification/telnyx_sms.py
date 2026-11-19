@@ -604,10 +604,15 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
 
     async def _request_vetting_once(self, refs) -> None:
         """Ask for vetting unless Telnyx already has a request: each one is
-        billed. A request that timed out or got a 5xx may have reached it."""
+        billed. A request that timed out or got a 5xx may have reached it.
+        Telnyx lists only ``ACTIVE`` records unless ``vettingStatus`` names
+        others, so the read names every request still running or passed (as
+        error 10012 does): a ``PENDING`` one is not asked for twice."""
         try:
             found = await self._api.request(
-                "GET", f"/10dlc/brand/{path_id(refs['brand_id'])}/externalVetting"
+                "GET",
+                f"/10dlc/brand/{path_id(refs['brand_id'])}/externalVetting",
+                params={"vettingStatus": ["PENDING", "UNSCORE", "ACTIVE"]},
             )
         except httpx.HTTPStatusError as exc:
             # 404: none listed. Any other failure: ask on the next pass.

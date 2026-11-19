@@ -2022,6 +2022,32 @@ async def test_a_vetting_telnyx_already_has_is_not_asked_again() -> None:
     assert refs["vetting_requested"] is True
 
 
+async def test_a_pending_vetting_telnyx_already_has_is_not_asked_again() -> None:
+    """Telnyx lists only ACTIVE vettings by default: the read names the
+    running ones too, so a PENDING request is found and not billed twice."""
+    seen: list = []
+
+    def handler(req: httpx.Request):
+        if req.method == "GET" and req.url.path.endswith("/externalVetting"):
+            seen.append(sorted(req.url.params.get_list("vettingStatus")))
+            return httpx.Response(200, json=[{"evpId": "AEGIS"}])
+        if req.method == "POST":
+            return httpx.Response(500)
+        return httpx.Response(
+            200, json={"status": "OK", "identityStatus": "SELF_DECLARED"}
+        )
+
+    refs = {
+        "brand_id": "B1",
+        "subject_type": "business",
+        "campaign": {},
+        "vetting_requested": False,
+    }
+    assert (await _provider(handler).status(refs)).state == "pending"
+    assert seen == [["ACTIVE", "PENDING", "UNSCORE"]]
+    assert refs["vetting_requested"] is True
+
+
 @pytest.mark.parametrize("listed", [[], 404])
 async def test_no_vetting_listed_asks_for_one(listed) -> None:
     p, refs, calls = _vetting_retry(listed)
