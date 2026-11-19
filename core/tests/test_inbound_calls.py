@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from typing import ClassVar
 
 import pytest
 from hailhq.core import inbound_calls
@@ -184,10 +185,10 @@ async def test_shared_trunk_serves_every_carrier(async_session, monkeypatch) -> 
 class FakeLiveKit:
     """Stands in for ``LiveKitClient``: the shared trunk lists ``numbers``."""
 
-    numbers: list[str] = []
-    error: Exception | None = None
-    reads = 0
-    closed = 0
+    numbers: ClassVar[list[str]] = []
+    error: ClassVar[Exception | None] = None
+    reads: ClassVar[int] = 0
+    closed: ClassVar[int] = 0
 
     async def inbound_trunk_numbers(self, trunk_id: str) -> list[str]:
         assert trunk_id == "ST_shared"

@@ -205,12 +205,11 @@ async def _trunk_accepted(trunk_id: str, expected: str, e164: str) -> bool:
             await lk.aclose()
     except Exception:
         # A security check: without the list, refuse.
-        logger.error(
+        logger.exception(
             "inbound call to %s on the shared trunk %s refused: could not "
             "read the trunk's numbers from LiveKit",
             e164,
             shared,
-            exc_info=True,
         )
         return False
     return e164 in listed

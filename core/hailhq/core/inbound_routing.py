@@ -101,7 +101,7 @@ async def unregister(db: AsyncSession, lk: LiveKitClient, number: PhoneNumber) -
         # is unregistered and the carrier sends it no calls. The leftover
         # stays until the next register removes it, or until
         # sip_trunks.py move puts it on the carrier's locked trunk.
-        logger.error(
+        logger.exception(
             "number %s: still listed on the shared inbound trunk %s (removal "
             "failed). It takes no calls: the carrier is detached. Its next "
             "register removes it, or run scripts/ops/sip_trunks.py move "
@@ -110,7 +110,6 @@ async def unregister(db: AsyncSession, lk: LiveKitClient, number: PhoneNumber) -
             number.e164,
             settings.livekit_sip_inbound_trunk_id,
             number.provider,
-            exc_info=True,
         )
     number.inbound_registered_at = None
     await db.flush()
