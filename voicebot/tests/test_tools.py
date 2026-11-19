@@ -350,7 +350,7 @@ async def _seed_http_tool(session_factory, monkeypatch, **over):
             AgentHttpTool(
                 agent_id=agent_id,
                 position=0,
-                name="lookup_order",
+                name=over.pop("name", "lookup_order"),
                 description="Find an order.",
                 url="https://api.example.com/orders",
                 parameters={"type": "object", "properties": {}},
@@ -431,6 +431,27 @@ async def test_http_tools_of_another_org_are_not_loaded(
         meta, call_id=uuid.uuid4(), hangup=None, send_dtmf=None
     )
     assert tools == []
+
+
+async def test_http_tool_with_a_built_in_name_is_skipped(
+    db, session_factory, monkeypatch
+):
+    """An HTTP tool saved as email_caller before the name was reserved must
+    not give LiveKit two tools with one name."""
+    org_id, agent_id = await _seed_http_tool(
+        session_factory, monkeypatch, name="email_caller"
+    )
+    names = await _email_caller_names(
+        monkeypatch,
+        {
+            **_PHONE,
+            "organization_id": str(org_id),
+            "agent_id": str(agent_id),
+            "email_caller_enabled": True,
+            "tools": [],
+        },
+    )
+    assert names.count("email_caller") == 1
 
 
 async def test_http_tool_load_failure_keeps_built_in_tools(db, monkeypatch):

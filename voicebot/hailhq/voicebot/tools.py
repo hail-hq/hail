@@ -228,8 +228,18 @@ async def build_agent_tools(
     ):
         specs.append(email_caller.SPEC.bind(metadata))
     # The agent's own HTTP tools are not built-ins: a `tools` list does not
-    # name them, and they stay on with `tools: []`.
-    specs.extend(await _http_tools(metadata, call_id, organization_id))
+    # name them, and they stay on with `tools: []`. One saved before its name
+    # was reserved (email_caller) is skipped: LiveKit refuses duplicate names.
+    taken = {s.name for s in specs}
+    for http_spec in await _http_tools(metadata, call_id, organization_id):
+        if http_spec.name in taken:
+            logger.warning(
+                "call_id=%s http tool %s skipped: built-in name",
+                call_id,
+                http_spec.name,
+            )
+            continue
+        specs.append(http_spec)
     if not specs:
         return [], None
 
