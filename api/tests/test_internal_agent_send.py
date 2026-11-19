@@ -543,11 +543,11 @@ async def test_send_email_to_the_callers_saved_name_asks_for_me(
     assert await _sent_to(async_session) == []
 
 
-async def test_send_email_to_a_member_sharing_a_caller_name_without_email(
+async def test_send_email_caller_name_without_email_never_reaches_a_namesake(
     client, async_session, email_mock, add_phone_number
 ):
-    """The caller has no email on file, so their saved name is just a name:
-    it reaches the member of that name."""
+    """The caller has no email on file. Their saved name still never sends
+    their request to a member who shares it."""
     org = uuid.uuid4()
     call = await _email_ready_call(async_session, org, add_phone_number)
     await _add_member(async_session, org, "Sam Lee", "sam@team.test")
@@ -556,8 +556,10 @@ async def test_send_email_to_a_member_sharing_a_caller_name_without_email(
     )
     await async_session.commit()
 
-    assert (await _send_email_to_name(client, call, "Sam Lee"))["ok"] is True
-    assert await _sent_to(async_session) == [["sam@team.test"]]
+    data = await _send_email_to_name(client, call, "Sam Lee")
+    assert data["ok"] is False
+    assert 'recipient_name "me"' in data["spoken"]
+    assert await _sent_to(async_session) == []
 
 
 async def test_send_email_by_name_to_the_callers_address_gets_caller_lines(

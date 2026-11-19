@@ -88,8 +88,8 @@ from hailhq.core.compliance_gate import (
 from hailhq.core.contact_ids import normalize_contact_id, parse_contact_id
 from hailhq.core.db import get_session, key_lock, org_lock
 from hailhq.core.directory import (
+    entry_email,
     find_by_phone,
-    resolve_caller_email,
     resolve_contact_emails,
     resolve_member_emails,
     resolve_member_phones,
@@ -430,12 +430,14 @@ async def _call_recipient(
     shares the caller's name.
 
     A name the caller is saved under that does not resolve to the caller's
-    own address is refused with a hint to use "me": a model told to email
-    them by name (an older prompt, or one that ignores the tool text) would
-    otherwise reach a member or contact of the same name."""
+    own address is refused with a hint to use "me": a model that emails them
+    by name (an older prompt, or one that ignores the tool text) would
+    otherwise send the caller's request to a member or contact of the same
+    name."""
     org = call.organization_id
     phone = _other_party(call)
-    own = await resolve_caller_email(db, org, phone) if phone else None
+    caller = await find_by_phone(db, org, phone) if phone else None
+    own = await entry_email(db, org, phone, caller) if phone else None
     if is_self_recipient(name):
         if own:
             return own, True
@@ -449,13 +451,11 @@ async def _call_recipient(
     recipient = await _known_email(db, org, name)
     if own and isinstance(recipient, str) and recipient.casefold() == own.casefold():
         return recipient, True
-    if own:
-        caller = await find_by_phone(db, org, phone)
-        if caller is not None and _same_name(caller.name, name):
-            return AgentSendResponse(
-                ok=False,
-                spoken=_SPOKEN_EMAIL_USE_SELF.format(name=_quoted_name(name)),
-            )
+    if caller is not None and _same_name(caller.name, name):
+        return AgentSendResponse(
+            ok=False,
+            spoken=_SPOKEN_EMAIL_USE_SELF.format(name=_quoted_name(name)),
+        )
     if isinstance(recipient, AgentSendResponse):
         return recipient
     return recipient, False
