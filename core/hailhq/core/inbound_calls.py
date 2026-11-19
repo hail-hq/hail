@@ -152,7 +152,18 @@ async def open_inbound_call(
         expected_trunk = inbound_trunk(number.provider)
     except ValueError:
         expected_trunk = None
-    accepted = {expected_trunk, settings.livekit_sip_inbound_trunk_id} - {None, ""}
+    shared = settings.livekit_sip_inbound_trunk_id
+    accepted = {expected_trunk, shared} - {None, ""}
+    if attrs.trunk_id == shared and expected_trunk not in (None, shared):
+        # Expected only for a number not moved yet. After the move, a call
+        # here means the shared trunk matched a moved number: check that it
+        # still lists its placeholder (sip_trunks.py status).
+        logger.warning(
+            "inbound call to %s answered on the shared trunk; its carrier "
+            "%s has its own trunk",
+            attrs.dialed,
+            number.provider,
+        )
     if (
         not attrs.trunk_id
         or attrs.trunk_id not in accepted

@@ -99,13 +99,9 @@ async def unregister(db: AsyncSession, lk: LiveKitClient, number: PhoneNumber) -
         # Left there, a later register to its carrier's trunk is refused.
         try:
             await lk.remove_inbound_number(shared, number.e164)
-        except Exception:
-            logger.exception(
-                "number %s: still listed on the shared inbound trunk; run "
-                "sip_trunks.py move --number %s --drop-unknown",
-                number.e164,
-                number.e164,
-            )
+        except Exception as exc:
+            # The row stays registered, so the next unregister retries.
+            raise InboundRoutingError("livekit_remove", exc) from exc
     number.inbound_registered_at = None
     await db.flush()
 

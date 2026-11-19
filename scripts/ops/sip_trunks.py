@@ -320,9 +320,9 @@ async def move(
         if own_trunk.name != spec.name:
             raise TrunkError(f"{env_key(spec.carrier)} is not the {spec.name} trunk")
     elif back:
-        # Rollback empties the carrier key and restarts the services first,
-        # then runs --back: the numbers are still on the carrier trunk.
-        # Find it by its JSON name.
+        # The second --back of a rollback runs after the key is emptied and
+        # the services restart: numbers routed in between are still on the
+        # carrier trunk. Find it by its JSON name.
         own_trunk = by_name(await trunks(sip), spec.name)
         if own_trunk is None:
             raise TrunkError(f"no LiveKit inbound trunk named {spec.name}")

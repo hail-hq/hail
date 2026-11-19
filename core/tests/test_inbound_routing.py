@@ -199,3 +199,21 @@ async def test_unregister_also_clears_the_shared_trunk_while_numbers_move(
         ("ST_shared", "+14155550100"),
     ]
     assert number.inbound_registered_at is None
+
+
+async def test_failed_shared_trunk_removal_keeps_the_row_registered(
+    async_session, hooks, monkeypatch
+) -> None:
+    monkeypatch.setattr(settings, "livekit_sip_inbound_trunk_id", "ST_shared")
+    lk = AsyncMock()
+    lk.remove_inbound_number.side_effect = [None, RuntimeError("timeout")]
+    number = _number()
+    number.inbound_registered_at = datetime.now(timezone.utc)
+    async_session.add(number)
+    await async_session.flush()
+
+    with pytest.raises(inbound_routing.InboundRoutingError) as err:
+        await inbound_routing.unregister(async_session, lk, number)
+
+    assert err.value.stage == "livekit_remove"
+    assert number.inbound_registered_at is not None
