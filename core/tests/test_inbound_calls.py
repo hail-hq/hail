@@ -27,6 +27,7 @@ CALLER = "+33612345678"
 def trunks(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "livekit_twilio_sip_inbound_trunk_id", "ST_in_tw")
     monkeypatch.setattr(settings, "livekit_telnyx_sip_inbound_trunk_id", "ST_in_tx")
+    monkeypatch.setattr(settings, "livekit_sip_inbound_trunk_id", "")
     monkeypatch.setattr(settings, "hail_voice_max_duration_seconds", 300)
 
 
@@ -178,6 +179,26 @@ async def test_shared_trunk_serves_every_carrier(async_session, monkeypatch) -> 
         async_session, _attrs(dialed="+351300509184", trunk_id="ST_shared")
     )
     assert isinstance(outcome, inbound_calls.Accepted)
+
+
+async def test_shared_trunk_is_accepted_while_numbers_move(
+    async_session, monkeypatch
+) -> None:
+    """Cutover: the carrier has its own trunk, but its numbers may still sit
+    on the shared trunk until they are moved."""
+    monkeypatch.setattr(settings, "livekit_sip_inbound_trunk_id", "ST_shared")
+    await _seed(async_session)
+    for trunk in ("ST_shared", "ST_in_tw"):
+        outcome = await inbound_calls.open_inbound_call(
+            async_session, _attrs(trunk_id=trunk, provider_call_sid=f"sip-{trunk}")
+        )
+        assert isinstance(outcome, inbound_calls.Accepted), trunk
+    # Another carrier's own trunk is still refused.
+    outcome = await inbound_calls.open_inbound_call(
+        async_session, _attrs(trunk_id="ST_in_tx", provider_call_sid="sip-tx")
+    )
+    assert isinstance(outcome, inbound_calls.Rejected)
+    assert outcome.reason == "carrier_route_failed"
 
 
 async def test_missing_trunk_id_is_refused(async_session) -> None:

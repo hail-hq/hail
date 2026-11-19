@@ -116,3 +116,7 @@ trunk lists the numbers instead: `PATCH /v1/numbers/{id}` with
 `voice_agent_id` adds the number to the Twilio trunk
 (`trunking.v1.trunks(TK...).phone_numbers`) and to the LiveKit trunk; `null`
 removes it from both ([Agents](../agents.md)).
+To lock calls to Twilio, give Twilio its own LiveKit inbound trunk with
+Twilio's [signaling IP ranges](https://www.twilio.com/docs/sip-trunking/ip-addresses)
+in `allowed_addresses` and set `LIVEKIT_TWILIO_SIP_INBOUND_TRUNK_ID`
+([LiveKit Cloud §4](./livekit-cloud.md#4-inbound-calls)).

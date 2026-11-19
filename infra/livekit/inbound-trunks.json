@@ -1,0 +1,54 @@
+{
+  "$comment": "LiveKit inbound SIP trunks, one per carrier. Applied by scripts/ops/sip_trunks.py; checked every Monday by scripts/ops/check_sip_allowlist.py. No trunk ids or secrets here. Runbook: docs/operations/inbound-trunk-lockdown.md",
+  "dispatch_rule": "hail-inbound",
+  "shared_placeholder": "hail-placeholder-shared",
+  "trunks": {
+    "twilio": {
+      "name": "hail-inbound-twilio",
+      "placeholder": "hail-placeholder-twilio",
+      "allowed_addresses": [
+        "54.172.60.0/30",
+        "54.244.51.0/30",
+        "54.171.127.192/30",
+        "35.156.191.128/30",
+        "54.65.63.192/30",
+        "54.169.127.128/30",
+        "54.252.254.64/30",
+        "177.71.206.192/30"
+      ],
+      "source": {
+        "url": "https://www.twilio.com/docs/sip-trunking/ip-addresses.md",
+        "version": "2026-03-09T18:47:22.000Z"
+      }
+    },
+    "telnyx": {
+      "name": "hail-inbound-telnyx",
+      "placeholder": "hail-placeholder-telnyx",
+      "allowed_addresses": [
+        "192.76.120.10/32",
+        "64.16.250.10/32",
+        "185.246.41.140/32",
+        "185.246.41.141/32",
+        "103.115.244.145/32",
+        "103.115.244.146/32",
+        "192.76.120.31/32",
+        "64.16.250.13/32",
+        "103.115.244.158/32",
+        "103.115.244.159/32",
+        "185.246.42.128/32",
+        "185.246.42.129/32",
+        "185.246.43.0/24"
+      ],
+      "source": {
+        "url": "https://sip.telnyx.com/voice.json",
+        "version": "2026-05-25T00:00:00Z"
+      }
+    },
+    "didww": {
+      "name": "hail-inbound-didww",
+      "placeholder": "hail-placeholder-didww",
+      "allowed_addresses": [],
+      "auth_username": "hail-didww"
+    }
+  }
+}

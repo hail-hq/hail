@@ -133,6 +133,10 @@ class Settings(BaseSettings):
     # DIDWW voice IN trunk (SIP, pointed at LiveKit) DIDs are assigned to when
     # they route calls to an agent. Empty = DIDWW numbers cannot take calls.
     didww_voice_in_trunk_id: str = ""
+    # Digest password DIDWW sends to the DIDWW LiveKit inbound trunk. Only the
+    # operator script reads it (scripts/ops/sip_trunks.py); it sets the same
+    # password on both trunks. Empty = no password on either trunk.
+    didww_sip_inbound_password: str = ""
 
     # AWS, used today for SES (outbound email). boto3 falls back to its
     # default credential chain (env / config file / IAM role) when these
@@ -221,13 +225,14 @@ class Settings(BaseSettings):
     livekit_telnyx_sip_outbound_trunk_id: str = ""
     # Empty = DIDWW numbers cannot dial and DIDWW offers are hidden.
     livekit_didww_sip_outbound_trunk_id: str = ""
-    # LiveKit inbound SIP trunk, ONE for every carrier: LiveKit allows a single
-    # wildcard inbound trunk per project, and Hail finds a call's carrier from
-    # the dialed number, not from the trunk. It holds the numbers Hail registers
-    # when a number routes calls to an agent (core/hailhq/core/inbound_routing.py).
-    # Empty = no number can take calls. The per-carrier names below are
-    # optional overrides for a project that runs one inbound trunk per carrier
-    # (each locked to that carrier's IPs); they are not in .env.example.
+    # LiveKit inbound SIP trunks. A trunk holds the numbers Hail registers when
+    # a number routes calls to an agent (core/hailhq/core/inbound_routing.py).
+    # The per-carrier trunks are each locked to their carrier: Twilio and
+    # Telnyx by signaling IPs, DIDWW by digest password
+    # (infra/livekit/inbound-trunks.json). A blank per-carrier id falls back
+    # to the shared trunk (self-host: one trunk for every carrier). While both
+    # are set, a call on the shared trunk is still accepted (inbound_calls.py)
+    # so numbers can move one carrier at a time.
     livekit_sip_inbound_trunk_id: str = ""
     livekit_twilio_sip_inbound_trunk_id: str = ""
     livekit_telnyx_sip_inbound_trunk_id: str = ""

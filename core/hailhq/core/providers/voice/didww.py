@@ -787,6 +787,76 @@ async def detach_inbound_number(resource_id: str | None, e164: str) -> None:
         raise CarrierRequestError(carrier_status(exc)) from exc
 
 
+# Written by the server, rejected on a write (400 Param not allowed).
+_READ_ONLY_SIP_ATTRS = frozenset({"incoming_auth_username", "incoming_auth_password"})
+
+
+def _set_voice_in_trunk_auth_sync(trunk_id: str, username: str, password: str) -> None:
+    """Digest credentials DIDWW answers LiveKit's challenge with. The PATCH
+    sends the trunk's whole SIP configuration back with the three auth fields
+    changed: DIDWW's docs do not say a partial configuration keeps the rest
+    (host, port, transport). Read back afterwards; a mismatch raises."""
+    client = didww_client()
+    trunk = client.get(f"voice_in_trunks/{trunk_id}")["data"]
+    config = (trunk.get("attributes") or {}).get("configuration") or {}
+    if config.get("type") != "sip_configurations":
+        raise CarrierNotConfigured(
+            f"DIDWW voice IN trunk {trunk_id} is not a SIP trunk"
+        )
+    attrs = {
+        k: v
+        for k, v in (config.get("attributes") or {}).items()
+        if k not in _READ_ONLY_SIP_ATTRS
+    }
+    attrs.update(auth_enabled=True, auth_user=username, auth_password=password)
+    client.patch(
+        f"voice_in_trunks/{trunk_id}",
+        {
+            "data": {
+                "id": trunk_id,
+                "type": "voice_in_trunks",
+                "attributes": {
+                    "configuration": {
+                        "type": "sip_configurations",
+                        "attributes": attrs,
+                    }
+                },
+            }
+        },
+    )
+    after = client.get(f"voice_in_trunks/{trunk_id}")["data"]
+    got = ((after.get("attributes") or {}).get("configuration") or {}).get(
+        "attributes"
+    ) or {}
+    if not got.get("auth_enabled") or got.get("auth_user") != username:
+        raise CarrierNotConfigured(
+            f"DIDWW voice IN trunk {trunk_id} did not keep the credentials"
+        )
+    if got.get("host") != attrs.get("host") or got.get("port") != attrs.get("port"):
+        raise CarrierNotConfigured(
+            f"DIDWW voice IN trunk {trunk_id} changed its host or port"
+        )
+
+
+async def set_voice_in_trunk_auth(username: str, password: str) -> None:
+    """Set digest credentials on ``DIDWW_VOICE_IN_TRUNK_ID`` so DIDWW can
+    answer the DIDWW LiveKit inbound trunk's challenge. Operator step, run
+    by scripts/ops/sip_trunks.py, never per call or per number."""
+    if not settings.didww_voice_in_trunk_id:
+        raise CarrierNotConfigured("DIDWW_VOICE_IN_TRUNK_ID is not set")
+    if not username or not password:
+        raise CarrierNotConfigured("DIDWW inbound username or password is empty")
+    try:
+        await asyncio.to_thread(
+            _set_voice_in_trunk_auth_sync,
+            settings.didww_voice_in_trunk_id,
+            username,
+            password,
+        )
+    except DidwwApiError as exc:
+        raise CarrierRequestError(carrier_status(exc)) from exc
+
+
 # --- call costs: DIDWW has no per-call lookup, so one outbound CDR export
 # covers every leg asked about. Voice IN legs are not in it: they stay
 # unpriced. The export is ready within seconds; one that is not ready after

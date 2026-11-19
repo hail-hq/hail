@@ -71,19 +71,28 @@ dispatch rule**. Hail adds and removes numbers on the trunk itself.
    ```
 
    Hail reads the dialed number from the call and finds its carrier in
-   `phone_numbers`; the trunk does not need to know it. To lock each carrier
-   to its own trunk instead, create one trunk per carrier with that
-   carrier's signaling IPs in `allowed_addresses` and set
-   `LIVEKIT_<CARRIER>_SIP_INBOUND_TRUNK_ID` (an override not listed in
-   `.env.example`) to that trunk's id. Narrow `0.0.0.0/0` to the carriers' IP ranges when you can.
+   `phone_numbers`; the trunk does not need to know it.
+
+   To lock each carrier to its own trunk instead (Twilio and Telnyx by their
+   signaling IPs, DIDWW by a password), use
+   [`infra/livekit/inbound-trunks.json`](https://github.com/hail-hq/hail/blob/main/infra/livekit/inbound-trunks.json)
+   and [`scripts/ops/sip_trunks.py`](https://github.com/hail-hq/hail/blob/main/scripts/ops/sip_trunks.py):
+   `apply --carrier <carrier>` creates the trunk, adds it to the dispatch
+   rule and prints its id for `LIVEKIT_<CARRIER>_SIP_INBOUND_TRUNK_ID`;
+   `move` moves numbers already registered. DIDWW needs
+   `DIDWW_SIP_INBOUND_PASSWORD`. A trunk never has empty `numbers`: that
+   trunk would match every dialed number, so each keeps a placeholder entry.
+   Steps and checks: the
+   [runbook](../../operations/inbound-trunk-lockdown.md).
 
    LiveKit Cloud does not check `allowed_addresses` until LiveKit support
    turns the check on for your project ([inbound trunk docs](https://docs.livekit.io/telephony/accepting-calls/inbound-trunk/)).
    Until then, a trunk accepts calls from any address, whatever the list
    says. Anyone who knows your project's SIP host can then call your numbers
-   directly and reach your agents, with any caller ID. To test it, set a
-   trunk's list to `["192.0.2.1/32"]` (an address no one uses) and send it a
-   call: a room appears when the check is off. `auth_username`/`auth_password`
+   directly and reach your agents, with any caller ID. To test it, send a
+   call from your own machine to a number on a locked trunk:
+   `python3 scripts/ops/sip_invite_probe.py --host <project>.sip.livekit.cloud --number +<number>`
+   prints `REFUSED` when the check is on. `auth_username`/`auth_password`
    is always checked; LiveKit answers `407` without them.
 
 2. Dispatch rule. One rule, bound to the inbound trunk, that puts each

@@ -259,3 +259,82 @@ async def test_didww_attach_moves_a_did_out_of_an_empty_group(
     assert (
         body["data"]["relationships"]["shared_capacity_group"]["data"]["id"] == "grp-1"
     )
+
+
+def _sip_trunk(**attrs) -> dict:
+    return {
+        "data": {
+            "id": "trunk-1",
+            "type": "voice_in_trunks",
+            "attributes": {
+                "configuration": {"type": "sip_configurations", "attributes": attrs}
+            },
+        }
+    }
+
+
+async def test_didww_trunk_auth_keeps_the_rest_of_the_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "didww_api_key", "key")
+    monkeypatch.setattr(settings, "didww_voice_in_trunk_id", "trunk-1")
+    stored = {
+        "host": "example.sip.livekit.cloud",
+        "port": 5060,
+        "transport_protocol_id": 2,
+        "auth_enabled": False,
+        "incoming_auth_username": "server-made",
+        "incoming_auth_password": "server-made",
+    }
+    client = MagicMock()
+    patches: list[dict] = []
+
+    def fake_patch(path, body, **kwargs):
+        assert path == "voice_in_trunks/trunk-1"
+        patches.append(body)
+        stored.update(body["data"]["attributes"]["configuration"]["attributes"])
+        return {}
+
+    client.get.side_effect = lambda path, **kw: _sip_trunk(**stored)
+    client.patch.side_effect = fake_patch
+    monkeypatch.setattr(didww, "didww_client", lambda: client)
+
+    await didww.set_voice_in_trunk_auth("hail-didww", "s3cret")
+
+    sent = patches[0]["data"]["attributes"]["configuration"]["attributes"]
+    assert sent["auth_enabled"] is True
+    assert sent["auth_user"] == "hail-didww"
+    assert sent["auth_password"] == "s3cret"
+    # The whole configuration goes back, without the server-made fields.
+    assert sent["host"] == "example.sip.livekit.cloud"
+    assert sent["transport_protocol_id"] == 2
+    assert "incoming_auth_username" not in sent
+
+
+async def test_didww_trunk_auth_fails_when_the_trunk_lost_its_host(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "didww_api_key", "key")
+    monkeypatch.setattr(settings, "didww_voice_in_trunk_id", "trunk-1")
+    reads = iter(
+        [
+            _sip_trunk(host="example.sip.livekit.cloud", port=5060),
+            _sip_trunk(auth_enabled=True, auth_user="hail-didww", host=None),
+        ]
+    )
+    client = MagicMock()
+    client.get.side_effect = lambda path, **kw: next(reads)
+    monkeypatch.setattr(didww, "didww_client", lambda: client)
+    with pytest.raises(CarrierNotConfigured, match="host or port"):
+        await didww.set_voice_in_trunk_auth("hail-didww", "s3cret")
+
+
+async def test_didww_trunk_auth_needs_a_trunk_and_a_password(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "didww_voice_in_trunk_id", "")
+    with pytest.raises(CarrierNotConfigured, match="DIDWW_VOICE_IN_TRUNK_ID"):
+        await didww.set_voice_in_trunk_auth("hail-didww", "s3cret")
+    monkeypatch.setattr(settings, "didww_voice_in_trunk_id", "trunk-1")
+    with pytest.raises(CarrierNotConfigured, match="password"):
+        await didww.set_voice_in_trunk_auth("hail-didww", "")

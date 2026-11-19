@@ -143,15 +143,15 @@ async def open_inbound_call(
         logger.info("inbound call to unknown/pool number %s dropped", attrs.dialed)
         return Rejected("unknown_number")
     # The INVITE must arrive on the LiveKit inbound trunk configured for the
-    # number's carrier. Carriers may share one trunk (one wildcard inbound
-    # trunk is all LiveKit allows) or have one each; both pass this check.
+    # number's carrier. Carriers may share one trunk or have one each (each
+    # locked to its carrier); both pass this check.
     try:
         expected_trunk = inbound_trunk(number.provider)
     except ValueError:
         expected_trunk = None
     if (
         not attrs.trunk_id
-        or attrs.trunk_id != expected_trunk
+        or attrs.trunk_id not in _accepted_trunks(expected_trunk)
         or "voice" not in number.capabilities
     ):
         # A real number of a real customer: keep a failed Call (and its event
@@ -177,6 +177,17 @@ async def open_inbound_call(
         return await _answer_or_refuse(db, number, org_id, attrs, org_name)
     finally:
         org_name.cancel()  # no-op once it has finished (refusals never await it)
+
+
+def _accepted_trunks(expected: str | None) -> set[str]:
+    """The carrier's own trunk, plus the shared ``LIVEKIT_SIP_INBOUND_TRUNK_ID``
+    while numbers move from the shared trunk to per-carrier trunks one carrier
+    at a time (docs/operations/inbound-trunk-lockdown.md). Temporary: once
+    the shared key is empty, only the carrier's own trunk is accepted."""
+    accepted = {expected} if expected else set()
+    if settings.livekit_sip_inbound_trunk_id:
+        accepted.add(settings.livekit_sip_inbound_trunk_id)
+    return accepted
 
 
 async def _organization_name(org_id: UUID) -> str | None:

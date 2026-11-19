@@ -14,6 +14,7 @@ import logging
 from datetime import datetime, timezone
 
 from hailhq.core.carrier_routing import carrier
+from hailhq.core.config import settings
 from hailhq.core.livekit import LiveKitClient
 from hailhq.core.models import PhoneNumber
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -92,8 +93,31 @@ async def unregister(db: AsyncSession, lk: LiveKitClient, number: PhoneNumber) -
         # The carrier is already detached; the row stays registered so the
         # next unregister (idempotent at the carrier) finishes the removal.
         raise InboundRoutingError("livekit_remove", exc) from exc
+    await _remove_from_shared_trunk(lk, trunk_id, number.e164)
     number.inbound_registered_at = None
     await db.flush()
+
+
+async def _remove_from_shared_trunk(
+    lk: LiveKitClient, trunk_id: str, e164: str
+) -> None:
+    """Temporary, while numbers move to per-carrier trunks
+    (docs/operations/inbound-trunk-lockdown.md): a number registered before
+    its carrier got its own trunk is still listed on the shared trunk. Left
+    there, the next ``register`` would fail, because LiveKit lists a number
+    on one trunk only. Best effort: once the shared trunk is deleted this
+    fails until ``LIVEKIT_SIP_INBOUND_TRUNK_ID`` is emptied."""
+    shared = settings.livekit_sip_inbound_trunk_id
+    if not shared or shared == trunk_id:
+        return
+    try:
+        await lk.remove_inbound_number(shared, e164)
+    except Exception:
+        logger.warning(
+            "number %s: removal from the shared inbound trunk failed",
+            e164,
+            exc_info=True,
+        )
 
 
 def _is_config_error(exc: Exception) -> bool:
