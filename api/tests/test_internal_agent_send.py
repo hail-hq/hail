@@ -28,6 +28,7 @@ from hailhq.core.models import (
     EmailDomain,
     Organization,
     OrganizationMember,
+    OrgProviderConfig,
     PhoneNumber,
     PlatformFlag,
     Sms,
@@ -497,6 +498,48 @@ async def test_send_email_me_reaches_the_callers_own_address(
         "Hello from the call.\n\n-- \n"
     )
     assert "If that was not you, you can ignore it." in sent
+
+
+@pytest.mark.parametrize("from_org_tts", [False, True])
+async def test_send_email_me_uses_the_call_language(
+    client, async_session, email_mock, add_phone_number, from_org_tts
+):
+    """An Italian call gets Italian fixed lines. With no language on the call
+    (an inbound agent without one), the org's saved TTS language is used,
+    like the voicebot."""
+    org = uuid.uuid4()
+    call = await _email_ready_call(async_session, org, add_phone_number)
+    if from_org_tts:
+        async_session.add(
+            OrgProviderConfig(
+                organization_id=org,
+                layer="tts",
+                provider="cartesia",
+                params={"language": "it"},
+                is_active=True,
+            )
+        )
+    else:
+        call.voice_config = {"language": "it"}
+    async_session.add(Organization(id=org, name="Northgate Dental", origin="human"))
+    async_session.add(
+        Contact(
+            organization_id=org,
+            name="Sam Lee",
+            email="sam@northgate.test",
+            phone_e164=call.to_e164,
+        )
+    )
+    await async_session.commit()
+
+    assert (await _send_email_to_name(client, call, "me"))["ok"] is True
+    row = (await async_session.execute(select(Email))).scalar_one()
+    assert row.subject == "Da una telefonata con Northgate Dental: Call summary"
+    assert row.body_text.startswith(
+        "Questa email è stata inviata in seguito a una telefonata con"
+        " Northgate Dental.\n\n"
+    )
+    assert "If that was not you" not in row.body_text
 
 
 async def test_send_email_me_names_no_org_without_the_org_table_row(

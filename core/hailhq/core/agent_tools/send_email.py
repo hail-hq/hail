@@ -17,6 +17,7 @@ import uuid
 from typing import Any
 
 from hailhq.core.agent_tools.spec import NO_CALL, SPOKEN_FALLBACK, ToolContext, ToolSpec
+from hailhq.core.caller_email_lines import caller_email_lines
 from hailhq.core.config import settings
 from hailhq.core.email_sender import head_retired_by_other_org
 from hailhq.core.hail_mail import default_user_prefix
@@ -62,34 +63,44 @@ def _one_line(text: str) -> str:
     return " ".join(kept.split())
 
 
-def _call_with(org_name: str | None) -> str:
-    name = _one_line(org_name or "")[:MAX_ORG_NAME_CHARS].strip()
-    return f"a phone call with {name}" if name else "a phone call"
+def _org_name(org_name: str | None, limit: int = MAX_ORG_NAME_CHARS) -> str:
+    return _one_line(org_name or "")[:limit].strip()
 
 
-def caller_email_subject(subject: str, org_name: str | None) -> str:
+def _fill(named: str, unnamed: str, name: str) -> str:
+    return named.replace("{org}", name) if name else unnamed
+
+
+def caller_email_subject(
+    subject: str, org_name: str | None, language: str | None = None
+) -> str:
     """The subject of an email to the caller's own address on file: fixed
-    words first, so the email list shows why it came before any words the
-    caller chose."""
+    words first, in the call's language, so the email list shows why it came
+    before any words the caller chose. A long org name is cut so the fixed
+    words always fit; the caller's words are cut last."""
+    lines = caller_email_lines(language)
+    fixed = len(lines.subject.replace("{org}", "")) + 2  # ": "
+    name = _org_name(org_name, min(MAX_ORG_NAME_CHARS, MAX_SUBJECT_CHARS - fixed))
+    prefix = _fill(lines.subject, lines.subject_unnamed, name)
     words = _one_line(subject)
-    prefix = f"From {_call_with(org_name)}"
     framed = f"{prefix}: {words}" if words else prefix
     return framed[:MAX_SUBJECT_CHARS]
 
 
-def caller_email_body(body_text: str, org_name: str | None) -> str:
+def caller_email_body(
+    body_text: str, org_name: str | None, language: str | None = None
+) -> str:
     """The body of an email to the caller's own address on file: a fixed
-    first line and footer around the agent's text. Caller ID picked the
-    address and can be faked, so the reader learns why it came and that
-    they can ignore it."""
-    call = _call_with(org_name)
+    first line and footer, in the call's language, around the agent's text.
+    Caller ID picked the address and can be faked, so the reader learns why
+    it came and that they can ignore it."""
+    lines = caller_email_lines(language)
+    name = _org_name(org_name)
     return (
-        f"This email was sent because of {call}.\n\n"
+        f"{_fill(lines.first_line, lines.first_line_unnamed, name)}\n\n"
         f"{body_text.strip()}\n\n"
         "-- \n"
-        f"You got this email because someone asked for it during {call},"
-        " on the phone number saved with this email address. If that was not"
-        " you, you can ignore it."
+        f"{_fill(lines.footer, lines.footer_unnamed, name)}"
     )
 
 

@@ -190,7 +190,11 @@ the caller's own address on file, with limits. Caller ID can be faked.
 - Each email to the caller's address on file (by `me` or by a name that
   resolves to it) gets a fixed subject start, first line
   and footer (`caller_email_subject`, `caller_email_body`): sent because of a
-  phone call with the organization. These lines are English only for now.
+  phone call with the organization. They are in the call's language
+  (`hailhq.core.caller_email_lines`, 39 languages): the call's
+  `voice_config.language`, else the org's saved TTS language, as the
+  voicebot picks it. Unknown language: English. A long org name is cut so
+  the fixed subject words always fit.
 - One phone call sends at most 3 emails (`MAX_CALL_EMAILS`), counted under
   the call row lock. The limit is per call; across calls only the org-wide
   agent caps apply. Refusals for the cap and for no email on file write an
