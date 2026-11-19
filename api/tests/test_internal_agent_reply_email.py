@@ -1299,6 +1299,24 @@ async def test_tool_email_me_reaches_the_proven_sender(
     assert email_mock.send_email.await_count == 1
 
 
+async def test_tool_email_me_after_a_failed_reply_says_it_failed(
+    client, async_session, email_mock
+) -> None:
+    _org, _agent, _domain, inbound = await _seed(
+        async_session, scope="anyone", sender="sam@northgate.test"
+    )
+    assert (await _tool_email(client, inbound.id, recipient_name="me"))["ok"]
+    await async_session.execute(
+        update(Email)
+        .where(Email.direction == "outbound")
+        .values(status="failed", end_reason="MessageRejected")
+    )
+    await async_session.commit()
+
+    again = await _tool_email(client, inbound.id, recipient_name="me", subject="Retry")
+    assert again == {"ok": False, "spoken": "I couldn't send the email."}
+
+
 async def test_tool_email_me_from_an_unproven_sender_sends_nothing(
     client, async_session, email_mock
 ) -> None:

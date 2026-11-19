@@ -543,6 +543,49 @@ async def test_send_email_to_the_callers_saved_name_asks_for_me(
     assert await _sent_to(async_session) == []
 
 
+async def test_send_email_to_a_member_sharing_a_caller_name_without_email(
+    client, async_session, email_mock, add_phone_number
+):
+    """The caller has no email on file, so their saved name is just a name:
+    it reaches the member of that name."""
+    org = uuid.uuid4()
+    call = await _email_ready_call(async_session, org, add_phone_number)
+    await _add_member(async_session, org, "Sam Lee", "sam@team.test")
+    async_session.add(
+        Contact(organization_id=org, name="Sam Lee", phone_e164=call.to_e164)
+    )
+    await async_session.commit()
+
+    assert (await _send_email_to_name(client, call, "Sam Lee"))["ok"] is True
+    assert await _sent_to(async_session) == [["sam@team.test"]]
+
+
+async def test_send_email_by_name_to_the_callers_address_gets_caller_lines(
+    client, async_session, email_mock, add_phone_number
+):
+    """A name that resolves to the caller's own address on file still gets
+    the fixed lines: caller ID tied that address to this call."""
+    org = uuid.uuid4()
+    call = await _email_ready_call(async_session, org, add_phone_number)
+    async_session.add_all(
+        [
+            Contact(
+                organization_id=org,
+                name="Sam Lee",
+                email="sam@northgate.test",
+                phone_e164=call.to_e164,
+            ),
+            Contact(organization_id=org, name="Sam", email="SAM@northgate.test"),
+        ]
+    )
+    await async_session.commit()
+
+    assert (await _send_email_to_name(client, call, "Sam"))["ok"] is True
+    row = (await async_session.execute(select(Email))).scalar_one()
+    assert row.subject.startswith("From a phone call: ")
+    assert row.body_text.startswith("This email was sent because of a phone call.")
+
+
 async def test_send_email_by_name_has_no_caller_lines(
     client, async_session, email_mock, add_phone_number
 ):

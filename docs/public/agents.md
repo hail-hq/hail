@@ -48,8 +48,8 @@ can be faked, so:
 
 - Each email to the caller has a fixed subject start, first line and footer that
   say it was sent because of a phone call with your organization.
-- If the agent names the caller instead, nothing is sent, and the agent is told
-  to use "me".
+- If the agent uses the caller's saved name and it would reach someone else,
+  nothing is sent. The agent is told to use "me" or ask who they mean.
 - One call sends at most 3 emails.
 
 The words `me`, `caller`, `sender` and `you` always mean the person the agent
