@@ -285,6 +285,10 @@ def test_send_email_self_recipient_is_a_reserved_word_only():
         assert is_self_recipient(name)
     for name in ("Sam Lee", "my email", "", "meg"):
         assert not is_self_recipient(name)
+    # On a call "you" may mean the business: it is a name there.
+    assert is_self_recipient("Caller", on_call=True)
+    for name in ("you", "sender"):
+        assert not is_self_recipient(name, on_call=True)
     # Both tool descriptions tell the model which word to use.
     tools = {t.name: t for t in all_tools()}
     for spec in (tools["send_email"], EMAIL_RUN_SPEC):

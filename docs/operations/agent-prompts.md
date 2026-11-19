@@ -177,8 +177,8 @@ email ownership. Browser sessions use the signed-in account's verified email.
 `send_email` on a phone call (owner decision, 2026-11-19): caller ID may pick
 the caller's own address on file, with limits. Caller ID can be faked.
 
-- Only the reserved `recipient_name` `me` (also `caller`, `sender`, `you`)
-  uses it. The contact line in the call's instructions tells the model to.
+- Only the reserved `recipient_name` `me` (also `caller`) uses it. On a
+  call, `you` and `sender` are names. The contact line in the call's instructions tells the model to.
 - It reaches the one email saved for the caller's number, members first. No
   single email means no send; it never falls back to a name lookup.
 - A name is looked up by name only, members first. Caller ID never breaks a

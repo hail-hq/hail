@@ -52,8 +52,8 @@ can be faked, so:
   nothing is sent. The agent is told to use "me" or ask who they mean.
 - One call sends at most 3 emails.
 
-The words `me`, `caller`, `sender` and `you` always mean the person the agent
-talks to, never a contact with that name. In an email conversation, "email me"
+The words `me` and `caller` (in email also `sender` and `you`) always mean the
+person the agent talks to, never a contact with that name. In an email conversation, "email me"
 goes to the sender, whose address is proven by DMARC. The agent never emails an address someone says or types. It answers
 that it can only email addresses on file, to prevent spam.
 

@@ -33,13 +33,16 @@ MAX_BODY_CHARS = 5000
 # recipient_name for the person the agent talks to: the caller's own address
 # on file on a call, the proven sender in an email run. Never a name lookup.
 SELF_RECIPIENT = "me"
-# "sender" and "you" are older spellings an email run already used.
-_SELF_NAMES = frozenset({SELF_RECIPIENT, "caller", "sender", "you"})
+_CALL_SELF_NAMES = frozenset({SELF_RECIPIENT, "caller"})
+# "sender" and "you" are older spellings an email run already used. On a call
+# "you" may mean the business, so it is a name there.
+_RUN_SELF_NAMES = _CALL_SELF_NAMES | {"sender", "you"}
 
 
-def is_self_recipient(name: str) -> bool:
+def is_self_recipient(name: str, *, on_call: bool = False) -> bool:
     """True when ``recipient_name`` means the person the agent talks to."""
-    return name.strip().casefold() in _SELF_NAMES
+    names = _CALL_SELF_NAMES if on_call else _RUN_SELF_NAMES
+    return name.strip().casefold() in names
 
 
 _UNAVAILABLE = "Email is not available right now."

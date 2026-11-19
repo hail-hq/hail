@@ -376,10 +376,11 @@ _SPOKEN_EMAIL_NO_SELF = (
     " You can only email people on file, to prevent spam. Offer to take a"
     " message."
 )
-_SPOKEN_EMAIL_USE_SELF = (
-    'Not sent: "{name}" is also the name saved for the person on this call.'
-    ' To email the caller, use recipient_name "me". For someone else, ask'
-    " who they mean."
+# On a call every name refusal also says how to email the caller, so the
+# answer for the caller's own saved name looks like any other.
+_SPOKEN_CALL_NO_MATCH = (
+    _SPOKEN_EMAIL_NO_MATCH
+    + ' To email the person on this call, use recipient_name "me".'
 )
 _SPOKEN_RUN_REPLIED = (
     "Not sent: the reply to this email was already sent or tried. Nothing"
@@ -430,7 +431,8 @@ async def _call_recipient(
     shares the caller's name.
 
     A name the caller is saved under that does not resolve to the caller's
-    own address is refused with a hint to use "me": a model that emails them
+    own address is refused like an unknown name, with a hint to use "me",
+    whether or not their entry has an email: a model that emails them
     by name (an older prompt, or one that ignores the tool text) would
     otherwise send the caller's request to a member or contact of the same
     name."""
@@ -438,7 +440,7 @@ async def _call_recipient(
     phone = _other_party(call)
     caller = await find_by_phone(db, org, phone) if phone else None
     own = await entry_email(db, org, phone, caller) if phone else None
-    if is_self_recipient(name):
+    if is_self_recipient(name, on_call=True):
         if own:
             return own, True
         return await _deny(
@@ -451,15 +453,12 @@ async def _call_recipient(
     recipient = await _known_email(db, org, name)
     if own and isinstance(recipient, str) and recipient.casefold() == own.casefold():
         return recipient, True
-    if caller is not None and _same_name(caller.name, name):
+    if isinstance(recipient, AgentSendResponse) or (
+        caller is not None and _same_name(caller.name, name)
+    ):
         return AgentSendResponse(
-            ok=False,
-            # One answer with or without an email on file, so a caller
-            # cannot learn whether this number's entry has one.
-            spoken=_SPOKEN_EMAIL_USE_SELF.format(name=_quoted_name(name)),
+            ok=False, spoken=_SPOKEN_CALL_NO_MATCH.format(name=_quoted_name(name))
         )
-    if isinstance(recipient, AgentSendResponse):
-        return recipient
     return recipient, False
 
 
