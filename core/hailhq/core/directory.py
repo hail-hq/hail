@@ -136,7 +136,7 @@ _UNDEFINED_TABLE = "42P01"
 def _reraise_unless_no_member_tables(exc: ProgrammingError) -> None:
     if getattr(exc.orig, "sqlstate", None) != _UNDEFINED_TABLE:
         raise exc
-    logger.debug("no users/members tables, members skipped: %s", exc)
+    logger.warning("no users/members tables, members skipped: %s", exc)
 
 
 async def is_verified_member(
@@ -208,11 +208,40 @@ async def find_by_phone(
     )
 
 
+async def resolve_caller_email(
+    session: AsyncSession, organization_id: uuid.UUID, phone_e164: str, name: str
+) -> str | None:
+    """The email of the person on the call, when ``name`` is the name their
+    number is saved under (:func:`find_by_phone`). "Email me" then reaches
+    the caller even when a member or another contact shares their name."""
+    entry = await find_by_phone(session, organization_id, phone_e164)
+    if entry is None or entry.name.strip().lower() != name.strip().lower():
+        return None
+    if entry.source == "member":
+        stmt: Any = (
+            select(User.email)
+            .join(OrganizationMember, OrganizationMember.user_id == User.id)
+            .where(
+                OrganizationMember.organization_id == organization_id,
+                User.phone_number == phone_e164,
+            )
+            .limit(2)
+        )
+    else:
+        stmt = select(Contact.email).where(
+            Contact.organization_id == organization_id,
+            Contact.phone_e164 == phone_e164,
+        )
+    emails = [e for e in (await session.execute(stmt)).scalars().all() if e]
+    return emails[0] if len(emails) == 1 else None
+
+
 __all__ = [
     "DirectoryEntry",
     "find_by_phone",
     "is_verified_member",
     "list_directory",
+    "resolve_caller_email",
     "resolve_contact_emails",
     "resolve_member_emails",
     "resolve_member_phones",
