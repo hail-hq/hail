@@ -34,11 +34,19 @@ Nothing to paste into a PulseMCP-specific field — there is none. The listing i
 
 **One-liner:**
 
-> Phone, SMS & email — for agents. One remote MCP endpoint, OAuth login, zero install.
+<!-- copy:short -->
+
+> Run your AI assistant with real phone numbers and email inboxes. Handle calls, texts, and email.
+
+<!-- /copy -->
 
 **Description** (mirrors the `server.json` `description` field the crawler ingests):
 
-> Voice calls, SMS, and email for AI agents — one remote MCP endpoint, OAuth login, zero install. Place calls, send messages, read replies, and pull deliverability events without standing up a phone system or mail server.
+<!-- copy:short -->
+
+> Run your AI assistant with real phone numbers and email inboxes. Handle calls, texts, and email.
+
+<!-- /copy -->
 
 **Repo / manual-fallback URL:**
 
@@ -55,8 +63,8 @@ https://mcp.hail.so
 **Icon** (pulled from `server.json`, mirrored at):
 
 ```
-hail-website/public/assets/monogram-512.png
-hail-website/public/assets/monogram-1024.png
+hail-website/public/assets/brand/logo/monogram-512.png
+hail-website/public/assets/brand/logo/monogram-1024.png
 ```
 
 **Tool inventory** (11 tools, for cross-checking the listing's tool list against `mcp/hailhq/mcp/tools.py`):

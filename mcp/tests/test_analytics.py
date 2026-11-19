@@ -7,10 +7,9 @@ the captured ``$mcp_tool_call`` carries metadata only.
 
 from __future__ import annotations
 
-import hashlib
+import asyncio
 import importlib
 import json
-import time
 
 import httpx
 import pytest
@@ -23,6 +22,8 @@ _SECRET = "+14155550123 secret body"
 _AUTH = {"Authorization": "Bearer user.jwt.token"}
 _ORG = "00000000-0000-0000-0000-0000000000aa"
 _USER = "00000000-0000-0000-0000-0000000000bb"
+_EMAIL = "actor@example.org"
+_NAME = "Example Actor"
 _MODEL = "claude-test"
 
 
@@ -61,6 +62,10 @@ async def _session(
     protocol: str,
     fail: bool,
     call: dict | None = None,
+    actor: dict | None = None,
+    auth: dict | None = None,
+    lookup_fails: bool = False,
+    followup_actors: list[dict | None] | None = None,
 ) -> tuple[list, list]:
     monkeypatch.setattr("hailhq.core.config.settings.mcp_resource_url", "https://m.t")
     monkeypatch.setattr(
@@ -73,6 +78,7 @@ async def _session(
     monkeypatch.setattr("hailhq.core.config.settings.next_public_posthog_key", token)
     # The reload below sets this flag; monkeypatch puts it back after the test.
     monkeypatch.setattr("hailhq.mcp.tools._analytics_actor", False)
+    monkeypatch.setattr("hailhq.mcp.tools.telemetry_enabled", lambda: False)
     # A capture that escapes the patch below goes nowhere.
     monkeypatch.setattr(
         "hailhq.core.config.settings.next_public_posthog_host", "http://127.0.0.1:9"
@@ -86,7 +92,14 @@ async def _session(
         lambda self, event, **kw: captured.append((event, kw)),
     )
 
+    pause_call = False
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
     async def regions(_self):
+        if pause_call:
+            entered.set()
+            await release.wait()
         if fail:
             raise RuntimeError(_SECRET)
         return {"regions": [], "note": _SECRET}
@@ -94,12 +107,32 @@ async def _session(
     monkeypatch.setattr(
         "hailhq.mcp.hail_client.HailClient.list_number_regions", regions
     )
-    auth = _AUTH if oauth else {}
-    # What _actor_for caches for this bearer.
-    key = hashlib.sha256(b"user.jwt.token").hexdigest()
-    actor = {"organization_id": _ORG, "user_id": _USER, "user_email": _SECRET}
-    cache = {key: (time.monotonic() + 300, actor)}
-    monkeypatch.setattr("hailhq.mcp.tools._actor_cache", cache)
+    auth = (_AUTH if oauth else {}) if auth is None else auth
+    expected_lookups = (
+        [next(iter(auth.values())).split(" ", 1)[1]] if token and oauth and auth else []
+    )
+    actor = (
+        actor
+        if actor is not None
+        else {
+            "auth_kind": "jwt",
+            "organization_id": _ORG,
+            "user_id": _USER,
+            "email": _EMAIL,
+            "name": _NAME,
+        }
+    )
+    lookups = []
+
+    async def whoami(client):
+        lookups.append(client._api_key)
+        if lookup_fails:
+            raise httpx.ConnectError("identity API unavailable")
+        return actor
+
+    monkeypatch.setattr("hailhq.mcp.hail_client.HailClient.whoami", whoami)
+    monkeypatch.setattr("hailhq.mcp.tools._actor_cache", {})
+    monkeypatch.setattr("hailhq.mcp.tools._actor_lookups", {})
     # Analytics adds an optional llm_model input; the agent fills it.
     args = {"llm_model": _MODEL} if token else {}
     call = call or {"name": "list_number_regions", "arguments": args}
@@ -153,6 +186,25 @@ async def _session(
                     headers,
                     {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": call},
                 )
+            pending = None
+            if followup_actors:
+                # Keep A's tool running while B and an anonymous caller list.
+                pause_call = True
+                pending = asyncio.create_task(post(*_modern("tools/call", 9, **call)))
+                await asyncio.wait_for(entered.wait(), 5)
+            try:
+                for i, next_actor in enumerate(followup_actors or []):
+                    auth = {}
+                    if next_actor is not None:
+                        actor = next_actor
+                        auth = {"Authorization": f"Bearer followup-{i}"}
+                    await post(*_modern("tools/list", 10 + i))
+            finally:
+                release.set()
+                if pending:
+                    await pending
+    # Only the tool call looks the bearer up; handshake and lists never do.
+    assert lookups == expected_lookups
     return seen, captured
 
 
@@ -195,7 +247,15 @@ async def test_analytics_keeps_responses_unchanged(monkeypatch, oauth, protocol,
     if oauth:
         assert calls[0]["distinct_id"] == _USER
         assert props["$groups"] == {"organization": _ORG}
-        assert props["$process_person_profile"] is True
+        # PostHog omits the flag for identified users; processing defaults on.
+        assert props.get("$process_person_profile", True) is True
+        assert props["$set"] == {"email": _EMAIL, "name": _NAME}
+        # Before the bearer's first tool call nothing is cached: anonymous.
+        for name, event in events:
+            if name in {"$mcp_initialize", "$mcp_tools_list"}:
+                assert event["distinct_id"] != _USER
+                assert event["properties"]["$process_person_profile"] is False
+                assert "$set" not in event["properties"]
     else:
         assert "$groups" not in props
         assert props["$process_person_profile"] is False
@@ -205,6 +265,7 @@ async def test_analytics_keeps_responses_unchanged(monkeypatch, oauth, protocol,
 def test_keep_metadata_drops_content():
     event = {
         "properties": {
+            analytics._REQUEST_IDENTITY: None,
             "$mcp_tool_name": "send_sms",
             "$mcp_parameters": {"body": _SECRET},
             "$mcp_response": _SECRET,
@@ -213,24 +274,146 @@ def test_keep_metadata_drops_content():
         }
     }
     assert analytics._keep_metadata(event)["properties"] == {
-        "$mcp_tool_name": "send_sms"
+        "$mcp_tool_name": "send_sms",
+        "$process_person_profile": False,
     }
 
 
-def test_keep_metadata_org_without_user():
+def test_keep_metadata_limits_person_properties():
     event = {
-        "distinct_id": "ses_1",
+        "distinct_id": "ses_shared",
         "properties": {
-            analytics._ORG_PROPERTY: _ORG,
-            "$process_person_profile": False,
+            analytics._REQUEST_IDENTITY: {
+                "distinct_id": _USER,
+                "properties": {"email": _EMAIL, "name": _NAME, "body": _SECRET},
+                "groups": None,
+            },
+            "$mcp_parameters": {"email": _SECRET},
         },
     }
     kept = analytics._keep_metadata(event)
-    assert kept["distinct_id"] == _ORG
-    assert kept["properties"] == {
-        "$process_person_profile": False,
-        "$groups": {"organization": _ORG},
+    assert kept["distinct_id"] == _USER
+    assert kept["properties"] == {"$set": {"email": _EMAIL, "name": _NAME}}
+
+
+def test_missing_request_identity_drops_sticky_sdk_profile(caplog, monkeypatch):
+    monkeypatch.setattr(analytics, "_drop_logged", False)
+    # The SDK swallows event_properties callback errors. Without a snapshot,
+    # its remaining identity could belong to a previous request.
+    event = {
+        "event": "$mcp_tool_call",
+        "distinct_id": _USER,
+        "properties": {
+            "$session_id": "ses_shared",
+            "$set": {"email": _EMAIL, "name": _NAME},
+        },
     }
+    assert analytics._keep_metadata(event) is None
+    # A broken callback must not stop analytics without a trace in our logs.
+    assert "dropped: no request identity" in caplog.text
+    caplog.clear()
+    assert analytics._keep_metadata(dict(event)) is None
+    assert "dropped" not in caplog.text
+
+
+@pytest.mark.parametrize("name", ["$exception", "custom_event"])
+def test_any_event_without_request_identity_is_dropped(name):
+    event = {
+        "event": name,
+        "distinct_id": _USER,
+        "properties": {"$set": {"email": _EMAIL, "name": _NAME}},
+    }
+    assert analytics._keep_metadata(event) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("protocol", [_LEGACY, _MODERN])
+@pytest.mark.parametrize("lookup_fails", [False, True])
+async def test_unresolved_user_stays_personless(monkeypatch, protocol, lookup_fails):
+    _, events = await _session(
+        monkeypatch,
+        "phc_test",
+        oauth=True,
+        protocol=protocol,
+        fail=False,
+        actor={"organization_id": _ORG, "user_id": None, "email": None, "name": None},
+        lookup_fails=lookup_fails,
+    )
+    for _, event in events:
+        assert event["distinct_id"] not in {_USER, _ORG}
+        assert event["properties"]["$process_person_profile"] is False
+        assert "$set" not in event["properties"]
+    calls = [event for name, event in events if name == "$mcp_tool_call"]
+    # An org-only caller still counts under its organization.
+    expected = None if lookup_fails else {"organization": _ORG}
+    assert calls[0]["properties"].get("$groups") == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("protocol", [_LEGACY, _MODERN])
+async def test_anonymous_discovery_does_not_resolve_a_user(monkeypatch, protocol):
+    _, events = await _session(
+        monkeypatch, "phc_test", oauth=True, protocol=protocol, fail=False, auth={}
+    )
+    assert events
+    for _, event in events:
+        assert event["properties"]["$process_person_profile"] is False
+        assert "$set" not in event["properties"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "profile", [{"email": _EMAIL, "name": _NAME}, {"email": None, "name": None}]
+)
+async def test_api_key_owner_is_identified(monkeypatch, profile):
+    _, events = await _session(
+        monkeypatch,
+        "phc_test",
+        oauth=True,
+        protocol=_MODERN,
+        fail=False,
+        auth={"Authorization": "Bearer hl_live_owner"},
+        actor={
+            "auth_kind": "apikey",
+            "organization_id": _ORG,
+            "user_id": _USER,
+            **profile,
+        },
+    )
+    calls = [event for name, event in events if name == "$mcp_tool_call"]
+    assert calls[0]["distinct_id"] == _USER
+    assert calls[0]["properties"].get("$process_person_profile", True) is True
+    if profile["email"]:
+        assert calls[0]["properties"]["$set"] == {"email": _EMAIL, "name": _NAME}
+    else:
+        assert "$set" not in calls[0]["properties"]
+
+
+@pytest.mark.asyncio
+async def test_stateless_requests_do_not_share_person_profiles(monkeypatch):
+    other_user = "00000000-0000-0000-0000-0000000000cc"
+    _, events = await _session(
+        monkeypatch,
+        "phc_test",
+        oauth=True,
+        protocol=_MODERN,
+        fail=False,
+        followup_actors=[{"user_id": other_user, "email": None, "name": None}, None],
+    )
+    lists = [event for name, event in events if name == "$mcp_tools_list"]
+    assert len(lists) == 3
+    # A's list ran before A's first tool call; B never called a tool. Neither
+    # may pick up A's sticky SDK profile while A's call is still running.
+    for event in lists:
+        assert event["distinct_id"] not in {_USER, other_user}
+        assert event["properties"]["$process_person_profile"] is False
+        assert "$set" not in event["properties"]
+        assert "$groups" not in event["properties"]
+    calls = [event for name, event in events if name == "$mcp_tool_call"]
+    assert len(calls) == 2
+    for event in calls:
+        assert event["distinct_id"] == _USER
+        assert event["properties"]["$set"] == {"email": _EMAIL, "name": _NAME}
 
 
 @pytest.mark.asyncio
@@ -268,6 +451,7 @@ async def test_llm_model_argument_never_reaches_the_tool(monkeypatch, token):
 def test_keep_metadata_keeps_only_model_ids(model, kept):
     event = {
         "properties": {
+            analytics._REQUEST_IDENTITY: None,
             "$mcp_llm_model": model,
             "$mcp_llm_model_source": "self_reported",
         }

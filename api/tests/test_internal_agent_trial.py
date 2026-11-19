@@ -603,7 +603,7 @@ async def test_reply_sms_never_uses_trial(client, async_session, sms_mock, monke
         {"sms_id": str(inbound.sms_id), "body": "Yes."},
     )
     assert data["ok"] is False and data["state"] == "skipped"
-    assert data["reason"] == BLOCK_MESSAGE
+    assert data["reason"] == "sms_registration"
     sms_mock.send_sms.assert_not_awaited()
 
 

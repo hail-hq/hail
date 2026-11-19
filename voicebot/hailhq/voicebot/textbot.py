@@ -1,5 +1,6 @@
 """Text worker: the agent answers inbound SMS. Inbound email runs on its own
-polling tasks here, through ``hailhq.voicebot.emailbot``.
+polling tasks here, through ``hailhq.voicebot.emailbot``, and so does the
+``call.summarized`` webhook, through ``hailhq.voicebot.callsummary``.
 
 Runs inside the voicebot process (``main.py`` starts it in a daemon thread
 with its own event loop) so text replies use the same LLM precedence and
@@ -25,7 +26,8 @@ from typing import Any
 
 import logfire
 from hailhq.core.agent_tools.client import AgentApiClient
-from hailhq.core.agent_tools.spec import ToolContext
+from hailhq.core.agent_tools.http_tool import Conversation, load_http_tool_specs
+from hailhq.core.agent_tools.spec import ToolContext, ToolSpec
 from hailhq.core.agent_tools.thread_history import SPEC as THREAD_HISTORY
 from hailhq.core.config import settings
 from hailhq.core.db import dispose_engine, session_scope
@@ -36,21 +38,26 @@ from hailhq.core.telemetry_identity import (
     tag_context,
 )
 from hailhq.core.text_agent import (
+    EMPTY_REPLY_SKIP,
     MAX_REPLY_CHARS,
+    SKIP_REASONS,
     ClaimedReply,
     ReplyState,
     build_chat_messages,
     claim_pending_reply,
     finish_reply,
+    reply_clock,
     retry_reply,
     thread_history_for_reply,
 )
 from hailhq.core.threads import ThreadScope
-from hailhq.voicebot import emailbot
+from hailhq.voicebot import callsummary, emailbot
 from hailhq.voicebot.chat_loop import (
+    HTTP_TOOL_BUDGET_SECONDS,
     LLM_TIMEOUT_SECONDS,
     MAX_TOOL_ROUNDS,
     TOOL_APOLOGY,
+    HttpToolTime,
     run_chat,
     tool_args,
 )
@@ -74,8 +81,8 @@ __all__ = [
 
 
 def _tool_context(claimed: ClaimedReply) -> ToolContext:
-    """The text agent's only tool reads this caller's thread, fixed by the
-    inbound text, never by the model's arguments."""
+    """``thread_history`` reads this caller's thread, fixed by the inbound
+    text, never by the model's arguments."""
     org = claimed.agent.organization_id
     sms = claimed.sms
     return ToolContext(
@@ -88,32 +95,55 @@ def _tool_context(claimed: ClaimedReply) -> ToolContext:
     )
 
 
-async def _run_tool(call: FunctionToolCall, tctx: ToolContext) -> tuple[str, bool]:
+async def _run_tool(
+    call: FunctionToolCall,
+    tctx: ToolContext,
+    specs: dict[str, ToolSpec] | None = None,
+) -> tuple[str, bool]:
     """``(output, is_error)`` for one tool call. Never raises."""
-    if call.name != THREAD_HISTORY.name:
+    spec = (specs or {THREAD_HISTORY.name: THREAD_HISTORY}).get(call.name)
+    if spec is None:
         return TOOL_APOLOGY, True
     try:
-        return await THREAD_HISTORY.execute(tctx, tool_args(call)), False
+        return str(await spec.execute(tctx, tool_args(call)) or ""), False
     except Exception:
         logger.exception("text agent tool %s failed", call.name)
         return TOOL_APOLOGY, True
 
 
+async def _http_tools(claimed: ClaimedReply) -> list[ToolSpec]:
+    """The agent's HTTP tools for this text. A failure loses only these."""
+    return await load_http_tool_specs(
+        Conversation(
+            channel="sms",
+            id=claimed.sms.id,
+            agent_id=claimed.agent.id,
+            organization_id=claimed.agent.organization_id,
+        )
+    )
+
+
 async def generate_reply(claimed: ClaimedReply, messages: list[dict[str, Any]]) -> str:
     """The model's reply over the chat, trimmed to the SMS cap. The model may
-    call ``thread_history``; each call's result goes back into the chat and
-    the model is asked again, for at most ``MAX_TOOL_ROUNDS`` model calls."""
+    call ``thread_history`` and the agent's HTTP tools; each call's result
+    goes back into the chat and the model is asked again, for at most
+    ``MAX_TOOL_ROUNDS`` model calls."""
+    specs = [THREAD_HISTORY, *await _http_tools(claimed)]
     org_cfgs = await resolve_org_configs(claimed.agent.organization_id)
     llm = build_llm(None, org_cfgs.get("llm"))
     tctx = _tool_context(claimed)
+    by_name = {s.name: s for s in specs}
+    tool_time = HttpToolTime()
 
     async def run_tool(call: FunctionToolCall) -> tuple[str, bool]:
-        return await _run_tool(call, tctx)
+        return await tool_time.run(
+            by_name.get(call.name), lambda: _run_tool(call, tctx, by_name)
+        )
 
     text = await run_chat(
         llm,
         messages,
-        [wrap_tool(THREAD_HISTORY, tctx)],
+        [wrap_tool(s, tctx) for s in specs],
         run_tool,
         max_rounds=MAX_TOOL_ROUNDS,
         log_label=f"sms_id={claimed.sms.id}",
@@ -125,17 +155,29 @@ async def _prepare(claimed: ClaimedReply) -> list[dict[str, Any]]:
     """Load the thread on a short session; nothing stays open afterwards."""
     async with session_scope() as db:
         history = await thread_history_for_reply(db, claimed.sms, claimed.agent)
-    return build_chat_messages(claimed.agent, history)
+    return build_chat_messages(claimed.agent, history, clock=reply_clock(claimed.sms))
 
 
 async def _settle(
-    claimed: ClaimedReply, state: ReplyState | None, *, retry: bool = False
+    claimed: ClaimedReply,
+    state: ReplyState | None,
+    *,
+    retry: bool = False,
+    reason: str | None = None,
+    detail: str | None = None,
 ) -> None:
     async with session_scope() as db:
         if retry:
             await retry_reply(db, claimed)
         elif state is not None:
-            await finish_reply(db, claimed.sms, state, attempt=claimed.attempt)
+            await finish_reply(
+                db,
+                claimed.sms,
+                state,
+                attempt=claimed.attempt,
+                reason=reason,
+                detail=detail,
+            )
 
 
 async def reply_once(api: AgentApiClient) -> bool:
@@ -187,7 +229,7 @@ async def _reply_claimed(api: AgentApiClient, claimed: ClaimedReply, span=None) 
         messages = await _prepare(claimed)
         text = await asyncio.wait_for(
             generate_reply(claimed, messages),
-            timeout=LLM_TIMEOUT_SECONDS * MAX_TOOL_ROUNDS,
+            timeout=LLM_TIMEOUT_SECONDS * MAX_TOOL_ROUNDS + HTTP_TOOL_BUDGET_SECONDS,
         )
     except ProviderKeyError as exc:
         if span is not None:
@@ -212,7 +254,7 @@ async def _reply_claimed(api: AgentApiClient, claimed: ClaimedReply, span=None) 
         if span is not None:
             span.set_attribute("reply.state", "skipped")
         logger.info("sms_id=%s text agent wrote nothing; skipped", sms.id)
-        await _settle(claimed, "skipped")
+        await _settle(claimed, "skipped", reason=EMPTY_REPLY_SKIP)
         return True
     try:
         result = await api.post(
@@ -230,11 +272,29 @@ async def _reply_claimed(api: AgentApiClient, claimed: ClaimedReply, span=None) 
     state = str(result.get("state") or "failed")
     if state not in ("done", "skipped", "failed"):
         state = "failed"
+    reason = result.get("reason")
+    detail = result.get("detail")
+    # Known codes only: an older API sent a sentence or a carrier code here (a
+    # rolling deploy can pair this worker with it). Those are not stored.
+    code = reason if isinstance(reason, str) and reason in SKIP_REASONS else None
     if state != "done":
-        logger.info("sms_id=%s reply %s: %s", sms.id, state, result.get("reason"))
+        # An older API's sentence can hold the recipient's number: not logged.
+        logger.info(
+            "sms_id=%s reply %s: %s %s",
+            sms.id,
+            state,
+            code if code or reason is None else "[sentence hidden]",
+            detail or "",
+        )
     if span is not None:
         span.set_attribute("reply.state", state)
-    await _settle(claimed, state)  # type: ignore[arg-type]
+    # The reason is saved on the text, so the console can say why it got no reply.
+    await _settle(
+        claimed,
+        state,  # type: ignore[arg-type]
+        reason=code,
+        detail=str(detail) if code and detail else None,
+    )
     return True
 
 
@@ -266,6 +326,12 @@ async def _email_poll_loop(api: AgentApiClient, stop: threading.Event | None) ->
     await _poll("email", emailbot.reply_once, api, stop)
 
 
+async def _analysis_poll_loop(
+    api: AgentApiClient, stop: threading.Event | None
+) -> None:
+    await _poll("call analysis", callsummary.analyze_once, api, stop)
+
+
 async def run_forever(stop: threading.Event | None = None) -> None:
     api = AgentApiClient(settings.hail_api_url, settings.hail_internal_secret)
     n = settings.hail_text_reply_concurrency
@@ -275,6 +341,9 @@ async def run_forever(stop: threading.Event | None = None) -> None:
         await asyncio.gather(
             *(_poll_loop(api, stop) for _ in range(n)),
             *(_email_poll_loop(api, stop) for _ in range(n)),
+            # Each call is claimed first, so parallel loops never summarize
+            # the same call twice.
+            *(_analysis_poll_loop(api, stop) for _ in range(n)),
         )
     finally:
         try:

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from math import ceil
 from typing import Annotated, Any, Literal
@@ -139,7 +140,15 @@ from hailhq.core.telemetry import bind_organization
 from hailhq.core.telemetry_identity import tag_context
 from hailhq.core.telephony_catalog import sells_in
 from hailhq.core.text_agent import (
+    AGENT_CAPS_SKIP,
+    CARRIER_REJECTED_SKIP,
+    INSUFFICIENT_FUNDS_SKIP,
     MAX_REPLIES_PER_THREAD,
+    NO_AGENT_SKIP,
+    PROVIDER_ERROR_SKIP,
+    SEND_BLOCKED_SKIP,
+    SMS_REGISTRATION_SKIP,
+    THREAD_CAP_SKIP,
     answers_texts,
     prior_reply,
     replies_in_thread,
@@ -152,6 +161,9 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
+
+# A phone number inside a gate sentence, hidden before it is logged.
+_PHONE_IN_TEXT = re.compile(r"\+?\d[\d\s().-]{6,}\d")
 
 router = APIRouter(
     prefix="/internal/agent",
@@ -869,7 +881,11 @@ class AgentReplySmsResponse(BaseModel):
     ok: bool
     # done | skipped | failed: what the worker writes to agent_reply_state.
     state: str
+    # A short code the worker stores as sms.metadata.skipped_reason; the
+    # console names it. ``detail`` is a customer-safe sentence for a code that
+    # has one (no phone numbers).
     reason: str | None = None
+    detail: str | None = None
     reply_id: UUID | None = None
 
 
@@ -914,7 +930,7 @@ async def agent_reply_sms(
         or not answers_texts(agent)
         or number.provisioning_state != "active"
     ):
-        return AgentReplySmsResponse(ok=False, state="skipped", reason="no_agent")
+        return AgentReplySmsResponse(ok=False, state="skipped", reason=NO_AGENT_SKIP)
 
     # One request per thread at a time: the lock is held until the reply row
     # is committed, so a retry that races the original sees it below and the
@@ -929,20 +945,31 @@ async def agent_reply_sms(
         return AgentReplySmsResponse(ok=True, state="done", reply_id=prior.id)
 
     if await replies_in_thread(db, inbound) >= MAX_REPLIES_PER_THREAD:
-        return AgentReplySmsResponse(ok=False, state="skipped", reason="thread_cap")
+        return AgentReplySmsResponse(ok=False, state="skipped", reason=THREAD_CAP_SKIP)
     if not await has_funds(db, org):
         return AgentReplySmsResponse(
-            ok=False, state="skipped", reason="insufficient_funds"
+            ok=False, state="skipped", reason=INSUFFICIENT_FUNDS_SKIP
         )
     gate = await check_sms_allowed(db, org, inbound.from_e164)
     if not gate.allowed:
-        return AgentReplySmsResponse(ok=False, state="skipped", reason=gate.reason)
+        # The gate's sentence can hold the recipient's number: it is not
+        # returned or stored, and the log shows it with the number hidden.
+        logger.info(
+            "sms_id=%s agent reply blocked: %s",
+            inbound.id,
+            _PHONE_IN_TEXT.sub("[number]", gate.reason or ""),
+        )
+        return AgentReplySmsResponse(
+            ok=False, state="skipped", reason=SEND_BLOCKED_SKIP
+        )
     cap_denial = await check_agent_send_allowed(db, org, "sms", [inbound.from_e164])
     if cap_denial is not None:
-        return AgentReplySmsResponse(ok=False, state="skipped", reason="agent_caps")
+        return AgentReplySmsResponse(ok=False, state="skipped", reason=AGENT_CAPS_SKIP)
     block = await us_registration_block(db, org, number, inbound.from_e164)
     if block is not None:
-        return AgentReplySmsResponse(ok=False, state="skipped", reason=block)
+        return AgentReplySmsResponse(
+            ok=False, state="skipped", reason=SMS_REGISTRATION_SKIP, detail=block
+        )
 
     reply = Sms(
         organization_id=org,
@@ -976,8 +1003,12 @@ async def agent_reply_sms(
     )
     err = await deliver_sms(db, reply)
     if err is not None:
+        # A carrier's own error code stays on the reply row (``error_code``).
+        code = (
+            PROVIDER_ERROR_SKIP if err == PROVIDER_ERROR_SKIP else CARRIER_REJECTED_SKIP
+        )
         return AgentReplySmsResponse(
-            ok=False, state="failed", reason=err, reply_id=reply.id
+            ok=False, state="failed", reason=code, reply_id=reply.id
         )
     return AgentReplySmsResponse(ok=True, state="done", reply_id=reply.id)
 

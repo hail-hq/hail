@@ -33,6 +33,7 @@ from hailhq.core.email_agent import (
     email_thread,
     finish_reply,
     prior_reply,
+    reply_clock,
     retry_reply,
     run_refusal,
     sender_trust,
@@ -48,7 +49,9 @@ from hailhq.core.telemetry_identity import (
 )
 from hailhq.voicebot.attachment_reader import inspect_tool_file
 from hailhq.voicebot.chat_loop import (
+    HTTP_TOOL_BUDGET_SECONDS,
     LLM_TIMEOUT_SECONDS,
+    HttpToolTime,
     run_chat,
     tool_args,
 )
@@ -121,9 +124,13 @@ async def generate_reply(
     llm = build_llm(None, org_cfgs.get("llm"))
     tctx = _tool_context(claimed, api)
     by_name = {s.name: s for s in specs}
+    tool_time = HttpToolTime()
 
     async def run_tool(call: FunctionToolCall) -> tuple[str, bool]:
-        return await _run_tool(call, by_name, tctx, model=llm)
+        return await tool_time.run(
+            by_name.get(call.name),
+            lambda: _run_tool(call, by_name, tctx, model=llm),
+        )
 
     text = await run_chat(
         llm,
@@ -160,11 +167,20 @@ async def _prepare(
         # A send from an earlier attempt: no tools, so a reworded message cannot
         # go out twice. The model still writes the reply.
         sent = await tool_sends_for_reply(db, email)
-        specs = [] if sent else await email_run_tools(claimed.agent, db, trust=trust)
+        specs = (
+            []
+            if sent
+            else await email_run_tools(
+                claimed.agent, db, trust=trust, email_id=email.id
+            )
+        )
         can_read = any(spec.name == "read_email" for spec in specs)
         # Keep context compact when history can be fetched on demand. Tool-free
         # retries and agents without retrieval still need their scoped thread.
         thread = [email] if can_read else await email_thread(db, email)
+        clock = await reply_clock(
+            db, claimed.agent, email.provider_received_at or email.requested_at
+        )
         files = []
         if can_read:
             rows = (
@@ -190,7 +206,7 @@ async def _prepare(
                 for row in rows
             ]
     messages = build_chat_messages(
-        claimed.agent, thread, trust=trust, sends_tried=sent > 0
+        claimed.agent, thread, trust=trust, sends_tried=sent > 0, clock=clock
     )
     messages.append(
         {
@@ -293,7 +309,8 @@ async def _reply_claimed(
                 messages, specs = prepared
                 text = await asyncio.wait_for(
                     generate_reply(claimed, messages, specs, api),
-                    timeout=LLM_TIMEOUT_SECONDS * EMAIL_TOOL_ROUNDS,
+                    timeout=LLM_TIMEOUT_SECONDS * EMAIL_TOOL_ROUNDS
+                    + HTTP_TOOL_BUDGET_SECONDS,
                 )
                 if not text:
                     logger.info("email_id=%s wrote nothing; skipped", email.id)

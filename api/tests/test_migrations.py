@@ -265,6 +265,86 @@ def test_hail_mail_head_is_globally_unique(empty_db: str) -> None:
         assert _index_def(conn, "email_domains_hail_mail_prefix_uq") is None
 
 
+def test_call_events_summarized_marker_is_unique(empty_db: str) -> None:
+    """After 0083 a call has at most one ``summarized`` call event, so the
+    call.summarized webhook cannot be sent twice."""
+    _run_alembic(empty_db, ["upgrade", "head"])
+    with psycopg.connect(_to_libpq_url(to_sync_url(empty_db))) as conn:
+        indexdef = _index_def(conn, "call_events_summarized_uniq")
+        assert indexdef is not None, "call_events_summarized_uniq missing"
+        assert "UNIQUE" in indexdef
+        assert "(call_id)" in indexdef
+        assert "'summarized'" in indexdef
+        assert _index_def(conn, "call_events_analyzed_uniq") is None
+
+
+def test_0083_renames_call_analyzed(empty_db: str) -> None:
+    """0083 moves the old marker and claim rows and the subscriptions that
+    list call.analyzed (or call.transcribed, its name before merge) to the
+    call.summarized names, and the call.analyzed ones back on downgrade."""
+    _run_alembic(empty_db, ["upgrade", "0082"])
+    org = "11111111-1111-1111-1111-111111111111"
+    url = _to_libpq_url(to_sync_url(empty_db))
+    with psycopg.connect(url, autocommit=True) as conn:
+        call_id = conn.execute(
+            "INSERT INTO calls (organization_id, transport, voice_config)"
+            " VALUES (%s, 'browser', '{}'::jsonb) RETURNING id",
+            (org,),
+        ).fetchone()[0]
+        for kind in ("analyzing", "analyzed", "user_turn"):
+            conn.execute(
+                "INSERT INTO call_events (call_id, kind, payload)"
+                " VALUES (%s, %s, '{}'::jsonb)",
+                (call_id, kind),
+            )
+        sub_id = conn.execute(
+            "INSERT INTO webhook_subscriptions"
+            " (organization_id, target_url, secret_encrypted, event_types)"
+            " VALUES (%s, 'https://example.com/h', 'x',"
+            " ARRAY['call.completed', 'call.analyzed']) RETURNING id",
+            (org,),
+        ).fetchone()[0]
+        early_id = conn.execute(
+            "INSERT INTO webhook_subscriptions"
+            " (organization_id, target_url, secret_encrypted, event_types)"
+            " VALUES (%s, 'https://example.com/h', 'x',"
+            " ARRAY['call.analyzed', 'call.transcribed']) RETURNING id",
+            (org,),
+        ).fetchone()[0]
+
+    def state() -> tuple[list[str], list[str]]:
+        with psycopg.connect(url) as conn:
+            kinds = [
+                r[0]
+                for r in conn.execute(
+                    "SELECT kind FROM call_events WHERE call_id = %s ORDER BY kind",
+                    (call_id,),
+                )
+            ]
+            types = conn.execute(
+                "SELECT event_types FROM webhook_subscriptions WHERE id = %s",
+                (sub_id,),
+            ).fetchone()[0]
+        return kinds, types
+
+    _run_alembic(empty_db, ["upgrade", "0083"])
+    assert state() == (
+        ["summarized", "summarizing", "user_turn"],
+        ["call.completed", "call.summarized"],
+    )
+    with psycopg.connect(url) as conn:
+        early = conn.execute(
+            "SELECT event_types FROM webhook_subscriptions WHERE id = %s",
+            (early_id,),
+        ).fetchone()[0]
+    assert early == ["call.summarized"]
+    _run_alembic(empty_db, ["downgrade", "0082"])
+    assert state() == (
+        ["analyzed", "analyzing", "user_turn"],
+        ["call.completed", "call.analyzed"],
+    )
+
+
 def test_forward_queue_poll_index_exists(empty_db: str) -> None:
     """After 0010 a partial index covers the forward worker's 1s poll
     (status='queued' AND direction='outbound') so it never seq-scans

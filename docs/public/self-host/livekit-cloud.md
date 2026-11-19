@@ -77,6 +77,15 @@ dispatch rule**. Hail adds and removes numbers on the trunk itself.
    `LIVEKIT_<CARRIER>_SIP_INBOUND_TRUNK_ID` (an override not listed in
    `.env.example`) to that trunk's id. Narrow `0.0.0.0/0` to the carriers' IP ranges when you can.
 
+   LiveKit Cloud does not check `allowed_addresses` until LiveKit support
+   turns the check on for your project ([inbound trunk docs](https://docs.livekit.io/telephony/accepting-calls/inbound-trunk/)).
+   Until then, a trunk accepts calls from any address, whatever the list
+   says. Anyone who knows your project's SIP host can then call your numbers
+   directly and reach your agents, with any caller ID. To test it, set a
+   trunk's list to `["192.0.2.1/32"]` (an address no one uses) and send it a
+   call: a room appears when the check is off. `auth_username`/`auth_password`
+   is always checked; LiveKit answers `407` without them.
+
 2. Dispatch rule. One rule, bound to the inbound trunk, that puts each
    caller in its own room and dispatches the voicebot with the static
    metadata it expects:

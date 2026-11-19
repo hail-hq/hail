@@ -220,7 +220,7 @@ Field notes:
   `reservedOAuthKeys` (`oauth.controller.ts:944`) and filtered before use. It is
   dead config; `linear-mcp` carries it anyway.
 - Assets, if the PR description wants one:
-  `/Users/r/playground/hail-website/public/assets/og-card-1200x630.png` or
+  `hail-website/public/assets/brand/social/link-card.png` or
   `hail-wordmark.svg`.
 
 ## Notes

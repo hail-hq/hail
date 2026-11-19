@@ -6,6 +6,10 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Added
 
+- Agents can call your own API during calls, texts and email: add `http_tools` on `POST`/`PATCH /v1/agents` (CLI, SDK, MCP too). Each request is signed like a webhook. A tool `url` that is private or does not resolve is refused on save with `URL host is private or could not be resolved`.
+- Call agents know the date, time and time zone at the start of each call.
+- Text and email reply agents know the date, time and time zone too.
+- Calls: `GET /v1/calls/{id}` returns the call's transcript, and the new `call.summarized` webhook sends the transcript and a short summary after each call.
 - US trial texting: a workspace can send up to 25 texts, ever, to its own verified phone from a Hail number, with no US registration needed. Set it up in the console under Numbers.
 - Rejected number registrations can be fixed and sent again for 30 days with `POST /v1/verifications/{id}/resubmit` (MCP: `resubmit_verification`).
 - `sms.received` webhooks and `received` SMS events have a new `compliance_keyword` field: `STOP`, `START` or `HELP` when the text is one of those keywords, otherwise `null`.
@@ -25,8 +29,14 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 - Number paperwork says when the address can be in any country: the new `address_any_country` item, from DIDWW.
 - Email agents: route an address to an agent, and it answers inbound mail in the thread.
 
+### Changed
+
+- Webhooks to CGNAT addresses (`100.64.0.0/10`, used by Tailscale), multicast, IPv6 site-local, or hosts that do not resolve are now refused, and existing ones fail on delivery. Self-hosters can allow them with `HAIL_WEBHOOK_ALLOW_PRIVATE_NETWORKS=true`.
+- A webhook `target_url` or BYO LLM `base_url` whose host is private or does not resolve is refused with one error text, which ends in `URL host is private or could not be resolved`.
+
 ### Fixed
 
+- Call agents no longer pause before saying a person's name.
 - MCP: `preview_sms_application` no longer fails with "the API and this MCP version differ" on a US texting form that lists its consent methods.
 - Email: informational mail no longer carries `List-Unsubscribe` headers, so an email agent no longer skips it as list mail. Marketing mail still does.
 - Billing: the same charge or credit can no longer be written to the ledger twice.

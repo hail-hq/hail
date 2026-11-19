@@ -45,7 +45,7 @@ Outbound phone calls only.
 # Place an outbound call (consent attestation required)
 hail call +15551234567 --prompt "You are a scheduling assistant." --recipient-consent
 
-hail call status <id>     # one call (full UUID or 4+ char prefix)
+hail call status <id>     # one call and its transcript (full UUID or 4+ char prefix)
 hail call list
 hail call tail <id>       # follow the event stream for one call
 ```
