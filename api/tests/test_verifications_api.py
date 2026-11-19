@@ -8392,6 +8392,25 @@ async def test_an_earlier_filings_owed_faster_lane_counts_at_filing(
     assert (await _post_sms(client, key, fields=_LOW_VOLUME)).status_code == 201
 
 
+async def test_an_uncharged_review_of_a_charged_filing_counts_at_filing(
+    org_and_key, sms_carrier, async_session
+) -> None:
+    org_id, _, _ = org_and_key
+    # The brand was never charged a submission (reused), but its campaign
+    # filed just now is not charged yet.
+    await _uncharged_company_filing(
+        async_session,
+        org_id,
+        {
+            "brand_reused": True,
+            "campaign_filed_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    review = sms_registration_fees.campaign_fee_cents("fake", "business")
+    uncharged = verifications_routes._uncharged_cents
+    assert await uncharged(async_session, org_id, filing_default=999) == review
+
+
 async def test_a_zero_carrier_fee_stays_zero_at_filing(
     org_and_key, async_session
 ) -> None:

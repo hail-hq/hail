@@ -608,6 +608,7 @@ def _refs_time(key: str):
 class _SmsStep(NamedTuple):
     """A US texting row's uncharged step, with what prices it."""
 
+    id: UUID
     provider: str
     subject_type: str
     low_volume: bool
@@ -655,6 +656,7 @@ async def _uncharged_sms_steps(
     ref = func.concat("sms_registration:", cast(CarrierVerification.id, String))
     found = await db.execute(
         select(
+            CarrierVerification.id,
             CarrierVerification.provider,
             CarrierVerification.subject_type,
             CarrierVerification.provider_refs["low_volume"].astext == "true",
@@ -673,8 +675,8 @@ async def _uncharged_sms_steps(
         )
     )
     return [
-        _SmsStep(str(p), str(t), bool(low), _lane_owed(refs))
-        for p, t, low, refs in found
+        _SmsStep(i, str(p), str(t), bool(low), _lane_owed(refs))
+        for i, p, t, low, refs in found
     ]
 
 
@@ -1156,12 +1158,16 @@ async def _uncharged_cents(
     ``filing_default`` given: the check before a new filing. Each uncharged
     filing then counts whole, as the new one does (its brand, its campaign
     review and, while it is owed, its faster lane: ``filing_fee_cents``); a
-    carrier with no fees counts ``filing_default``."""
+    carrier with no fees counts ``filing_default``. A campaign review of a
+    row whose filing is already charged (filed over a day ago, or one that
+    reused a brand) counts on its own."""
     filings = await _uncharged_sms_steps(db, organization_id, "submission")
     lanes = sum(
         _faster_lane_fee(s.provider)
         for s in await _uncharged_sms_steps(db, organization_id, "faster_lane")
     )
+    campaigns = await _uncharged_sms_steps(db, organization_id, "review")
+    campaign = sms_registration_fees.campaign_fee_cents
     if filing_default is not None:
         whole = 0
         for s in filings:
@@ -1174,10 +1180,14 @@ async def _uncharged_cents(
                 )
             except KeyError:
                 whole += filing_default
-        return whole + lanes
-    campaigns = await _uncharged_sms_steps(db, organization_id, "review")
+        counted = {s.id for s in filings}
+        reviews = sum(
+            _carrier_fee(campaign, s.provider, s.subject_type, s.low_volume) or 0
+            for s in campaigns
+            if s.id not in counted
+        )
+        return whole + reviews + lanes
     brand = sms_registration_fees.brand_fee_cents
-    campaign = sms_registration_fees.campaign_fee_cents
     return (
         sum(
             _carrier_fee(brand, s.provider, s.subject_type, s.low_volume) or 0

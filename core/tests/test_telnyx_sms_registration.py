@@ -3235,13 +3235,22 @@ async def test_a_failed_faster_lane_request_is_asked_again_on_the_next_pass() ->
     refs = _low_volume_refs(faster_lane_ok=True)
     with pytest.raises(VerificationProviderError):
         await p.status(refs)
-    # The API keeps the keys a failed call added: the vetting is owed.
-    assert refs["faster_lane_at"] and refs["vetting_requested"] is False
+    # Nothing bought, so nothing to charge: the lane stays owed.
+    assert "faster_lane_at" not in refs and not refs.get("vetting_requested")
     ok = _low_volume_brand(calls, [{"status": "OK", "identityStatus": "UNVERIFIED"}])
     calls.clear()
     assert (await ok.status(refs)).state == "pending"
     assert _vetting_calls(calls) == [("POST", "/v2/10dlc/brand/B1/externalVetting")]
-    assert refs["vetting_requested"] is True
+    assert refs["vetting_requested"] is True and refs["faster_lane_at"]
+
+
+async def test_no_faster_lane_hold_once_a_campaign_is_filed() -> None:
+    calls: list = []
+    p = _low_volume_brand(calls, [{"status": "OK", "identityStatus": "UNVERIFIED"}])
+    refs = _low_volume_refs()
+    refs["campaign_id"] = "C1"
+    assert (await p.status(refs)).state == "pending"
+    assert "needs_information" not in refs and not _vetting_calls(calls)
 
 
 async def test_low_volume_campaign_files_its_purposes_as_sub_use_cases() -> None:

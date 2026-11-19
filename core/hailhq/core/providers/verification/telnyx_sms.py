@@ -723,13 +723,12 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                         # The credit does not cover the vetting yet: a later
                         # pass buys it (the API checks it like a campaign).
                         return ProviderStatus(state="pending")
-                    # The fee rater charges the vetting from this mark. Both
-                    # new keys outlive a failed request (the API keeps added
-                    # keys), so the next pass asks again, once
-                    # (``vetting_requested`` False, as for a vetted filing).
-                    refs["faster_lane_at"] = datetime.now(timezone.utc).isoformat()
-                    refs["vetting_requested"] = False
+                    # The fee rater charges the vetting from this mark, so it
+                    # is written only once Telnyx has the request. A failed
+                    # request leaves the lane owed: the next pass asks again,
+                    # and finds a request that reached Telnyx (a timeout).
                     await self._request_vetting_once(refs)
+                    refs["faster_lane_at"] = datetime.now(timezone.utc).isoformat()
                 elif refs.get("vetting_requested") is False and _vetted(refs):
                     # The brand was still registering when it was filed, or
                     # the vetting call failed (Telnyx may have got it).
@@ -1270,12 +1269,14 @@ def _faster_lane_owed(refs: dict, brand: dict) -> bool:
     other values are final, so any other value that is not verified
     (``SELF_DECLARED``, a missing or new one) counts once it has lasted
     ``_IDENTITY_WAIT`` from the first pass that saw it
-    (``identity_wait_since``): never pending forever. The caller only asks
-    for a registered brand that is not verified."""
+    (``identity_wait_since``): never pending forever. Never once a campaign
+    is filed: a hold then could not be amended or polled again. The caller
+    only asks for a registered brand that is not verified."""
     if (
         refs.get("subject_type") == "person"
         or not refs.get("low_volume")
         or refs.get("faster_lane_at")
+        or refs.get("campaign_id")
     ):
         return False
     if brand.get("identityStatus") == "UNVERIFIED":
