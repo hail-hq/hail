@@ -5,6 +5,7 @@ values (``Settings`` reads ``.env`` from the working directory):
 
     uv run python scripts/ops/sip_trunks.py status
     uv run python scripts/ops/sip_trunks.py apply --carrier twilio
+    uv run python scripts/ops/sip_trunks.py move --carrier twilio --number +E164
     uv run python scripts/ops/sip_trunks.py move --carrier twilio
     uv run python scripts/ops/sip_trunks.py move --carrier twilio --back
     uv run python scripts/ops/sip_trunks.py retire-shared
@@ -16,14 +17,17 @@ Every command except ``status`` prints its plan and changes nothing until
   ``infra/livekit/inbound-trunks.json`` (its allowed addresses, its digest
   username and password, a placeholder entry), adds it to the dispatch rule,
   and for DIDWW first sets the same credentials on ``DIDWW_VOICE_IN_TRUNK_ID``
-  (read and checked before any change, dry run too).
+  (read and checked before any change, dry run too; its current host, port,
+  transport and digest user are printed first, so they can be restored by
+  hand).
   Prints the trunk id for ``LIVEKIT_<CARRIER>_SIP_INBOUND_TRUNK_ID``. On the
   shared trunk it only adds the shared placeholder. It adds numbers only
   (Hail manages them).
 * ``move``: moves the carrier's numbers from the shared trunk
   (``LIVEKIT_SIP_INBOUND_TRUNK_ID``) to the carrier's trunk, one at a time
-  (LiveKit lists a number on one trunk only). ``--back`` reverses it; with
-  the carrier key empty it finds the carrier trunk by its JSON name.
+  (LiveKit lists a number on one trunk only). ``--number`` (repeatable)
+  moves only those numbers. ``--back`` reverses it; with the carrier key
+  empty it finds the carrier trunk by its JSON name.
 * ``retire-shared``: once the shared trunk holds no number, takes it out of
   the dispatch rule and deletes it.
 
@@ -156,6 +160,10 @@ async def apply(sip, data: dict, spec: Spec, yes: bool) -> list[str]:
         if password
         else None
     )
+    if didww_sip is not None:
+        # Printed at once, before any write: a failed write below would
+        # lose the plan, and these are what to restore by hand.
+        print(didww_settings_line(didww_sip), flush=True)
     plan: list[str] = []
     shared = settings.livekit_sip_inbound_trunk_id
     if shared and any(t.sip_trunk_id == shared for t in all_trunks):
@@ -244,6 +252,21 @@ async def apply(sip, data: dict, spec: Spec, yes: bool) -> list[str]:
     return plan
 
 
+def didww_settings_line(sip_attrs: dict) -> str:
+    """The DIDWW voice IN trunk's current settings, never its password."""
+    shown = ", ".join(
+        f"{key} {sip_attrs.get(key)!r}"
+        for key in (
+            "host",
+            "port",
+            "transport_protocol_id",
+            "auth_enabled",
+            "auth_user",
+        )
+    )
+    return f"DIDWW_VOICE_IN_TRUNK_ID now: {shown}"
+
+
 async def live_carriers(numbers: list[str]) -> dict[str, str]:
     """e164 -> carrier of the live (not released, not failed) row."""
     if not numbers:
@@ -266,19 +289,24 @@ async def move(
     yes: bool,
     carriers_of=live_carriers,
     drop_unknown: bool = False,
+    only: list[str] | None = None,
 ) -> list[str]:
+    """``only``: move just these numbers; each must be on the source trunk
+    and (forward) be this carrier's live number, or nothing changes."""
     shared = settings.livekit_sip_inbound_trunk_id
     own = carrier_trunk_id(spec.carrier)
     if not shared:
         raise TrunkError("LIVEKIT_SIP_INBOUND_TRUNK_ID is empty: nothing to move")
+    if only and drop_unknown:
+        raise TrunkError("--drop-unknown cannot be used with --number")
     if own:
         own_trunk = await trunk_by_id(sip, own)
         if own_trunk.name != spec.name:
             raise TrunkError(f"{env_key(spec.carrier)} is not the {spec.name} trunk")
     elif back:
-        # Rollback runs --back again after the carrier key is emptied and
-        # the services restarted: numbers routed before the restart are
-        # still on the carrier trunk. Find it by its JSON name.
+        # Rollback empties the carrier key and restarts the services first,
+        # then runs --back: the numbers are still on the carrier trunk.
+        # Find it by its JSON name.
         own_trunk = by_name(await trunks(sip), spec.name)
         if own_trunk is None:
             raise TrunkError(f"no LiveKit inbound trunk named {spec.name}")
@@ -290,13 +318,17 @@ async def move(
     placeholders = {data["shared_placeholder"]} | {
         t["placeholder"] for t in data["trunks"].values()
     }
+    src, dst = (own_trunk, shared_trunk) if back else (shared_trunk, own_trunk)
+    on_src = [n for n in src.numbers if n not in placeholders]
+    if only:
+        absent = [n for n in only if n not in on_src]
+        if absent:
+            raise TrunkError(f"not on {src.name}: {', '.join(absent)}")
+    candidates = list(dict.fromkeys(only)) if only else on_src
+    skipped: list[str] = []
     if back:
-        src, dst = own_trunk, shared_trunk
-        movable = [n for n in src.numbers if n not in placeholders]
-        skipped: list[str] = []
+        movable = candidates
     else:
-        src, dst = shared_trunk, own_trunk
-        candidates = [n for n in src.numbers if n not in placeholders]
         found = await carriers_of(candidates)
         if candidates and not found:
             raise TrunkError(
@@ -304,7 +336,14 @@ async def move(
                 "live row: is DATABASE_URL the production database?"
             )
         movable = [n for n in candidates if found.get(n) == spec.carrier]
-        skipped = [n for n in candidates if n not in found]
+        if only:
+            other = [n for n in candidates if found.get(n) != spec.carrier]
+            if other:
+                raise TrunkError(
+                    f"not a live {spec.carrier} number: {', '.join(other)}"
+                )
+        else:
+            skipped = [n for n in candidates if n not in found]
     src_placeholder = spec.placeholder if back else data["shared_placeholder"]
     plan = [
         f"keep placeholder {src_placeholder} on {src.name}",
@@ -453,7 +492,13 @@ async def run(args: argparse.Namespace) -> list[str]:
         if args.command == "apply":
             return await apply(lk.sip, data, spec, args.yes)
         return await move(
-            lk.sip, data, spec, args.back, args.yes, drop_unknown=args.drop_unknown
+            lk.sip,
+            data,
+            spec,
+            args.back,
+            args.yes,
+            drop_unknown=args.drop_unknown,
+            only=args.number,
         )
     finally:
         await lk.aclose()
@@ -471,6 +516,12 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--yes", action="store_true", help="make the changes")
         if name == "move":
             p.add_argument("--back", action="store_true", help="carrier -> shared")
+            p.add_argument(
+                "--number",
+                action="append",
+                metavar="+E164",
+                help="move only this number (repeatable)",
+            )
             p.add_argument(
                 "--drop-unknown",
                 action="store_true",

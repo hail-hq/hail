@@ -237,10 +237,8 @@ class Settings(BaseSettings):
     # The per-carrier trunks are each locked to their carrier: Twilio and
     # Telnyx by signaling IPs, DIDWW by digest password
     # (infra/livekit/inbound-trunks.json). A blank per-carrier id falls back
-    # to the shared trunk (self-host: one trunk for every carrier). While both
-    # are set, a call on the shared trunk is still accepted for a number the
-    # shared trunk lists (inbound_calls.py), so numbers can move one carrier
-    # at a time.
+    # to the shared trunk (self-host: one trunk for every carrier). A call is
+    # accepted only on the trunk of the number's carrier (inbound_calls.py).
     livekit_sip_inbound_trunk_id: str = ""
     livekit_twilio_sip_inbound_trunk_id: str = ""
     livekit_telnyx_sip_inbound_trunk_id: str = ""

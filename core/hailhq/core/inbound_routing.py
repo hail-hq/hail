@@ -14,10 +14,8 @@ import logging
 from datetime import datetime, timezone
 
 from hailhq.core.carrier_routing import carrier
-from hailhq.core.config import settings
 from hailhq.core.livekit import LiveKitClient
 from hailhq.core.models import PhoneNumber
-from livekit.api.twirp_client import TwirpError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -53,7 +51,7 @@ async def register(db: AsyncSession, lk: LiveKitClient, number: PhoneNumber) -> 
             "carrier_attach", exc, config=_is_config_error(exc)
         ) from exc
     try:
-        await _add_to_carrier_trunk(lk, trunk_id, number.e164)
+        await lk.add_inbound_number(trunk_id, number.e164)
     except Exception as exc:
         # Do not leave the carrier pointing at a LiveKit trunk that refuses
         # the number: callers would hear a failure tone until someone retries.
@@ -94,117 +92,8 @@ async def unregister(db: AsyncSession, lk: LiveKitClient, number: PhoneNumber) -
         # The carrier is already detached; the row stays registered so the
         # next unregister (idempotent at the carrier) finishes the removal.
         raise InboundRoutingError("livekit_remove", exc) from exc
-    try:
-        await _remove_from_shared_trunk(lk, trunk_id, number.e164)
-    except Exception:
-        # The carrier is detached and the carrier trunk cleared: the number
-        # is unregistered and the carrier sends it no calls. The leftover
-        # stays until the next register removes it, or until
-        # sip_trunks.py move puts it on the carrier's locked trunk.
-        logger.exception(
-            "number %s: still listed on the shared inbound trunk %s (removal "
-            "failed). It takes no calls: the carrier is detached. Its next "
-            "register removes it, or run scripts/ops/sip_trunks.py move "
-            "--carrier %s --yes to put it on the carrier's locked trunk "
-            "(docs/operations/inbound-trunk-lockdown.md)",
-            number.e164,
-            settings.livekit_sip_inbound_trunk_id,
-            number.provider,
-        )
     number.inbound_registered_at = None
     await db.flush()
-
-
-# livekit/protocol sip/sip.go, validateTrunkInbound.
-_TRUNK_CONFLICT = "Conflicting inbound SIP Trunks"
-
-# A SIP user name no call uses. A trunk with no numbers matches every dialed
-# number, so the shared trunk keeps this entry before a number leaves it.
-# Must equal ``shared_placeholder`` in infra/livekit/inbound-trunks.json.
-SHARED_TRUNK_PLACEHOLDER = "hail-placeholder-shared"
-
-
-async def _add_to_carrier_trunk(lk: LiveKitClient, trunk_id: str, e164: str) -> None:
-    """Add, and once retry after a leftover shared-trunk entry is removed.
-
-    Temporary, while numbers move to per-carrier trunks
-    (docs/operations/inbound-trunk-lockdown.md; removal: issue #475). A
-    number registered before its carrier got its own trunk can still be on
-    the shared trunk, and LiveKit lists a number on one trunk only, so the
-    add is refused. An unregistered number takes no calls, so removing the
-    leftover loses nothing. The shared trunk is touched only after LiveKit
-    refuses the add with ``invalid_argument`` and either says so ("Conflicting
-    inbound SIP Trunks" in livekit/protocol sip/sip.go) or the shared trunk
-    lists the number (the message text can change)."""
-    try:
-        await lk.add_inbound_number(trunk_id, e164)
-        return
-    except TwirpError as first:
-        shared = settings.livekit_sip_inbound_trunk_id
-        if first.code != "invalid_argument":
-            raise
-        if (
-            not shared
-            or shared == trunk_id
-            or not await _shared_trunk_conflict(lk, shared, e164, first)
-        ):
-            logger.error(
-                "number %s: LiveKit refused the add to trunk %s (%s: %s)",
-                e164,
-                trunk_id,
-                first.code,
-                first.message,
-            )
-            raise
-        logger.warning(
-            "number %s: carrier trunk refused the add (%s: %s), removing a "
-            "shared-trunk leftover and retrying",
-            e164,
-            first.code,
-            first.message,
-        )
-        try:
-            await _remove_from_shared_trunk(lk, trunk_id, e164)
-            await lk.add_inbound_number(trunk_id, e164)
-        except Exception as exc:
-            raise exc from first
-
-
-async def _shared_trunk_conflict(
-    lk: LiveKitClient, shared: str, e164: str, refused: TwirpError
-) -> bool:
-    """True when ``refused`` is the one-trunk-per-number conflict with the
-    shared trunk: LiveKit's message says so, or the shared trunk lists
-    ``e164``. A failed read counts as no conflict."""
-    if _TRUNK_CONFLICT in refused.message:
-        return True
-    try:
-        return e164 in await lk.inbound_trunk_numbers(shared)
-    except Exception:
-        logger.warning(
-            "number %s: could not read the shared inbound trunk %s",
-            e164,
-            shared,
-            exc_info=True,
-        )
-        return False
-
-
-async def _remove_from_shared_trunk(
-    lk: LiveKitClient, trunk_id: str, e164: str
-) -> None:
-    """Drop ``e164`` from the shared trunk when a carrier has its own trunk.
-    A deleted shared trunk (``not_found``) holds nothing: that is done."""
-    shared = settings.livekit_sip_inbound_trunk_id
-    if not shared or shared == trunk_id:
-        return
-    try:
-        await lk.add_inbound_number(shared, SHARED_TRUNK_PLACEHOLDER)
-        await lk.remove_inbound_number(shared, e164)
-    except TwirpError as exc:
-        if exc.code != "not_found":
-            raise
-        logger.warning("number %s: shared inbound trunk %s is gone", e164, shared)
 
 
 def _is_config_error(exc: Exception) -> bool:

@@ -37,11 +37,7 @@ class _Ctx:
         self.room = SimpleNamespace(name="hail-in-abc")
         self._participant = participant
         self.shutdown_calls: list[str] = []
-        self.shutdown_callbacks: list = []
         self.delete_room_calls = 0
-
-    def add_shutdown_callback(self, callback) -> None:
-        self.shutdown_callbacks.append(callback)
 
     async def wait_for_participant(self, *, kind=None):
         if self._participant is None:
@@ -103,8 +99,6 @@ async def test_accepted_returns_metadata_from_sip_attributes(
     ]
     assert ctx.delete_room_calls == 0
     assert ctx.shutdown_calls == []
-    # The shared LiveKit client a cutover read may build is closed on shutdown.
-    assert ctx.shutdown_callbacks == [agent_mod.close_livekit_client]
 
 
 async def test_rejected_deletes_room_and_exits(

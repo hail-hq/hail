@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import importlib.util
-import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from hailhq.core.config import settings
-from hailhq.core.inbound_routing import SHARED_TRUNK_PLACEHOLDER
 from livekit import api
 
 HERE = Path(__file__).resolve().parent
@@ -447,12 +445,154 @@ async def test_move_stops_when_the_database_knows_no_number(monkeypatch) -> None
     assert "+14155550188" in sip.trunks["ST_shared"].numbers
 
 
-def test_shared_placeholder_matches_core() -> None:
-    """inbound_routing adds the same placeholder before a number leaves the
-    shared trunk, so an emptied shared trunk never matches every number."""
-    data = json.loads(
-        (
-            Path(__file__).resolve().parents[2] / "infra/livekit/inbound-trunks.json"
-        ).read_text()
+async def test_didww_apply_prints_the_trunk_settings_first(monkeypatch, capsys) -> None:
+    """The current DIDWW settings are printed before the write, so a failed
+    write still leaves them on screen. Never the password."""
+    monkeypatch.setattr(settings, "didww_sip_inbound_password", "new-secret")
+    monkeypatch.setattr(settings, "didww_voice_in_trunk_id", "didww-trunk-1")
+    sip = FakeSip(trunk("ST_shared", "shared"))
+    current = {
+        "host": "example.sip.livekit.cloud",
+        "port": 5060,
+        "transport_protocol_id": 2,
+        "auth_enabled": True,
+        "auth_user": "old-user",
+        "auth_password": "old-secret",
+    }
+
+    async def fake_check(_user, _password):
+        return current
+
+    async def fail_auth(*_args):
+        raise st.CarrierNotConfigured("DIDWW voice IN trunk changed its host")
+
+    monkeypatch.setattr(st.didww, "check_voice_in_trunk", fake_check)
+    monkeypatch.setattr(st.didww, "set_voice_in_trunk_auth", fail_auth)
+    await st.apply(sip, DATA, SPECS["didww"], yes=False)
+    with pytest.raises(st.CarrierNotConfigured):
+        await st.apply(sip, DATA, SPECS["didww"], yes=True)
+    out = capsys.readouterr().out
+    line = (
+        "DIDWW_VOICE_IN_TRUNK_ID now: host 'example.sip.livekit.cloud', "
+        "port 5060, transport_protocol_id 2, auth_enabled True, "
+        "auth_user 'old-user'"
     )
-    assert data["shared_placeholder"] == SHARED_TRUNK_PLACEHOLDER
+    assert out.count(line) == 2  # dry run, then before the failed write
+    assert "secret" not in out
+
+
+async def test_move_only_the_listed_numbers(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "livekit_telnyx_sip_inbound_trunk_id", "ST_tx")
+
+    async def carriers(numbers):
+        return {n: "telnyx" for n in numbers}
+
+    sip = FakeSip(
+        trunk("ST_shared", "shared", ["+14155550100", "+14155550102"]),
+        trunk("ST_tx", "hail-inbound-telnyx", ["hail-placeholder-telnyx"]),
+    )
+    plan = await st.move(
+        sip,
+        DATA,
+        SPECS["telnyx"],
+        back=False,
+        yes=True,
+        carriers_of=carriers,
+        only=["+14155550102"],
+    )
+    assert list(sip.trunks["ST_tx"].numbers) == [
+        "hail-placeholder-telnyx",
+        "+14155550102",
+    ]
+    assert "+14155550100" in sip.trunks["ST_shared"].numbers
+    assert "moved +14155550102" in plan
+    # The rest move without --number.
+    await st.move(
+        sip, DATA, SPECS["telnyx"], back=False, yes=True, carriers_of=carriers
+    )
+    assert "+14155550100" in sip.trunks["ST_tx"].numbers
+    # --back --number moves only that one back.
+    await st.move(
+        sip, DATA, SPECS["telnyx"], back=True, yes=True, only=["+14155550100"]
+    )
+    assert "+14155550100" in sip.trunks["ST_shared"].numbers
+    assert "+14155550102" in sip.trunks["ST_tx"].numbers
+
+
+@pytest.mark.parametrize(
+    ("number", "error"),
+    [
+        ("+14155550177", "not on shared: \\+14155550177"),
+        ("+14155550101", "not a live telnyx number: \\+14155550101"),
+        ("+14155550199", "not a live telnyx number: \\+14155550199"),
+    ],
+)
+@pytest.mark.parametrize("yes", [False, True])
+async def test_move_refuses_a_listed_number_it_cannot_move(
+    monkeypatch, number, error, yes
+) -> None:
+    """Not on the shared trunk, another carrier's, or no live row: nothing
+    changes, not even the listed numbers that could move."""
+    monkeypatch.setattr(settings, "livekit_telnyx_sip_inbound_trunk_id", "ST_tx")
+    sip = FakeSip(
+        trunk(
+            "ST_shared",
+            "shared",
+            ["+14155550100", "+14155550101", "+14155550199"],
+        ),
+        trunk("ST_tx", "hail-inbound-telnyx", ["hail-placeholder-telnyx"]),
+    )
+    with pytest.raises(st.TrunkError, match=error):
+        await st.move(
+            sip,
+            DATA,
+            SPECS["telnyx"],
+            back=False,
+            yes=yes,
+            carriers_of=_carriers,
+            only=["+14155550100", number],
+        )
+    assert sip.calls == []
+
+
+async def test_move_back_refuses_a_number_not_on_the_carrier_trunk(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(settings, "livekit_telnyx_sip_inbound_trunk_id", "ST_tx")
+    sip = FakeSip(
+        trunk("ST_shared", "shared", ["+14155550100"]),
+        trunk("ST_tx", "hail-inbound-telnyx", ["hail-placeholder-telnyx"]),
+    )
+    with pytest.raises(st.TrunkError, match="not on hail-inbound-telnyx"):
+        await st.move(
+            sip, DATA, SPECS["telnyx"], back=True, yes=True, only=["+14155550100"]
+        )
+    assert sip.calls == []
+
+
+async def test_number_and_drop_unknown_do_not_mix(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "livekit_telnyx_sip_inbound_trunk_id", "ST_tx")
+    sip = FakeSip(trunk("ST_shared", "shared", ["+14155550100"]))
+    with pytest.raises(st.TrunkError, match="--drop-unknown"):
+        await st.move(
+            sip,
+            DATA,
+            SPECS["telnyx"],
+            back=False,
+            yes=False,
+            drop_unknown=True,
+            only=["+14155550100"],
+        )
+
+
+def test_main_passes_the_numbers(monkeypatch) -> None:
+    seen = {}
+
+    async def fake_run(args):
+        seen["number"] = args.number
+        return []
+
+    monkeypatch.setattr(st, "run", fake_run)
+    argv = ["move", "--carrier", "twilio", "--number", "+14155550100"]
+    assert st.main([*argv, "--number", "+14155550101"]) == 0
+    assert seen["number"] == ["+14155550100", "+14155550101"]

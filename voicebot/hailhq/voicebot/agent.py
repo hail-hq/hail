@@ -49,12 +49,7 @@ from hailhq.core.db import session_scope
 from hailhq.core.directory import DirectoryEntry, find_by_phone
 from hailhq.core.disclosure import after_greeting_text, disclosure_text
 from hailhq.core.handover import HANDOVER_DEFAULT_MAX_SECONDS
-from hailhq.core.inbound_calls import (
-    Rejected,
-    SipAttributes,
-    close_livekit_client,
-    open_inbound_call,
-)
+from hailhq.core.inbound_calls import Rejected, SipAttributes, open_inbound_call
 from hailhq.core.internal_webhook import notify_usage_event_recorded
 from hailhq.core.languages import SUPPORTED_LANGUAGES
 from hailhq.core.livekit import VOICE_READY_ATTRIBUTE
@@ -1544,8 +1539,6 @@ async def open_inbound_from_room(
     deleted, which hangs up on the caller, and ``None`` is returned so the
     entrypoint exits without starting a session.
     """
-    # open_inbound_call may build the process's LiveKit client (cutover read).
-    ctx.add_shutdown_callback(close_livekit_client)
     try:
         participant = await asyncio.wait_for(
             ctx.wait_for_participant(kind=rtc.ParticipantKind.PARTICIPANT_KIND_SIP),
