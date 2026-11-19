@@ -31,21 +31,20 @@ The MCP registry entry moves to 0.2.0. Database migrations run on deploy.
 - US texting registration: upload a consent screenshot with `POST /v1/verifications/sms/evidence`, use the public link it returns, and delete it with `DELETE` on that link. Verbal consent no longer needs a screenshot link.
 - MCP: `preview_sms_application` shows the campaign text a carrier reviews before a US texting registration is submitted. It files and charges nothing.
 - Hail records what the carrier charged for each call, from Twilio, Telnyx and DIDWW.
-- New `GET /v1/numbers/options`: number types per country, with prices and the papers a person or a company needs. Filter with `capabilities=voice` and `capabilities=sms`.
+- New `GET /v1/numbers/options`: number types per country, with prices and papers, filtered by `capabilities`.
 - Carrier call rates per minute, by country and line type, in `costs/voice.json` (Twilio, refreshed weekly; Telnyx, added by hand).
 - `POST /v1/numbers/quotes` takes an optional `subject_type` (`person` or `business`) and returns each offer's `paperwork` for it.
 - Number paperwork says when the address can be in any country: the new `address_any_country` item, from DIDWW.
-- Email agents: route an address to an agent, and it answers inbound mail in the thread. CLI: `hail email domain route <id>`. MCP: `route_email_domain`. `hail-sdk`: `email_agent_id` on `email_domains.patch()`.
-- CLI: `hail agents create` and `hail agents update` take `--http-tools-file` and `--no-http-tools`, and `hail agents rotate-tool-secret <id>` makes a new signing secret. MCP: `http_tools` on the agent tools.
-- `hail-sdk`: `http_tools` on `agents.create()` and `agents.update()`, `agents.rotate_tool_secret()`, and the call `transcript`.
-- Number verification: `POST /v1/verifications/document-check` reads the uploaded documents with an AI model, fills the form and warns about problems. Nothing is filed or charged. MCP: `check_verification_documents`.
-- US texting: read and correct a saved registration with `GET` and `PATCH /v1/verifications/{id}/application`. CLI: `hail numbers get-sms-application` and `hail numbers amend-sms`. MCP: `get_sms_application` and `amend_sms_application`.
+- Email agents: route an address to an agent, and it answers inbound mail in the thread (CLI `hail email domain route`, MCP `route_email_domain`).
+- CLI: `--http-tools-file` and `--no-http-tools` on `hail agents create|update`, and `hail agents rotate-tool-secret <id>`.
+- `hail-sdk`: `http_tools`, `agents.rotate_tool_secret()`, call `transcript`, and `email_agent_id` on `email_domains.patch()`.
+- Number verification: `POST /v1/verifications/document-check` (MCP `check_verification_documents`) reads uploaded documents with AI to fill the form and warn.
+- US texting: read and correct a saved registration with `GET`/`PATCH /v1/verifications/{id}/application` (CLI `hail numbers amend-sms`, MCP `amend_sms_application`).
 - US texting: free toll-free texting verification for an owned US or Canadian toll-free number (`purpose=sms` with its `number_id`).
 - US texting: companies outside the US and Canada can register with their own tax or company number.
-- Email: turn off sending from a custom domain with `sends_enabled: false`. Inbound mail is not affected.
-- Text agents: `metadata.skipped_reason` says why a text got no reply, for example `sms_registration` or `active_call`.
+- Email: turn off sending from a custom domain with `sends_enabled: false`; inbound mail still arrives.
 - Hail Cloud: a new workspace can talk to its saved agent in the browser before it buys a number, with 5 free minutes.
-- MCP: when `NEXT_PUBLIC_POSTHOG_KEY` is set, the HTTP server sends tool-call metadata to PostHog. Arguments and results are never sent.
+- MCP: with `NEXT_PUBLIC_POSTHOG_KEY` set, the HTTP server sends PostHog tool names, timings, the calling model and, for signed-in callers, their user id, email and name. Arguments and results are never sent.
 
 ### Changed
 
@@ -58,16 +57,17 @@ The MCP registry entry moves to 0.2.0. Database migrations run on deploy.
 - Inbound email is free at zero balance: the message is still stored and shown, with no charge.
 - The built-in AI line on calls is spoken in the call's language. Custom lines are spoken as written.
 - **Breaking.** `GET /v1/agents/prompt-templates` is retired and returns 410. Hail's shared prompts are no longer shown to customers.
-- Number verification (`purpose=number`) holds the setup fee and the first month when it starts, and returns 402 without enough credit. The hold comes back on rejection or cancel.
-- US texting: credit is checked again before the campaign is filed. Until then the verification shows `waiting_for_credit: true`.
-- US texting samples: one sample needs STOP, not every one. The sender name check ignores spaces, dots and case, and `sample_N_type` is optional.
+- Number verification (`purpose=number`) holds the setup fee and first month at start, or returns 402; the hold returns on rejection or cancel.
+- US texting: credit is checked again before the campaign is filed (`waiting_for_credit: true` until then).
+- US texting samples: only one needs STOP, the sender name check ignores spaces and case, and `sample_N_type` is optional.
 - US texting: the opt-in reply filed with a campaign now states message frequency and rates.
-- US texting: numbers in US territories, such as the US Virgin Islands, need US texting registration too. Text-capable number quotes include the carrier's monthly SMS fee.
-- UK numbers: local, mobile and toll-free numbers come from one carrier, and UK national (03) numbers are for companies only.
+- US texting: numbers in US territories need US texting registration too, and text-capable quotes include the monthly SMS fee.
+- UK numbers: local, mobile and toll-free come from one carrier; national (03) numbers are for companies only.
+- Text agents: `metadata.skipped_reason` now covers more reasons, such as `sms_registration` and `send_blocked`.
 - US and Canada toll-free quotes that ask for `sms` list only numbers Hail can verify for texting.
 - Verification: a rejected number verification's `rejection_reason` now says what to fix.
-- Hail Cloud: closing an account releases its numbers, cancels its carrier registrations and deletes its texting answers.
-- MCP: tool inputs carry their rules (allowed values, ranges, patterns) in the schema, and a bad argument is refused before the API call. Tool descriptions state facts only.
+- Hail Cloud: closing an account releases its numbers, cancels carrier registrations and deletes texting answers.
+- MCP: tool input rules live in the schema, so a bad argument is refused before the API call.
 
 ### Fixed
 
@@ -89,11 +89,9 @@ The MCP registry entry moves to 0.2.0. Database migrations run on deploy.
 - Text agents: a text to a workspace with no credits is skipped before the AI writes a reply (`metadata.skipped_reason: "insufficient_funds"`).
 - Numbers: a DIDWW number routed to an agent now takes calls.
 - Numbers: US and Canadian searches by area code no longer hide numbers or return another area code.
-- Numbers: `GET /v1/numbers/options` with no filter shows, per number type, an option that does every job the type offers. With `capabilities`, the price covers only those jobs.
 - Email: a phone call can no longer read a member's email history through the phone number in their profile.
 - Webhook and BYO LLM URL checks now read international domain names the way the connection does (IDNA 2008).
 - Call agents answer follow-up questions before they say goodbye.
-- Calls: during a handover with an unknown price, the call's credit hold lasts until the call ends.
 
 ## [0.32.0] (2026-10-30)
 
