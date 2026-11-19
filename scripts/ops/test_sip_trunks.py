@@ -648,19 +648,16 @@ def test_main_passes_the_numbers(monkeypatch) -> None:
     assert seen["number"] == ["+14155550100", "+14155550101"]
 
 
-async def test_move_back_refuses_while_the_carrier_key_is_set(monkeypatch) -> None:
-    """The running app takes the carrier's calls only on its own trunk while
-    the key is set, so moving numbers back first would refuse them all."""
+async def test_move_back_works_while_the_carrier_key_is_set(monkeypatch) -> None:
+    """The app accepts the shared trunk while it exists, so a rollback can
+    move numbers back before the key is emptied."""
     monkeypatch.setattr(settings, "livekit_telnyx_sip_inbound_trunk_id", "ST_tx")
     sip = FakeSip(
         trunk("ST_shared", "shared", ["hail-placeholder-shared"]),
-        trunk(
-            "ST_tx", "hail-inbound-telnyx", ["hail-placeholder-telnyx", "+14155550100"]
-        ),
+        trunk("ST_tx", "hail-inbound-telnyx", ["hail-placeholder-telnyx", "+14155550100"]),
     )
-    with pytest.raises(st.TrunkError, match="restart first"):
-        await st.move(sip, DATA, SPECS["telnyx"], back=True, yes=True)
-    assert sip.calls == []
+    await st.move(sip, DATA, SPECS["telnyx"], back=True, yes=True)
+    assert "+14155550100" in sip.trunks["ST_shared"].numbers
 
 
 async def test_drop_unknown_clears_stale_entries_once_numbers_moved(

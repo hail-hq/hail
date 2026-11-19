@@ -315,13 +315,6 @@ async def move(
     own = carrier_trunk_id(spec.carrier)
     if not shared:
         raise TrunkError("LIVEKIT_SIP_INBOUND_TRUNK_ID is empty: nothing to move")
-    if own and back:
-        # The running app accepts this carrier's calls only on its own trunk
-        # while the key is set: moving numbers back first refuses them all.
-        raise TrunkError(
-            f"empty {env_key(spec.carrier)} in .env, copy it to the VM and "
-            "restart first, then run --back"
-        )
     if own:
         own_trunk = await trunk_by_id(sip, own)
         if own_trunk.name != spec.name:

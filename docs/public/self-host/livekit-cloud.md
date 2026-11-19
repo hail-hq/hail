@@ -82,10 +82,9 @@ dispatch rule**. Hail adds and removes numbers on the trunk itself.
    `move` moves numbers already registered. DIDWW needs
    `DIDWW_SIP_INBOUND_PASSWORD`. A trunk never has empty `numbers`: that
    trunk would match every dialed number, so each keeps a placeholder entry.
-   Hail answers a call only on the trunk of the number's carrier: once a
-   carrier's key is set, its numbers still on the shared trunk are refused
-   until `move` puts them on its trunk, so run `move` right after the
-   restart. Steps and checks: the
+   Hail answers a call on the trunk of the number's carrier, and on the
+   shared trunk while `LIVEKIT_SIP_INBOUND_TRUNK_ID` is set, so numbers
+   move with no refused call. Run `move` right after the restart. Steps and checks: the
    [runbook](https://github.com/hail-hq/hail/blob/main/docs/operations/inbound-trunk-lockdown.md).
 
    Upgrading with a per-carrier key already set: first add

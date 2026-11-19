@@ -144,15 +144,18 @@ async def open_inbound_call(
         return Rejected("unknown_number")
     # The INVITE must arrive on the LiveKit inbound trunk configured for the
     # number's carrier: its own trunk when its key is set, else the shared
-    # one. Each trunk keeps a placeholder entry, because a trunk with no
-    # numbers matches every dialed number.
+    # one. While the shared trunk exists it is accepted too, so numbers can
+    # move to their carrier's trunk with no refused call (LiveKit lists a
+    # number on one trunk only). Each trunk keeps a placeholder entry,
+    # because a trunk with no numbers matches every dialed number.
     try:
         expected_trunk = inbound_trunk(number.provider)
     except ValueError:
         expected_trunk = None
+    accepted = {expected_trunk, settings.livekit_sip_inbound_trunk_id} - {None, ""}
     if (
         not attrs.trunk_id
-        or attrs.trunk_id != expected_trunk
+        or attrs.trunk_id not in accepted
         or "voice" not in number.capabilities
     ):
         # A real number of a real customer: keep a failed Call (and its event

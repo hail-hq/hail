@@ -26,9 +26,9 @@ How LiveKit picks a trunk ([`sip.go`](https://github.com/livekit/protocol/blob/m
 
 Run every command from the repo root of the main checkout, whose `.env` holds the production values. Values marked _(chat)_ are not written here: the trunk ids, the LiveKit SIP host, the test numbers and the VM path.
 
-Hail answers a call only on the trunk of the number's carrier ([`inbound_calls.py`](../../core/hailhq/core/inbound_calls.py)). While a carrier's key is empty, that is the shared trunk. Once the key is set and the services restart, that carrier's numbers still on the shared trunk are refused until `move` puts them on the carrier's trunk.
+Hail answers a call on the trunk of the number's carrier, and also on the shared trunk while `LIVEKIT_SIP_INBOUND_TRUNK_ID` is set ([`inbound_calls.py`](../../core/hailhq/core/inbound_calls.py)). So no call is refused while numbers move. LiveKit lists a number on one trunk only, so a moved number never arrives on the shared trunk.
 
-**So each carrier's inbound calls can fail for about 1 to 2 minutes**: from the restart until the last `move --yes` ends, test call included. Run each carrier at a quiet hour. The other carriers are not affected. A number routed or unrouted to an agent inside that window can be left on the wrong trunk: run `status` after the last `move` and move any leftover with `move --number`, or remove one that is no longer routed with `move --number <number> --drop-unknown`.
+Run `move` right after the restart anyway: a number routed to an agent between the restart and `move` can fail to register, because it is still listed on the shared trunk. Run `status` after the last `move` and move any leftover with `move --number`, or remove one that is no longer routed with `move --number <number> --drop-unknown`.
 
 1. Merge the PR. The Deploy workflow builds and rolls `api`, `voicebot` and `mcp`. Wait until it is green. Merge changes no call behavior while the carrier keys are empty.
 2. Update the checkout and look at the current state:
@@ -122,13 +122,15 @@ Hail answers a call only on the trunk of the number's carrier ([`inbound_calls.p
 
 ## Rollback
 
-- One carrier, before `retire-shared`. **The carrier's calls can fail again for about 1 to 2 minutes**, from the restart until `move --back` ends.
-  1. Empty its `LIVEKIT_<CARRIER>_SIP_INBOUND_TRUNK_ID=` in `.env`, copy it to the VM, and restart as in step 5.
-  2. At once, move its numbers back. With the key empty, `move --back` finds the carrier trunk by its name in the JSON.
+- One carrier, before `retire-shared`. No call is refused: the shared trunk is accepted throughout.
+  1. Move its numbers back:
 
      ```bash
      uv run python scripts/ops/sip_trunks.py move --carrier twilio --back --yes
      ```
+
+  2. Empty its `LIVEKIT_<CARRIER>_SIP_INBOUND_TRUNK_ID=` in `.env`, copy it to the VM, and restart as in step 5.
+  3. Run the same `move --back` again, for numbers routed between steps 1 and 2. With the key empty it finds the carrier trunk by its name in the JSON.
 
   The carrier trunk can stay; it lists only its placeholder.
 
