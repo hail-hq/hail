@@ -108,8 +108,8 @@ The catalog and subscription validation share the `WebhookEventType` registry in
   (`X-Hail-Signature`, `X-Hail-Event`, `X-Hail-Delivery`). Hail omits the
   `X-Hail-Email-Domain` header.
 - **`sms.delivered`** — the carrier confirmed delivery (requires Twilio delivery receipts).
-- **`sms.undelivered`** — the carrier reported the message was not delivered.
-- **`sms.failed`** — the send failed (transport error or carrier rejection).
+- **`sms.undelivered`** — the carrier reported the message was not delivered. `data` may include `error_code`, the carrier's error code.
+- **`sms.failed`** — the send failed (transport error or carrier rejection). `data` may include `error_code`, the carrier's error code.
 
 **Call lifecycle** — `received` (inbound only), `answered`, `completed`,
 `failed`, `busy`, `no_answer`, `transferred`, `summarized` (there is no `canceled` event; it has no data source):

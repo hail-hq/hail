@@ -1267,7 +1267,7 @@ async def test_tool_says_when_a_name_is_unknown(
 ) -> None:
     _org, _agent, _domain, inbound = await _seed(async_session)
     data = await _tool_email(client, inbound.id, recipient_name="Nobody")
-    assert "couldn't find Nobody" in data["spoken"]
+    assert "no team member or saved contact is named Nobody" in data["spoken"]
 
 
 async def test_tool_sms_with_no_phone_says_so(client, async_session, sms_mock) -> None:

@@ -6,11 +6,13 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Added
 
+- Agents can email your saved contacts by name, and the caller when their number is a saved contact. They never email an address someone says or types.
 - Agents can call your own API during calls, texts and email: add `http_tools` on `POST`/`PATCH /v1/agents` (CLI, SDK, MCP too). Each request is signed like a webhook. A tool `url` that is private or does not resolve is refused on save with `URL host is private or could not be resolved`.
 - Call agents know the date, time and time zone at the start of each call.
 - Text and email reply agents know the date, time and time zone too.
 - Calls: `GET /v1/calls/{id}` returns the call's transcript, and the new `call.summarized` webhook sends the transcript and a short summary after each call.
 - US texting registration: companies register at low volume (up to 2,000 texts a day, lower fees) unless they set `daily_texts` to `OVER_2000`.
+- US trial texting: a workspace can send up to 25 texts, ever, to its own verified phone from a Hail number, with no US registration needed. Set it up in the console under Numbers.
 - Rejected number registrations can be fixed and sent again for 30 days with `POST /v1/verifications/{id}/resubmit` (MCP: `resubmit_verification`).
 - `sms.received` webhooks and `received` SMS events have a new `compliance_keyword` field: `STOP`, `START` or `HELP` when the text is one of those keywords, otherwise `null`.
 - [Hail for Vercel Chat SDK](https://github.com/hail-hq/chat-sdk-adapter/releases/tag/v0.1.0): the published [`@hail-hq/chat-sdk-adapter`](https://www.npmjs.com/package/@hail-hq/chat-sdk-adapter) connects SMS webhooks and replies to Chat SDK. Hail maintains the adapter; its Vercel vendor-official listing requires separate acceptance.

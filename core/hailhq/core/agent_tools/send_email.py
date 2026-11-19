@@ -1,8 +1,9 @@
-"""send_email — email an org member from the directory. outbound_send tier.
+"""send_email — email a member or saved contact by name. outbound_send tier.
 
-Recipients are directory names only (see ``list_contacts``); dictated
-addresses are unverifiable over voice, so raw addresses are never
-accepted. Resolution, gate, cap, and billing run server-side in
+Recipients are names of org members (see ``list_contacts``) or saved
+contacts with an email address. A spoken or typed address is never
+accepted: nothing proves the person owns it, and it would let anyone use
+the org's domain to send spam. Resolution, gate, cap, and billing run server-side in
 ``/internal/agent/send-email``.
 """
 
@@ -132,9 +133,10 @@ async def _execute(ctx: ToolContext, args: dict[str, Any]) -> str:
 SPEC = ToolSpec(
     name="send_email",
     description=(
-        "Send an email to a member of the organization's team directory "
-        "(use list_contacts to see who). You cannot email arbitrary "
-        "addresses, only directory names. When the person on the call asks "
+        "Send an email to a team member (use list_contacts to see who) or a "
+        "saved contact, by name. It cannot email an address someone says or "
+        "types. If asked to, politely say you can only email addresses already "
+        "on file, to prevent spam. When the person on the call asks "
         "for the email, send it right away; their request is the "
         "confirmation. Reattach original files with their attachment_ids and reply_to_email_id from this person’s email thread. Never invent file IDs. Then say it is sent. Ask one short question only when "
         "the recipient, the channel (text or email) or the content is "
@@ -158,7 +160,7 @@ SPEC = ToolSpec(
             },
             "recipient_name": {
                 "type": "string",
-                "description": "The directory name of the recipient.",
+                "description": "The name of a team member or saved contact.",
             },
             "subject": {"type": "string", "maxLength": MAX_SUBJECT_CHARS},
             "body_text": {
@@ -178,8 +180,8 @@ SPEC = ToolSpec(
 EMAIL_RUN_SPEC = dataclasses.replace(
     SPEC,
     description=(
-        "Send an email to a member of the organization's team directory "
-        "(use list_contacts to see who). You cannot email arbitrary "
-        "addresses, only directory names. To reply with original files to the authenticated sender, use recipient_name=sender, attachment_ids from read_email, and the current reply_to_email_id. This sends the final reply with those original files; do not send it twice."
+        "Send an email to a team member (use list_contacts to see who) or a "
+        "saved contact, by name. You cannot email an address someone writes: "
+        "you can only email addresses already on file, to prevent spam. To reply with original files to the authenticated sender, use recipient_name=sender, attachment_ids from read_email, and the current reply_to_email_id. This sends the final reply with those original files; do not send it twice."
     ),
 )

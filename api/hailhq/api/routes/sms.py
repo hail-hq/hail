@@ -7,6 +7,11 @@ GET /sms - cursor-paginated list (org-scoped, optional status / to filters).
 No pool fallback: SMS requires a dedicated PhoneNumber on the org (see
 Decision 6 of the SMS design spec) — inbound replies need unambiguous
 number-to-org routing, which a shared pool number can't provide.
+
+One exception: up to 25 trial texts from Hail's trial number to the
+workspace's verified trial phone. With no ``from`` a trial text is used only
+when the workspace's own number cannot text that US phone; a ``from`` equal
+to the trial number uses one directly.
 """
 
 from __future__ import annotations
@@ -71,6 +76,13 @@ from hailhq.core.sms_registration_gate import (
     us_registration_block,
 )
 from hailhq.core.sms_setup import org_messaging_service_sid
+from hailhq.core.sms_trial import (
+    TRIAL_HINT,
+    TrialBodyTooLong,
+    claim_trial_send,
+    trial_hint_applies,
+    trial_refusal_reason,
+)
 from hailhq.core.telemetry_identity import tag_context
 from hailhq.core.urls import join_url
 from hailhq.core.webhook_fanout import fanout_sms_event
@@ -210,6 +222,22 @@ async def deliver_sms(
     return None
 
 
+_NO_SMS_NUMBER = (
+    "no dedicated SMS-capable phone number on this organization; "
+    "SMS requires a dedicated number, not the shared voice pool"
+)
+
+
+async def _with_trial_hint(
+    db: AsyncSession, organization_id: UUID, to: str, msg: str
+) -> str:
+    """``msg``, plus how to send a trial text when the workspace can still
+    send one to this US destination."""
+    if is_us(to) and await trial_hint_applies(db, organization_id):
+        return f"{msg} {TRIAL_HINT}"
+    return msg
+
+
 @router.post(
     "",
     response_model=SmsResponse,
@@ -239,6 +267,10 @@ async def create_sms(
     it, or requires a dedicated SMS-capable number otherwise. Requires
     recipient_consent=true on the request body; Hail does not verify
     lawful basis to contact the recipient, the caller warrants it.
+
+    Trial texts (up to 25, only to the workspace's verified trial phone):
+    with no from, Hail uses one when the workspace's own number cannot text
+    that US phone; set from to the trial number to use one directly.
     """
     if idem is not None and idem.is_replay:
         cached_id, cached = replay_cached(
@@ -287,7 +319,6 @@ async def create_sms(
         )
 
     await require_funds(db, principal, idem)
-    await require_agent_send_allowed(db, principal, "sms", [body.to], idem)
 
     # The dedicated-number requirement is conditional on the destination
     # corridor (Task 5). For alphanumeric-eligible corridors with no explicit
@@ -299,7 +330,77 @@ async def create_sms(
     # SmsSenderIdentity query on explicit-``from`` sends.
     from_number = None
     from_e164 = None
-    if body.from_ is None:
+    sms_body = body.body
+    metadata = dict(body.metadata)
+    # No ``from`` and a US recipient: prefer a number on an approved US SMS
+    # registration, the only kind the registration gate lets through.
+    registered = (
+        await registered_sms_number(db, principal.organization_id)
+        if body.from_ is None and is_us(body.to)
+        else None
+    )
+    # No ``from``, a US recipient and no registered number: the workspace's
+    # own number and its gate answer, found once and before the trial claim
+    # takes the workspace lock (the gate can ask the carrier).
+    own_checked = body.from_ is None and is_us(body.to) and registered is None
+    own_number = None
+    own_block = None
+    if own_checked:
+        own_number = await resolve_org_number(
+            db, principal.organization_id, None, capability="sms"
+        )
+        if own_number is not None:
+            own_block = await us_registration_block(
+                db, principal.organization_id, own_number, body.to
+            )
+    # Trial texts: ``from`` names the trial number, or no ``from`` and the
+    # own number is missing or blocked, as at the agent send sites.
+    # ``claim_trial_send`` decides the rest.
+    trial = None
+    trial_from = body.from_ is not None and body.from_ == settings.hail_sms_trial_number
+    if trial_from or (own_checked and (own_number is None or own_block is not None)):
+        try:
+            trial = await claim_trial_send(
+                db,
+                principal.organization_id,
+                to=body.to,
+                body=body.body,
+                limit=1600,
+                explicit_from=body.from_,
+            )
+        except TrialBodyTooLong as exc:
+            # The claim holds the workspace lock: release it before answering.
+            await db.rollback()
+            raise await cache_failure(
+                idem, unprocessable(str(exc), loc=["body", "body"])
+            ) from None
+        if trial is None and db.in_transaction():
+            # A refused claim may hold the workspace lock (all texts used,
+            # phone changed). Release it before the checks below, which can
+            # call the carrier. The rollback drops nothing: this transaction
+            # has only read so far (authentication commits its own key
+            # stamp, and the agent caps below write their log after it).
+            # test_refused_trial_claim_rolls_back_only_reads checks this.
+            # The rollback expires ``own_number``; below, only its gate
+            # answer is read.
+            await db.rollback()
+    # The agent caps log the send, so they run after any rollback above;
+    # a trial send logs it under the claim's lock.
+    try:
+        await require_agent_send_allowed(db, principal, "sms", [body.to], idem)
+    except HTTPException:
+        if trial is not None:
+            # Release the claim's workspace lock before answering.
+            await db.rollback()
+        raise
+    if trial is not None:
+        # The claim holds the workspace lock: nothing commits before the
+        # insert and commit below, in this same transaction.
+        from_number = trial.number
+        from_e164 = trial.number.e164
+        sms_body = trial.body
+        metadata = {**metadata, **trial.metadata}
+    elif body.from_ is None:
         sender_id_row = (
             await db.execute(
                 select(SmsSenderIdentity).where(
@@ -317,35 +418,57 @@ async def create_sms(
             # resolved Sender ID; no dedicated number is provisioned.
             from_e164 = resolution.sender_id
 
-    if from_e164 is None:
+    if from_e164 is None and own_checked:
+        # The own number was resolved and gated above.
+        if own_number is None:
+            raise await cache_failure(
+                idem,
+                unprocessable(
+                    await _with_trial_hint(
+                        db, principal.organization_id, body.to, _NO_SMS_NUMBER
+                    ),
+                    loc=["body", "from"],
+                ),
+            )
+        if own_block:
+            msg = await _with_trial_hint(
+                db, principal.organization_id, body.to, own_block
+            )
+            raise await cache_failure(idem, unprocessable(msg, loc=["body", "from"]))
+        from_number = own_number
+        from_e164 = own_number.e164
+    elif from_e164 is None:
         # Explicit ``from``, or a corridor that still requires a dedicated
         # SMS-capable number.
-        # No ``from`` and a US recipient: prefer a number on an approved US
-        # SMS registration, the only kind the gate below lets through.
-        from_number = (
-            await registered_sms_number(db, principal.organization_id)
-            if body.from_ is None and is_us(body.to)
-            else None
-        ) or await resolve_org_number(
+        from_number = registered or await resolve_org_number(
             db, principal.organization_id, body.from_, capability="sms"
         )
         if from_number is None:
             if body.from_ is not None:
-                msg = (
+                # ``from`` is the trial number and the claim was refused:
+                # name why, not that the number belongs to someone else.
+                reason = (
+                    await trial_refusal_reason(
+                        db, principal.organization_id, to=body.to
+                    )
+                    if trial_from
+                    else None
+                )
+                msg = reason or (
                     f"phone number {body.from_} is not registered to this "
                     "organization, is not active, or lacks the sms capability"
                 )
             else:
-                msg = (
-                    "no dedicated SMS-capable phone number on this organization; "
-                    "SMS requires a dedicated number, not the shared voice pool"
+                msg = await _with_trial_hint(
+                    db, principal.organization_id, body.to, _NO_SMS_NUMBER
                 )
             raise await cache_failure(idem, unprocessable(msg, loc=["body", "from"]))
         block = await us_registration_block(
             db, principal.organization_id, from_number, body.to
         )
         if block:
-            raise await cache_failure(idem, unprocessable(block, loc=["body", "from"]))
+            msg = await _with_trial_hint(db, principal.organization_id, body.to, block)
+            raise await cache_failure(idem, unprocessable(msg, loc=["body", "from"]))
         from_e164 = from_number.e164
 
     sms = Sms(
@@ -360,8 +483,8 @@ async def create_sms(
         to_e164=body.to,
         direction="outbound",
         status="queued",
-        body=body.body,
-        metadata_=dict(body.metadata),
+        body=sms_body,
+        metadata_=metadata,
     )
     # No refresh needed: expire_on_commit=False and asyncpg INSERT..RETURNING
     # (eager_defaults) leave id/timestamps populated on the instance.
@@ -426,16 +549,38 @@ async def create_sms(
 TERMINAL_SMS_STATUSES = frozenset({"delivered", "undelivered", "failed"})
 
 
-async def apply_sms_status(db: AsyncSession, sms: Sms, new_status: str) -> None:
-    """Record a status change and fan out terminal ones. Caller commits."""
+async def apply_sms_status(
+    db: AsyncSession,
+    sms: Sms,
+    new_status: str,
+    *,
+    error_code: str | None = None,
+) -> None:
+    """Record a status change and fan out terminal ones. Caller commits.
+
+    A carrier ``error_code`` (a Twilio 21610 after a STOP, for example) is
+    kept on the row when the row has none, and rides on the event and fan-out.
+    """
     prior = sms.status
     sms.status = new_status
+    if error_code is not None and not sms.error_code:
+        sms.error_code = error_code
+    event_payload: dict[str, str] = {"from": prior, "to": new_status}
+    data = {
+        "id": str(sms.id),
+        "to": sms.to_e164,
+        "from": sms.from_e164,
+        "status": new_status,
+    }
+    if error_code is not None:
+        event_payload["error_code"] = error_code
+        data["error_code"] = error_code
     db.add(
         SmsEvent(
             sms_id=sms.id,
             organization_id=sms.organization_id,
             kind="state_change",
-            payload={"from": prior, "to": new_status},
+            payload=event_payload,
         )
     )
     if new_status in TERMINAL_SMS_STATUSES:
@@ -444,12 +589,7 @@ async def apply_sms_status(db: AsyncSession, sms: Sms, new_status: str) -> None:
             organization_id=sms.organization_id,
             event_type=f"sms.{new_status}",
             event_id=sms.id,
-            data={
-                "id": str(sms.id),
-                "to": sms.to_e164,
-                "from": sms.from_e164,
-                "status": new_status,
-            },
+            data=data,
         )
 
 

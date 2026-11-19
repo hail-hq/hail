@@ -112,6 +112,11 @@ async def receive_sms_status(
         # new event either way.
         return {"status": "duplicate"}
 
-    await apply_sms_status(db, sms, new_status)
+    error_code = (
+        (params.get("ErrorCode") or None)
+        if new_status in {"failed", "undelivered"}
+        else None
+    )
+    await apply_sms_status(db, sms, new_status, error_code=error_code)
     await db.commit()
     return {"status": "applied"}
