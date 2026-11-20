@@ -398,6 +398,12 @@ async def move(
         src.sip_trunk_id, numbers=ListUpdate(add=[src_placeholder])
     )
     for number in movable:
+        # The app may have unrouted it since the plan: its unregister would
+        # then run before this add and leave it listed on the carrier trunk.
+        # Read again right before the move.
+        if not back and (await carriers_of([number])).get(number) != spec.carrier:
+            plan.append(f"skipped {number}: it is not routed now")
+            continue
         try:
             await sip.update_inbound_trunk_fields(
                 src.sip_trunk_id, numbers=ListUpdate(remove=[number])

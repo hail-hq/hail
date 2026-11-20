@@ -727,3 +727,26 @@ async def test_drop_unknown_keeps_a_number_routed_after_the_plan(monkeypatch) ->
     )
     assert "+14155550198" in sip.trunks["ST_shared"].numbers
     assert "kept +14155550198: it is routed now" in plan
+
+
+async def test_move_skips_a_number_unrouted_after_the_plan(monkeypatch) -> None:
+    """The app's unregister may run between the plan and the move: the move
+    reads the database again and leaves the number off the carrier trunk."""
+    monkeypatch.setattr(settings, "livekit_telnyx_sip_inbound_trunk_id", "ST_tx")
+    sip = FakeSip(
+        trunk("ST_shared", "shared", ["hail-placeholder-shared", "+14155550100"]),
+        trunk("ST_tx", "hail-inbound-telnyx", ["hail-placeholder-telnyx"]),
+    )
+    calls = {"n": 0}
+
+    async def carriers(numbers):
+        calls["n"] += 1
+        if calls["n"] > 1:  # unrouted after the plan was made
+            return {}
+        return {n: "telnyx" for n in numbers}
+
+    plan = await st.move(
+        sip, DATA, SPECS["telnyx"], back=False, yes=True, carriers_of=carriers
+    )
+    assert list(sip.trunks["ST_tx"].numbers) == ["hail-placeholder-telnyx"]
+    assert "skipped +14155550100: it is not routed now" in plan
