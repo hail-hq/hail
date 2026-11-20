@@ -141,6 +141,27 @@ async def test_invalid_receiver_authorization_does_not_echo_credentials(
     assert "secretsecret" not in response.text
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method", ["post", "patch"])
+async def test_bare_scheme_authorization_is_rejected(client, auth_headers, method):
+    body = {
+        "target_url": "https://hooks.example.com/receive",
+        "event_types": ["call.completed"],
+    }
+    path = "/webhooks"
+    if method == "patch":
+        created = await client.post("/webhooks", headers=auth_headers, json=body)
+        assert created.status_code == 201, created.text
+        path = f"/webhooks/{created.json()['id']}"
+    response = await getattr(client, method)(
+        path, headers=auth_headers, json={**body, "authorization": " basic "}
+    )
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["msg"] == (
+        "Authorization header needs a credential after the scheme."
+    )
+
+
 @pytest.mark.parametrize(
     ("path", "kept"), [("/v1/webhooks", False), ("/v1/calls", True)]
 )
