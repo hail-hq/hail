@@ -7985,6 +7985,58 @@ async def test_a_legacy_evidence_hold_is_not_audited_as_a_refusal(monkeypatch) -
     assert written == ["verification.campaign_refused"]
 
 
+@pytest.mark.parametrize(
+    "refs, pollable",
+    [
+        # Held because the faster lane failed: Hail keeps reading the brand.
+        ({"needs_information": True, "faster_lane_failed": True}, True),
+        # Every other hold waits for the customer.
+        ({"needs_information": True}, False),
+        ({"needs_information": True, "campaign_needs_repair": True}, False),
+        ({}, True),
+    ],
+)
+def test_only_a_failed_faster_lane_hold_is_still_polled(refs, pollable) -> None:
+    from datetime import datetime, timezone
+
+    row = CarrierVerification(
+        state="submitted",
+        purpose="sms",
+        updated_at=datetime.now(timezone.utc),
+        provider_refs=refs,
+    )
+    assert verifications_routes._pollable(row) is pollable
+
+
+async def test_a_failed_lane_hold_that_ends_drops_its_guidance() -> None:
+    """The brand was verified later: the plug-in dropped the hold, so the
+    row reads as a normal pending one again."""
+    from datetime import datetime, timezone
+
+    held = {"low_volume": True, "needs_information": True, "faster_lane_failed": True}
+    row = CarrierVerification(
+        id=uuid.uuid4(),
+        organization_id=uuid.uuid4(),
+        state="submitted",
+        purpose="sms",
+        updated_at=datetime.now(timezone.utc),
+        rejection_reason="Cancel this registration and register again.",
+        provider_refs={"low_volume": True, "brand_verified": True},
+    )
+    assert await verifications_routes._poll_and_apply(
+        None, row, ProviderStatus(state="pending"), lambda *a: None, held
+    )
+    assert row.state == "submitted" and row.rejection_reason is None
+    # Still held: the same guidance stays, and nothing changes.
+    row.rejection_reason = "Cancel this registration and register again."
+    row.provider_refs = dict(held)
+    still = ProviderStatus(state="pending", reason=row.rejection_reason)
+    assert not await verifications_routes._poll_and_apply(
+        None, row, still, lambda *a: None, dict(held)
+    )
+    assert row.rejection_reason == "Cancel this registration and register again."
+
+
 async def test_refusal_audit_is_dropped_on_rollback(async_session):
     """A rolled-back refusal leaves no audit row; a committed one writes it."""
     db = async_session
@@ -8492,6 +8544,17 @@ _HELD = {
         "low_volume": True,
         "identity_wait_since": "2026-11-17T10:00:00+00:00",
         "needs_information": True,
+    },
+    # The faster lane ran and failed: still polled, still cancellable.
+    "telnyx_failed_lane": {
+        "brand_id": "B1",
+        "subject_type": "business",
+        "low_volume": True,
+        "faster_lane_ok": True,
+        "faster_lane_at": "2026-11-17T10:00:00+00:00",
+        "vetting_requested": True,
+        "needs_information": True,
+        "faster_lane_failed": True,
     },
 }
 

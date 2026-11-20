@@ -33,11 +33,12 @@ LOW_VOLUME_NEEDS_NEW_FILING = (
 )
 # The faster lane ran and the networks still could not verify the company.
 # The company details cannot change on a filed brand: only a new
-# registration can try again.
+# registration can try again. Hail keeps checking this one meanwhile.
 LOW_VOLUME_FASTER_LANE_FAILED = (
     "The networks could not verify your company, even with the extra details. "
     "Check that your company name, tax number and address match your official records. "
-    "Then cancel this registration and register again."
+    "Then cancel this registration and register again. "
+    "We keep checking, and continue on our own if the networks verify your company later."
 )
 
 

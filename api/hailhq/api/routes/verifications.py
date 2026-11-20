@@ -781,10 +781,17 @@ async def _requirements(
 def _pollable(row: CarrierVerification) -> bool:
     """True when the carrier has something to say about this row: it is
     submitted, or was cut off while submitting long enough ago that no approve
-    can still be running."""
+    can still be running. An SMS row held for the customer is not, except
+    one held because its faster lane failed (``faster_lane_failed``): the
+    plug-in keeps reading its brand, and ends the hold if it is verified."""
     if row.state not in _POLLED_STATES:
         return False
-    if row.purpose == "sms" and (row.provider_refs or {}).get("needs_information"):
+    refs = row.provider_refs or {}
+    if (
+        row.purpose == "sms"
+        and refs.get("needs_information")
+        and not refs.get("faster_lane_failed")
+    ):
         return False
     if row.state == "submitting":
         return datetime.now(timezone.utc) - row.updated_at >= _SUBMITTING_STUCK_AFTER
@@ -853,8 +860,8 @@ def _apply_status(row: CarrierVerification, status: ProviderStatus | None) -> bo
     elif row.state == "submitting" and status.state == "pending":
         row.state, row.submitted_at, row.updated_at = "submitted", now, now
         if status.reason and (row.provider_refs or {}).get("needs_information"):
-            # Held for answers on this same poll: a held row is not polled
-            # again, so keep the repair guidance now.
+            # Held for answers on this same poll: most held rows are not
+            # polled again, so keep the repair guidance now.
             row.rejection_reason = status.reason
     elif row.state == "submitting" and status.state == "draft":
         row.state, row.approved_by, row.updated_at = "awaiting_review", None, now
@@ -1005,6 +1012,16 @@ async def _poll_and_apply(
     changes, so mark it)."""
     status = await _settle_sms_approval(db, row, status, registry)
     changed = _apply_status(row, status)
+    if (
+        (refs_before or {}).get("faster_lane_failed")
+        and not (row.provider_refs or {}).get("faster_lane_failed")
+        and row.state == "submitted"
+        and row.rejection_reason is not None
+    ):
+        # The carrier verified the company after the failed faster lane:
+        # the hold ended, so its guidance goes too.
+        row.rejection_reason, row.updated_at = None, datetime.now(timezone.utc)
+        changed = True
     if changed and status is not None and status.state == "rejected":
         await _audit_carrier_rejection(row, status.raw_reason)
         await _release_number_hold(db, row)
@@ -4469,6 +4486,7 @@ async def amend_sms_application(
     refs["application_amendment_hash"] = digest
     refs.pop("needs_information", None)
     refs.pop("campaign_needs_repair", None)
+    refs.pop("faster_lane_failed", None)
     row.provider_refs = refs
     row.requirements_version = requirements.version
     row.updated_at = datetime.now(timezone.utc)
@@ -4641,7 +4659,8 @@ def _can_cancel(row: CarrierVerification) -> bool:
         )
         # Held for the customer before any campaign (a low-volume brand the
         # networks could not verify, answers to repair): no review is
-        # running, and the hold may only end with a new registration.
+        # running. A failed faster lane may still end on its own (the
+        # brand is verified later), but the customer need not wait.
         # Toll-free rows too: they never set ``campaign_filed_at``, so one
         # held after a rejection the customer may edit can be cancelled.
         or (

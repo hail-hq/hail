@@ -764,8 +764,21 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                 # The networks verified the company: the faster lane is no
                 # longer owed, so the credit checks stop counting its fee.
                 refs["brand_verified"] = True
+            if verified and refs.pop("faster_lane_failed", None):
+                # Verified after the failed faster lane held the row: the
+                # hold ends with no customer step. Nothing is filed on this
+                # pass, which got no credit check (a held row needs none):
+                # the next pass files the campaign once the credit covers it.
+                refs.pop("needs_information", None)
+                return ProviderStatus(state="pending")
             # After a confirmed PIN the brand read may still lag behind it.
             if not verified and not refs.get("identity_verified"):
+                if refs.get("faster_lane_failed"):
+                    # Still held: each pass only reads the brand. No new
+                    # request and no fee.
+                    return ProviderStatus(
+                        state="pending", reason=LOW_VOLUME_FASTER_LANE_FAILED
+                    )
                 if person:
                     await self._resend_pin_if_old(refs)
                 elif _faster_lane_owed(refs, brand):
@@ -792,8 +805,11 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                     await self._request_vetting_once(refs)
                 elif await self._faster_lane_failed(refs):
                     # Held: no other step can verify this brand. The
-                    # customer cancels and registers again.
+                    # customer can cancel and register again. Hail keeps
+                    # reading the brand (``faster_lane_failed`` keeps the row
+                    # polled): if Telnyx verifies it later, the hold ends.
                     refs["needs_information"] = True
+                    refs["faster_lane_failed"] = True
                     return ProviderStatus(
                         state="pending", reason=LOW_VOLUME_FASTER_LANE_FAILED
                     )
@@ -1027,6 +1043,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
             refs["campaign_id"] = existing[0]["campaignId"]
             _store_replies(refs, existing[0], brand or {})
             refs.pop("needs_information", None)
+            refs.pop("faster_lane_failed", None)
             return True
         return False
 

@@ -102,7 +102,8 @@ score. If Telnyx does not verify that company, Hail asks for vetting when
 `faster_lane_ok=YES` and the credit covers it; otherwise the registration
 waits for the customer to turn it on or cancel. A company Telnyx verifies never
 gets that vetting. If the vetting ends and Telnyx still does not verify the
-company, the registration waits for the customer to cancel and register again.
+company, the customer can cancel and register again. Hail keeps checking, and
+files the campaign on its own if Telnyx verifies the company later.
 Until an organization is approved,
 texts from its US long codes to US numbers return 422. Telnyx answers `STOP` and
 `HELP` itself; Hail sets the replies on the organization's messaging profile

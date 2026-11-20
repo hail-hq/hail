@@ -3450,6 +3450,77 @@ async def test_an_active_vetting_that_never_verifies_the_brand_holds_the_row() -
     assert refs["needs_information"] is True
 
 
+def _held_lane(calls: list, brand: dict):
+    """A low-volume row held because its faster lane failed; the brand
+    reads ``brand["identity"]`` (the test changes it between passes)."""
+
+    def handler(req: httpx.Request):
+        calls.append((req.method, req.url.path))
+        if req.method == "GET" and req.url.path.endswith("/10dlc/brand/B1"):
+            return httpx.Response(
+                200, json={"status": "OK", "identityStatus": brand["identity"]}
+            )
+        if req.method == "GET" and req.url.path.endswith("/externalVetting"):
+            return httpx.Response(
+                200, json=[{"evpId": "AEGIS", "vettingStatus": "FAILED"}]
+            )
+        if req.url.path.endswith("/10dlc/campaignBuilder"):
+            return httpx.Response(200, json={"campaignId": "C1"})
+        return httpx.Response(404)
+
+    refs = _low_volume_refs(
+        faster_lane_ok=True,
+        faster_lane_at=datetime.now(timezone.utc).isoformat(),
+        vetting_requested=True,
+        needs_information=True,
+        faster_lane_failed=True,
+    )
+    return _provider(handler), refs
+
+
+async def test_a_failed_lane_hold_marks_the_row_to_keep_checking() -> None:
+    calls: list = []
+    p, refs = _bought_lane(calls, [{"evpId": "AEGIS", "vettingStatus": "FAILED"}])
+    await p.status(refs)
+    assert refs["needs_information"] is True and refs["faster_lane_failed"] is True
+
+
+async def test_a_held_lane_still_unverified_stays_held_with_no_request() -> None:
+    from hailhq.core.providers.verification.sms_review import (
+        LOW_VOLUME_FASTER_LANE_FAILED,
+    )
+
+    calls: list = []
+    p, refs = _held_lane(calls, {"identity": "UNVERIFIED"})
+    before = json.loads(json.dumps(refs))
+    st = await p.status(refs)
+    assert st.state == "pending" and st.reason == LOW_VOLUME_FASTER_LANE_FAILED
+    # Unchanged refs: the poll writes nothing. Only the brand is read.
+    assert refs == before
+    assert calls == [("GET", "/v2/10dlc/brand/B1")]
+
+
+async def test_a_held_lane_ends_when_the_brand_is_verified_later() -> None:
+    calls: list = []
+    brand = {"identity": "VERIFIED"}
+    p, refs = _held_lane(calls, brand)
+    # The pass that ends the hold files nothing: it got no credit check.
+    st = await p.status(refs, may_file_campaign=True)
+    assert st.state == "pending" and st.reason is None
+    assert "needs_information" not in refs and "faster_lane_failed" not in refs
+    assert refs["brand_verified"] is True
+    assert p.step(refs) != "needs_information"
+    assert not any(c[0] == "POST" for c in calls)
+    # The next pass is a normal one: no campaign without the credit...
+    assert (await p.status(refs, may_file_campaign=False)).state == "pending"
+    assert "campaign_id" not in refs
+    # ...and the campaign once the credit covers it, with no new vetting.
+    assert (await p.status(refs, may_file_campaign=True)).state == "pending"
+    assert refs["campaign_id"] == "C1"
+    posts = [c for c in calls if c[0] == "POST"]
+    assert posts == [("POST", "/v2/10dlc/campaignBuilder")]
+
+
 async def test_no_failed_lane_hold_once_a_campaign_is_filed() -> None:
     calls: list = []
     p, refs = _bought_lane(calls, [{"evpId": "AEGIS", "vettingStatus": "FAILED"}])
