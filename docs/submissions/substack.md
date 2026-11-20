@@ -35,5 +35,5 @@ Nothing is submitted to a directory. Each post is written in the Substack editor
 
 ## Notes
 
-- Do not import Hail users into Substack. Substack's content guidelines (<https://substack.com/content>, read 2026-11-20): "Don't add people to your mailing list without their consent." An imported list must be "made up of people who explicitly opted-in to receive emails from your specific publication."
+- Never import Hail users who did not opt in. Substack's content guidelines (<https://substack.com/content>, read 2026-11-20): "Don't add people to your mailing list without their consent." An imported list must be "made up of people who explicitly opted-in to receive emails from your specific publication."
 - Only people who opted in are imported: the sign-up box or the Personal settings switch. The privacy policy (section 3.5) promises removal within 7 days after someone turns the switch off, so the import and removal run once a week by hand.
