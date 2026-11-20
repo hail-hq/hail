@@ -15,8 +15,9 @@ Hail's newsletter on Substack: product updates, know-how, and tips. The publicat
 
 - [x] Publication created: <https://hailhq.substack.com/>
 - [ ] First post published
-- [ ] Subscribe link on hail.so
-- [ ] Decide how Hail users can opt in (see **Notes**)
+- [x] Subscribe link on hail.so (footer and blog posts)
+- [x] Hail users can opt in: a box at email sign-up and a switch in the console's Personal settings (2026-11-20)
+- [x] Substack added to the privacy policy and <https://hail.so/legal/subprocessors>
 
 ## Steps to submit
 
@@ -35,5 +36,4 @@ Nothing is submitted to a directory. Each post is written in the Substack editor
 ## Notes
 
 - Do not import Hail users into Substack. Substack's content guidelines (<https://substack.com/content>, read 2026-11-20): "Don't add people to your mailing list without their consent." An imported list must be "made up of people who explicitly opted-in to receive emails from your specific publication."
-- Hail's sign-up has no newsletter opt-in. The privacy policy mentions "optional communications (e.g., marketing emails), where required" and names no newsletter platform. Substack is not on <https://hail.so/legal/subprocessors>.
-- Before any import: add an opt-in that is off by default, update the privacy policy, and add Substack as a sub-processor. Until then, people subscribe on Substack themselves.
+- Only people who opted in are imported: the sign-up box or the Personal settings switch. The privacy policy (section 3.5) promises removal within 7 days after someone turns the switch off, so the import and removal run once a week by hand.
