@@ -4,7 +4,7 @@ slug: cursor-marketplace
 category: mcp-registry
 url: "https://cursor.com/marketplace/publish"
 score: 8
-status: drafted
+status: submitted
 ---
 
 # Cursor Marketplace
@@ -19,7 +19,7 @@ It is not the community site `cursor.directory` (see `cursor-directory-community
 - [x] Logo committed and referenced by a relative path: `docs/assets/hail-messenger.svg`
 - [x] README documents setup: the "Cursor plugin" section of `README.md`
 - [ ] Plugin tested locally in Cursor (steps below), with one tool call that works
-- [ ] Submitted
+- [x] Submitted (owner, before 2026-11-20; no review result yet)
 - [ ] Confirmed live
 
 ## Steps to submit
@@ -49,4 +49,6 @@ It is not the community site `cursor.directory` (see `cursor-directory-community
   - Required manifest field: `name` (lowercase kebab-case). Ours: `hail`.
   - `displayName` is not in the docs field table, but Cursor's plugin template uses it.
   - Cursor also loads `skills/`, `rules/`, `agents/`, `commands/` and `hooks/hooks.json` at the plugin root by default. This repo has none of them, so the plugin contains only the MCP server.
+- 2026-11-20: checked the repo against Cursor's submission checklist. The manifest, `name`, `description`, `mcp.json`, the logo (committed, relative path), `README.md`, and relative paths all pass. No `${VAR}` and no `skills/`, `rules/`, `agents/`, `commands/` or `hooks/` folders at the root. Not a multi-plugin repo, so no `marketplace.json`. The local test is the owner's step.
+- The publish form is a publisher application: organization name, handle, contact email, logotype URL (1:1 SVG or PNG with a background plate), description, GitHub repository, owner, website URL. Without a paid Cursor team, the owner is an individual account.
 - Not verified: the fields on the publish form (the page did not render for a script), the review time, and where to see review status. The docs say only "Plugins are reviewed by the Cursor team."
