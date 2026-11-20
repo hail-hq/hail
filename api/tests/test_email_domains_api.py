@@ -8,8 +8,9 @@ from unittest.mock import AsyncMock
 
 import httpx
 import pytest
+from hailhq.api.main import app
 from hailhq.core.config import settings
-from hailhq.core.hail_mail import default_user_prefix, org_prefix_from_id
+from hailhq.core.hail_mail import default_workspace_prefix, org_prefix_from_id
 from hailhq.core.models import ApiKey, EmailDomain, RetiredHailMailAddress
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -115,8 +116,8 @@ async def test_post_hail_mail_uses_explicit_prefixes(
         "/email-domains",
         json={
             "kind": "hail_mail",
-            "local_prefix_user": "alice",
-            "local_prefix_org": "acme",
+            "local_prefix_workspace": "alice",
+            "local_prefix_name": "acme",
         },
         headers={"Authorization": f"Bearer {plain}"},
     )
@@ -124,8 +125,8 @@ async def test_post_hail_mail_uses_explicit_prefixes(
     body = resp.json()
     assert body["kind"] == "hail_mail"
     assert body["domain"] == "alice+acme@mail.hail.so"
-    assert body["local_prefix_user"] == "alice"
-    assert body["local_prefix_org"] == "acme"
+    assert body["local_prefix_workspace"] == "alice"
+    assert body["local_prefix_name"] == "acme"
     assert body["verification_status"] == "verified"
     assert body["dns_records"] == []
 
@@ -135,8 +136,8 @@ async def test_post_hail_mail_user_default_with_derived_org_prefix(
     org_and_key: tuple,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """With only HAIL_MAIL_DEFAULT_USER_PREFIX set, the user prefix is the env
-    default plus a per-org token, and the org prefix is derived from the org id."""
+    """With only HAIL_MAIL_DEFAULT_USER_PREFIX set, the workspace prefix is the env
+    default plus a per-org token, and the name prefix is derived from the org id."""
     monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
     monkeypatch.setattr(settings, "hail_mail_default_user_prefix", "admin")
     org_id, _, plain = org_and_key
@@ -148,8 +149,8 @@ async def test_post_hail_mail_user_default_with_derived_org_prefix(
     assert resp.status_code == 201, resp.text
     body = resp.json()
     expected_org = org_prefix_from_id(org_id)
-    assert body["local_prefix_user"] == f"admin-{expected_org}"
-    assert body["local_prefix_org"] == expected_org
+    assert body["local_prefix_workspace"] == f"admin-{expected_org}"
+    assert body["local_prefix_name"] == expected_org
     assert body["domain"] == f"admin-{expected_org}+{expected_org}@mail.hail.so"
 
 
@@ -172,8 +173,8 @@ async def test_post_hail_mail_uses_hail_mail_from_env(
     assert resp.status_code == 201, resp.text
     body = resp.json()
     assert body["domain"] == "alice+acme@mail.hail.so"
-    assert body["local_prefix_user"] == "alice"
-    assert body["local_prefix_org"] == "acme"
+    assert body["local_prefix_workspace"] == "alice"
+    assert body["local_prefix_name"] == "acme"
 
 
 async def test_post_hail_mail_from_overrides_default_prefix_vars(
@@ -208,8 +209,8 @@ async def test_post_hail_mail_body_prefixes_override_hail_mail_from(
         "/email-domains",
         json={
             "kind": "hail_mail",
-            "local_prefix_user": "bob",
-            "local_prefix_org": "beta",
+            "local_prefix_workspace": "bob",
+            "local_prefix_name": "beta",
         },
         headers={"Authorization": f"Bearer {plain}"},
     )
@@ -240,7 +241,7 @@ async def test_post_hail_mail_from_rejects_missing_plus(
     org_and_key: tuple,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """HAIL_MAIL_FROM must contain ``+`` between the user and org prefixes."""
+    """HAIL_MAIL_FROM must contain ``+`` between the user and name prefixes."""
     monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
     monkeypatch.setattr(settings, "hail_mail_from", "admin@mail.hail.so")
     _, _, plain = org_and_key
@@ -250,7 +251,7 @@ async def test_post_hail_mail_from_rejects_missing_plus(
         headers={"Authorization": f"Bearer {plain}"},
     )
     assert resp.status_code == 503
-    assert "<user>+<org>" in resp.text
+    assert "<workspace>+<name>" in resp.text
 
 
 async def test_post_hail_mail_from_rejects_invalid_prefix(
@@ -284,10 +285,10 @@ async def test_post_hail_mail_503_when_prefix_missing_and_no_default(
         json={"kind": "hail_mail"},
         headers={"Authorization": f"Bearer {plain}"},
     )
-    # The org prefix is always derivable now, so only the user prefix can be
+    # The name prefix is always derivable now, so only the workspace prefix can be
     # missing — that still yields a 503.
     assert resp.status_code == 503
-    assert "local_prefix_user" in resp.text
+    assert "local_prefix_workspace" in resp.text
 
 
 async def test_post_hail_mail_rejects_invalid_prefix(
@@ -301,8 +302,8 @@ async def test_post_hail_mail_rejects_invalid_prefix(
         "/email-domains",
         json={
             "kind": "hail_mail",
-            "local_prefix_user": "Alice!",  # invalid: uppercase + '!'
-            "local_prefix_org": "acme",
+            "local_prefix_workspace": "Alice!",  # invalid: uppercase + '!'
+            "local_prefix_name": "acme",
         },
         headers={"Authorization": f"Bearer {plain}"},
     )
@@ -335,8 +336,8 @@ async def test_post_hail_mail_503_when_base_domain_unset(
         "/email-domains",
         json={
             "kind": "hail_mail",
-            "local_prefix_user": "alice",
-            "local_prefix_org": "acme",
+            "local_prefix_workspace": "alice",
+            "local_prefix_name": "acme",
         },
         headers={"Authorization": f"Bearer {plain}"},
     )
@@ -354,7 +355,7 @@ async def test_post_custom_rejects_prefix_fields(
         json={
             "kind": "custom",
             "domain": "acme.com",
-            "local_prefix_user": "alice",
+            "local_prefix_workspace": "alice",
         },
         headers={"Authorization": f"Bearer {plain}"},
     )
@@ -373,8 +374,8 @@ async def test_patch_hail_mail_updates_prefixes_and_domain(
         "/email-domains",
         json={
             "kind": "hail_mail",
-            "local_prefix_user": "u1",
-            "local_prefix_org": "o1",
+            "local_prefix_workspace": "u1",
+            "local_prefix_name": "o1",
         },
         headers=headers,
     )
@@ -382,14 +383,14 @@ async def test_patch_hail_mail_updates_prefixes_and_domain(
 
     resp = await client.patch(
         f"/email-domains/{domain_id}",
-        json={"local_prefix_user": "alice", "local_prefix_org": "acme"},
+        json={"local_prefix_workspace": "alice", "local_prefix_name": "acme"},
         headers=headers,
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["domain"] == "alice+acme@mail.hail.so"
-    assert body["local_prefix_user"] == "alice"
-    assert body["local_prefix_org"] == "acme"
+    assert body["local_prefix_workspace"] == "alice"
+    assert body["local_prefix_name"] == "acme"
 
 
 async def test_patch_hail_mail_partial_update_keeps_other_prefix(
@@ -404,8 +405,8 @@ async def test_patch_hail_mail_partial_update_keeps_other_prefix(
         "/email-domains",
         json={
             "kind": "hail_mail",
-            "local_prefix_user": "alice",
-            "local_prefix_org": "acme",
+            "local_prefix_workspace": "alice",
+            "local_prefix_name": "acme",
         },
         headers=headers,
     )
@@ -413,7 +414,7 @@ async def test_patch_hail_mail_partial_update_keeps_other_prefix(
 
     resp = await client.patch(
         f"/email-domains/{domain_id}",
-        json={"local_prefix_user": "bob"},
+        json={"local_prefix_workspace": "bob"},
         headers=headers,
     )
     assert resp.status_code == 200, resp.text
@@ -433,7 +434,7 @@ async def test_patch_on_custom_domain_returns_422(
     )
     resp = await client.patch(
         f"/email-domains/{created.json()['id']}",
-        json={"local_prefix_user": "alice"},
+        json={"local_prefix_workspace": "alice"},
         headers=headers,
     )
     assert resp.status_code == 422
@@ -483,8 +484,8 @@ async def test_patch_sends_enabled_on_hail_mail_returns_422(
         "/email-domains",
         json={
             "kind": "hail_mail",
-            "local_prefix_user": "alice",
-            "local_prefix_org": "acme",
+            "local_prefix_workspace": "alice",
+            "local_prefix_name": "acme",
         },
         headers=headers,
     )
@@ -505,7 +506,7 @@ async def test_patch_unknown_returns_404(
     _, _, plain = org_and_key
     resp = await client.patch(
         "/email-domains/00000000-0000-0000-0000-000000000000",
-        json={"local_prefix_user": "alice"},
+        json={"local_prefix_workspace": "alice"},
         headers={"Authorization": f"Bearer {plain}"},
     )
     assert resp.status_code == 404
@@ -569,7 +570,7 @@ async def test_post_hail_mail_default_org_prefix_is_per_org_not_shared(
 ) -> None:
     """Two orgs that both omit prefixes must NOT collide on a shared default.
 
-    Reproduces the multi-tenant bug: the org prefix used to come from a
+    Reproduces the multi-tenant bug: the name prefix used to come from a
     deploy-wide constant (HAIL_MAIL_DEFAULT_ORG_PREFIX), so every org
     resolved to the same ``admin+selfhost@…`` address — the first org claimed
     it and every later org hit the global-unique index (409). Both default
@@ -591,8 +592,8 @@ async def test_post_hail_mail_default_org_prefix_is_per_org_not_shared(
     assert r2.status_code == 201, r2.text
     d1, d2 = r1.json()["domain"], r2.json()["domain"]
     assert d1 != d2, "two orgs must not share one hail-mail address"
-    assert d1.split("+")[0] == default_user_prefix("admin", org_a)
-    assert d2.split("+")[0] == default_user_prefix("admin", org_b)
+    assert d1.split("+")[0] == default_workspace_prefix("admin", org_a)
+    assert d2.split("+")[0] == default_workspace_prefix("admin", org_b)
 
 
 async def test_post_hail_mail_default_org_prefix_is_deterministic(
@@ -601,7 +602,7 @@ async def test_post_hail_mail_default_org_prefix_is_deterministic(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Re-provisioning the same org with no prefixes is idempotent — the
-    derived org prefix is a stable function of the organization id, so a
+    derived name prefix is a stable function of the organization id, so a
     retry reproduces the same address rather than minting a second one."""
     monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
     monkeypatch.setattr(settings, "hail_mail_default_user_prefix", "admin")
@@ -628,7 +629,7 @@ async def test_post_hail_mail_duplicate_across_orgs_returns_409(
     async_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A hail-mail user prefix is globally unique — inbound routing matches on
+    """A hail-mail workspace prefix is globally unique — inbound routing matches on
     it with no org scoping, so org B holding org A's prefix would intercept
     org A's mail."""
     monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
@@ -636,8 +637,8 @@ async def test_post_hail_mail_duplicate_across_orgs_returns_409(
     _, _, plain_b = await insert_org_and_key(async_session)
     body = {
         "kind": "hail_mail",
-        "local_prefix_user": "alice",
-        "local_prefix_org": "acme",
+        "local_prefix_workspace": "alice",
+        "local_prefix_name": "acme",
     }
     r1 = await client.post(
         "/email-domains",
@@ -652,8 +653,8 @@ async def test_post_hail_mail_duplicate_across_orgs_returns_409(
     )
     assert r2.status_code == 409, r2.text
     assert r2.json()["detail"] == (
-        "hail-mail user prefix 'alice' is already taken; "
-        "choose a different local_prefix_user"
+        "hail-mail workspace prefix 'alice' is already taken; "
+        "choose a different local_prefix_workspace"
     )
 
 
@@ -672,8 +673,8 @@ async def test_post_hail_mail_taken_head_with_another_tail_returns_409(
         "/email-domains",
         json={
             "kind": "hail_mail",
-            "local_prefix_user": "alice",
-            "local_prefix_org": "acme",
+            "local_prefix_workspace": "alice",
+            "local_prefix_name": "acme",
         },
         headers={"Authorization": f"Bearer {plain_a}"},
     )
@@ -682,8 +683,8 @@ async def test_post_hail_mail_taken_head_with_another_tail_returns_409(
         "/email-domains",
         json={
             "kind": "hail_mail",
-            "local_prefix_user": "alice",
-            "local_prefix_org": "globex",
+            "local_prefix_workspace": "alice",
+            "local_prefix_name": "globex",
         },
         headers={"Authorization": f"Bearer {plain_b}"},
     )
@@ -705,8 +706,8 @@ async def test_patch_hail_mail_taken_head_returns_409(
             "/email-domains",
             json={
                 "kind": "hail_mail",
-                "local_prefix_user": head,
-                "local_prefix_org": "acme",
+                "local_prefix_workspace": head,
+                "local_prefix_name": "acme",
             },
             headers={"Authorization": f"Bearer {plain}"},
         )
@@ -714,13 +715,13 @@ async def test_patch_hail_mail_taken_head_returns_409(
 
     resp = await client.patch(
         f"/email-domains/{created.json()['id']}",
-        json={"local_prefix_user": "alice"},
+        json={"local_prefix_workspace": "alice"},
         headers={"Authorization": f"Bearer {plain_b}"},
     )
     assert resp.status_code == 409, resp.text
     assert resp.json()["detail"] == (
-        "hail-mail user prefix 'alice' is already taken; "
-        "choose a different local_prefix_user"
+        "hail-mail workspace prefix 'alice' is already taken; "
+        "choose a different local_prefix_workspace"
     )
 
 
@@ -736,16 +737,16 @@ async def test_patch_hail_mail_tail_cannot_claim_a_retired_address(
         "/email-domains",
         json={
             "kind": "hail_mail",
-            "local_prefix_user": "alice",
-            "local_prefix_org": "acme",
+            "local_prefix_workspace": "alice",
+            "local_prefix_name": "acme",
         },
         headers={"Authorization": f"Bearer {plain}"},
     )
     assert created.status_code == 201, created.text
     async_session.add(
         RetiredHailMailAddress(
-            local_prefix_user="alice",
-            local_prefix_org="globex",
+            local_prefix_workspace="alice",
+            local_prefix_name="globex",
             organization_id=uuid.uuid4(),
         )
     )
@@ -753,14 +754,14 @@ async def test_patch_hail_mail_tail_cannot_claim_a_retired_address(
 
     resp = await client.patch(
         f"/email-domains/{created.json()['id']}",
-        json={"local_prefix_org": "globex"},
+        json={"local_prefix_name": "globex"},
         headers={"Authorization": f"Bearer {plain}"},
     )
 
     assert resp.status_code == 409, resp.text
     assert resp.json()["detail"] == (
         "hail-mail address 'alice+globex@mail.hail.so' is already taken; "
-        "choose a different local_prefix_org"
+        "choose a different local_prefix_name"
     )
 
 
@@ -775,8 +776,8 @@ async def test_patch_hail_mail_tail_only_keeps_the_head(
         "/email-domains",
         json={
             "kind": "hail_mail",
-            "local_prefix_user": "alice",
-            "local_prefix_org": "acme",
+            "local_prefix_workspace": "alice",
+            "local_prefix_name": "acme",
         },
         headers={"Authorization": f"Bearer {plain}"},
     )
@@ -784,7 +785,7 @@ async def test_patch_hail_mail_tail_only_keeps_the_head(
 
     resp = await client.patch(
         f"/email-domains/{created.json()['id']}",
-        json={"local_prefix_org": "sales"},
+        json={"local_prefix_name": "sales"},
         headers={"Authorization": f"Bearer {plain}"},
     )
     assert resp.status_code == 200, resp.text
@@ -909,8 +910,8 @@ async def test_default_from_is_null_when_another_org_retired_the_pinned_head(
     headers = {"Authorization": f"Bearer {plain}"}
     async_session.add(
         RetiredHailMailAddress(
-            local_prefix_user="team",
-            local_prefix_org="shared",
+            local_prefix_workspace="team",
+            local_prefix_name="shared",
             organization_id=uuid.uuid4(),
         )
     )
@@ -922,8 +923,8 @@ async def test_default_from_is_null_when_another_org_retired_the_pinned_head(
 
     async_session.add(
         RetiredHailMailAddress(
-            local_prefix_user="team",
-            local_prefix_org="old",
+            local_prefix_workspace="team",
+            local_prefix_name="old",
             organization_id=org_id,
             retired_at=datetime.now(timezone.utc) + timedelta(hours=1),
         )
@@ -1096,8 +1097,8 @@ async def test_verify_hail_mail_is_a_noop(
         "/email-domains",
         json={
             "kind": "hail_mail",
-            "local_prefix_user": "alice",
-            "local_prefix_org": "acme",
+            "local_prefix_workspace": "alice",
+            "local_prefix_name": "acme",
         },
         headers=headers,
     )
@@ -1175,8 +1176,8 @@ async def test_delete_hail_mail_does_not_touch_provider(
         "/email-domains",
         json={
             "kind": "hail_mail",
-            "local_prefix_user": "alice",
-            "local_prefix_org": "acme",
+            "local_prefix_workspace": "alice",
+            "local_prefix_name": "acme",
         },
         headers=headers,
     )
@@ -1317,8 +1318,8 @@ async def test_email_domain_mutations_write_audit_log(
         "/email-domains",
         json={
             "kind": "hail_mail",
-            "local_prefix_user": "alice",
-            "local_prefix_org": "acme",
+            "local_prefix_workspace": "alice",
+            "local_prefix_name": "acme",
         },
         headers=headers,
     )
@@ -1328,7 +1329,7 @@ async def test_email_domain_mutations_write_audit_log(
     # patch
     patch = await client.patch(
         f"/email-domains/{domain_id}",
-        json={"local_prefix_user": "bob"},
+        json={"local_prefix_workspace": "bob"},
         headers=headers,
     )
     assert patch.status_code == 200
@@ -1603,8 +1604,8 @@ async def _hail_mail_and_agent(
         "/email-domains",
         json={
             "kind": "hail_mail",
-            "local_prefix_user": "amber-heron",
-            "local_prefix_org": "acme",
+            "local_prefix_workspace": "amber-heron",
+            "local_prefix_name": "acme",
         },
         headers=headers,
     )
@@ -1906,3 +1907,165 @@ async def test_clearing_the_route_needs_nothing_from_a_custom_domain(
         f"/email-domains/{domain_id}", json={"email_agent_id": None}, headers=headers
     )
     assert resp.status_code == 200, resp.text
+
+
+# --------------------------------------------------------------------------- #
+# Deprecated prefix names: local_prefix_user / local_prefix_org
+# --------------------------------------------------------------------------- #
+
+
+def _prefixes(body: dict) -> tuple:
+    return (
+        body["local_prefix_workspace"],
+        body["local_prefix_name"],
+        body["local_prefix_user"],
+        body["local_prefix_org"],
+    )
+
+
+async def test_post_hail_mail_accepts_the_deprecated_prefix_names(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    async_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Released SDK, CLI and MCP versions still send the old names."""
+    monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
+    _, _, plain = org_and_key
+    resp = await client.post(
+        "/email-domains",
+        json={
+            "kind": "hail_mail",
+            "local_prefix_user": "acme",
+            "local_prefix_org": "amber",
+        },
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["domain"] == "acme+amber@mail.hail.so"
+    assert _prefixes(body) == ("acme", "amber", "acme", "amber")
+
+    row = await async_session.get(EmailDomain, uuid.UUID(body["id"]))
+    assert (row.local_prefix_workspace, row.local_prefix_name) == ("acme", "amber")
+
+
+async def test_get_returns_both_prefix_names(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
+    _, _, plain = org_and_key
+    auth = {"Authorization": f"Bearer {plain}"}
+    created = await client.post(
+        "/email-domains",
+        json={
+            "kind": "hail_mail",
+            "local_prefix_workspace": "acme",
+            "local_prefix_name": "amber",
+        },
+        headers=auth,
+    )
+    assert created.status_code == 201, created.text
+    one = await client.get(f"/email-domains/{created.json()['id']}", headers=auth)
+    listed = await client.get("/email-domains", headers=auth)
+    assert _prefixes(one.json()) == ("acme", "amber", "acme", "amber")
+    assert _prefixes(listed.json()["items"][0]) == ("acme", "amber", "acme", "amber")
+
+
+async def test_patch_accepts_the_deprecated_prefix_names(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
+    _, _, plain = org_and_key
+    auth = {"Authorization": f"Bearer {plain}"}
+    created = await client.post(
+        "/email-domains",
+        json={
+            "kind": "hail_mail",
+            "local_prefix_workspace": "acme",
+            "local_prefix_name": "amber",
+        },
+        headers=auth,
+    )
+    domain_id = created.json()["id"]
+
+    old = await client.patch(
+        f"/email-domains/{domain_id}",
+        json={"local_prefix_user": "acme-labs", "local_prefix_org": "heron"},
+        headers=auth,
+    )
+    assert old.status_code == 200, old.text
+    assert old.json()["domain"] == "acme-labs+heron@mail.hail.so"
+    assert _prefixes(old.json()) == ("acme-labs", "heron", "acme-labs", "heron")
+
+    # Both names with one value is fine.
+    same = await client.patch(
+        f"/email-domains/{domain_id}",
+        json={
+            "local_prefix_name": "amber-heron-42",
+            "local_prefix_org": "amber-heron-42",
+        },
+        headers=auth,
+    )
+    assert same.status_code == 200, same.text
+    assert _prefixes(same.json())[1] == "amber-heron-42"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {
+            "kind": "hail_mail",
+            "local_prefix_workspace": "acme",
+            "local_prefix_user": "globex",
+        },
+        {
+            "kind": "hail_mail",
+            "local_prefix_name": "amber",
+            "local_prefix_org": "heron",
+        },
+    ],
+)
+async def test_post_refuses_two_names_with_different_values(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    monkeypatch: pytest.MonkeyPatch,
+    body: dict,
+) -> None:
+    monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
+    _, _, plain = org_and_key
+    resp = await client.post(
+        "/email-domains", json=body, headers={"Authorization": f"Bearer {plain}"}
+    )
+    assert resp.status_code == 422, resp.text
+    assert "is the deprecated name of" in resp.text
+
+
+async def test_post_refuses_a_reserved_head_under_the_old_name(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
+    _, _, plain = org_and_key
+    resp = await client.post(
+        "/email-domains",
+        json={"kind": "hail_mail", "local_prefix_user": "noreply"},
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 422, resp.text
+    assert "workspace prefix 'noreply' is reserved" in resp.text
+
+
+def test_openapi_marks_the_old_prefix_names_deprecated() -> None:
+    schemas = app.openapi()["components"]["schemas"]
+    for name in ("EmailDomainCreate", "EmailDomainPatch", "EmailDomainResponse"):
+        props = schemas[name]["properties"]
+        for old in ("local_prefix_user", "local_prefix_org"):
+            assert props[old]["deprecated"] is True, (name, old)
+        for new in ("local_prefix_workspace", "local_prefix_name"):
+            assert "deprecated" not in props[new], (name, new)

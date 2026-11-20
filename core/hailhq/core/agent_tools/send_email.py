@@ -20,9 +20,9 @@ from hailhq.core.agent_tools.spec import NO_CALL, SPOKEN_FALLBACK, ToolContext, 
 from hailhq.core.caller_email_lines import caller_email_lines
 from hailhq.core.config import settings
 from hailhq.core.email_sender import head_retired_by_other_org
-from hailhq.core.hail_mail import default_user_prefix
+from hailhq.core.hail_mail import default_workspace_prefix
 from hailhq.core.models import EmailDomain
-from hailhq.core.schemas import RESERVED_USER_PREFIXES
+from hailhq.core.schemas import RESERVED_WORKSPACE_PREFIXES
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -162,9 +162,9 @@ async def _is_available(organization_id: uuid.UUID, session: AsyncSession) -> bo
     # on the tenant's first send. Mirror that mint branch's requirements
     # exactly (resolve_hail_mail_prefixes / compose_hail_mail_address in
     # routes/email_domains.py) rather than just checking for existing rows:
-    # HAIL_MAIL_BASE_DOMAIN must be configured, and a user prefix must be
+    # HAIL_MAIL_BASE_DOMAIN must be configured, and a workspace prefix must be
     # resolvable from HAIL_MAIL_FROM or HAIL_MAIL_DEFAULT_USER_PREFIX (the
-    # org prefix is always derivable from organization_id, so it never
+    # name prefix is always derivable from organization_id, so it never
     # blocks the mint). The mint also refuses a role name, and a head another
     # org retired.
     if not settings.hail_mail_base_domain:
@@ -173,8 +173,8 @@ async def _is_available(organization_id: uuid.UUID, session: AsyncSession) -> bo
     default = settings.hail_mail_default_user_prefix
     if not pinned and not default:
         return False
-    head = pinned or default_user_prefix(default, organization_id)
-    if head in RESERVED_USER_PREFIXES:
+    head = pinned or default_workspace_prefix(default, organization_id)
+    if head in RESERVED_WORKSPACE_PREFIXES:
         return False
     return not await head_retired_by_other_org(session, head, organization_id)
 

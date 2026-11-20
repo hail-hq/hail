@@ -42,15 +42,16 @@ SYSTEM_KIND_FORWARD_STOPPED = "forward_stopped"
 
 
 def noreply_address(
-    organization_id: UUID, local_prefix_org: str | None, base_domain: str
+    organization_id: UUID, local_prefix_name: str | None, base_domain: str
 ) -> str:
-    """``noreply+<org>@<base>``: the From of every forward and system mail.
+    """``noreply+<name>@<base>``: the From of every forward and system mail.
 
-    ``noreply`` is a reserved user prefix (schemas.RESERVED_USER_PREFIXES),
-    so no tenant can mint this address and receive another org's bounces.
-    Custom-domain rows carry no org prefix; fall back to the id-derived one
-    every hail-mail address of the org uses."""
-    prefix = local_prefix_org or org_prefix_from_id(organization_id)
+    ``noreply`` is a reserved workspace prefix
+    (schemas.RESERVED_WORKSPACE_PREFIXES), so no tenant can mint this address
+    and receive another org's bounces. Custom-domain rows carry no name
+    prefix; fall back to the id-derived one every hail-mail address of the
+    org uses."""
+    prefix = local_prefix_name or org_prefix_from_id(organization_id)
     return f"noreply+{prefix}@{base_domain}"
 
 

@@ -4,7 +4,7 @@ POST   /email-domains             — register a custom domain or mint a hail-ma
 GET    /email-domains             — cursor-paginated list (org-scoped).
 GET    /email-domains/{id}        — single domain (org-scoped).
 GET    /email-domains/{id}/dns-check — DNS host + record observation + DMARC (org-scoped, read-only).
-PATCH  /email-domains/{id}        — edit the user/org prefix on a hail-mail row,
+PATCH  /email-domains/{id}        — edit the workspace/name prefix on a hail-mail row,
                                      or the inbound action (forward_to — new
                                      addresses get a confirm link first).
 POST   /email-domains/{id}/verify — re-poll the email provider's view of the identity.
@@ -16,11 +16,12 @@ Two flavors of row land here:
   ``CreateEmailIdentity`` and surface the three DKIM CNAMEs they need to
   publish. The row stays ``verification_status='pending'`` until the
   caller hits the verify endpoint after publishing DNS.
-* ``kind='hail_mail'`` — caller may supply ``local_prefix_user`` +
-  ``local_prefix_org``; otherwise the user prefix falls back to
-  ``HAIL_MAIL_DEFAULT_USER_PREFIX`` (or ``HAIL_MAIL_FROM``) and the org
+* ``kind='hail_mail'`` — caller may supply ``local_prefix_workspace`` +
+  ``local_prefix_name``; otherwise the workspace prefix falls back to
+  ``HAIL_MAIL_DEFAULT_USER_PREFIX`` (or ``HAIL_MAIL_FROM``) and the name
   prefix is derived per-org from the organization id, so two orgs can never
-  share an address. The server composes ``<user>+<org>@<HAIL_MAIL_BASE_DOMAIN>``,
+  share an address. The server composes
+  ``<workspace>+<name>@<HAIL_MAIL_BASE_DOMAIN>``,
   lands the row ``verified`` immediately (the parent is pre-verified at
   SES out-of-band), and never calls SES. Org admins can later rename
   through ``PATCH``.
@@ -68,12 +69,12 @@ from hailhq.core.forward_targets import (
     PendingLimitExceeded,
     sync_targets,
 )
-from hailhq.core.hail_mail import default_user_prefix, org_prefix_from_id
+from hailhq.core.hail_mail import default_workspace_prefix, org_prefix_from_id
 from hailhq.core.models import Agent, Email, EmailDomain
 from hailhq.core.providers.email import EmailProvider, SesEmailProvider
 from hailhq.core.schemas import (
     LOCAL_PREFIX,
-    RESERVED_USER_PREFIXES,
+    RESERVED_WORKSPACE_PREFIXES,
     DmarcCheck,
     DnsProviderSchema,
     DnsRecordSchema,
@@ -138,7 +139,7 @@ async def get_email_provider() -> EmailProvider:
 
 
 def _parse_hail_mail_from(addr: str) -> tuple[str, str]:
-    """Split ``HAIL_MAIL_FROM`` into ``(user_prefix, org_prefix)``.
+    """Split ``HAIL_MAIL_FROM`` into ``(workspace_prefix, name_prefix)``.
 
     Raises HTTPException 503 with a specific message on malformed input
     — wrong shape, prefix charset violations, or domain mismatch against
@@ -152,7 +153,7 @@ def _parse_hail_mail_from(addr: str) -> tuple[str, str]:
             status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=(
                 f"HAIL_MAIL_FROM={addr!r} is not a valid email "
-                "(expected <user>+<org>@<HAIL_MAIL_BASE_DOMAIN>)"
+                "(expected <workspace>+<name>@<HAIL_MAIL_BASE_DOMAIN>)"
             ),
         )
     base = settings.hail_mail_base_domain
@@ -164,80 +165,81 @@ def _parse_hail_mail_from(addr: str) -> tuple[str, str]:
                 f"HAIL_MAIL_BASE_DOMAIN ({base!r})"
             ),
         )
-    user, sep, org = local.partition("+")
-    if not sep or not user or not org:
+    workspace, sep, name = local.partition("+")
+    if not sep or not workspace or not name:
         raise HTTPException(
             status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=(
                 f"HAIL_MAIL_FROM local-part {local!r} must be "
-                "<user>+<org> (e.g. hi+selfhost)"
+                "<workspace>+<name> (e.g. hi+selfhost)"
             ),
         )
-    if not LOCAL_PREFIX.match(user) or not LOCAL_PREFIX.match(org):
+    if not LOCAL_PREFIX.match(workspace) or not LOCAL_PREFIX.match(name):
         raise HTTPException(
             status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=(
-                f"HAIL_MAIL_FROM prefixes ({user!r}, {org!r}) must each match "
-                "^[a-z0-9]([a-z0-9-]{0,18}[a-z0-9])?$"
+                f"HAIL_MAIL_FROM prefixes ({workspace!r}, {name!r}) must each "
+                "match ^[a-z0-9]([a-z0-9-]{0,18}[a-z0-9])?$"
             ),
         )
-    return user, org
+    return workspace, name
 
 
 def resolve_hail_mail_prefixes(
-    body_user: str | None,
-    body_org: str | None,
+    body_workspace: str | None,
+    body_name: str | None,
     organization_id: UUID,
 ) -> tuple[str, str]:
-    """Pick the user/org prefixes for a hail-mail address.
+    """Pick the workspace/name prefixes for a hail-mail address.
 
-    User-prefix precedence (highest wins):
+    Workspace-prefix precedence (highest wins):
 
-    1. Explicit ``body_user`` (the POST body's ``local_prefix_user``).
-    2. ``HAIL_MAIL_FROM`` env var (single-shot ``<user>+<org>@<base>``).
+    1. Explicit ``body_workspace`` (the POST body's ``local_prefix_workspace``).
+    2. ``HAIL_MAIL_FROM`` env var (single-shot ``<workspace>+<name>@<base>``).
     3. ``HAIL_MAIL_DEFAULT_USER_PREFIX`` env var, plus a per-org token: one
-       row per deployment may hold a user prefix, so a shared value would
-       409 every org after the first.
+       row per deployment may hold a workspace prefix, so a shared value
+       would 409 every org after the first.
 
-    Org-prefix precedence:
+    Name-prefix precedence:
 
-    1. Explicit ``body_org``.
-    2. ``HAIL_MAIL_FROM`` org part — the single-tenant self-host opt-in.
+    1. Explicit ``body_name``.
+    2. ``HAIL_MAIL_FROM`` name part — the single-tenant self-host opt-in.
     3. ``org_prefix_from_id(organization_id)`` — derived per-org so a
        multi-tenant deployment never mints one shared address. (This
        replaced ``HAIL_MAIL_DEFAULT_ORG_PREFIX``, a deploy-wide constant
        that every org collided on: the first org claimed it and the global
        unique index 409'd the rest.)
 
-    Returns ``(user_prefix, org_prefix)``. Raises HTTPException 503 only if
-    the user prefix has no source — the org prefix is always derivable.
+    Returns ``(workspace_prefix, name_prefix)``. Raises HTTPException 503
+    only if the workspace prefix has no source — the name prefix is always
+    derivable.
     """
-    env_user, env_org = ("", "")
+    env_workspace, env_name = ("", "")
     if settings.hail_mail_from:
-        env_user, env_org = _parse_hail_mail_from(settings.hail_mail_from)
+        env_workspace, env_name = _parse_hail_mail_from(settings.hail_mail_from)
 
     default = settings.hail_mail_default_user_prefix
-    user = (
-        body_user
-        or env_user
-        or (default and default_user_prefix(default, organization_id))
+    workspace = (
+        body_workspace
+        or env_workspace
+        or (default and default_workspace_prefix(default, organization_id))
     )
-    org = body_org or env_org or org_prefix_from_id(organization_id)
-    if user in RESERVED_USER_PREFIXES:
+    name = body_name or env_name or org_prefix_from_id(organization_id)
+    if workspace in RESERVED_WORKSPACE_PREFIXES:
         raise unprocessable(
-            f"user prefix {user!r} is reserved",
-            loc=["body", "local_prefix_user"],
+            f"workspace prefix {workspace!r} is reserved",
+            loc=["body", "local_prefix_workspace"],
         )
-    if not user:
+    if not workspace:
         raise HTTPException(
             status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=(
                 "hail-mail prefixes are not configured: missing "
-                "local_prefix_user (or HAIL_MAIL_FROM / "
+                "local_prefix_workspace (or HAIL_MAIL_FROM / "
                 "HAIL_MAIL_DEFAULT_USER_PREFIX)"
             ),
         )
-    return user, org
+    return workspace, name
 
 
 HAIL_MAIL_EXISTS_DETAIL = (
@@ -246,16 +248,16 @@ HAIL_MAIL_EXISTS_DETAIL = (
 )
 
 
-def taken_user_prefix_detail(user_prefix: str) -> str:
-    """409 text for a user prefix another hail-mail row already holds."""
+def taken_workspace_prefix_detail(workspace_prefix: str) -> str:
+    """409 text for a workspace prefix another hail-mail row already holds."""
     return (
-        f"hail-mail user prefix {user_prefix!r} is already taken; "
-        "choose a different local_prefix_user"
+        f"hail-mail workspace prefix {workspace_prefix!r} is already taken; "
+        "choose a different local_prefix_workspace"
     )
 
 
-def compose_hail_mail_address(user_prefix: str, org_prefix: str) -> str:
-    """``<user>+<org>@<HAIL_MAIL_BASE_DOMAIN>`` — fails fast if base is unset."""
+def compose_hail_mail_address(workspace_prefix: str, name_prefix: str) -> str:
+    """``<workspace>+<name>@<HAIL_MAIL_BASE_DOMAIN>``; fails fast if base is unset."""
     base = settings.hail_mail_base_domain
     if not base:
         raise HTTPException(
@@ -266,7 +268,7 @@ def compose_hail_mail_address(user_prefix: str, org_prefix: str) -> str:
                 "with kind='custom'"
             ),
         )
-    return f"{user_prefix}+{org_prefix}@{base}"
+    return f"{workspace_prefix}+{name_prefix}@{base}"
 
 
 # --------------------------------------------------------------------------- #
@@ -344,16 +346,16 @@ async def _unminted_hail_mail(db: AsyncSession, organization_id: UUID) -> str | 
         # resolve_sender 422s on this state instead of minting.
         return None
     try:
-        user_prefix, org_prefix = resolve_hail_mail_prefixes(
+        workspace_prefix, name_prefix = resolve_hail_mail_prefixes(
             None, None, organization_id
         )
-        address = compose_hail_mail_address(user_prefix, org_prefix)
+        address = compose_hail_mail_address(workspace_prefix, name_prefix)
     except HTTPException:
         # 503 from either helper — the operator has not configured
         # hail-mail. Not an error for a read; there simply is no default.
         return None
 
-    # The hail-mail user prefix is unique across the whole deployment, not
+    # The hail-mail workspace prefix is unique across the whole deployment, not
     # per org. ``HAIL_MAIL_FROM`` pins one for every tenant, so on a
     # multi-tenant deployment the first org to send claims it and the mint
     # 409s for everyone else (emails.py, the IntegrityError branch). Report
@@ -362,13 +364,13 @@ async def _unminted_hail_mail(db: AsyncSession, organization_id: UUID) -> str | 
         await db.execute(
             select(EmailDomain.organization_id).where(
                 EmailDomain.kind == "hail_mail",
-                EmailDomain.local_prefix_user == user_prefix,
+                EmailDomain.local_prefix_workspace == workspace_prefix,
             )
         )
     ).scalar_one_or_none()
     if owner is not None and owner != organization_id:
         return None
-    if await head_retired_by_other_org(db, user_prefix, organization_id):
+    if await head_retired_by_other_org(db, workspace_prefix, organization_id):
         return None
     return address
 
@@ -400,18 +402,18 @@ async def create_email_domain(
     those DNS records and Hail confirms them.
     """
     if body.kind == "hail_mail":
-        user_prefix, org_prefix = resolve_hail_mail_prefixes(
-            body.local_prefix_user,
-            body.local_prefix_org,
+        workspace_prefix, name_prefix = resolve_hail_mail_prefixes(
+            body.local_prefix_workspace,
+            body.local_prefix_name,
             principal.organization_id,
         )
-        address = compose_hail_mail_address(user_prefix, org_prefix)
+        address = compose_hail_mail_address(workspace_prefix, name_prefix)
         sd = EmailDomain(
             organization_id=principal.organization_id,
             kind="hail_mail",
             domain=address,
-            local_prefix_user=user_prefix,
-            local_prefix_org=org_prefix,
+            local_prefix_workspace=workspace_prefix,
+            local_prefix_name=name_prefix,
             # Parent domain is pre-verified by the operator out-of-band.
             verification_status="verified",
             dns_records=[],
@@ -438,7 +440,7 @@ async def create_email_domain(
                 detail=(
                     HAIL_MAIL_EXISTS_DETAIL
                     if existing.first() is not None
-                    else taken_user_prefix_detail(user_prefix)
+                    else taken_workspace_prefix_detail(workspace_prefix)
                 ),
             ) from exc
         await db.refresh(sd)
@@ -806,7 +808,7 @@ async def patch_email_domain(
 
     Four modes, mutually compatible:
 
-    * **Prefix edit** (``local_prefix_user`` / ``local_prefix_org``):
+    * **Prefix edit** (``local_prefix_workspace`` / ``local_prefix_name``):
       hail_mail rows only. The managed-cloud console writes here when
       an org admin changes the visible hail-mail address.
     * **Send switch** (``sends_enabled``): custom rows only. ``false``
@@ -831,19 +833,19 @@ async def patch_email_domain(
     updates: dict = {}
 
     # ---- prefix edits (hail_mail only) ----
-    if body.local_prefix_user is not None or body.local_prefix_org is not None:
+    if body.local_prefix_workspace is not None or body.local_prefix_name is not None:
         if sd.kind != "hail_mail":
             raise unprocessable(
                 "prefix edits are only allowed on kind='hail_mail' rows",
-                loc=["body", "local_prefix_user"],
+                loc=["body", "local_prefix_workspace"],
             )
-        new_user = body.local_prefix_user or sd.local_prefix_user
-        head_changed = new_user != sd.local_prefix_user
-        new_org = body.local_prefix_org or sd.local_prefix_org
-        assert new_user is not None and new_org is not None
-        new_address = compose_hail_mail_address(new_user, new_org)
-        updates["local_prefix_user"] = new_user
-        updates["local_prefix_org"] = new_org
+        new_workspace = body.local_prefix_workspace or sd.local_prefix_workspace
+        head_changed = new_workspace != sd.local_prefix_workspace
+        new_name = body.local_prefix_name or sd.local_prefix_name
+        assert new_workspace is not None and new_name is not None
+        new_address = compose_hail_mail_address(new_workspace, new_name)
+        updates["local_prefix_workspace"] = new_workspace
+        updates["local_prefix_name"] = new_name
         updates["domain"] = new_address
 
     # ---- send switch (custom only) ----
@@ -944,11 +946,11 @@ async def patch_email_domain(
     if issued:
         # Send through the org's hail-mail row, not necessarily ``sd``: the
         # console saves one list to every domain row, and a custom-domain row
-        # carries no org prefix, so the mail would name the wrong sender.
+        # carries no name prefix, so the mail would name the wrong sender.
         identity = await sending_identity(db, sd.organization_id) or sd
         sender = noreply_address(
             sd.organization_id,
-            identity.local_prefix_org,
+            identity.local_prefix_name,
             settings.hail_mail_base_domain,
         )
         for item in issued:
@@ -976,14 +978,14 @@ async def patch_email_domain(
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
-        if "local_prefix_user" in updates:
+        if "local_prefix_workspace" in updates:
             raise HTTPException(
                 status_code=http_status.HTTP_409_CONFLICT,
                 detail=(
-                    taken_user_prefix_detail(updates["local_prefix_user"])
+                    taken_workspace_prefix_detail(updates["local_prefix_workspace"])
                     if head_changed
                     else f"hail-mail address {updates['domain']!r} is already "
-                    "taken; choose a different local_prefix_org"
+                    "taken; choose a different local_prefix_name"
                 ),
             ) from exc
         raise unprocessable("patch violates a domain check constraint") from exc

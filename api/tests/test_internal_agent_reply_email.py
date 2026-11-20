@@ -101,8 +101,8 @@ async def _seed(
         organization_id=org,
         kind="hail_mail",
         domain=ADDRESS,
-        local_prefix_user="amber-heron-42",
-        local_prefix_org="acme",
+        local_prefix_workspace="amber-heron-42",
+        local_prefix_name="acme",
         verification_status="verified",
         provider="ses",
         verified_at=NOW,
@@ -1239,8 +1239,8 @@ async def test_a_custom_domain_reply_ignores_the_to_header(
     domain.kind = "custom"
     domain.domain = "acme.com"
     domain.inbound_enabled = True
-    domain.local_prefix_user = None
-    domain.local_prefix_org = None
+    domain.local_prefix_workspace = None
+    domain.local_prefix_name = None
     inbound.to_addresses = ["ceo@acme.com"]
     await async_session.commit()
     await _reply(client, inbound.id)
@@ -1382,8 +1382,8 @@ async def test_a_disabled_custom_inbox_cannot_send_a_queued_reply(
     _, _, domain, inbound = await _seed(async_session)
     domain.kind = "custom"
     domain.domain = "mail.example.test"
-    domain.local_prefix_user = None
-    domain.local_prefix_org = None
+    domain.local_prefix_workspace = None
+    domain.local_prefix_name = None
     domain.inbound_enabled = change != "inbound"
     if change == "verification":
         domain.verification_status = "pending"

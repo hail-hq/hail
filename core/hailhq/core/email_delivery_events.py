@@ -279,7 +279,7 @@ async def _stop_forwarding_on_complaint(
     domain = await db.get(EmailDomain, email.email_domain_id)
     sender = noreply_address(
         email.organization_id,
-        domain.local_prefix_org if domain is not None else None,
+        domain.local_prefix_name if domain is not None else None,
         settings.hail_mail_base_domain,
     )
     owners = await verified_member_emails(

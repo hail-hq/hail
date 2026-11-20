@@ -26,7 +26,11 @@ def _bearer(plain: str) -> dict[str, str]:
 
 
 def _hail_mail(head: str, tail: str = "acme") -> dict[str, str]:
-    return {"kind": "hail_mail", "local_prefix_user": head, "local_prefix_org": tail}
+    return {
+        "kind": "hail_mail",
+        "local_prefix_workspace": head,
+        "local_prefix_name": tail,
+    }
 
 
 @pytest.fixture(autouse=True)
@@ -45,7 +49,7 @@ async def test_post_refuses_a_reserved_head(
         "/email-domains", json=_hail_mail(head), headers=_bearer(plain)
     )
     assert resp.status_code == 422, resp.text
-    assert f"user prefix {head!r} is reserved" in resp.text
+    assert f"workspace prefix {head!r} is reserved" in resp.text
 
 
 async def test_patch_refuses_a_reserved_head(
@@ -59,11 +63,11 @@ async def test_patch_refuses_a_reserved_head(
 
     resp = await client.patch(
         f"/email-domains/{created.json()['id']}",
-        json={"local_prefix_user": "postmaster"},
+        json={"local_prefix_workspace": "postmaster"},
         headers=_bearer(plain),
     )
     assert resp.status_code == 422, resp.text
-    assert "user prefix 'postmaster' is reserved" in resp.text
+    assert "workspace prefix 'postmaster' is reserved" in resp.text
 
 
 async def test_pinned_from_with_a_role_head_is_refused(
@@ -79,7 +83,7 @@ async def test_pinned_from_with_a_role_head_is_refused(
     )
 
     assert resp.status_code == 422, resp.text
-    assert "user prefix 'admin' is reserved" in resp.text
+    assert "workspace prefix 'admin' is reserved" in resp.text
 
 
 async def test_role_name_as_the_default_prefix_still_mints(
@@ -96,7 +100,7 @@ async def test_role_name_as_the_default_prefix_still_mints(
     )
 
     assert resp.status_code == 201, resp.text
-    assert resp.json()["local_prefix_user"].startswith("admin-")
+    assert resp.json()["local_prefix_workspace"].startswith("admin-")
 
 
 async def test_second_address_in_one_org_returns_409(
@@ -131,7 +135,7 @@ async def test_head_retired_by_another_org_returns_409(
     )
     moved = await client.patch(
         f"/email-domains/{created.json()['id']}",
-        json={"local_prefix_user": "bob"},
+        json={"local_prefix_workspace": "bob"},
         headers=_bearer(plain_a),
     )
     assert moved.status_code == 200, moved.text
@@ -142,8 +146,8 @@ async def test_head_retired_by_another_org_returns_409(
 
     assert resp.status_code == 409, resp.text
     assert resp.json()["detail"] == (
-        "hail-mail user prefix 'alice' is already taken; "
-        "choose a different local_prefix_user"
+        "hail-mail workspace prefix 'alice' is already taken; "
+        "choose a different local_prefix_workspace"
     )
 
 
@@ -161,7 +165,7 @@ async def test_first_send_with_a_retired_pinned_head_returns_409(
     )
     await client.patch(
         f"/email-domains/{created.json()['id']}",
-        json={"local_prefix_user": "other"},
+        json={"local_prefix_workspace": "other"},
         headers=_bearer(plain_a),
     )
     monkeypatch.setattr(settings, "hail_mail_from", "team+shared@mail.hail.so")
@@ -179,8 +183,8 @@ async def test_first_send_with_a_retired_pinned_head_returns_409(
 
     assert resp.status_code == 409, resp.text
     assert resp.json()["detail"] == (
-        "hail-mail user prefix 'team' is already taken; "
-        "choose a different local_prefix_user"
+        "hail-mail workspace prefix 'team' is already taken; "
+        "choose a different local_prefix_workspace"
     )
     email_mock.send_email.assert_not_awaited()
 
@@ -243,8 +247,8 @@ async def test_agent_pick_prefers_a_verified_custom_domain(
             organization_id=org_id,
             kind="hail_mail",
             domain="alice+acme@mail.hail.so",
-            local_prefix_user="alice",
-            local_prefix_org="acme",
+            local_prefix_workspace="alice",
+            local_prefix_name="acme",
             verification_status="verified",
             provider="ses",
             created_at=now - timedelta(days=1),
@@ -354,8 +358,8 @@ async def test_disabled_custom_domain_is_not_a_sender_pick(
             organization_id=org_id,
             kind="hail_mail",
             domain="alice+acme@mail.hail.so",
-            local_prefix_user="alice",
-            local_prefix_org="acme",
+            local_prefix_workspace="alice",
+            local_prefix_name="acme",
             verification_status="verified",
             provider="ses",
             created_at=now - timedelta(days=1),
@@ -402,7 +406,7 @@ async def test_claim_waits_for_a_release_of_the_same_head(db) -> None:
     holder = uuid.uuid4()
     insert = text(
         "INSERT INTO email_domains (organization_id, kind, domain, "
-        "local_prefix_user, local_prefix_org, verification_status) "
+        "local_prefix_workspace, local_prefix_name, verification_status) "
         "VALUES (:org, 'hail_mail', :domain, 'alice', 'acme', 'verified')"
     )
 
@@ -420,7 +424,7 @@ async def test_claim_waits_for_a_release_of_the_same_head(db) -> None:
     async with db.begin() as release:
         await release.execute(
             text(
-                "UPDATE email_domains SET local_prefix_user = 'bob', "
+                "UPDATE email_domains SET local_prefix_workspace = 'bob', "
                 "domain = 'bob+acme@mail.hail.so' WHERE organization_id = :org"
             ),
             {"org": holder},

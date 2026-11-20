@@ -5,21 +5,21 @@ from __future__ import annotations
 import re
 import uuid
 
-from hailhq.core.hail_mail import default_user_prefix, org_prefix_from_id
+from hailhq.core.hail_mail import default_workspace_prefix, org_prefix_from_id
 from hailhq.core.schemas import LOCAL_PREFIX
 
 
-def test_default_user_prefix_is_unique_per_org() -> None:
+def test_default_workspace_prefix_is_unique_per_org() -> None:
     a = uuid.UUID(int=1)
     b = uuid.UUID(int=2)
-    assert default_user_prefix("admin", a) == f"admin-{org_prefix_from_id(a)}"
-    assert default_user_prefix("admin", a) != default_user_prefix("admin", b)
+    assert default_workspace_prefix("admin", a) == f"admin-{org_prefix_from_id(a)}"
+    assert default_workspace_prefix("admin", a) != default_workspace_prefix("admin", b)
 
 
-def test_default_user_prefix_fits_the_prefix_rule() -> None:
+def test_default_workspace_prefix_fits_the_prefix_rule() -> None:
     oid = uuid.UUID(int=1)
     for prefix in ("a", "admin", "a" * 20, "abcdefghij-klmn"):
-        assert re.fullmatch(LOCAL_PREFIX, default_user_prefix(prefix, oid))
+        assert re.fullmatch(LOCAL_PREFIX, default_workspace_prefix(prefix, oid))
 
 
 def test_org_prefix_is_deterministic() -> None:

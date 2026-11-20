@@ -1,6 +1,7 @@
 import uuid
 from datetime import datetime
 from decimal import Decimal
+from typing import ClassVar
 
 from hailhq.core.call_end_reasons import CallEndReasonDB
 from hailhq.core.call_failures import call_failure_message
@@ -13,6 +14,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     DateTime,
+    FetchedValue,
     ForeignKey,
     Index,
     Integer,
@@ -26,7 +28,13 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import INET, JSONB, UUID
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import (
+    DeclarativeBase,
+    Mapped,
+    Unmapped,
+    mapped_column,
+    unmapped_column,
+)
 
 
 class Base(DeclarativeBase):
@@ -1381,13 +1389,14 @@ class EmailDomain(Base):
     Two flavors of row:
 
     * ``kind = 'hail_mail'`` — a per-org sending address of the form
-      ``<local_prefix_user>+<local_prefix_org>@<HAIL_MAIL_BASE_DOMAIN>``
-      (e.g. ``alice+acme@mail.hail.so``). The two prefix columns are the
+      ``<local_prefix_workspace>+<local_prefix_name>@<HAIL_MAIL_BASE_DOMAIN>``
+      (e.g. ``acme+amber@mail.hail.so``). The two prefix columns are the
       source of truth; ``domain`` is the computed full address kept in
       sync at write time. The parent base domain is pre-verified by the
       operator out-of-band, so these rows land at ``verified`` immediately
-      and ``dns_records`` stays empty. ``local_prefix_user`` is the mailbox
-      and ``local_prefix_org`` an alias: inbound mail routes on the user
+      and ``dns_records`` stays empty. ``local_prefix_workspace`` names the
+      workspace and is the mailbox; ``local_prefix_name`` is a free name
+      inside the workspace (an alias): inbound mail routes on the workspace
       prefix alone.
     * ``kind = 'custom'`` — a tenant-controlled bare DNS name (e.g.
       ``acme.com``). The prefix columns are both NULL.
@@ -1398,7 +1407,7 @@ class EmailDomain(Base):
     Dual-purpose ``domain`` column (intentional for v1):
 
     * For ``custom`` rows it's the bare DNS identity SES verifies.
-    * For ``hail_mail`` rows it's the full ``<user>+<org>@<base>``
+    * For ``hail_mail`` rows it's the full ``<workspace>+<name>@<base>``
       address used as the wire ``From:``.
 
     A future refactor could split into ``dns_domain`` (always the
@@ -1424,8 +1433,19 @@ class EmailDomain(Base):
     # full sending address (`domain`) is computed from these at write time
     # and kept in sync — these two are the source of truth, `domain` is the
     # convenience materialization other callers can read without re-parsing.
-    local_prefix_user: Mapped[str | None] = mapped_column(Text, nullable=True)
-    local_prefix_org: Mapped[str | None] = mapped_column(Text, nullable=True)
+    local_prefix_workspace: Mapped[str | None] = mapped_column(Text, nullable=True)
+    local_prefix_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Old names of the two columns above, with the meanings swapped in the
+    # name: local_prefix_user holds the workspace part, local_prefix_org the
+    # name part. Not mapped: code reads and writes the new pair, and the
+    # 0087 trigger copies it here. The unique index, the CHECKs and the 0070
+    # triggers still read these until the old columns are dropped.
+    local_prefix_user: Unmapped[str | None] = unmapped_column(
+        Text, nullable=True, server_default=FetchedValue()
+    )
+    local_prefix_org: Unmapped[str | None] = unmapped_column(
+        Text, nullable=True, server_default=FetchedValue()
+    )
     verification_status: Mapped[str] = mapped_column(
         Text, server_default="pending", nullable=False
     )
@@ -1518,7 +1538,7 @@ class EmailDomain(Base):
         # An org can't register the same domain twice.  Custom domains are
         # globally unique (one org per domain) — see the partial index below.
         # hail_mail rows are org-scoped by this constraint only (their global
-        # uniqueness is enforced on the user prefix, not the domain column).
+        # uniqueness is enforced on the workspace prefix, not the domain column).
         UniqueConstraint(
             "organization_id", "domain", name="email_domains_org_domain_unique"
         ),
@@ -1532,7 +1552,7 @@ class EmailDomain(Base):
             unique=True,
             postgresql_where=text("kind = 'custom'"),
         ),
-        # Hail-mail addresses route inbound mail by the user prefix alone,
+        # Hail-mail addresses route inbound mail by the workspace prefix alone,
         # with no org scoping at lookup time (email_ingest does not match the
         # domain column) — the prefix must be globally unique or org B could
         # register org A's prefix and intercept mail, even if
@@ -1563,14 +1583,26 @@ class RetiredHailMailAddress(Base):
 
     __tablename__ = "retired_hail_mail_addresses"
 
-    local_prefix_user: Mapped[str] = mapped_column(Text, primary_key=True)
-    local_prefix_org: Mapped[str] = mapped_column(Text, primary_key=True)
+    local_prefix_workspace: Mapped[str] = mapped_column(Text, nullable=True)
+    local_prefix_name: Mapped[str] = mapped_column(Text, nullable=True)
+    # Old names of the pair above, filled by the 0087 trigger. They hold the
+    # table's primary key until the old columns are dropped. See EmailDomain.
+    local_prefix_user: Unmapped[str] = unmapped_column(
+        Text, primary_key=True, server_default=FetchedValue()
+    )
+    local_prefix_org: Unmapped[str] = unmapped_column(
+        Text, primary_key=True, server_default=FetchedValue()
+    )
     organization_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True
     )
     retired_at: Mapped[datetime] = mapped_column(
         TS, server_default=text("now()"), nullable=False
     )
+
+    __mapper_args__: ClassVar[dict] = {
+        "primary_key": [local_prefix_workspace, local_prefix_name, organization_id]
+    }
 
 
 # Rules on a NEW head or tail only, so an older row with a role-name head keeps
@@ -1670,6 +1702,38 @@ CREATE OR REPLACE TRIGGER email_domains_retire_hail_mail
 AFTER UPDATE OR DELETE ON email_domains
 FOR EACH ROW EXECUTE FUNCTION email_domains_retire_hail_mail()
 """
+# Keeps the old prefix columns equal to the new ones while old writers (the
+# website) still use them. Mirrors migration 0087.
+HAIL_MAIL_SYNC_FUNCTION = """
+CREATE OR REPLACE FUNCTION hail_mail_sync_prefix_columns() RETURNS trigger AS $$
+BEGIN
+    -- local_prefix_workspace = local_prefix_user, local_prefix_name =
+    -- local_prefix_org. The new pair wins a conflict.
+    IF TG_OP = 'INSERT' THEN
+        NEW.local_prefix_workspace :=
+            COALESCE(NEW.local_prefix_workspace, NEW.local_prefix_user);
+        NEW.local_prefix_name := COALESCE(NEW.local_prefix_name, NEW.local_prefix_org);
+    ELSE
+        IF NEW.local_prefix_workspace IS NOT DISTINCT FROM OLD.local_prefix_workspace THEN
+            NEW.local_prefix_workspace := NEW.local_prefix_user;
+        END IF;
+        IF NEW.local_prefix_name IS NOT DISTINCT FROM OLD.local_prefix_name THEN
+            NEW.local_prefix_name := NEW.local_prefix_org;
+        END IF;
+    END IF;
+    NEW.local_prefix_user := NEW.local_prefix_workspace;
+    NEW.local_prefix_org := NEW.local_prefix_name;
+    RETURN NEW;
+END
+$$ LANGUAGE plpgsql
+"""
+# "00" sorts before every other trigger name: Postgres fires triggers of one
+# timing in name order, and the 0070 guard reads the old columns.
+HAIL_MAIL_SYNC_TRIGGERS = tuple(f"""
+CREATE OR REPLACE TRIGGER {table}_00_sync_prefix_columns
+BEFORE INSERT OR UPDATE ON {table}
+FOR EACH ROW EXECUTE FUNCTION hail_mail_sync_prefix_columns()
+""" for table in ("email_domains", "retired_hail_mail_addresses"))
 
 # Base.metadata.create_all (tests) must produce the same shape as the migration.
 for _statement in (
@@ -1677,6 +1741,8 @@ for _statement in (
     EMAIL_DOMAINS_GUARD_TRIGGER,
     EMAIL_DOMAINS_RETIRE_FUNCTION,
     EMAIL_DOMAINS_RETIRE_TRIGGER,
+    HAIL_MAIL_SYNC_FUNCTION,
+    *HAIL_MAIL_SYNC_TRIGGERS,
 ):
     event.listen(Base.metadata, "after_create", DDL(_statement))
 

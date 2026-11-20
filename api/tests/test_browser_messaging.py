@@ -82,8 +82,8 @@ async def seed(db):
         organization_id=org,
         kind="hail_mail",
         domain="demo+workspace@mail.example.test",
-        local_prefix_user="demo",
-        local_prefix_org="workspace",
+        local_prefix_workspace="demo",
+        local_prefix_name="workspace",
         verification_status="verified",
         dns_records=[],
     )
@@ -823,7 +823,7 @@ async def test_generated_inbox_mints_even_with_existing_custom_domain(
     ).scalar_one()
     assert caps["inboxAddress"] == generated.domain
     assert generated.domain == compose_hail_mail_address(
-        generated.local_prefix_user, generated.local_prefix_org
+        generated.local_prefix_workspace, generated.local_prefix_name
     )
     assert caps["inboundEmailReady"]
 

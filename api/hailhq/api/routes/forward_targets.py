@@ -173,7 +173,7 @@ async def resend_forward_confirm(
 
     sender = noreply_address(
         principal.organization_id,
-        identity.local_prefix_org,
+        identity.local_prefix_name,
         settings.hail_mail_base_domain,
     )
     subject, text, html = render_forward_confirm(

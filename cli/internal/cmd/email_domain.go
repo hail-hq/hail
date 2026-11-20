@@ -49,11 +49,11 @@ Two flavors of identity (POST body 'kind' field):
 // --------------------------------------------------------------------------- //
 
 type emailDomainRegisterFlags struct {
-	kind       string
-	domain     string
-	userPrefix string
-	orgPrefix  string
-	idemKey    string
+	kind            string
+	domain          string
+	workspacePrefix string
+	namePrefix      string
+	idemKey         string
 }
 
 func newEmailDomainRegisterCmd(opts *Options) *cobra.Command {
@@ -67,9 +67,9 @@ Examples:
   # Hail-mail using server env defaults (HAIL_MAIL_DEFAULT_USER_PREFIX):
   hail email domain register --kind hail_mail
 
-  # Hail-mail with explicit prefixes:
+  # Hail-mail with explicit prefixes (acme+amber@<base>):
   hail email domain register --kind hail_mail \
-      --local-prefix-user alice --local-prefix-org acme
+      --local-prefix-workspace acme --local-prefix-name amber
 
   # Custom domain (returns DKIM CNAMEs to publish):
   hail email domain register --kind custom --domain acme.com`,
@@ -81,8 +81,13 @@ Examples:
 	}
 	cmd.Flags().StringVar(&f.kind, "kind", "", "Identity kind: hail_mail or custom")
 	cmd.Flags().StringVar(&f.domain, "domain", "", "DNS domain — required if --kind=custom; omit for --kind=hail_mail")
-	cmd.Flags().StringVar(&f.userPrefix, "local-prefix-user", "", "User-side local part for kind=hail_mail, held by one organization only (falls back to HAIL_MAIL_DEFAULT_USER_PREFIX plus a per-organization token)")
-	cmd.Flags().StringVar(&f.orgPrefix, "local-prefix-org", "", "Org-side local part for kind=hail_mail (falls back to a value derived from the organization id)")
+	cmd.Flags().StringVar(&f.workspacePrefix, "local-prefix-workspace", "", "Part before the '+' for kind=hail_mail. It names the workspace, held by one workspace only (falls back to HAIL_MAIL_DEFAULT_USER_PREFIX plus a per-organization token)")
+	cmd.Flags().StringVar(&f.namePrefix, "local-prefix-name", "", "Part after the '+' for kind=hail_mail, a free name inside the workspace (falls back to a value derived from the organization id)")
+	// Old names of the two flags above, kept so existing scripts still work.
+	cmd.Flags().StringVar(&f.workspacePrefix, "local-prefix-user", "", "Deprecated: use --local-prefix-workspace")
+	_ = cmd.Flags().MarkDeprecated("local-prefix-user", "use --local-prefix-workspace")
+	cmd.Flags().StringVar(&f.namePrefix, "local-prefix-org", "", "Deprecated: use --local-prefix-name")
+	_ = cmd.Flags().MarkDeprecated("local-prefix-org", "use --local-prefix-name")
 	cmd.Flags().StringVar(&f.idemKey, "idempotency-key", "", "Defaults to a fresh UUID")
 	cmd.MarkFlagRequired("kind")
 	return cmd
@@ -100,15 +105,15 @@ func runEmailDomainRegister(
 	if f.kind == "custom" && f.domain == "" {
 		return requireInputs(cmd, "--domain (required when --kind=custom)")
 	}
-	if f.kind == "custom" && (f.userPrefix != "" || f.orgPrefix != "") {
-		return helpAndFail(cmd, "--local-prefix-user/--local-prefix-org are not allowed with --kind=custom")
+	if f.kind == "custom" && (f.workspacePrefix != "" || f.namePrefix != "") {
+		return helpAndFail(cmd, "--local-prefix-workspace/--local-prefix-name are not allowed with --kind=custom")
 	}
 
 	body := client.EmailDomainCreate{
-		Kind:            client.EmailDomainCreateKind(f.kind),
-		Domain:          strPtr(f.domain),
-		LocalPrefixUser: strPtr(f.userPrefix),
-		LocalPrefixOrg:  strPtr(f.orgPrefix),
+		Kind:                 client.EmailDomainCreateKind(f.kind),
+		Domain:               strPtr(f.domain),
+		LocalPrefixWorkspace: strPtr(f.workspacePrefix),
+		LocalPrefixName:      strPtr(f.namePrefix),
 	}
 
 	apiClient, err := opts.newClientWithIdempotency(f.idemKey)
@@ -442,11 +447,12 @@ func printEmailDomain(opts *Options, sd *client.EmailDomainResponse) error {
 	}
 	fmt.Fprintf(opts.Stdout, "✓ Email domain %s: %s\n", string(sd.Kind), sd.Id.String())
 	fmt.Fprintf(opts.Stdout, "  Domain:       %s\n", sd.Domain)
-	if sd.LocalPrefixUser != nil && *sd.LocalPrefixUser != "" {
-		fmt.Fprintf(opts.Stdout, "  User prefix:  %s\n", *sd.LocalPrefixUser)
+	// A server from before the rename sends only the old names.
+	if p := firstNonEmpty(sd.LocalPrefixWorkspace, sd.LocalPrefixUser); p != "" {
+		fmt.Fprintf(opts.Stdout, "  Workspace:    %s\n", p)
 	}
-	if sd.LocalPrefixOrg != nil && *sd.LocalPrefixOrg != "" {
-		fmt.Fprintf(opts.Stdout, "  Org prefix:   %s\n", *sd.LocalPrefixOrg)
+	if p := firstNonEmpty(sd.LocalPrefixName, sd.LocalPrefixOrg); p != "" {
+		fmt.Fprintf(opts.Stdout, "  Name:         %s\n", p)
 	}
 	fmt.Fprintf(opts.Stdout, "  Verification: %s\n", string(sd.VerificationStatus))
 	if sd.EmailAgentId != nil {
@@ -572,4 +578,14 @@ func printEmailDomainList(opts *Options, body *client.EmailDomainListResponse) e
 		fmt.Fprintf(opts.Stdout, "\nMore: --cursor %s\n", *body.NextCursor)
 	}
 	return nil
+}
+
+// firstNonEmpty returns the first set, non-empty value.
+func firstNonEmpty(values ...*string) string {
+	for _, v := range values {
+		if v != nil && *v != "" {
+			return *v
+		}
+	}
+	return ""
 }

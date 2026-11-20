@@ -9,6 +9,7 @@ import httpx
 import pytest
 import respx
 from hail import Client, EmailDomainCreate, EmailDomainPatch
+from hail.models import EmailDomainResponse
 from pydantic import ValidationError
 
 from tests.conftest import make_dns_check_response, make_email_domain_response
@@ -27,8 +28,8 @@ async def test_email_domains_create_hail_mail(base_url: str, api_key: str) -> No
     async with Client(api_key=api_key, base_url=base_url) as c:
         sd = await c.email_domains.create(
             kind="hail_mail",
-            local_prefix_user="alice",
-            local_prefix_org="acme",
+            local_prefix_workspace="alice",
+            local_prefix_name="acme",
         )
     assert sd.kind == "hail_mail"
     assert sd.domain == "alice+acme@mail.hail.so"
@@ -36,8 +37,8 @@ async def test_email_domains_create_hail_mail(base_url: str, api_key: str) -> No
     body = json.loads(route.calls.last.request.content)
     assert body == {
         "kind": "hail_mail",
-        "local_prefix_user": "alice",
-        "local_prefix_org": "acme",
+        "local_prefix_workspace": "alice",
+        "local_prefix_name": "acme",
     }
 
 
@@ -54,8 +55,8 @@ async def test_email_domains_create_custom_returns_dkim(
         kind="custom",
         domain="acme.com",
         verification_status="pending",
-        local_prefix_user=None,
-        local_prefix_org=None,
+        local_prefix_workspace=None,
+        local_prefix_name=None,
         dns_records=dkim,
     )
     respx.post(f"{base_url}/email-domains").mock(
@@ -237,17 +238,17 @@ async def test_email_domains_patch(base_url: str, api_key: str) -> None:
     payload = make_email_domain_response(
         kind="hail_mail",
         domain="bob+acme@mail.hail.so",
-        local_prefix_user="bob",
-        local_prefix_org="acme",
+        local_prefix_workspace="bob",
+        local_prefix_name="acme",
     )
     route = respx.patch(f"{base_url}/email-domains/{payload['id']}").mock(
         return_value=httpx.Response(200, json=payload)
     )
     async with Client(api_key=api_key, base_url=base_url) as c:
-        sd = await c.email_domains.patch(payload["id"], local_prefix_user="bob")
+        sd = await c.email_domains.patch(payload["id"], local_prefix_workspace="bob")
     assert sd.domain == "bob+acme@mail.hail.so"
     body = json.loads(route.calls.last.request.content)
-    assert body == {"local_prefix_user": "bob"}
+    assert body == {"local_prefix_workspace": "bob"}
 
 
 @respx.mock
@@ -279,12 +280,14 @@ def test_email_domain_create_hail_mail_rejects_domain() -> None:
 
 def test_email_domain_create_custom_rejects_prefixes() -> None:
     with pytest.raises(ValueError, match="only valid"):
-        EmailDomainCreate(kind="custom", domain="acme.com", local_prefix_user="alice")
+        EmailDomainCreate(
+            kind="custom", domain="acme.com", local_prefix_workspace="alice"
+        )
 
 
 def test_email_domain_create_invalid_prefix() -> None:
     with pytest.raises(ValueError, match="lowercase"):
-        EmailDomainCreate(kind="hail_mail", local_prefix_user="Alice!")
+        EmailDomainCreate(kind="hail_mail", local_prefix_workspace="Alice!")
 
 
 def test_email_domain_patch_requires_at_least_one_field() -> None:
@@ -292,11 +295,24 @@ def test_email_domain_patch_requires_at_least_one_field() -> None:
         EmailDomainPatch()
 
 
+def test_email_domain_models_read_the_deprecated_names() -> None:
+    create = EmailDomainCreate(
+        kind="hail_mail", local_prefix_user="acme", local_prefix_org="amber"
+    )
+    assert (create.local_prefix_workspace, create.local_prefix_name) == (
+        "acme",
+        "amber",
+    )
+    assert EmailDomainPatch(local_prefix_org="amber").local_prefix_name == "amber"
+    with pytest.raises(ValueError, match="deprecated name"):
+        EmailDomainPatch(local_prefix_user="acme", local_prefix_workspace="globex")
+
+
 def test_email_domain_patch_invalid_prefix() -> None:
     # Validator lowercases before regex-matching, so use a value that
     # still fails after lowercasing (space + '!' aren't in the charset).
     with pytest.raises(ValueError, match="lowercase"):
-        EmailDomainPatch(local_prefix_user="not valid!")
+        EmailDomainPatch(local_prefix_workspace="not valid!")
 
 
 # --------------------------------------------------------------------------- #
@@ -433,3 +449,51 @@ async def test_patch_refuses_a_new_agent_with_a_clear() -> None:
                 email_agent_id="22222222-2222-2222-2222-222222222222",
                 clear_email_agent=True,
             )
+
+
+def test_email_domain_response_fills_both_prefix_names() -> None:
+    """A server from before the rename sends only the old names."""
+    old = make_email_domain_response()
+    del old["local_prefix_workspace"], old["local_prefix_name"]
+    dom = EmailDomainResponse.model_validate(old)
+    assert (dom.local_prefix_workspace, dom.local_prefix_name) == ("alice", "acme")
+
+    new = make_email_domain_response()
+    del new["local_prefix_user"], new["local_prefix_org"]
+    dom = EmailDomainResponse.model_validate(new)
+    assert (dom.local_prefix_user, dom.local_prefix_org) == ("alice", "acme")
+
+
+@respx.mock
+async def test_email_domains_deprecated_kwargs_send_the_new_names(
+    base_url: str, api_key: str
+) -> None:
+    payload = make_email_domain_response()
+    create = respx.post(f"{base_url}/email-domains").mock(
+        return_value=httpx.Response(201, json=payload)
+    )
+    patch = respx.patch(f"{base_url}/email-domains/{payload['id']}").mock(
+        return_value=httpx.Response(200, json=payload)
+    )
+    async with Client(api_key=api_key, base_url=base_url) as c:
+        with pytest.warns(DeprecationWarning) as caught:
+            await c.email_domains.create(
+                kind="hail_mail", local_prefix_user="alice", local_prefix_org="acme"
+            )
+        assert len(caught) == 2
+        with pytest.warns(DeprecationWarning, match="local_prefix_org"):
+            await c.email_domains.patch(payload["id"], local_prefix_org="amber")
+        with pytest.warns(DeprecationWarning), pytest.raises(
+            ValueError, match="not both"
+        ):
+            await c.email_domains.patch(
+                payload["id"], local_prefix_workspace="acme", local_prefix_user="bob"
+            )
+    assert json.loads(create.calls.last.request.content) == {
+        "kind": "hail_mail",
+        "local_prefix_workspace": "alice",
+        "local_prefix_name": "acme",
+    }
+    assert json.loads(patch.calls.last.request.content) == {
+        "local_prefix_name": "amber"
+    }
