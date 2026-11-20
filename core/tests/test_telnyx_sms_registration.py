@@ -12,6 +12,9 @@ from hailhq.core.providers.verification.base import (
     RegistrationHoldsAnotherNumber,
     VerificationProviderError,
 )
+from hailhq.core.providers.verification.sms_review import (
+    LOW_VOLUME_FASTER_LANE_FAILED,
+)
 from hailhq.core.providers.verification.telnyx_sms import (
     TelnyxSmsRegistrationProvider,
 )
@@ -3486,10 +3489,6 @@ async def test_a_failed_lane_hold_marks_the_row_to_keep_checking() -> None:
 
 
 async def test_a_held_lane_still_unverified_stays_held_with_no_request() -> None:
-    from hailhq.core.providers.verification.sms_review import (
-        LOW_VOLUME_FASTER_LANE_FAILED,
-    )
-
     calls: list = []
     p, refs = _held_lane(calls, {"identity": "UNVERIFIED"})
     before = json.loads(json.dumps(refs))

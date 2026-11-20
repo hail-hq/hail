@@ -7997,8 +7997,6 @@ async def test_a_legacy_evidence_hold_is_not_audited_as_a_refusal(monkeypatch) -
     ],
 )
 def test_only_a_failed_faster_lane_hold_is_still_polled(refs, pollable) -> None:
-    from datetime import datetime, timezone
-
     row = CarrierVerification(
         state="submitted",
         purpose="sms",
@@ -8011,8 +8009,6 @@ def test_only_a_failed_faster_lane_hold_is_still_polled(refs, pollable) -> None:
 async def test_a_failed_lane_hold_that_ends_drops_its_guidance() -> None:
     """The brand was verified later: the plug-in dropped the hold, so the
     row reads as a normal pending one again."""
-    from datetime import datetime, timezone
-
     held = {"low_volume": True, "needs_information": True, "faster_lane_failed": True}
     row = CarrierVerification(
         id=uuid.uuid4(),
