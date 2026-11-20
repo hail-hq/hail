@@ -1438,8 +1438,8 @@ class EmailDomain(Base):
     # Old names of the two columns above, with the meanings swapped in the
     # name: local_prefix_user holds the workspace part, local_prefix_org the
     # name part. Not mapped: code reads and writes the new pair, and the
-    # 0087 trigger copies it here. The unique index, the CHECKs and the 0070
-    # triggers still read these until the old columns are dropped.
+    # sync trigger below copies it here. The unique index, the CHECKs and the
+    # guard and retire triggers still read these until the old columns are dropped.
     local_prefix_user: Unmapped[str | None] = unmapped_column(
         Text, nullable=True, server_default=FetchedValue()
     )
@@ -1563,7 +1563,7 @@ class EmailDomain(Base):
             unique=True,
             postgresql_where=text("kind = 'hail_mail'"),
         ),
-        # Inbound routing reads the new column. Mirrors migration 0087.
+        # Inbound routing reads the new column. Mirrors the migration.
         Index(
             "email_domains_hail_mail_workspace_idx",
             "local_prefix_workspace",
@@ -1591,7 +1591,7 @@ class RetiredHailMailAddress(Base):
 
     local_prefix_workspace: Mapped[str] = mapped_column(Text, nullable=True)
     local_prefix_name: Mapped[str] = mapped_column(Text, nullable=True)
-    # Old names of the pair above, filled by the 0087 trigger. They hold the
+    # Old names of the pair above, filled by the sync trigger. They hold the
     # table's primary key until the old columns are dropped. See EmailDomain.
     local_prefix_user: Unmapped[str] = unmapped_column(
         Text, primary_key=True, server_default=FetchedValue()
@@ -1607,7 +1607,7 @@ class RetiredHailMailAddress(Base):
     )
 
     __table_args__ = (
-        # The retired-address checks read the new columns. Mirrors 0087.
+        # The retired-address checks read the new columns. Mirrors the migration.
         Index(
             "retired_hail_mail_addresses_workspace_idx",
             "local_prefix_workspace",
@@ -1717,7 +1717,7 @@ AFTER UPDATE OR DELETE ON email_domains
 FOR EACH ROW EXECUTE FUNCTION email_domains_retire_hail_mail()
 """
 # Keeps the old prefix columns equal to the new ones while old writers (the
-# website) still use them. Mirrors migration 0087.
+# website) still use them. Mirrors the migration that added the new pair.
 HAIL_MAIL_SYNC_FUNCTION = """
 CREATE OR REPLACE FUNCTION hail_mail_sync_prefix_columns() RETURNS trigger AS $$
 BEGIN
@@ -1742,7 +1742,7 @@ END
 $$ LANGUAGE plpgsql
 """
 # "00" sorts before every other trigger name: Postgres fires triggers of one
-# timing in name order, and the 0070 guard reads the old columns.
+# timing in name order, and the guard trigger reads the old columns.
 HAIL_MAIL_SYNC_TRIGGERS = tuple(f"""
 CREATE OR REPLACE TRIGGER {table}_00_sync_prefix_columns
 BEFORE INSERT OR UPDATE ON {table}

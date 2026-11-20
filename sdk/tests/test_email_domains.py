@@ -306,6 +306,9 @@ def test_email_domain_models_read_the_deprecated_names() -> None:
     assert EmailDomainPatch(local_prefix_org="amber").local_prefix_name == "amber"
     with pytest.raises(ValueError, match="deprecated name"):
         EmailDomainPatch(local_prefix_user="acme", local_prefix_workspace="globex")
+    # The server folds case and spaces before it compares, so these match.
+    same = EmailDomainPatch(local_prefix_user="Acme ", local_prefix_workspace="acme")
+    assert same.local_prefix_workspace == "acme"
 
 
 def test_email_domain_patch_invalid_prefix() -> None:
@@ -481,6 +484,13 @@ async def test_email_domains_deprecated_kwargs_send_the_new_names(
                 kind="hail_mail", local_prefix_user="alice", local_prefix_org="acme"
             )
         assert len(caught) == 2
+        with pytest.warns(DeprecationWarning):
+            await c.email_domains.patch(
+                payload["id"], local_prefix_workspace="acme", local_prefix_user="Acme"
+            )
+        assert json.loads(patch.calls.last.request.content) == {
+            "local_prefix_workspace": "acme"
+        }
         with pytest.warns(DeprecationWarning, match="local_prefix_org"):
             await c.email_domains.patch(payload["id"], local_prefix_org="amber")
         with pytest.warns(DeprecationWarning), pytest.raises(

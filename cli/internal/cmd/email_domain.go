@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/google/uuid"
@@ -53,7 +54,10 @@ type emailDomainRegisterFlags struct {
 	domain          string
 	workspacePrefix string
 	namePrefix      string
-	idemKey         string
+	// Values of the deprecated --local-prefix-user / --local-prefix-org.
+	oldWorkspacePrefix string
+	oldNamePrefix      string
+	idemKey            string
 }
 
 func newEmailDomainRegisterCmd(opts *Options) *cobra.Command {
@@ -84,9 +88,9 @@ Examples:
 	cmd.Flags().StringVar(&f.workspacePrefix, "local-prefix-workspace", "", "Part before the '+' for kind=hail_mail. It names the workspace, held by one workspace only (falls back to HAIL_MAIL_DEFAULT_USER_PREFIX plus a per-organization token)")
 	cmd.Flags().StringVar(&f.namePrefix, "local-prefix-name", "", "Part after the '+' for kind=hail_mail, a free name inside the workspace (falls back to a value derived from the organization id)")
 	// Old names of the two flags above, kept so existing scripts still work.
-	cmd.Flags().StringVar(&f.workspacePrefix, "local-prefix-user", "", "Deprecated: use --local-prefix-workspace")
+	cmd.Flags().StringVar(&f.oldWorkspacePrefix, "local-prefix-user", "", "Deprecated: use --local-prefix-workspace")
 	_ = cmd.Flags().MarkDeprecated("local-prefix-user", "use --local-prefix-workspace")
-	cmd.Flags().StringVar(&f.namePrefix, "local-prefix-org", "", "Deprecated: use --local-prefix-name")
+	cmd.Flags().StringVar(&f.oldNamePrefix, "local-prefix-org", "", "Deprecated: use --local-prefix-name")
 	_ = cmd.Flags().MarkDeprecated("local-prefix-org", "use --local-prefix-name")
 	cmd.Flags().StringVar(&f.idemKey, "idempotency-key", "", "Defaults to a fresh UUID")
 	cmd.MarkFlagRequired("kind")
@@ -105,15 +109,23 @@ func runEmailDomainRegister(
 	if f.kind == "custom" && f.domain == "" {
 		return requireInputs(cmd, "--domain (required when --kind=custom)")
 	}
-	if f.kind == "custom" && (f.workspacePrefix != "" || f.namePrefix != "") {
+	workspacePrefix, err := mergePrefixFlag(f.workspacePrefix, f.oldWorkspacePrefix, "--local-prefix-workspace", "--local-prefix-user")
+	if err != nil {
+		return helpAndFail(cmd, err.Error())
+	}
+	namePrefix, err := mergePrefixFlag(f.namePrefix, f.oldNamePrefix, "--local-prefix-name", "--local-prefix-org")
+	if err != nil {
+		return helpAndFail(cmd, err.Error())
+	}
+	if f.kind == "custom" && (workspacePrefix != "" || namePrefix != "") {
 		return helpAndFail(cmd, "--local-prefix-workspace/--local-prefix-name are not allowed with --kind=custom")
 	}
 
 	body := client.EmailDomainCreate{
 		Kind:                 client.EmailDomainCreateKind(f.kind),
 		Domain:               strPtr(f.domain),
-		LocalPrefixWorkspace: strPtr(f.workspacePrefix),
-		LocalPrefixName:      strPtr(f.namePrefix),
+		LocalPrefixWorkspace: strPtr(workspacePrefix),
+		LocalPrefixName:      strPtr(namePrefix),
 	}
 
 	apiClient, err := opts.newClientWithIdempotency(f.idemKey)
@@ -588,4 +600,19 @@ func firstNonEmpty(values ...*string) string {
 		}
 	}
 	return ""
+}
+
+// mergePrefixFlag reads a prefix flag and its deprecated name. Both may be
+// given with one value; the server folds case and spaces the same way.
+func mergePrefixFlag(value, oldValue, flag, oldFlag string) (string, error) {
+	if oldValue == "" {
+		return value, nil
+	}
+	if value != "" && !strings.EqualFold(strings.TrimSpace(value), strings.TrimSpace(oldValue)) {
+		return "", fmt.Errorf("%s is the deprecated name of %s; pass only %s", oldFlag, flag, flag)
+	}
+	if value == "" {
+		return oldValue, nil
+	}
+	return value, nil
 }

@@ -1710,29 +1710,22 @@ _PREFIX_RULE = (
 )
 
 
-def _fold(value: Any) -> Any:
-    return value.strip().lower() if isinstance(value, str) else value
+def _merge_deprecated_prefix_fields(model: BaseModel) -> None:
+    """Read an old prefix field as its new name.
 
-
-def _move_deprecated_prefix_fields(data: Any) -> Any:
-    """Read an old prefix field name as its new name.
-
-    Both names may be sent with the same value. Different values are refused:
-    no guess about which one the caller meant.
+    The old fields are validated on their own first, so an error names the
+    field the caller sent. Both names may be sent with the same value.
+    Different values are refused: no guess about which one the caller meant.
     """
-    if not isinstance(data, dict):
-        return data
-    data = dict(data)
     for old, new in DEPRECATED_PREFIX_FIELDS.items():
-        value = data.pop(old, None)
+        value = getattr(model, old)
         if value is None:
             continue
-        given = data.get(new)
+        given = getattr(model, new)
         if given is None:
-            data[new] = value
-        elif _fold(given) != _fold(value):
+            setattr(model, new, value)
+        elif given != value:
             raise ValueError(f"{old} is the deprecated name of {new}; send only {new}")
-    return data
 
 
 def _normalize_local_prefix(v: str | None) -> str | None:
@@ -1865,19 +1858,14 @@ class EmailDomainCreate(BaseModel):
     )
     local_prefix_user: str | None = Field(
         default=None,
-        deprecated=True,
+        json_schema_extra={"deprecated": True},
         description="Deprecated: use local_prefix_workspace. Same meaning.",
     )
     local_prefix_org: str | None = Field(
         default=None,
-        deprecated=True,
+        json_schema_extra={"deprecated": True},
         description="Deprecated: use local_prefix_name. Same meaning.",
     )
-
-    @model_validator(mode="before")
-    @classmethod
-    def _deprecated_names(cls, data: Any) -> Any:
-        return _move_deprecated_prefix_fields(data)
 
     @field_validator("domain")
     @classmethod
@@ -1891,18 +1879,24 @@ class EmailDomainCreate(BaseModel):
             )
         return v
 
-    @field_validator("local_prefix_workspace", "local_prefix_name")
+    @field_validator(
+        "local_prefix_workspace",
+        "local_prefix_name",
+        "local_prefix_user",
+        "local_prefix_org",
+    )
     @classmethod
     def _validate_local_prefix(cls, v: str | None) -> str | None:
         return _normalize_local_prefix(v)
 
-    @field_validator("local_prefix_workspace")
+    @field_validator("local_prefix_workspace", "local_prefix_user")
     @classmethod
     def _not_reserved(cls, v: str | None) -> str | None:
         return _workspace_prefix_not_reserved(v)
 
     @model_validator(mode="after")
     def _kind_field_consistency(self):
+        _merge_deprecated_prefix_fields(self)
         if self.kind == "custom":
             if not self.domain:
                 raise ValueError("domain is required when kind='custom'")
@@ -1983,12 +1977,12 @@ class EmailDomainPatch(BaseModel):
     )
     local_prefix_user: str | None = Field(
         default=None,
-        deprecated=True,
+        json_schema_extra={"deprecated": True},
         description="Deprecated: use local_prefix_workspace. Same meaning.",
     )
     local_prefix_org: str | None = Field(
         default=None,
-        deprecated=True,
+        json_schema_extra={"deprecated": True},
         description="Deprecated: use local_prefix_name. Same meaning.",
     )
     inbound_enabled: bool | None = Field(
@@ -2039,20 +2033,20 @@ class EmailDomainPatch(BaseModel):
         ),
     )
 
-    @field_validator("local_prefix_workspace", "local_prefix_name")
+    @field_validator(
+        "local_prefix_workspace",
+        "local_prefix_name",
+        "local_prefix_user",
+        "local_prefix_org",
+    )
     @classmethod
     def _validate_local_prefix(cls, v: str | None) -> str | None:
         return _normalize_local_prefix(v)
 
-    @field_validator("local_prefix_workspace")
+    @field_validator("local_prefix_workspace", "local_prefix_user")
     @classmethod
     def _not_reserved(cls, v: str | None) -> str | None:
         return _workspace_prefix_not_reserved(v)
-
-    @model_validator(mode="before")
-    @classmethod
-    def _deprecated_names(cls, data: Any) -> Any:
-        return _move_deprecated_prefix_fields(data)
 
     @field_validator("forward_to")
     @classmethod
@@ -2067,6 +2061,7 @@ class EmailDomainPatch(BaseModel):
 
     @model_validator(mode="after")
     def _at_least_one_field(self):
+        _merge_deprecated_prefix_fields(self)
         if (
             self.local_prefix_workspace is None
             and self.local_prefix_name is None

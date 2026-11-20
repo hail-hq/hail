@@ -2045,6 +2045,22 @@ async def test_post_refuses_two_names_with_different_values(
     assert "is the deprecated name of" in resp.text
 
 
+async def test_error_on_an_old_name_points_at_that_name(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
+    _, _, plain = org_and_key
+    resp = await client.post(
+        "/email-domains",
+        json={"kind": "hail_mail", "local_prefix_org": "Not valid!"},
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 422, resp.text
+    assert [e["loc"] for e in resp.json()["detail"]] == [["body", "local_prefix_org"]]
+
+
 async def test_post_refuses_a_reserved_head_under_the_old_name(
     client: httpx.AsyncClient,
     org_and_key: tuple,
@@ -2059,6 +2075,7 @@ async def test_post_refuses_a_reserved_head_under_the_old_name(
     )
     assert resp.status_code == 422, resp.text
     assert "workspace prefix 'noreply' is reserved" in resp.text
+    assert resp.json()["detail"][0]["loc"] == ["body", "local_prefix_user"]
 
 
 def test_openapi_marks_the_old_prefix_names_deprecated() -> None:

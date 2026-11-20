@@ -119,6 +119,43 @@ func TestEmailDomain_RegisterDeprecatedPrefixFlags(t *testing.T) {
 	}
 }
 
+func TestEmailDomain_RegisterRefusesConflictingPrefixFlags(t *testing.T) {
+	srv := newFakeServer(t, http.StatusCreated, sampleEmailDomainResponse("hail_mail"))
+
+	_, stderr, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"email", "domain", "register",
+		"--kind", "hail_mail",
+		"--local-prefix-workspace", "acme",
+		"--local-prefix-user", "globex",
+	)
+	if err == nil || !strings.Contains(stderr, "deprecated name of --local-prefix-workspace") {
+		t.Fatalf("want a conflict error, got %v, stderr %q", err, stderr)
+	}
+	if got := atomic.LoadInt32(&srv.hits); got != 0 {
+		t.Fatalf("expected no request, got %d", got)
+	}
+
+	// One value under both names is fine.
+	_, _, err = runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"email", "domain", "register",
+		"--kind", "hail_mail",
+		"--local-prefix-name", "amber",
+		"--local-prefix-org", "Amber",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(srv.lastBody, &body); err != nil {
+		t.Fatalf("body parse: %v; raw=%s", err, srv.lastBody)
+	}
+	if body["local_prefix_name"] != "amber" {
+		t.Fatalf("local_prefix_name = %v", body["local_prefix_name"])
+	}
+}
+
 func TestEmailDomain_PrintsPrefixesFromAnOlderServer(t *testing.T) {
 	resp := sampleEmailDomainResponse("hail_mail")
 	resp.LocalPrefixWorkspace = nil

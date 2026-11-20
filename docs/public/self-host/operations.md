@@ -722,7 +722,7 @@ After stage 5, in order:
 
 5. **Forwarding** (only if `forward_to` is configured on the domain):
    the forward target must receive a copy from
-   `noreply+<org>@mail.hail.so` with the original sender in
+   `noreply+<name>@mail.hail.so` with the original sender in
    `Reply-To:`. Check `hail email list --direction outbound`. A
    row with `metadata.forwarded_from = <inbound id>` must show
    `status=sent`.
