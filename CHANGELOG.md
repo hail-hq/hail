@@ -54,6 +54,7 @@ The MCP registry entry moves to 0.2.0. Database migrations run on deploy.
 - Webhooks to CGNAT addresses (`100.64.0.0/10`, used by Tailscale), multicast, IPv6 site-local, or hosts that do not resolve are now refused, and existing ones fail on delivery. Self-hosters can allow them with `HAIL_WEBHOOK_ALLOW_PRIVATE_NETWORKS=true`.
 - A webhook `target_url` or BYO LLM `base_url` whose host is private or does not resolve is refused with one error text, which ends in `URL host is private or could not be resolved`.
 - Self-host: inbound calls can use one LiveKit trunk per carrier, locked to that carrier ([LiveKit Cloud §4](docs/public/self-host/livekit-cloud.md#4-inbound-calls)).
+- **Breaking.** Self-host with a `LIVEKIT_<CARRIER>_SIP_INBOUND_TRUNK_ID` set: before upgrading, add `hail-placeholder-shared` to the shared inbound trunk's `numbers`, or empty `LIVEKIT_SIP_INBOUND_TRUNK_ID`. A shared trunk with no numbers now takes calls to every number.
 - Calls: on Hail's cloud, a call's time limit is cut to the minutes your credit pays for, and `POST /v1/calls` returns 402 when it pays for less than one minute to that destination.
 - **Breaking.** A hail-mail user prefix now belongs to one organization (`409` if taken), and mail to `<user>@` or `<user>+<any alias>@` reaches that organization.
 - **Breaking.** An organization holds one hail-mail address, role names such as `admin` cannot be new user prefixes, and an address given up stays out of reach of other organizations.
