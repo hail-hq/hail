@@ -51,158 +51,34 @@ _UNAVAILABLE = "Email is not available right now."
 MAX_ORG_NAME_CHARS = 100
 # Control, format and surrogate characters: they could break or disguise text.
 _HIDDEN = frozenset({"Cc", "Cf", "Cs"})
-# Format characters some scripts need to draw letters: zero width
-# non-joiner and joiner. Kept only right after a letter or mark of a script
-# that uses them (Arabic and Persian, Indic), so they cannot hide inside
-# Latin words.
-_JOINERS = frozenset({"\u200c", "\u200d"})
-# Arabic in all its blocks counts as one script.
-_ARABIC = (
-    (0x0600, 0x06FF),
-    (0x0750, 0x077F),
-    (0x08A0, 0x08FF),
-    (0xFB50, 0xFDFF),
-    (0xFE70, 0xFEFF),
-)
-# Combining marks kept on one letter: more would pile over nearby text.
-_MAX_MARKS = 4
-# Devanagari to Sinhala: one script per 128-character block.
-_INDIC = (0x0900, 0x0DFF)
-# Thai and Lao vowels written before their consonant.
-_FOLLOWING_VOWELS = frozenset("\u0e33\u0eb3")  # SARA AM, Lao AM: join the one before
-_LEADING_VOWELS = frozenset(
-    "\u0e40\u0e41\u0e42\u0e43\u0e44\u0ec0\u0ec1\u0ec2\u0ec3\u0ec4"
-)
-
-
-def _joiner_script(c: str) -> int | None:
-    """Which script that uses joiners the letter or mark ``c`` is in: -1 for
-    Arabic, else the Indic block's start."""
-    if unicodedata.category(c)[0] not in "LM":
-        return None
-    code = ord(c)
-    if any(low <= code <= high for low, high in _ARABIC):
-        return -1
-    if _INDIC[0] <= code <= _INDIC[1]:
-        return code & ~0x7F
-    return None
-
-
-def _is_flag_letter(c: str) -> bool:
-    return 0x1F1E6 <= ord(c) <= 0x1F1FF
-
-
-def _inside_flag(text: str, at: int) -> bool:
-    """True when ``text[at - 1]`` is the first letter of a two-letter flag."""
-    run = 0
-    while at - run > 0 and _is_flag_letter(text[at - run - 1]):
-        run += 1
-    return run % 2 == 1
 
 
 def _one_line(text: str) -> str:
-    """``text`` on one line, without characters that could disguise it. A
-    joiner stays only between two letters or marks of one script that uses
-    it (Arabic, or one Indic block), or ends a word after an Indic virama.
-    Emoji joined by ZWJ show as separate emoji. A combining mark with no
-    letter before it, or past four on one letter, goes too: it would draw
-    over the fixed words."""
-    kept: list[str] = []
-
-    def drop_open_joiner() -> None:
-        # A ZWJ after a virama ends a word in older Malayalam chillu and
-        # Bengali khanda ta spellings: it stays.
-        if kept and kept[-1] in _JOINERS:
-            after_virama = (
-                kept[-1] == "\u200d"
-                and len(kept) > 1
-                and unicodedata.combining(kept[-2]) == 9
-                and _joiner_script(kept[-2]) not in (None, -1)
-            )
-            if not after_virama:
-                kept.pop()
-
-    def too_many_marks() -> bool:
-        run = 0
-        while run < len(kept) and unicodedata.category(kept[-run - 1])[0] == "M":
-            run += 1
-        return run >= _MAX_MARKS
-
-    for c in unicodedata.normalize("NFC", text):
-        category = unicodedata.category(c)
-        if c.isspace():
-            drop_open_joiner()
-            kept.append(" ")
-        elif c in _JOINERS:
-            if kept and _joiner_script(kept[-1]) is not None:
-                kept.append(c)
-        elif category in _HIDDEN or (
-            category.startswith("M")
-            and (not kept or kept[-1] == " " or too_many_marks())
-        ):
-            continue
-        else:
-            script = _joiner_script(c)
-            joined = kept and kept[-1] in _JOINERS
-            if joined and (script is None or script != _joiner_script(kept[-2])):
-                kept.pop()
-            kept.append(c)
-    drop_open_joiner()
-    return " ".join("".join(kept).split())
-
-
-def _splits_letter(text: str, at: int) -> bool:
-    """True when a cut before ``text[at]`` would split one written letter: a
-    combining mark or joiner follows, a virama, joiner or Thai leading vowel
-    comes before, or it falls inside a flag or before a skin tone."""
-    after, before = text[at], text[at - 1]
-    return (
-        unicodedata.category(after).startswith("M")
-        or after in _JOINERS
-        or after in _FOLLOWING_VOWELS
-        or before in _JOINERS
-        or before in _LEADING_VOWELS
-        or unicodedata.combining(before) == 9  # virama
-        or (_is_flag_letter(after) and _inside_flag(text, at))
-        or 0x1F3FB <= ord(after) <= 0x1F3FF  # emoji skin tone
-        or (_is_choseong(before) and _is_jamo_after_choseong(after))
+    """``text`` on one line, without characters that could disguise it."""
+    kept = "".join(
+        " " if c.isspace() else c
+        for c in text
+        if c.isspace() or unicodedata.category(c) not in _HIDDEN
     )
-
-
-def _is_choseong(c: str) -> bool:
-    code = ord(c)
-    return 0x1100 <= code <= 0x115F or 0xA960 <= code <= 0xA97F
-
-
-def _is_jamo_after_choseong(c: str) -> bool:
-    code = ord(c)
-    return 0x1160 <= code <= 0x11FF or 0xD7B0 <= code <= 0xD7FF
-
-
-def _cut(text: str, limit: int) -> str:
-    """``text`` cut to ``limit`` characters, never inside a written letter
-    (Indic vowel signs, viramas and joiners, Thai vowels, flags, skin
-    tones, Korean jamo). Text is NFC, so most Korean syllables are single characters (NFC
-    also maps CJK compatibility ideographs to their unified form)."""
-    if len(text) <= limit:
-        return text
-    while limit > 0 and _splits_letter(text, limit):
-        limit -= 1
-    return text[:limit].rstrip()
+    return " ".join(kept.split())
 
 
 def _org_name(org_name: str | None, limit: int = MAX_ORG_NAME_CHARS) -> str:
-    """The org name for the fixed lines. A Thai or Lao leading vowel at its
-    end has no consonant and would join the fixed words after it, so it
-    goes. A virama stays: it is part of how many names are spelled."""
-    name = _cut(_one_line(org_name or ""), limit).strip()
-    while name and name[-1] in _LEADING_VOWELS:
-        name = name[:-1].rstrip()
-    return name
+    return _one_line(org_name or "")[:limit].strip()
 
 
 def _fill(named: str, unnamed: str, name: str) -> str:
-    return named.replace("{org}", name) if name else unnamed
+    """``named`` with the org name, or ``unnamed`` without one. When a letter
+    follows ``{org}`` directly (Telugu ``{org}తో``) and the name ends in a
+    virama, a zero width non-joiner keeps the name from joining the fixed
+    word into one conjunct. The name itself stays as written."""
+    if not name:
+        return unnamed
+    before, _, after = named.partition("{org}")
+    joins = after[:1] and unicodedata.category(after[0])[0] in "LM"
+    if joins and unicodedata.combining(name[-1]) == 9:  # virama
+        name += "\u200c"
+    return f"{before}{name}{after}"
 
 
 def caller_email_subject(
@@ -216,8 +92,9 @@ def caller_email_subject(
     fixed = len(lines.subject.replace("{org}", "")) + 2  # ": "
     name = _org_name(org_name, min(MAX_ORG_NAME_CHARS, MAX_SUBJECT_CHARS - fixed))
     prefix = _fill(lines.subject, lines.subject_unnamed, name)
-    words = _cut(_one_line(subject), MAX_SUBJECT_CHARS - len(prefix) - 2)
-    return f"{prefix}: {words}" if words else prefix
+    words = _one_line(subject)
+    framed = f"{prefix}: {words}" if words else prefix
+    return framed[:MAX_SUBJECT_CHARS]
 
 
 def caller_email_body(

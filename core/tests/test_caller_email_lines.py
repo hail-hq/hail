@@ -65,116 +65,13 @@ def test_unknown_language_is_english():
         )
 
 
-def test_joiners_stay_and_a_cut_never_splits_a_letter():
-    # Marathi eyelash ra needs the zero width joiner.
-    assert caller_email_subject("र\u094d\u200dया", None, "mr").endswith(
-        ": र\u094d\u200dया"
-    )
-    # Bidi overrides still go.
-    assert "\u202e" not in caller_email_subject("a\u202eb", None)
-    prefix = caller_email_subject("", None, "hi")
-    room = MAX_SUBJECT_CHARS - len(prefix) - 2
-    # "कि" is a consonant and a vowel sign: the cut falls before the pair.
-    subject = caller_email_subject("क" * (room - 1) + "कि", None, "hi")
-    assert subject.endswith("क") and len(subject) == MAX_SUBJECT_CHARS - 1
-
-
-def test_joiners_only_stay_inside_non_latin_words():
-    assert caller_email_subject("P\u200dassword", None) == (
-        "From a phone call: Password"
-    )
-    assert caller_email_subject("Hi", "\u200d") == "From a phone call: Hi"
-    # Accented, Vietnamese and fullwidth Latin are Latin too.
-    for word in ("Pa\u0301\u200dss", "Vi\u1ec7\u200dt", "\uff30\u200dass"):
-        assert "\u200d" not in caller_email_subject(word, None)
-    # Persian keeps its non-joiner.
-    assert "\u200c" in caller_email_subject(
-        "\u0645\u06cc\u200c\u062e\u0648\u0627\u0645", None, "en"
-    )
-
-
-def test_a_cut_never_leaves_a_half_letter():
-    prefix = caller_email_subject("", None, "mr")
-    room = MAX_SUBJECT_CHARS - len(prefix) - 2
-    # Eyelash ra (ra, virama, joiner) then ya: the cut keeps none of it.
-    words = "क" * (room - 3) + "र\u094d\u200dया"
-    subject = caller_email_subject(words, None, "mr")
-    assert subject.endswith("क")
-    assert len(subject) == MAX_SUBJECT_CHARS - 3
-
-
-def test_a_cut_keeps_thai_vowels_and_flags_whole():
-    prefix = caller_email_subject("", None, "th")
-    room = MAX_SUBJECT_CHARS - len(prefix) - 2
-    thai = caller_email_subject("ก" * (room - 1) + "\u0e40\u0e01", None, "th")
-    assert thai.endswith("ก") and not thai.endswith("\u0e40")
-    flag = "\U0001f1ec\U0001f1e7"
-    cut = caller_email_subject("x" * (room - 1) + flag, None)
-    assert not cut.endswith("\U0001f1ec")
-
-
-def test_a_cut_keeps_skin_tones_and_korean_syllables_and_no_stray_colon():
-    prefix = caller_email_subject("", None)
-    room = MAX_SUBJECT_CHARS - len(prefix) - 2
-    thumb = caller_email_subject("x" * (room - 1) + "\U0001f44d\U0001f3fd", None)
-    assert thumb.endswith("x")
-    # Separate jamo become one syllable before the cut.
-    korean = caller_email_subject("x" * (room - 1) + "\u1100\u1161", None)
-    assert korean.endswith("\uac00")
-    assert caller_email_subject("\u0301" * 300, None) == "From a phone call"
-
-
-def test_a_joiner_never_sits_before_latin_or_at_the_end():
-    assert "\u200d" not in caller_email_subject("\u0915\u200dPassword", None)
-    assert "\u200d" not in caller_email_subject("Hi", "\u0915\u200d")
-
-
-def test_joiners_go_before_a_space_or_another_script():
-    assert "\u200d" not in caller_email_subject("Hi", "Acme \u0915\u200d Dental")
-    assert "\u200c" not in caller_email_subject("\u0645\u06cc\u200c x", None)
-    assert "\u200d" not in caller_email_subject("\u0645\u200d\u0915", None)
-
-
-def test_marks_with_no_letter_and_thai_sara_am():
-    assert caller_email_subject("\u0336\u0336abc", None) == "From a phone call: abc"
-    prefix = caller_email_subject("", None, "th")
-    room = MAX_SUBJECT_CHARS - len(prefix) - 2
-    thai = caller_email_subject("x" * (room - 1) + "\u0e01\u0e33", None, "th")
-    assert thai.endswith("x")
-
-
-def test_a_run_of_flags_is_cut_between_flags():
-    gb = "\U0001f1ec\U0001f1e7"
-    prefix = caller_email_subject("", None)
-    room = MAX_SUBJECT_CHARS - len(prefix) - 2
-    subject = caller_email_subject(gb * 100, None)
-    assert subject.startswith(prefix + ": " + gb)
-    words = subject[len(prefix) + 2 :]
-    assert len(words) % 2 == 0 and len(words) >= room - 1
-
-
-def test_org_name_keeps_its_spelling_and_drops_a_dangling_thai_vowel():
-    # Telugu "bank" ends in a virama: it stays.
+def test_org_name_ending_in_a_virama_never_joins_the_fixed_word():
+    # Telugu "bank" ends in a virama, and the te line puts a letter right
+    # after {org}: a zero width non-joiner keeps them apart.
     bank = "\u0c2c\u0c4d\u0c2f\u0c3e\u0c02\u0c15\u0c4d"
+    body = caller_email_body("Hi.", bank, "te")
+    template = CALLER_EMAIL_LINES["te"].first_line
+    assert body.startswith(template.replace("{org}", bank + "\u200c"))
+    # Where a space or a dot follows {org}, the name is unchanged.
     assert caller_email_subject("Hi", bank) == f"From a phone call with {bank}: Hi"
-    # Malayalam chillu in the older spelling ends in virama and ZWJ.
-    chillu = "\u0d28\u0d4d\u200d"
-    assert caller_email_subject("Hi", chillu + " X").startswith(
-        f"From a phone call with {chillu} X"
-    )
-    assert caller_email_subject("Hi", "Acme\u0e40", "th").endswith("Acme: Hi")
-
-
-def test_marks_on_one_letter_are_capped_and_archaic_jamo_stay_whole():
-    subject = caller_email_subject("A" + "\u0336" * 80, None)
-    assert subject == "From a phone call: A" + "\u0336" * 4
-    jamo = caller_email_subject("\u1113\u1161" * 120, None, "ko")
-    assert jamo.endswith("\u1161") and len(jamo) <= MAX_SUBJECT_CHARS
-
-
-def test_a_joiner_between_two_indic_scripts_goes():
-    assert "\u200d" not in caller_email_subject("\u0915\u200d\u0b95", None)
-    # Arabic and its presentation forms are one script.
-    assert "\u200c" in caller_email_subject("\u0645\u200c\ufe8d", None)
-    # Syriac is not Arabic.
-    assert "\u200d" not in caller_email_subject("\u0645\u200d\u0710", None)
+    assert f"with {bank}." in caller_email_body("Hi.", bank)
