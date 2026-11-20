@@ -57,6 +57,12 @@ campaign from the console (Numbers → Register for US texting) or with
 your approved Trust Hub primary profile (business identity ISV Reseller or
 Partner); without it, SMS registration through Twilio is off. Texts from an
 organization's US long codes to US numbers return 422 until it is approved.
+A company that leaves `daily_texts` blank, or answers `NOT_SURE` or
+`UP_TO_2000`, gets a Low-Volume Standard brand (`skip_automatic_sec_vet`) and a
+`LOW_VOLUME` campaign: no secondary vetting, about 2,000 texts a day to
+T-Mobile users, and no trust score. If Twilio cannot verify that company, the
+registration waits: cancel it and file again with `daily_texts=OVER_2000`.
+Twilio has no faster lane, so Hail ignores `faster_lane_ok` here.
 
 **Trial texting (United States).** Set `HAIL_SMS_TRIAL_NUMBER` to a toll-free
 number with approved toll-free verification; empty turns it off. Put that

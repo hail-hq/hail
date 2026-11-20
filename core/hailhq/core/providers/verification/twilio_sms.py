@@ -35,6 +35,7 @@ from hailhq.core.providers.verification.sms_form import (
 )
 from hailhq.core.providers.verification.sms_review import (
     LEGACY_APPLICATION,
+    LOW_VOLUME_NEEDS_NEW_FILING,
     application_validation_error,
     campaign_repair_reason,
 )
@@ -166,7 +167,10 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
         messaging_service_sid=None,
         provider_resource_id=None,
         e164=None,
+        low_volume=False,
     ) -> DraftResult:
+        """``low_volume``: the API's choice for a company (no secondary
+        vetting). The API writes ``provider_refs.low_volume`` itself."""
         subject_type = requirements.subject_type
         if requirements.number_type == "toll_free":
             return await self._create_tollfree_draft(
@@ -227,6 +231,7 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
                 fields,
                 address,
                 subject_type,
+                low_volume and not person,
             )
         except Exception as exc:
             _log_failure("draft", exc)
@@ -317,6 +322,7 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
         fields,
         address,
         subject_type,
+        low_volume=False,
     ) -> None:
         th = self._client.trusthub.v1
         person = subject_type == "person"
@@ -451,6 +457,10 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
         }
         if person:
             brand_kwargs["brand_type"] = "SOLE_PROPRIETOR"
+        elif low_volume:
+            # A Low-Volume Standard brand: no secondary vetting, so no trust
+            # score and the lowest daily limits.
+            brand_kwargs["skip_automatic_sec_vet"] = True
         brand = self._client.messaging.v1.brand_registrations.create(**brand_kwargs)
         # A person's code is texted by Twilio when the brand is approved.
         refs["brand_sid"] = brand.sid
@@ -488,6 +498,17 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
                 self._resend_otp_if_old(refs)
                 return ProviderStatus(state="pending")
             refs["identity_verified"] = True
+        elif (
+            refs.get("low_volume")
+            and brand.identity_status == "UNVERIFIED"
+            and "campaign_sid" not in refs
+        ):
+            # The carrier could not verify the company. Twilio's API cannot
+            # add vetting to a Low-Volume Standard brand (its Vettings
+            # resource files Campaign Verify tokens only), so the faster
+            # lane is a new registration. Held for the customer.
+            refs["needs_information"] = True
+            return ProviderStatus(state="pending", reason=LOW_VOLUME_NEEDS_NEW_FILING)
         svc = self._client.messaging.v1.services(refs["messaging_service_sid"])
         if "campaign_sid" not in refs:
             # Recover a paid submission whose response was lost before retrying.

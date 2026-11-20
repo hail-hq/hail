@@ -8,16 +8,19 @@
       "last_verified": "2026-10-13",
       "source_url": "https://support.twilio.com/hc/en-us/articles/1260803965530",
       "person": { "brand_usd": "4.50", "campaign_vetting_usd": "15.00", "campaign_monthly_usd": "2.00" },
-      "business": { "brand_usd": "46.00", "campaign_vetting_usd": "15.00", "campaign_monthly_usd": "10.00" }
+      "business": { "brand_usd": "46.00", "campaign_vetting_usd": "15.00", "campaign_monthly_usd": "10.00" },
+      "note": "business_low_volume is a Low-Volume Standard brand (skip_automatic_sec_vet, no secondary vetting) with a LOW_VOLUME campaign, from Twilio docs; not yet checked against a Twilio invoice. One Twilio page gives the brand as $4; brand_usd uses $4.50, the same as person.brand_usd. No faster_lane_usd: Twilio's API cannot add vetting to a Low-Volume Standard brand, so Hail never asks for it.",
+      "business_low_volume": { "brand_usd": "4.50", "campaign_vetting_usd": "15.00", "campaign_monthly_usd": "1.50", "last_verified": "2026-11-17", "verification_method": "unverified" }
     },
     {
       "provider": "telnyx",
       "last_verified": "2026-10-13",
       "verification_method": "unverified",
-      "note": "Brand $4.50, campaign review $15, campaign $2/month (sole proprietor) or $10/month (mixed), from source_url. Campaign fees are billed for three months initially. business.brand_usd is the $4.50 brand plus about $41 Aegis standard vetting, which source_url does not list; the vetting price is from https://api.support.vonage.com/hc/en-us/articles/360058158511-10-DLC-Pricing-and-Fees ($41.50) and https://www.telgorithm.com/news/how-much-does-10dlc-registration-cost-2025-guide-for-isvs. Not yet checked against a Telnyx invoice.",
+      "note": "Brand $4.50, campaign review $15, campaign $2/month (sole proprietor) or $10/month (mixed), from source_url. Campaign fees are billed for three months initially. business.brand_usd is the $4.50 brand plus about $41 Aegis standard vetting, which source_url does not list; the vetting price is from https://api.support.vonage.com/hc/en-us/articles/360058158511-10-DLC-Pricing-and-Fees ($41.50) and https://www.telgorithm.com/news/how-much-does-10dlc-registration-cost-2025-guide-for-isvs. Not yet checked against a Telnyx invoice. business_low_volume is the $4.50 brand with no externalVetting call and a LOW_VOLUME campaign at $1.50/month, from source_url. The Telnyx API reference gives the low volume campaign as $6 up front (first 3 months), then $2/month; not yet checked against a Telnyx invoice. business_low_volume.faster_lane_usd is the STANDARD externalVetting Hail asks for when a low-volume brand comes back UNVERIFIED and the customer allowed it ($41.50, from https://developers.telnyx.com/docs/messaging/10dlc/brand-registration).",
       "source_url": "https://support.telnyx.com/en/articles/5634625-10dlc-fees-and-charges",
       "person": { "brand_usd": "4.50", "campaign_vetting_usd": "15.00", "campaign_monthly_usd": "2.00", "minimum_months": 3 },
-      "business": { "brand_usd": "45.50", "campaign_vetting_usd": "15.00", "campaign_monthly_usd": "10.00", "minimum_months": 3 }
+      "business": { "brand_usd": "45.50", "campaign_vetting_usd": "15.00", "campaign_monthly_usd": "10.00", "minimum_months": 3 },
+      "business_low_volume": { "brand_usd": "4.50", "campaign_vetting_usd": "15.00", "campaign_monthly_usd": "1.50", "minimum_months": 3, "faster_lane_usd": "41.50", "last_verified": "2026-11-17", "verification_method": "unverified" }
     }
   ]
 }
