@@ -19,10 +19,12 @@ export function useDropdown(initialOpen = false) {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") setOpen(false);
     }
-    document.addEventListener("mousedown", onDocClick);
+    // The release target is fixed by click dispatch. Capture also sees clicks
+    // stopped by controls such as the console's touch timestamps.
+    document.addEventListener("click", onDocClick, true);
     document.addEventListener("keydown", onKey);
     return () => {
-      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("click", onDocClick, true);
       document.removeEventListener("keydown", onKey);
     };
   }, [open]);

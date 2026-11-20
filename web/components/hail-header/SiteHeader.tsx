@@ -152,7 +152,7 @@ export function SiteHeader({
       >
         <a className={styles.logo} href={siteHref("/")} aria-label="hail home">
           <Mascot size={26} />
-          hail.so
+          hail
         </a>
         <nav
           id={navId}
