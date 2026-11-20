@@ -19,6 +19,9 @@ The trigger name sorts before every other trigger on these tables. Postgres
 fires triggers of the same timing in name order, so the 0070 guard and the
 retire trigger, which still read the old columns, see filled values.
 
+Two plain indexes on the new columns serve the lookups that now read them:
+inbound routing by workspace prefix, and the retired-address checks.
+
 The unique indexes, CHECK constraints, the primary key of
 ``retired_hail_mail_addresses`` and the 0070 trigger functions stay on the
 old columns. A later step moves them to the new columns and drops the old
@@ -72,6 +75,8 @@ FOR EACH ROW EXECUTE FUNCTION hail_mail_sync_prefix_columns()
 
 
 def upgrade() -> None:
+    # The copy is not an edit: keep each row's updated_at.
+    op.execute("ALTER TABLE email_domains DISABLE TRIGGER email_domains_updated_at")
     for table in TABLES:
         # Adding a column locks the table until commit, so no writer can add
         # a row between the copy and the trigger.
@@ -82,12 +87,30 @@ def upgrade() -> None:
             "local_prefix_name = local_prefix_org "
             "WHERE local_prefix_user IS NOT NULL OR local_prefix_org IS NOT NULL"
         )
+    op.execute("ALTER TABLE email_domains ENABLE TRIGGER email_domains_updated_at")
     op.execute(SYNC_FUNCTION)
     for statement in SYNC_TRIGGERS:
         op.execute(statement)
+    # The tables are small and already locked by the column adds.
+    op.create_index(
+        "email_domains_hail_mail_workspace_idx",
+        "email_domains",
+        ["local_prefix_workspace"],
+        postgresql_where=sa.text("kind = 'hail_mail'"),
+    )
+    op.create_index(
+        "retired_hail_mail_addresses_workspace_idx",
+        "retired_hail_mail_addresses",
+        ["local_prefix_workspace", "local_prefix_name"],
+    )
 
 
 def downgrade() -> None:
+    op.drop_index(
+        "retired_hail_mail_addresses_workspace_idx",
+        table_name="retired_hail_mail_addresses",
+    )
+    op.drop_index("email_domains_hail_mail_workspace_idx", table_name="email_domains")
     for table in TABLES:
         op.execute(f"DROP TRIGGER {table}_00_sync_prefix_columns ON {table}")
     op.execute("DROP FUNCTION hail_mail_sync_prefix_columns()")

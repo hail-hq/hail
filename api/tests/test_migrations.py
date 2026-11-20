@@ -368,6 +368,9 @@ def test_0087_copies_and_syncs_the_hail_mail_prefixes(empty_db: str) -> None:
             insert.format(cols="local_prefix_user, local_prefix_org"),
             (org, "acme+amber@mail.example.com", "acme", "amber"),
         ).fetchone()[0]
+        stamped = conn.execute(
+            "SELECT updated_at FROM email_domains WHERE id = %s", (before,)
+        ).fetchone()[0]
         conn.execute(
             "INSERT INTO retired_hail_mail_addresses "
             "(local_prefix_user, local_prefix_org, organization_id) "
@@ -381,6 +384,22 @@ def test_0087_copies_and_syncs_the_hail_mail_prefixes(empty_db: str) -> None:
             f"SELECT {pairs} FROM email_domains WHERE id = %s", (before,)
         ).fetchone()
         assert row == ("acme", "amber", "acme", "amber")
+        # The copy is not an edit, and the updated_at trigger is back on.
+        assert (
+            conn.execute(
+                "SELECT updated_at FROM email_domains WHERE id = %s", (before,)
+            ).fetchone()[0]
+            == stamped
+        )
+        trigger_enabled = conn.execute(
+            "SELECT tgenabled FROM pg_trigger WHERE tgname = 'email_domains_updated_at'"
+        ).fetchone()[0]
+        assert trigger_enabled == "O"
+        for index in (
+            "email_domains_hail_mail_workspace_idx",
+            "retired_hail_mail_addresses_workspace_idx",
+        ):
+            assert _index_def(conn, index) is not None, index
         retired = conn.execute(
             f"SELECT {pairs} FROM retired_hail_mail_addresses"
         ).fetchone()

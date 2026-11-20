@@ -1563,6 +1563,12 @@ class EmailDomain(Base):
             unique=True,
             postgresql_where=text("kind = 'hail_mail'"),
         ),
+        # Inbound routing reads the new column. Mirrors migration 0087.
+        Index(
+            "email_domains_hail_mail_workspace_idx",
+            "local_prefix_workspace",
+            postgresql_where=text("kind = 'hail_mail'"),
+        ),
         # One hail-mail address per org.
         Index(
             "email_domains_hail_mail_org_uq",
@@ -1600,6 +1606,14 @@ class RetiredHailMailAddress(Base):
         TS, server_default=text("now()"), nullable=False
     )
 
+    __table_args__ = (
+        # The retired-address checks read the new columns. Mirrors 0087.
+        Index(
+            "retired_hail_mail_addresses_workspace_idx",
+            "local_prefix_workspace",
+            "local_prefix_name",
+        ),
+    )
     __mapper_args__: ClassVar[dict] = {
         "primary_key": [local_prefix_workspace, local_prefix_name, organization_id]
     }
