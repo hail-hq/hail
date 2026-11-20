@@ -8373,8 +8373,6 @@ components:
         - organization_id
         - kind
         - domain
-        - local_prefix_workspace
-        - local_prefix_name
         - verification_status
         - dns_records
         - mail_from_domain

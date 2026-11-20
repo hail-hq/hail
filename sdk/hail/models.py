@@ -17,6 +17,7 @@ One intentional deviation from core:
 from __future__ import annotations
 
 import re
+import warnings
 from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
@@ -719,6 +720,26 @@ class EmailDomainCreate(BaseModel):
     def _deprecated_names(cls, data: Any) -> Any:
         return _move_deprecated_prefix_fields(data)
 
+    @property
+    def local_prefix_user(self) -> str | None:
+        """Deprecated: use ``local_prefix_workspace``."""
+        warnings.warn(
+            "local_prefix_user is deprecated; use local_prefix_workspace",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.local_prefix_workspace
+
+    @property
+    def local_prefix_org(self) -> str | None:
+        """Deprecated: use ``local_prefix_name``."""
+        warnings.warn(
+            "local_prefix_org is deprecated; use local_prefix_name",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.local_prefix_name
+
     @field_validator("domain")
     @classmethod
     def _validate_domain(cls, v: str | None) -> str | None:
@@ -812,6 +833,26 @@ class EmailDomainPatch(BaseModel):
     @classmethod
     def _deprecated_names(cls, data: Any) -> Any:
         return _move_deprecated_prefix_fields(data)
+
+    @property
+    def local_prefix_user(self) -> str | None:
+        """Deprecated: use ``local_prefix_workspace``."""
+        warnings.warn(
+            "local_prefix_user is deprecated; use local_prefix_workspace",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.local_prefix_workspace
+
+    @property
+    def local_prefix_org(self) -> str | None:
+        """Deprecated: use ``local_prefix_name``."""
+        warnings.warn(
+            "local_prefix_org is deprecated; use local_prefix_name",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.local_prefix_name
 
     @model_validator(mode="after")
     def _at_least_one_field(self):

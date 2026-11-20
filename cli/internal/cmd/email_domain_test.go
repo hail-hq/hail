@@ -91,7 +91,7 @@ func TestEmailDomain_RegisterHailMail(t *testing.T) {
 	}
 }
 
-func TestEmailDomain_RegisterDeprecatedPrefixFlags(t *testing.T) {
+func TestEmailDomain_RegisterDeprecatedPrefixFlagsSendOldKeys(t *testing.T) {
 	srv := newFakeServer(t, http.StatusCreated, sampleEmailDomainResponse("hail_mail"))
 
 	_, _, err := runRoot(t,
@@ -109,10 +109,12 @@ func TestEmailDomain_RegisterDeprecatedPrefixFlags(t *testing.T) {
 	if err := json.Unmarshal(srv.lastBody, &body); err != nil {
 		t.Fatalf("body parse: %v; raw=%s", err, srv.lastBody)
 	}
-	if body["local_prefix_workspace"] != "acme" || body["local_prefix_name"] != "amber" {
-		t.Fatalf("old flags must send the new keys, got %v", body)
+	// Old flags send the old keys, so a server from before the rename
+	// still accepts them.
+	if body["local_prefix_user"] != "acme" || body["local_prefix_org"] != "amber" {
+		t.Fatalf("old flags must send the old keys, got %v", body)
 	}
-	for _, key := range []string{"local_prefix_user", "local_prefix_org"} {
+	for _, key := range []string{"local_prefix_workspace", "local_prefix_name"} {
 		if _, present := body[key]; present {
 			t.Errorf("%s should not be sent, got %v", key, body[key])
 		}
@@ -153,6 +155,9 @@ func TestEmailDomain_RegisterRefusesConflictingPrefixFlags(t *testing.T) {
 	}
 	if body["local_prefix_name"] != "amber" {
 		t.Fatalf("local_prefix_name = %v", body["local_prefix_name"])
+	}
+	if _, present := body["local_prefix_org"]; present {
+		t.Errorf("both names given: only the new key is sent, got %v", body)
 	}
 }
 

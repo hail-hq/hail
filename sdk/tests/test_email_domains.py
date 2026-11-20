@@ -311,6 +311,17 @@ def test_email_domain_models_read_the_deprecated_names() -> None:
     assert same.local_prefix_workspace == "acme"
 
 
+def test_email_domain_models_keep_the_deprecated_attributes() -> None:
+    create = EmailDomainCreate(kind="hail_mail", local_prefix_workspace="acme")
+    patch = EmailDomainPatch(local_prefix_name="amber")
+    with pytest.warns(DeprecationWarning, match="local_prefix_user"):
+        assert create.local_prefix_user == "acme"
+    with pytest.warns(DeprecationWarning, match="local_prefix_org"):
+        assert patch.local_prefix_org == "amber"
+    # Read only: they are not fields.
+    assert "local_prefix_user" not in create.model_dump()
+
+
 def test_email_domain_patch_invalid_prefix() -> None:
     # Validator lowercases before regex-matching, so use a value that
     # still fails after lowercasing (space + '!' aren't in the charset).
@@ -468,7 +479,7 @@ def test_email_domain_response_fills_both_prefix_names() -> None:
 
 
 @respx.mock
-async def test_email_domains_deprecated_kwargs_send_the_new_names(
+async def test_email_domains_deprecated_kwargs_send_the_deprecated_names(
     base_url: str, api_key: str
 ) -> None:
     payload = make_email_domain_response()
@@ -499,11 +510,11 @@ async def test_email_domains_deprecated_kwargs_send_the_new_names(
             await c.email_domains.patch(
                 payload["id"], local_prefix_workspace="acme", local_prefix_user="bob"
             )
+    # An old keyword sends the old key, so a server from before the rename
+    # still accepts it.
     assert json.loads(create.calls.last.request.content) == {
         "kind": "hail_mail",
-        "local_prefix_workspace": "alice",
-        "local_prefix_name": "acme",
+        "local_prefix_user": "alice",
+        "local_prefix_org": "acme",
     }
-    assert json.loads(patch.calls.last.request.content) == {
-        "local_prefix_name": "amber"
-    }
+    assert json.loads(patch.calls.last.request.content) == {"local_prefix_org": "amber"}

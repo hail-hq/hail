@@ -21,6 +21,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    PrivateAttr,
     SecretStr,
     ValidationInfo,
     computed_field,
@@ -1710,15 +1711,20 @@ _PREFIX_RULE = (
 )
 
 
-def _merge_deprecated_prefix_fields(model: BaseModel) -> None:
+def _merge_deprecated_prefix_fields(model: BaseModel) -> dict[str, str]:
     """Read an old prefix field as its new name.
 
     The old fields are validated on their own first, so an error names the
     field the caller sent. Both names may be sent with the same value.
     Different values are refused: no guess about which one the caller meant.
+
+    Returns, for each new field name, the name the caller used, so later
+    errors can name that field.
     """
+    sent: dict[str, str] = {}
     for old, new in DEPRECATED_PREFIX_FIELDS.items():
         value = getattr(model, old)
+        sent[new] = new if value is None or getattr(model, new) is not None else old
         if value is None:
             continue
         given = getattr(model, new)
@@ -1726,6 +1732,17 @@ def _merge_deprecated_prefix_fields(model: BaseModel) -> None:
             setattr(model, new, value)
         elif given != value:
             raise ValueError(f"{old} is the deprecated name of {new}; send only {new}")
+    return sent
+
+
+class _PrefixNames(BaseModel):
+    """Remembers which prefix field names the caller sent."""
+
+    _sent_prefix_names: dict[str, str] = PrivateAttr(default_factory=dict)
+
+    def prefix_field(self, new: str) -> str:
+        """The name the caller used for ``new``: itself or its deprecated name."""
+        return self._sent_prefix_names.get(new, new)
 
 
 def _normalize_local_prefix(v: str | None) -> str | None:
@@ -1814,7 +1831,7 @@ class DomainCheckResponse(BaseModel):
     )
 
 
-class EmailDomainCreate(BaseModel):
+class EmailDomainCreate(_PrefixNames):
     """Request body for POST /email-domains.
 
     For ``kind='hail_mail'`` ``domain`` is omitted; the server composes
@@ -1896,7 +1913,7 @@ class EmailDomainCreate(BaseModel):
 
     @model_validator(mode="after")
     def _kind_field_consistency(self):
-        _merge_deprecated_prefix_fields(self)
+        self._sent_prefix_names = _merge_deprecated_prefix_fields(self)
         if self.kind == "custom":
             if not self.domain:
                 raise ValueError("domain is required when kind='custom'")
@@ -1904,9 +1921,14 @@ class EmailDomainCreate(BaseModel):
                 self.local_prefix_workspace is not None
                 or self.local_prefix_name is not None
             ):
+                sent = [
+                    self.prefix_field(field)
+                    for field in ("local_prefix_workspace", "local_prefix_name")
+                    if getattr(self, field) is not None
+                ]
+                verb = "is" if len(sent) == 1 else "are"
                 raise ValueError(
-                    "local_prefix_workspace/local_prefix_name are only valid "
-                    "when kind='hail_mail'"
+                    f"{'/'.join(sent)} {verb} only valid when kind='hail_mail'"
                 )
         if self.kind == "hail_mail" and self.domain is not None:
             raise ValueError(
@@ -1934,7 +1956,7 @@ RESERVED_EMAIL_METADATA_KEYS = frozenset(
 )
 
 
-class EmailDomainPatch(BaseModel):
+class EmailDomainPatch(_PrefixNames):
     """Body for PATCH /email-domains/{id}.
 
     Two clusters of mutable fields:
@@ -2061,7 +2083,7 @@ class EmailDomainPatch(BaseModel):
 
     @model_validator(mode="after")
     def _at_least_one_field(self):
-        _merge_deprecated_prefix_fields(self)
+        self._sent_prefix_names = _merge_deprecated_prefix_fields(self)
         if (
             self.local_prefix_workspace is None
             and self.local_prefix_name is None
@@ -2090,6 +2112,19 @@ class EmailDomainResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _read_deprecated_prefix_keys(cls, data: Any) -> Any:
+        # A reply from a server before the rename (or a stored idempotent
+        # reply) has only the old keys.
+        if not isinstance(data, dict):
+            return data
+        data = dict(data)
+        for old, new in DEPRECATED_PREFIX_FIELDS.items():
+            if data.get(new) is None and data.get(old) is not None:
+                data[new] = data[old]
+        return data
+
     id: UUID = Field(description="Unique identifier for this email domain.")
     organization_id: UUID = Field(description="Organization that owns this domain.")
     kind: EmailDomainKind = Field(
@@ -2097,16 +2132,18 @@ class EmailDomainResponse(BaseModel):
     )
     domain: str = Field(description="The DNS domain mail is sent from.")
     local_prefix_workspace: str | None = Field(
+        default=None,
         description=(
             f"Workspace prefix of a hail_mail address: {_WORKSPACE_PREFIX_DOC} "
             "Null for kind='custom'."
-        )
+        ),
     )
     local_prefix_name: str | None = Field(
+        default=None,
         description=(
             f"Name prefix of a hail_mail address: {_NAME_PREFIX_DOC} Null for "
             "kind='custom'."
-        )
+        ),
     )
     verification_status: EmailDomainVerificationStatus = Field(
         description="'pending' (not yet verified), 'verified' (ready to send), or 'failed'."

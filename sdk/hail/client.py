@@ -498,7 +498,9 @@ def _prefix_fields(
     """Body keys for the two hail-mail prefixes.
 
     ``local_prefix_user`` and ``local_prefix_org`` are the deprecated names of
-    ``local_prefix_workspace`` and ``local_prefix_name``.
+    ``local_prefix_workspace`` and ``local_prefix_name``. A value passed under
+    a deprecated name is sent under that name, so a server from before the
+    rename still accepts it. New names are sent as new names.
     """
     body: dict[str, str] = {}
     for new, value, old, old_value in (
@@ -511,7 +513,9 @@ def _prefix_fields(
             )
             if value is not None and _fold_prefix(value) != _fold_prefix(old_value):
                 raise ValueError(f"pass {new} or {old}, not both")
-            value = old_value if value is None else value
+            if value is None:
+                body[old] = old_value
+                continue
         if value is not None:
             body[new] = value
     return body

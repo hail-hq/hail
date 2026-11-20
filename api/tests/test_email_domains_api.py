@@ -12,6 +12,7 @@ from hailhq.api.main import app
 from hailhq.core.config import settings
 from hailhq.core.hail_mail import default_workspace_prefix, org_prefix_from_id
 from hailhq.core.models import ApiKey, EmailDomain, RetiredHailMailAddress
+from hailhq.core.schemas import EmailDomainResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -2086,3 +2087,128 @@ def test_openapi_marks_the_old_prefix_names_deprecated() -> None:
             assert props[old]["deprecated"] is True, (name, old)
         for new in ("local_prefix_workspace", "local_prefix_name"):
             assert "deprecated" not in props[new], (name, new)
+
+
+async def test_custom_kind_error_names_the_fields_the_caller_sent(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+) -> None:
+    _, _, plain = org_and_key
+    resp = await client.post(
+        "/email-domains",
+        json={"kind": "custom", "domain": "acme.com", "local_prefix_org": "amber"},
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 422, resp.text
+    assert "local_prefix_org is only valid when kind='hail_mail'" in resp.text
+    assert "local_prefix_name" not in resp.text
+
+    resp = await client.post(
+        "/email-domains",
+        json={
+            "kind": "custom",
+            "domain": "acme.com",
+            "local_prefix_user": "acme",
+            "local_prefix_name": "amber",
+        },
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 422, resp.text
+    assert (
+        "local_prefix_user/local_prefix_name are only valid when kind='hail_mail'"
+        in resp.text
+    )
+
+
+async def test_patch_on_a_custom_row_points_at_the_old_name(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    async_session: AsyncSession,
+) -> None:
+    org_id, _, plain = org_and_key
+    row = EmailDomain(
+        organization_id=org_id,
+        kind="custom",
+        domain="acme.example.com",
+        verification_status="verified",
+        provider="ses",
+    )
+    async_session.add(row)
+    await async_session.commit()
+    for sent in ("local_prefix_org", "local_prefix_user", "local_prefix_workspace"):
+        resp = await client.patch(
+            f"/email-domains/{row.id}",
+            json={sent: "amber"},
+            headers={"Authorization": f"Bearer {plain}"},
+        )
+        assert resp.status_code == 422, resp.text
+        assert resp.json()["detail"][0]["loc"] == ["body", sent]
+
+
+async def test_taken_head_under_the_old_name_names_the_old_field(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    async_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
+    _, _, plain_a = org_and_key
+    _, _, plain_b = await insert_org_and_key(async_session)
+    first = await client.post(
+        "/email-domains",
+        json={"kind": "hail_mail", "local_prefix_user": "acme"},
+        headers={"Authorization": f"Bearer {plain_a}"},
+    )
+    assert first.status_code == 201, first.text
+
+    taken = await client.post(
+        "/email-domains",
+        json={"kind": "hail_mail", "local_prefix_user": "acme"},
+        headers={"Authorization": f"Bearer {plain_b}"},
+    )
+    assert taken.status_code == 409, taken.text
+    assert taken.json()["detail"] == (
+        "hail-mail workspace prefix 'acme' is already taken; "
+        "choose a different local_prefix_user"
+    )
+
+    own = await client.post(
+        "/email-domains",
+        json={"kind": "hail_mail", "local_prefix_workspace": "globex"},
+        headers={"Authorization": f"Bearer {plain_b}"},
+    )
+    assert own.status_code == 201, own.text
+    patched = await client.patch(
+        f"/email-domains/{own.json()['id']}",
+        json={"local_prefix_user": "acme"},
+        headers={"Authorization": f"Bearer {plain_b}"},
+    )
+    assert patched.status_code == 409, patched.text
+    assert patched.json()["detail"].endswith("choose a different local_prefix_user")
+
+
+def test_response_reads_a_reply_with_only_the_old_keys() -> None:
+    """A stored idempotent reply, or a server before the rename."""
+    now = datetime.now(timezone.utc).isoformat()
+    parsed = EmailDomainResponse.model_validate(
+        {
+            "id": str(uuid.uuid4()),
+            "organization_id": str(uuid.uuid4()),
+            "kind": "hail_mail",
+            "domain": "acme+amber@mail.hail.so",
+            "local_prefix_user": "acme",
+            "local_prefix_org": "amber",
+            "verification_status": "verified",
+            "dns_records": [],
+            "mail_from_domain": None,
+            "provider": "ses",
+            "verified_at": now,
+            "created_at": now,
+            "updated_at": now,
+        }
+    )
+    assert (parsed.local_prefix_workspace, parsed.local_prefix_name) == (
+        "acme",
+        "amber",
+    )
+    assert parsed.model_dump()["local_prefix_user"] == "acme"

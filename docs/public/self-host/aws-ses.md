@@ -229,7 +229,7 @@ Skip these until later milestones. This list names them so that you do not use S
 
 ## 10. Inbound email
 
-To receive mail at `<user>+<org>@<HAIL_MAIL_BASE_DOMAIN>`, you need four things:
+To receive mail at `<workspace>+<name>@<HAIL_MAIL_BASE_DOMAIN>`, you need four things:
 
 1. An MX record on `mail.hail.so` that points at SES inbound.
 2. An S3 bucket that SES can write raw MIME into.

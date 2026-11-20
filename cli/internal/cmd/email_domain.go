@@ -109,23 +109,29 @@ func runEmailDomainRegister(
 	if f.kind == "custom" && f.domain == "" {
 		return requireInputs(cmd, "--domain (required when --kind=custom)")
 	}
-	workspacePrefix, err := mergePrefixFlag(f.workspacePrefix, f.oldWorkspacePrefix, "--local-prefix-workspace", "--local-prefix-user")
-	if err != nil {
+	if err := checkPrefixFlags(f.workspacePrefix, f.oldWorkspacePrefix, "--local-prefix-workspace", "--local-prefix-user"); err != nil {
 		return helpAndFail(cmd, err.Error())
 	}
-	namePrefix, err := mergePrefixFlag(f.namePrefix, f.oldNamePrefix, "--local-prefix-name", "--local-prefix-org")
-	if err != nil {
+	if err := checkPrefixFlags(f.namePrefix, f.oldNamePrefix, "--local-prefix-name", "--local-prefix-org"); err != nil {
 		return helpAndFail(cmd, err.Error())
 	}
-	if f.kind == "custom" && (workspacePrefix != "" || namePrefix != "") {
+	if f.kind == "custom" && (f.workspacePrefix != "" || f.namePrefix != "" || f.oldWorkspacePrefix != "" || f.oldNamePrefix != "") {
 		return helpAndFail(cmd, "--local-prefix-workspace/--local-prefix-name are not allowed with --kind=custom")
 	}
 
 	body := client.EmailDomainCreate{
 		Kind:                 client.EmailDomainCreateKind(f.kind),
 		Domain:               strPtr(f.domain),
-		LocalPrefixWorkspace: strPtr(workspacePrefix),
-		LocalPrefixName:      strPtr(namePrefix),
+		LocalPrefixWorkspace: strPtr(f.workspacePrefix),
+		LocalPrefixName:      strPtr(f.namePrefix),
+	}
+	// A deprecated flag used alone is sent under its old key, so a server
+	// from before the rename still accepts it.
+	if f.workspacePrefix == "" {
+		body.LocalPrefixUser = strPtr(f.oldWorkspacePrefix)
+	}
+	if f.namePrefix == "" {
+		body.LocalPrefixOrg = strPtr(f.oldNamePrefix)
 	}
 
 	apiClient, err := opts.newClientWithIdempotency(f.idemKey)
@@ -602,17 +608,12 @@ func firstNonEmpty(values ...*string) string {
 	return ""
 }
 
-// mergePrefixFlag reads a prefix flag and its deprecated name. Both may be
-// given with one value; the server folds case and spaces the same way.
-func mergePrefixFlag(value, oldValue, flag, oldFlag string) (string, error) {
-	if oldValue == "" {
-		return value, nil
+// checkPrefixFlags refuses a prefix flag and its deprecated name with
+// different values. One value under both names is fine; the server folds
+// case and spaces the same way.
+func checkPrefixFlags(value, oldValue, flag, oldFlag string) error {
+	if value != "" && oldValue != "" && !strings.EqualFold(strings.TrimSpace(value), strings.TrimSpace(oldValue)) {
+		return fmt.Errorf("%s is the deprecated name of %s; pass only %s", oldFlag, flag, flag)
 	}
-	if value != "" && !strings.EqualFold(strings.TrimSpace(value), strings.TrimSpace(oldValue)) {
-		return "", fmt.Errorf("%s is the deprecated name of %s; pass only %s", oldFlag, flag, flag)
-	}
-	if value == "" {
-		return oldValue, nil
-	}
-	return value, nil
+	return nil
 }

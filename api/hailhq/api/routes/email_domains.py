@@ -248,11 +248,16 @@ HAIL_MAIL_EXISTS_DETAIL = (
 )
 
 
-def taken_workspace_prefix_detail(workspace_prefix: str) -> str:
-    """409 text for a workspace prefix another hail-mail row already holds."""
+def taken_workspace_prefix_detail(
+    workspace_prefix: str, field: str = "local_prefix_workspace"
+) -> str:
+    """409 text for a workspace prefix another hail-mail row already holds.
+
+    ``field`` is the name the caller sent: the new one or its deprecated name.
+    """
     return (
         f"hail-mail workspace prefix {workspace_prefix!r} is already taken; "
-        "choose a different local_prefix_workspace"
+        f"choose a different {field}"
     )
 
 
@@ -440,7 +445,10 @@ async def create_email_domain(
                 detail=(
                     HAIL_MAIL_EXISTS_DETAIL
                     if existing.first() is not None
-                    else taken_workspace_prefix_detail(workspace_prefix)
+                    else taken_workspace_prefix_detail(
+                        workspace_prefix,
+                        body.prefix_field("local_prefix_workspace"),
+                    )
                 ),
             ) from exc
         await db.refresh(sd)
@@ -835,9 +843,14 @@ async def patch_email_domain(
     # ---- prefix edits (hail_mail only) ----
     if body.local_prefix_workspace is not None or body.local_prefix_name is not None:
         if sd.kind != "hail_mail":
+            sent = (
+                "local_prefix_workspace"
+                if body.local_prefix_workspace is not None
+                else "local_prefix_name"
+            )
             raise unprocessable(
                 "prefix edits are only allowed on kind='hail_mail' rows",
-                loc=["body", "local_prefix_workspace"],
+                loc=["body", body.prefix_field(sent)],
             )
         new_workspace = body.local_prefix_workspace or sd.local_prefix_workspace
         head_changed = new_workspace != sd.local_prefix_workspace
@@ -982,10 +995,13 @@ async def patch_email_domain(
             raise HTTPException(
                 status_code=http_status.HTTP_409_CONFLICT,
                 detail=(
-                    taken_workspace_prefix_detail(updates["local_prefix_workspace"])
+                    taken_workspace_prefix_detail(
+                        updates["local_prefix_workspace"],
+                        body.prefix_field("local_prefix_workspace"),
+                    )
                     if head_changed
                     else f"hail-mail address {updates['domain']!r} is already "
-                    "taken; choose a different local_prefix_name"
+                    f"taken; choose a different {body.prefix_field('local_prefix_name')}"
                 ),
             ) from exc
         raise unprocessable("patch violates a domain check constraint") from exc

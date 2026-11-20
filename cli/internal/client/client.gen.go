@@ -2512,7 +2512,7 @@ type EmailDomainResponse struct {
 	Kind EmailDomainResponseKind `json:"kind"`
 
 	// LocalPrefixName Name prefix of a hail_mail address: the part after the '+'. A free name inside the workspace, such as a person or team. Null for kind='custom'.
-	LocalPrefixName *string `json:"local_prefix_name"`
+	LocalPrefixName *string `json:"local_prefix_name,omitempty"`
 
 	// LocalPrefixOrg Deprecated: use local_prefix_name. Same value.
 	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
@@ -2523,7 +2523,7 @@ type EmailDomainResponse struct {
 	LocalPrefixUser *string `json:"local_prefix_user,omitempty"`
 
 	// LocalPrefixWorkspace Workspace prefix of a hail_mail address: the part before the '+'. It names the workspace, and one workspace only may hold it. Null for kind='custom'.
-	LocalPrefixWorkspace *string `json:"local_prefix_workspace"`
+	LocalPrefixWorkspace *string `json:"local_prefix_workspace,omitempty"`
 
 	// MailFromDomain Custom MAIL FROM domain, if configured. Null when using the provider default.
 	MailFromDomain *string `json:"mail_from_domain"`
