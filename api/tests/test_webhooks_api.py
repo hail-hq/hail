@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 
 import httpx
 import pytest
+from hailhq.api.main import _request_span_arguments
 from hailhq.core.config import settings
 from hailhq.core.models import WebhookDelivery, WebhookSubscription
 from hailhq.core.secret_cipher import SecretCipher, generate_key
@@ -129,6 +130,23 @@ async def test_invalid_receiver_authorization_does_not_echo_credentials(
     assert response.status_code == 422
     assert "private_key" not in response.text
     assert "secretsecret" not in response.text
+
+
+@pytest.mark.parametrize(
+    ("path", "kept"), [("/v1/webhooks", False), ("/v1/calls", True)]
+)
+def test_telemetry_drops_rejected_input_on_webhook_routes(path, kept):
+    request = httpx.Request("POST", f"https://api.example.com{path}")
+    error = {
+        "type": "string_type",
+        "loc": ["body", "authorization"],
+        "msg": "Input should be a valid string",
+        "input": {"key": "xk93hd72qq"},
+    }
+    attributes = {"values": {}, "errors": [error]}
+    mapped = _request_span_arguments(request, attributes)
+    assert ("input" in mapped["errors"][0]) is kept
+    assert mapped["errors"][0]["loc"] == ["body", "authorization"]
 
 
 @pytest.fixture(autouse=True)
