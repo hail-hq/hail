@@ -81,10 +81,10 @@ def test_marks_with_no_letter_or_stacked_marks_go():
     assert caller_email_subject("\u0301" * 300, None) == "From a phone call"
     assert caller_email_subject("\u0336\u0336abc", None) == "From a phone call: abc"
     stacked = caller_email_subject("A" + "\u0336" * 80, None)
-    assert stacked == "From a phone call: A" + "\u0336" * 4
+    assert stacked == "From a phone call: A" + "\u0336" * 8
     # Joiners between marks are dropped, and the marks still count as one run.
     joined = caller_email_subject("A" + "\u0336\u200d" * 80, None)
-    assert joined == "From a phone call: A" + "\u0336" * 4
+    assert joined == "From a phone call: A" + "\u0336" * 8
     assert caller_email_subject("Hi", "\u0336" * 5) == "From a phone call: Hi"
 
 
@@ -93,3 +93,11 @@ def test_org_name_drops_a_dangling_thai_leading_vowel():
         "\u0e08\u0e32\u0e01\u0e01\u0e32\u0e23\u0e42\u0e17\u0e23\u0e28"
         "\u0e31\u0e1e\u0e17\u0e4c\u0e01\u0e31\u0e1a Acme: Hi"
     )
+
+
+def test_fully_pointed_hebrew_keeps_every_mark():
+    # Bet with dagesh, qamats, etnahta, meteg and merkha: five marks.
+    word = "\u05d1\u05bc\u05b8\u0591\u05bd\u05a5"
+    words = caller_email_subject(word, None, "he").split(": ", 1)[1]
+    # NFC may reorder the marks; none may be lost.
+    assert sorted(words) == sorted(word)

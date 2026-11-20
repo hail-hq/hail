@@ -52,7 +52,8 @@ MAX_ORG_NAME_CHARS = 100
 # Control, format and surrogate characters: they could break or disguise text.
 _HIDDEN = frozenset({"Cc", "Cf", "Cs"})
 # Combining marks kept on one letter: more would pile over nearby text.
-_MAX_MARKS = 4
+# Fully pointed Hebrew uses up to six.
+_MAX_MARKS = 8
 # Thai and Lao vowels written before their consonant. At the end of an org
 # name they have no consonant and would join the fixed words after it.
 _LEADING_VOWELS = frozenset(
@@ -63,7 +64,7 @@ _LEADING_VOWELS = frozenset(
 def _one_line(text: str) -> str:
     """``text`` on one line, in NFC, without characters that could disguise
     it. Joiners are format characters, so they go. A combining mark with no
-    letter before it, or past four on one letter, goes too: it would draw
+    letter before it, or past eight on one letter, goes too: it would draw
     over the fixed words."""
     kept: list[str] = []
     marks = 0
