@@ -56,12 +56,10 @@ _HIDDEN = frozenset({"Cc", "Cf", "Cs"})
 # that uses them (Arabic and Persian, Indic), so they cannot hide inside
 # Latin words.
 _JOINERS = frozenset({"\u200c", "\u200d"})
-_JOINER_SCRIPTS = (
-    (0x0600, 0x08FF),  # Arabic, Syriac, Thaana, Arabic Extended
-    (0x0900, 0x0DFF),  # Devanagari to Sinhala
-    (0xFB50, 0xFDFF),  # Arabic Presentation Forms-A
-    (0xFE70, 0xFEFF),  # Arabic Presentation Forms-B
-)
+# Arabic in all its blocks counts as one script.
+_ARABIC = ((0x0600, 0x08FF), (0xFB50, 0xFDFF), (0xFE70, 0xFEFF))
+# Devanagari to Sinhala: one script per 128-character block.
+_INDIC = (0x0900, 0x0DFF)
 # Thai and Lao vowels written before their consonant.
 _FOLLOWING_VOWELS = frozenset("\u0e33\u0eb3")  # SARA AM, Lao AM: join the one before
 _LEADING_VOWELS = frozenset(
@@ -70,13 +68,15 @@ _LEADING_VOWELS = frozenset(
 
 
 def _joiner_script(c: str) -> int | None:
-    """Which of :data:`_JOINER_SCRIPTS` the letter or mark ``c`` is in."""
+    """Which script that uses joiners the letter or mark ``c`` is in: -1 for
+    Arabic, else the Indic block's start."""
     if unicodedata.category(c)[0] not in "LM":
         return None
     code = ord(c)
-    for index, (low, high) in enumerate(_JOINER_SCRIPTS):
-        if low <= code <= high:
-            return index
+    if any(low <= code <= high for low, high in _ARABIC):
+        return -1
+    if _INDIC[0] <= code <= _INDIC[1]:
+        return code & ~0x7F
     return None
 
 
@@ -84,10 +84,19 @@ def _is_flag_letter(c: str) -> bool:
     return 0x1F1E6 <= ord(c) <= 0x1F1FF
 
 
+def _inside_flag(text: str, at: int) -> bool:
+    """True when ``text[at - 1]`` is the first letter of a two-letter flag."""
+    run = 0
+    while at - run > 0 and _is_flag_letter(text[at - run - 1]):
+        run += 1
+    return run % 2 == 1
+
+
 def _one_line(text: str) -> str:
     """``text`` on one line, without characters that could disguise it. A
     joiner stays only between two letters or marks of one script that uses
-    it. A combining mark with no letter before it goes too: it would draw
+    it (Arabic, or one Indic block). Emoji joined by ZWJ show as separate
+    emoji. A combining mark with no letter before it goes too: it would draw
     over the fixed words."""
     kept: list[str] = []
 
@@ -129,7 +138,7 @@ def _splits_letter(text: str, at: int) -> bool:
         or before in _JOINERS
         or before in _LEADING_VOWELS
         or unicodedata.combining(before) == 9  # virama
-        or (_is_flag_letter(before) and _is_flag_letter(after))
+        or (_is_flag_letter(after) and _inside_flag(text, at))
         or 0x1F3FB <= ord(after) <= 0x1F3FF  # emoji skin tone
     )
 
@@ -137,7 +146,8 @@ def _splits_letter(text: str, at: int) -> bool:
 def _cut(text: str, limit: int) -> str:
     """``text`` cut to ``limit`` characters, never inside a written letter
     (Indic vowel signs, viramas and joiners, Thai vowels, flags, skin
-    tones). Text is NFC, so Korean syllables are single characters."""
+    tones). Text is NFC, so Korean syllables are single characters (NFC
+    also maps CJK compatibility ideographs to their unified form)."""
     if len(text) <= limit:
         return text
     while limit > 0 and _splits_letter(text, limit):
@@ -146,7 +156,14 @@ def _cut(text: str, limit: int) -> str:
 
 
 def _org_name(org_name: str | None, limit: int = MAX_ORG_NAME_CHARS) -> str:
-    return _cut(_one_line(org_name or ""), limit).strip()
+    """The org name for the fixed lines. A virama or Thai leading vowel at
+    its end would fuse with the fixed words after it, so it goes."""
+    name = _cut(_one_line(org_name or ""), limit).strip()
+    while name and (
+        name[-1] in _LEADING_VOWELS or unicodedata.combining(name[-1]) == 9
+    ):
+        name = name[:-1].rstrip()
+    return name
 
 
 def _fill(named: str, unnamed: str, name: str) -> str:

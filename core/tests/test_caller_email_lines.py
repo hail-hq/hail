@@ -141,3 +141,26 @@ def test_marks_with_no_letter_and_thai_sara_am():
     room = MAX_SUBJECT_CHARS - len(prefix) - 2
     thai = caller_email_subject("x" * (room - 1) + "\u0e01\u0e33", None, "th")
     assert thai.endswith("x")
+
+
+def test_a_run_of_flags_is_cut_between_flags():
+    gb = "\U0001f1ec\U0001f1e7"
+    prefix = caller_email_subject("", None)
+    room = MAX_SUBJECT_CHARS - len(prefix) - 2
+    subject = caller_email_subject(gb * 100, None)
+    assert subject.startswith(prefix + ": " + gb)
+    words = subject[len(prefix) + 2 :]
+    assert len(words) % 2 == 0 and len(words) >= room - 1
+
+
+def test_org_name_never_fuses_with_the_fixed_words():
+    assert caller_email_body("Hi.", "\u0c15\u0c4d", "te").startswith(
+        CALLER_EMAIL_LINES["te"].first_line.replace("{org}", "\u0c15")
+    )
+    assert caller_email_subject("Hi", "Acme\u0e40", "th").endswith("Acme: Hi")
+
+
+def test_a_joiner_between_two_indic_scripts_goes():
+    assert "\u200d" not in caller_email_subject("\u0915\u200d\u0b95", None)
+    # Arabic and its presentation forms are one script.
+    assert "\u200c" in caller_email_subject("\u0645\u200c\ufe8d", None)
