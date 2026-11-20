@@ -63,16 +63,21 @@ _JOINER_SCRIPTS = (
     (0xFE70, 0xFEFF),  # Arabic Presentation Forms-B
 )
 # Thai and Lao vowels written before their consonant.
+_FOLLOWING_VOWELS = frozenset("\u0e33\u0eb3")  # SARA AM, Lao AM: join the one before
 _LEADING_VOWELS = frozenset(
     "\u0e40\u0e41\u0e42\u0e43\u0e44\u0ec0\u0ec1\u0ec2\u0ec3\u0ec4"
 )
 
 
-def _keeps_joiner(prev: str) -> bool:
-    code = ord(prev)
-    return unicodedata.category(prev)[0] in "LM" and any(
-        low <= code <= high for low, high in _JOINER_SCRIPTS
-    )
+def _joiner_script(c: str) -> int | None:
+    """Which of :data:`_JOINER_SCRIPTS` the letter or mark ``c`` is in."""
+    if unicodedata.category(c)[0] not in "LM":
+        return None
+    code = ord(c)
+    for index, (low, high) in enumerate(_JOINER_SCRIPTS):
+        if low <= code <= high:
+            return index
+    return None
 
 
 def _is_flag_letter(c: str) -> bool:
@@ -81,20 +86,34 @@ def _is_flag_letter(c: str) -> bool:
 
 def _one_line(text: str) -> str:
     """``text`` on one line, without characters that could disguise it. A
-    joiner stays only between two letters or marks of a script that uses it."""
+    joiner stays only between two letters or marks of one script that uses
+    it. A combining mark with no letter before it goes too: it would draw
+    over the fixed words."""
     kept: list[str] = []
+
+    def drop_open_joiner() -> None:
+        if kept and kept[-1] in _JOINERS:
+            kept.pop()
+
     for c in unicodedata.normalize("NFC", text):
+        category = unicodedata.category(c)
         if c.isspace():
+            drop_open_joiner()
             kept.append(" ")
         elif c in _JOINERS:
-            if kept and _keeps_joiner(kept[-1]):
+            if kept and _joiner_script(kept[-1]) is not None:
                 kept.append(c)
-        elif unicodedata.category(c) not in _HIDDEN:
-            if kept and kept[-1] in _JOINERS and not _keeps_joiner(c):
+        elif category in _HIDDEN or (
+            category.startswith("M") and (not kept or kept[-1] == " ")
+        ):
+            continue
+        else:
+            script = _joiner_script(c)
+            joined = kept and kept[-1] in _JOINERS
+            if joined and (script is None or script != _joiner_script(kept[-2])):
                 kept.pop()
             kept.append(c)
-    if kept and kept[-1] in _JOINERS:
-        kept.pop()
+    drop_open_joiner()
     return " ".join("".join(kept).split())
 
 
@@ -106,6 +125,7 @@ def _splits_letter(text: str, at: int) -> bool:
     return (
         unicodedata.category(after).startswith("M")
         or after in _JOINERS
+        or after in _FOLLOWING_VOWELS
         or before in _JOINERS
         or before in _LEADING_VOWELS
         or unicodedata.combining(before) == 9  # virama

@@ -127,3 +127,17 @@ def test_a_cut_keeps_skin_tones_and_korean_syllables_and_no_stray_colon():
 def test_a_joiner_never_sits_before_latin_or_at_the_end():
     assert "\u200d" not in caller_email_subject("\u0915\u200dPassword", None)
     assert "\u200d" not in caller_email_subject("Hi", "\u0915\u200d")
+
+
+def test_joiners_go_before_a_space_or_another_script():
+    assert "\u200d" not in caller_email_subject("Hi", "Acme \u0915\u200d Dental")
+    assert "\u200c" not in caller_email_subject("\u0645\u06cc\u200c x", None)
+    assert "\u200d" not in caller_email_subject("\u0645\u200d\u0915", None)
+
+
+def test_marks_with_no_letter_and_thai_sara_am():
+    assert caller_email_subject("\u0336\u0336abc", None) == "From a phone call: abc"
+    prefix = caller_email_subject("", None, "th")
+    room = MAX_SUBJECT_CHARS - len(prefix) - 2
+    thai = caller_email_subject("x" * (room - 1) + "\u0e01\u0e33", None, "th")
+    assert thai.endswith("x")
