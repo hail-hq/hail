@@ -92,6 +92,13 @@ def _reflected_credentials(authorization: str) -> list[str]:
     for credential in list(found):
         escaped = json.dumps(credential)[1:-1]
         found += [escaped, escaped.replace("/", "\\/")]
+        # Go's encoding/json also writes <, > and & as \u escapes.
+        go_escaped = (
+            escaped.replace("<", "\\u003c")
+            .replace(">", "\\u003e")
+            .replace("&", "\\u0026")
+        )
+        found.append(go_escaped)
     # Longest first, so a shorter fragment never splits a longer match.
     return sorted(
         {c for c in found if len(c) >= _MIN_REDACTED_FRAGMENT} | {authorization},

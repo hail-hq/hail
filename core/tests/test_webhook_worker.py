@@ -84,6 +84,11 @@ def test_reflected_credentials_cover_json_escaped_echoes():
     assert 'ab/cd\\"ef\\\\gh12' in found
 
 
+def test_reflected_credentials_cover_go_escaped_echoes():
+    found = _reflected_credentials("Bearer ab<cd>ef&gh")
+    assert "ab\\u003ccd\\u003eef\\u0026gh" in found
+
+
 def _make_delivery(**kw) -> WebhookDelivery:
     return WebhookDelivery(
         id=uuid.uuid4(),
