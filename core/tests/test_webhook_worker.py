@@ -77,6 +77,13 @@ def test_reflected_credentials_cover_basic_and_skip_short_fragments():
     assert _reflected_credentials("Bearer abc") == ["Bearer abc"]
 
 
+def test_reflected_credentials_cover_json_escaped_echoes():
+    token = 'Bearer ab/cd"ef\\gh12'
+    found = _reflected_credentials(token)
+    assert 'ab\\/cd\\"ef\\\\gh12' in found
+    assert 'ab/cd\\"ef\\\\gh12' in found
+
+
 def _make_delivery(**kw) -> WebhookDelivery:
     return WebhookDelivery(
         id=uuid.uuid4(),

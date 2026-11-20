@@ -112,8 +112,17 @@ async def test_receiver_authorization_is_encrypted_and_write_only(
         "Bearer private_key\u2603",
         {"key": "private_key"},
         "   ",
+        "Bearer   ",
     ],
-    ids=["newline", "null-byte", "oversized", "unicode", "invalid-type", "spaces"],
+    ids=[
+        "newline",
+        "null-byte",
+        "oversized",
+        "unicode",
+        "invalid-type",
+        "spaces",
+        "scheme-only",
+    ],
 )
 async def test_invalid_receiver_authorization_does_not_echo_credentials(
     client, auth_headers, authorization

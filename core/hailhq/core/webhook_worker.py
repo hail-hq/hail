@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+import json
 import logging
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -86,6 +87,11 @@ def _reflected_credentials(authorization: str) -> list[str]:
             except (binascii.Error, UnicodeDecodeError):
                 decoded = ""
             found += [decoded, decoded.partition(":")[2]]
+    # A receiver that echoes headers as JSON escapes quotes and backslashes,
+    # and some encoders (PHP's json_encode) also write "/" as \/.
+    for credential in list(found):
+        escaped = json.dumps(credential)[1:-1]
+        found += [escaped, escaped.replace("/", "\\/")]
     # Longest first, so a shorter fragment never splits a longer match.
     return sorted(
         {c for c in found if len(c) >= _MIN_REDACTED_FRAGMENT} | {authorization},

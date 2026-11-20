@@ -79,7 +79,15 @@ def _authorization_value(value: SecretStr | None) -> str | None:
             'Authorization header cannot be only spaces. Send "" to remove it.',
             loc=["body", "authorization"],
         )
-    return plain.strip()
+    plain = plain.strip()
+    if plain.lower() in {"basic", "bearer"}:
+        # A bare scheme sends no credential, and the worker would then redact
+        # that word from every receiver reply.
+        raise unprocessable(
+            "Authorization header needs a credential after the scheme.",
+            loc=["body", "authorization"],
+        )
+    return plain
 
 
 def _to_response(
