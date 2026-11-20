@@ -165,7 +165,7 @@ def test_prompt_text_is_pinned() -> None:
         "37e9a0b5058e8c60355db926a963a8fba59c0fc4dd43d9ede4c7116e464e9e8b"
     )
     assert _sha(prompts.VOICE_CONFIGURATION_HELP) == (
-        "b7f9294f20ef6e348519fb3c658a9d44d8b2018c21d9face22943509a08e649b"
+        "22cf701fda60a28bd310c1ee6af96b7405d54832837df06cfdfdd0c2152d2ca8"
     )
 
 
@@ -329,3 +329,12 @@ def test_email_clock_says_when_the_email_arrived() -> None:
         "- The email you are answering arrived at: Tuesday, 17 November 2026, "
         "16:50 UTC (16:50 where the business is)." in out
     )
+
+
+def test_onboarding_voice_help_names_the_optional_trial_settings():
+    guide = prompts.VOICE_CONFIGURATION_HELP
+    assert "Choose a language and voice" not in guide
+    assert "During onboarding, open Voice and instructions" in guide
+    assert "Language and voice" in guide
+    assert "without leaving the trial" in guide
+    assert "next conversation" in guide
