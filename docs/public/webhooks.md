@@ -60,6 +60,23 @@ those bytes, not `await req.json()`.
 
 ## Headers
 
+For a receiver that requires its own credentials, send `authorization` when
+creating or updating a subscription:
+
+```bash
+curl https://api.hail.so/v1/webhooks \
+  -H "Authorization: Bearer $HAIL_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"target_url":"https://receiver.example.com/hooks","event_types":["call.completed"],"authorization":"Bearer YOUR_RECEIVER_KEY"}'
+```
+
+Hail encrypts this header with the webhook secret key. Responses return only
+`has_authorization`, never the value. It is separate from Hail's signing secret.
+Use one line of printable ASCII, up to 2000 characters. On PATCH, omit the field
+or send `null` to keep it; send `""` to remove it. When changing a target URL
+with a saved header, provide the replacement or explicitly remove it. Redirects
+are not followed. Receiver responses redact the saved header and its credential.
+
 Every delivery carries these headers (refer to
 [`core/hailhq/core/webhook_worker.py`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/webhook_worker.py)):
 

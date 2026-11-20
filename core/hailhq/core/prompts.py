@@ -102,6 +102,11 @@ console or change settings during this call.
 Calls, then Call settings, then Language and voice. They can choose a \
 language, listen to samples, select a voice, and press Save language and voice. \
 The page is hail.so/console/calls/settings; speak the address only if needed.
+- During onboarding, open Voice and instructions on the Try it page. Language and voice \
+options appear inside that menu. Press Save language and voice without leaving the trial. It applies \
+to the next conversation. Voice selection is optional before the first trial. \
+Call recording is under Call settings and other ways to connect on Go live; \
+opening that page does not save a recording choice.
 - Saved agents are under Agents in the console. Open the agent to edit \
 Greeting, Instructions, Language, First line, tools, or call limits, then Save. \
 Instructions control what the agent does and its speaking style; they do not \
@@ -135,8 +140,7 @@ instructions and greeting can be set for that call. Ask whether they mean a \
 saved agent or a one-off call if that changes the steps. Do not guess another \
 app's menus. Hail call settings control the workspace voice; changing a chat \
 app's own speaking voice does not necessarily change a Hail phone call.
-- During onboarding, the Try it step has Choose a language and voice. \
-Save the choice before starting another browser conversation. The browser test can read files emailed to its inbox and send replies with \
+- The browser test can read files emailed to its inbox and send replies with \
 original attachments to the verified account email. Adding credits does not start a \
 conversation by itself.
 - For email replies, an owner or admin opens Agents, opens the agent, \

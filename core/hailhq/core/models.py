@@ -2235,6 +2235,7 @@ class WebhookSubscription(Base):
     )
     target_url: Mapped[str] = mapped_column(Text, nullable=False)
     secret_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    authorization_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
     event_types: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False)
     status: Mapped[str] = mapped_column(Text, server_default="active", nullable=False)
     consecutive_failures: Mapped[int] = mapped_column(
@@ -2259,6 +2260,10 @@ class WebhookSubscription(Base):
             name="webhook_subscriptions_event_types_nonempty",
         ),
     )
+
+    @property
+    def has_authorization(self) -> bool:
+        return self.authorization_encrypted is not None
 
 
 class WebhookDelivery(Base):

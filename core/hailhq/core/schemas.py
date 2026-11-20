@@ -21,6 +21,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    SecretStr,
     ValidationInfo,
     computed_field,
     field_validator,
@@ -3220,6 +3221,10 @@ class WebhookEventCatalogResponse(BaseModel):
 
 
 class WebhookSubscriptionCreate(BaseModel):
+    authorization: SecretStr | None = Field(
+        default=None,
+        description="Optional Authorization header, e.g. Bearer <receiver key>. Write-only; encrypted at rest. Use printable ASCII, at most 2000 characters.",
+    )
     target_url: str = Field(
         min_length=1, description="HTTPS URL Hail POSTs event payloads to."
     )
@@ -3230,6 +3235,10 @@ class WebhookSubscriptionCreate(BaseModel):
 
 
 class WebhookSubscriptionPatch(BaseModel):
+    authorization: SecretStr | None = Field(
+        default=None,
+        description="Replacement Authorization header. Omit or null to keep it; empty string removes it. A changed target URL requires replacement or removal when a header is saved.",
+    )
     target_url: str | None = Field(
         default=None, description="New delivery URL. Omit to leave unchanged."
     )
@@ -3251,6 +3260,10 @@ class WebhookSubscriptionResponse(BaseModel):
     """
 
     id: UUID = Field(description="Unique identifier for this subscription.")
+    has_authorization: bool = Field(
+        default=False,
+        description="Whether an Authorization header is saved. Its value is never returned.",
+    )
     organization_id: UUID = Field(
         description="Organization that owns this subscription."
     )
