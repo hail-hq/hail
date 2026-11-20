@@ -21,6 +21,10 @@ and works across processes — no in-process cache to go cold.
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
+import html
+import json
 import logging
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -64,6 +68,52 @@ def _next_delivery_state(
         "pending",
         datetime.now(timezone.utc) + timedelta(seconds=delay),
         attempt,
+    )
+
+
+# Shorter fragments match ordinary response text, so redacting them would
+# corrupt the stored body without hiding a real secret.
+_MIN_REDACTED_FRAGMENT = 8
+
+# Characters JSON encoders write as \u escapes by default. Base64 credentials
+# often hold "=" and "+", so the Gson and .NET forms matter.
+_UNICODE_ESCAPES = (
+    ("<>&", "\\u{:04x}"),  # Go encoding/json
+    ("<>&='", "\\u{:04x}"),  # Gson
+    ("<>&'+`\"", "\\u{:04X}"),  # .NET System.Text.Json
+)
+
+
+def _reflected_credentials(authorization: str) -> list[str]:
+    """The full header plus its credential forms a receiver may echo back."""
+    found = [authorization]
+    parts = authorization.split(None, 1)
+    if len(parts) == 2:
+        found.append(parts[1])
+        if parts[0].lower() == "basic":
+            try:
+                decoded = base64.b64decode(parts[1], validate=True).decode()
+            except (binascii.Error, UnicodeDecodeError):
+                decoded = ""
+            found += [decoded, decoded.partition(":")[2]]
+    # A receiver that echoes headers as JSON escapes quotes and backslashes,
+    # and some encoders (PHP's json_encode) also write "/" as \/.
+    for credential in list(found):
+        escaped = json.dumps(credential)[1:-1]
+        found += [escaped, escaped.replace("/", "\\/"), html.escape(credential)]
+        # Other encoders write some characters as \u escapes (see table).
+        for chars, form in _UNICODE_ESCAPES:
+            found.append(
+                "".join(
+                    form.format(ord(c)) if c in chars else json.dumps(c)[1:-1]
+                    for c in credential
+                )
+            )
+    # Longest first, so a shorter fragment never splits a longer match.
+    return sorted(
+        {c for c in found if len(c) >= _MIN_REDACTED_FRAGMENT} | {authorization},
+        key=len,
+        reverse=True,
     )
 
 
@@ -181,10 +231,15 @@ class WebhookWorker:
                     # No HTTP attempt happened: preserve the last response and
                     # retry budget so the pending event can resume later.
                     return
-                target_url, secret_encrypted = resolved
+                target_url, secret_encrypted, authorization_encrypted = resolved
 
                 try:
                     secret = self._decrypt(secret_encrypted)
+                    authorization = (
+                        self._decrypt(authorization_encrypted)
+                        if authorization_encrypted
+                        else ""
+                    )
                 except Exception:
                     await self._record_failure(
                         session, row, None, "secret decrypt failed"
@@ -214,13 +269,21 @@ class WebhookWorker:
                 }
                 if row.email_domain_id:
                     headers["X-Hail-Email-Domain"] = str(row.email_domain_id)
+                if authorization:
+                    headers["Authorization"] = authorization
 
             # The session above has ended, so a slow customer server holds no
             # pooled connection. The claim's deferral keeps the row ours.
             try:
                 status, resp_body = await self._http_post(target_url, body, headers)
             except Exception as exc:  # pragma: no cover
-                status, resp_body = None, str(exc)[:RESPONSE_BODY_CAP]
+                status, resp_body = None, str(exc)
+
+            # A receiver or HTTP exception can reflect its request credentials.
+            # Keep those out of the delivery inspector and audit history.
+            if authorization:
+                for credential in _reflected_credentials(authorization):
+                    resp_body = (resp_body or "").replace(credential, "[redacted]")
 
             async with self._session_factory() as session:
                 if status is not None and 200 <= status < 300:
@@ -234,8 +297,8 @@ class WebhookWorker:
 
     async def _resolve_target_url(
         self, db: AsyncSession, row: WebhookDelivery
-    ) -> tuple[str, str] | None:
-        """Return (target_url, secret_encrypted) or None if undeliverable.
+    ) -> tuple[str, str, str | None] | None:
+        """Return target URL and encrypted signing/auth secrets, or None.
 
         Every delivery is owned by a subscription (DB CHECK
         ``webhook_deliveries_target_check``); a missing or inactive
@@ -250,7 +313,7 @@ class WebhookWorker:
         ).scalar_one_or_none()
         if sub is None or sub.status != "active":
             return None
-        return sub.target_url, sub.secret_encrypted
+        return sub.target_url, sub.secret_encrypted, sub.authorization_encrypted
 
     async def _record_success(
         self,

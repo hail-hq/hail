@@ -8,7 +8,27 @@ themselves need to be airtight.
 
 from __future__ import annotations
 
-from hailhq.core.urls import canonical_url, join_url, url_variants
+import pytest
+from hailhq.core.urls import canonical_url, join_url, same_request_url, url_variants
+
+
+@pytest.mark.parametrize(
+    ("left", "right", "same"),
+    [
+        ("https://example.com", "https://example.com/", True),
+        ("https://EXAMPLE.com:443/", "https://example.com/", True),
+        ("https://example.com/hooks", "https://example.com/hooks/", False),
+        ("https://example.com/?q=a", "https://example.com/?q=a/", False),
+        (
+            "https://user:Password@example.com/",
+            "https://user:password@example.com/",
+            False,
+        ),
+        ("not a url", "not a url", False),
+    ],
+)
+def test_same_request_url_preserves_credential_destination(left, right, same):
+    assert same_request_url(left, right) is same
 
 
 def test_canonical_url_strips_single_trailing_slash() -> None:

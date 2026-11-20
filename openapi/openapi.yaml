@@ -12274,6 +12274,16 @@ components:
       title: WebhookEventType
     WebhookSubscriptionCreate:
       properties:
+        authorization:
+          anyOf:
+            - type: string
+              format: password
+              writeOnly: true
+            - type: "null"
+          title: Authorization
+          description:
+            Optional Authorization header, e.g. Bearer <receiver key>.
+            Write-only; encrypted at rest. Use printable ASCII, at most 2000 characters.
         target_url:
           type: string
           minLength: 1
@@ -12315,6 +12325,17 @@ components:
       title: WebhookSubscriptionListResponse
     WebhookSubscriptionPatch:
       properties:
+        authorization:
+          anyOf:
+            - type: string
+              format: password
+              writeOnly: true
+            - type: "null"
+          title: Authorization
+          description:
+            Replacement Authorization header. Omit or null to keep it;
+            empty string removes it. A changed target URL requires replacement or
+            removal when a header is saved.
         target_url:
           anyOf:
             - type: string
@@ -12349,6 +12370,13 @@ components:
           format: uuid
           title: Id
           description: Unique identifier for this subscription.
+        has_authorization:
+          type: boolean
+          title: Has Authorization
+          description:
+            Whether an Authorization header is saved. Its value is never
+            returned.
+          default: false
         organization_id:
           type: string
           format: uuid
