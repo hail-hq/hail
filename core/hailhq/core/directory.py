@@ -133,9 +133,19 @@ async def _members_named(
 _UNDEFINED_TABLE = "42P01"
 
 
+_warned_no_member_tables = False
+
+
 def _reraise_unless_no_member_tables(exc: ProgrammingError) -> None:
+    global _warned_no_member_tables
     if getattr(exc.orig, "sqlstate", None) != _UNDEFINED_TABLE:
         raise exc
+    # Normal on a pure self-host, and it runs on every lookup: warn once per
+    # process, so a broken hosted schema still shows, then debug only.
+    if _warned_no_member_tables:
+        logger.debug("no users/members tables, members skipped: %s", exc)
+        return
+    _warned_no_member_tables = True
     logger.warning("no users/members tables, members skipped: %s", exc)
 
 
@@ -204,18 +214,21 @@ async def find_by_phone(
         return None
     name, email = row
     return DirectoryEntry(
-        name=name, has_email=email is not None, has_phone=True, source="contact"
+        name=name, has_email=bool(email), has_phone=True, source="contact"
     )
 
 
-async def resolve_caller_email(
-    session: AsyncSession, organization_id: uuid.UUID, phone_e164: str, name: str
+async def entry_email(
+    session: AsyncSession,
+    organization_id: uuid.UUID,
+    phone_e164: str,
+    entry: DirectoryEntry | None,
 ) -> str | None:
-    """The email of the person on the call, when ``name`` is the name their
-    number is saved under (:func:`find_by_phone`). "Email me" then reaches
-    the caller even when a member or another contact shares their name."""
-    entry = await find_by_phone(session, organization_id, phone_e164)
-    if entry is None or entry.name.strip().lower() != name.strip().lower():
+    """The one email saved for the person on a call: ``entry`` is the
+    :func:`find_by_phone` result for their number (members first). Only for
+    an explicit "email me", never to pick an address for a name. None when
+    the number names nobody or that entry has no single email."""
+    if entry is None:
         return None
     if entry.source == "member":
         stmt: Any = (
@@ -238,10 +251,10 @@ async def resolve_caller_email(
 
 __all__ = [
     "DirectoryEntry",
+    "entry_email",
     "find_by_phone",
     "is_verified_member",
     "list_directory",
-    "resolve_caller_email",
     "resolve_contact_emails",
     "resolve_member_emails",
     "resolve_member_phones",
