@@ -19,7 +19,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
 MIGRATION = (
-    Path(__file__).parents[2] / "api/migrations/versions/0087_hail_mail_prefix_names.py"
+    Path(__file__).parents[2] / "api/migrations/versions/0088_hail_mail_prefix_names.py"
 )
 spec = importlib.util.spec_from_file_location("hail_mail_prefix_names", MIGRATION)
 migration = importlib.util.module_from_spec(spec)
@@ -210,7 +210,7 @@ async def test_custom_rows_keep_every_prefix_null(async_session) -> None:
 
 @pytest.mark.asyncio
 async def test_retired_rows_hold_both_pairs(async_session) -> None:
-    # The 0070 retire trigger writes the old pair only.
+    # The retire trigger writes the old pair only.
     org = uuid.uuid4()
     row_id = await _insert(
         async_session,

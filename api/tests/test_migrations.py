@@ -345,11 +345,11 @@ def test_0083_renames_call_analyzed(empty_db: str) -> None:
     )
 
 
-def test_0087_copies_and_syncs_the_hail_mail_prefixes(empty_db: str) -> None:
-    """0087 adds local_prefix_workspace/local_prefix_name, copies the old
+def test_0088_copies_and_syncs_the_hail_mail_prefixes(empty_db: str) -> None:
+    """0088 adds local_prefix_workspace/local_prefix_name, copies the old
     columns into them, and keeps both pairs equal for old and new writers.
     The 0070 guard, which reads the old columns, still sees every head."""
-    _run_alembic(empty_db, ["upgrade", "0086"])
+    _run_alembic(empty_db, ["upgrade", "0087"])
     url = _to_libpq_url(to_sync_url(empty_db))
     org = "11111111-1111-1111-1111-111111111111"
     other = "22222222-2222-2222-2222-222222222222"
@@ -378,7 +378,7 @@ def test_0087_copies_and_syncs_the_hail_mail_prefixes(empty_db: str) -> None:
             (other,),
         )
 
-    _run_alembic(empty_db, ["upgrade", "0087"])
+    _run_alembic(empty_db, ["upgrade", "0088"])
     with psycopg.connect(url, autocommit=True) as conn:
         row = conn.execute(
             f"SELECT {pairs} FROM email_domains WHERE id = %s", (before,)
@@ -436,7 +436,7 @@ def test_0087_copies_and_syncs_the_hail_mail_prefixes(empty_db: str) -> None:
             ("initech", "amber-heron-42", "initech", "amber-heron-42"),
         ]
 
-    _run_alembic(empty_db, ["downgrade", "0086"])
+    _run_alembic(empty_db, ["downgrade", "0087"])
     with psycopg.connect(url) as conn:
         assert _column_data_type(conn, "email_domains", "local_prefix_name") is None
         assert (
