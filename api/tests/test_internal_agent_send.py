@@ -11,6 +11,7 @@ import httpx
 import pytest
 from hailhq.api.main import app
 from hailhq.api.numbers import resolve_sms_number
+from hailhq.api.routes.internal import agent as agent_route
 from hailhq.api.routes.internal.agent import _SPOKEN_SMS_UNCONFIGURED
 from hailhq.core import hmac_signing
 from hailhq.core.agent_caps import AGENT_OUTBOUND_DISABLED_FLAG
@@ -28,6 +29,7 @@ from hailhq.core.models import (
     EmailDomain,
     Organization,
     OrganizationMember,
+    OrgProviderConfig,
     PhoneNumber,
     PlatformFlag,
     Sms,
@@ -35,6 +37,7 @@ from hailhq.core.models import (
 )
 from hailhq.core.providers.email.ses import SES_NOT_ACCEPTED_FAILURES
 from sqlalchemy import select
+from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .conftest import approve_us_sms
@@ -497,6 +500,74 @@ async def test_send_email_me_reaches_the_callers_own_address(
         "Hello from the call.\n\n-- \n"
     )
     assert "If that was not you, you can ignore it." in sent
+
+
+@pytest.mark.parametrize("from_org_tts", [False, True])
+async def test_send_email_me_uses_the_call_language(
+    client, async_session, email_mock, add_phone_number, from_org_tts
+):
+    """An Italian call gets Italian fixed lines. With no language on the call
+    (an inbound agent without one), the org's saved TTS language is used,
+    like the voicebot."""
+    org = uuid.uuid4()
+    call = await _email_ready_call(async_session, org, add_phone_number)
+    # The call's own language wins over the org's saved TTS language.
+    async_session.add(
+        OrgProviderConfig(
+            organization_id=org,
+            layer="tts",
+            provider="cartesia",
+            params={"language": "it" if from_org_tts else "de"},
+            is_active=True,
+        )
+    )
+    if not from_org_tts:
+        call.voice_config = {"language": "it"}
+    async_session.add(Organization(id=org, name="Northgate Dental", origin="human"))
+    async_session.add(
+        Contact(
+            organization_id=org,
+            name="Sam Lee",
+            email="sam@northgate.test",
+            phone_e164=call.to_e164,
+        )
+    )
+    await async_session.commit()
+
+    assert (await _send_email_to_name(client, call, "me"))["ok"] is True
+    row = (await async_session.execute(select(Email))).scalar_one()
+    assert row.subject == "Da una telefonata con Northgate Dental: Call summary"
+    assert row.body_text.startswith(
+        "Questa email è stata inviata in seguito a una telefonata con"
+        " Northgate Dental.\n\n"
+    )
+    assert "If that was not you" not in row.body_text
+
+
+async def test_send_email_me_is_english_when_the_language_lookup_fails(
+    client, async_session, email_mock, add_phone_number, monkeypatch
+):
+    """The language only picks words: a failed lookup still sends, in English."""
+
+    async def _fail(*_args, **_kwargs):
+        raise ProgrammingError("SELECT", {}, Exception("missing table"))
+
+    monkeypatch.setattr(agent_route, "load_org_provider_configs", _fail)
+    org = uuid.uuid4()
+    call = await _email_ready_call(async_session, org, add_phone_number)
+    async_session.add(
+        Contact(
+            organization_id=org,
+            name="Sam Lee",
+            email="sam@northgate.test",
+            phone_e164=call.to_e164,
+        )
+    )
+    await async_session.commit()
+
+    assert (await _send_email_to_name(client, call, "me"))["ok"] is True
+    row = (await async_session.execute(select(Email))).scalar_one()
+    assert row.subject == "From a phone call: Call summary"
 
 
 async def test_send_email_me_names_no_org_without_the_org_table_row(

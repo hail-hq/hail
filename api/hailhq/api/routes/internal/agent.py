@@ -140,6 +140,7 @@ from hailhq.core.models import (
     PhoneNumber,
     Sms,
 )
+from hailhq.core.provider_config import load_org_provider_configs
 from hailhq.core.providers.email import EmailProvider
 from hailhq.core.providers.email.ses import SES_NOT_ACCEPTED_FAILURES
 from hailhq.core.sms_registration_gate import us_registration_block
@@ -171,7 +172,7 @@ from hailhq.core.threads import is_e164
 from hailhq.core.webhook_fanout import call_event_data, fanout_call_event
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 from sqlalchemy import select, update
-from sqlalchemy.exc import ProgrammingError
+from sqlalchemy.exc import ProgrammingError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -480,6 +481,28 @@ async def _organization_name(db: AsyncSession, org: UUID) -> str | None:
         if getattr(exc.orig, "sqlstate", None) != "42P01":  # undefined_table
             logger.warning("organization name lookup failed: %s", exc)
         return None
+
+
+async def _call_language(db: AsyncSession, call: Call) -> str | None:
+    """The call's language, as the voicebot picks it: ``voice_config.language``,
+    else the org's saved TTS language (an inbound call copies the agent's
+    voice_config, which may have none). The voicebot reads the TTS language
+    at call start; a change during the call shows here. It only picks the
+    words of the caller email's fixed lines, so a bad shape or a failed
+    read means None (English); the savepoint keeps the send's transaction."""
+    config = call.voice_config if isinstance(call.voice_config, dict) else {}
+    language = config.get("language")
+    if isinstance(language, str) and language:
+        return language
+    try:
+        async with db.begin_nested():
+            tts = (await load_org_provider_configs(db, call.organization_id)).get("tts")
+    except SQLAlchemyError as exc:
+        logger.warning("call language lookup failed: %s", exc)
+        return None
+    params = tts.params if tts is not None else None
+    language = params.get("language") if isinstance(params, dict) else None
+    return language if isinstance(language, str) else None
 
 
 async def _run_recipient(
@@ -1707,8 +1730,9 @@ async def agent_send_email(
             # be faked: fixed words in the subject, first line and footer say
             # why it came.
             org_name = await _organization_name(db, org)
-            subject = caller_email_subject(subject, org_name)
-            body_text = caller_email_body(body_text, org_name)
+            language = await _call_language(db, call)
+            subject = caller_email_subject(subject, org_name, language)
+            body_text = caller_email_body(body_text, org_name, language)
         parent = None
         files = []
         meta = _meta(body)

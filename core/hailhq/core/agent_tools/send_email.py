@@ -17,6 +17,7 @@ import uuid
 from typing import Any
 
 from hailhq.core.agent_tools.spec import NO_CALL, SPOKEN_FALLBACK, ToolContext, ToolSpec
+from hailhq.core.caller_email_lines import caller_email_lines
 from hailhq.core.config import settings
 from hailhq.core.email_sender import head_retired_by_other_org
 from hailhq.core.hail_mail import default_user_prefix
@@ -50,46 +51,93 @@ _UNAVAILABLE = "Email is not available right now."
 MAX_ORG_NAME_CHARS = 100
 # Control, format and surrogate characters: they could break or disguise text.
 _HIDDEN = frozenset({"Cc", "Cf", "Cs"})
+# Combining marks kept on one letter: more would pile over nearby text.
+# Fully pointed Hebrew uses up to six.
+_MAX_MARKS = 8
+# Thai and Lao vowels written before their consonant. At the end of an org
+# name they have no consonant and would join the fixed words after it.
+_LEADING_VOWELS = frozenset(
+    "\u0e40\u0e41\u0e42\u0e43\u0e44\u0ec0\u0ec1\u0ec2\u0ec3\u0ec4"
+)
 
 
 def _one_line(text: str) -> str:
-    """``text`` on one line, without characters that could disguise it."""
-    kept = "".join(
-        " " if c.isspace() else c
-        for c in text
-        if c.isspace() or unicodedata.category(c) not in _HIDDEN
-    )
-    return " ".join(kept.split())
+    """``text`` on one line, in NFC, without characters that could disguise
+    it. Joiners are format characters, so they go. A combining mark with no
+    letter before it, or past eight on one letter, goes too: it would draw
+    over the fixed words."""
+    kept: list[str] = []
+    marks = 0
+    for c in unicodedata.normalize("NFC", text):
+        category = unicodedata.category(c)
+        if c.isspace():
+            kept.append(" ")
+            marks = 0
+        elif category in _HIDDEN:
+            continue
+        elif category[0] == "M":
+            if not kept or kept[-1] == " " or marks >= _MAX_MARKS:
+                continue
+            kept.append(c)
+            marks += 1
+        else:
+            kept.append(c)
+            marks = 0
+    return " ".join("".join(kept).split())
 
 
-def _call_with(org_name: str | None) -> str:
-    name = _one_line(org_name or "")[:MAX_ORG_NAME_CHARS].strip()
-    return f"a phone call with {name}" if name else "a phone call"
+def _org_name(org_name: str | None, limit: int = MAX_ORG_NAME_CHARS) -> str:
+    name = _one_line(org_name or "")[:limit].strip()
+    while name and name[-1] in _LEADING_VOWELS:
+        name = name[:-1].rstrip()
+    return name
 
 
-def caller_email_subject(subject: str, org_name: str | None) -> str:
+def _fill(named: str, unnamed: str, name: str) -> str:
+    """``named`` with the org name, or ``unnamed`` without one. When a letter
+    follows ``{org}`` directly (Telugu ``{org}తో``) and the name ends in a
+    virama, a zero width non-joiner keeps the name from joining the fixed
+    word into one conjunct. The name keeps its letters (after the NFC
+    cleanup in :func:`_one_line`)."""
+    if not name:
+        return unnamed
+    before, _, after = named.partition("{org}")
+    joins = after[:1] and unicodedata.category(after[0])[0] in "LM"
+    if joins and unicodedata.combining(name[-1]) == 9:  # virama
+        name += "\u200c"
+    return f"{before}{name}{after}"
+
+
+def caller_email_subject(
+    subject: str, org_name: str | None, language: str | None = None
+) -> str:
     """The subject of an email to the caller's own address on file: fixed
-    words first, so the email list shows why it came before any words the
-    caller chose."""
+    words first, in the call's language, so the email list shows why it came
+    before any words the caller chose. A long org name is cut so the fixed
+    words always fit; the caller's words are cut last."""
+    lines = caller_email_lines(language)
+    fixed = len(lines.subject.replace("{org}", "")) + 2  # ": "
+    name = _org_name(org_name, min(MAX_ORG_NAME_CHARS, MAX_SUBJECT_CHARS - fixed))
+    prefix = _fill(lines.subject, lines.subject_unnamed, name)
     words = _one_line(subject)
-    prefix = f"From {_call_with(org_name)}"
     framed = f"{prefix}: {words}" if words else prefix
     return framed[:MAX_SUBJECT_CHARS]
 
 
-def caller_email_body(body_text: str, org_name: str | None) -> str:
+def caller_email_body(
+    body_text: str, org_name: str | None, language: str | None = None
+) -> str:
     """The body of an email to the caller's own address on file: a fixed
-    first line and footer around the agent's text. Caller ID picked the
-    address and can be faked, so the reader learns why it came and that
-    they can ignore it."""
-    call = _call_with(org_name)
+    first line and footer, in the call's language, around the agent's text.
+    Caller ID picked the address and can be faked, so the reader learns why
+    it came and that they can ignore it."""
+    lines = caller_email_lines(language)
+    name = _org_name(org_name)
     return (
-        f"This email was sent because of {call}.\n\n"
+        f"{_fill(lines.first_line, lines.first_line_unnamed, name)}\n\n"
         f"{body_text.strip()}\n\n"
         "-- \n"
-        f"You got this email because someone asked for it during {call},"
-        " on the phone number saved with this email address. If that was not"
-        " you, you can ignore it."
+        f"{_fill(lines.footer, lines.footer_unnamed, name)}"
     )
 
 
