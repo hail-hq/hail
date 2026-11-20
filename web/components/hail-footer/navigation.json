@@ -93,6 +93,10 @@
         "href": "/blog"
       },
       {
+        "label": "Newsletter",
+        "href": "https://hailhq.substack.com/"
+      },
+      {
         "label": "MCP",
         "href": "/mcp"
       },
