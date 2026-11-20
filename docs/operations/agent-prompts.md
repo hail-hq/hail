@@ -138,7 +138,8 @@ Saving the task opens the browser trial. Voice selection, recording settings,
 and attribution remain optional. On Try it, open **Voice and instructions** to
 show the language picker, voice choices, and samples inside the menu. Press
 **Save language and voice** without leaving the trial; it affects the next
-conversation. Old `choose-voice` links show the trial with the menu already open. On Go live, open
+conversation. Old `choose-voice` links open the trial with the menu open once an
+agent exists. On Go live, open
 **Call settings and other ways to connect**, then **Call recording**. Opening
 that page never changes the recording setting; its save action does.
 Authentication keeps the marketing style. Authenticated welcome uses the console
