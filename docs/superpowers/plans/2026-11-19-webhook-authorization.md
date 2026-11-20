@@ -27,7 +27,7 @@ writes, deployments, replay, or merges. Deploy the backend before the console.
   URL-change protection, and invalid-header privacy in api/tests/test_webhooks_api.py.
 - [ ] Add failing authenticated delivery and reflected-secret tests in
   core/tests/test_webhook_worker.py. Run both files and verify expected failures.
-- [ ] Extend models.py and migration 0087; add SecretStr request fields and
+- [ ] Extend models.py and add a migration; add SecretStr request fields and
   has_authorization response; encrypt in routes/webhooks.py and decrypt in worker.
 - [ ] Run API/worker/schema tests, lint, and migration checks; regenerate OpenAPI.
 - [ ] Document receiver authorization and commit the tested backend.
@@ -48,7 +48,7 @@ Starting from backend 22b0b22d8 and current website origin/master.
 
 Backend: 2821 core tests passed, 21 skipped. Webhook and idempotency API:
 37 passed. A local HTTP receiver returned 401 without authorization, then
-204 for the encrypted credential plus HMAC. Migration 0087 passed
+204 for the encrypted credential plus HMAC. The migration passed
 upgrade/downgrade/upgrade on local PostgreSQL, preserving an existing target.
 
 Console: 45 webhook/query/design-rule tests passed; ESLint and the production

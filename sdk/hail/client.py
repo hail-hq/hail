@@ -937,10 +937,23 @@ class _WebhooksResource:
         self._http = http
 
     async def create(
-        self, *, target_url: str, event_types: list[str]
+        self,
+        *,
+        target_url: str,
+        event_types: list[str],
+        authorization: str | None = None,
     ) -> dict[str, Any]:
-        """Create a subscription; returns the response including the plaintext secret once."""
-        body = {"target_url": target_url, "event_types": list(event_types)}
+        """Create a subscription; returns the response including the plaintext secret once.
+
+        ``authorization`` is an optional write-only Authorization header Hail
+        sends to your receiver, e.g. ``"Bearer <receiver key>"``.
+        """
+        body: dict[str, Any] = {
+            "target_url": target_url,
+            "event_types": list(event_types),
+        }
+        if authorization is not None:
+            body["authorization"] = authorization
         return await self._http.request("POST", "/webhooks", json=body)
 
     async def list(self) -> dict[str, Any]:
@@ -956,7 +969,11 @@ class _WebhooksResource:
         target_url: str | None = None,
         event_types: list[str] | None = None,
         status: str | None = None,
+        authorization: str | None = None,
     ) -> dict[str, Any]:
+        """Update a subscription. ``authorization=None`` keeps the saved
+        header; ``""`` removes it. A changed ``target_url`` needs a new
+        header or ``""`` when one is saved."""
         body: dict[str, Any] = {}
         if target_url is not None:
             body["target_url"] = target_url
@@ -964,6 +981,8 @@ class _WebhooksResource:
             body["event_types"] = list(event_types)
         if status is not None:
             body["status"] = status
+        if authorization is not None:
+            body["authorization"] = authorization
         return await self._http.request("PATCH", f"/webhooks/{sub_id}", json=body)
 
     async def delete(self, sub_id: str | UUID) -> None:

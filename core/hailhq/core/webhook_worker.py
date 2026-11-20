@@ -21,6 +21,8 @@ and works across processes — no in-process cache to go cold.
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import logging
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -64,6 +66,31 @@ def _next_delivery_state(
         "pending",
         datetime.now(timezone.utc) + timedelta(seconds=delay),
         attempt,
+    )
+
+
+# Shorter fragments match ordinary response text, so redacting them would
+# corrupt the stored body without hiding a real secret.
+_MIN_REDACTED_FRAGMENT = 8
+
+
+def _reflected_credentials(authorization: str) -> list[str]:
+    """The full header plus its credential forms a receiver may echo back."""
+    found = [authorization]
+    parts = authorization.split(None, 1)
+    if len(parts) == 2:
+        found.append(parts[1])
+        if parts[0].lower() == "basic":
+            try:
+                decoded = base64.b64decode(parts[1], validate=True).decode()
+            except (binascii.Error, UnicodeDecodeError):
+                decoded = ""
+            found += [decoded, decoded.partition(":")[2]]
+    # Longest first, so a shorter fragment never splits a longer match.
+    return sorted(
+        {c for c in found if len(c) >= _MIN_REDACTED_FRAGMENT} | {authorization},
+        key=len,
+        reverse=True,
     )
 
 
@@ -232,10 +259,8 @@ class WebhookWorker:
             # A receiver or HTTP exception can reflect its request credentials.
             # Keep those out of the delivery inspector and audit history.
             if authorization:
-                parts = authorization.split(None, 1)
-                for credential in (authorization, parts[-1]):
-                    if credential:
-                        resp_body = (resp_body or "").replace(credential, "[redacted]")
+                for credential in _reflected_credentials(authorization):
+                    resp_body = (resp_body or "").replace(credential, "[redacted]")
 
             async with self._session_factory() as session:
                 if status is not None and 200 <= status < 300:

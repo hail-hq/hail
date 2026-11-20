@@ -110,8 +110,9 @@ async def test_receiver_authorization_is_encrypted_and_write_only(
         "secret" * 400,
         "Bearer private_key\u2603",
         {"key": "private_key"},
+        "   ",
     ],
-    ids=["newline", "null-byte", "oversized", "unicode", "invalid-type"],
+    ids=["newline", "null-byte", "oversized", "unicode", "invalid-type", "spaces"],
 )
 async def test_invalid_receiver_authorization_does_not_echo_credentials(
     client, auth_headers, authorization
@@ -558,7 +559,10 @@ async def test_create_subscription_writes_audit_log(
     ).scalar_one()
     assert row.resource_type == "webhook_subscription"
     assert str(row.resource_id) == sub_id
-    assert row.payload == {"target_url": "https://hooks.example.com/audit"}
+    assert row.payload == {
+        "target_url": "https://hooks.example.com/audit",
+        "has_authorization": False,
+    }
 
 
 @pytest.mark.asyncio

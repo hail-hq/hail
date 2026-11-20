@@ -6,18 +6,25 @@ test against the real Postgres fixture and a stub http_post.
 
 from __future__ import annotations
 
+import base64
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
+from functools import partial
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from threading import Thread
 
 import pytest
+from hailhq.core.http_post import httpx_post
 from hailhq.core.models import EmailDomain, WebhookDelivery, WebhookSubscription
+from hailhq.core.secret_cipher import SecretCipher, generate_key
 from hailhq.core.webhook_worker import (
     MAX_CONSECUTIVE_FAILURES,
     WebhookWorker,
     _next_delivery_state,
+    _reflected_credentials,
 )
-from hailhq.core.webhooks import RETRY_SCHEDULE_SECONDS
+from hailhq.core.webhooks import RETRY_SCHEDULE_SECONDS, sign_payload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -27,8 +34,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 async def test_authenticated_receiver_gets_authorization_and_signed_event(
     async_session, receiver_raises, spacing
 ):
-    from hailhq.core.secret_cipher import SecretCipher, generate_key
-
     cipher = SecretCipher(generate_key())
     authorization = "Bearer" + spacing + "cursor_receiver_test_key"
     org_id = uuid.uuid4()
@@ -63,6 +68,13 @@ async def test_authenticated_receiver_gets_authorization_and_signed_event(
     assert delivery.status == ("pending" if receiver_raises else "succeeded")
     assert "cursor_receiver_test_key" not in delivery.response_body
     assert "cursor_" not in delivery.response_body
+
+
+def test_reflected_credentials_cover_basic_and_skip_short_fragments():
+    basic = "Basic " + base64.b64encode(b"sam:longpassword").decode()
+    assert "sam:longpassword" in _reflected_credentials(basic)
+    assert "longpassword" in _reflected_credentials(basic)
+    assert _reflected_credentials("Bearer abc") == ["Bearer abc"]
 
 
 def _make_delivery(**kw) -> WebhookDelivery:
@@ -126,14 +138,6 @@ def _build_worker(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("url_userinfo", ["", "unused:password@"])
 async def test_worker_reaches_authenticated_http_receiver(async_session, url_userinfo):
-    from functools import partial
-    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-    from threading import Thread
-
-    from hailhq.core.http_post import httpx_post
-    from hailhq.core.secret_cipher import SecretCipher, generate_key
-    from hailhq.core.webhooks import sign_payload
-
     authorization = "Bearer local_receiver_test_key"
     received = []
 

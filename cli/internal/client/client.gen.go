@@ -4316,6 +4316,9 @@ type WebhookEventType string
 
 // WebhookSubscriptionCreate defines model for WebhookSubscriptionCreate.
 type WebhookSubscriptionCreate struct {
+	// Authorization Optional Authorization header, e.g. Bearer <receiver key>. Write-only; encrypted at rest. Use printable ASCII, at most 2000 characters.
+	Authorization *string `json:"authorization,omitempty"`
+
 	// EventTypes Event types to subscribe to (e.g. 'call.completed', 'email.bounced'). At least one required.
 	EventTypes []WebhookEventType `json:"event_types"`
 
@@ -4334,6 +4337,9 @@ type WebhookSubscriptionListResponse struct {
 
 // WebhookSubscriptionPatch defines model for WebhookSubscriptionPatch.
 type WebhookSubscriptionPatch struct {
+	// Authorization Replacement Authorization header. Omit or null to keep it; empty string removes it. A changed target URL requires replacement or removal when a header is saved.
+	Authorization *string `json:"authorization,omitempty"`
+
 	// EventTypes New set of subscribed event types. Omit to leave unchanged.
 	EventTypes *[]WebhookEventType `json:"event_types,omitempty"`
 
@@ -4360,6 +4366,9 @@ type WebhookSubscriptionResponse struct {
 
 	// EventTypes Event types this subscription receives.
 	EventTypes []string `json:"event_types"`
+
+	// HasAuthorization Whether an Authorization header is saved. Its value is never returned.
+	HasAuthorization *bool `json:"has_authorization,omitempty"`
 
 	// Id Unique identifier for this subscription.
 	Id openapi_types.UUID `json:"id"`

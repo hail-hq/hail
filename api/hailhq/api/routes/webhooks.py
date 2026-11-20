@@ -73,6 +73,12 @@ def _authorization_value(value: SecretStr | None) -> str | None:
             "Authorization header must use printable ASCII and at most 2000 characters.",
             loc=["body", "authorization"],
         )
+    if plain and not plain.strip():
+        # Only an empty string removes a saved header (see the PATCH docs).
+        raise unprocessable(
+            'Authorization header cannot be only spaces. Send "" to remove it.',
+            loc=["body", "authorization"],
+        )
     return plain.strip()
 
 
@@ -160,7 +166,10 @@ async def create_subscription(
         action="webhook.create",
         resource_type="webhook_subscription",
         resource_id=sub.id,
-        payload={"target_url": sub.target_url},
+        payload={
+            "target_url": sub.target_url,
+            "has_authorization": sub.has_authorization,
+        },
         actor_user_id=actor_user_id,
         actor_kind=actor_kind,
     )
@@ -246,11 +255,10 @@ async def patch_subscription(
     failures does not immediately re-disable itself.
     """
     authorization = _authorization_value(body.authorization)
-    sub = await _load_owned(db, sub_id, principal.organization_id, lock=True)
-    updates: dict = {}
     if body.target_url is not None:
         try:
-            # DNS lookup: keep it off the event loop.
+            # DNS lookup: keep it off the event loop, and run it before the
+            # row lock so a slow resolver does not block delivery updates.
             await asyncio.to_thread(
                 validate_webhook_target,
                 body.target_url,
@@ -258,6 +266,9 @@ async def patch_subscription(
             )
         except ValueError as exc:
             raise unprocessable(str(exc), loc=["body", "target_url"]) from exc
+    sub = await _load_owned(db, sub_id, principal.organization_id, lock=True)
+    updates: dict = {}
+    if body.target_url is not None:
         updates["target_url"] = body.target_url
         if (
             sub.authorization_encrypted is not None
@@ -300,7 +311,11 @@ async def patch_subscription(
             action="webhook.patch",
             resource_type="webhook_subscription",
             resource_id=sub.id,
-            payload={"target_url": sub.target_url, "status": sub.status},
+            payload={
+                "target_url": sub.target_url,
+                "status": sub.status,
+                "has_authorization": sub.has_authorization,
+            },
             actor_user_id=actor_user_id,
             actor_kind=actor_kind,
         )
