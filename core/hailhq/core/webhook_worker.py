@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+import html
 import json
 import logging
 from collections.abc import Awaitable, Callable
@@ -74,6 +75,14 @@ def _next_delivery_state(
 # corrupt the stored body without hiding a real secret.
 _MIN_REDACTED_FRAGMENT = 8
 
+# Characters JSON encoders write as \u escapes by default. Base64 credentials
+# often hold "=" and "+", so the Gson and .NET forms matter.
+_UNICODE_ESCAPES = (
+    ("<>&", "\\u{:04x}"),  # Go encoding/json
+    ("<>&='", "\\u{:04x}"),  # Gson
+    ("<>&'+`\"", "\\u{:04X}"),  # .NET System.Text.Json
+)
+
 
 def _reflected_credentials(authorization: str) -> list[str]:
     """The full header plus its credential forms a receiver may echo back."""
@@ -91,14 +100,15 @@ def _reflected_credentials(authorization: str) -> list[str]:
     # and some encoders (PHP's json_encode) also write "/" as \/.
     for credential in list(found):
         escaped = json.dumps(credential)[1:-1]
-        found += [escaped, escaped.replace("/", "\\/")]
-        # Go's encoding/json also writes <, > and & as \u escapes.
-        go_escaped = (
-            escaped.replace("<", "\\u003c")
-            .replace(">", "\\u003e")
-            .replace("&", "\\u0026")
-        )
-        found.append(go_escaped)
+        found += [escaped, escaped.replace("/", "\\/"), html.escape(credential)]
+        # Other encoders write some characters as \u escapes (see table).
+        for chars, form in _UNICODE_ESCAPES:
+            found.append(
+                "".join(
+                    form.format(ord(c)) if c in chars else json.dumps(c)[1:-1]
+                    for c in credential
+                )
+            )
     # Longest first, so a shorter fragment never splits a longer match.
     return sorted(
         {c for c in found if len(c) >= _MIN_REDACTED_FRAGMENT} | {authorization},
