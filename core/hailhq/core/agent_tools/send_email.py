@@ -51,20 +51,45 @@ _UNAVAILABLE = "Email is not available right now."
 MAX_ORG_NAME_CHARS = 100
 # Control, format and surrogate characters: they could break or disguise text.
 _HIDDEN = frozenset({"Cc", "Cf", "Cs"})
+# Combining marks kept on one letter: more would pile over nearby text.
+_MAX_MARKS = 4
+# Thai and Lao vowels written before their consonant. At the end of an org
+# name they have no consonant and would join the fixed words after it.
+_LEADING_VOWELS = frozenset(
+    "\u0e40\u0e41\u0e42\u0e43\u0e44\u0ec0\u0ec1\u0ec2\u0ec3\u0ec4"
+)
 
 
 def _one_line(text: str) -> str:
-    """``text`` on one line, without characters that could disguise it."""
-    kept = "".join(
-        " " if c.isspace() else c
-        for c in text
-        if c.isspace() or unicodedata.category(c) not in _HIDDEN
-    )
-    return " ".join(kept.split())
+    """``text`` on one line, in NFC, without characters that could disguise
+    it. Joiners are format characters, so they go. A combining mark with no
+    letter before it, or past four on one letter, goes too: it would draw
+    over the fixed words."""
+    kept: list[str] = []
+    marks = 0
+    for c in unicodedata.normalize("NFC", text):
+        category = unicodedata.category(c)
+        if c.isspace():
+            kept.append(" ")
+            marks = 0
+        elif category in _HIDDEN:
+            continue
+        elif category[0] == "M":
+            if not kept or kept[-1] == " " or marks >= _MAX_MARKS:
+                continue
+            kept.append(c)
+            marks += 1
+        else:
+            kept.append(c)
+            marks = 0
+    return " ".join("".join(kept).split())
 
 
 def _org_name(org_name: str | None, limit: int = MAX_ORG_NAME_CHARS) -> str:
-    return _one_line(org_name or "")[:limit].strip()
+    name = _one_line(org_name or "")[:limit].strip()
+    while name and name[-1] in _LEADING_VOWELS:
+        name = name[:-1].rstrip()
+    return name
 
 
 def _fill(named: str, unnamed: str, name: str) -> str:
