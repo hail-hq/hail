@@ -57,7 +57,15 @@ _HIDDEN = frozenset({"Cc", "Cf", "Cs"})
 # Latin words.
 _JOINERS = frozenset({"\u200c", "\u200d"})
 # Arabic in all its blocks counts as one script.
-_ARABIC = ((0x0600, 0x08FF), (0xFB50, 0xFDFF), (0xFE70, 0xFEFF))
+_ARABIC = (
+    (0x0600, 0x06FF),
+    (0x0750, 0x077F),
+    (0x08A0, 0x08FF),
+    (0xFB50, 0xFDFF),
+    (0xFE70, 0xFEFF),
+)
+# Combining marks kept on one letter: more would pile over nearby text.
+_MAX_MARKS = 4
 # Devanagari to Sinhala: one script per 128-character block.
 _INDIC = (0x0900, 0x0DFF)
 # Thai and Lao vowels written before their consonant.
@@ -95,14 +103,30 @@ def _inside_flag(text: str, at: int) -> bool:
 def _one_line(text: str) -> str:
     """``text`` on one line, without characters that could disguise it. A
     joiner stays only between two letters or marks of one script that uses
-    it (Arabic, or one Indic block). Emoji joined by ZWJ show as separate
-    emoji. A combining mark with no letter before it goes too: it would draw
+    it (Arabic, or one Indic block), or ends a word after an Indic virama.
+    Emoji joined by ZWJ show as separate emoji. A combining mark with no
+    letter before it, or past four on one letter, goes too: it would draw
     over the fixed words."""
     kept: list[str] = []
 
     def drop_open_joiner() -> None:
+        # A ZWJ after a virama ends a word in older Malayalam chillu and
+        # Bengali khanda ta spellings: it stays.
         if kept and kept[-1] in _JOINERS:
-            kept.pop()
+            after_virama = (
+                kept[-1] == "\u200d"
+                and len(kept) > 1
+                and unicodedata.combining(kept[-2]) == 9
+                and _joiner_script(kept[-2]) not in (None, -1)
+            )
+            if not after_virama:
+                kept.pop()
+
+    def too_many_marks() -> bool:
+        run = 0
+        while run < len(kept) and unicodedata.category(kept[-run - 1])[0] == "M":
+            run += 1
+        return run >= _MAX_MARKS
 
     for c in unicodedata.normalize("NFC", text):
         category = unicodedata.category(c)
@@ -113,7 +137,8 @@ def _one_line(text: str) -> str:
             if kept and _joiner_script(kept[-1]) is not None:
                 kept.append(c)
         elif category in _HIDDEN or (
-            category.startswith("M") and (not kept or kept[-1] == " ")
+            category.startswith("M")
+            and (not kept or kept[-1] == " " or too_many_marks())
         ):
             continue
         else:
@@ -140,13 +165,24 @@ def _splits_letter(text: str, at: int) -> bool:
         or unicodedata.combining(before) == 9  # virama
         or (_is_flag_letter(after) and _inside_flag(text, at))
         or 0x1F3FB <= ord(after) <= 0x1F3FF  # emoji skin tone
+        or (_is_choseong(before) and _is_jamo_after_choseong(after))
     )
+
+
+def _is_choseong(c: str) -> bool:
+    code = ord(c)
+    return 0x1100 <= code <= 0x115F or 0xA960 <= code <= 0xA97F
+
+
+def _is_jamo_after_choseong(c: str) -> bool:
+    code = ord(c)
+    return 0x1160 <= code <= 0x11FF or 0xD7B0 <= code <= 0xD7FF
 
 
 def _cut(text: str, limit: int) -> str:
     """``text`` cut to ``limit`` characters, never inside a written letter
     (Indic vowel signs, viramas and joiners, Thai vowels, flags, skin
-    tones). Text is NFC, so Korean syllables are single characters (NFC
+    tones, Korean jamo). Text is NFC, so most Korean syllables are single characters (NFC
     also maps CJK compatibility ideographs to their unified form)."""
     if len(text) <= limit:
         return text
@@ -156,12 +192,11 @@ def _cut(text: str, limit: int) -> str:
 
 
 def _org_name(org_name: str | None, limit: int = MAX_ORG_NAME_CHARS) -> str:
-    """The org name for the fixed lines. A virama or Thai leading vowel at
-    its end would fuse with the fixed words after it, so it goes."""
+    """The org name for the fixed lines. A Thai or Lao leading vowel at its
+    end has no consonant and would join the fixed words after it, so it
+    goes. A virama stays: it is part of how many names are spelled."""
     name = _cut(_one_line(org_name or ""), limit).strip()
-    while name and (
-        name[-1] in _LEADING_VOWELS or unicodedata.combining(name[-1]) == 9
-    ):
+    while name and name[-1] in _LEADING_VOWELS:
         name = name[:-1].rstrip()
     return name
 

@@ -153,14 +153,28 @@ def test_a_run_of_flags_is_cut_between_flags():
     assert len(words) % 2 == 0 and len(words) >= room - 1
 
 
-def test_org_name_never_fuses_with_the_fixed_words():
-    assert caller_email_body("Hi.", "\u0c15\u0c4d", "te").startswith(
-        CALLER_EMAIL_LINES["te"].first_line.replace("{org}", "\u0c15")
+def test_org_name_keeps_its_spelling_and_drops_a_dangling_thai_vowel():
+    # Telugu "bank" ends in a virama: it stays.
+    bank = "\u0c2c\u0c4d\u0c2f\u0c3e\u0c02\u0c15\u0c4d"
+    assert caller_email_subject("Hi", bank) == f"From a phone call with {bank}: Hi"
+    # Malayalam chillu in the older spelling ends in virama and ZWJ.
+    chillu = "\u0d28\u0d4d\u200d"
+    assert caller_email_subject("Hi", chillu + " X").startswith(
+        f"From a phone call with {chillu} X"
     )
     assert caller_email_subject("Hi", "Acme\u0e40", "th").endswith("Acme: Hi")
+
+
+def test_marks_on_one_letter_are_capped_and_archaic_jamo_stay_whole():
+    subject = caller_email_subject("A" + "\u0336" * 80, None)
+    assert subject == "From a phone call: A" + "\u0336" * 4
+    jamo = caller_email_subject("\u1113\u1161" * 120, None, "ko")
+    assert jamo.endswith("\u1161") and len(jamo) <= MAX_SUBJECT_CHARS
 
 
 def test_a_joiner_between_two_indic_scripts_goes():
     assert "\u200d" not in caller_email_subject("\u0915\u200d\u0b95", None)
     # Arabic and its presentation forms are one script.
     assert "\u200c" in caller_email_subject("\u0645\u200c\ufe8d", None)
+    # Syriac is not Arabic.
+    assert "\u200d" not in caller_email_subject("\u0645\u200d\u0710", None)
