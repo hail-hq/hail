@@ -96,7 +96,8 @@ def _fill(named: str, unnamed: str, name: str) -> str:
     """``named`` with the org name, or ``unnamed`` without one. When a letter
     follows ``{org}`` directly (Telugu ``{org}తో``) and the name ends in a
     virama, a zero width non-joiner keeps the name from joining the fixed
-    word into one conjunct. The name itself stays as written."""
+    word into one conjunct. The name keeps its letters (after the NFC
+    cleanup in :func:`_one_line`)."""
     if not name:
         return unnamed
     before, _, after = named.partition("{org}")

@@ -511,17 +511,17 @@ async def test_send_email_me_uses_the_call_language(
     like the voicebot."""
     org = uuid.uuid4()
     call = await _email_ready_call(async_session, org, add_phone_number)
-    if from_org_tts:
-        async_session.add(
-            OrgProviderConfig(
-                organization_id=org,
-                layer="tts",
-                provider="cartesia",
-                params={"language": "it"},
-                is_active=True,
-            )
+    # The call's own language wins over the org's saved TTS language.
+    async_session.add(
+        OrgProviderConfig(
+            organization_id=org,
+            layer="tts",
+            provider="cartesia",
+            params={"language": "it" if from_org_tts else "de"},
+            is_active=True,
         )
-    else:
+    )
+    if not from_org_tts:
         call.voice_config = {"language": "it"}
     async_session.add(Organization(id=org, name="Northgate Dental", origin="human"))
     async_session.add(
