@@ -13,6 +13,21 @@ const CLICKABLE =
 
 /** A press held longer than this is a long press (text selection, callout), not a tap. */
 const LONG_PRESS_MS = 500;
+/** A finger that moves farther than this swiped; it did not tap. */
+const TAP_SLOP_PX = 10;
+
+/**
+ * Only iOS and iPadOS Safari skip the click on blank area. Other touch
+ * browsers send it, and the menu must wait for it there: closing first can
+ * move a link under the finger before the click lands.
+ */
+function skipsBlankAreaClick() {
+  const { userAgent, maxTouchPoints } = navigator;
+  return (
+    /iP(hone|ad|od)/.test(userAgent) ||
+    (/Macintosh/.test(userAgent) && maxTouchPoints > 1)
+  );
+}
 
 function canReceiveClick(target: EventTarget | null) {
   const el = target as Element | null;
@@ -39,9 +54,11 @@ function canReceiveClick(target: EventTarget | null) {
 /**
  * Open/close state for a popover menu. While open it closes on:
  * - a click outside (a drag that starts inside and ends outside does not count),
- * - a touch or pen tap outside on something that cannot take a click (iOS
- *   Safari sends none on blank area), when the finger lifts. Not for a scroll,
- *   a long press, or a gesture with a second finger,
+ * - on iOS and iPadOS, a touch or pen tap outside on something that cannot
+ *   take a click (Safari sends none on blank area), when the finger lifts. Not
+ *   for a scroll, a swipe, a long press, or a gesture with a second finger.
+ *   Elements that get a click only through addEventListener look blank here,
+ *   so the menu closes just before their click,
  * - a right or middle press, or a press on a disabled control, outside,
  * - a context menu outside (right-click, or Control+click on a Mac),
  * - Escape.
@@ -56,17 +73,20 @@ export function useDropdown(initialOpen = false) {
     if (!open) return;
     let pressedInside = false;
     // A primary touch or pen press that started outside: its pointer and time.
-    let tap: { id: number; at: number } | null = null;
+    let tap: { id: number; at: number; x: number; y: number } | null = null;
+    const ios = skipsBlankAreaClick();
     const outside = (e: Event) => !ref.current?.contains(e.target as Node);
     function onPointerDown(e: PointerEvent) {
       const inside = !outside(e);
-      // Only a primary press is followed by a click that we must ignore.
-      pressedInside = e.button === 0 && inside;
+      // Only a primary press is followed by a click that we must ignore. A
+      // second finger must not reset the press of the first one.
+      const touch = e.pointerType === "touch" || e.pointerType === "pen";
+      if (e.isPrimary || !touch) pressedInside = e.button === 0 && inside;
       // A second finger is not primary, so any press here also ends a tap in
       // progress: a gesture with two fingers is not a tap.
       tap =
-        e.button === 0 && !inside && e.isPrimary && e.pointerType !== "mouse"
-          ? { id: e.pointerId, at: e.timeStamp }
+        ios && e.button === 0 && !inside && e.isPrimary && touch
+          ? { id: e.pointerId, at: e.timeStamp, x: e.clientX, y: e.clientY }
           : null;
       // These presses send no click, so close now. Nothing under them can move.
       const control = (e.target as Element | null)?.closest?.(
@@ -80,8 +100,11 @@ export function useDropdown(initialOpen = false) {
     function onPointerUp(e: PointerEvent) {
       if (!tap || e.pointerId !== tap.id) return;
       const quick = e.timeStamp - tap.at <= LONG_PRESS_MS;
+      const still =
+        Math.hypot(e.clientX - tap.x, e.clientY - tap.y) <= TAP_SLOP_PX;
       tap = null;
-      if (quick && outside(e) && !canReceiveClick(e.target)) setOpen(false);
+      if (quick && still && outside(e) && !canReceiveClick(e.target))
+        setOpen(false);
     }
     function onDocClick(e: MouseEvent) {
       // A drag that starts in the menu (text selection) clicks the common
