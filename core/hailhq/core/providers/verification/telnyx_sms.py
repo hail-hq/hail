@@ -640,12 +640,14 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
         since it was vetted (or the lane was bought, with no ``vettedDate``),
         so a brand read that lags behind the vetting is not held. A missing
         or other status (``PENDING``, ``UNSCORE``) is still running. Never
-        once a campaign is filed. Telnyx lists only ``ACTIVE`` records
-        unless ``vettingStatus`` names others."""
+        once a campaign is filed or the brand was verified. Telnyx lists
+        only ``ACTIVE`` records unless ``vettingStatus`` names others."""
         if (
             not refs.get("faster_lane_at")
             or not refs.get("vetting_requested")
             or refs.get("campaign_id")
+            # Verified once: a later read that lags behind holds nothing.
+            or refs.get("brand_verified")
         ):
             return False
         try:

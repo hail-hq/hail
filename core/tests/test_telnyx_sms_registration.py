@@ -3511,6 +3511,11 @@ async def test_a_held_lane_ends_when_the_brand_is_verified_later() -> None:
     assert refs["brand_verified"] is True
     assert p.step(refs) != "needs_information"
     assert not any(c[0] == "POST" for c in calls)
+    # A later read that lags behind holds nothing again.
+    brand["identity"] = "UNVERIFIED"
+    assert (await p.status(refs)).reason is None
+    assert "needs_information" not in refs
+    brand["identity"] = "VERIFIED"
     # The next pass is a normal one: no campaign without the credit...
     assert (await p.status(refs, may_file_campaign=False)).state == "pending"
     assert "campaign_id" not in refs
