@@ -78,7 +78,7 @@ from hailhq.core.telemetry import (
     request_span_attributes,
 )
 from hailhq.core.telemetry_identity import IdentityMiddleware
-from hailhq.core.webhook_worker import WebhookWorker
+from hailhq.core.webhook_worker import RESPONSE_BODY_CAP, WebhookWorker
 
 _telemetry = configure_telemetry("hail-api")
 logger = logging.getLogger(__name__)
@@ -253,6 +253,9 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             http_post=partial(
                 httpx_post,
                 allow_private_networks=settings.hail_webhook_allow_private_networks,
+                # Only the first RESPONSE_BODY_CAP characters are stored.
+                # UTF-8 uses up to 4 bytes a character.
+                max_body_bytes=RESPONSE_BODY_CAP * 4,
             ),
             decrypt=cipher.decrypt,
         )

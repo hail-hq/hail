@@ -3194,6 +3194,78 @@ paths:
               description: Seconds until the current window resets.
               schema:
                 type: integer
+  /v1/webhooks/test:
+    post:
+      tags:
+        - webhooks
+      summary: Test Subscription
+      description:
+        "Send one ``webhook.test`` event to a URL and return the receiver's
+        answer.
+
+
+        Use it before saving a subscription or a change to one. It sends the
+
+        same headers as a real delivery. Nothing is stored or retried, and a
+
+        failed test does not count toward auto-disable.
+
+
+        With ``subscription_id`` the subscription's secret signs the test, and an
+
+        omitted ``authorization`` sends the saved header. Without it the test is
+
+        not signed: a new subscription gets its secret when it is created."
+      operationId: test_subscription_v1_webhooks_test_post
+      parameters:
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebhookTestRequest"
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookTestResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
   /v1/webhooks/{sub_id}:
     get:
       tags:
@@ -12512,6 +12584,80 @@ components:
         ``secret`` is populated **only** by create + rotate-secret responses;
 
         later GETs return ``None`` so the plaintext never round-trips."
+    WebhookTestRequest:
+      properties:
+        target_url:
+          type: string
+          minLength: 1
+          title: Target Url
+          description: HTTPS URL to send the test event to.
+        authorization:
+          anyOf:
+            - type: string
+              format: password
+              writeOnly: true
+            - type: "null"
+          title: Authorization
+          description:
+            Authorization header to send, e.g. Bearer <receiver key>. With
+            subscription_id, omit or null to send the saved header (only when target_url
+            is the saved URL); an empty string sends none.
+        subscription_id:
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
+          title: Subscription Id
+          description:
+            Saved subscription to test. Its secret signs the test. Without
+            it the test is not signed, because a new subscription has no secret yet.
+      type: object
+      required:
+        - target_url
+      title: WebhookTestRequest
+    WebhookTestResponse:
+      properties:
+        ok:
+          type: boolean
+          title: Ok
+          description: True when the receiver answered with a 2xx status.
+        status_code:
+          anyOf:
+            - type: integer
+            - type: "null"
+          title: Status Code
+          description:
+            HTTP status the receiver answered with. Null when no answer
+            came.
+        duration_ms:
+          type: integer
+          title: Duration Ms
+          description: Time from sending to the answer or error.
+        response_body:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Response Body
+          description:
+            Start of the receiver's answer (at most 4096 characters), with
+            the Authorization header removed.
+        error:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Error
+          description: Why no answer came (timeout, connection refused).
+        signed:
+          type: boolean
+          title: Signed
+          description: Whether the test carried an X-Hail-Signature header.
+      type: object
+      required:
+        - ok
+        - duration_ms
+        - signed
+      title: WebhookTestResponse
+      description: Result of one test POST. Nothing is stored or retried.
     WhoamiResponse:
       properties:
         auth_kind:
