@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import inspect
 from datetime import datetime, timedelta, timezone
 
 import pytest
 from hailhq.core import db_size_alert
 from hailhq.core.db_size_alert import ALERT_FLAG, check_database_size
 from hailhq.core.models import PlatformFlag
+from hailhq.core.providers.email.ses import SesEmailProvider
 
 
 async def test_alert_once_a_day(async_session, monkeypatch) -> None:
@@ -51,3 +53,26 @@ async def test_small_database_or_no_sender_sends_nothing(async_session, send):
 
     # The test database is far below the real line.
     assert not await check_database_size(async_session, never)
+
+
+async def test_ses_sender_calls_the_provider_with_every_required_field(
+    monkeypatch,
+) -> None:
+
+    calls: list[dict] = []
+
+    class Fake:
+        async def send_email(self, **kwargs):
+            # The real signature must take exactly these arguments.
+            inspect.signature(SesEmailProvider.send_email).bind(None, **kwargs)
+            calls.append(kwargs)
+
+    monkeypatch.setattr(db_size_alert, "SesEmailProvider", Fake)
+    monkeypatch.setattr(db_size_alert.settings, "hail_mail_base_domain", "mail.example")
+    monkeypatch.setattr(db_size_alert.settings, "hail_support_email", "ops@example.com")
+    send = db_size_alert.ses_sender()
+    await send("subject", "body")
+    assert calls[0]["from_address"] == "noreply@mail.example"
+    assert calls[0]["to_addresses"] == ["ops@example.com"]
+    monkeypatch.setattr(db_size_alert.settings, "hail_mail_base_domain", "")
+    assert db_size_alert.ses_sender() is None

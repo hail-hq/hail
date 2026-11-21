@@ -33,13 +33,13 @@ from uuid import UUID
 import numpy as np
 from hailhq.core.db import session_scope
 from hailhq.core.knowledge.access import MEMORY_MAX_PIECES, agent_uses_knowledge
-from hailhq.core.knowledge.embed import Embedder, get_embedder, load_embedder
+from hailhq.core.knowledge.embed import Embedder, get_embedder
 from hailhq.core.knowledge.index import Hit, MemoryIndex, Piece
 from hailhq.core.knowledge.search import search_pieces
 from hailhq.core.knowledge.text import query_terms
 from hailhq.core.models import KnowledgeDocument, KnowledgePiece
 from hailhq.core.prompts import knowledge_section
-from sqlalchemy import func, select
+from sqlalchemy import Text, cast, func, select
 
 __all__ = [
     "CALL_PIECES",
@@ -136,7 +136,8 @@ class CallKnowledge:
                                 KnowledgePiece.text,
                                 KnowledgePiece.page,
                                 KnowledgePiece.csv_row,
-                                KnowledgePiece.embedding,
+                                # Text: parsed in a thread, not on the loop.
+                                cast(KnowledgePiece.embedding, Text).label("embedding"),
                             )
                             .join(
                                 KnowledgeDocument,
@@ -149,7 +150,8 @@ class CallKnowledge:
                             )
                         )
                     ).all()
-            embedder = await asyncio.to_thread(load_embedder)
+            # No model: the call keeps keyword search, like texts and email.
+            embedder = await asyncio.to_thread(get_embedder)
             if rows:
                 self._index = await asyncio.to_thread(_build_index, rows)
             else:
@@ -177,9 +179,15 @@ class CallKnowledge:
             # and the real one): no second search.
             return self._last[1]
         try:
-            vector = await asyncio.to_thread(self._embedder.embed_query, text)
+            vector = (
+                await asyncio.to_thread(self._embedder.embed_query, text)
+                if self._embedder is not None
+                else None
+            )
             if self._index is not None:
-                hits = self._index.search(text, vector, CALL_PIECES)
+                hits = await asyncio.to_thread(
+                    self._index.search, text, vector, CALL_PIECES
+                )
             else:
                 async with session_scope() as db:
                     hits = await search_pieces(
@@ -205,7 +213,9 @@ def _build_index(rows) -> MemoryIndex:
         )
         for r in rows
     ]
-    vectors = np.asarray([r.embedding for r in rows], dtype=np.float32)
+    vectors = np.asarray(
+        [r.embedding.strip("[]").split(",") for r in rows], dtype=np.float32
+    )
     return MemoryIndex(pieces, vectors)
 
 

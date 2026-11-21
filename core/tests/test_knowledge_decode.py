@@ -168,3 +168,32 @@ async def test_child_process_reads_and_reports_errors() -> None:
         max_output=1024 * 1024,
     )
     assert json.loads(out) == {"error": "this file type cannot be read"}
+
+
+def test_docx_reads_through_content_controls_and_nested_tables() -> None:
+    sdt = "<w:sdt><w:sdtContent>{}</w:sdtContent></w:sdt>"
+    cell = "<w:tc><w:p><w:r><w:t>{}</w:t></w:r></w:p></w:tc>"
+    nested = (
+        "<w:tc><w:tbl><w:tr>"
+        + cell.format("E-204")
+        + cell.format("Grid voltage")
+        + "</w:tr></w:tbl></w:tc>"
+    )
+    raw = make_docx(
+        sdt.format("<w:p><w:r><w:t>Cover page text</w:t></w:r></w:p>")
+        + "<w:tbl>"
+        + sdt.format(
+            "<w:tr>" + cell.format("NS-WB-02") + cell.format("Bracket") + "</w:tr>"
+        )
+        + "<w:tr>"
+        + cell.format("Codes")
+        + nested
+        + "</w:tr>"
+        + "</w:tbl>"
+    )
+    texts = [b["t"] for b in decode(DOCX, raw)["blocks"]]
+    assert texts == [
+        "Cover page text",
+        "NS-WB-02 | Bracket",
+        "Codes | E-204 | Grid voltage",
+    ]

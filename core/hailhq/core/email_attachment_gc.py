@@ -128,17 +128,36 @@ class EmailAttachmentGcWorker:
         s3 = self._get_s3()
         deleted = 0
         for row_id, s3_key in candidates:
-            try:
-                await delete_upload_objects(s3, s3_key)
-            except Exception:
-                logger.warning(
-                    "GC: failed to delete S3 object for upload_id=%s; "
-                    "skipping row deletion this tick",
-                    row_id,
-                    exc_info=True,
-                )
-                continue
             async with self._session_factory() as session:
+                # The rule again, under the row's lock: a request may have
+                # used the upload since the list (POST /knowledge/documents
+                # locks the same row), and deleting a used knowledge upload
+                # would delete its document.
+                still = (
+                    await session.execute(
+                        select(FileUpload.id)
+                        .where(
+                            FileUpload.id == row_id,
+                            FileUpload.uploaded_at.is_not(None),
+                            condition,
+                        )
+                        .with_for_update()
+                    )
+                ).scalar_one_or_none()
+                if still is None:
+                    await session.rollback()
+                    continue
+                try:
+                    await delete_upload_objects(s3, s3_key)
+                except Exception:
+                    await session.rollback()
+                    logger.warning(
+                        "GC: failed to delete S3 object for upload_id=%s; "
+                        "skipping row deletion this tick",
+                        row_id,
+                        exc_info=True,
+                    )
+                    continue
                 await session.execute(delete(FileUpload).where(FileUpload.id == row_id))
                 await session.commit()
             deleted += 1

@@ -46,7 +46,7 @@ from hailhq.core.knowledge.access import delete_org_knowledge
 from hailhq.core.livekit import LiveKitClient
 from hailhq.core.models import OrgClosure
 from hailhq.core.providers.verification import get_verification_provider
-from hailhq.core.retention import clear_closed_org_registrations
+from hailhq.core.retention import clear_closed_org_registrations, closed_org_ids
 from hailhq.core.s3_mail import S3MailClient
 from pydantic import BaseModel
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -101,8 +101,11 @@ async def close_org(organization_id: UUID, lk: LiveKitClient | None) -> None:
                 if settings.hail_mail_bucket
                 else None
             )
-            documents = await delete_org_knowledge(db, organization_id, store)
-            logger.info("org closure: %d knowledge document(s) deleted", documents)
+            # Same rule as the steps above: closed by now, never the
+            # self-hosted org. The ingest worker deletes it later otherwise.
+            if await db.scalar(closed_org_ids(now, organization_id).exists().select()):
+                documents = await delete_org_knowledge(db, organization_id, store)
+                logger.info("org closure: %d knowledge document(s) deleted", documents)
         except Exception:
             await db.rollback()
             logger.exception("org closure: could not delete the knowledge base")

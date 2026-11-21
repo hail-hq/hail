@@ -29,7 +29,6 @@ from sqlalchemy import text
 
 @pytest.fixture(autouse=True)
 def fake_model(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(module, "load_embedder", FakeEmbedder)
     monkeypatch.setattr(module, "get_embedder", FakeEmbedder)
 
 
@@ -128,13 +127,22 @@ async def test_both_switches_must_be_on(async_session, enabled, agent_knowledge)
     assert await knowledge.context_for("what does error E 204 mean") is None
 
 
+async def test_no_model_keeps_keyword_search(async_session, monkeypatch) -> None:
+    org, agent_id = await seed(async_session)
+    monkeypatch.setattr(module, "get_embedder", lambda: None)
+    knowledge = await loaded(org, agent_id)
+    assert knowledge.ready
+    section = await knowledge.context_for("what does error E 204 mean")
+    assert section and "E-204" in section
+
+
 async def test_load_failure_fails_open(async_session, monkeypatch) -> None:
     org, agent_id = await seed(async_session)
 
-    def broken():
-        raise RuntimeError("no model")
+    def broken(rows):
+        raise RuntimeError("bad rows")
 
-    monkeypatch.setattr(module, "load_embedder", broken)
+    monkeypatch.setattr(module, "_build_index", broken)
     knowledge = await loaded(org, agent_id)
     assert not knowledge.ready
     assert await knowledge.context_for("what does error E 204 mean") is None

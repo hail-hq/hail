@@ -43,6 +43,7 @@ from contextlib import AbstractAsyncContextManager
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
+from botocore.exceptions import BotoCoreError, ClientError
 from hailhq.core.file_uploads import matches_declared_type
 from hailhq.core.isolated_process import run_isolated
 from hailhq.core.knowledge.access import (
@@ -74,6 +75,9 @@ logger = logging.getLogger(__name__)
 
 MAX_ATTEMPTS = 3
 RETRY_MINUTES = 5
+# Bucket errors that never clear: the object is gone or not ours to read.
+_GONE = frozenset({"NoSuchKey", "404", "NotFound", "AccessDenied", "403"})
+_SPENT = "the file could not be processed; delete it and upload it again"
 LEASE = timedelta(minutes=15)
 # Wall-clock limit of one decode. The child also has a 30 s CPU limit.
 DECODE_SECONDS = 60.0
@@ -148,6 +152,7 @@ class KnowledgeIngestWorker:
         """Delete closed accounts' knowledge, then ingest documents until
         none is waiting. Returns how many documents were finished."""
         await self._forget_closed_orgs()
+        await self._fail_spent()
         done = 0
         while not self._stop.is_set():
             claimed = await self._claim()
@@ -193,22 +198,26 @@ class KnowledgeIngestWorker:
                     type(exc).__name__,
                 )
 
-    async def _claim(self) -> tuple[UUID, int] | None:
+    async def _fail_spent(self) -> None:
+        """Rows that used every try (a crashed worker's lease) fail, in one
+        statement."""
         async with self._session_factory() as db:
             now = (await db.execute(select(func.now()))).scalar_one()
-            # Rows that used every try fail first, in one statement.
             await db.execute(
                 update(KnowledgeDocument)
                 .where(_claimable(now), KnowledgeDocument.attempts >= MAX_ATTEMPTS)
                 .values(
                     status="failed",
-                    error="the file could not be processed; delete it and "
-                    "upload it again",
+                    error=_SPENT,
                     claimed_at=None,
                     updated_at=func.now(),
                 )
             )
             await db.commit()
+
+    async def _claim(self) -> tuple[UUID, int] | None:
+        async with self._session_factory() as db:
+            now = (await db.execute(select(func.now()))).scalar_one()
             row = (
                 await db.execute(
                     select(KnowledgeDocument.id, KnowledgeDocument.attempts)
@@ -252,13 +261,18 @@ class KnowledgeIngestWorker:
             )
             await self._finish(document_id, attempt, "pending", attempts=attempt - 1)
         except Exception as exc:
+            last = attempt >= MAX_ATTEMPTS
             logger.warning(
-                "knowledge: document %s attempt %d failed (%s); will retry",
+                "knowledge: document %s attempt %d failed (%s)%s",
                 document_id,
                 attempt,
                 type(exc).__name__,
+                "" if last else "; will retry",
             )
-            await self._finish(document_id, attempt, "pending")
+            if last:
+                await self._finish(document_id, attempt, "failed", error=_SPENT)
+            else:
+                await self._finish(document_id, attempt, "pending")
 
     async def _finish(
         self,
@@ -309,7 +323,14 @@ class KnowledgeIngestWorker:
             data = await self._get_s3().fetch_raw(
                 row.s3_key, max_bytes=(row.size_bytes or 0) + 1
             )
-        except Exception as exc:
+        except ValueError:
+            raise _Refused("the stored file is not the one uploaded; upload it again")
+        except ClientError as exc:
+            code = str(exc.response.get("Error", {}).get("Code", ""))
+            if code in _GONE:
+                raise _Refused("the stored file is gone; upload it again") from exc
+            raise _Unavailable(f"bucket ({code or 'error'})") from exc
+        except (BotoCoreError, OSError) as exc:
             raise _Unavailable(f"bucket ({type(exc).__name__})") from exc
         if not data or not matches_declared_type(data, row.content_type):
             raise _Refused(f"the file does not look like {row.content_type}")

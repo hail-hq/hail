@@ -350,7 +350,8 @@ async def update_agent(
             changes.pop(field)
     if "voice_config" in changes:
         changes["voice_config"] = body.voice_config.model_dump(mode="json")
-    if changes.get("knowledge"):
+    if changes.get("knowledge") and not agent.knowledge:
+        # Only turning it on is checked: re-sending true changes nothing.
         await _check_knowledge_on(db, principal.organization_id)
     # Validate before any attribute is set: the validation queries would
     # autoflush a pending name change outside the conflict handler below.

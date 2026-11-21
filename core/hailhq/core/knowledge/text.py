@@ -23,6 +23,7 @@ each piece starts on.
 from __future__ import annotations
 
 import unicodedata
+from collections import deque
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
@@ -60,6 +61,8 @@ _ID_SEPARATORS = frozenset(" -./_")
 _ID_PART_MAX = 10
 _ID_PARTS_MAX = 6
 _ID_MAX = 32
+# Words with no digit are joined only across dashes, at most this many.
+_DASH_JOIN_PARTS = 3
 # A query keeps at most this many distinct words (the SQL search runs one
 # lookup per word).
 MAX_QUERY_TERMS = 24
@@ -104,15 +107,18 @@ def _id_terms(text: str) -> Iterable[str]:
 
 
 def _id_runs(group: list[str], gaps: list[str]) -> Iterable[str]:
-    """Every run of 2 to 6 neighbouring parts, joined, that has a digit or
-    is joined by dashes, dots, slashes or underscores only ("Wi-Fi" gives
-    "wifi", so "wifi" finds it)."""
+    """Every run of 2 to 6 neighbouring parts, joined, that has a digit, or
+    of 2 to 3 parts joined by dashes only ("Wi-Fi" gives "wifi", so "wifi"
+    finds it)."""
     for start in range(len(group)):
         for end in range(start + 2, min(len(group), start + _ID_PARTS_MAX) + 1):
             joined = "".join(group[start:end])
             if len(joined) > _ID_MAX:
                 break
-            if any(c.isdigit() for c in joined) or " " not in gaps[start : end - 1]:
+            if any(c.isdigit() for c in joined) or (
+                end - start <= _DASH_JOIN_PARTS
+                and all(g == "-" for g in gaps[start : end - 1])
+            ):
                 yield joined
 
 
@@ -282,12 +288,21 @@ def chunk_blocks(
                 current, carried, tokens = [], 0, 0
                 set_heading(heading)
         budget = max_tokens - overlap - heading_cost
-        for part in _split_long(text, max(budget, 1), count_tokens):
+        parts = deque(_split_long(text, max(budget, 1), count_tokens))
+        while parts:
+            part = parts.popleft()
             size = count_tokens(part)
             if len(current) > carried and tokens + size + heading_cost > max_tokens:
                 flush(keep_overlap=True)
                 if max_pieces is not None and len(chunks) > max_pieces:
                     return chunks
+            room = max_tokens - tokens - heading_cost
+            if size > room and len(part) > 1:
+                # A flush brought a longer heading: cut the part to fit.
+                parts.extendleft(
+                    reversed(_split_long(part, max(room, 1), count_tokens))
+                )
+                continue
             current.append((part, block.page))
             tokens += size
             if tokens + heading_cost >= target and not block.heading:

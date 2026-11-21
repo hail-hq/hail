@@ -174,41 +174,69 @@ def _docx(raw: bytes, budget: _Budget):
         raise DecodeError("the Word document could not be read") from None
     body = root.find(f"{_W}body")
     blocks: list[dict] = []
+    if body is not None:
+        for kind, node in _docx_blocks(body):
+            if kind == "p":
+                text = _docx_text(node).strip()
+                if text:
+                    style = node.find(f"{_W}pPr/{_W}pStyle")
+                    name = (style.get(f"{_W}val") or "") if style is not None else ""
+                    heading = name.lower().startswith(("heading", "title"))
+                    blocks.append({"t": budget.take(text), "p": None, "h": heading})
+            else:
+                for row in _unwrapped(node, "tr"):
+                    cells = [_docx_text(c).strip() for c in _unwrapped(row, "tc")]
+                    line = " | ".join(c for c in cells if c)
+                    if line:
+                        blocks.append({"t": budget.take(line), "p": None, "h": False})
+    return blocks
 
-    def run_text(node) -> str:
+
+# Elements that only wrap content: a content control and custom XML.
+_WRAPPERS = (f"{_W}sdt", f"{_W}customXml")
+
+
+def _unwrapped(node, tag: str):
+    """``node``'s children named ``tag``, looking through content controls
+    and custom XML, never into a nested table."""
+    for child in node:
+        if child.tag == f"{_W}{tag}":
+            yield child
+        elif child.tag in _WRAPPERS:
+            inner = child.find(f"{_W}sdtContent")
+            yield from _unwrapped(inner if inner is not None else child, tag)
+
+
+def _docx_blocks(node):
+    """The paragraphs and tables of a body or cell, in order, through
+    wrappers: ("p", paragraph) or ("tbl", table)."""
+    for child in node:
+        if child.tag == f"{_W}p":
+            yield "p", child
+        elif child.tag == f"{_W}tbl":
+            yield "tbl", child
+        elif child.tag in _WRAPPERS:
+            inner = child.find(f"{_W}sdtContent")
+            yield from _docx_blocks(inner if inner is not None else child)
+
+
+def _docx_text(node) -> str:
+    """The text of a paragraph, or of a cell: its paragraphs and nested
+    tables joined with spaces (a nested row as "cell | cell")."""
+    if node.tag == f"{_W}p":
         return "".join(
             (t.text or "") if t.tag == f"{_W}t" else "\t" if t.tag == f"{_W}tab" else ""
             for t in node.iter()
         )
-
-    def walk(container) -> None:
-        for child in list(container):
-            if child.tag == f"{_W}p":
-                text = run_text(child).strip()
-                if not text:
-                    continue
-                style = child.find(f"{_W}pPr/{_W}pStyle")
-                name = (style.get(f"{_W}val") or "") if style is not None else ""
-                heading = name.lower().startswith(("heading", "title"))
-                blocks.append({"t": budget.take(text), "p": None, "h": heading})
-            elif child.tag == f"{_W}tbl":
-                # Direct rows and cells only: a table nested in a cell is
-                # read once, as that cell's text.
-                for row in child.findall(f"{_W}tr"):
-                    cells = [run_text(c).strip() for c in row.findall(f"{_W}tc")]
-                    line = " | ".join(c for c in cells if c)
-                    if line:
-                        blocks.append({"t": budget.take(line), "p": None, "h": False})
-            elif child.tag == f"{_W}sdt":
-                # A content control (templates, cover pages, tables of
-                # contents) holds paragraphs and tables of its own.
-                content = child.find(f"{_W}sdtContent")
-                if content is not None:
-                    walk(content)
-
-    if body is not None:
-        walk(body)
-    return blocks
+    parts = []
+    for kind, child in _docx_blocks(node):
+        if kind == "p":
+            parts.append(_docx_text(child).strip())
+        else:
+            for row in _unwrapped(child, "tr"):
+                cells = [_docx_text(c).strip() for c in _unwrapped(row, "tc")]
+                parts.append(" | ".join(c for c in cells if c))
+    return " ".join(p for p in parts if p)
 
 
 def _csv(raw: bytes, budget: _Budget):

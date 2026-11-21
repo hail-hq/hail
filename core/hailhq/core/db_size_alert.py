@@ -26,7 +26,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 
-from hailhq.core.config import settings
+from hailhq.core.config import SELF_HOSTED_ORG_ID, settings
 from hailhq.core.providers.email.ses import SesEmailProvider
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -64,6 +64,8 @@ def ses_sender() -> Sender | None:
             body_text=body,
             body_html=None,
             headers={"Auto-Submitted": "auto-generated"},
+            # Hail's own mail, no workspace's: tagged as the platform.
+            organization_id=SELF_HOSTED_ORG_ID,
         )
 
     return send

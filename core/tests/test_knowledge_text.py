@@ -96,3 +96,19 @@ def test_piece_gets_its_section_heading() -> None:
     )
     assert len(chunks) >= 2
     assert all(c.text.startswith("Warranty") for c in chunks)
+
+
+def test_dash_joins_stay_small() -> None:
+    words = set(terms("state-of-the-art and/or e.g Wi-Fi"))
+    assert "wifi" in words
+    assert "stateoftheart" not in words and "andor" not in words and "eg" not in words
+
+
+def test_a_longer_heading_after_a_flush_still_fits() -> None:
+    blocks = [
+        Block(" ".join(["intro"] * 50)),
+        Block(" ".join(["head"] * 30), heading=True),
+        Block(" ".join(["word"] * 3000)),
+    ]
+    chunks = chunk_blocks(blocks, _words)
+    assert all(_words(c.text) <= 500 for c in chunks), [_words(c.text) for c in chunks]
