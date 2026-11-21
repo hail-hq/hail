@@ -317,7 +317,11 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
                 return DraftResult(
                     refs={},
                     problems=[
-                        Problem(field="", message=campaign_repair_reason(exc.msg))
+                        Problem(
+                            field="",
+                            message=campaign_repair_reason(exc.msg),
+                            raw=exc.msg or None,
+                        )
                     ],
                 )
             raise VerificationProviderError(

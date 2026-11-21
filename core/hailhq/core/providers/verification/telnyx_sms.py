@@ -1417,7 +1417,10 @@ def _pointer(error: dict) -> str | None:
 
 
 def _detail(error: dict) -> str | None:
-    return error.get("detail") or error.get("title")
+    for key in ("detail", "title"):
+        if isinstance(error.get(key), str) and error[key].strip():
+            return error[key]
+    return None
 
 
 def _error_log(response: httpx.Response) -> list:
@@ -1494,7 +1497,7 @@ def _field_names(reason: dict) -> list[str]:
 def _one_line(text: str | None) -> str | None:
     """``text`` on one line: a problem's ``raw`` holds one reason per line,
     so a reason's own line breaks would split it on the way back."""
-    return " ".join((text or "").split()) or None
+    return " ".join(text.split()) or None if isinstance(text, str) else None
 
 
 def _general_problem(unmatched: list) -> Problem:

@@ -157,17 +157,17 @@ def with_carrier_text(message: str, raw: object) -> str:
 
 def customer_reason(
     fixes: Iterable[str],
-    carrier_texts: Iterable[str],
+    said_texts: Iterable[str],
     *,
     fallback: str = DETAILS_REJECTED,
     next_step: str = "start again",
 ) -> str:
     """One reason for the customer. ``fixes`` are Hail's own sentences;
-    ``carrier_texts`` are the carrier's own words for problems Hail has no
+    ``said_texts`` are the carrier's own words for problems Hail has no
     fix for. Duplicates are dropped, order is kept. Nothing at all gives
     ``fallback``. The reason ends with ``next_step``."""
     fixes = list(dict.fromkeys(f.strip() for f in fixes if f and f.strip()))
-    said = list(dict.fromkeys(sentence(t) for t in carrier_texts if t and t.strip()))
+    said = list(dict.fromkeys(sentence(t) for t in said_texts if t and t.strip()))
     if not fixes and not said:
         return fallback
     parts = [*fixes]
