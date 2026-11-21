@@ -7,12 +7,27 @@ from twilio.http.response import Response
 from .test_twilio_sms_registration import ADDRESS, FIELDS
 from .test_twilio_sms_sdk import sdk_provider
 
+# Toll-free has no brand to vet: no low-volume answer.
 TF_FIELDS = {
-    **FIELDS,
+    **{k: v for k, v in FIELDS.items() if k not in ("daily_texts", "faster_lane_ok")},
     "registration_kind": "toll_free",
     "message_volume": "1000",
     "business_registration_authority": "EIN",
 }
+
+
+@pytest.mark.parametrize("subject", ["business", "person"])
+async def test_tollfree_form_never_asks_the_low_volume_question(subject):
+    from hailhq.core.providers.verification import twilio_tollfree
+
+    p, _ = sdk_provider()
+    requirements = await p.requirements("US", "toll_free", subject)
+    local_only = {"daily_texts", "faster_lane_ok"}
+    assert not local_only & {f.name for f in requirements.fields}
+    problems = twilio_tollfree.problems(
+        p, {**TF_FIELDS, "daily_texts": "MAYBE"}, ADDRESS, "business"
+    )
+    assert not local_only & {pr.field for pr in problems}
 
 
 async def test_tollfree_requirements_are_distinct_and_have_no_otp():

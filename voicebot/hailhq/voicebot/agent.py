@@ -2563,9 +2563,9 @@ async def _run_call(
             metadata.get("system_prompt"),
             metadata.get("direction"),
             language=language,
-            # send_email reaches members only, so a contact's email is no use.
+            # send_email reaches members and contacts that have an email.
             other_party=(
-                other_party_section(known.name, can_email=known.source == "member")
+                other_party_section(known.name, can_email=known.has_email)
                 if known is not None
                 else None
             ),

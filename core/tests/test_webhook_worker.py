@@ -6,19 +6,94 @@ test against the real Postgres fixture and a stub http_post.
 
 from __future__ import annotations
 
+import base64
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
+from functools import partial
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from threading import Thread
 
 import pytest
+from hailhq.core.http_post import httpx_post
 from hailhq.core.models import EmailDomain, WebhookDelivery, WebhookSubscription
+from hailhq.core.secret_cipher import SecretCipher, generate_key
 from hailhq.core.webhook_worker import (
     MAX_CONSECUTIVE_FAILURES,
     WebhookWorker,
     _next_delivery_state,
+    _reflected_credentials,
 )
-from hailhq.core.webhooks import RETRY_SCHEDULE_SECONDS
+from hailhq.core.webhooks import RETRY_SCHEDULE_SECONDS, sign_payload
 from sqlalchemy.ext.asyncio import AsyncSession
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("receiver_raises", [False, True])
+@pytest.mark.parametrize("spacing", [" ", "  "])
+async def test_authenticated_receiver_gets_authorization_and_signed_event(
+    async_session, receiver_raises, spacing
+):
+    cipher = SecretCipher(generate_key())
+    authorization = "Bearer" + spacing + "cursor_receiver_test_key"
+    org_id = uuid.uuid4()
+    sub = WebhookSubscription(
+        organization_id=org_id,
+        target_url="https://hooks.example.com/h",
+        secret_encrypted=cipher.encrypt("signing_secret"),
+        authorization_encrypted=cipher.encrypt(authorization),
+        event_types=["call.completed"],
+    )
+    async_session.add(sub)
+    await async_session.commit()
+    delivery = WebhookDelivery(
+        subscription_id=sub.id,
+        event_type="call.completed",
+        event_id=uuid.uuid4(),
+        payload={"organization_id": str(org_id), "data": {}},
+    )
+    async_session.add(delivery)
+    await async_session.commit()
+
+    async def receiver(url, body, headers):
+        assert headers.get("Authorization") == authorization
+        assert headers["X-Hail-Signature"].startswith("t=")
+        if receiver_raises:
+            raise RuntimeError("x" * 4080 + authorization)
+        return 200, "echo:" + authorization + '\n{"token":"cursor_receiver_test_key"}'
+
+    worker = _build_worker(async_session, http_post=receiver, decrypt=cipher.decrypt)
+    assert await worker.tick() == 1
+    await async_session.refresh(delivery)
+    assert delivery.status == ("pending" if receiver_raises else "succeeded")
+    assert "cursor_receiver_test_key" not in delivery.response_body
+    assert "cursor_" not in delivery.response_body
+
+
+def test_reflected_credentials_cover_basic_and_skip_short_fragments():
+    basic = "Basic " + base64.b64encode(b"sam:longpassword").decode()
+    assert "sam:longpassword" in _reflected_credentials(basic)
+    assert "longpassword" in _reflected_credentials(basic)
+    assert _reflected_credentials("Bearer abc") == ["Bearer abc"]
+
+
+def test_reflected_credentials_cover_json_escaped_echoes():
+    token = 'Bearer ab/cd"ef\\gh12'
+    found = _reflected_credentials(token)
+    assert 'ab\\/cd\\"ef\\\\gh12' in found
+    assert 'ab/cd\\"ef\\\\gh12' in found
+
+
+def test_reflected_credentials_cover_go_escaped_echoes():
+    found = _reflected_credentials("Bearer ab<cd>ef&gh")
+    assert "ab\\u003ccd\\u003eef\\u0026gh" in found
+
+
+def test_reflected_credentials_cover_gson_dotnet_and_html_echoes():
+    found = _reflected_credentials("Bearer ab+cd'ef=gh&ij")
+    assert "ab+cd\\u0027ef\\u003dgh\\u0026ij" in found
+    assert "ab\\u002Bcd\\u0027ef=gh\\u0026ij" in found
+    assert "ab+cd&#x27;ef=gh&amp;ij" in found
 
 
 def _make_delivery(**kw) -> WebhookDelivery:
@@ -77,6 +152,74 @@ def _build_worker(
         concurrency=4,
         poll_interval=0.01,
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("url_userinfo", ["", "unused:password@"])
+async def test_worker_reaches_authenticated_http_receiver(async_session, url_userinfo):
+    authorization = "Bearer local_receiver_test_key"
+    received = []
+
+    class Receiver(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_POST(self):
+            body = self.rfile.read(int(self.headers["Content-Length"]))
+            if self.headers.get("Authorization") != authorization:
+                self.send_response(401)
+                self.end_headers()
+                return
+            signature = self.headers["X-Hail-Signature"]
+            timestamp = int(signature.split(",")[0].split("=")[1])
+            assert signature == sign_payload(
+                body, "signing_secret", timestamp=timestamp
+            )
+            received.append(body)
+            self.send_response(204)
+            self.end_headers()
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Receiver)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        target = f"http://{url_userinfo}127.0.0.1:{server.server_port}/events"
+        post = partial(httpx_post, allow_private_networks=True)
+        status, _ = await post(target, b"{}", {})
+        assert status == 401
+        cipher = SecretCipher(generate_key())
+        org_id = uuid.uuid4()
+        sub = WebhookSubscription(
+            organization_id=org_id,
+            target_url=target,
+            secret_encrypted=cipher.encrypt("signing_secret"),
+            authorization_encrypted=cipher.encrypt(authorization),
+            event_types=["call.completed"],
+        )
+        async_session.add(sub)
+        await async_session.commit()
+        delivery = WebhookDelivery(
+            subscription_id=sub.id,
+            event_type="call.completed",
+            event_id=uuid.uuid4(),
+            payload={"organization_id": str(org_id), "data": {}},
+        )
+        async_session.add(delivery)
+        await async_session.commit()
+        assert (
+            await _build_worker(
+                async_session, http_post=post, decrypt=cipher.decrypt
+            ).tick()
+            == 1
+        )
+        await async_session.refresh(delivery)
+        assert delivery.status == "succeeded"
+        assert delivery.response_status == 204
+        assert len(received) == 1
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
 
 
 @pytest.mark.asyncio
@@ -159,6 +302,100 @@ async def test_tick_failure_schedules_retry(async_session):
     await async_session.refresh(sub)
     assert sub.consecutive_failures == 0  # only bumps on terminal 'dead'
     assert sub.last_failure_at is not None
+
+
+@pytest.mark.asyncio
+async def test_paused_delivery_preserves_failure_and_resumes_remaining_attempt(
+    async_session,
+):
+    org_id = uuid.uuid4()
+    failed_at = datetime.now(timezone.utc) - timedelta(hours=1)
+    due_at = failed_at + timedelta(minutes=1)
+    sub = WebhookSubscription(
+        organization_id=org_id,
+        target_url="https://hooks.example.com/h",
+        secret_encrypted="plain",
+        event_types=["call.completed"],
+        status="disabled",
+        last_failure_at=failed_at,
+    )
+    async_session.add(sub)
+    await async_session.commit()
+    delivery = WebhookDelivery(
+        subscription_id=sub.id,
+        event_type="call.completed",
+        event_id=uuid.uuid4(),
+        payload={"organization_id": str(org_id), "data": {}},
+        attempt=6,
+        response_status=401,
+        response_body="receiver authentication required",
+        next_attempt_at=due_at,
+    )
+    async_session.add(delivery)
+    await async_session.commit()
+
+    async def accept_delivery(_url, _body, _headers):
+        return 204, ""
+
+    worker = _build_worker(async_session, http_post=accept_delivery)
+    assert await worker.tick() == 0
+
+    await async_session.refresh(delivery)
+    await async_session.refresh(sub)
+    assert delivery.status == "pending"
+    assert delivery.attempt == 6
+    assert delivery.response_status == 401
+    assert delivery.response_body == "receiver authentication required"
+    assert delivery.next_attempt_at == due_at
+    assert sub.last_failure_at == failed_at
+
+    sub.status = "active"
+    await async_session.commit()
+    assert await worker.tick() == 1
+    await async_session.refresh(delivery)
+    assert delivery.status == "succeeded"
+    assert delivery.attempt == 7
+    assert delivery.response_status == 204
+
+
+@pytest.mark.asyncio
+async def test_disable_after_claim_preserves_last_http_failure(async_session):
+    org_id = uuid.uuid4()
+    sub = WebhookSubscription(
+        organization_id=org_id,
+        target_url="https://hooks.example.com/h",
+        secret_encrypted="plain",
+        event_types=["call.completed"],
+    )
+    async_session.add(sub)
+    await async_session.commit()
+    delivery = WebhookDelivery(
+        subscription_id=sub.id,
+        event_type="call.completed",
+        event_id=uuid.uuid4(),
+        payload={"organization_id": str(org_id), "data": {}},
+        attempt=4,
+        response_status=401,
+        response_body="receiver authentication required",
+    )
+    async_session.add(delivery)
+    await async_session.commit()
+
+    async def unexpected_delivery(_url, _body, _headers):
+        pytest.fail("A paused webhook must not send an HTTP request")
+
+    worker = _build_worker(async_session, http_post=unexpected_delivery)
+    assert await worker._claim_batch(async_session) == [delivery.id]
+    sub.status = "disabled"
+    await async_session.commit()
+    await worker._sem.acquire()
+    await worker._deliver(delivery.id)
+
+    await async_session.refresh(delivery)
+    assert delivery.status == "pending"
+    assert delivery.attempt == 4
+    assert delivery.response_status == 401
+    assert delivery.response_body == "receiver authentication required"
 
 
 @pytest.mark.asyncio

@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import os
+import warnings
 from collections.abc import AsyncIterator
 from datetime import datetime
 from typing import Any, Literal, Self
@@ -65,6 +66,7 @@ from hail.models import (
     SmsStatus,
     SuppressionListResponse,
     WhoamiResponse,
+    fold_prefix,
 )
 
 _DEFAULT_BASE_URL = "https://api.hail.so"
@@ -487,6 +489,41 @@ class _EmailAttachmentsResource:
         return EmailAttachmentUploadResponse.model_validate(data)
 
 
+def _prefix_fields(
+    workspace: str | None,
+    name: str | None,
+    user: str | None,
+    org: str | None,
+) -> dict[str, str]:
+    """Body keys for the two hail-mail prefixes.
+
+    ``local_prefix_user`` and ``local_prefix_org`` are the deprecated names of
+    ``local_prefix_workspace`` and ``local_prefix_name``. A value passed under
+    a deprecated name is sent under that name, so a server from before the
+    rename still accepts it. New names are sent as new names.
+    """
+    body: dict[str, str] = {}
+    for new, value, old, old_value in (
+        ("local_prefix_workspace", workspace, "local_prefix_user", user),
+        ("local_prefix_name", name, "local_prefix_org", org),
+    ):
+        if old_value is not None:
+            warnings.warn(
+                f"{old} is deprecated; use {new}", DeprecationWarning, stacklevel=3
+            )
+            if value is not None and fold_prefix(value) != fold_prefix(old_value):
+                raise ValueError(
+                    f"{old} is the deprecated name of {new}, and the two values "
+                    f"differ; pass only {new}"
+                )
+            if value is None:
+                body[old] = old_value
+                continue
+        if value is not None:
+            body[new] = value
+    return body
+
+
 class _EmailDomainsResource:
     """``client.email_domains.*`` — manage SES identities."""
 
@@ -498,24 +535,32 @@ class _EmailDomainsResource:
         *,
         kind: str,
         domain: str | None = None,
+        local_prefix_workspace: str | None = None,
+        local_prefix_name: str | None = None,
         local_prefix_user: str | None = None,
         local_prefix_org: str | None = None,
         idempotency_key: str | None = None,
     ) -> EmailDomainResponse:
         """Register an email domain.
 
-        ``kind`` is ``'hail_mail'`` (server composes the address from
-        the prefixes) or ``'custom'`` (tenant DNS — server returns DKIM
-        CNAMEs to publish). Validation is deferred to the server so
-        SDK and API stay in lockstep on the rule set.
+        ``kind`` is ``'hail_mail'`` (server composes
+        ``<local_prefix_workspace>+<local_prefix_name>@<base>``) or
+        ``'custom'`` (tenant DNS — server returns DKIM CNAMEs to publish).
+        ``local_prefix_user`` / ``local_prefix_org`` are deprecated names of
+        the two prefixes. Validation is deferred to the server so SDK and
+        API stay in lockstep on the rule set.
         """
         body: dict[str, Any] = {"kind": kind}
         if domain is not None:
             body["domain"] = domain
-        if local_prefix_user is not None:
-            body["local_prefix_user"] = local_prefix_user
-        if local_prefix_org is not None:
-            body["local_prefix_org"] = local_prefix_org
+        body.update(
+            _prefix_fields(
+                local_prefix_workspace,
+                local_prefix_name,
+                local_prefix_user,
+                local_prefix_org,
+            )
+        )
 
         key = idempotency_key or generate_idempotency_key()
         data = await self._http.request(
@@ -580,6 +625,8 @@ class _EmailDomainsResource:
         self,
         domain_id: str | UUID,
         *,
+        local_prefix_workspace: str | None = None,
+        local_prefix_name: str | None = None,
         local_prefix_user: str | None = None,
         local_prefix_org: str | None = None,
         inbound_enabled: bool | None = None,
@@ -592,8 +639,9 @@ class _EmailDomainsResource:
     ) -> EmailDomainResponse:
         """Edit hail-mail prefixes, inbound action settings, and the agent route.
 
-        Prefix edits (``local_prefix_user``/``local_prefix_org``) only
-        apply to hail_mail rows. Inbound action fields (``inbound_enabled``,
+        Prefix edits (``local_prefix_workspace``/``local_prefix_name``; the
+        deprecated names ``local_prefix_user``/``local_prefix_org`` still
+        work) only apply to hail_mail rows. Inbound action fields (``inbound_enabled``,
         ``forward_to``, ``webhook_url``, ``forward_rate_per_hour``) apply
         to any kind. Setting ``webhook_url`` mints a fresh secret and
         returns it once in the response's ``webhook_secret``.
@@ -606,11 +654,12 @@ class _EmailDomainsResource:
         """
         if clear_email_agent and email_agent_id is not None:
             raise ValueError("use email_agent_id or clear_email_agent, not both")
-        body: dict[str, Any] = {}
-        if local_prefix_user is not None:
-            body["local_prefix_user"] = local_prefix_user
-        if local_prefix_org is not None:
-            body["local_prefix_org"] = local_prefix_org
+        body: dict[str, Any] = _prefix_fields(
+            local_prefix_workspace,
+            local_prefix_name,
+            local_prefix_user,
+            local_prefix_org,
+        )
         if inbound_enabled is not None:
             body["inbound_enabled"] = inbound_enabled
         if forward_to is not None:
@@ -937,10 +986,23 @@ class _WebhooksResource:
         self._http = http
 
     async def create(
-        self, *, target_url: str, event_types: list[str]
+        self,
+        *,
+        target_url: str,
+        event_types: list[str],
+        authorization: str | None = None,
     ) -> dict[str, Any]:
-        """Create a subscription; returns the response including the plaintext secret once."""
-        body = {"target_url": target_url, "event_types": list(event_types)}
+        """Create a subscription; returns the response including the plaintext secret once.
+
+        ``authorization`` is an optional write-only Authorization header Hail
+        sends to your receiver, e.g. ``"Bearer <receiver key>"``.
+        """
+        body: dict[str, Any] = {
+            "target_url": target_url,
+            "event_types": list(event_types),
+        }
+        if authorization is not None:
+            body["authorization"] = authorization
         return await self._http.request("POST", "/webhooks", json=body)
 
     async def list(self) -> dict[str, Any]:
@@ -956,7 +1018,11 @@ class _WebhooksResource:
         target_url: str | None = None,
         event_types: list[str] | None = None,
         status: str | None = None,
+        authorization: str | None = None,
     ) -> dict[str, Any]:
+        """Update a subscription. ``authorization=None`` keeps the saved
+        header; ``""`` removes it. A changed ``target_url`` needs a new
+        header or ``""`` when one is saved."""
         body: dict[str, Any] = {}
         if target_url is not None:
             body["target_url"] = target_url
@@ -964,6 +1030,8 @@ class _WebhooksResource:
             body["event_types"] = list(event_types)
         if status is not None:
             body["status"] = status
+        if authorization is not None:
+            body["authorization"] = authorization
         return await self._http.request("PATCH", f"/webhooks/{sub_id}", json=body)
 
     async def delete(self, sub_id: str | UUID) -> None:

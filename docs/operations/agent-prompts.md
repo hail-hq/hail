@@ -1,6 +1,6 @@
 # Agent prompts and customer configuration help
 
-Run `uv run --directory core pytest tests/test_prompts.py` after a prompt change.
+Run `uv run --directory core --extra dev pytest tests/test_prompts.py` after a prompt change.
 Run `uv run --directory api pytest tests/test_agents_api.py` against a local test database after an API change.
 
 [`core/prompts.py`](../../core/hailhq/core/prompts.py) owns the shared voice and SMS framing.
@@ -131,6 +131,24 @@ These are product controls, not a determination of which laws apply. The
 is one example of jurisdiction-specific requirements; do not present it as a
 complete global checklist.
 
+## Onboarding navigation
+
+The welcome flow has three primary stages: Your agent, Try it, and Go live.
+Saving the task opens the browser trial. Voice selection, recording settings,
+and attribution remain optional. On Try it, open **Voice and instructions** to
+show the language picker, voice choices, and samples inside the menu. Press
+**Save language and voice** without leaving the trial; it affects the next
+conversation. Old `choose-voice` links open the trial with the menu open once an
+agent exists. On Go live, open
+**Call settings and other ways to connect**, then **Call recording**. Opening
+that page never changes the recording setting; its save action does.
+Authentication keeps the marketing style. Authenticated welcome uses the console
+frame. While required reads are pending, Workspace reveal shows a bird crossing
+a dashed path toward a workspace icon, an indeterminate track, and a form
+skeleton inside a soft frame. The frame settles into the console outline when
+the data is ready. Fast reads can skip the loading panel; there is no simulated
+percentage or minimum wait. A failed read offers a server refetch.
+
 ## Browser onboarding conversations
 
 The browser worker uses `BROWSER_VOICE_PREAMBLE` server-side. Saved task
@@ -173,6 +191,40 @@ be forwarded. This feature adds no upload control.
 The normal `read_email` tool uses the same checks. Ordinary phone calls cannot
 read email history. Neither caller ID nor an editable profile phone proves
 email ownership. Browser sessions use the signed-in account's verified email.
+
+`send_email` on a phone call (owner decision, 2026-11-19): caller ID may pick
+the caller's own address on file, with limits. Caller ID can be faked.
+
+- Only the reserved `recipient_name` `me` (also `caller`) uses it. On a
+  call, `you` and `sender` are names. The contact line in the call's
+  instructions tells the model to use `me`.
+- It reaches the one email saved for the caller's number, members first. No
+  single email means no send; it never falls back to a name lookup.
+- A name is looked up by name only, members first. Caller ID never breaks a
+  name tie, and never puts the caller's address in place of a name. The
+  caller's saved name is refused like an unknown name unless it resolves to
+  the caller's own address, so an older prompt cannot send the caller's
+  request to a member or contact of the same name.
+- Each email to the caller's address on file (by `me` or by a name that
+  resolves to it) gets a fixed subject start, first line
+  and footer (`caller_email_subject`, `caller_email_body`): sent because of a
+  phone call with the organization. They are in the call's language
+  (`hailhq.core.caller_email_lines`, every language in `SUPPORTED_LANGUAGES`): the call's
+  `voice_config.language`, else the org's saved TTS language, as the
+  voicebot picks it. Unknown language: English. A long org name is cut so
+  the fixed subject words always fit.
+- One phone call sends at most 3 emails (`MAX_CALL_EMAILS`), counted under
+  the call row lock. The limit is per call; across calls only the org-wide
+  agent caps apply. Refusals for the cap and for no email on file write an
+  `agent.email.blocked` audit row.
+- An unknown name and a name shared by several people get one answer, so a
+  caller cannot probe the saved contacts.
+
+In an email run, `me` is the sender that DMARC proved. Like a name saved
+with their address, it sends its own email, and the run's reply still
+follows. With original files, it is the run's threaded reply instead. Email
+runs may still email saved contacts by name (owner decision, 2026-11-19).
+
 Stored transcripts contain spoken user/assistant text only. Send receipts
 mean provider acceptance, never delivery. Disabled providers expose no send
 tool. Inbox access requires the verified person associated with the call.

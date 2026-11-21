@@ -50,7 +50,7 @@ export function Footer({
             {/* The same Mascot as the header: it blinks, and nods when this link is hovered. */}
             <a className="hail-footer-mark" href={homeHref}>
               <Mascot className="hail-footer-mascot" size={36} />
-              <span>hail.so</span>
+              <span>hail</span>
             </a>
             <p>
               {PRODUCT_COPY.tagline} {PRODUCT_COPY.availability}
@@ -82,7 +82,7 @@ export function Footer({
           </ul>
         )}
         <div className="hail-footer-end">
-          <span>© {new Date().getFullYear()} hail.so</span>
+          <span>© {new Date().getFullYear()} hail</span>
           <div className="hail-footer-theme">{themeControl}</div>
         </div>
       </div>

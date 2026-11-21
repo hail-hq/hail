@@ -76,10 +76,17 @@ _AUTHORITIES = tuple(
 )
 
 
+# Questions of the local (10DLC) form that toll-free does not ask: it has
+# no brand to vet, so no daily volume or faster lane.
+_LOCAL_ONLY = frozenset({"daily_texts", "faster_lane_ok"})
+
+
 def requirements(provider, country_code, subject_type) -> Requirements:
     base = sms_requirements(provider, subject_type)
     fields = []
     for spec in base.fields:
+        if spec.name in _LOCAL_ONLY:
+            continue
         if spec.name == "consent_methods":
             spec = spec.model_copy(
                 update={"options": tuple(o for o in spec.options if o.key in _METHODS)}
@@ -154,9 +161,13 @@ def requirements(provider, country_code, subject_type) -> Requirements:
 
 def problems(provider, fields, address, subject_type) -> list[Problem]:
     # Reuse the common consent and sender checks, then apply the TFV form.
-    result = SmsRegistrationProvider.validate_application(
-        provider, fields, address, subject_type
-    )
+    result = [
+        p
+        for p in SmsRegistrationProvider.validate_application(
+            provider, fields, address, subject_type
+        )
+        if p.field not in _LOCAL_ONLY
+    ]
     # The shared checks may already report a field, in their own words.
     reported = {p.field for p in result}
     for spec in requirements(provider, "US", subject_type).fields:

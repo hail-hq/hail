@@ -5,6 +5,7 @@ import logging
 from collections.abc import AsyncIterator, Coroutine
 from contextlib import asynccontextmanager
 from functools import partial
+from typing import Any
 
 import logfire
 from fastapi import FastAPI, Request
@@ -34,6 +35,7 @@ from hailhq.api.routes import providers as providers_routes
 from hailhq.api.routes import recordings as recordings_routes
 from hailhq.api.routes import sms as sms_routes
 from hailhq.api.routes import sms_evidence as sms_evidence_routes
+from hailhq.api.routes import sms_trial as sms_trial_routes
 from hailhq.api.routes import sms_webhooks
 from hailhq.api.routes import unsubscribe as unsubscribe_routes
 from hailhq.api.routes import uploads as uploads_routes
@@ -372,6 +374,28 @@ app = FastAPI(
     servers=[{"url": "https://api.hail.so", "description": "Hail Cloud"}],
     lifespan=lifespan,
 )
+_WEBHOOK_PATHS = ("/webhooks", "/v1/webhooks")
+
+
+def _without_rejected_input(errors: list[dict]) -> list[dict]:
+    """Validation errors echo the rejected value in ``input`` and ``ctx``.
+    On webhook routes that value can be a write-only receiver credential."""
+    return [
+        {key: value for key, value in error.items() if key not in {"input", "ctx"}}
+        for error in errors
+    ]
+
+
+def _request_span_arguments(
+    request: Request, attributes: dict[str, Any]
+) -> dict[str, Any]:
+    """Logfire records 422 errors as ``fastapi.arguments.errors``. Its scrubber
+    misses a credential sent as an object or number, so drop the input."""
+    if request.url.path.startswith(_WEBHOOK_PATHS) and attributes.get("errors"):
+        return {**attributes, "errors": _without_rejected_input(attributes["errors"])}
+    return attributes
+
+
 if _telemetry:
     app.add_middleware(IdentityMiddleware)
     instrument(
@@ -381,6 +405,7 @@ if _telemetry:
         excluded_urls=r"/healthz$",
         extra_spans=False,
         server_request_hook=request_span_attributes,
+        request_attributes_mapper=_request_span_arguments,
     )
 
 app.add_middleware(DeprecationHeaderMiddleware)
@@ -457,6 +482,10 @@ async def _cache_422_for_idempotent_retry(
     them — without this, a same-key retry of the same invalid body 409s
     "still processing" until the row expires. Store the 422 so retries
     replay it, then defer to FastAPI's stock handler for the response."""
+    if request.url.path.startswith(_WEBHOOK_PATHS):
+        # A malformed write-only receiver credential must never be returned
+        # or cached.
+        exc = RequestValidationError(_without_rejected_input(exc.errors()))
     idem = getattr(request.state, "idempotency_ctx", None)
     if idem is not None:
         if idem.is_replay:
@@ -496,6 +525,8 @@ _CUSTOMER_ROUTERS = [
     numbers_routes.router,
     webhooks_routes.router,
     unsubscribe_routes.router,
+    # Before sms_routes: GET /sms/{sms_id} would capture /sms/trial.
+    sms_trial_routes.router,
     sms_routes.router,
     *sms_webhooks.routers,
     contacts_routes.router,

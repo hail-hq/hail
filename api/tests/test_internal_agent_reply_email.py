@@ -101,8 +101,8 @@ async def _seed(
         organization_id=org,
         kind="hail_mail",
         domain=ADDRESS,
-        local_prefix_user="amber-heron-42",
-        local_prefix_org="acme",
+        local_prefix_workspace="amber-heron-42",
+        local_prefix_name="acme",
         verification_status="verified",
         provider="ses",
         verified_at=NOW,
@@ -1239,8 +1239,8 @@ async def test_a_custom_domain_reply_ignores_the_to_header(
     domain.kind = "custom"
     domain.domain = "acme.com"
     domain.inbound_enabled = True
-    domain.local_prefix_user = None
-    domain.local_prefix_org = None
+    domain.local_prefix_workspace = None
+    domain.local_prefix_name = None
     inbound.to_addresses = ["ceo@acme.com"]
     await async_session.commit()
     await _reply(client, inbound.id)
@@ -1267,7 +1267,34 @@ async def test_tool_says_when_a_name_is_unknown(
 ) -> None:
     _org, _agent, _domain, inbound = await _seed(async_session)
     data = await _tool_email(client, inbound.id, recipient_name="Nobody")
-    assert "couldn't find Nobody" in data["spoken"]
+    assert 'no single team member or saved contact matches "Nobody"' in data["spoken"]
+
+
+@pytest.mark.parametrize("name", ["me", "Me ", "sender"])
+async def test_tool_email_me_reaches_the_proven_sender(
+    client, async_session, email_mock, name
+) -> None:
+    """In an email run "me" is the sender ingest proved, not a name lookup."""
+    _org, _agent, _domain, inbound = await _seed(
+        async_session, scope="anyone", sender="Sam@Northgate.test"
+    )
+    data = await _tool_email(client, inbound.id, recipient_name=name)
+    assert data == {"ok": True, "spoken": "Email sent."}
+    kwargs = email_mock.send_email.await_args.kwargs
+    assert kwargs["to_addresses"] == ["sam@northgate.test"]
+    # From the address the sender wrote to.
+    assert kwargs["from_address"] == ADDRESS
+
+
+async def test_tool_email_me_from_an_unproven_sender_sends_nothing(
+    client, async_session, email_mock
+) -> None:
+    _org, _agent, _domain, inbound = await _seed(
+        async_session, scope="anyone", sender="sam@northgate.test", dmarc="FAIL"
+    )
+    data = await _tool_email(client, inbound.id, recipient_name="me")
+    assert data["ok"] is False
+    email_mock.send_email.assert_not_awaited()
 
 
 async def test_tool_sms_with_no_phone_says_so(client, async_session, sms_mock) -> None:
@@ -1355,8 +1382,8 @@ async def test_a_disabled_custom_inbox_cannot_send_a_queued_reply(
     _, _, domain, inbound = await _seed(async_session)
     domain.kind = "custom"
     domain.domain = "mail.example.test"
-    domain.local_prefix_user = None
-    domain.local_prefix_org = None
+    domain.local_prefix_workspace = None
+    domain.local_prefix_name = None
     domain.inbound_enabled = change != "inbound"
     if change == "verification":
         domain.verification_status = "pending"

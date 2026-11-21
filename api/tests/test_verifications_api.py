@@ -138,6 +138,8 @@ class FakeCarrier(VerificationProvider):
 
 class FakeSmsCarrier(SmsRegistrationProvider):
     name = "fake"
+    # Like Telnyx: a low-volume brand it cannot verify can be vetted later.
+    faster_lane = True
 
     def __init__(self) -> None:
         self.remote_status = ProviderStatus(state="pending")
@@ -345,7 +347,31 @@ def pinned_catalog(tmp_path, monkeypatch):
                             "campaign_vetting_usd": "15.00",
                             "campaign_monthly_usd": "10.00",
                         },
-                    }
+                        # Unlike any other brand price here, so a test
+                        # sees which row was used.
+                        "business_low_volume": {
+                            "brand_usd": "3.00",
+                            "campaign_vetting_usd": "15.00",
+                            "campaign_monthly_usd": "1.50",
+                            "faster_lane_usd": "41.50",
+                        },
+                    },
+                    {
+                        # A carrier whose fees are all zero.
+                        "provider": "zero",
+                        "last_verified": "2026-10-13",
+                        "source_url": "",
+                        "person": {
+                            "brand_usd": "0",
+                            "campaign_vetting_usd": "0",
+                            "campaign_monthly_usd": "0",
+                        },
+                        "business": {
+                            "brand_usd": "0",
+                            "campaign_vetting_usd": "0",
+                            "campaign_monthly_usd": "0",
+                        },
+                    },
                 ],
             }
         )
@@ -2376,7 +2402,12 @@ def _sms_submission(**overrides) -> dict:
         "number_type": "local",
         "subject_type": "business",
         "fields": json.dumps(
-            {"legal_name": "Acme", "campaign_description": "Order updates"}
+            {
+                "legal_name": "Acme",
+                "campaign_description": "Order updates",
+                # A vetted company: blank would file low volume.
+                "daily_texts": "OVER_2000",
+            }
         ),
         "address": json.dumps(
             {
@@ -4241,7 +4272,7 @@ async def test_credit_needed_counts_the_rows_covered_after_a_waiting_one(
     monkeypatch.setattr(
         sms_registration_fees,
         "campaign_fee_cents",
-        lambda provider, subject_type: fees[subject_type],
+        lambda provider, subject_type, low_volume=False: fees[subject_type],
     )
     sms_carrier.campaign_key = "campaign_id"
     await _set_balance(async_session, org_id, 8)
@@ -5921,6 +5952,7 @@ _TELNYX_BUSINESS = {
     "rep_email": "ada@acme.example",
     "rep_phone": "+15125550100",
     "rep_title": "CEO",
+    "daily_texts": "OVER_2000",
     "campaign_description": "Order updates and delivery notices for customers who ordered on our site.",
     "sample_1": "Acme: your order 123 shipped. Reply STOP to opt out.",
     "sample_2": "Acme: your order 123 was delivered. Reply STOP to opt out.",
@@ -7953,6 +7985,54 @@ async def test_a_legacy_evidence_hold_is_not_audited_as_a_refusal(monkeypatch) -
     assert written == ["verification.campaign_refused"]
 
 
+@pytest.mark.parametrize(
+    "refs, pollable",
+    [
+        # Held because the faster lane failed: Hail keeps reading the brand.
+        ({"needs_information": True, "faster_lane_failed": True}, True),
+        # Every other hold waits for the customer.
+        ({"needs_information": True}, False),
+        ({"needs_information": True, "campaign_needs_repair": True}, False),
+        ({}, True),
+    ],
+)
+def test_only_a_failed_faster_lane_hold_is_still_polled(refs, pollable) -> None:
+    row = CarrierVerification(
+        state="submitted",
+        purpose="sms",
+        updated_at=datetime.now(timezone.utc),
+        provider_refs=refs,
+    )
+    assert verifications_routes._pollable(row) is pollable
+
+
+async def test_a_failed_lane_hold_that_ends_drops_its_guidance() -> None:
+    """The brand was verified later: the plug-in dropped the hold, so the
+    row reads as a normal pending one again."""
+    held = {"low_volume": True, "needs_information": True, "faster_lane_failed": True}
+    row = CarrierVerification(
+        id=uuid.uuid4(),
+        organization_id=uuid.uuid4(),
+        state="submitted",
+        purpose="sms",
+        updated_at=datetime.now(timezone.utc),
+        rejection_reason="Cancel this registration and register again.",
+        provider_refs={"low_volume": True, "brand_verified": True},
+    )
+    assert await verifications_routes._poll_and_apply(
+        None, row, ProviderStatus(state="pending"), lambda *a: None, held
+    )
+    assert row.state == "submitted" and row.rejection_reason is None
+    # Still held: the same guidance stays, and nothing changes.
+    row.rejection_reason = "Cancel this registration and register again."
+    row.provider_refs = dict(held)
+    still = ProviderStatus(state="pending", reason=row.rejection_reason)
+    assert not await verifications_routes._poll_and_apply(
+        None, row, still, lambda *a: None, dict(held)
+    )
+    assert row.rejection_reason == "Cancel this registration and register again."
+
+
 async def test_refusal_audit_is_dropped_on_rollback(async_session):
     """A rolled-back refusal leaves no audit row; a committed one writes it."""
     db = async_session
@@ -7963,3 +8043,724 @@ async def test_refusal_audit_is_dropped_on_rollback(async_session):
     await db.rollback()
     await sms_registration.drain_audits()
     assert db.sync_session.info.get("sms_attach_refused_audits") is None
+
+
+# -- Low-volume company registrations --------------------------------------
+
+_LOW_VOLUME = json.dumps(
+    {
+        "legal_name": "Acme",
+        "campaign_description": "Order updates",
+        "daily_texts": "UP_TO_2000",
+    }
+)
+_FASTER_LANE = json.dumps({**json.loads(_LOW_VOLUME), "faster_lane_ok": "YES"})
+
+
+def _low_volume_filing_fee(**kwargs) -> int:
+    return sms_registration_fees.filing_fee_cents(
+        "fake", "business", low_volume=True, **kwargs
+    )
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_low_volume_company_files_on_the_low_volume_floor(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    org_id, _, key = org_and_key
+    low = _low_volume_filing_fee()
+    # 3.00 brand with no vetting + 15.00 campaign review.
+    assert low == 1800
+    await _set_balance(async_session, org_id, low - 1)
+    assert (await _post_sms(client, key, fields=_LOW_VOLUME)).status_code == 402
+    # A vetted company still needs the vetted brand's cost.
+    await _set_balance(async_session, org_id, low)
+    assert (await _post_sms(client, key)).status_code == 402
+    assert sms_carrier.drafts == []
+    resp = await _post_sms(client, key, fields=_LOW_VOLUME)
+    assert resp.status_code == 201, resp.text
+    # One decision: it priced the filing, went to the plug-in, and marks the row.
+    assert sms_carrier.drafts[-1]["low_volume"] is True
+    refs = await _stored_refs(async_session, resp.json()["id"])
+    assert refs["low_volume"] is True and "faster_lane_ok" not in refs
+
+
+@pytest.mark.usefixtures("us_number")
+@pytest.mark.parametrize("answer", [None, "NOT_SURE"])
+async def test_a_company_that_does_not_say_files_low_volume(
+    client, org_and_key, sms_carrier, async_session, answer
+) -> None:
+    """Old clients that omit the answer, and "not sure yet", file low volume."""
+    org_id, _, key = org_and_key
+    fields = {"legal_name": "Acme", "campaign_description": "Order updates"}
+    if answer:
+        fields["daily_texts"] = answer
+    await _set_balance(async_session, org_id, _low_volume_filing_fee())
+    resp = await _post_sms(client, key, fields=json.dumps(fields))
+    assert resp.status_code == 201, resp.text
+    assert (await _stored_refs(async_session, resp.json()["id"]))["low_volume"] is True
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_vetted_company_gets_no_markers(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 10_000)
+    fields = {**json.loads(_sms_submission()["fields"]), "faster_lane_ok": "YES"}
+    resp = await _post_sms(client, key, fields=json.dumps(fields))
+    assert resp.status_code == 201, resp.text
+    assert "low_volume" not in sms_carrier.drafts[-1]
+    refs = await _stored_refs(async_session, resp.json()["id"])
+    assert "low_volume" not in refs and "faster_lane_ok" not in refs
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_ticked_faster_lane_files_on_the_worst_case_floor(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    org_id, _, key = org_and_key
+    worst = _low_volume_filing_fee(faster_lane=True)
+    assert worst == _low_volume_filing_fee() + 4150
+    await _set_balance(async_session, org_id, worst - 1)
+    assert (await _post_sms(client, key, fields=_FASTER_LANE)).status_code == 402
+    await _set_balance(async_session, org_id, worst)
+    resp = await _post_sms(client, key, fields=_FASTER_LANE)
+    assert resp.status_code == 201, resp.text
+    refs = await _stored_refs(async_session, resp.json()["id"])
+    assert refs["low_volume"] is True and refs["faster_lane_ok"] is True
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_billed_refusal_carries_the_low_volume_marker(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 10_000)
+    sms_carrier.problems = [Problem(field="ein", message="Check the number.")]
+    sms_carrier.billed_refs = {"brand_id": "B7"}
+    resp = await _post_sms(client, key, fields=_LOW_VOLUME)
+    assert resp.status_code == 422, resp.text
+    row = (
+        await async_session.execute(
+            select(CarrierVerification).where(
+                CarrierVerification.organization_id == org_id
+            )
+        )
+    ).scalar_one()
+    assert row.state == "rejected" and row.provider_refs["low_volume"] is True
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_person_never_files_on_the_low_volume_floor(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    org_id, _, key = org_and_key
+    person = sms_registration_fees.filing_fee_cents("fake", "person")
+    assert _low_volume_filing_fee() < person
+    await _set_balance(async_session, org_id, _low_volume_filing_fee())
+    resp = await _post_sms(client, key, subject_type="person", fields=_FASTER_LANE)
+    assert resp.status_code == 402, resp.text
+    await _set_balance(async_session, org_id, person)
+    resp = await _post_sms(client, key, subject_type="person", fields=_FASTER_LANE)
+    assert resp.status_code == 201, resp.text
+    refs = await _stored_refs(async_session, resp.json()["id"])
+    assert "low_volume" not in refs and "faster_lane_ok" not in refs
+
+
+async def _uncharged_company_filing(async_session, org_id, refs: dict) -> None:
+    """A company filing of the last day the rater has not charged yet."""
+    async_session.add(
+        CarrierVerification(
+            organization_id=org_id,
+            provider="fake",
+            purpose="sms",
+            country_code="US",
+            number_type="local",
+            subject_type="business",
+            state="rejected",
+            provider_refs=refs,
+            requirements_version="v1",
+        )
+    )
+    await async_session.commit()
+
+
+@pytest.mark.usefixtures("us_number")
+@pytest.mark.parametrize("earlier_low", [True, False])
+async def test_an_uncharged_filing_counts_at_its_own_price(
+    client, org_and_key, sms_carrier, async_session, earlier_low
+) -> None:
+    org_id, _, key = org_and_key
+    await _uncharged_company_filing(
+        async_session, org_id, {"low_volume": True} if earlier_low else {}
+    )
+    low = _low_volume_filing_fee()
+    earlier = sms_registration_fees.filing_fee_cents(
+        "fake", "business", low_volume=earlier_low
+    )
+    await _set_balance(async_session, org_id, low + earlier - 1)
+    assert (await _post_sms(client, key, fields=_LOW_VOLUME)).status_code == 402
+    await _set_balance(async_session, org_id, low + earlier)
+    resp = await _post_sms(client, key, fields=_LOW_VOLUME)
+    assert resp.status_code == 201, resp.text
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_an_uncharged_faster_lane_counts_against_a_new_filing(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    org_id, _, key = org_and_key
+    # A brand charged already, whose faster lane the rater has not charged.
+    await _uncharged_company_filing(
+        async_session,
+        org_id,
+        {
+            "low_volume": True,
+            "brand_reused": True,
+            "faster_lane_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    low = _low_volume_filing_fee()
+    lane = sms_registration_fees.faster_lane_fee_cents("fake")
+    await _set_balance(async_session, org_id, low + lane - 1)
+    assert (await _post_sms(client, key, fields=_LOW_VOLUME)).status_code == 402
+    await _set_balance(async_session, org_id, low + lane)
+    assert (await _post_sms(client, key, fields=_LOW_VOLUME)).status_code == 201
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_an_uncharged_low_volume_brand_leaves_credit_for_its_campaign(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 10_000)
+    resp = await _post_sms(client, key, fields=_LOW_VOLUME)
+    assert resp.status_code == 201, resp.text
+    vid = resp.json()["id"]
+    sms_carrier.campaign_key = "campaign_id"
+    brand = sms_registration_fees.brand_fee_cents("fake", "business", low_volume=True)
+    campaign = sms_registration_fees.campaign_fee_cents(
+        "fake", "business", low_volume=True
+    )
+    # The balance holds the uncharged low-volume brand and the campaign
+    # review; at the vetted brand's price it would wait for credit.
+    await _set_balance(async_session, org_id, brand + campaign)
+    verifications_routes._last_polled.clear()
+    resp = await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["waiting_for_credit"] is False
+    assert sms_carrier.campaigns_created == 1
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_an_uncharged_faster_lane_counts_against_the_campaign(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    org_id, _, key = org_and_key
+    vid = await _before_campaign(client, key, async_session, org_id, sms_carrier)
+    refs = await _stored_refs(async_session, vid)
+    refs.update(low_volume=True, faster_lane_at=datetime.now(timezone.utc).isoformat())
+    await _set_refs(async_session, vid, await _stored_state(async_session, vid), refs)
+    lane = sms_registration_fees.faster_lane_fee_cents("fake")
+    campaign = sms_registration_fees.campaign_fee_cents(
+        "fake", "business", low_volume=True
+    )
+    await _set_balance(async_session, org_id, campaign + lane - 1)
+    verifications_routes._last_polled.clear()
+    resp = await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.json()["waiting_for_credit"] is True
+    assert resp.json()["credit_needed_cents"] == 1
+    await _set_balance(async_session, org_id, campaign + lane)
+    verifications_routes._last_polled.clear()
+    resp = await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.json()["waiting_for_credit"] is False
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_cancelled_low_volume_row_keeps_its_markers(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 10_000)
+    vid = (await _post_sms(client, key, fields=_LOW_VOLUME)).json()["id"]
+    await _set_refs(
+        async_session,
+        vid,
+        "awaiting_review",
+        {
+            "brand_sid": "BN1",
+            "subject_type": "business",
+            "low_volume": True,
+            "faster_lane_at": "2026-11-18T10:00:00+00:00",
+        },
+    )
+    resp = await client.delete(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["state"] == "cancelled"
+    refs = await _stored_refs(async_session, vid)
+    assert refs["low_volume"] is True and "brand_sid" not in refs
+    assert refs["faster_lane_at"] == "2026-11-18T10:00:00+00:00"
+
+
+@pytest.mark.parametrize("rejected", [True, False])
+def test_emptied_refs_keep_the_rater_markers_only_when_set(rejected) -> None:
+    lane = "2026-11-18T10:00:00+00:00"
+    row = CarrierVerification(
+        purpose="sms",
+        state="submitted",
+        provider_refs={"brand_sid": "BN1", "low_volume": True, "faster_lane_at": lane},
+    )
+    assert verifications_routes._wiped_refs(row, rejected=rejected) == {
+        "low_volume": True,
+        "faster_lane_at": lane,
+    }
+    row.provider_refs = {"brand_sid": "BN1", "faster_lane_ok": True}
+    assert verifications_routes._wiped_refs(row, rejected=rejected) == {}
+
+
+async def _held_application(
+    client, key, sms_carrier, async_session, monkeypatch, refs_extra: dict
+):
+    vid, answers = await _needs_information_application(
+        client, key, sms_carrier, async_session, monkeypatch
+    )
+    row = await async_session.get(CarrierVerification, uuid.UUID(vid))
+    row.provider_refs = {**row.provider_refs, **refs_extra}
+    await async_session.commit()
+    return vid, answers
+
+
+def _answers_with(answers: dict, **changes) -> dict:
+    fields = {**answers["fields"], **changes}
+    return {**answers, "fields": {k: v for k, v in fields.items() if v is not None}}
+
+
+@pytest.mark.usefixtures("us_number")
+@pytest.mark.parametrize("filed_low", [True, False])
+async def test_an_amendment_cannot_change_the_volume_choice(
+    client, org_and_key, sms_carrier, async_session, monkeypatch, filed_low
+) -> None:
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 10_000)
+    vid, answers = await _held_application(
+        client,
+        key,
+        sms_carrier,
+        async_session,
+        monkeypatch,
+        {"low_volume": True} if filed_low else {},
+    )
+    path = f"/verifications/{vid}/application"
+    flipped = _answers_with(
+        answers, daily_texts="OVER_2000" if filed_low else "UP_TO_2000"
+    )
+    resp = await client.patch(path, headers=_auth(key), json=flipped)
+    assert resp.status_code == 422, resp.text
+    assert [e["loc"][-1] for e in resp.json()["detail"]] == ["daily_texts"]
+    # No answer keeps the filed one.
+    resp = await client.patch(
+        path, headers=_auth(key), json=_answers_with(answers, daily_texts=None)
+    )
+    assert resp.status_code == 200, resp.text
+    stored = await _stored_refs(async_session, vid)
+    assert stored["campaign"]["use_case"] == ("LOW_VOLUME" if filed_low else "MIXED")
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_bad_volume_answer_says_only_pick_from_the_list(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+) -> None:
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 10_000)
+    vid, answers = await _held_application(
+        client, key, sms_carrier, async_session, monkeypatch, {"low_volume": True}
+    )
+    resp = await client.patch(
+        f"/verifications/{vid}/application",
+        headers=_auth(key),
+        json=_answers_with(answers, daily_texts="MAYBE"),
+    )
+    assert resp.status_code == 422, resp.text
+    problems = [e for e in resp.json()["detail"] if e["loc"][-1] == "daily_texts"]
+    assert [p["msg"] for p in problems] == ["Pick from the list."]
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_an_amendment_can_turn_on_the_faster_lane(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+) -> None:
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 10_000)
+    vid, answers = await _held_application(
+        client, key, sms_carrier, async_session, monkeypatch, {"low_volume": True}
+    )
+    ticked = _answers_with(answers, daily_texts=None, faster_lane_ok="YES")
+    path = f"/verifications/{vid}/application"
+    lane = sms_registration_fees.faster_lane_fee_cents("fake")
+    # The vetting it may start must be covered, as at filing.
+    await _set_balance(async_session, org_id, 0)
+    await _charge_submission(async_session, org_id, vid)
+    await _set_balance(async_session, org_id, lane - 1)
+    resp = await client.patch(path, headers=_auth(key), json=ticked)
+    assert resp.status_code == 402, resp.text
+    await _set_balance(async_session, org_id, lane)
+    resp = await client.patch(path, headers=_auth(key), json=ticked)
+    assert resp.status_code == 200, resp.text
+    stored = await _stored_refs(async_session, vid)
+    assert stored["faster_lane_ok"] is True and "needs_information" not in stored
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_carrier_without_a_faster_lane_ignores_the_box(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+) -> None:
+    org_id, _, key = org_and_key
+    monkeypatch.setattr(sms_carrier, "faster_lane", False)
+    await _set_balance(async_session, org_id, _low_volume_filing_fee())
+    resp = await _post_sms(client, key, fields=_FASTER_LANE)
+    assert resp.status_code == 201, resp.text
+    refs = await _stored_refs(async_session, resp.json()["id"])
+    assert refs["low_volume"] is True and "faster_lane_ok" not in refs
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_an_earlier_filings_owed_faster_lane_counts_at_filing(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    org_id, _, key = org_and_key
+    await _uncharged_company_filing(
+        async_session, org_id, {"low_volume": True, "faster_lane_ok": True}
+    )
+    low = _low_volume_filing_fee()
+    earlier = _low_volume_filing_fee(faster_lane=True)
+    await _set_balance(async_session, org_id, low + earlier - 1)
+    assert (await _post_sms(client, key, fields=_LOW_VOLUME)).status_code == 402
+    await _set_balance(async_session, org_id, low + earlier)
+    assert (await _post_sms(client, key, fields=_LOW_VOLUME)).status_code == 201
+
+
+async def test_an_uncharged_review_of_a_charged_filing_counts_at_filing(
+    org_and_key, sms_carrier, async_session
+) -> None:
+    org_id, _, _ = org_and_key
+    # The brand was never charged a submission (reused), but its campaign
+    # filed just now is not charged yet.
+    await _uncharged_company_filing(
+        async_session,
+        org_id,
+        {
+            "brand_reused": True,
+            "campaign_filed_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    review = sms_registration_fees.campaign_fee_cents("fake", "business")
+    uncharged = verifications_routes._uncharged_cents
+    assert await uncharged(async_session, org_id, filing_default=999) == review
+
+
+async def test_a_zero_carrier_fee_stays_zero_at_filing(
+    org_and_key, async_session
+) -> None:
+    org_id, _, _ = org_and_key
+    async_session.add(
+        CarrierVerification(
+            organization_id=org_id,
+            provider="zero",
+            purpose="sms",
+            country_code="US",
+            number_type="local",
+            subject_type="business",
+            state="rejected",
+            provider_refs={},
+            requirements_version="v1",
+        )
+    )
+    await async_session.commit()
+    uncharged = verifications_routes._uncharged_cents
+    assert await uncharged(async_session, org_id, filing_default=999) == 0
+    # A carrier with no fees at all counts the default.
+    async_session.add(
+        CarrierVerification(
+            organization_id=org_id,
+            provider="nofees",
+            purpose="sms",
+            country_code="US",
+            number_type="local",
+            subject_type="business",
+            state="rejected",
+            provider_refs={},
+            requirements_version="v1",
+        )
+    )
+    await async_session.commit()
+    assert await uncharged(async_session, org_id, filing_default=999) == 999
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_the_faster_lane_waits_for_credit_like_the_campaign(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    org_id, _, key = org_and_key
+    vid = await _before_campaign(client, key, async_session, org_id, sms_carrier)
+    refs = await _stored_refs(async_session, vid)
+    refs.update(low_volume=True, faster_lane_ok=True)
+    await _set_refs(async_session, vid, await _stored_state(async_session, vid), refs)
+    lane = sms_registration_fees.faster_lane_fee_cents("fake")
+    campaign = sms_registration_fees.campaign_fee_cents(
+        "fake", "business", low_volume=True
+    )
+    # The campaign alone is covered, the faster lane it may buy first is not.
+    await _set_balance(async_session, org_id, campaign)
+    verifications_routes._last_polled.clear()
+    resp = await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.json()["waiting_for_credit"] is True
+    assert resp.json()["credit_needed_cents"] == lane
+    assert sms_carrier.campaigns_skipped == 1 and sms_carrier.campaigns_created == 0
+    await _set_balance(async_session, org_id, campaign + lane)
+    verifications_routes._last_polled.clear()
+    resp = await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.json()["waiting_for_credit"] is False
+    assert sms_carrier.campaigns_created == 1
+
+
+# The holds each carrier puts a low-volume brand in when the networks could
+# not verify the company (Twilio: a new registration; Telnyx: the faster lane).
+_HELD = {
+    "twilio": {
+        "brand_sid": "BN1",
+        "messaging_service_sid": "MG1",
+        "subject_type": "business",
+        "low_volume": True,
+        "needs_information": True,
+    },
+    "telnyx": {
+        "brand_id": "B1",
+        "subject_type": "business",
+        "low_volume": True,
+        "identity_wait_since": "2026-11-17T10:00:00+00:00",
+        "needs_information": True,
+    },
+    # The faster lane ran and failed: still polled, still cancellable.
+    "telnyx_failed_lane": {
+        "brand_id": "B1",
+        "subject_type": "business",
+        "low_volume": True,
+        "faster_lane_ok": True,
+        "faster_lane_at": "2026-11-17T10:00:00+00:00",
+        "vetting_requested": True,
+        "needs_information": True,
+        "faster_lane_failed": True,
+    },
+}
+
+
+@pytest.mark.usefixtures("us_number")
+@pytest.mark.parametrize("carrier", sorted(_HELD))
+async def test_a_held_low_volume_row_can_be_cancelled(
+    client, org_and_key, sms_carrier, async_session, carrier
+) -> None:
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 10_000)
+    vid = (await _post_sms(client, key, fields=_LOW_VOLUME)).json()["id"]
+    await _set_refs(async_session, vid, "submitted", dict(_HELD[carrier]))
+    resp = await client.delete(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["state"] == "cancelled"
+    # The carrier's cleanup ran on the held filing.
+    assert sms_carrier.discarded[-1] == _HELD[carrier]
+    assert (await _stored_refs(async_session, vid))["low_volume"] is True
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_held_row_with_a_filed_campaign_still_waits_for_review(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 10_000)
+    vid = (await _post_sms(client, key, fields=_LOW_VOLUME)).json()["id"]
+    refs = {
+        **_HELD["telnyx"],
+        "campaign_id": "C1",
+        "campaign_filed_at": "2026-11-17T10:00:00+00:00",
+    }
+    await _set_refs(async_session, vid, "submitted", refs)
+    resp = await client.delete(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.status_code == 409, resp.text
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_verified_brand_owes_no_faster_lane(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    """Box ticked, but the networks verified the brand: the lane is never
+    bought, so the campaign waits only for its own fee."""
+    org_id, _, key = org_and_key
+    vid = await _before_campaign(client, key, async_session, org_id, sms_carrier)
+    refs = await _stored_refs(async_session, vid)
+    refs.update(low_volume=True, faster_lane_ok=True, brand_verified=True)
+    await _set_refs(async_session, vid, await _stored_state(async_session, vid), refs)
+    campaign = sms_registration_fees.campaign_fee_cents(
+        "fake", "business", low_volume=True
+    )
+    await _set_balance(async_session, org_id, campaign)
+    verifications_routes._last_polled.clear()
+    resp = await client.get(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.json()["waiting_for_credit"] is False
+    assert sms_carrier.campaigns_created == 1
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_an_amendment_on_a_verified_brand_needs_no_faster_lane_credit(
+    client, org_and_key, sms_carrier, async_session, monkeypatch
+) -> None:
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 10_000)
+    vid, answers = await _held_application(
+        client,
+        key,
+        sms_carrier,
+        async_session,
+        monkeypatch,
+        {"low_volume": True, "brand_verified": True},
+    )
+    await _set_balance(async_session, org_id, 0)
+    await _charge_submission(async_session, org_id, vid)
+    resp = await client.patch(
+        f"/verifications/{vid}/application",
+        headers=_auth(key),
+        json=_answers_with(answers, daily_texts=None, faster_lane_ok="YES"),
+    )
+    assert resp.status_code == 200, resp.text
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_row_held_after_a_failed_faster_lane_can_be_cancelled(
+    client, org_and_key, sms_carrier, async_session
+) -> None:
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 10_000)
+    vid = (await _post_sms(client, key, fields=_FASTER_LANE)).json()["id"]
+    held = {
+        **_HELD["telnyx"],
+        "faster_lane_ok": True,
+        "faster_lane_at": "2026-11-17T11:00:00+00:00",
+        "vetting_requested": True,
+    }
+    await _set_refs(async_session, vid, "submitted", dict(held))
+    resp = await client.delete(f"/verifications/{vid}", headers=_auth(key))
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["state"] == "cancelled"
+    assert sms_carrier.discarded[-1] == held
+    # The rater still charges the bought lane after the wipe.
+    kept = await _stored_refs(async_session, vid)
+    assert kept["faster_lane_at"] == "2026-11-17T11:00:00+00:00"
+
+
+async def test_a_held_toll_free_row_can_be_cancelled(
+    client, org_and_key, async_session
+) -> None:
+    """A toll-free row held after a rejection the customer may edit never
+    sets ``campaign_filed_at``, so the held-row rule lets it be cancelled."""
+    org_id, _, key = org_and_key
+    twilio = Mock()
+    plugin = TwilioSmsRegistrationProvider(
+        account_sid="AC1",
+        auth_token="t",
+        client=twilio,
+        primary_profile_sid="BU0",
+        sms_provider=Mock(),
+    )
+    app.dependency_overrides[get_verification_registry] = lambda: (
+        lambda name, purpose="number": plugin if name == "twilio" else None
+    )
+    try:
+        number = await _us_number(
+            async_session, org_id, e164="+18005550100", provider="twilio"
+        )
+        row = CarrierVerification(
+            organization_id=org_id,
+            provider="twilio",
+            country_code="US",
+            number_type="toll_free",
+            number_id=number.id,
+            subject_type="business",
+            subject_name="Acme",
+            purpose="sms",
+            state="submitted",
+            provider_refs={
+                "registration_kind": "toll_free",
+                "tollfree_verification_sid": "HH1",
+                "needs_information": True,
+                "campaign_needs_repair": True,
+            },
+            requirements_version="1",
+        )
+        async_session.add(row)
+        await async_session.commit()
+        resp = await client.delete(f"/verifications/{row.id}", headers=_auth(key))
+    finally:
+        app.dependency_overrides.pop(get_verification_registry, None)
+    assert resp.status_code == 200, resp.text
+    await async_session.refresh(row)
+    assert row.state == "cancelled"
+    twilio.messaging.v1.tollfree_verifications.assert_called_with("HH1")
+    twilio.messaging.v1.tollfree_verifications.return_value.delete.assert_called()
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_a_carrier_with_no_low_volume_filing_files_the_vetted_brand(
+    client, org_and_key, sms_carrier, async_session, tmp_path
+) -> None:
+    """No ``business_low_volume`` row: a company that left the answer blank
+    files the vetted brand at the business prices, not a 404."""
+    org_id, _, key = org_and_key
+    path = tmp_path / "sms-registration.json"
+    data = json.loads(path.read_text())
+    for row in data["providers"]:
+        row.pop("business_low_volume", None)
+    path.write_text(json.dumps(data))
+    sms_registration_fees._load.cache_clear()
+    vetted = sms_registration_fees.filing_fee_cents("fake", "business")
+    assert vetted == sms_registration_fees.filing_fee_cents(
+        "fake", "business", low_volume=True, faster_lane=True
+    )
+    fields = json.dumps({"legal_name": "Acme", "campaign_description": "Order updates"})
+    await _set_balance(async_session, org_id, vetted - 1)
+    assert (await _post_sms(client, key, fields=fields)).status_code == 402
+    await _set_balance(async_session, org_id, vetted)
+    resp = await _post_sms(client, key, fields=fields)
+    assert resp.status_code == 201, resp.text
+    draft = sms_carrier.drafts[-1]
+    assert "low_volume" not in draft
+    assert draft["fields"]["daily_texts"] == "OVER_2000"
+    refs = await _stored_refs(async_session, resp.json()["id"])
+    assert "low_volume" not in refs and "faster_lane_ok" not in refs
+
+
+@pytest.mark.usefixtures("us_number")
+async def test_an_amendment_at_a_carrier_with_no_low_volume_filing_stays_vetted(
+    client, org_and_key, sms_carrier, async_session, monkeypatch, tmp_path
+) -> None:
+    """A vetted brand filed because the carrier has no low-volume filing:
+    a low-volume answer on the amendment keeps it vetted, not a 422."""
+    org_id, _, key = org_and_key
+    await _set_balance(async_session, org_id, 10_000)
+    vid, answers = await _held_application(
+        client, key, sms_carrier, async_session, monkeypatch, {}
+    )
+    path = tmp_path / "sms-registration.json"
+    data = json.loads(path.read_text())
+    for row in data["providers"]:
+        row.pop("business_low_volume", None)
+    path.write_text(json.dumps(data))
+    sms_registration_fees._load.cache_clear()
+    resp = await client.patch(
+        f"/verifications/{vid}/application",
+        headers=_auth(key),
+        json=_answers_with(answers, daily_texts="UP_TO_2000"),
+    )
+    assert resp.status_code == 200, resp.text
+    stored = await _stored_refs(async_session, vid)
+    assert stored["campaign"]["use_case"] != "LOW_VOLUME"
+    assert "low_volume" not in stored

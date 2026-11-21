@@ -12,6 +12,9 @@ from hailhq.core.providers.verification.base import (
     RegistrationHoldsAnotherNumber,
     VerificationProviderError,
 )
+from hailhq.core.providers.verification.sms_review import (
+    LOW_VOLUME_FASTER_LANE_FAILED,
+)
 from hailhq.core.providers.verification.telnyx_sms import (
     TelnyxSmsRegistrationProvider,
 )
@@ -56,6 +59,7 @@ FIELDS = {
     "rep_email": "ada@acme.example",
     "rep_phone": "+15125550100",
     "rep_title": "CEO",
+    "daily_texts": "OVER_2000",
     "campaign_description": "Order updates and delivery notices for customers who ordered on our site.",
     "sample_1": "Acme: your order 123 shipped. Reply STOP to opt out.",
     "sample_2": "Acme: your order 123 was delivered. Reply STOP to opt out.",
@@ -92,7 +96,7 @@ def _provider(handler):
     return TelnyxSmsRegistrationProvider(api_key="k", client=client)
 
 
-async def _draft(p, subject="business", fields=FIELDS, address=ADDRESS):
+async def _draft(p, subject="business", fields=FIELDS, address=ADDRESS, **kwargs):
     req = await p.requirements("US", "local", subject)
     return await p.create_draft(
         organization_id="org1",
@@ -102,6 +106,7 @@ async def _draft(p, subject="business", fields=FIELDS, address=ADDRESS):
         address=address,
         documents={},
         messaging_service_sid="MP1",
+        **kwargs,
     )
 
 
@@ -2020,6 +2025,32 @@ async def test_a_vetting_telnyx_already_has_is_not_asked_again() -> None:
     assert refs["vetting_requested"] is True
 
 
+async def test_a_pending_vetting_telnyx_already_has_is_not_asked_again() -> None:
+    """Telnyx lists only ACTIVE vettings by default: the read names the
+    running ones too, so a PENDING request is found and not billed twice."""
+    seen: list = []
+
+    def handler(req: httpx.Request):
+        if req.method == "GET" and req.url.path.endswith("/externalVetting"):
+            seen.append(sorted(req.url.params.get_list("vettingStatus")))
+            return httpx.Response(200, json=[{"evpId": "AEGIS"}])
+        if req.method == "POST":
+            return httpx.Response(500)
+        return httpx.Response(
+            200, json={"status": "OK", "identityStatus": "SELF_DECLARED"}
+        )
+
+    refs = {
+        "brand_id": "B1",
+        "subject_type": "business",
+        "campaign": {},
+        "vetting_requested": False,
+    }
+    assert (await _provider(handler).status(refs)).state == "pending"
+    assert seen == [["ACTIVE", "PENDING", "UNSCORE"]]
+    assert refs["vetting_requested"] is True
+
+
 @pytest.mark.parametrize("listed", [[], 404])
 async def test_no_vetting_listed_asks_for_one(listed) -> None:
     p, refs, calls = _vetting_retry(listed)
@@ -3022,3 +3053,482 @@ def test_same_sender_reads_a_vat_number_with_or_without_its_prefix() -> None:
     assert not same_sender(
         original, {**fields, "ein": "SE556677889902"}, address, "business"
     )
+
+
+LOW_VOLUME_FIELDS = {**FIELDS, "daily_texts": "UP_TO_2000"}
+
+
+async def _low_volume_draft(p, **kwargs):
+    return await _draft(p, fields=LOW_VOLUME_FIELDS, low_volume=True, **kwargs)
+
+
+def _low_volume_brand(calls: list, brand_reads, vetting_status: int = 200):
+    """Telnyx makes brand B1; each GET of it answers the next of
+    ``brand_reads`` (a status code or a JSON body), the last one repeating.
+    A vetting request answers ``vetting_status``."""
+    reads = list(brand_reads)
+
+    def handler(req: httpx.Request):
+        calls.append((req.method, req.url.path))
+        if req.method == "POST" and req.url.path.endswith("/10dlc/brand"):
+            return httpx.Response(200, json={"brandId": "B1"})
+        if req.method == "GET" and req.url.path.endswith("/10dlc/brand/B1"):
+            answer = reads.pop(0) if len(reads) > 1 else reads[0]
+            if isinstance(answer, int):
+                return httpx.Response(answer)
+            return httpx.Response(200, json=answer)
+        if req.url.path.endswith("/externalVetting"):
+            if req.method == "GET":
+                return httpx.Response(200, json=[])
+            return httpx.Response(vetting_status, json={})
+        if req.url.path.endswith("/10dlc/campaignBuilder"):
+            return httpx.Response(200, json={"campaignId": "C1"})
+        return httpx.Response(404)
+
+    return _provider(handler)
+
+
+def _vetting_calls(calls: list) -> list:
+    return [c for c in calls if c == ("POST", "/v2/10dlc/brand/B1/externalVetting")]
+
+
+def _filable_campaign(use_case: str, purposes: list[str]) -> dict:
+    return {
+        **_unfiled_campaign_refs()["campaign"],
+        "use_case": use_case,
+        "text_types": purposes,
+        "has_phone": False,
+        "age_gated": False,
+        "direct_lending": False,
+    }
+
+
+def _low_volume_refs(**extra) -> dict:
+    return {
+        "brand_id": "B1",
+        "messaging_profile_id": "MP1",
+        "subject_type": "business",
+        "low_volume": True,
+        "campaign": _filable_campaign("LOW_VOLUME", ["CUSTOMER_CARE"]),
+        **extra,
+    }
+
+
+async def test_low_volume_company_brand_is_never_vetted_at_filing() -> None:
+    calls: list = []
+    p = _low_volume_brand(calls, [{"status": "OK", "identityStatus": "VERIFIED"}])
+    draft = await _low_volume_draft(p)
+    assert draft.problems == [] and draft.refs["brand_id"] == "B1"
+    assert _vetting_calls(calls) == []
+    assert "vetting_requested" not in draft.refs
+    assert draft.refs["campaign"]["use_case"] == "LOW_VOLUME"
+    # The API writes the fee marker, from the decision it priced.
+    assert "low_volume" not in draft.refs
+
+
+async def test_low_volume_brand_still_registering_owes_no_vetting() -> None:
+    calls: list = []
+    draft = await _low_volume_draft(_low_volume_brand(calls, [404]))
+    assert draft.problems == [] and draft.refs["brand_id"] == "B1"
+    assert "vetting_requested" not in draft.refs
+    assert _vetting_calls(calls) == []
+
+
+async def test_a_failure_after_the_low_volume_brand_owes_no_vetting() -> None:
+    calls: list = []
+    # The brand read fails with an answer that is not a refusal.
+    draft = await _low_volume_draft(_low_volume_brand(calls, [401]))
+    assert draft.problems == [] and draft.refs["brand_id"] == "B1"
+    assert "vetting_requested" not in draft.refs
+    assert _vetting_calls(calls) == []
+
+
+@pytest.mark.parametrize("owed", [False, True, None])
+@pytest.mark.parametrize("faster_lane_ok", [False, True])
+async def test_a_low_volume_brand_still_being_checked_waits_a_day(
+    owed, faster_lane_ok
+) -> None:
+    calls: list = []
+    p = _low_volume_brand(calls, [{"status": "OK", "identityStatus": "SELF_DECLARED"}])
+    refs = _low_volume_refs()
+    if owed is not None:
+        refs["vetting_requested"] = owed
+    if faster_lane_ok:
+        refs["faster_lane_ok"] = True
+    for _ in range(3):
+        assert (await p.status(refs)).state == "pending"
+    assert not any(m == "POST" for m, _ in calls)
+    assert "needs_information" not in refs and "faster_lane_at" not in refs
+    assert datetime.fromisoformat(refs["identity_wait_since"]).tzinfo is not None
+
+
+@pytest.mark.parametrize("identity", ["SELF_DECLARED", None, "SOMETHING_NEW"])
+@pytest.mark.parametrize("faster_lane_ok", [False, True])
+async def test_a_brand_still_not_verified_after_a_day_takes_the_faster_lane_path(
+    identity, faster_lane_ok
+) -> None:
+    """Not verified a day after Telnyx registered it: never pending forever."""
+    calls: list = []
+    brand = {"status": "OK", **({"identityStatus": identity} if identity else {})}
+    p = _low_volume_brand(calls, [brand])
+    day_ago = datetime.now(timezone.utc) - timedelta(hours=25)
+    refs = _low_volume_refs(identity_wait_since=day_ago.isoformat())
+    if faster_lane_ok:
+        refs["faster_lane_ok"] = True
+    await p.status(refs)
+    if faster_lane_ok:
+        assert len(_vetting_calls(calls)) == 1 and refs["faster_lane_at"]
+    else:
+        assert refs["needs_information"] is True and _vetting_calls(calls) == []
+
+
+@pytest.mark.parametrize("identity", ["UNVERIFIED", "SELF_DECLARED"])
+async def test_the_faster_lane_waits_for_credit(identity) -> None:
+    """Not covered (``may_file_campaign`` False): nothing is bought; a
+    later pass with credit buys it."""
+    calls: list = []
+    p = _low_volume_brand(calls, [{"status": "OK", "identityStatus": identity}])
+    day_ago = datetime.now(timezone.utc) - timedelta(hours=25)
+    refs = _low_volume_refs(
+        faster_lane_ok=True, identity_wait_since=day_ago.isoformat()
+    )
+    st = await p.status(refs, may_file_campaign=False)
+    assert st.state == "pending"
+    assert not any(m == "POST" for m, _ in calls)
+    assert "faster_lane_at" not in refs and "needs_information" not in refs
+    await p.status(refs)
+    assert len(_vetting_calls(calls)) == 1 and refs["faster_lane_at"]
+
+
+async def test_an_unverified_low_volume_brand_offers_the_faster_lane() -> None:
+    from hailhq.core.providers.verification.sms_review import LOW_VOLUME_FASTER_LANE
+
+    calls: list = []
+    p = _low_volume_brand(calls, [{"status": "OK", "identityStatus": "UNVERIFIED"}])
+    refs = _low_volume_refs()
+    st = await p.status(refs)
+    assert st.state == "pending" and st.reason == LOW_VOLUME_FASTER_LANE
+    assert refs["needs_information"] is True
+    assert not any(m == "POST" for m, _ in calls)
+    assert "faster_lane_at" not in refs and "vetting_requested" not in refs
+
+
+async def test_a_ticked_faster_lane_vets_an_unverified_brand_once() -> None:
+    calls: list = []
+    reads = [
+        {"status": "OK", "identityStatus": "UNVERIFIED"},
+        {"status": "OK", "identityStatus": "UNVERIFIED"},
+        {"status": "OK", "identityStatus": "VETTED_VERIFIED"},
+    ]
+    p = _low_volume_brand(calls, reads)
+    refs = _low_volume_refs(faster_lane_ok=True)
+    assert (await p.status(refs)).state == "pending"
+    assert _vetting_calls(calls) == [("POST", "/v2/10dlc/brand/B1/externalVetting")]
+    # The fee rater charges the vetting from this mark.
+    assert datetime.fromisoformat(refs["faster_lane_at"]).tzinfo is not None
+    assert refs["vetting_requested"] is True and p.in_review(refs)
+    assert "needs_information" not in refs
+    # Still unverified while vetting runs: no second request.
+    assert (await p.status(refs)).state == "pending"
+    assert len(_vetting_calls(calls)) == 1
+    # Vetted: the normal flow files the low-volume campaign.
+    assert (await p.status(refs)).state == "pending"
+    assert refs["campaign_id"] == "C1"
+    assert len(_vetting_calls(calls)) == 1
+
+
+async def test_a_faster_lane_vetting_telnyx_already_has_is_not_asked_again() -> None:
+    calls: list = []
+
+    def handler(req: httpx.Request):
+        calls.append((req.method, req.url.path))
+        if req.url.path.endswith("/10dlc/brand/B1"):
+            return httpx.Response(
+                200, json={"status": "OK", "identityStatus": "UNVERIFIED"}
+            )
+        if req.method == "GET" and req.url.path.endswith("/externalVetting"):
+            return httpx.Response(200, json=[{"evpId": "AEGIS"}])
+        return httpx.Response(404)
+
+    refs = _low_volume_refs(faster_lane_ok=True)
+    assert (await _provider(handler).status(refs)).state == "pending"
+    assert not any(m == "POST" for m, _ in calls)
+    assert refs["vetting_requested"] is True and refs["faster_lane_at"]
+
+
+async def test_a_failed_faster_lane_request_is_asked_again_on_the_next_pass() -> None:
+    calls: list = []
+    p = _low_volume_brand(
+        calls, [{"status": "OK", "identityStatus": "UNVERIFIED"}], vetting_status=502
+    )
+    refs = _low_volume_refs(faster_lane_ok=True)
+    with pytest.raises(VerificationProviderError):
+        await p.status(refs)
+    # Nothing bought, so nothing to charge: the lane stays owed.
+    assert "faster_lane_at" not in refs and not refs.get("vetting_requested")
+    ok = _low_volume_brand(calls, [{"status": "OK", "identityStatus": "UNVERIFIED"}])
+    calls.clear()
+    assert (await ok.status(refs)).state == "pending"
+    assert _vetting_calls(calls) == [("POST", "/v2/10dlc/brand/B1/externalVetting")]
+    assert refs["vetting_requested"] is True and refs["faster_lane_at"]
+
+
+async def test_no_faster_lane_hold_once_a_campaign_is_filed() -> None:
+    calls: list = []
+    p = _low_volume_brand(calls, [{"status": "OK", "identityStatus": "UNVERIFIED"}])
+    refs = _low_volume_refs()
+    refs["campaign_id"] = "C1"
+    assert (await p.status(refs)).state == "pending"
+    assert "needs_information" not in refs and not _vetting_calls(calls)
+
+
+async def test_low_volume_campaign_files_its_purposes_as_sub_use_cases() -> None:
+    posted = []
+
+    def handler(req):
+        if req.url.path.endswith("/10dlc/brand/B1"):
+            return httpx.Response(
+                200, json={"status": "OK", "identityStatus": "VERIFIED"}
+            )
+        if req.url.path.endswith("/10dlc/campaignBuilder"):
+            posted.append(json.loads(req.content))
+            return httpx.Response(200, json={"campaignId": "C1"})
+        return httpx.Response(404)
+
+    for purposes in (["CUSTOMER_CARE"], ["CUSTOMER_CARE", "MARKETING"]):
+        posted.clear()
+        refs = _low_volume_refs(campaign=_filable_campaign("LOW_VOLUME", purposes))
+        assert (await _provider(handler).status(refs)).state == "pending"
+        assert posted[0]["usecase"] == "LOW_VOLUME"
+        assert posted[0]["subUsecases"] == purposes
+
+
+async def test_a_single_purpose_vetted_company_files_no_sub_use_cases() -> None:
+    posted = []
+
+    def handler(req):
+        if req.url.path.endswith("/10dlc/brand/B1"):
+            return httpx.Response(200, json={"identityStatus": "VETTED_VERIFIED"})
+        if req.url.path.endswith("/10dlc/campaignBuilder"):
+            posted.append(json.loads(req.content))
+            return httpx.Response(200, json={"campaignId": "C1"})
+        return httpx.Response(404)
+
+    refs = _unfiled_campaign_refs()
+    refs["campaign"] = _filable_campaign("CUSTOMER_CARE", ["CUSTOMER_CARE"])
+    await _provider(handler).status(refs)
+    assert posted[0]["usecase"] == "CUSTOMER_CARE"
+    assert "subUsecases" not in posted[0]
+
+
+async def test_a_person_never_gets_the_low_volume_brand() -> None:
+    def handler(req: httpx.Request):
+        if req.url.path.endswith("/10dlc/brand"):
+            return httpx.Response(200, json={"brandId": "B1"})
+        if req.method == "GET":
+            return httpx.Response(200, json={"status": "OK"})
+        return httpx.Response(200, json={"referenceId": "R1"})
+
+    draft = await _draft(
+        _provider(handler),
+        subject="person",
+        fields={**PERSON_FIELDS, "daily_texts": "UP_TO_2000"},
+        low_volume=True,
+    )
+    assert draft.problems == []
+    assert draft.refs["campaign"]["use_case"] == "SOLE_PROPRIETOR"
+
+
+async def test_a_verified_low_volume_brand_marks_the_lane_not_owed() -> None:
+    """Verified, even on a pass that may not file the campaign: the mark
+    stops the credit checks counting the faster lane, and no later read
+    buys it."""
+    calls: list = []
+    p = _low_volume_brand(
+        calls,
+        [
+            {"status": "OK", "identityStatus": "VERIFIED"},
+            {"status": "OK", "identityStatus": "UNVERIFIED"},
+        ],
+    )
+    refs = _low_volume_refs(faster_lane_ok=True)
+    assert (await p.status(refs, may_file_campaign=False)).state == "pending"
+    assert refs["brand_verified"] is True
+    assert "campaign_id" not in refs
+    # A later read that lags behind buys no lane and holds nothing.
+    assert (await p.status(refs)).state == "pending"
+    assert _vetting_calls(calls) == []
+    assert "faster_lane_at" not in refs and "needs_information" not in refs
+
+
+async def test_a_vetted_company_gets_no_lane_mark() -> None:
+    calls: list = []
+    p = _low_volume_brand(calls, [{"status": "OK", "identityStatus": "VERIFIED"}])
+    refs = _low_volume_refs()
+    refs.pop("low_volume")
+    await p.status(refs, may_file_campaign=False)
+    assert "brand_verified" not in refs
+
+
+def _bought_lane(calls: list, vettings, identity: str = "UNVERIFIED"):
+    """A low-volume brand whose faster lane was bought; the vetting list
+    answers ``vettings`` (a status code or a JSON body)."""
+
+    def handler(req: httpx.Request):
+        calls.append((req.method, req.url.path, req.url.params))
+        if req.method == "GET" and req.url.path.endswith("/10dlc/brand/B1"):
+            return httpx.Response(
+                200, json={"status": "OK", "identityStatus": identity}
+            )
+        if req.method == "GET" and req.url.path.endswith("/externalVetting"):
+            if isinstance(vettings, int):
+                return httpx.Response(vettings)
+            return httpx.Response(200, json=vettings)
+        return httpx.Response(404)
+
+    refs = _low_volume_refs(
+        faster_lane_ok=True,
+        faster_lane_at=datetime.now(timezone.utc).isoformat(),
+        vetting_requested=True,
+    )
+    return _provider(handler), refs
+
+
+@pytest.mark.parametrize("status", ["FAILED", "EXPIRED"])
+async def test_a_failed_faster_lane_holds_the_row(status) -> None:
+    from hailhq.core.providers.verification.sms_review import (
+        LOW_VOLUME_FASTER_LANE_FAILED,
+    )
+
+    calls: list = []
+    p, refs = _bought_lane(calls, [{"evpId": "AEGIS", "vettingStatus": status}])
+    st = await p.status(refs)
+    assert st.state == "pending" and st.reason == LOW_VOLUME_FASTER_LANE_FAILED
+    assert refs["needs_information"] is True
+    # The customer can act: the row reads as held, not as in review.
+    assert p.step(refs) == "needs_information"
+    # Telnyx lists only ACTIVE vettings unless asked for the others.
+    params = [c[2] for c in calls if c[1].endswith("/externalVetting")]
+    assert sorted(params[0].get_list("vettingStatus")) == [
+        "ACTIVE",
+        "EXPIRED",
+        "FAILED",
+    ]
+    assert not any(c[0] == "POST" for c in calls)
+
+
+@pytest.mark.parametrize(
+    "vettings",
+    [
+        [],
+        404,
+        [{"evpId": "AEGIS"}],
+        [{"evpId": "AEGIS", "vettingStatus": "PENDING"}],
+        [{"evpId": "AEGIS", "vettingStatus": "UNSCORE"}],
+        # Vetted just now: the brand read may lag behind it.
+        [
+            {
+                "evpId": "AEGIS",
+                "vettingStatus": "ACTIVE",
+                "vettedDate": datetime.now(timezone.utc).isoformat(),
+            }
+        ],
+    ],
+)
+async def test_a_faster_lane_still_running_waits(vettings) -> None:
+    calls: list = []
+    p, refs = _bought_lane(calls, vettings)
+    st = await p.status(refs)
+    assert st.state == "pending" and st.reason is None
+    assert "needs_information" not in refs
+
+
+async def test_an_active_vetting_that_never_verifies_the_brand_holds_the_row() -> None:
+    calls: list = []
+    day_ago = (datetime.now(timezone.utc) - timedelta(hours=25)).isoformat()
+    p, refs = _bought_lane(
+        calls, [{"evpId": "AEGIS", "vettingStatus": "ACTIVE", "vettedDate": day_ago}]
+    )
+    assert (await p.status(refs)).state == "pending"
+    assert refs["needs_information"] is True
+
+
+def _held_lane(calls: list, brand: dict):
+    """A low-volume row held because its faster lane failed; the brand
+    reads ``brand["identity"]`` (the test changes it between passes)."""
+
+    def handler(req: httpx.Request):
+        calls.append((req.method, req.url.path))
+        if req.method == "GET" and req.url.path.endswith("/10dlc/brand/B1"):
+            return httpx.Response(
+                200, json={"status": "OK", "identityStatus": brand["identity"]}
+            )
+        if req.method == "GET" and req.url.path.endswith("/externalVetting"):
+            return httpx.Response(
+                200, json=[{"evpId": "AEGIS", "vettingStatus": "FAILED"}]
+            )
+        if req.url.path.endswith("/10dlc/campaignBuilder"):
+            return httpx.Response(200, json={"campaignId": "C1"})
+        return httpx.Response(404)
+
+    refs = _low_volume_refs(
+        faster_lane_ok=True,
+        faster_lane_at=datetime.now(timezone.utc).isoformat(),
+        vetting_requested=True,
+        needs_information=True,
+        faster_lane_failed=True,
+    )
+    return _provider(handler), refs
+
+
+async def test_a_failed_lane_hold_marks_the_row_to_keep_checking() -> None:
+    calls: list = []
+    p, refs = _bought_lane(calls, [{"evpId": "AEGIS", "vettingStatus": "FAILED"}])
+    await p.status(refs)
+    assert refs["needs_information"] is True and refs["faster_lane_failed"] is True
+
+
+async def test_a_held_lane_still_unverified_stays_held_with_no_request() -> None:
+    calls: list = []
+    p, refs = _held_lane(calls, {"identity": "UNVERIFIED"})
+    before = json.loads(json.dumps(refs))
+    st = await p.status(refs)
+    assert st.state == "pending" and st.reason == LOW_VOLUME_FASTER_LANE_FAILED
+    # Unchanged refs: the poll writes nothing. Only the brand is read.
+    assert refs == before
+    assert calls == [("GET", "/v2/10dlc/brand/B1")]
+
+
+async def test_a_held_lane_ends_when_the_brand_is_verified_later() -> None:
+    calls: list = []
+    brand = {"identity": "VERIFIED"}
+    p, refs = _held_lane(calls, brand)
+    # The pass that ends the hold files nothing: it got no credit check.
+    st = await p.status(refs, may_file_campaign=True)
+    assert st.state == "pending" and st.reason is None
+    assert "needs_information" not in refs and "faster_lane_failed" not in refs
+    assert refs["brand_verified"] is True
+    assert p.step(refs) != "needs_information"
+    assert not any(c[0] == "POST" for c in calls)
+    # A later read that lags behind holds nothing again.
+    brand["identity"] = "UNVERIFIED"
+    assert (await p.status(refs)).reason is None
+    assert "needs_information" not in refs
+    brand["identity"] = "VERIFIED"
+    # The next pass is a normal one: no campaign without the credit...
+    assert (await p.status(refs, may_file_campaign=False)).state == "pending"
+    assert "campaign_id" not in refs
+    # ...and the campaign once the credit covers it, with no new vetting.
+    assert (await p.status(refs, may_file_campaign=True)).state == "pending"
+    assert refs["campaign_id"] == "C1"
+    posts = [c for c in calls if c[0] == "POST"]
+    assert posts == [("POST", "/v2/10dlc/campaignBuilder")]
+
+
+async def test_no_failed_lane_hold_once_a_campaign_is_filed() -> None:
+    calls: list = []
+    p, refs = _bought_lane(calls, [{"evpId": "AEGIS", "vettingStatus": "FAILED"}])
+    refs["campaign_id"] = "C1"
+    assert (await p.status(refs)).state == "pending"
+    assert "needs_information" not in refs
+    assert not any(c[1].endswith("/externalVetting") for c in calls)

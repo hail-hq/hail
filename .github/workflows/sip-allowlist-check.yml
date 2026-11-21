@@ -1,0 +1,114 @@
+name: sip-allowlist-check
+
+# Weekly check of the carriers' published SIP signaling IPs against the
+# allow-list in infra/livekit/inbound-trunks.json. On an address difference
+# or a page it cannot read, it opens or updates the
+# issue "SIP allow-list: carrier IPs changed" and fails. It changes no file
+# and no trunk, and holds no LiveKit keys. Runbook:
+# docs/operations/inbound-trunk-lockdown.md
+on:
+  schedule:
+    # Mondays 09:30 UTC, after costs-stale. Order of the Monday jobs:
+    # costs/README.md, "Weekly jobs, in order"
+    - cron: "30 9 * * 1"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compare published IPs with the allow-list
+        id: check
+        run: |
+          set +e
+          python3 scripts/ops/check_sip_allowlist.py --report /tmp/sip-report.md
+          code=$?
+          echo "exit=$code" >> "$GITHUB_OUTPUT"
+          if [ "$code" != 0 ] && [ ! -s /tmp/sip-report.md ]; then
+            echo "The check script crashed (exit $code). See the run log." > /tmp/sip-report.md
+          fi
+      - name: Open or update tracking issue
+        if: steps.check.outputs.exit != '0'
+        uses: actions/github-script@v7
+        env:
+          REPORT_PATH: /tmp/sip-report.md
+        with:
+          script: |
+            const fs = require('node:fs');
+            const report = fs.readFileSync(process.env.REPORT_PATH, 'utf-8');
+            const title = 'SIP allow-list: carrier IPs changed';
+            const run = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = [
+              'The weekly sip-allowlist-check found a difference between the carriers\' published SIP signaling IPs and `infra/livekit/inbound-trunks.json`, or could not read a published list.',
+              '',
+              'Calls from a new carrier IP are refused until the IP is on the trunk. Follow docs/operations/inbound-trunk-lockdown.md, "When the weekly check fails".',
+              '',
+              report,
+              '',
+              `Run: ${run}`,
+              '',
+              `_Last updated: ${new Date().toISOString().slice(0, 10)}._`,
+            ].join('\n');
+
+            // The issues API also returns pull requests: keep only the issue
+            // with this exact title, in case the label is reused.
+            const labelled = await github.paginate(github.rest.issues.listForRepo, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'sip-allowlist',
+            });
+            let existing = labelled.filter((i) => !i.pull_request && i.title === title);
+            if (existing.length === 0) {
+              // The label may have been removed while triaging: match by
+              // title, but only an issue this workflow opened (the repo is
+              // public, so anyone can open an issue with the same title).
+              const open = await github.paginate(github.rest.issues.listForRepo, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                state: 'open',
+                creator: 'github-actions[bot]',
+              });
+              existing = open.filter(
+                (i) => !i.pull_request && i.title === title && i.user?.login === 'github-actions[bot]',
+              );
+            }
+            if (existing.length > 0) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing[0].number,
+                body,
+              });
+              // GitHub sends no notification for a body edit; a comment
+              // notifies the issue's subscribers. The failed run itself
+              // emails whoever last changed this workflow's schedule.
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing[0].number,
+                body: 'The SIP allow-list check failed again. Report updated above.',
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ['sip-allowlist'],
+              });
+            }
+      - name: Fail loudly
+        if: steps.check.outputs.exit != '0'
+        run: |
+          cat /tmp/sip-report.md
+          echo "::error::SIP allow-list check needs attention (see the issue)"
+          exit 1

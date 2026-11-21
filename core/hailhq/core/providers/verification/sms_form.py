@@ -55,6 +55,9 @@ _VERTICALS = (
     ("COMMUNICATION", "Communication"),
 )
 _YES_NO = (FieldOption(key="YES", label="Yes"), FieldOption(key="NO", label="No"))
+# The daily_texts answer that files a vetted brand. Blank, "not sure" and
+# "up to 2,000" file low volume.
+_OVER_2000 = "OVER_2000"
 # Carrier maximums, in characters: campaign description and each sample.
 _DESCRIPTION_MAX = 4096
 _SAMPLE_MAX = 1024
@@ -186,6 +189,36 @@ _BUSINESS_FIELDS = (
     FieldSpec(name="rep_email", label="Contact person email", kind="email"),
     FieldSpec(name="rep_phone", label="Contact person phone", kind="phone"),
     FieldSpec(name="rep_title", label="Contact person job title"),
+    FieldSpec(
+        name="daily_texts",
+        label="How many texts do you expect to send each day?",
+        required=False,
+        options=(
+            FieldOption(key="NOT_SURE", label="Not sure yet"),
+            FieldOption(key="UP_TO_2000", label="Up to 2,000"),
+            FieldOption(key=_OVER_2000, label="More than 2,000"),
+        ),
+        help=(
+            "Up to 2,000 a day costs less and starts with a quick setup. "
+            "It has a daily limit and sends a little slower. "
+            "Sending more later needs a carrier check."
+        ),
+    ),
+    FieldSpec(
+        name="faster_lane_ok",
+        label=(
+            "Move me to the faster lane automatically if the networks need "
+            "more details about my company."
+        ),
+        kind="choices",
+        required=False,
+        options=(FieldOption(key="YES", label="Yes"),),
+        max_choices=1,
+        help=(
+            "For up to 2,000 texts a day. If the networks ask, we send the "
+            "extra details for you. This step has its own fee."
+        ),
+    ),
 )
 # What the texts are about. Both routes select one to five real purposes;
 # companies with exactly one purpose file that specific use case.
@@ -475,6 +508,8 @@ def _fields_for(
 ) -> tuple[FieldSpec, ...]:
     """The shared form with the carrier's extra fields and limits."""
     subject = _PERSON_FIELDS if subject_type == "person" else _BUSINESS_FIELDS
+    if not provider.faster_lane:
+        subject = tuple(f for f in subject if f.name != "faster_lane_ok")
     extra = tuple(
         f for f in provider.extra_fields(subject_type) if f.name != "text_types"
     )
@@ -933,6 +968,34 @@ class CampaignText:
     schema_version: int = 1
 
 
+def low_volume(fields: dict[str, str], subject_type: SubjectType) -> bool:
+    """True for a company that did not say it sends more than 2,000 texts a
+    day (blank, "not sure" or "up to 2,000"): its brand is not vetted and
+    its campaign files the LOW_VOLUME use case. Never for a person."""
+    return subject_type == "business" and _answer(fields, "daily_texts") != _OVER_2000
+
+
+def faster_lane_ok(fields: dict[str, str], subject_type: SubjectType) -> bool:
+    """True for a low-volume company that ticked the faster lane: Hail asks
+    for the brand's vetting when the carrier cannot verify it. The box is a
+    'choices' value, read as its check reads it (``picked``). The caller
+    checks the carrier has a faster lane (``faster_lane``)."""
+    return low_volume(fields, subject_type) and "YES" in picked(
+        fields.get("faster_lane_ok")
+    )
+
+
+def _use_case(
+    fields: dict[str, str], subject_type: SubjectType, purposes: list[str]
+) -> str:
+    if subject_type == "person":
+        return "SOLE_PROPRIETOR"
+    if low_volume(fields, subject_type):
+        # Any mix of the picked purposes, filed as its sub-use-cases.
+        return "LOW_VOLUME"
+    return purposes[0] if len(purposes) == 1 else "MIXED"
+
+
 def campaign_text(fields: dict[str, str], subject_type: SubjectType) -> CampaignText:
     """Compile only applicant-supplied facts; reading old saved forms stays safe.
 
@@ -942,11 +1005,7 @@ def campaign_text(fields: dict[str, str], subject_type: SubjectType) -> Campaign
     purposes = picked(fields.get("text_types"))
     structured = bool(_answer(fields, "consent_methods"))
     return CampaignText(
-        use_case=(
-            "SOLE_PROPRIETOR"
-            if subject_type == "person"
-            else (purposes[0] if len(purposes) == 1 else "MIXED")
-        ),
+        use_case=_use_case(fields, subject_type, purposes),
         description=fields["campaign_description"].strip(),
         message_flow=(
             _structured_flow(fields)

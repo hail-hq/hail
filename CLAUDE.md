@@ -87,7 +87,8 @@ Internal runbooks (not published) live in `docs/operations/`:
 [first-number-call-test.md](docs/operations/first-number-call-test.md) (one test call to the first number of a new carrier, country or type),
 [call-record-deletion.md](docs/operations/call-record-deletion.md) (deleting one call, its recording and its charges from a workspace),
 [voice-llm.md](docs/operations/voice-llm.md) (the house LLM chain, Bedrock access and model ids),
-[call-speaking-gate.md](docs/operations/call-speaking-gate.md) (the agent does not listen while it talks; echo detection and the phone test).
+[call-speaking-gate.md](docs/operations/call-speaking-gate.md) (the agent does not listen while it talks; echo detection and the phone test),
+[inbound-trunk-lockdown.md](docs/operations/inbound-trunk-lockdown.md) (one LiveKit inbound trunk per carrier, locked by IP or password; cutover, negative test, weekly IP check).
 
 ## Order of work
 
@@ -96,6 +97,7 @@ Some changes only work when they ship in a fixed order. Follow these every time.
 1. **Monday cost jobs.** They run in a fixed order, each writing its own files. The table and rules are in [costs/README.md](costs/README.md#weekly-jobs-in-order).
 2. **hail before hail-website.** A change that spans both repos merges and deploys in hail first: migrations, API fields, endpoints, `costs/*.json` (hail-website reads them from `main`). Merge the hail-website PR only after the hail deploy finishes. The hail-website code must never call something hail does not serve yet.
    - Exception: hail code that calls a new hail-website route merges after that route is deployed. Example: the call price quote (`POST /api/internal/voice-rates/quote`) ships in hail-website first, then the hail call balance cap that calls it. In the other order, every billed call and handover falls back to the default limit until the route is live.
+   - Exception: a hail-website change that only reads new optional API fields, and prices exactly as today while they are absent, merges first. Example: the low-volume texting brand. The website rater must charge low-volume prices before the API files low-volume brands. In the other order, low-volume companies are charged the vetted prices between the two deploys.
 3. **Per-destination call pricing.** The PRs merge in this order, each after the one before is deployed:
    1. hail: carrier call rates in `costs/voice.json` and the weekly sync.
    2. hail: the real carrier cost of each call leg.
@@ -122,12 +124,14 @@ Shared runtime instructions live in `core/hailhq/core/prompts.py`. Keep them out
 Customer-authored instructions remain editable. Do not restore the retired prompt-template endpoint or full-prompt preview.
 When changing call or agent settings, update `VOICE_CONFIGURATION_HELP`, its tests, and the matching console labels together.
 Follow [docs/operations/agent-prompts.md](docs/operations/agent-prompts.md) for the privacy boundary and conversational checks.
+Agents talk in many languages. Never hardcode a sentence that the voicebot speaks word for word: add it to the voicebot's translated spoken lines, in every supported language.
+A tool result is text for the model, not for the caller: the model says it in the call's language. Keep it short and plain so it translates well.
 
 ## Style
 
 - **Python**: ruff (lint, `--fix`) + black (format); ruff, black and pytest run in CI. FastAPI async handlers. Type-hinted. Pydantic v2 models.
 - **Go**: `gofmt`, stdlib first. Cobra for subcommands if/when the CLI grows them.
-- **Docker**: multi-stage (builder → runtime), runs as non-root `hail` user, runtime image carries no build tools. Deps installed into `/app/.venv` with `uv sync --frozen`, so images install exactly `uv.lock`; only the venv is copied to the runtime stage. Newer releases arrive by upgrading `uv.lock` in a PR.
+- **Docker**: multi-stage (builder → runtime), runs as non-root `hail` user, runtime image carries no build tools. Third-party deps install into `/app/.venv` in a `deps` stage that copies only `uv.lock` and the workspace `pyproject.toml` files (`uv sync --frozen --no-install-workspace`), so a code change reuses that layer; the builder stage adds our `hailhq` packages, and the runtime copies the deps venv plus only those packages. Newer releases arrive by upgrading `uv.lock` in a PR.
 - **Pre-commit**: husky + lint-staged run `ruff`/`black`/`gofmt`/`prettier` on staged files. Install with `pnpm install` at repo root; hooks activate automatically via the `prepare` script. pnpm is the Node package manager for this repo (pinned via `packageManager` in `package.json`).
 - **Commits**: Conventional Commits.
 

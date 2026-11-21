@@ -7,19 +7,13 @@ from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import select
-from twilio.request_validator import RequestValidator
 
-from .conftest import approve_us_sms, insert_org_and_key  # noqa: F401
-
-STATUS_AUTH_TOKEN = "test-twilio-auth-token"
-STATUS_URL = "http://t/sms/status"
-
-
-def _signed_status_form(
-    params: dict[str, str],
-) -> tuple[dict[str, str], dict[str, str]]:
-    sig = RequestValidator(STATUS_AUTH_TOKEN).compute_signature(STATUS_URL, params)
-    return params, {"X-Twilio-Signature": sig}
+from .conftest import (  # noqa: F401
+    STATUS_AUTH_TOKEN,
+    _signed_status_form,
+    approve_us_sms,
+    insert_org_and_key,
+)
 
 
 async def _seed_sent_sms(async_session, organization_id, *, provider_message_sid: str):
@@ -709,6 +703,48 @@ async def test_sms_status_failed_fans_out(
         .all()
     )
     assert len(deliveries) == 1
+
+
+async def test_status_callback_stores_error_code(
+    client, async_session, org_and_key, monkeypatch
+) -> None:
+    from hailhq.core.config import settings
+    from hailhq.core.models import Sms, WebhookDelivery, WebhookSubscription
+
+    monkeypatch.setattr(settings, "twilio_auth_token", STATUS_AUTH_TOKEN)
+    monkeypatch.setattr(settings, "hail_api_url", "http://t")
+
+    org_id, _, _ = org_and_key
+    sms = await _seed_sent_sms(async_session, org_id, provider_message_sid="SM_21610")
+    sms_id = sms.id
+    async_session.add(
+        WebhookSubscription(
+            organization_id=org_id,
+            target_url="https://example.com/firehose",
+            secret_encrypted="hash",
+            event_types=["sms.failed"],
+        )
+    )
+    await async_session.commit()
+
+    form, headers = _signed_status_form(
+        {"MessageSid": "SM_21610", "MessageStatus": "failed", "ErrorCode": "21610"}
+    )
+    resp = await client.post("/sms/status", data=form, headers=headers)
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "applied"}
+
+    async_session.expire_all()
+    row = await async_session.get(Sms, sms_id)
+    assert row.status == "failed"
+    assert row.error_code == "21610"
+
+    delivery = (
+        await async_session.execute(
+            select(WebhookDelivery).where(WebhookDelivery.event_type == "sms.failed")
+        )
+    ).scalar_one()
+    assert delivery.payload["data"]["error_code"] == "21610"
 
 
 async def test_sms_status_out_of_order_terminal_callback_is_absorbed(

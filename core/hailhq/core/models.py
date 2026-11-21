@@ -1,6 +1,7 @@
 import uuid
 from datetime import datetime
 from decimal import Decimal
+from typing import ClassVar
 
 from hailhq.core.call_end_reasons import CallEndReasonDB
 from hailhq.core.call_failures import call_failure_message
@@ -13,6 +14,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     DateTime,
+    FetchedValue,
     ForeignKey,
     Index,
     Integer,
@@ -26,7 +28,13 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import INET, JSONB, UUID
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import (
+    DeclarativeBase,
+    Mapped,
+    Unmapped,
+    mapped_column,
+    unmapped_column,
+)
 
 
 class Base(DeclarativeBase):
@@ -1166,6 +1174,13 @@ class Sms(Base):
             "to_e164",
             "requested_at",
         ),
+        # Counts a workspace's trial texts; mirrors the migration so
+        # Base.metadata.create_all (tests) builds the same index.
+        Index(
+            "sms_trial_org_idx",
+            "organization_id",
+            postgresql_where=text("metadata ? 'sms_trial'"),
+        ),
     )
 
 
@@ -1228,6 +1243,83 @@ class SmsSenderIdentity(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         TS, server_default=text("now()"), nullable=False
+    )
+
+
+class SmsTrialPhone(Base):
+    """The one phone a workspace proved to receive US trial texts.
+
+    ``organization_id`` has no FK, matching SmsSenderIdentity (hail's DB does
+    not own the Organization table). The code is stored hashed. A phone can be
+    pending in many workspaces but verified in only one.
+
+    A verified workspace that asks for a code to a new phone keeps
+    ``phone_e164`` verified and stores the new one in ``pending_phone_e164``;
+    the confirm moves it into ``phone_e164``.
+    """
+
+    __tablename__ = "sms_trial_phones"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
+    phone_e164: Mapped[str] = mapped_column(Text, nullable=False)
+    # The phone the open code went to, while ``phone_e164`` stays verified.
+    pending_phone_e164: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(
+        Text, server_default=text("'pending'"), nullable=False
+    )
+    code_hash: Mapped[str | None] = mapped_column(Text)
+    code_expires_at: Mapped[datetime | None] = mapped_column(TS)
+    code_attempts: Mapped[int] = mapped_column(
+        Integer, server_default=text("0"), nullable=False
+    )
+    # One {"phone", "at"} entry per code text, pruned to the last 24 hours.
+    # Kept per phone so switching phones cannot reset a phone's send count.
+    code_send_log: Mapped[list] = mapped_column(
+        JSONB, server_default=text("'[]'::jsonb"), nullable=False
+    )
+    consent_version: Mapped[str] = mapped_column(Text, nullable=False)
+    consent_at: Mapped[datetime] = mapped_column(TS, nullable=False)
+    consent_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    verified_at: Mapped[datetime | None] = mapped_column(TS)
+    created_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint("organization_id", name="sms_trial_phones_org_uq"),
+        CheckConstraint(
+            "status IN ('pending','verified')",
+            name="sms_trial_phones_status_check",
+        ),
+        CheckConstraint(
+            r"phone_e164 ~ '^\+[1-9][0-9]{6,14}$'",
+            name="sms_trial_phones_phone_e164_check",
+        ),
+        CheckConstraint(
+            r"pending_phone_e164 ~ '^\+[1-9][0-9]{6,14}$'",
+            name="sms_trial_phones_pending_phone_e164_check",
+        ),
+        Index(
+            "sms_trial_phones_verified_phone_uq",
+            "phone_e164",
+            unique=True,
+            postgresql_where=text("status = 'verified'"),
+        ),
+        # Narrows the per-phone code count to rows holding that phone.
+        Index(
+            "sms_trial_phones_code_send_log_idx",
+            "code_send_log",
+            postgresql_using="gin",
+            postgresql_ops={"code_send_log": "jsonb_path_ops"},
+        ),
     )
 
 
@@ -1297,13 +1389,14 @@ class EmailDomain(Base):
     Two flavors of row:
 
     * ``kind = 'hail_mail'`` — a per-org sending address of the form
-      ``<local_prefix_user>+<local_prefix_org>@<HAIL_MAIL_BASE_DOMAIN>``
-      (e.g. ``alice+acme@mail.hail.so``). The two prefix columns are the
+      ``<local_prefix_workspace>+<local_prefix_name>@<HAIL_MAIL_BASE_DOMAIN>``
+      (e.g. ``acme+amber@mail.hail.so``). The two prefix columns are the
       source of truth; ``domain`` is the computed full address kept in
       sync at write time. The parent base domain is pre-verified by the
       operator out-of-band, so these rows land at ``verified`` immediately
-      and ``dns_records`` stays empty. ``local_prefix_user`` is the mailbox
-      and ``local_prefix_org`` an alias: inbound mail routes on the user
+      and ``dns_records`` stays empty. ``local_prefix_workspace`` names the
+      workspace and is the mailbox; ``local_prefix_name`` is a free name
+      inside the workspace (an alias): inbound mail routes on the workspace
       prefix alone.
     * ``kind = 'custom'`` — a tenant-controlled bare DNS name (e.g.
       ``acme.com``). The prefix columns are both NULL.
@@ -1314,7 +1407,7 @@ class EmailDomain(Base):
     Dual-purpose ``domain`` column (intentional for v1):
 
     * For ``custom`` rows it's the bare DNS identity SES verifies.
-    * For ``hail_mail`` rows it's the full ``<user>+<org>@<base>``
+    * For ``hail_mail`` rows it's the full ``<workspace>+<name>@<base>``
       address used as the wire ``From:``.
 
     A future refactor could split into ``dns_domain`` (always the
@@ -1340,8 +1433,19 @@ class EmailDomain(Base):
     # full sending address (`domain`) is computed from these at write time
     # and kept in sync — these two are the source of truth, `domain` is the
     # convenience materialization other callers can read without re-parsing.
-    local_prefix_user: Mapped[str | None] = mapped_column(Text, nullable=True)
-    local_prefix_org: Mapped[str | None] = mapped_column(Text, nullable=True)
+    local_prefix_workspace: Mapped[str | None] = mapped_column(Text, nullable=True)
+    local_prefix_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Old names of the two columns above, with the meanings swapped in the
+    # name: local_prefix_user holds the workspace part, local_prefix_org the
+    # name part. Not mapped: code reads and writes the new pair, and the
+    # sync trigger below copies it here. The unique index, the CHECKs and the
+    # guard and retire triggers still read these until the old columns are dropped.
+    local_prefix_user: Unmapped[str | None] = unmapped_column(
+        Text, nullable=True, server_default=FetchedValue()
+    )
+    local_prefix_org: Unmapped[str | None] = unmapped_column(
+        Text, nullable=True, server_default=FetchedValue()
+    )
     verification_status: Mapped[str] = mapped_column(
         Text, server_default="pending", nullable=False
     )
@@ -1434,7 +1538,7 @@ class EmailDomain(Base):
         # An org can't register the same domain twice.  Custom domains are
         # globally unique (one org per domain) — see the partial index below.
         # hail_mail rows are org-scoped by this constraint only (their global
-        # uniqueness is enforced on the user prefix, not the domain column).
+        # uniqueness is enforced on the workspace prefix, not the domain column).
         UniqueConstraint(
             "organization_id", "domain", name="email_domains_org_domain_unique"
         ),
@@ -1448,7 +1552,7 @@ class EmailDomain(Base):
             unique=True,
             postgresql_where=text("kind = 'custom'"),
         ),
-        # Hail-mail addresses route inbound mail by the user prefix alone,
+        # Hail-mail addresses route inbound mail by the workspace prefix alone,
         # with no org scoping at lookup time (email_ingest does not match the
         # domain column) — the prefix must be globally unique or org B could
         # register org A's prefix and intercept mail, even if
@@ -1457,6 +1561,12 @@ class EmailDomain(Base):
             "email_domains_hail_mail_head_uq",
             "local_prefix_user",
             unique=True,
+            postgresql_where=text("kind = 'hail_mail'"),
+        ),
+        # Inbound routing reads the new column. Mirrors the migration.
+        Index(
+            "email_domains_hail_mail_workspace_idx",
+            "local_prefix_workspace",
             postgresql_where=text("kind = 'hail_mail'"),
         ),
         # One hail-mail address per org.
@@ -1479,14 +1589,34 @@ class RetiredHailMailAddress(Base):
 
     __tablename__ = "retired_hail_mail_addresses"
 
-    local_prefix_user: Mapped[str] = mapped_column(Text, primary_key=True)
-    local_prefix_org: Mapped[str] = mapped_column(Text, primary_key=True)
+    local_prefix_workspace: Mapped[str | None] = mapped_column(Text, nullable=True)
+    local_prefix_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Old names of the pair above, filled by the sync trigger. They hold the
+    # table's primary key until the old columns are dropped. See EmailDomain.
+    local_prefix_user: Unmapped[str] = unmapped_column(
+        Text, primary_key=True, server_default=FetchedValue()
+    )
+    local_prefix_org: Unmapped[str] = unmapped_column(
+        Text, primary_key=True, server_default=FetchedValue()
+    )
     organization_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True
     )
     retired_at: Mapped[datetime] = mapped_column(
         TS, server_default=text("now()"), nullable=False
     )
+
+    __table_args__ = (
+        # The retired-address checks read the new columns. Mirrors the migration.
+        Index(
+            "retired_hail_mail_addresses_workspace_idx",
+            "local_prefix_workspace",
+            "local_prefix_name",
+        ),
+    )
+    __mapper_args__: ClassVar[dict] = {
+        "primary_key": [local_prefix_workspace, local_prefix_name, organization_id]
+    }
 
 
 # Rules on a NEW head or tail only, so an older row with a role-name head keeps
@@ -1586,6 +1716,38 @@ CREATE OR REPLACE TRIGGER email_domains_retire_hail_mail
 AFTER UPDATE OR DELETE ON email_domains
 FOR EACH ROW EXECUTE FUNCTION email_domains_retire_hail_mail()
 """
+# Keeps the old prefix columns equal to the new ones while old writers (the
+# website) still use them. Mirrors the migration that added the new pair.
+HAIL_MAIL_SYNC_FUNCTION = """
+CREATE OR REPLACE FUNCTION hail_mail_sync_prefix_columns() RETURNS trigger AS $$
+BEGIN
+    -- local_prefix_workspace = local_prefix_user, local_prefix_name =
+    -- local_prefix_org. The new pair wins a conflict.
+    IF TG_OP = 'INSERT' THEN
+        NEW.local_prefix_workspace :=
+            COALESCE(NEW.local_prefix_workspace, NEW.local_prefix_user);
+        NEW.local_prefix_name := COALESCE(NEW.local_prefix_name, NEW.local_prefix_org);
+    ELSE
+        IF NEW.local_prefix_workspace IS NOT DISTINCT FROM OLD.local_prefix_workspace THEN
+            NEW.local_prefix_workspace := NEW.local_prefix_user;
+        END IF;
+        IF NEW.local_prefix_name IS NOT DISTINCT FROM OLD.local_prefix_name THEN
+            NEW.local_prefix_name := NEW.local_prefix_org;
+        END IF;
+    END IF;
+    NEW.local_prefix_user := NEW.local_prefix_workspace;
+    NEW.local_prefix_org := NEW.local_prefix_name;
+    RETURN NEW;
+END
+$$ LANGUAGE plpgsql
+"""
+# "00" sorts before every other trigger name: Postgres fires triggers of one
+# timing in name order, and the guard trigger reads the old columns.
+HAIL_MAIL_SYNC_TRIGGERS = tuple(f"""
+CREATE OR REPLACE TRIGGER {table}_00_sync_prefix_columns
+BEFORE INSERT OR UPDATE ON {table}
+FOR EACH ROW EXECUTE FUNCTION hail_mail_sync_prefix_columns()
+""" for table in ("email_domains", "retired_hail_mail_addresses"))
 
 # Base.metadata.create_all (tests) must produce the same shape as the migration.
 for _statement in (
@@ -1593,6 +1755,8 @@ for _statement in (
     EMAIL_DOMAINS_GUARD_TRIGGER,
     EMAIL_DOMAINS_RETIRE_FUNCTION,
     EMAIL_DOMAINS_RETIRE_TRIGGER,
+    HAIL_MAIL_SYNC_FUNCTION,
+    *HAIL_MAIL_SYNC_TRIGGERS,
 ):
     event.listen(Base.metadata, "after_create", DDL(_statement))
 
@@ -2071,6 +2235,7 @@ class WebhookSubscription(Base):
     )
     target_url: Mapped[str] = mapped_column(Text, nullable=False)
     secret_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    authorization_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
     event_types: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False)
     status: Mapped[str] = mapped_column(Text, server_default="active", nullable=False)
     consecutive_failures: Mapped[int] = mapped_column(
@@ -2095,6 +2260,10 @@ class WebhookSubscription(Base):
             name="webhook_subscriptions_event_types_nonempty",
         ),
     )
+
+    @property
+    def has_authorization(self) -> bool:
+        return self.authorization_encrypted is not None
 
 
 class WebhookDelivery(Base):

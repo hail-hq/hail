@@ -18,6 +18,28 @@ LEGACY_APPLICATION = (
     "This application needs the current consent evidence and message examples. "
     "Review the saved details, complete the missing answers, and resubmit."
 )
+# A low-volume company brand the carrier could not verify. The customer
+# can turn on the faster lane: Hail then sends the extra company details.
+LOW_VOLUME_FASTER_LANE = (
+    "The networks need more details about your company before you can text. "
+    "Turn on the faster lane in your answers and save. "
+    "We then send the details for you. This step has its own fee."
+)
+# The same, on a carrier where the faster lane needs a new registration.
+LOW_VOLUME_NEEDS_NEW_FILING = (
+    "The networks need more details about your company before you can text. "
+    "This needs a new registration that sends more than 2,000 texts a day. "
+    "Cancel this registration, then register again."
+)
+# The faster lane ran and the networks still could not verify the company.
+# The company details cannot change on a filed brand: only a new
+# registration can try again. Hail keeps checking this one meanwhile.
+LOW_VOLUME_FASTER_LANE_FAILED = (
+    "The networks could not verify your company, even with the extra details. "
+    "Check that your company name, tax number and address match your official records. "
+    "Then cancel this registration and register again. "
+    "We keep checking, and continue on our own if the networks verify your company later."
+)
 
 
 def sender_problems(

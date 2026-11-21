@@ -82,8 +82,8 @@ async def _seed(
         organization_id=org,
         kind="hail_mail",
         domain=ADDRESS,
-        local_prefix_user="amber-heron-42",
-        local_prefix_org="acme",
+        local_prefix_workspace="amber-heron-42",
+        local_prefix_name="acme",
         verification_status="verified",
         provider="ses",
         verified_at=NOW,
@@ -559,6 +559,12 @@ async def test_the_same_message_keeps_its_id_across_a_retried_run() -> None:
         await spec.execute(ctx, {**args, "body_text": "other", "body": "other"})
         ids = [c.args[1]["tool_invocation_id"] for c in api.post.await_args_list]
         assert ids[0] == ids[1] != ids[2]
+    # Every word for the sender gives one id, so a retry cannot send twice.
+    api.post.reset_mock()
+    for name in ("me", "sender", " You"):
+        await send_email.EMAIL_RUN_SPEC.execute(ctx, {**args, "recipient_name": name})
+    ids = {c.args[1]["tool_invocation_id"] for c in api.post.await_args_list}
+    assert len(ids) == 1
 
 
 async def test_history_is_available_on_demand_without_automatic_context_dump(

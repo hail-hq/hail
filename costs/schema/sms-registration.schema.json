@@ -29,6 +29,19 @@
         "brand_usd": { "$ref": "#/$defs/decimal" },
         "campaign_vetting_usd": { "$ref": "#/$defs/decimal" },
         "campaign_monthly_usd": { "$ref": "#/$defs/decimal" },
+        "faster_lane_usd": {
+          "description": "business_low_volume only: the brand vetting Hail asks for when the carrier cannot verify a low-volume company that allowed the faster lane. Absent means the carrier has no faster lane.",
+          "$ref": "#/$defs/decimal"
+        },
+        "last_verified": {
+          "description": "When these fees were last checked, when it differs from the provider's last_verified.",
+          "type": "string",
+          "format": "date"
+        },
+        "verification_method": {
+          "description": "How these fees were checked, when it differs from the provider's verification_method.",
+          "enum": ["manual-confirmed", "community-pr", "carrier-sync", "unverified"]
+        },
         "minimum_months": {
           "description": "Monthly campaign fees the carrier bills at least, counted from approval, even when the registration is cancelled sooner. Absent means 1.",
           "type": "integer",
@@ -50,7 +63,11 @@
         "note": { "type": "string" },
         "source_url": { "type": "string", "format": "uri" },
         "person": { "$ref": "#/$defs/fees" },
-        "business": { "$ref": "#/$defs/fees" }
+        "business": { "$ref": "#/$defs/fees" },
+        "business_low_volume": {
+          "description": "A company that chose low volume: a brand with no secondary vetting and a LOW_VOLUME campaign. Absent means the carrier has no low-volume filing: such a company files the vetted brand and pays the business prices.",
+          "$ref": "#/$defs/fees"
+        }
       }
     }
   }

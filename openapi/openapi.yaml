@@ -1939,8 +1939,8 @@ paths:
       summary: Patch Email Domain
       description:
         "Edit hail-mail prefixes, the send switch, and/or inbound action.\n\
-        \nFour modes, mutually compatible:\n\n* **Prefix edit** (``local_prefix_user``\
-        \ / ``local_prefix_org``):\n  hail_mail rows only. The managed-cloud console\
+        \nFour modes, mutually compatible:\n\n* **Prefix edit** (``local_prefix_workspace``\
+        \ / ``local_prefix_name``):\n  hail_mail rows only. The managed-cloud console\
         \ writes here when\n  an org admin changes the visible hail-mail address.\n\
         * **Send switch** (``sends_enabled``): custom rows only. ``false``\n  stops\
         \ the domain from sending at all \u2014 it is skipped by sender\n  selection\
@@ -3678,6 +3678,206 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
+  /v1/sms/trial:
+    get:
+      tags:
+        - sms
+      summary: Get Sms Trial
+      description: "Read the workspace's US trial texting status.
+
+
+        Shows whether trial texting is set up and can send now, the workspace's
+
+        trial phone and its status, and how many of the 25 trial texts are left."
+      operationId: get_sms_trial_v1_sms_trial_get
+      parameters:
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SmsTrialResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /v1/sms/trial/phone:
+    post:
+      tags:
+        - sms
+      summary: Start Sms Trial Phone
+      description: "Text a 6-digit code to the workspace's own US mobile.
+
+
+        The code expires in 10 minutes. A new code replaces the old one. A
+
+        verified phone keeps getting trial texts until the new phone is
+
+        confirmed; until then the new phone shows as pending_phone. Asking
+
+        again for the verified phone drops the waiting new phone. A
+
+        workspace or a phone gets at most 5 codes in 24 hours. Code texts are
+
+        free and do not count toward the 25 trial texts. Console sessions only."
+      operationId: start_sms_trial_phone_v1_sms_trial_phone_post
+      parameters:
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SmsTrialPhoneStart"
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SmsTrialResponse"
+        "429":
+          description:
+            The workspace asked for, or the phone got, 5 codes in the last
+            24 hours. Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "403":
+          description: Only a signed-in console session can set the phone.
+        "409":
+          description:
+            Trial texting is not available yet, or another workspace uses
+            this phone.
+        "422":
+          description:
+            The phone is not a US number, is a Hail number, replied STOP
+            to Hail, or could not be texted.
+        "502":
+          description:
+            Hail could not reach the carrier. The code may still arrive
+            and counts toward the 5 codes.
+  /v1/sms/trial/phone/confirm:
+    post:
+      tags:
+        - sms
+      summary: Confirm Sms Trial Phone
+      description: "Confirm the workspace's trial phone with the texted code.
+
+
+        On success the phone receives trial texts. Each code allows 5 tries.
+
+        A phone can be the trial phone of only one workspace. Console sessions
+
+        only."
+      operationId: confirm_sms_trial_phone_v1_sms_trial_phone_confirm_post
+      parameters:
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SmsTrialPhoneConfirm"
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SmsTrialResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "403":
+          description: Only a signed-in console session can set the phone.
+        "409":
+          description:
+            Another workspace uses this phone for trial texts. Use a different
+            phone.
+        "422":
+          description:
+            No code is open, the code expired, or the code is not correct.
+            After 5 wrong tries, send a new code.
   /v1/sms:
     post:
       tags:
@@ -3691,7 +3891,10 @@ paths:
         \ otherwise Hail\npicks an alphanumeric sender ID where the destination corridor\
         \ allows\nit, or requires a dedicated SMS-capable number otherwise. Requires\n\
         recipient_consent=true on the request body; Hail does not verify\nlawful basis\
-        \ to contact the recipient, the caller warrants it."
+        \ to contact the recipient, the caller warrants it.\n\nTrial texts (up to\
+        \ 25, only to the workspace's verified trial phone):\nwith no from, Hail uses\
+        \ one when the workspace's own number cannot text\nthat US phone; set from\
+        \ to the trial number to use one directly."
       operationId: create_sms_v1_sms_post
       parameters:
         - name: authorization
@@ -5873,7 +6076,13 @@ paths:
 
         carrier for the next filing. One that is under review cannot be
 
-        cancelled: wait for the result; if it is rejected, dismiss it.
+        cancelled: wait for the result; if it is rejected, dismiss it. A US SMS
+
+        registration that waits for your answers before its campaign is filed
+
+        (`step: needs_information`) can be cancelled. So can a toll-free
+
+        registration that waits for your answers.
 
 
         An accepted campaign waiting on runtime setup can be cancelled, as can
@@ -7095,9 +7304,9 @@ components:
             - type: "null"
           title: Transcript
           description:
-            "What was said on the call, in the order it was said. Set only by
-            GET /v1/calls/{call_id}: an empty list until someone speaks. Null in POST
-            /v1/calls and GET /v1/calls responses."
+            "What was said on the call, in the order it was said. Set only
+            by GET /v1/calls/{call_id}: an empty list until someone speaks. Null in
+            POST /v1/calls and GET /v1/calls responses."
       type: object
       required:
         - id
@@ -7134,7 +7343,9 @@ components:
           type: string
           format: date-time
           title: At
-          description: When the speaker started this turn, ISO 8601. When that is not known, when Hail recorded the turn.
+          description:
+            When the speaker started this turn, ISO 8601. When that is
+            not known, when Hail recorded the turn.
       type: object
       required:
         - role
@@ -7726,25 +7937,40 @@ components:
           description:
             DNS domain to send from (e.g. 'acme.com'). Required for kind='custom';
             must be omitted for kind='hail_mail'.
+        local_prefix_workspace:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Local Prefix Workspace
+          description:
+            "Workspace prefix of a hail_mail address: the part before the
+            '+'. It names the workspace, and one workspace only may hold it. A taken
+            prefix returns 409. Only valid for kind='hail_mail'. Falls back to HAIL_MAIL_DEFAULT_USER_PREFIX
+            plus a per-organization token if omitted."
+        local_prefix_name:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Local Prefix Name
+          description:
+            "Name prefix of a hail_mail address: the part after the '+'.
+            A free name inside the workspace, such as a person or team. Only valid
+            for kind='hail_mail'. Falls back to a prefix derived from the organization
+            id if omitted."
         local_prefix_user:
           anyOf:
             - type: string
             - type: "null"
           title: Local Prefix User
-          description:
-            User-chosen local-part prefix for a hail_mail address. One
-            organization only may hold it; a taken prefix returns 409. Only valid
-            for kind='hail_mail'. Falls back to HAIL_MAIL_DEFAULT_USER_PREFIX plus
-            a per-organization token if omitted.
+          description: "Deprecated: use local_prefix_workspace. Same meaning."
+          deprecated: true
         local_prefix_org:
           anyOf:
             - type: string
             - type: "null"
           title: Local Prefix Org
-          description:
-            Org-chosen local-part prefix for a hail_mail address. Only
-            valid for kind='hail_mail'. Falls back to a prefix derived from the organization
-            id if omitted.
+          description: "Deprecated: use local_prefix_name. Same meaning."
+          deprecated: true
       additionalProperties: false
       type: object
       required:
@@ -7755,15 +7981,17 @@ components:
 
         For ``kind='hail_mail'`` ``domain`` is omitted; the server composes
 
-        the full address as ``<local_prefix_user>+<local_prefix_org>@<base>``.
+        the full address as ``<local_prefix_workspace>+<local_prefix_name>@<base>``.
 
-        Both prefixes are optional in the body and fall back to the
+        Both prefixes are optional in the body. The workspace prefix falls back
 
-        ``HAIL_MAIL_DEFAULT_*_PREFIX`` env vars; the server returns 503 if
+        to ``HAIL_MAIL_FROM`` or ``HAIL_MAIL_DEFAULT_USER_PREFIX``; the server
 
-        neither is supplied. For ``kind='custom'`` ``domain`` is required and
+        returns 503 if none is set. For ``kind='custom'`` ``domain`` is required
 
-        the prefix fields must be omitted."
+        and the prefix fields must be omitted. ``local_prefix_user`` and
+
+        ``local_prefix_org`` are the deprecated names of the two prefix fields."
     EmailDomainDnsCheck:
       properties:
         kind:
@@ -7858,23 +8086,37 @@ components:
       title: EmailDomainListResponse
     EmailDomainPatch:
       properties:
+        local_prefix_workspace:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Local Prefix Workspace
+          description: "New workspace prefix: the part before the '+'. It names
+            the workspace, and one workspace only may hold it. A taken prefix returns
+            409. Only valid on kind='hail_mail' rows. Omit to leave unchanged."
+        local_prefix_name:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Local Prefix Name
+          description:
+            "New name prefix: the part after the '+'. A free name inside
+            the workspace, such as a person or team. Only valid on kind='hail_mail'
+            rows. Omit to leave unchanged."
         local_prefix_user:
           anyOf:
             - type: string
             - type: "null"
           title: Local Prefix User
-          description:
-            New user local-part prefix. One organization only may hold
-            it; a taken prefix returns 409. Only valid on kind='hail_mail' rows. Omit
-            to leave unchanged.
+          description: "Deprecated: use local_prefix_workspace. Same meaning."
+          deprecated: true
         local_prefix_org:
           anyOf:
             - type: string
             - type: "null"
           title: Local Prefix Org
-          description:
-            New org local-part prefix. Only valid on kind='hail_mail' rows.
-            Omit to leave unchanged.
+          description: "Deprecated: use local_prefix_name. Same meaning."
+          deprecated: true
         inbound_enabled:
           anyOf:
             - type: boolean
@@ -7941,20 +8183,21 @@ components:
       title: EmailDomainPatch
       description:
         "Body for PATCH /email-domains/{id}.\n\nTwo clusters of mutable\
-        \ fields:\n\n* Hail-mail addressing \u2014 the user/org prefix pair (only\
-        \ valid on\n  ``kind='hail_mail'`` rows; the handler returns 422 if a tenant\
-        \ tries\n  to PATCH these on a custom row).\n* Send switch \u2014 ``sends_enabled``\
-        \ (only valid on ``kind='custom'``\n  rows; the handler returns 422 otherwise).\
-        \ ``false`` stops the\n  domain from sending at all: skipped by sender selection,\
-        \ explicit\n  ``from`` refused.\n* Inbound action \u2014 ``inbound_enabled``\
-        \ + ``forward_to`` + the optional\n  ``forward_rate_per_hour`` cap. These\
-        \ apply to either kind, but this\n  milestone routes inbound only to ``hail_mail``\
-        \ rows; custom-domain\n  inbound (MX delegation) is the next milestone.\n\n\
-        Every field is independently optional so ``PATCH`` semantics work the\nway\
-        \ callers expect: send only what you want to change. The route\nenforces the\
-        \ cross-field rules (the CHECK constraint on the table\nrequires an action\
-        \ when ``inbound_enabled`` is true) \u2014 we don't\nre-implement it here\
-        \ because the patch may merge with existing row\nstate to satisfy the invariant."
+        \ fields:\n\n* Hail-mail addressing \u2014 the workspace/name prefix pair\
+        \ (only valid on\n  ``kind='hail_mail'`` rows; the handler returns 422 if\
+        \ a tenant tries\n  to PATCH these on a custom row).\n* Send switch \u2014\
+        \ ``sends_enabled`` (only valid on ``kind='custom'``\n  rows; the handler\
+        \ returns 422 otherwise). ``false`` stops the\n  domain from sending at all:\
+        \ skipped by sender selection, explicit\n  ``from`` refused.\n* Inbound action\
+        \ \u2014 ``inbound_enabled`` + ``forward_to`` + the optional\n  ``forward_rate_per_hour``\
+        \ cap. These apply to either kind, but this\n  milestone routes inbound only\
+        \ to ``hail_mail`` rows; custom-domain\n  inbound (MX delegation) is the next\
+        \ milestone.\n\nEvery field is independently optional so ``PATCH`` semantics\
+        \ work the\nway callers expect: send only what you want to change. The route\n\
+        enforces the cross-field rules (the CHECK constraint on the table\nrequires\
+        \ an action when ``inbound_enabled`` is true) \u2014 we don't\nre-implement\
+        \ it here because the patch may merge with existing row\nstate to satisfy\
+        \ the invariant."
     EmailDomainResponse:
       properties:
         id:
@@ -7979,18 +8222,23 @@ components:
           type: string
           title: Domain
           description: The DNS domain mail is sent from.
-        local_prefix_user:
+        local_prefix_workspace:
           anyOf:
             - type: string
             - type: "null"
-          title: Local Prefix User
-          description: User local-part prefix for a hail_mail address. Null for kind='custom'.
-        local_prefix_org:
+          title: Local Prefix Workspace
+          description:
+            "Workspace prefix of a hail_mail address: the part before the
+            '+'. It names the workspace, and one workspace only may hold it. Null
+            for kind='custom'."
+        local_prefix_name:
           anyOf:
             - type: string
             - type: "null"
-          title: Local Prefix Org
-          description: Org local-part prefix for a hail_mail address. Null for kind='custom'.
+          title: Local Prefix Name
+          description:
+            "Name prefix of a hail_mail address: the part after the '+'.
+            A free name inside the workspace, such as a person or team. Null for kind='custom'."
         verification_status:
           type: string
           enum:
@@ -8103,14 +8351,30 @@ components:
             True when the domain's published MX points at Hail's inbound
             host. Only populated by POST /{id}/verify on custom domains; null everywhere
             else.
+        local_prefix_user:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Local Prefix User
+          description: "Deprecated: use local_prefix_workspace. Same value."
+          deprecated: true
+          readOnly: true
+        local_prefix_org:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Local Prefix Org
+          description: "Deprecated: use local_prefix_name. Same value."
+          deprecated: true
+          readOnly: true
       type: object
       required:
         - id
         - organization_id
         - kind
         - domain
-        - local_prefix_user
-        - local_prefix_org
+        - local_prefix_workspace
+        - local_prefix_name
         - verification_status
         - dns_records
         - mail_from_domain
@@ -8118,6 +8382,8 @@ components:
         - verified_at
         - created_at
         - updated_at
+        - local_prefix_user
+        - local_prefix_org
       title: EmailDomainResponse
       description: "Read view for an email domain.
 
@@ -10669,7 +10935,10 @@ components:
             none is set; Australia (+61) may always use 'HAIL', depending on the
             carrier. Every other destination, including the US and Canada, uses the
             organization's oldest active SMS-capable number; if none exists the request
-            fails with 422. SMS never uses the shared pool."
+            fails with 422. SMS never uses the shared pool. Trial texts (up to 25,
+            only to the workspace's verified trial phone): with no from, Hail uses
+            one when the workspace's own number cannot text that US phone; set from
+            to the trial number to use one directly."
         body:
           type: string
           maxLength: 1600
@@ -10682,7 +10951,8 @@ components:
           title: Metadata
           description:
             Free-form JSON object attached to the message and echoed back
-            on reads. Not interpreted by Hail.
+            on reads. Not interpreted by Hail. The key 'sms_trial' is reserved and
+            rejected.
       additionalProperties: false
       type: object
       required:
@@ -10847,6 +11117,116 @@ components:
         - requested_at
         - sent_at
       title: SmsResponse
+    SmsTrialPhoneConfirm:
+      properties:
+        code:
+          type: string
+          pattern: ^[0-9]{6}$
+          title: Code
+          description: The 6-digit code Hail texted to the trial phone.
+      additionalProperties: false
+      type: object
+      required:
+        - code
+      title: SmsTrialPhoneConfirm
+    SmsTrialPhoneStart:
+      properties:
+        phone:
+          type: string
+          title: Phone
+          description:
+            Your own US mobile in E.164 (e.g. +14155551234). Hail texts
+            a 6-digit code to it.
+        recipient_consent:
+          type: boolean
+          const: true
+          title: Recipient Consent
+          description:
+            "Must be true: the phone's owner agreed to get the code and
+            the trial texts."
+        consent_version:
+          type: string
+          maxLength: 40
+          minLength: 1
+          title: Consent Version
+          description: Version of the consent wording the person agreed to.
+      additionalProperties: false
+      type: object
+      required:
+        - phone
+        - recipient_consent
+        - consent_version
+      title: SmsTrialPhoneStart
+    SmsTrialResponse:
+      properties:
+        configured:
+          type: boolean
+          title: Configured
+          description: True when this Hail deployment has a trial number set up.
+        available:
+          type: boolean
+          title: Available
+          description:
+            True when trial texts can be sent now. False while the trial
+            number waits for carrier approval.
+        status:
+          type: string
+          enum:
+            - none
+            - pending
+            - verified
+          title: Status
+          description:
+            "The workspace's trial phone: 'none' (no phone yet), 'pending'
+            (code sent, not confirmed) or 'verified' (receives trial texts)."
+        phone:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Phone
+          description: The trial phone in E.164. Null when status is 'none'.
+        pending_phone:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Pending Phone
+          description:
+            A new phone in E.164 that got a code and is not confirmed yet.
+            Until it is, the verified phone keeps getting trial texts. Null when no
+            new phone waits.
+        code_expires_at:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: "null"
+          title: Code Expires At
+          description:
+            When the open code expires, for pending_phone when set, else
+            for phone. Null when no code is open.
+        texts_used:
+          type: integer
+          title: Texts Used
+          description: Trial texts this workspace has sent.
+        texts_limit:
+          type: integer
+          title: Texts Limit
+          description: Trial texts a workspace can send, ever.
+        texts_left:
+          type: integer
+          title: Texts Left
+          description: Trial texts this workspace can still send.
+      type: object
+      required:
+        - configured
+        - available
+        - status
+        - phone
+        - pending_phone
+        - code_expires_at
+        - texts_used
+        - texts_limit
+        - texts_left
+      title: SmsTrialResponse
     SubjectOption:
       properties:
         allowed:
@@ -11949,6 +12329,16 @@ components:
       title: WebhookEventType
     WebhookSubscriptionCreate:
       properties:
+        authorization:
+          anyOf:
+            - type: string
+              format: password
+              writeOnly: true
+            - type: "null"
+          title: Authorization
+          description:
+            Optional Authorization header, e.g. Bearer <receiver key>.
+            Write-only; encrypted at rest. Use printable ASCII, at most 2000 characters.
         target_url:
           type: string
           minLength: 1
@@ -11990,6 +12380,17 @@ components:
       title: WebhookSubscriptionListResponse
     WebhookSubscriptionPatch:
       properties:
+        authorization:
+          anyOf:
+            - type: string
+              format: password
+              writeOnly: true
+            - type: "null"
+          title: Authorization
+          description:
+            Replacement Authorization header. Omit or null to keep it;
+            empty string removes it. A changed target URL requires replacement or
+            removal when a header is saved.
         target_url:
           anyOf:
             - type: string
@@ -12024,6 +12425,13 @@ components:
           format: uuid
           title: Id
           description: Unique identifier for this subscription.
+        has_authorization:
+          type: boolean
+          title: Has Authorization
+          description:
+            Whether an Authorization header is saved. Its value is never
+            returned.
+          default: false
         organization_id:
           type: string
           format: uuid

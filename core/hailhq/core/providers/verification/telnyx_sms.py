@@ -41,6 +41,8 @@ from hailhq.core.providers.verification.sms_form import (
 )
 from hailhq.core.providers.verification.sms_review import (
     LEGACY_APPLICATION,
+    LOW_VOLUME_FASTER_LANE,
+    LOW_VOLUME_FASTER_LANE_FAILED,
     application_validation_error,
     campaign_repair_reason,
 )
@@ -99,6 +101,14 @@ _AUTO_REPLIES = (
 # Auto-replies apply by the subscriber's country; 10DLC is US texting.
 _AUTO_REPLY_COUNTRY = "US"
 _VERIFIED = {"VERIFIED", "VETTED_VERIFIED"}
+# How long a low-volume company brand may stay not verified (and not
+# UNVERIFIED) before Hail treats it as final: the faster lane or a hold.
+# Also how long after a faster lane's vetting turns ACTIVE the brand may
+# still read not verified before the row is held.
+_IDENTITY_WAIT = timedelta(hours=24)
+# Use cases filed with the picked purposes as sub-use-cases. MIXED takes 2
+# to 5; LOW_VOLUME (low volume mixed) takes 1 to 5; the form allows 1 to 5.
+_SUB_USE_CASES = frozenset({"MIXED", "SOLE_PROPRIETOR", "LOW_VOLUME"})
 # Texts Telnyx sends a person: the PIN (@OTP_PIN@ is replaced by Telnyx),
 # then a notice once the PIN is confirmed.
 _PIN_SMS = "Hail: your confirmation code is @OTP_PIN@. It expires in 24 hours."
@@ -288,6 +298,8 @@ def _policy_links(text: dict) -> dict:
 class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
     name = "telnyx"
     campaign_ref = "campaign_id"
+    # A low-volume brand Telnyx cannot verify can be vetted afterwards.
+    faster_lane = True
     # subscriberOptin describes consent before sending, not keyword support.
     # Every self-service program requires consent and an actual confirmation.
     opt_in_message_required = True
@@ -353,8 +365,14 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
         messaging_service_sid=None,
         kept_brand_id=None,
         new_brand_funded=False,
+        low_volume=False,
     ) -> DraftResult:
+        """``low_volume``: the API's choice for a company (no vetting). The
+        API writes ``provider_refs.low_volume`` itself; the background pass
+        reads it from there."""
         subject_type = requirements.subject_type
+        # A company brand that gets vetting at filing.
+        vetted = subject_type != "person" and not low_volume
         problems = self.validate_application(fields, address, subject_type)
         if problems:
             return DraftResult(refs={}, problems=problems)
@@ -392,7 +410,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
             # Telnyx bills a new brand once made, so stop before _build.
             if kept_brand_id and not new_brand_funded:
                 return DraftResult(refs={}, needs_new_brand_credit=True)
-            problems = await self._build(refs, fields, address, subject_type)
+            problems = await self._build(refs, fields, address, subject_type, vetted)
         except Exception as exc:
             refused = _refused(exc)
             if refs.get("brand_id") and not refused:
@@ -404,7 +422,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                     "10DLC step after the brand failed; brand kept: %s",
                     _failure(exc),
                 )
-                if subject_type != "person":
+                if vetted:
                     # False, not unset: rows filed before this flag existed
                     # already asked for vetting and must not ask again.
                     refs.setdefault("vetting_requested", False)
@@ -487,7 +505,9 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
         refs["brand_reused"] = True
         return True
 
-    async def _build(self, refs, fields, address, subject_type) -> list[Problem]:
+    async def _build(
+        self, refs, fields, address, subject_type, vetted=True
+    ) -> list[Problem]:
         """File the brand, wait for Telnyx to register it, then send the
         person's PIN or ask for the company's vetting. Returns the problems
         of a refused brand. A brand still registering after the wait is
@@ -530,7 +550,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
         brand = await self._settled_brand(refs["brand_id"])
         if brand is None:
             logger.warning("10DLC brand still registering after the wait")
-            if subject_type != "person":
+            if vetted:
                 # See create_draft: False means "ask on the next pass".
                 refs["vetting_requested"] = False
             return []
@@ -541,7 +561,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
         if subject_type == "person":
             # No vetting for a sole proprietor; the PIN confirms the person.
             await self._send_pin(refs)
-        else:
+        elif vetted:
             await self._request_vetting(refs)
         return []
 
@@ -584,10 +604,15 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
 
     async def _request_vetting_once(self, refs) -> None:
         """Ask for vetting unless Telnyx already has a request: each one is
-        billed. A request that timed out or got a 5xx may have reached it."""
+        billed. A request that timed out or got a 5xx may have reached it.
+        Telnyx lists only ``ACTIVE`` records unless ``vettingStatus`` names
+        others, so the read names every request still running or passed (as
+        error 10012 does): a ``PENDING`` one is not asked for twice."""
         try:
             found = await self._api.request(
-                "GET", f"/10dlc/brand/{path_id(refs['brand_id'])}/externalVetting"
+                "GET",
+                f"/10dlc/brand/{path_id(refs['brand_id'])}/externalVetting",
+                params={"vettingStatus": ["PENDING", "UNSCORE", "ACTIVE"]},
             )
         except httpx.HTTPStatusError as exc:
             # 404: none listed. Any other failure: ask on the next pass.
@@ -607,6 +632,53 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
             if not any(str(e.get("code")) == "10012" for e in _errors(exc.response)):
                 raise
             refs["vetting_requested"] = True
+
+    async def _faster_lane_failed(self, refs) -> bool:
+        """True once the vetting a bought faster lane asked for ended and
+        the brand is still not verified (the caller read it): ``FAILED`` or
+        ``EXPIRED`` at once; ``ACTIVE`` once ``_IDENTITY_WAIT`` has passed
+        since it was vetted (or the lane was bought, with no ``vettedDate``),
+        so a brand read that lags behind the vetting is not held. A missing
+        or other status (``PENDING``, ``UNSCORE``) is still running. Never
+        once a campaign is filed or the brand was verified. Telnyx lists
+        only ``ACTIVE`` records unless ``vettingStatus`` names others."""
+        if (
+            not refs.get("faster_lane_at")
+            or not refs.get("vetting_requested")
+            or refs.get("campaign_id")
+            # Verified once: a later read that lags behind holds nothing.
+            or refs.get("brand_verified")
+        ):
+            return False
+        try:
+            found = await self._api.request(
+                "GET",
+                f"/10dlc/brand/{path_id(refs['brand_id'])}/externalVetting",
+                params={"vettingStatus": ["ACTIVE", "FAILED", "EXPIRED"]},
+            )
+        except httpx.HTTPStatusError as exc:
+            # 404: none listed. Any other failure: ask on the next pass.
+            if exc.response.status_code != 404:
+                raise
+            return False
+        if isinstance(found, dict):
+            found = found.get("data")
+        if not isinstance(found, list):
+            return False
+        now = datetime.now(timezone.utc)
+        for record in found:
+            if not isinstance(record, dict):
+                continue
+            status = record.get("vettingStatus")
+            if status in ("FAILED", "EXPIRED"):
+                return True
+            if status == "ACTIVE":
+                since = _iso_time(record.get("vettedDate")) or _iso_time(
+                    refs["faster_lane_at"]
+                )
+                if since is not None and now - since >= _IDENTITY_WAIT:
+                    return True
+        return False
 
     async def _send_pin(self, refs) -> None:
         """Ask Telnyx to text the person a PIN. The caller saves refs."""
@@ -690,14 +762,59 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
             verified = brand.get("identityStatus") in _VERIFIED
             if person and verified:
                 refs["identity_verified"] = True
+            if verified and refs.get("low_volume"):
+                # The networks verified the company: the faster lane is no
+                # longer owed, so the credit checks stop counting its fee.
+                refs["brand_verified"] = True
+            if verified and refs.pop("faster_lane_failed", None):
+                # Verified after the failed faster lane held the row: the
+                # hold ends with no customer step. Nothing is filed on this
+                # pass, which got no credit check (a held row needs none):
+                # the next pass files the campaign once the credit covers it.
+                refs.pop("needs_information", None)
+                return ProviderStatus(state="pending")
             # After a confirmed PIN the brand read may still lag behind it.
             if not verified and not refs.get("identity_verified"):
+                if refs.get("faster_lane_failed"):
+                    # Still held: each pass only reads the brand. No new
+                    # request and no fee.
+                    return ProviderStatus(
+                        state="pending", reason=LOW_VOLUME_FASTER_LANE_FAILED
+                    )
                 if person:
                     await self._resend_pin_if_old(refs)
-                elif refs.get("vetting_requested") is False:
+                elif _faster_lane_owed(refs, brand):
+                    if not refs.get("faster_lane_ok"):
+                        # Held: the customer turns on the faster lane with
+                        # an amendment, and the next pass asks for vetting.
+                        refs["needs_information"] = True
+                        return ProviderStatus(
+                            state="pending", reason=LOW_VOLUME_FASTER_LANE
+                        )
+                    if not may_file_campaign:
+                        # The credit does not cover the vetting yet: a later
+                        # pass buys it (the API checks it like a campaign).
+                        return ProviderStatus(state="pending")
+                    # The fee rater charges the vetting from this mark, so it
+                    # is written only once Telnyx has the request. A failed
+                    # request leaves the lane owed: the next pass asks again,
+                    # and finds a request that reached Telnyx (a timeout).
+                    await self._request_vetting_once(refs)
+                    refs["faster_lane_at"] = datetime.now(timezone.utc).isoformat()
+                elif refs.get("vetting_requested") is False and _vetted(refs):
                     # The brand was still registering when it was filed, or
                     # the vetting call failed (Telnyx may have got it).
                     await self._request_vetting_once(refs)
+                elif await self._faster_lane_failed(refs):
+                    # Held: no other step can verify this brand. The
+                    # customer can cancel and register again. Hail keeps
+                    # reading the brand (``faster_lane_failed`` keeps the row
+                    # polled): if Telnyx verifies it later, the hold ends.
+                    refs["needs_information"] = True
+                    refs["faster_lane_failed"] = True
+                    return ProviderStatus(
+                        state="pending", reason=LOW_VOLUME_FASTER_LANE_FAILED
+                    )
                 return ProviderStatus(state="pending")
             if "campaign_id" not in refs:
                 # A campaign filed by an earlier call whose answer was lost
@@ -722,7 +839,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                         "usecase": text["use_case"],
                         **(
                             {"subUsecases": list(text["text_types"])}
-                            if text["use_case"] in {"MIXED", "SOLE_PROPRIETOR"}
+                            if text["use_case"] in _SUB_USE_CASES
                             else {}
                         ),
                         "description": text["description"],
@@ -928,6 +1045,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
             refs["campaign_id"] = existing[0]["campaignId"]
             _store_replies(refs, existing[0], brand or {})
             refs.pop("needs_information", None)
+            refs.pop("faster_lane_failed", None)
             return True
         return False
 
@@ -1218,6 +1336,50 @@ def _failure(exc: Exception) -> str:
     if isinstance(exc, httpx.HTTPStatusError):
         return f"status={exc.response.status_code}"
     return type(exc).__name__
+
+
+def _vetted(refs: dict) -> bool:
+    """A company brand that gets vetting: never a person's, and a
+    low-volume company's only once its faster lane asked for it."""
+    return refs.get("subject_type") != "person" and (
+        not refs.get("low_volume") or bool(refs.get("faster_lane_at"))
+    )
+
+
+def _iso_time(value) -> datetime | None:
+    """An ISO 8601 time as an aware datetime (UTC when it names no zone);
+    None for anything else."""
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _faster_lane_owed(refs: dict, brand: dict) -> bool:
+    """A low-volume company brand Telnyx did not verify, with no faster lane
+    asked yet. ``UNVERIFIED`` is a verdict. Telnyx does not document which
+    other values are final, so any other value that is not verified
+    (``SELF_DECLARED``, a missing or new one) counts once it has lasted
+    ``_IDENTITY_WAIT`` from the first pass that saw it
+    (``identity_wait_since``): never pending forever. Never once a campaign
+    is filed: a hold then could not be amended or polled again. The caller
+    only asks for a registered brand that is not verified."""
+    if (
+        refs.get("subject_type") == "person"
+        or not refs.get("low_volume")
+        or refs.get("faster_lane_at")
+        or refs.get("brand_verified")
+        or refs.get("campaign_id")
+    ):
+        return False
+    if brand.get("identityStatus") == "UNVERIFIED":
+        return True
+    now = datetime.now(timezone.utc)
+    since = refs.setdefault("identity_wait_since", now.isoformat())
+    return now - datetime.fromisoformat(since) >= _IDENTITY_WAIT
 
 
 def _billed(refs: dict) -> dict:

@@ -57,6 +57,22 @@ campaign from the console (Numbers → Register for US texting) or with
 your approved Trust Hub primary profile (business identity ISV Reseller or
 Partner); without it, SMS registration through Twilio is off. Texts from an
 organization's US long codes to US numbers return 422 until it is approved.
+A company that leaves `daily_texts` blank, or answers `NOT_SURE` or
+`UP_TO_2000`, gets a Low-Volume Standard brand (`skip_automatic_sec_vet`) and a
+`LOW_VOLUME` campaign: no secondary vetting, about 2,000 texts a day to
+T-Mobile users, and no trust score. If Twilio cannot verify that company, the
+registration waits: cancel it and file again with `daily_texts=OVER_2000`.
+Twilio has no faster lane, so Hail ignores `faster_lane_ok` here.
+
+**Trial texting (United States).** Set `HAIL_SMS_TRIAL_NUMBER` to a toll-free
+number with approved toll-free verification; empty turns it off. Put that
+number in a separate operator organization: the organization that owns the
+trial number never sends trial texts. `HAIL_SMS_TRIAL_SENDING` (default
+`false`, not in `.env.example`) turns sending on; set it to `true` only once
+that verification covers trial texts. Each organization verifies one phone and
+sends up to 25 texts to it, ever. Verifying the phone needs a Hail console session, so on a
+self-host without the console leave `HAIL_SMS_TRIAL_NUMBER` empty. Code:
+[`core/hailhq/core/sms_trial.py`](../../../core/hailhq/core/sms_trial.py).
 
 **Sender ID (optional, rest-of-world).** For destinations that allow it, set a
 custom alphanumeric sender with `PATCH /sms/sender-id` (read the current value
@@ -116,3 +132,8 @@ trunk lists the numbers instead: `PATCH /v1/numbers/{id}` with
 `voice_agent_id` adds the number to the Twilio trunk
 (`trunking.v1.trunks(TK...).phone_numbers`) and to the LiveKit trunk; `null`
 removes it from both ([Agents](../agents.md)).
+To lock calls to Twilio, give Twilio its own LiveKit inbound trunk with
+Twilio's [signaling IP ranges](https://www.twilio.com/docs/sip-trunking/ip-addresses)
+in `allowed_addresses` and set `LIVEKIT_TWILIO_SIP_INBOUND_TRUNK_ID`
+([LiveKit Cloud §4](./livekit-cloud.md#4-inbound-calls)). Keep a placeholder entry in
+the shared trunk's `numbers`, or empty `LIVEKIT_SIP_INBOUND_TRUNK_ID`.

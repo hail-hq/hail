@@ -93,6 +93,10 @@ class Principal(BaseModel):
 
     ``superadmin`` is True only on the JWT path when the website minted
     ``superadmin: true``; never for API keys.
+
+    ``console_session`` is True only on the JWT path for a first-party
+    console token (no ``azp`` claim). MCP OAuth tokens are JWTs too and
+    always carry ``azp``; API keys never set it.
     """
 
     auth_kind: Literal["apikey", "jwt", "shared"]
@@ -101,6 +105,7 @@ class Principal(BaseModel):
     organization_id: uuid.UUID
     scopes: list[str]
     superadmin: bool = False
+    console_session: bool = False
 
 
 def _unauthorized(detail: str) -> HTTPException:
@@ -320,7 +325,8 @@ async def _principal_from_jwt(token: str, db: AsyncSession) -> Principal:
     # so a claims payload from an untrusted source can't smuggle it in.
     # OAuth-provider access tokens (MCP clients) always carry azp; the staff
     # role is only for first-party console session tokens.
-    is_superadmin = claims.get("superadmin") is True and "azp" not in claims
+    console_session = "azp" not in claims
+    is_superadmin = claims.get("superadmin") is True and console_session
 
     active_org_claim = claims.get("activeOrganizationId")
     active_org_uuid: uuid.UUID | None = None
@@ -351,6 +357,7 @@ async def _principal_from_jwt(token: str, db: AsyncSession) -> Principal:
             organization_id=active_org_uuid,
             scopes=_scopes_from_jwt(claims),
             superadmin=True,
+            console_session=console_session,
         )
 
     # Prefer the session's *selected* org (the ``activeOrganizationId`` claim the
@@ -390,6 +397,7 @@ async def _principal_from_jwt(token: str, db: AsyncSession) -> Principal:
         organization_id=organization_id,
         scopes=_scopes_from_jwt(claims),
         superadmin=is_superadmin,
+        console_session=console_session,
     )
 
 

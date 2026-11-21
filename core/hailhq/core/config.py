@@ -1,3 +1,4 @@
+import re
 from typing import Literal
 from uuid import UUID
 
@@ -125,6 +126,12 @@ class Settings(BaseSettings):
     # that sends SMS. Which destinations accept a sender ID is this carrier's
     # table in core/hailhq/core/sender_id_corridors.py.
     sender_id_sms_carrier: str = "twilio"
+    # US trial texting: E.164 of the toll-free number in Hail's own workspace
+    # that sends trial texts to each workspace's verified phone. Empty = off.
+    hail_sms_trial_number: str = ""
+    # Trial texts send only while this is true (and the number's registration
+    # is approved).
+    hail_sms_trial_sending: bool = False
     # DIDWW: numbers, orders and end-user registration through API v3.
     # Empty key = DIDWW offers are hidden and its verification plug-in is off.
     didww_api_key: str = ""
@@ -133,6 +140,10 @@ class Settings(BaseSettings):
     # DIDWW voice IN trunk (SIP, pointed at LiveKit) DIDs are assigned to when
     # they route calls to an agent. Empty = DIDWW numbers cannot take calls.
     didww_voice_in_trunk_id: str = ""
+    # Digest password DIDWW sends to the DIDWW LiveKit inbound trunk. Only the
+    # operator script reads it (scripts/ops/sip_trunks.py); it sets the same
+    # password on both trunks, and refuses to run for DIDWW without it.
+    didww_sip_inbound_password: str = ""
 
     # AWS, used today for SES (outbound email). boto3 falls back to its
     # default credential chain (env / config file / IAM role) when these
@@ -143,28 +154,30 @@ class Settings(BaseSettings):
     aws_secret_access_key: str = ""
 
     # Email, operator-managed parent domain used to mint hail-mail
-    # addresses of the form ``<user>+<org>@<HAIL_MAIL_BASE_DOMAIN>``
-    # (e.g. ``alice+acme@mail.hail.so``). The operator pre-verifies this
+    # addresses of the form ``<workspace>+<name>@<HAIL_MAIL_BASE_DOMAIN>``
+    # (e.g. ``acme+amber@mail.hail.so``). The operator pre-verifies this
     # one SES identity out-of-band; per-org rows land already-verified.
     # Leave empty to disable hail-mail mode (only custom domains accepted).
     hail_mail_base_domain: str = ""
 
     # Shortcut for self-hosters running a SINGLE org: one full address the
-    # server splits into the user/org prefix pair internally. Wins over the
-    # per-org derived org prefix when set. Example:
+    # server splits into the workspace/name prefix pair internally. Wins over
+    # the per-org derived name prefix when set. Example:
     #   HAIL_MAIL_FROM=hi+selfhost@mail.hail.so
     # The domain portion must match ``HAIL_MAIL_BASE_DOMAIN`` (the
     # SES-verified parent); each side of the ``+`` must match the
     # ``^[a-z0-9]([a-z0-9-]{0,18}[a-z0-9])?$`` prefix regex.
-    # Do NOT set this on a multi-tenant deployment, a fixed org prefix is
-    # shared across orgs and only the first org can claim it.
+    # Do NOT set this on a multi-tenant deployment, a fixed workspace prefix
+    # is shared across orgs and only the first org can claim it.
     hail_mail_from: str = ""
 
-    # Default USER prefix for ``POST /email-domains`` (``kind='hail_mail'``)
-    # when the request omits ``local_prefix_user``. Hail appends a per-org
-    # token (see ``hailhq.core.hail_mail.default_user_prefix``), because one
-    # org only may hold a user prefix. The ORG prefix is never a deploy-wide
-    # constant, it is derived per-org from the organization id. Must match
+    # Default WORKSPACE prefix (the part before the '+') for
+    # ``POST /email-domains`` (``kind='hail_mail'``) when the request omits
+    # ``local_prefix_workspace``. Hail appends a per-org token (see
+    # ``hailhq.core.hail_mail.default_workspace_prefix``), because one org only
+    # may hold a workspace prefix. The NAME prefix (after the '+') is never a
+    # deploy-wide constant, it is derived per-org from the organization id.
+    # The env key keeps its old USER name. Must match
     # ``^[a-z0-9]([a-z0-9-]{0,18}[a-z0-9])?$``.
     hail_mail_default_user_prefix: str = ""
 
@@ -221,13 +234,14 @@ class Settings(BaseSettings):
     livekit_telnyx_sip_outbound_trunk_id: str = ""
     # Empty = DIDWW numbers cannot dial and DIDWW offers are hidden.
     livekit_didww_sip_outbound_trunk_id: str = ""
-    # LiveKit inbound SIP trunk, ONE for every carrier: LiveKit allows a single
-    # wildcard inbound trunk per project, and Hail finds a call's carrier from
-    # the dialed number, not from the trunk. It holds the numbers Hail registers
-    # when a number routes calls to an agent (core/hailhq/core/inbound_routing.py).
-    # Empty = no number can take calls. The per-carrier names below are
-    # optional overrides for a project that runs one inbound trunk per carrier
-    # (each locked to that carrier's IPs); they are not in .env.example.
+    # LiveKit inbound SIP trunks. A trunk holds the numbers Hail registers when
+    # a number routes calls to an agent (core/hailhq/core/inbound_routing.py).
+    # The per-carrier trunks are each locked to their carrier: Twilio and
+    # Telnyx by signaling IPs, DIDWW by digest password
+    # (infra/livekit/inbound-trunks.json). A blank per-carrier id falls back
+    # to the shared trunk (self-host: one trunk for every carrier). A call is
+    # accepted on the trunk of the number's carrier, and on the shared trunk
+    # until it is retired (inbound_calls.py).
     livekit_sip_inbound_trunk_id: str = ""
     livekit_twilio_sip_inbound_trunk_id: str = ""
     livekit_telnyx_sip_inbound_trunk_id: str = ""
@@ -418,6 +432,13 @@ class Settings(BaseSettings):
         "You are resubscribed to Hail messages. Reply STOP to unsubscribe, "
         "HELP for help."
     )
+
+    @field_validator("hail_sms_trial_number")
+    @classmethod
+    def _trial_number_e164(cls, value: str) -> str:
+        if value and not re.fullmatch(r"\+[1-9][0-9]{6,14}", value):
+            raise ValueError("HAIL_SMS_TRIAL_NUMBER must be empty or E.164")
+        return value
 
     @field_validator("hail_recording_retention_days")
     @classmethod

@@ -88,23 +88,25 @@ HAIL_MAIL_BASE_DOMAIN=mail.hail.so
 # Single-variable form (self-hosters running a SINGLE org):
 HAIL_MAIL_FROM=hi+selfhost@mail.hail.so
 
-# Multi-tenant: leave HAIL_MAIL_FROM unset. The org prefix is derived
-# per-org from the organization id; set only the default user prefix:
+# Multi-tenant: leave HAIL_MAIL_FROM unset. The name prefix is derived
+# per-org from the organization id; set only the default workspace prefix:
 # HAIL_MAIL_DEFAULT_USER_PREFIX=admin
 
 AWS_REGION=us-east-1
 ```
 
-Hail-mail addresses always have the shape `<user>+<org>@<HAIL_MAIL_BASE_DOMAIN>` — for example `alice+acme@mail.hail.so`. Hail validates both `<user>` and `<org>` against `^[a-z0-9]([a-z0-9-]{0,18}[a-z0-9])?$` (1–20 characters, lowercase alphanumeric plus hyphens, no leading or trailing hyphen).
+Hail-mail addresses always have the shape `<workspace>+<name>@<HAIL_MAIL_BASE_DOMAIN>`, for example `acme+amber@mail.hail.so`. The API fields are `local_prefix_workspace` and `local_prefix_name`. Hail validates both `<workspace>` and `<name>` against `^[a-z0-9]([a-z0-9-]{0,18}[a-z0-9])?$` (1–20 characters, lowercase alphanumeric plus hyphens, no leading or trailing hyphen).
 
-`<user>` is the mailbox. One organization only may hold it. A taken `<user>` returns 409. `<org>` is an alias, so `alice@mail.hail.so` and `alice+anything@mail.hail.so` reach the same organization. Role names, such as `admin` and `postmaster`, stay with the operator: no organization can register one as `<user>`, and Hail never routes a bare `admin@mail.hail.so` to an organization. The full list is `ROLE_MAILBOXES` in [`core/hailhq/core/hail_mail.py`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/hail_mail.py).
+`<workspace>` names the workspace and is the mailbox. One organization only may hold it. A taken `<workspace>` returns 409. `<name>` is a free name inside the workspace (an alias), so `acme@mail.hail.so` and `acme+anything@mail.hail.so` reach the same organization. Role names, such as `admin` and `postmaster`, stay with the operator: no organization can register one as `<workspace>`, and Hail never routes a bare `admin@mail.hail.so` to an organization. The full list is `ROLE_MAILBOXES` in [`core/hailhq/core/hail_mail.py`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/hail_mail.py).
 
-An organization keeps every `<user>` it gives up: no other organization can take it, so mail sent to the old address never reaches a stranger. A custom domain, once verified, is the default sender over the hail-mail address.
+An organization keeps every `<workspace>` it gives up: no other organization can take it, so mail sent to the old address never reaches a stranger. A custom domain, once verified, is the default sender over the hail-mail address.
 
 Precedence at send time (highest wins):
 
-- **User prefix:** explicit `local_prefix_user` → `HAIL_MAIL_FROM` (user part) → `HAIL_MAIL_DEFAULT_USER_PREFIX` plus a per-organization token (for example `admin-j3bv6cw2`).
-- **Org prefix:** explicit `local_prefix_org` → `HAIL_MAIL_FROM` (org part, single-tenant) → derived per-org from the organization id. The org prefix is never a deploy-wide constant — that constant would make every org collide on one address.
+- **Workspace prefix:** explicit `local_prefix_workspace` → `HAIL_MAIL_FROM` (part before the `+`) → `HAIL_MAIL_DEFAULT_USER_PREFIX` plus a per-organization token (for example `admin-j3bv6cw2`).
+- **Name prefix:** explicit `local_prefix_name` → `HAIL_MAIL_FROM` (part after the `+`, single-tenant) → derived per-org from the organization id. The name prefix is never a deploy-wide constant: that constant would make every org collide on one address.
+
+`local_prefix_user` and `local_prefix_org` are the old, deprecated names of `local_prefix_workspace` and `local_prefix_name`. Requests still accept them and responses still include them, with the same values.
 
 ### Self-host vs managed
 
@@ -227,7 +229,7 @@ Skip these until later milestones. This list names them so that you do not use S
 
 ## 10. Inbound email
 
-To receive mail at `<user>+<org>@<HAIL_MAIL_BASE_DOMAIN>`, you need four things:
+To receive mail at `<workspace>+<name>@<HAIL_MAIL_BASE_DOMAIN>`, you need four things:
 
 1. An MX record on `mail.hail.so` that points at SES inbound.
 2. An S3 bucket that SES can write raw MIME into.

@@ -88,35 +88,52 @@ Hail answers calls on a number once the number routes calls to an agent
 ([Agents](../agents.md)). LiveKit needs **one inbound trunk** and **one
 dispatch rule**. Hail adds and removes numbers on the trunk itself.
 
-1. Inbound trunk. One trunk for every carrier: LiveKit allows a single
-   wildcard (empty `numbers`) inbound trunk per project. Without `numbers`,
-   LiveKit needs `allowed_addresses` (or `auth_username`/`auth_password`,
-   which Twilio Elastic SIP does not send). The carrier pages say what each
-   carrier sends: [Twilio](./twilio.md#6-inbound-calls),
+1. Inbound trunk. One trunk for every carrier. Hail adds each number it
+   routes to the trunk's `numbers`. The trunk starts with a placeholder
+   entry: a trunk with empty `numbers` would match every dialed number,
+   including numbers on a locked per-carrier trunk (below). The carrier
+   pages say what each carrier sends: [Twilio](./twilio.md#6-inbound-calls),
    [Telnyx](./telnyx.md#inbound-calls), [DIDWW](./didww.md#inbound-calls).
 
    ```bash
    cat > inbound.json <<'JSON'
-   {"trunk": {"name": "hail-inbound", "numbers": [], "allowed_addresses": ["0.0.0.0/0"]}}
+   {"trunk": {"name": "hail-inbound", "numbers": ["hail-placeholder-shared"], "allowed_addresses": ["0.0.0.0/0"]}}
    JSON
    lk sip inbound create inbound.json
    # → ST_...  → LIVEKIT_SIP_INBOUND_TRUNK_ID
    ```
 
    Hail reads the dialed number from the call and finds its carrier in
-   `phone_numbers`; the trunk does not need to know it. To lock each carrier
-   to its own trunk instead, create one trunk per carrier with that
-   carrier's signaling IPs in `allowed_addresses` and set
-   `LIVEKIT_<CARRIER>_SIP_INBOUND_TRUNK_ID` (an override not listed in
-   `.env.example`) to that trunk's id. Narrow `0.0.0.0/0` to the carriers' IP ranges when you can.
+   `phone_numbers`; the trunk does not need to know it.
+
+   To lock each carrier to its own trunk instead (Twilio and Telnyx by their
+   signaling IPs, DIDWW by a password), use
+   [`infra/livekit/inbound-trunks.json`](https://github.com/hail-hq/hail/blob/main/infra/livekit/inbound-trunks.json)
+   and [`scripts/ops/sip_trunks.py`](https://github.com/hail-hq/hail/blob/main/scripts/ops/sip_trunks.py):
+   `apply --carrier <carrier>` creates the trunk, adds it to the dispatch
+   rule and prints its id for `LIVEKIT_<CARRIER>_SIP_INBOUND_TRUNK_ID`;
+   `move` moves numbers already registered. DIDWW needs
+   `DIDWW_SIP_INBOUND_PASSWORD`. A trunk never has empty `numbers`: that
+   trunk would match every dialed number, so each keeps a placeholder entry.
+   Hail answers a call on the trunk of the number's carrier, and on the
+   shared trunk while `LIVEKIT_SIP_INBOUND_TRUNK_ID` is set, so numbers
+   move with no refused call (each number is on no trunk for one request
+   while it moves). Run `move` right after the restart. Steps and checks: the
+   [runbook](https://github.com/hail-hq/hail/blob/main/docs/operations/inbound-trunk-lockdown.md).
+
+   Upgrading with a per-carrier key already set: first add
+   `hail-placeholder-shared` to the shared trunk's `numbers`, or empty
+   `LIVEKIT_SIP_INBOUND_TRUNK_ID`. A shared trunk with no numbers takes
+   calls to every number.
 
    LiveKit Cloud does not check `allowed_addresses` until LiveKit support
    turns the check on for your project ([inbound trunk docs](https://docs.livekit.io/telephony/accepting-calls/inbound-trunk/)).
    Until then, a trunk accepts calls from any address, whatever the list
    says. Anyone who knows your project's SIP host can then call your numbers
-   directly and reach your agents, with any caller ID. To test it, set a
-   trunk's list to `["192.0.2.1/32"]` (an address no one uses) and send it a
-   call: a room appears when the check is off. `auth_username`/`auth_password`
+   directly and reach your agents, with any caller ID. To test it, send a
+   call from your own machine to a number on a locked trunk:
+   `python3 scripts/ops/sip_invite_probe.py --host <project>.sip.livekit.cloud --number +<number>`
+   prints `REFUSED` when the check is on. `auth_username`/`auth_password`
    is always checked; LiveKit answers `407` without them.
 
 2. Dispatch rule. One rule, bound to the inbound trunk, that puts each

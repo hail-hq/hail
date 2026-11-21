@@ -13,8 +13,10 @@ suppression-list membership or a member's address to the callee.
 
 The agent never supplies addresses: SMS always targets the call's
 counterpart (``calls.to_e164`` on outbound, ``calls.from_e164`` on inbound);
-email targets a directory name resolved
-here, scoped to the call's org.
+email targets a member or saved contact by name, resolved here, scoped to
+the call's org, or the person the agent talks to when the model passes the
+reserved ``SELF_RECIPIENT``. An address someone says or types is never a
+recipient.
 """
 
 from __future__ import annotations
@@ -55,6 +57,9 @@ from hailhq.core.agent_tools.send_email import (
 from hailhq.core.agent_tools.send_email import (
     MAX_RECIPIENT_NAME_CHARS,
     MAX_SUBJECT_CHARS,
+    caller_email_body,
+    caller_email_subject,
+    is_self_recipient,
 )
 from hailhq.core.agent_tools.send_sms import MAX_BODY_CHARS as SMS_MAX_BODY_CHARS
 from hailhq.core.agent_tools.transfer_call import MAX_REASON_CHARS
@@ -82,12 +87,19 @@ from hailhq.core.compliance_gate import (
 )
 from hailhq.core.contact_ids import normalize_contact_id, parse_contact_id
 from hailhq.core.db import get_session, key_lock, org_lock
-from hailhq.core.directory import resolve_member_emails, resolve_member_phones
+from hailhq.core.directory import (
+    entry_email,
+    find_by_phone,
+    resolve_contact_emails,
+    resolve_member_emails,
+    resolve_member_phones,
+)
 from hailhq.core.email_agent import (
     MAX_REPLY_CHARS as EMAIL_MAX_REPLY_CHARS,
 )
 from hailhq.core.email_agent import (
     MAX_TOOL_SENDS,
+    emails_sent_on_call,
     reply_references,
     reply_subject,
     routed_agent,
@@ -124,12 +136,20 @@ from hailhq.core.models import (
     Email,
     EmailAttachment,
     EmailDomain,
+    Organization,
     PhoneNumber,
     Sms,
 )
+from hailhq.core.provider_config import load_org_provider_configs
 from hailhq.core.providers.email import EmailProvider
 from hailhq.core.providers.email.ses import SES_NOT_ACCEPTED_FAILURES
 from hailhq.core.sms_registration_gate import us_registration_block
+from hailhq.core.sms_trial import (
+    TrialBodyTooLong,
+    claim_trial_send,
+    is_verified_trial_phone,
+    trial_enabled,
+)
 from hailhq.core.telemetry import bind_organization
 from hailhq.core.telemetry_identity import tag_context
 from hailhq.core.telephony_catalog import sells_in
@@ -152,6 +172,7 @@ from hailhq.core.threads import is_e164
 from hailhq.core.webhook_fanout import call_event_data, fanout_call_event
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 from sqlalchemy import select, update
+from sqlalchemy.exc import ProgrammingError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -177,6 +198,7 @@ _SPOKEN_EMAIL_UNCONFIGURED = "Email isn't set up for this account."
 _SPOKEN_SMS_SENT_MEMBER = "Text message sent."
 _SPOKEN_RUN_UNAVAILABLE = "This email can no longer send messages."
 _SPOKEN_RUN_LIMIT = "That is the limit of messages for one email."
+_SPOKEN_TRIAL_TOO_LONG_FMT = "Keep trial texts to {n} characters. Nothing was sent."
 # How long a queued reply counts as in flight. After this its delivery is
 # unknown: SES may have accepted it before the API stopped. Never resend it.
 _QUEUED_GRACE = timedelta(seconds=240)
@@ -337,19 +359,161 @@ async def _deny(
     return AgentSendResponse(ok=False, spoken=spoken)
 
 
-async def _member_email(
+# Emails one phone call may send with send_email, so one caller cannot turn a
+# call into a stream of email. Browser test calls have their own limit.
+MAX_CALL_EMAILS = 3
+# Longest recipient name quoted back to the model in a refusal.
+_MAX_QUOTED_NAME = 60
+
+# Tool results for the model, not words for the caller: the model tells the
+# person in the call's language. An unknown name and a name shared by several
+# people get the same answer, so a caller cannot probe the saved contacts.
+_SPOKEN_EMAIL_NO_MATCH = (
+    'Not sent: no single team member or saved contact matches "{name}".'
+    " You can only email people on file, to prevent spam."
+)
+_SPOKEN_EMAIL_NO_SELF = (
+    "Not sent: no email address is on file for the person on this call."
+    " You can only email people on file, to prevent spam. Offer to take a"
+    " message."
+)
+
+_SPOKEN_RUN_REPLIED = (
+    "Your reply to this email was already sent. Nothing more was sent."
+)
+_SPOKEN_RUN_REPLY_FAILED = (
+    "Not sent: your reply to this email already failed. Nothing more can go"
+    " to the sender as that reply."
+)
+_SPOKEN_CALL_EMAIL_LIMIT = (
+    f"Not sent: this call already sent {MAX_CALL_EMAILS} emails, the limit for"
+    " one call. Offer to take a message."
+)
+
+
+def _quoted_name(name: str) -> str:
+    """``name`` safe to quote back to the model: one line, no double quotes,
+    at most ``_MAX_QUOTED_NAME`` characters."""
+    text = "".join(c if c.isprintable() else " " for c in name).replace('"', "'")
+    text = " ".join(text.split())
+    if len(text) > _MAX_QUOTED_NAME:
+        return text[: _MAX_QUOTED_NAME - 1] + "…"
+    return text
+
+
+async def _known_email(
     db: AsyncSession, org: UUID, name: str
 ) -> str | AgentSendResponse:
-    """The one member named ``name``, or the answer when there is none or
-    more than one."""
+    """The one address on file for ``name``: a member, else a saved contact.
+    Members win over contacts, so a customer saved under a team member's name
+    never blocks or takes that member's email. No match and more than one
+    match get the same answer."""
     matches = await resolve_member_emails(db, org, name)
     if not matches:
+        matches = await resolve_contact_emails(db, org, name)
+    # One address saved twice, in any letter case, is still one recipient.
+    addresses = list(dict.fromkeys(m.lower() for m in matches))
+    if len(addresses) != 1:
         return AgentSendResponse(
-            ok=False, spoken=f"I couldn't find {name} in the directory."
+            ok=False, spoken=_SPOKEN_EMAIL_NO_MATCH.format(name=_quoted_name(name))
         )
-    if len(matches) > 1:
-        return _ambiguous_recipient(name)
-    return matches[0]
+    return next(m for m in matches if m.lower() == addresses[0])
+
+
+async def _call_recipient(
+    db: AsyncSession, call: Call, name: str, meta: dict[str, str]
+) -> tuple[str, bool] | AgentSendResponse:
+    """The address for ``send_email`` on a phone call, and whether it is the
+    caller's own address on file. The reserved self-reference reaches only
+    the caller's own entry, found by their number; anything else is a name.
+    Neither falls back to the other, so "email me" never picks someone who
+    shares the caller's name.
+
+    A name the caller is saved under that does not resolve to the caller's
+    own address is refused like an unknown name, whether or not their entry
+    has an email (the contact line tells the model to use "me"): a model
+    that emails them
+    by name (an older prompt, or one that ignores the tool text) would
+    otherwise send the caller's request to a member or contact of the same
+    name."""
+    org = call.organization_id
+    phone = _other_party(call)
+    caller = await find_by_phone(db, org, phone) if phone else None
+    own = await entry_email(db, org, phone, caller) if phone else None
+    if is_self_recipient(name, on_call=True):
+        if own:
+            return own, True
+        return await _deny(
+            org,
+            action="agent.email.blocked",
+            resource_type="email",
+            spoken=_SPOKEN_EMAIL_NO_SELF,
+            payload={**meta, "reason": "no_caller_email"},
+        )
+    recipient = await _known_email(db, org, name)
+    if own and isinstance(recipient, str) and recipient.casefold() == own.casefold():
+        return recipient, True
+    if isinstance(recipient, AgentSendResponse) or (
+        caller is not None and _same_name(caller.name, name)
+    ):
+        return AgentSendResponse(
+            ok=False, spoken=_SPOKEN_EMAIL_NO_MATCH.format(name=_quoted_name(name))
+        )
+    return recipient, False
+
+
+def _same_name(a: str, b: str) -> bool:
+    # lower(), like the SQL name lookups in hailhq.core.directory.
+    return a.strip().lower() == b.strip().lower()
+
+
+async def _organization_name(db: AsyncSession, org: UUID) -> str | None:
+    """The org's display name for the fixed lines of a caller email. One read
+    on this session, in a savepoint. It only adds words, so it fails open:
+    the website-owned table is missing on a pure self-host, and a schema
+    change must not stop the email. The lines then name no organization."""
+    try:
+        async with db.begin_nested():
+            return await db.scalar(
+                select(Organization.name).where(Organization.id == org)
+            )
+    except ProgrammingError as exc:
+        if getattr(exc.orig, "sqlstate", None) != "42P01":  # undefined_table
+            logger.warning("organization name lookup failed: %s", exc)
+        return None
+
+
+async def _call_language(db: AsyncSession, call: Call) -> str | None:
+    """The call's language, as the voicebot picks it: ``voice_config.language``,
+    else the org's saved TTS language (an inbound call copies the agent's
+    voice_config, which may have none). The voicebot reads the TTS language
+    at call start; a change during the call shows here. It only picks the
+    words of the caller email's fixed lines, so a bad shape or a failed
+    read means None (English); the savepoint keeps the send's transaction."""
+    config = call.voice_config if isinstance(call.voice_config, dict) else {}
+    language = config.get("language")
+    if isinstance(language, str) and language:
+        return language
+    try:
+        async with db.begin_nested():
+            tts = (await load_org_provider_configs(db, call.organization_id)).get("tts")
+    except SQLAlchemyError as exc:
+        logger.warning("call language lookup failed: %s", exc)
+        return None
+    params = tts.params if tts is not None else None
+    language = params.get("language") if isinstance(params, dict) else None
+    return language if isinstance(language, str) else None
+
+
+async def _run_recipient(
+    db: AsyncSession, inbound: Email, name: str
+) -> str | AgentSendResponse:
+    """The address for ``send_email`` in an email run. The self-reference is
+    the sender: ``_email_run`` already refused mail whose From address
+    ingest did not prove. Anything else is a name."""
+    if is_self_recipient(name):
+        return normalize_address(inbound.from_address)
+    return await _known_email(db, inbound.organization_id, name)
 
 
 async def _send_sms_to(
@@ -394,20 +558,45 @@ async def _send_sms_to(
     # Text from the number the caller dialed when it can text; else a text
     # number of this agent (see resolve_sms_number).
     from_number = await resolve_sms_number(db, org, agent_id, dialed, recipient)
-    if from_number is None:
-        return AgentSendResponse(ok=False, spoken=_SPOKEN_SMS_UNCONFIGURED)
-
-    block = await us_registration_block(db, org, from_number, recipient)
-    if block is not None:
-        return await _deny(
-            org,
-            action="agent.sms.blocked",
-            resource_type="sms",
-            spoken=_SPOKEN_NOT_ALLOWED,
-            payload={**meta, "reason": block},
-        )
-
-    auto_bound = db.info.pop("auto_bound_sms_number_id", None) == from_number.id
+    block = (
+        await us_registration_block(db, org, from_number, recipient)
+        if from_number is not None
+        else None
+    )
+    # The agent's own number, kept for the bind audit when the trial number
+    # sends instead: the bind commits with the text.
+    own_number = from_number
+    auto_bound = (
+        from_number is not None
+        and db.info.pop("auto_bound_sms_number_id", None) == from_number.id
+    )
+    row_meta = meta
+    if from_number is None or block is not None:
+        # Trial text to the workspace's verified phone. A refused claim keeps
+        # today's answer and is not rolled back: this transaction may hold
+        # the auto-bind and send-cap rows, which a refusal never commits.
+        try:
+            trial = await claim_trial_send(
+                db, org, to=recipient, body=body, limit=SMS_MAX_BODY_CHARS
+            )
+        except TrialBodyTooLong as exc:
+            return AgentSendResponse(
+                ok=False, spoken=_SPOKEN_TRIAL_TOO_LONG_FMT.format(n=exc.max_chars)
+            )
+        if trial is None:
+            if from_number is None:
+                return AgentSendResponse(ok=False, spoken=_SPOKEN_SMS_UNCONFIGURED)
+            return await _deny(
+                org,
+                action="agent.sms.blocked",
+                resource_type="sms",
+                spoken=_SPOKEN_NOT_ALLOWED,
+                payload={**meta, "reason": block},
+            )
+        # The claim holds the workspace lock until the commit below.
+        from_number = trial.number
+        body = trial.body
+        row_meta = {**meta, **trial.metadata}
 
     sms = Sms(
         organization_id=org,
@@ -419,7 +608,7 @@ async def _send_sms_to(
         direction="outbound",
         status="queued",
         body=body,
-        metadata_=meta,
+        metadata_=row_meta,
     )
     db.add(sms)
     await db.commit()
@@ -430,9 +619,9 @@ async def _send_sms_to(
             api_key_id=None,
             action="number.route",
             resource_type="phone_number",
-            resource_id=from_number.id,
+            resource_id=own_number.id,
             payload={
-                "e164": from_number.e164,
+                "e164": own_number.e164,
                 "sms_agent_id": str(agent_id),
                 "automatic": True,
                 "source": route_source,
@@ -488,7 +677,7 @@ async def _send_email_to(
     attachment_rows: list[EmailAttachment] | None = None,
 ) -> AgentSendResponse:
     """Gate, cap, pick the sender, write the row, audit, and deliver one
-    email to a member the caller resolved from the directory."""
+    email to a member or saved contact the caller resolved by name."""
     gate = await check_email_allowed(db, org, [recipient])
     if not gate.allowed:
         return await _deny(
@@ -582,8 +771,8 @@ async def _send_email_to(
 
 
 async def _shared_denial(db: AsyncSession, call: Call) -> tuple[str, str] | None:
-    """The funds check shared by the send routes. Sends are not capped per
-    call: each is billed like any text or email.
+    """The funds check shared by the send routes. Each send is billed like
+    any text or email; phone-call emails also have ``MAX_CALL_EMAILS``.
 
     Returns ``(spoken, audit_reason)`` on denial or None when the send may
     proceed. The audit reason distinguishes which gate fired; the spoken
@@ -689,11 +878,19 @@ async def agent_send_sms(
         )
 
     from_number = await sms_sender(db, org, counterpart, call=call)
-    if from_number is None:
+    block = (
+        await us_registration_block(db, org, from_number, counterpart)
+        if from_number is not None
+        else None
+    )
+    # The hail.so demo keeps its own senders. Other conversations may send a
+    # trial text, claimed after the reservation below.
+    use_trial = (from_number is None or block is not None) and not call.metadata_.get(
+        "browser_trial"
+    )
+    if from_number is None and not use_trial:
         return AgentSendResponse(ok=False, spoken=_SPOKEN_SMS_UNCONFIGURED)
-
-    block = await us_registration_block(db, org, from_number, counterpart)
-    if block is not None:
+    if block is not None and not use_trial:
         return await _deny(
             org,
             action="agent.sms.blocked",
@@ -702,7 +899,10 @@ async def agent_send_sms(
             payload={**_meta(body), "reason": block},
         )
 
-    auto_bound = db.info.pop("auto_bound_sms_number_id", None) == from_number.id
+    auto_bound = (
+        from_number is not None
+        and db.info.pop("auto_bound_sms_number_id", None) == from_number.id
+    )
 
     if call.transport == "browser" and not await reserve_browser_preview(
         db,
@@ -721,6 +921,32 @@ async def agent_send_sms(
             spoken="Your three test texts are used, or the conversation has ended. Nothing was sent.",
         )
 
+    own_number = from_number
+    sms_body = body.body
+    trial_meta = {}
+    if use_trial:
+        # The reservation took the same workspace lock and only flushed, so
+        # the lock holds until the insert below commits. A refused claim
+        # keeps today's answer and is not rolled back: nothing commits on
+        # that path, so the flushed reservation is dropped with it.
+        # The body has at most 70 characters, so it always fits.
+        trial = await claim_trial_send(
+            db, org, to=counterpart, body=body.body, limit=SMS_MAX_BODY_CHARS
+        )
+        if trial is None:
+            if from_number is None:
+                return AgentSendResponse(ok=False, spoken=_SPOKEN_SMS_UNCONFIGURED)
+            return await _deny(
+                org,
+                action="agent.sms.blocked",
+                resource_type="sms",
+                spoken=_SPOKEN_NOT_ALLOWED,
+                payload={**_meta(body), "reason": block},
+            )
+        from_number = trial.number
+        sms_body = trial.body
+        trial_meta = trial.metadata
+
     sms = Sms(
         organization_id=org,
         provider=from_number.provider,
@@ -730,7 +956,7 @@ async def agent_send_sms(
         agent_id=call.agent_id,
         direction="outbound",
         status="queued",
-        body=body.body,
+        body=sms_body,
         metadata_={
             **_meta(body),
             **(
@@ -738,6 +964,7 @@ async def agent_send_sms(
                 if call.transport == "browser" and call.metadata_.get("browser_trial")
                 else {}
             ),
+            **trial_meta,
         },
     )
     db.add(sms)
@@ -749,9 +976,9 @@ async def agent_send_sms(
             api_key_id=None,
             action="number.route",
             resource_type="phone_number",
-            resource_id=from_number.id,
+            resource_id=own_number.id,
             payload={
-                "e164": from_number.e164,
+                "e164": own_number.e164,
                 "sms_agent_id": str(call.agent_id),
                 "automatic": True,
                 "source": "in-call send_sms",
@@ -1311,7 +1538,8 @@ async def agent_email_run_send_email(
     db: Annotated[AsyncSession, Depends(get_session)],
     email_provider: Annotated[EmailProvider, Depends(get_email_provider)],
 ) -> AgentSendResponse:
-    """The ``send_email`` tool in an email run: a member by directory name."""
+    """The ``send_email`` tool in an email run: a member or saved contact by
+    name."""
     run = await _email_run(
         db, body, model=Email, action="agent.email.blocked", resource_type="email"
     )
@@ -1323,10 +1551,21 @@ async def agent_email_run_send_email(
     parent = None
     files = []
     meta = _email_run_meta(body, agent, inbound)
+    recipient = await _run_recipient(db, inbound, body.recipient_name)
+    if isinstance(recipient, AgentSendResponse):
+        return recipient
+    # A send with original files is the run's reply itself: threaded, from
+    # the inbound's domain, and seen by the reply endpoint, which then sends
+    # no second email. Any other send, also to the sender, is its own email.
     if body.attachment_ids or body.reply_to_email_id:
+        # A retry of this same send was answered in _email_run, so a reply
+        # found here is another send: it already used the run's one reply.
+        # One that failed is reported as failed, so the model says so.
         existing = await prior_email_reply(db, inbound)
         if existing is not None:
-            return _replayed_send(existing)
+            if existing.status in ("failed", "bounced"):
+                return AgentSendResponse(ok=False, spoken=_SPOKEN_RUN_REPLY_FAILED)
+            return AgentSendResponse(ok=True, spoken=_SPOKEN_RUN_REPLIED)
         try:
             scope, source, files = await source_files(
                 db, inbound, body.reply_to_email_id or inbound.id, body.attachment_ids
@@ -1336,30 +1575,20 @@ async def agent_email_run_send_email(
                 ok=False,
                 spoken="Those files are not available in this email thread. Nothing was sent.",
             )
-        if body.recipient_name.casefold() in ("sender", "you"):
-            recipient = scope.peer
-        else:
-            recipient = await _member_email(db, org, body.recipient_name)
-            if isinstance(recipient, AgentSendResponse):
-                return recipient
-        if recipient.casefold() != scope.peer.casefold():
+        if normalize_address(recipient) != scope.peer:
             return AgentSendResponse(
                 ok=False,
                 spoken="Original files can only return to this email's sender.",
             )
-        # This file-bearing send is the automatic reply itself. The normal
-        # reply endpoint observes this row and does not send a second email.
         parent = inbound
+        # prior_reply matches the normalized sender address exactly.
+        recipient = scope.peer
         meta = {
             **meta,
             "reply_to_email_id": str(inbound.id),
             "attachment_reply_to_email_id": str(source.id),
             "source_attachment_ids": [str(row.id) for row in files],
         }
-    else:
-        recipient = await _member_email(db, org, body.recipient_name)
-        if isinstance(recipient, AgentSendResponse):
-            return recipient
 
     if await tool_sends_for_reply(db, inbound) >= MAX_TOOL_SENDS:
         return AgentSendResponse(ok=False, spoken=_SPOKEN_RUN_LIMIT)
@@ -1374,9 +1603,11 @@ async def agent_email_run_send_email(
         agent_id=agent.id,
         consent_source="inbound_email",
         reply_parent=parent,
+        # Mail to the sender comes from the domain they wrote to.
         reply_domain=(
             await db.get(EmailDomain, inbound.email_domain_id)
             if parent is not None
+            or normalize_address(recipient) == normalize_address(inbound.from_address)
             else None
         ),
         attachment_rows=files,
@@ -1478,6 +1709,30 @@ async def agent_send_email(
         )
 
     if call.transport != "browser":
+        # Counted under the call row lock (_load_call_for_update) and before
+        # the commit that writes the new row, so concurrent sends on one call
+        # cannot both take the last slot.
+        if await emails_sent_on_call(db, org, call.id) >= MAX_CALL_EMAILS:
+            return await _deny(
+                org,
+                action="agent.email.blocked",
+                resource_type="email",
+                spoken=_SPOKEN_CALL_EMAIL_LIMIT,
+                payload={**_meta(body), "reason": "call_email_limit"},
+            )
+        resolved = await _call_recipient(db, call, body.recipient_name, _meta(body))
+        if isinstance(resolved, AgentSendResponse):
+            return resolved
+        recipient, to_caller = resolved
+        subject, body_text = body.subject, body.body_text
+        if to_caller:
+            # The caller's own address on file, which caller ID found and can
+            # be faked: fixed words in the subject, first line and footer say
+            # why it came.
+            org_name = await _organization_name(db, org)
+            language = await _call_language(db, call)
+            subject = caller_email_subject(subject, org_name, language)
+            body_text = caller_email_body(body_text, org_name, language)
         parent = None
         files = []
         meta = _meta(body)
@@ -1491,13 +1746,6 @@ async def agent_send_email(
                     ok=False,
                     spoken="Those files are not available in this conversation.",
                 )
-            recipient = (
-                scope.peer
-                if body.recipient_name.casefold() in ("you", "sender")
-                else await _member_email(db, org, body.recipient_name)
-            )
-            if isinstance(recipient, AgentSendResponse):
-                return recipient
             if recipient.casefold() != scope.peer.casefold():
                 return AgentSendResponse(
                     ok=False,
@@ -1508,17 +1756,13 @@ async def agent_send_email(
                 "source_attachment_ids": [str(row.id) for row in files],
                 "attachment_reply_to_email_id": str(parent.id),
             }
-        else:
-            recipient = await _member_email(db, org, body.recipient_name)
-            if isinstance(recipient, AgentSendResponse):
-                return recipient
         return await _send_email_to(
             db,
             email_provider,
             org,
             recipient=recipient,
-            subject=body.subject,
-            body_text=body.body_text,
+            subject=subject,
+            body_text=body_text,
             meta=meta,
             agent_id=None,
             consent_source="voice_call",
@@ -2109,9 +2353,15 @@ async def agent_handover_sms(
         call.to_number_id if call.direction == "inbound" else call.from_number_id
     )
     from_number = await db.get(PhoneNumber, number_id) if number_id else None
-    if from_number is None or "sms" not in from_number.capabilities:
-        return AgentHandoverSmsResponse(sms="skipped:number_cannot_text")
     org = call.organization_id
+    cannot_text = from_number is None or "sms" not in from_number.capabilities
+    # A number that cannot text skips the notice, unless trial texting is on
+    # and the contact is the workspace's verified trial phone: then the
+    # trial number may send it.
+    if cannot_text and not (
+        trial_enabled() and await is_verified_trial_phone(db, org, to)
+    ):
+        return AgentHandoverSmsResponse(sms="skipped:number_cannot_text")
     denial = await _shared_denial(db, call)
     if denial is not None:
         return AgentHandoverSmsResponse(
@@ -2131,12 +2381,37 @@ async def agent_handover_sms(
                 call, body, "sms", "agent_caps", detail=cap_denial.reason
             )
         )
-    if await us_registration_block(db, org, from_number, to) is not None:
+    blocked = (
+        not cannot_text
+        and await us_registration_block(db, org, from_number, to) is not None
+    )
+    # A blocked notice to any contact but the verified trial phone answers
+    # now, before the notice text is built or a trial claimed.
+    if blocked and not (trial_enabled() and await is_verified_trial_phone(db, org, to)):
         return AgentHandoverSmsResponse(
             sms=await _notice_blocked(call, body, "sms", "us_registration")
         )
 
     _, words = await _notice_text(db, call, body)
+    sms_body = words[:SMS_MAX_BODY_CHARS]
+    meta = _notice_meta(call, body)
+    if cannot_text or blocked:
+        # The notice is cut to fit, so the footer always stays. A refused
+        # claim keeps today's answer and is not rolled back: this
+        # transaction may hold send-cap rows, which a refusal never commits.
+        trial = await claim_trial_send(
+            db, org, to=to, body=words, limit=SMS_MAX_BODY_CHARS, truncate=True
+        )
+        if trial is None:
+            if cannot_text:
+                return AgentHandoverSmsResponse(sms="skipped:number_cannot_text")
+            return AgentHandoverSmsResponse(
+                sms=await _notice_blocked(call, body, "sms", "us_registration")
+            )
+        # The claim holds the workspace lock until the commit below.
+        from_number = trial.number
+        sms_body = trial.body
+        meta = {**meta, **trial.metadata}
     sms = Sms(
         organization_id=org,
         provider=from_number.provider,
@@ -2146,8 +2421,8 @@ async def agent_handover_sms(
         agent_id=call.agent_id,
         direction="outbound",
         status="queued",
-        body=words[:SMS_MAX_BODY_CHARS],
-        metadata_=_notice_meta(call, body),
+        body=sms_body,
+        metadata_=meta,
     )
     db.add(sms)
     await db.commit()

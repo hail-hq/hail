@@ -36,6 +36,28 @@ SDK: `client.agents.create(...)`, `client.numbers.route(...)`.
 Schemas: `AgentCreate`, `AgentUpdate`, `AgentResponse`, `PhoneNumberRoutingUpdate`
 in [`openapi/openapi.yaml`](../../openapi/openapi.yaml).
 
+## Who the agent can email
+
+`send_email` reaches addresses you have on file, by name: your team members and
+your saved contacts (`POST /v1/contacts`, MCP `create_contact`). A name shared by
+two people, or not on file, sends nothing, and both get the same answer.
+
+When a caller says "email me", the agent sends to the email saved for the caller's
+number. It never falls back to a name. Caller ID picks that address, and caller ID
+can be faked, so:
+
+- Each email to the caller has a fixed subject start, first line and footer that
+  say it was sent because of a phone call with your organization. They are in
+  the call's language.
+- If the agent uses the caller's saved name and it would reach someone else,
+  nothing is sent.
+- One call sends at most 3 emails.
+
+The words `me` and `caller` (in email also `sender` and `you`) always mean the
+person the agent talks to, never a contact with that name. In an email conversation, "email me"
+goes to the sender, whose address is proven by DMARC. The agent never emails an address someone says or types. It answers
+that it can only email addresses on file, to prevent spam.
+
 ## Hand over to a person
 
 Let the agent pass a live call to a person you picked: a team member with a
@@ -326,8 +348,8 @@ A skipped row names why in `metadata.agent_skip_reason`. Replies bill as outboun
 carry `agent_id`.
 
 An agent answering email can use `list_contacts`, `send_email`, and `send_sms`, unless its
-`tools` list leaves them out. Each send names a person in the directory, and each email allows
-at most 3 sends.
+`tools` list leaves them out. Each text names a team member, each email names a team member or
+saved contact, and each email allows at most 3 sends.
 
 ## Threads
 
