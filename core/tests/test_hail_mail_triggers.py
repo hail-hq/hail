@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from hailhq.core.hail_mail import ROLE_MAILBOXES
 from hailhq.core.models import EmailDomain, RetiredHailMailAddress
-from hailhq.core.schemas import RESERVED_USER_PREFIXES
+from hailhq.core.schemas import RESERVED_WORKSPACE_PREFIXES
 from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 
@@ -16,8 +16,8 @@ def _row(org_id, head="alice", tail="acme") -> EmailDomain:
         organization_id=org_id,
         kind="hail_mail",
         domain=f"{head}+{tail}@mail.hail.so",
-        local_prefix_user=head,
-        local_prefix_org=tail,
+        local_prefix_workspace=head,
+        local_prefix_name=tail,
         verification_status="verified",
         provider="ses",
     )
@@ -33,7 +33,7 @@ async def _set_head(session, row_id, head) -> None:
     await session.execute(
         update(EmailDomain)
         .where(EmailDomain.id == row_id)
-        .values(local_prefix_user=head, domain=f"{head}+acme@mail.hail.so")
+        .values(local_prefix_workspace=head, domain=f"{head}+acme@mail.hail.so")
     )
     await session.commit()
 
@@ -41,8 +41,8 @@ async def _set_head(session, row_id, head) -> None:
 async def _retired(session) -> list[tuple]:
     rows = await session.execute(
         select(
-            RetiredHailMailAddress.local_prefix_user,
-            RetiredHailMailAddress.local_prefix_org,
+            RetiredHailMailAddress.local_prefix_workspace,
+            RetiredHailMailAddress.local_prefix_name,
             RetiredHailMailAddress.organization_id,
         )
     )
@@ -54,8 +54,8 @@ def _sqlstate(exc: pytest.ExceptionInfo) -> str:
 
 
 def test_role_names_are_reserved() -> None:
-    assert ROLE_MAILBOXES <= RESERVED_USER_PREFIXES
-    assert {"noreply", "forwarder"} <= RESERVED_USER_PREFIXES
+    assert ROLE_MAILBOXES <= RESERVED_WORKSPACE_PREFIXES
+    assert {"noreply", "forwarder"} <= RESERVED_WORKSPACE_PREFIXES
 
 
 @pytest.mark.asyncio
@@ -96,7 +96,7 @@ async def test_tail_change_and_custom_rows_record_nothing(async_session) -> None
     await async_session.execute(
         update(EmailDomain)
         .where(EmailDomain.id == row.id)
-        .values(local_prefix_org="sales", domain="alice+sales@mail.hail.so")
+        .values(local_prefix_name="sales", domain="alice+sales@mail.hail.so")
     )
     await async_session.execute(delete(EmailDomain).where(EmailDomain.id == custom.id))
     await async_session.commit()
@@ -129,7 +129,7 @@ async def test_same_org_may_reuse_its_own_head(async_session) -> None:
     await _set_head(async_session, row_id, "alice")
 
     head = await async_session.execute(
-        select(EmailDomain.local_prefix_user).where(EmailDomain.id == row_id)
+        select(EmailDomain.local_prefix_workspace).where(EmailDomain.id == row_id)
     )
     assert head.scalar_one() == "alice"
 
@@ -141,8 +141,8 @@ async def test_org_that_held_a_head_may_return_to_it(async_session) -> None:
     keeper_id = keeper.id
     async_session.add(
         RetiredHailMailAddress(
-            local_prefix_user="alice",
-            local_prefix_org="globex",
+            local_prefix_workspace="alice",
+            local_prefix_name="globex",
             organization_id=uuid.uuid4(),
         )
     )
@@ -163,8 +163,8 @@ async def test_org_that_is_not_the_last_holder_cannot_return(async_session) -> N
     # record is seeded: only a migration rename can produce this history.
     async_session.add(
         RetiredHailMailAddress(
-            local_prefix_user="alice",
-            local_prefix_org="newer",
+            local_prefix_workspace="alice",
+            local_prefix_name="newer",
             organization_id=last_holder,
             retired_at=datetime.now(timezone.utc) + timedelta(hours=1),
         )
@@ -190,7 +190,7 @@ async def test_retiring_a_pair_again_makes_it_the_newest_record(async_session) -
     await async_session.execute(
         update(EmailDomain)
         .where(EmailDomain.id == row_id)
-        .values(local_prefix_org="acme", domain="alice+acme@mail.hail.so")
+        .values(local_prefix_name="acme", domain="alice+acme@mail.hail.so")
     )
     await async_session.commit()
     await _set_head(async_session, row_id, "carol")
@@ -203,8 +203,8 @@ async def test_retiring_a_pair_again_makes_it_the_newest_record(async_session) -
 async def _retire(session, tail="globex", org=None) -> None:
     session.add(
         RetiredHailMailAddress(
-            local_prefix_user="alice",
-            local_prefix_org=tail,
+            local_prefix_workspace="alice",
+            local_prefix_name=tail,
             organization_id=org or uuid.uuid4(),
         )
     )
@@ -215,7 +215,7 @@ async def _set_tail(session, row_id, tail) -> None:
     await session.execute(
         update(EmailDomain)
         .where(EmailDomain.id == row_id)
-        .values(local_prefix_org=tail, domain=f"alice+{tail}@mail.hail.so")
+        .values(local_prefix_name=tail, domain=f"alice+{tail}@mail.hail.so")
     )
     await session.commit()
 
@@ -270,7 +270,7 @@ async def test_unchanged_tail_keeps_working_after_another_org_retired_it(
     await async_session.execute(
         update(EmailDomain)
         .where(EmailDomain.id == row_id)
-        .values(forward_rate_per_hour=5, local_prefix_org="acme")
+        .values(forward_rate_per_hour=5, local_prefix_name="acme")
     )
     await async_session.commit()
 

@@ -43,8 +43,8 @@ async def org(async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch):
         organization_id=org_id,
         kind="hail_mail",
         domain="alice+acme@mail.hail.so",
-        local_prefix_user="alice",
-        local_prefix_org="acme",
+        local_prefix_workspace="alice",
+        local_prefix_name="acme",
         verification_status="verified",
         provider="ses",
         verified_at=datetime.now(UTC),
@@ -330,13 +330,13 @@ async def test_same_list_saved_to_two_domain_rows_sends_one_confirm(
     assert [(t.address, t.status) for t in rows] == [("stranger@other.com", "pending")]
     queued = await _queued_system(async_session, org_id)
     assert len(queued) == 1
-    # Custom rows have no org prefix; the mail is sent through the hail-mail row.
+    # Custom rows have no name prefix; the mail is sent through the hail-mail row.
     assert queued[0].from_address == "noreply+acme@mail.hail.so"
     assert queued[0].email_domain_id == domain.id
 
 
 @pytest.mark.asyncio
-async def test_reserved_user_prefixes_cannot_be_minted_or_renamed(
+async def test_reserved_workspace_prefixes_cannot_be_minted_or_renamed(
     client: httpx.AsyncClient, org
 ):
     """noreply+<org>@ is the sender of every forward. Another org must not be
@@ -347,8 +347,8 @@ async def test_reserved_user_prefixes_cannot_be_minted_or_renamed(
             "/email-domains",
             json={
                 "kind": "hail_mail",
-                "local_prefix_user": prefix,
-                "local_prefix_org": "x",
+                "local_prefix_workspace": prefix,
+                "local_prefix_name": "x",
             },
             headers=headers,
         )
@@ -356,7 +356,7 @@ async def test_reserved_user_prefixes_cannot_be_minted_or_renamed(
         assert "reserved" in r.text
         r = await client.patch(
             f"/email-domains/{domain.id}",
-            json={"local_prefix_user": prefix},
+            json={"local_prefix_workspace": prefix},
             headers=headers,
         )
         assert r.status_code == 422, (prefix, r.text)

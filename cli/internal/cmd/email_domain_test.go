@@ -32,6 +32,8 @@ func sampleEmailDomainResponse(kind string) client.EmailDomainResponse {
 		UpdatedAt:          now,
 	}
 	if kind == "hail_mail" {
+		resp.LocalPrefixWorkspace = &user
+		resp.LocalPrefixName = &org
 		resp.LocalPrefixUser = &user
 		resp.LocalPrefixOrg = &org
 	} else {
@@ -54,8 +56,8 @@ func TestEmailDomain_RegisterHailMail(t *testing.T) {
 		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
 		"email", "domain", "register",
 		"--kind", "hail_mail",
-		"--local-prefix-user", "alice",
-		"--local-prefix-org", "acme",
+		"--local-prefix-workspace", "alice",
+		"--local-prefix-name", "acme",
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -75,14 +77,125 @@ func TestEmailDomain_RegisterHailMail(t *testing.T) {
 	if body.Kind != "hail_mail" {
 		t.Fatalf("Kind = %v", body.Kind)
 	}
-	if body.LocalPrefixUser == nil || *body.LocalPrefixUser != "alice" {
-		t.Fatalf("LocalPrefixUser = %v", body.LocalPrefixUser)
+	if body.LocalPrefixWorkspace == nil || *body.LocalPrefixWorkspace != "alice" {
+		t.Fatalf("LocalPrefixWorkspace = %v", body.LocalPrefixWorkspace)
 	}
-	if body.LocalPrefixOrg == nil || *body.LocalPrefixOrg != "acme" {
-		t.Fatalf("LocalPrefixOrg = %v", body.LocalPrefixOrg)
+	if body.LocalPrefixName == nil || *body.LocalPrefixName != "acme" {
+		t.Fatalf("LocalPrefixName = %v", body.LocalPrefixName)
 	}
 	if !strings.Contains(stdout, "alice+acme@mail.hail.so") {
 		t.Errorf("stdout missing address: %q", stdout)
+	}
+	if !strings.Contains(stdout, "Workspace:    alice") {
+		t.Errorf("stdout missing workspace prefix: %q", stdout)
+	}
+}
+
+func TestEmailDomain_RegisterDeprecatedPrefixFlagsSendOldKeys(t *testing.T) {
+	srv := newFakeServer(t, http.StatusCreated, sampleEmailDomainResponse("hail_mail"))
+
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"email", "domain", "register",
+		"--kind", "hail_mail",
+		"--local-prefix-user", "acme",
+		"--local-prefix-org", "amber",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(srv.lastBody, &body); err != nil {
+		t.Fatalf("body parse: %v; raw=%s", err, srv.lastBody)
+	}
+	// Old flags send the old keys, so a server from before the rename
+	// still accepts them.
+	if body["local_prefix_user"] != "acme" || body["local_prefix_org"] != "amber" {
+		t.Fatalf("old flags must send the old keys, got %v", body)
+	}
+	for _, key := range []string{"local_prefix_workspace", "local_prefix_name"} {
+		if _, present := body[key]; present {
+			t.Errorf("%s should not be sent, got %v", key, body[key])
+		}
+	}
+}
+
+func TestEmailDomain_RegisterRefusesConflictingPrefixFlags(t *testing.T) {
+	srv := newFakeServer(t, http.StatusCreated, sampleEmailDomainResponse("hail_mail"))
+
+	_, stderr, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"email", "domain", "register",
+		"--kind", "hail_mail",
+		"--local-prefix-workspace", "acme",
+		"--local-prefix-user", "globex",
+	)
+	if err == nil || !strings.Contains(stderr, "deprecated name of --local-prefix-workspace") {
+		t.Fatalf("want a conflict error, got %v, stderr %q", err, stderr)
+	}
+	if got := atomic.LoadInt32(&srv.hits); got != 0 {
+		t.Fatalf("expected no request, got %d", got)
+	}
+
+	// One value under both names is fine.
+	_, _, err = runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"email", "domain", "register",
+		"--kind", "hail_mail",
+		"--local-prefix-name", "amber",
+		"--local-prefix-org", "Amber",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(srv.lastBody, &body); err != nil {
+		t.Fatalf("body parse: %v; raw=%s", err, srv.lastBody)
+	}
+	if body["local_prefix_name"] != "amber" {
+		t.Fatalf("local_prefix_name = %v", body["local_prefix_name"])
+	}
+	if _, present := body["local_prefix_org"]; present {
+		t.Errorf("both names given: only the new key is sent, got %v", body)
+	}
+}
+
+func TestEmailDomain_RegisterCustomNamesTheFlagsSet(t *testing.T) {
+	srv := newFakeServer(t, http.StatusCreated, sampleEmailDomainResponse("custom"))
+
+	_, stderr, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"email", "domain", "register",
+		"--kind", "custom", "--domain", "acme.com",
+		"--local-prefix-org", "amber",
+	)
+	if err == nil || !strings.Contains(stderr, "--local-prefix-org is not allowed with --kind=custom") {
+		t.Fatalf("want the old flag named, got %v, stderr %q", err, stderr)
+	}
+	if first, _, _ := strings.Cut(stderr, "\n"); strings.Contains(first, "--local-prefix-name") {
+		t.Errorf("error names a flag that was not set: %q", first)
+	}
+	if got := atomic.LoadInt32(&srv.hits); got != 0 {
+		t.Fatalf("expected no request, got %d", got)
+	}
+}
+
+func TestEmailDomain_PrintsPrefixesFromAnOlderServer(t *testing.T) {
+	resp := sampleEmailDomainResponse("hail_mail")
+	resp.LocalPrefixWorkspace = nil
+	resp.LocalPrefixName = nil
+	srv := newFakeServer(t, http.StatusCreated, resp)
+
+	stdout, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"email", "domain", "register", "--kind", "hail_mail",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout, "Workspace:    alice") || !strings.Contains(stdout, "Name:         acme") {
+		t.Errorf("stdout missing prefixes: %q", stdout)
 	}
 }
 
@@ -134,7 +247,7 @@ func TestEmailDomain_RegisterHailMailMinimalArgs(t *testing.T) {
 		t.Fatalf("kind = %v", body["kind"])
 	}
 	// Optional fields must be omitted, not sent as empty strings.
-	for _, key := range []string{"domain", "local_prefix_user", "local_prefix_org"} {
+	for _, key := range []string{"domain", "local_prefix_workspace", "local_prefix_name", "local_prefix_user", "local_prefix_org"} {
 		if _, present := body[key]; present {
 			t.Errorf("%s should be omitted from minimal-args body, got %v", key, body[key])
 		}

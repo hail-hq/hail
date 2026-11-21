@@ -145,7 +145,7 @@ hail email domain route <id> --scope anyone       # answer every sender, not onl
 hail email domain route <id> --clear              # stop agent replies
 ```
 
-`register` flags: `--kind` (`hail_mail|custom`, required), `--domain` (required for `custom`), `--local-prefix-user`, `--local-prefix-org` (for `hail_mail`), `--idempotency-key`. `list` takes `--limit` / `--cursor`. Aliases: `list`→`ls`, `delete`→`rm`.
+`register` flags: `--kind` (`hail_mail|custom`, required), `--domain` (required for `custom`), `--local-prefix-workspace`, `--local-prefix-name` (for `hail_mail`; the old `--local-prefix-user` and `--local-prefix-org` still work), `--idempotency-key`. `list` takes `--limit` / `--cursor`. Aliases: `list`→`ls`, `delete`→`rm`.
 
 `dns-check <id>` is read-only: it detects the tenant's DNS host and checks whether DKIM/MX/SPF and DMARC are live in public DNS. It never changes `verification_status` (run `verify` for that). `kind='hail_mail'` rows do no lookups, so the host line reads `not recognised`, and there's no table or DMARC line — that zone is Hail's, not the customer's. Otherwise, output is a `DNS host: <name> — <url>` line, a TYPE/NAME/VALUE/SEEN table (`SEEN` = seen in public DNS, not verified; `?` = that record's lookup failed, so it could not be checked), and a `DMARC: found` or `DMARC: not found — add TXT <name> "<value>"` line. If the zone or DMARC lookup fails, or the check times out, it prints one line — `DNS check could not be completed. Try again in a minute.` — instead of guessing at missing records.
 
