@@ -101,11 +101,24 @@ def sender_problems(
 BRAND_REJECTED_LEAD = "The 10DLC registry rejected the registration."
 
 
-def brand_rejected_reason(fixes: list[str], raw: object) -> str:
+# A suspended brand: a compliance action a new filing cannot fix. Twilio
+# warns that texting the same way from a new brand can close the account.
+BRAND_SUSPENDED_LEAD = "The carrier suspended your US texting registration."
+BRAND_SUSPENDED_NEXT = (
+    "Email hi@hail.so and we will look into it. Do not file a new registration."
+)
+
+
+def brand_rejected_reason(
+    fixes: list[str], raw: object, *, suspended: bool = False
+) -> str:
     """Why a brand was refused: Hail's fixes (or its lead sentence), then
     the carrier's own words, then the next step, worded as
     ``customer_reason`` words it. No fix and no carrier text gives the
-    generic ``BRAND_REJECTED``."""
+    generic ``BRAND_REJECTED``. A suspended brand asks the customer to
+    contact Hail instead of filing again."""
+    if suspended:
+        return f"{with_carrier_text(BRAND_SUSPENDED_LEAD, raw)} {BRAND_SUSPENDED_NEXT}"
     said = bool(with_carrier_text("", raw))
     if not fixes and not said:
         return BRAND_REJECTED

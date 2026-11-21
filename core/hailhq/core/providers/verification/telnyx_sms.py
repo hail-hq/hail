@@ -1455,7 +1455,12 @@ def _response_problems(response: httpx.Response, subject_type) -> list[Problem]:
         else:
             _add_carrier_text(problem, _detail(e))
     if not problems:
-        return [Problem(field="", message=_safe_message(response))]
+        texts = carrier_texts(_errors(response))
+        return [
+            Problem(
+                field="", message=_safe_message(response), raw="; ".join(texts) or None
+            )
+        ]
     if with_carrier_text("", unmatched):
         problems.append(_general_problem(unmatched))
     return problems

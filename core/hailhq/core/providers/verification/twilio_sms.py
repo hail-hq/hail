@@ -78,7 +78,12 @@ def _log_failure(operation: str, exc: Exception) -> None:
 
 class _NotCompliant(TwilioRestException):
     """A Trust Hub evaluation found a detail of the form not compliant: a
-    definite refusal of the customer's answers, whatever its wording."""
+    definite refusal of the customer's answers, whatever its wording.
+    ``reasons`` holds each failed field's text."""
+
+    def __init__(self, reasons: list[str]) -> None:
+        super().__init__(400, "", msg="; ".join(reasons))
+        self.reasons = reasons
 
 
 def _policy_links(text: dict) -> dict:
@@ -243,12 +248,19 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
                 )
                 # A failed evaluation names a detail of the form, whatever its
                 # wording; an account or configuration problem stays an outage.
-                if application_validation_error(
-                    exc.status, exc.msg, known_field=isinstance(exc, _NotCompliant)
-                ):
+                if _refused_answers(exc):
                     return DraftResult(
                         refs={},
-                        problems=[Problem(field="", message=_safe_message(exc.msg))],
+                        problems=[
+                            Problem(
+                                field="",
+                                message=_safe_message(
+                                    exc.reasons
+                                    if isinstance(exc, _NotCompliant)
+                                    else exc.msg
+                                ),
+                            )
+                        ],
                     )
             raise VerificationProviderError("Twilio request failed") from exc
         return DraftResult(refs=refs)
@@ -414,7 +426,7 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
             policy_sid=profile_policy
         )
         if ev.status != "compliant":
-            raise _NotCompliant(400, "", msg=_evaluation_message(ev))
+            raise _NotCompliant(_evaluation_reasons(ev))
         th.customer_profiles(profile.sid).update(status="pending-review")
 
         trust = th.trust_products.create(
@@ -449,7 +461,7 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
             policy_sid=_SOLE_PROP_TRUST_POLICY if person else _A2P_TRUST_POLICY
         )
         if ev.status != "compliant":
-            raise _NotCompliant(400, "", msg=_evaluation_message(ev))
+            raise _NotCompliant(_evaluation_reasons(ev))
         th.trust_products(trust.sid).update(status="pending-review")
 
         brand_kwargs = {
@@ -573,7 +585,7 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
             # For the audit row: what the topic match read, codes included.
             raw = "; ".join(
                 ": ".join(
-                    str(v)
+                    ", ".join(map(str, v)) if isinstance(v, list) else str(v)
                     for v in (
                         e.get("error_code"),
                         e.get("description"),
@@ -944,15 +956,27 @@ def _company_type(key: str) -> str:
     }[key]
 
 
-def _evaluation_message(ev) -> str:
-    """The carrier's text for every failed field, or "" when it gave none."""
+def _refused_answers(exc: TwilioRestException) -> bool:
+    """A refusal of the customer's answers, not an outage. A failed
+    evaluation is one when any failed field's own text is (each is checked
+    alone, so one field's wording cannot hide another's)."""
+    if isinstance(exc, _NotCompliant):
+        return any(
+            application_validation_error(exc.status, text, known_field=True)
+            for text in exc.reasons or [""]
+        )
+    return application_validation_error(exc.status, exc.msg)
+
+
+def _evaluation_reasons(ev) -> list[str]:
+    """The carrier's text for every failed field (empty when it gave none)."""
     said: list[str] = []
     for result in getattr(ev, "results", None) or []:
         for field in result.get("fields", []) if isinstance(result, dict) else []:
             text = field.get("failure_reason")
             if not field.get("passed", True) and text and text not in said:
                 said.append(text)
-    return "; ".join(said)
+    return said
 
 
 # Hail's fix for each brand refusal Twilio documents. By error code: the
@@ -1036,14 +1060,21 @@ def _brand_customer_reason(brand) -> str:
             )
         if fix and fix not in fixes:
             fixes.append(fix)
+    # Twilio's "General Error" placeholder says nothing: never quote it.
+    errors = [e for e in errors if not _placeholder(e.get("description"))]
     said: object = errors
     if not with_carrier_text("", errors):
         # No text in errors: Twilio's failure_reason, unless it is only
         # its placeholder.
         failure = str(getattr(brand, "failure_reason", None) or "")
-        placeholder = failure.strip().rstrip(".").lower() == "general error"
-        said = "" if placeholder else failure
-    return brand_rejected_reason(fixes, said)
+        said = "" if _placeholder(failure) else failure
+    return brand_rejected_reason(
+        fixes, said, suspended=getattr(brand, "status", None) == "SUSPENDED"
+    )
+
+
+def _placeholder(text: object) -> bool:
+    return str(text or "").strip().rstrip(".").lower() == "general error"
 
 
 def _brand_reason(brand) -> str | None:
@@ -1062,8 +1093,8 @@ def _brand_reason(brand) -> str | None:
 
 def _safe_message(msg) -> str:
     """Hail's short sentence for the detail ``msg`` names, then the
-    carrier's own words."""
-    low = (msg or "").lower()
+    carrier's own words. ``msg`` is one text or a list of them."""
+    low = " ".join(msg if isinstance(msg, list) else [msg or ""]).lower()
     for words, text in (
         (("ein", "tax id", "registration number"), "Check the business tax number."),
         (("website", "url"), "Check the website address."),

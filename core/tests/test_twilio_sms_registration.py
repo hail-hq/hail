@@ -819,6 +819,9 @@ def test_sdk_wrapper_is_not_quoted() -> None:
         "Hi. The carrier said: Bad EIN."
     )
     assert with_carrier_text("Hi.", "Unable to create record") == "Hi."
+    assert with_carrier_text("Hi.", "Unable to fetch page: Bad EIN") == (
+        "Hi. The carrier said: Bad EIN."
+    )
     # A field tag goes with or without its separator.
     assert with_carrier_text("Hi.", "[address_sids]: Invalid Postal Code.") == (
         "Hi. The carrier said: Invalid Postal Code."
@@ -873,6 +876,30 @@ async def test_draft_noncompliant_evaluation_is_problem_whatever_its_wording(
     draft = await _draft(_provider(r))
     assert [pr.field for pr in draft.problems] == [""]
     assert draft.refs == {}
+
+
+async def test_noncompliant_fields_are_each_checked_alone() -> None:
+    """One field's wording (here "configuration") cannot turn another
+    field's fixable refusal into an outage."""
+    r = _ok_responses()
+    r["customer_profiles_evaluations.create"] = SimpleNamespace(
+        status="noncompliant",
+        results=[
+            {
+                "fields": [
+                    {"passed": False, "failure_reason": "bad website"},
+                    {"passed": False, "failure_reason": "configuration mismatch"},
+                ]
+            }
+        ],
+    )
+    draft = await _draft(_provider(r))
+    assert [pr.message for pr in draft.problems] == [
+        (
+            "Check the website address. The carrier said: bad website. "
+            "configuration mismatch."
+        )
+    ]
 
 
 async def test_draft_noncompliant_account_configuration_stays_retryable() -> None:
@@ -1030,11 +1057,26 @@ async def test_failed_brand_general_error_placeholder_is_not_quoted() -> None:
 
 async def test_failed_brand_without_errors_quotes_failure_reason() -> None:
     brand = _failed_brand()
-    brand.status, brand.failure_reason = "SUSPENDED", "Brand suspended by review"
+    brand.failure_reason = "Website unreachable"
     st = await _brand_status(brand)
     assert st.reason == (
         "The 10DLC registry rejected the registration. The carrier said: "
-        "Brand suspended by review. Fix that and start again."
+        "Website unreachable. Fix that and start again."
+    )
+    # A placeholder in errors is never quoted either.
+    brand = _failed_brand((30794, "General Error"))
+    assert "General Error" not in (await _brand_status(brand)).reason
+
+
+async def test_suspended_brand_asks_to_contact_hail_not_refile() -> None:
+    brand = _failed_brand((30794, "Brand suspended by review"))
+    brand.status = "SUSPENDED"
+    st = await _brand_status(brand)
+    assert st.state == "rejected"
+    assert st.reason == (
+        "The carrier suspended your US texting registration. The carrier said: "
+        "Brand suspended by review. Email hi@hail.so and we will look into it. "
+        "Do not file a new registration."
     )
 
 
