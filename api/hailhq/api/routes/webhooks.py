@@ -1,6 +1,7 @@
 """CRUD for org-wide webhook subscriptions and per-attempt delivery audit.
 
 POST     /webhooks                              create + return plaintext secret once
+POST     /webhooks/test                         send one test event, return the answer
 GET      /webhooks                              list paginated
 GET      /webhooks/event-types                  supported names and display metadata
 GET      /webhooks/{id}                         detail (no secret)
@@ -20,10 +21,12 @@ from __future__ import annotations
 
 import asyncio
 import secrets as _secrets
+import time
 from datetime import datetime, timezone
 from typing import Annotated
-from uuid import UUID
+from uuid import UUID, uuid4
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi import status as http_status
 from hailhq.api.audit import actor_of, write_audit_log
@@ -33,7 +36,11 @@ from hailhq.api.pagination import fetch_cursor_page
 from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.core.config import settings
 from hailhq.core.db import get_session
-from hailhq.core.http_post import validate_webhook_target
+from hailhq.core.http_post import (
+    PrivateNetworkBlockedError,
+    httpx_post,
+    validate_webhook_target,
+)
 from hailhq.core.models import WebhookDelivery, WebhookSubscription
 from hailhq.core.schemas import (
     WebhookDeliveryListResponse,
@@ -44,10 +51,14 @@ from hailhq.core.schemas import (
     WebhookSubscriptionListResponse,
     WebhookSubscriptionPatch,
     WebhookSubscriptionResponse,
+    WebhookTestRequest,
+    WebhookTestResponse,
 )
 from hailhq.core.secret_cipher import SecretCipher
 from hailhq.core.urls import same_request_url
 from hailhq.core.webhook_events import WebhookEventType
+from hailhq.core.webhook_worker import RESPONSE_BODY_CAP, redact_credentials
+from hailhq.core.webhooks import build_event_payload, sign_payload
 from pydantic import SecretStr
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -228,6 +239,107 @@ async def list_event_types() -> WebhookEventCatalogResponse:
             WebhookEventDefinition(type=event, label=event.label, channel=event.channel)
             for event in WebhookEventType
         ]
+    )
+
+
+_TEST_EVENT = "webhook.test"
+_TEST_TIMEOUT_SECONDS = 10.0
+
+
+def _test_error(exc: Exception) -> str:
+    if isinstance(exc, httpx.TimeoutException):
+        return f"No answer within {_TEST_TIMEOUT_SECONDS:.0f} seconds."
+    if isinstance(exc, PrivateNetworkBlockedError):
+        return f"target_url is not allowed: {exc}"
+    if isinstance(exc, httpx.ConnectError):
+        return f"Could not connect: {exc}" if str(exc) else "Could not connect."
+    return str(exc) or type(exc).__name__
+
+
+@router.post("/test", response_model=WebhookTestResponse)
+async def test_subscription(
+    body: WebhookTestRequest,
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> WebhookTestResponse:
+    """Send one ``webhook.test`` event to a URL and return the receiver's answer.
+
+    Use it before saving a subscription or a change to one. It sends the
+    same headers as a real delivery. Nothing is stored or retried, and a
+    failed test does not count toward auto-disable.
+
+    With ``subscription_id`` the subscription's secret signs the test, and an
+    omitted ``authorization`` sends the saved header. Without it the test is
+    not signed: a new subscription gets its secret when it is created.
+    """
+    authorization = _authorization_value(body.authorization)
+    try:
+        # DNS lookup: keep it off the event loop.
+        await asyncio.to_thread(
+            validate_webhook_target,
+            body.target_url,
+            allow_private_networks=settings.hail_webhook_allow_private_networks,
+        )
+    except ValueError as exc:
+        raise unprocessable(str(exc), loc=["body", "target_url"]) from exc
+
+    delivery_id = uuid4()
+    headers = {
+        "Content-Type": "application/json",
+        "X-Hail-Event": _TEST_EVENT,
+        "X-Hail-Delivery": str(delivery_id),
+    }
+    secret: str | None = None
+    if body.subscription_id is not None:
+        sub = await _load_owned(db, body.subscription_id, principal.organization_id)
+        cipher = SecretCipher(settings.hail_webhook_secret_key)
+        secret = cipher.decrypt(sub.secret_encrypted)
+        headers["X-Hail-Subscription"] = str(sub.id)
+        if authorization is None and sub.authorization_encrypted is not None:
+            # A saved credential goes only to the URL it was saved for.
+            if not same_request_url(body.target_url, sub.target_url):
+                raise unprocessable(
+                    "Enter the Authorization header again or remove it when changing the target URL.",
+                    loc=["body", "authorization"],
+                )
+            authorization = cipher.decrypt(sub.authorization_encrypted)
+        # Return the pooled connection before a slow receiver holds it.
+        await db.commit()
+
+    payload = build_event_payload(
+        delivery_id=delivery_id,
+        event_type=_TEST_EVENT,
+        organization_id=principal.organization_id,
+        data={"message": "Test event from Hail. No action needed."},
+    )
+    if secret is not None:
+        headers["X-Hail-Signature"] = sign_payload(payload, secret)
+    if authorization:
+        headers["Authorization"] = authorization
+
+    started = time.monotonic()
+    status: int | None = None
+    text: str | None = None
+    error: str | None = None
+    try:
+        status, text = await httpx_post(
+            body.target_url,
+            payload,
+            headers,
+            allow_private_networks=settings.hail_webhook_allow_private_networks,
+            timeout_seconds=_TEST_TIMEOUT_SECONDS,
+        )
+    except Exception as exc:  # the answer is the receiver's problem to show
+        error = _test_error(exc)
+    duration_ms = round((time.monotonic() - started) * 1000)
+    text = redact_credentials(text, authorization or "")
+    return WebhookTestResponse(
+        ok=status is not None and 200 <= status < 300,
+        status_code=status,
+        duration_ms=duration_ms,
+        response_body=text[:RESPONSE_BODY_CAP] if text else None,
+        error=redact_credentials(error, authorization or ""),
+        signed=secret is not None,
     )
 
 

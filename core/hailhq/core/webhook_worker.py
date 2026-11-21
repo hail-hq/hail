@@ -117,6 +117,15 @@ def _reflected_credentials(authorization: str) -> list[str]:
     )
 
 
+def redact_credentials(text: str | None, authorization: str) -> str | None:
+    """Replace every form of ``authorization`` a receiver may echo back."""
+    if not authorization or not text:
+        return text
+    for credential in _reflected_credentials(authorization):
+        text = text.replace(credential, "[redacted]")
+    return text
+
+
 class WebhookWorker:
     def __init__(
         self,
@@ -281,9 +290,7 @@ class WebhookWorker:
 
             # A receiver or HTTP exception can reflect its request credentials.
             # Keep those out of the delivery inspector and audit history.
-            if authorization:
-                for credential in _reflected_credentials(authorization):
-                    resp_body = (resp_body or "").replace(credential, "[redacted]")
+            resp_body = redact_credentials(resp_body, authorization)
 
             async with self._session_factory() as session:
                 if status is not None and 200 <= status < 300:

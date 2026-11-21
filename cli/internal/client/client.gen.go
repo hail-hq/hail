@@ -4398,6 +4398,39 @@ type WebhookSubscriptionResponse struct {
 // WebhookSubscriptionResponseStatus 'active' (delivering) or 'disabled' (paused).
 type WebhookSubscriptionResponseStatus string
 
+// WebhookTestRequest defines model for WebhookTestRequest.
+type WebhookTestRequest struct {
+	// Authorization Authorization header to send, e.g. Bearer <receiver key>. With subscription_id, omit or null to send the saved header (only when target_url is the saved URL); an empty string sends none.
+	Authorization *string `json:"authorization,omitempty"`
+
+	// SubscriptionId Saved subscription to test. Its secret signs the test. Without it the test is not signed, because a new subscription has no secret yet.
+	SubscriptionId *openapi_types.UUID `json:"subscription_id,omitempty"`
+
+	// TargetUrl HTTPS URL to send the test event to.
+	TargetUrl string `json:"target_url"`
+}
+
+// WebhookTestResponse Result of one test POST. Nothing is stored or retried.
+type WebhookTestResponse struct {
+	// DurationMs Time from sending to the answer or error.
+	DurationMs int `json:"duration_ms"`
+
+	// Error Why no answer came (timeout, connection refused).
+	Error *string `json:"error,omitempty"`
+
+	// Ok True when the receiver answered with a 2xx status.
+	Ok bool `json:"ok"`
+
+	// ResponseBody Start of the receiver's answer (at most 4096 characters), with the Authorization header removed.
+	ResponseBody *string `json:"response_body,omitempty"`
+
+	// Signed Whether the test carried an X-Hail-Signature header.
+	Signed bool `json:"signed"`
+
+	// StatusCode HTTP status the receiver answered with. Null when no answer came.
+	StatusCode *int `json:"status_code,omitempty"`
+}
+
 // WhoamiResponse Who the caller is — the answer “GET /whoami“ gives.
 //
 // “user_id“/“email“/“name“ are “None“ for shared-key
@@ -4933,6 +4966,11 @@ type CreateSubscriptionV1WebhooksPostParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
+// TestSubscriptionV1WebhooksTestPostParams defines parameters for TestSubscriptionV1WebhooksTestPost.
+type TestSubscriptionV1WebhooksTestPostParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
 // DeleteSubscriptionV1WebhooksSubIdDeleteParams defines parameters for DeleteSubscriptionV1WebhooksSubIdDelete.
 type DeleteSubscriptionV1WebhooksSubIdDeleteParams struct {
 	Authorization *string `json:"authorization,omitempty"`
@@ -5053,6 +5091,9 @@ type ConfirmVerificationJSONRequestBody = ConfirmRequest
 
 // CreateSubscriptionV1WebhooksPostJSONRequestBody defines body for CreateSubscriptionV1WebhooksPost for application/json ContentType.
 type CreateSubscriptionV1WebhooksPostJSONRequestBody = WebhookSubscriptionCreate
+
+// TestSubscriptionV1WebhooksTestPostJSONRequestBody defines body for TestSubscriptionV1WebhooksTestPost for application/json ContentType.
+type TestSubscriptionV1WebhooksTestPostJSONRequestBody = WebhookTestRequest
 
 // PatchSubscriptionV1WebhooksSubIdPatchJSONRequestBody defines body for PatchSubscriptionV1WebhooksSubIdPatch for application/json ContentType.
 type PatchSubscriptionV1WebhooksSubIdPatchJSONRequestBody = WebhookSubscriptionPatch
@@ -5729,6 +5770,11 @@ type ClientInterface interface {
 
 	// ListEventTypesV1WebhooksEventTypesGet request
 	ListEventTypesV1WebhooksEventTypesGet(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// TestSubscriptionV1WebhooksTestPostWithBody request with any body
+	TestSubscriptionV1WebhooksTestPostWithBody(ctx context.Context, params *TestSubscriptionV1WebhooksTestPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	TestSubscriptionV1WebhooksTestPost(ctx context.Context, params *TestSubscriptionV1WebhooksTestPostParams, body TestSubscriptionV1WebhooksTestPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// DeleteSubscriptionV1WebhooksSubIdDelete request
 	DeleteSubscriptionV1WebhooksSubIdDelete(ctx context.Context, subId openapi_types.UUID, params *DeleteSubscriptionV1WebhooksSubIdDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -7076,6 +7122,30 @@ func (c *Client) CreateSubscriptionV1WebhooksPost(ctx context.Context, params *C
 
 func (c *Client) ListEventTypesV1WebhooksEventTypesGet(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListEventTypesV1WebhooksEventTypesGetRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) TestSubscriptionV1WebhooksTestPostWithBody(ctx context.Context, params *TestSubscriptionV1WebhooksTestPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewTestSubscriptionV1WebhooksTestPostRequestWithBody(c.Server, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) TestSubscriptionV1WebhooksTestPost(ctx context.Context, params *TestSubscriptionV1WebhooksTestPostParams, body TestSubscriptionV1WebhooksTestPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewTestSubscriptionV1WebhooksTestPostRequest(c.Server, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -12208,6 +12278,61 @@ func NewListEventTypesV1WebhooksEventTypesGetRequest(server string) (*http.Reque
 	return req, nil
 }
 
+// NewTestSubscriptionV1WebhooksTestPostRequest calls the generic TestSubscriptionV1WebhooksTestPost builder with application/json body
+func NewTestSubscriptionV1WebhooksTestPostRequest(server string, params *TestSubscriptionV1WebhooksTestPostParams, body TestSubscriptionV1WebhooksTestPostJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewTestSubscriptionV1WebhooksTestPostRequestWithBody(server, params, "application/json", bodyReader)
+}
+
+// NewTestSubscriptionV1WebhooksTestPostRequestWithBody generates requests for TestSubscriptionV1WebhooksTestPost with any type of body
+func NewTestSubscriptionV1WebhooksTestPostRequestWithBody(server string, params *TestSubscriptionV1WebhooksTestPostParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/webhooks/test")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
 // NewDeleteSubscriptionV1WebhooksSubIdDeleteRequest generates requests for DeleteSubscriptionV1WebhooksSubIdDelete
 func NewDeleteSubscriptionV1WebhooksSubIdDeleteRequest(server string, subId openapi_types.UUID, params *DeleteSubscriptionV1WebhooksSubIdDeleteParams) (*http.Request, error) {
 	var err error
@@ -12951,6 +13076,11 @@ type ClientWithResponsesInterface interface {
 
 	// ListEventTypesV1WebhooksEventTypesGetWithResponse request
 	ListEventTypesV1WebhooksEventTypesGetWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListEventTypesV1WebhooksEventTypesGetResponse, error)
+
+	// TestSubscriptionV1WebhooksTestPostWithBodyWithResponse request with any body
+	TestSubscriptionV1WebhooksTestPostWithBodyWithResponse(ctx context.Context, params *TestSubscriptionV1WebhooksTestPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*TestSubscriptionV1WebhooksTestPostResponse, error)
+
+	TestSubscriptionV1WebhooksTestPostWithResponse(ctx context.Context, params *TestSubscriptionV1WebhooksTestPostParams, body TestSubscriptionV1WebhooksTestPostJSONRequestBody, reqEditors ...RequestEditorFn) (*TestSubscriptionV1WebhooksTestPostResponse, error)
 
 	// DeleteSubscriptionV1WebhooksSubIdDeleteWithResponse request
 	DeleteSubscriptionV1WebhooksSubIdDeleteWithResponse(ctx context.Context, subId openapi_types.UUID, params *DeleteSubscriptionV1WebhooksSubIdDeleteParams, reqEditors ...RequestEditorFn) (*DeleteSubscriptionV1WebhooksSubIdDeleteResponse, error)
@@ -14912,6 +15042,29 @@ func (r ListEventTypesV1WebhooksEventTypesGetResponse) StatusCode() int {
 	return 0
 }
 
+type TestSubscriptionV1WebhooksTestPostResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *WebhookTestResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r TestSubscriptionV1WebhooksTestPostResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r TestSubscriptionV1WebhooksTestPostResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type DeleteSubscriptionV1WebhooksSubIdDeleteResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -16043,6 +16196,23 @@ func (c *ClientWithResponses) ListEventTypesV1WebhooksEventTypesGetWithResponse(
 		return nil, err
 	}
 	return ParseListEventTypesV1WebhooksEventTypesGetResponse(rsp)
+}
+
+// TestSubscriptionV1WebhooksTestPostWithBodyWithResponse request with arbitrary body returning *TestSubscriptionV1WebhooksTestPostResponse
+func (c *ClientWithResponses) TestSubscriptionV1WebhooksTestPostWithBodyWithResponse(ctx context.Context, params *TestSubscriptionV1WebhooksTestPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*TestSubscriptionV1WebhooksTestPostResponse, error) {
+	rsp, err := c.TestSubscriptionV1WebhooksTestPostWithBody(ctx, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseTestSubscriptionV1WebhooksTestPostResponse(rsp)
+}
+
+func (c *ClientWithResponses) TestSubscriptionV1WebhooksTestPostWithResponse(ctx context.Context, params *TestSubscriptionV1WebhooksTestPostParams, body TestSubscriptionV1WebhooksTestPostJSONRequestBody, reqEditors ...RequestEditorFn) (*TestSubscriptionV1WebhooksTestPostResponse, error) {
+	rsp, err := c.TestSubscriptionV1WebhooksTestPost(ctx, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseTestSubscriptionV1WebhooksTestPostResponse(rsp)
 }
 
 // DeleteSubscriptionV1WebhooksSubIdDeleteWithResponse request returning *DeleteSubscriptionV1WebhooksSubIdDeleteResponse
@@ -18782,6 +18952,39 @@ func ParseListEventTypesV1WebhooksEventTypesGetResponse(rsp *http.Response) (*Li
 			return nil, err
 		}
 		response.JSON200 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseTestSubscriptionV1WebhooksTestPostResponse parses an HTTP response from a TestSubscriptionV1WebhooksTestPostWithResponse call
+func ParseTestSubscriptionV1WebhooksTestPostResponse(rsp *http.Response) (*TestSubscriptionV1WebhooksTestPostResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &TestSubscriptionV1WebhooksTestPostResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest WebhookTestResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
 
 	}
 

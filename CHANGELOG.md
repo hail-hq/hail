@@ -4,6 +4,10 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- Webhooks: send a test event to an endpoint before you save it with `POST /v1/webhooks/test`, and see the receiver's answer.
+
 ## [0.34.0] (2026-11-21)
 
 Webhooks can send your receiver's own `Authorization` header. Companies
