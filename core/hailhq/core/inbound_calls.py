@@ -143,15 +143,31 @@ async def open_inbound_call(
         logger.info("inbound call to unknown/pool number %s dropped", attrs.dialed)
         return Rejected("unknown_number")
     # The INVITE must arrive on the LiveKit inbound trunk configured for the
-    # number's carrier. Carriers may share one trunk (one wildcard inbound
-    # trunk is all LiveKit allows) or have one each; both pass this check.
+    # number's carrier: its own trunk when its key is set, else the shared
+    # one. While the shared trunk exists it is accepted too, so numbers can
+    # move to their carrier's trunk with no refused call (LiveKit lists a
+    # number on one trunk only). Each trunk keeps a placeholder entry,
+    # because a trunk with no numbers matches every dialed number.
     try:
         expected_trunk = inbound_trunk(number.provider)
     except ValueError:
         expected_trunk = None
+    shared = settings.livekit_sip_inbound_trunk_id
+    # The shared trunk counts only for a carrier Hail can route.
+    accepted = {expected_trunk, shared} - {None, ""} if expected_trunk else set()
+    if shared and attrs.trunk_id == shared and expected_trunk not in (None, shared):
+        # Expected only for a number not moved yet. After the move, a call
+        # here means the shared trunk matched a moved number: check that it
+        # still lists its placeholder (sip_trunks.py status).
+        logger.info(
+            "inbound call to %s answered on the shared trunk; its carrier "
+            "%s has its own trunk",
+            attrs.dialed,
+            number.provider,
+        )
     if (
         not attrs.trunk_id
-        or attrs.trunk_id != expected_trunk
+        or attrs.trunk_id not in accepted
         or "voice" not in number.capabilities
     ):
         # A real number of a real customer: keep a failed Call (and its event

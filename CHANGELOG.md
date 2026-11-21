@@ -7,8 +7,31 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 ### Changed
 
 - Email: hail-mail prefix fields are now `local_prefix_workspace` (before the `+`) and `local_prefix_name` (after it). The old `local_prefix_user` and `local_prefix_org` still work and are deprecated.
-- CLI and SDK: the new prefix names (`--local-prefix-workspace`, `--local-prefix-name` and the new SDK arguments) need a Hail server from this release or newer. The old names still work with older servers.
+- CLI and SDK: the new prefix names (`--local-prefix-workspace` and `--local-prefix-name` in the CLI, `local_prefix_workspace` and `local_prefix_name` in the SDK) need a Hail server from this release or newer. The old names, used alone, still work with older servers.
 - CLI: `hail email domain` commands (register, get, verify, route) print `Workspace:` and `Name:` instead of `User prefix:` and `Org prefix:`.
+
+## [0.34.0] (2026-11-21)
+
+Webhooks can send your receiver's own `Authorization` header. Companies
+register for US texting at low volume by default, with lower fees. Agent emails
+to callers go only to their saved address and use the call's language.
+Self-hosts with per-carrier inbound trunks must update the shared trunk
+before upgrading (see Changed).
+
+Component versions cut alongside this release:
+**`sdk-v0.24.0`** (PyPI). Database migrations run on deploy.
+
+### Added
+
+- Webhooks can send an `Authorization` header to your receiver: set `authorization` on `POST`/`PATCH /v1/webhooks` (SDK too). Hail encrypts it and never returns it.
+- US texting registration: companies register at low volume (up to 2,000 texts a day, lower fees) unless they set `daily_texts` to `OVER_2000`.
+- US texting registration: when the faster lane still cannot verify your company, the registration waits for you (`step: needs_information`) and can be cancelled, so you can register again.
+
+### Changed
+
+- Self-host: inbound calls can use one LiveKit trunk per carrier, locked to that carrier ([LiveKit Cloud §4](docs/public/self-host/livekit-cloud.md#4-inbound-calls)).
+- Self-host: the voicebot image is about 0.9 GB smaller, and a release that changes only Hail code adds a few MB of new image layers instead of every package again.
+- **Breaking.** Self-host with a `LIVEKIT_<CARRIER>_SIP_INBOUND_TRUNK_ID` set: before upgrading, add `hail-placeholder-shared` to the shared inbound trunk's `numbers`, or empty `LIVEKIT_SIP_INBOUND_TRUNK_ID`. A shared trunk with no numbers now takes calls to every number.
 
 ### Fixed
 
@@ -29,14 +52,11 @@ The MCP registry entry moves to 0.2.0. Database migrations run on deploy.
 
 ### Added
 
-- Webhooks can send an `Authorization` header to your receiver: set `authorization` on `POST`/`PATCH /v1/webhooks` (SDK too). Hail encrypts it and never returns it.
 - Agents can email your saved contacts by name, and the caller when their number is a saved contact. They never email an address someone says or types.
 - Agents can call your own API during calls, texts and email: add `http_tools` on `POST`/`PATCH /v1/agents` (CLI, SDK, MCP too). Each request is signed like a webhook. A tool `url` that is private or does not resolve is refused on save with `URL host is private or could not be resolved`.
 - Call agents know the date, time and time zone at the start of each call.
 - Text and email reply agents know the date, time and time zone too.
 - Calls: `GET /v1/calls/{id}` returns the call's transcript, and the new `call.summarized` webhook sends the transcript and a short summary after each call.
-- US texting registration: companies register at low volume (up to 2,000 texts a day, lower fees) unless they set `daily_texts` to `OVER_2000`.
-- US texting registration: when the faster lane still cannot verify your company, the registration waits for you (`step: needs_information`) and can be cancelled, so you can register again.
 - US trial texting: a workspace can send up to 25 texts, ever, to its own verified phone from a Hail number, with no US registration needed. Set it up in the console under Numbers.
 - Rejected number registrations can be fixed and sent again for 30 days with `POST /v1/verifications/{id}/resubmit` (MCP: `resubmit_verification`).
 - `sms.received` webhooks and `received` SMS events have a new `compliance_keyword` field: `STOP`, `START` or `HELP` when the text is one of those keywords, otherwise `null`.

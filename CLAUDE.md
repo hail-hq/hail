@@ -86,7 +86,8 @@ Internal runbooks (not published) live in `docs/operations/`:
 [didww-by-request.md](docs/operations/didww-by-request.md) (ordering a DIDWW number a customer asked support for; routing a number by hand),
 [first-number-call-test.md](docs/operations/first-number-call-test.md) (one test call to the first number of a new carrier, country or type),
 [call-record-deletion.md](docs/operations/call-record-deletion.md) (deleting one call, its recording and its charges from a workspace),
-[voice-llm.md](docs/operations/voice-llm.md) (the house LLM chain, Bedrock access and model ids).
+[voice-llm.md](docs/operations/voice-llm.md) (the house LLM chain, Bedrock access and model ids),
+[inbound-trunk-lockdown.md](docs/operations/inbound-trunk-lockdown.md) (one LiveKit inbound trunk per carrier, locked by IP or password; cutover, negative test, weekly IP check).
 
 ## Order of work
 
@@ -129,7 +130,7 @@ A tool result is text for the model, not for the caller: the model says it in th
 
 - **Python**: ruff (lint, `--fix`) + black (format); ruff, black and pytest run in CI. FastAPI async handlers. Type-hinted. Pydantic v2 models.
 - **Go**: `gofmt`, stdlib first. Cobra for subcommands if/when the CLI grows them.
-- **Docker**: multi-stage (builder → runtime), runs as non-root `hail` user, runtime image carries no build tools. Deps installed into `/app/.venv` with `uv sync --frozen`, so images install exactly `uv.lock`; only the venv is copied to the runtime stage. Newer releases arrive by upgrading `uv.lock` in a PR.
+- **Docker**: multi-stage (builder → runtime), runs as non-root `hail` user, runtime image carries no build tools. Third-party deps install into `/app/.venv` in a `deps` stage that copies only `uv.lock` and the workspace `pyproject.toml` files (`uv sync --frozen --no-install-workspace`), so a code change reuses that layer; the builder stage adds our `hailhq` packages, and the runtime copies the deps venv plus only those packages. Newer releases arrive by upgrading `uv.lock` in a PR.
 - **Pre-commit**: husky + lint-staged run `ruff`/`black`/`gofmt`/`prettier` on staged files. Install with `pnpm install` at repo root; hooks activate automatically via the `prepare` script. pnpm is the Node package manager for this repo (pinned via `packageManager` in `package.json`).
 - **Commits**: Conventional Commits.
 
