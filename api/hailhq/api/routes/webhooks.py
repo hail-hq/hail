@@ -253,8 +253,11 @@ def _test_error(exc: Exception) -> str:
     if isinstance(exc, PrivateNetworkBlockedError):
         return "target_url is not allowed: it does not resolve to a public address."
     if isinstance(exc, httpx.ConnectError):
-        if "CERTIFICATE" in str(exc).upper() or "SSL" in str(exc).upper():
+        reason = str(exc).upper()
+        if "CERTIFICATE" in reason:
             return "The TLS certificate check failed."
+        if "SSL" in reason or "TLS" in reason:
+            return "The TLS handshake failed."
         return "Could not connect to your endpoint."
     if isinstance(exc, httpx.RemoteProtocolError):
         return "Your endpoint closed the connection without a valid answer."

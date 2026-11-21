@@ -338,3 +338,24 @@ async def test_httpx_post_tries_ipv4_first_then_the_next_address(
     )
     assert (status, body) == (200, "ok")
     assert first.called and second.called
+
+
+@pytest.mark.asyncio
+async def test_httpx_post_tries_the_next_address_after_a_connect_timeout(
+    respx_mock, monkeypatch
+):
+    def fake_getaddrinfo(host, port, **kw):
+        return [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0)),
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.35", 0)),
+        ]
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+    respx_mock.post("https://93.184.216.34/x").mock(
+        side_effect=httpx.ConnectTimeout("timed out")
+    )
+    respx_mock.post("https://93.184.216.35/x").respond(200, text="ok")
+    status, body = await httpx_post(
+        "https://example.com/x", b"{}", {}, allow_private_networks=False
+    )
+    assert (status, body) == (200, "ok")

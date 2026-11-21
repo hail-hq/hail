@@ -36,8 +36,10 @@ tools the save check here is a first filter, and the real guard is the
 resolver check in ``agent_tools/http_tool.py``, which judges every address
 aiohttp is about to connect to.
 
-Not covered: httpx resolves the host again when it connects, so a DNS
-rebind between the two lookups is still possible.
+Webhook deliveries connect to an address ``assert_public_host`` returned,
+so a DNS rebind after the check cannot move them. ``assert_public_https_url``
+callers (the LLM ``base_url``) still let httpx resolve the host again when it
+connects, so a rebind between the two lookups is possible there.
 """
 
 from __future__ import annotations

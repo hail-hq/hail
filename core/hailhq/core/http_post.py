@@ -119,8 +119,9 @@ async def httpx_post(
                         raw = raw[:max_body_bytes]
                     text = raw.decode(resp.encoding or "utf-8", "replace")
                     return resp.status_code, text
-            except httpx.ConnectError:
-                # Nothing was sent: try the next checked address.
+            except (httpx.ConnectError, httpx.ConnectTimeout):
+                # Nothing was sent: try the next checked address. A dead
+                # address often times out instead of refusing.
                 if index == len(targets) - 1:
                     raise
     raise AssertionError("unreachable: targets is never empty")
