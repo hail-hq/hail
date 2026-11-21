@@ -442,8 +442,9 @@ class ProviderStatus(BaseModel):
     # never log it.
     reason: str | None = None
     # The carrier's own text for a rejection. Kept in the audit log; never
-    # logged. ``reason`` may quote it when Hail has no fix of its own
-    # (see rejections.py).
+    # logged. For US texting ``reason`` always quotes it after Hail's fix
+    # (``with_carrier_text``); for a number verification, when Hail has no
+    # fix of its own (see rejections.py).
     raw_reason: str | None = None
 
 

@@ -28,8 +28,10 @@ identifying data is not written to disk or logs, except
 the name of the person or company (``subject_name``), which the
 database keeps so the customer can tell verifications apart. It is never
 logged. One more exception: when the carrier rejects a verification, its own reason is
-kept in the audit row (``payload.carrier_reason``), never in logs and never
-shown to the customer. That text can quote a value the customer sent.
+kept in the audit row (``payload.carrier_reason``) and never logged. A US
+texting reason (``rejection_reason``, ``Problem.message``) quotes it to the
+workspace after Hail's sentence, so never log those either. That text can
+quote a value the customer sent.
 The multipart body is parsed here with an in-memory parser and a hard size cap,
 so no part is ever spooled to a temporary file.
 """

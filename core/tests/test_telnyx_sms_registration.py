@@ -1871,6 +1871,22 @@ async def test_brand_refused_later_reads_text_and_fields(reasons, start) -> None
     assert st.reason.startswith(start)
 
 
+async def test_an_account_error_under_description_stays_an_outage():
+    def handler(req):
+        return httpx.Response(
+            422,
+            json={
+                "errors": [
+                    {"detail": "Invalid email", "source": {"pointer": "/email"}},
+                    {"description": "Unauthorized: profile configuration invalid"},
+                ]
+            },
+        )
+
+    with pytest.raises(VerificationProviderError):
+        await _draft(_provider(handler), subject="person", fields=PERSON_FIELDS)
+
+
 async def test_an_off_form_duplicate_error_alone_gets_the_reuse_fix():
     def handler(req):
         return httpx.Response(

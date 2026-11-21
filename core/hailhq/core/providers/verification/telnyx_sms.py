@@ -1334,9 +1334,8 @@ def _refused(exc: Exception) -> bool:
         (_pointer(error) or "").removeprefix("/body") in _APPLICATION_POINTERS
         for error in errors
     )
-    prose = " ".join(
-        f"{error.get('title', '')} {error.get('detail', '')}" for error in errors
-    )
+    # Every text key: the outage check reads the same words that get quoted.
+    prose = " ".join(_all_text(error) for error in errors)
     return application_validation_error(
         exc.response.status_code, prose, known_field=known_field
     )
