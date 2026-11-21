@@ -66,7 +66,7 @@ from hail.models import (
     SmsStatus,
     SuppressionListResponse,
     WhoamiResponse,
-    _fold_prefix,
+    fold_prefix,
 )
 
 _DEFAULT_BASE_URL = "https://api.hail.so"
@@ -511,7 +511,7 @@ def _prefix_fields(
             warnings.warn(
                 f"{old} is deprecated; use {new}", DeprecationWarning, stacklevel=3
             )
-            if value is not None and _fold_prefix(value) != _fold_prefix(old_value):
+            if value is not None and fold_prefix(value) != fold_prefix(old_value):
                 raise ValueError(
                     f"{old} is the deprecated name of {new}, and the two values "
                     f"differ; pass only {new}"

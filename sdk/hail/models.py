@@ -675,7 +675,7 @@ DEPRECATED_PREFIX_FIELDS = {
 }
 
 
-def _fold_prefix(value: Any) -> Any:
+def fold_prefix(value: Any) -> Any:
     """The server strips and lowercases a prefix before it compares one."""
     return value.strip().lower() if isinstance(value, str) else value
 
@@ -691,7 +691,7 @@ def _move_deprecated_prefix_fields(data: Any) -> Any:
             continue
         if data.get(new) is None:
             data[new] = value
-        elif _fold_prefix(data[new]) != _fold_prefix(value):
+        elif fold_prefix(data[new]) != fold_prefix(value):
             raise ValueError(f"{old} is the deprecated name of {new}; send only {new}")
     return data
 
