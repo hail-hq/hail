@@ -247,13 +247,18 @@ _TEST_TIMEOUT_SECONDS = 10.0
 
 
 def _test_error(exc: Exception) -> str:
-    if isinstance(exc, httpx.TimeoutException):
+    """A fixed category, never the exception text: it can name internal hosts."""
+    if isinstance(exc, (httpx.TimeoutException, TimeoutError)):
         return f"No answer within {_TEST_TIMEOUT_SECONDS:.0f} seconds."
     if isinstance(exc, PrivateNetworkBlockedError):
-        return f"target_url is not allowed: {exc}"
+        return "target_url is not allowed: it does not resolve to a public address."
     if isinstance(exc, httpx.ConnectError):
-        return f"Could not connect: {exc}" if str(exc) else "Could not connect."
-    return str(exc) or type(exc).__name__
+        if "CERTIFICATE" in str(exc).upper() or "SSL" in str(exc).upper():
+            return "The TLS certificate check failed."
+        return "Could not connect to your endpoint."
+    if isinstance(exc, httpx.RemoteProtocolError):
+        return "Your endpoint closed the connection without a valid answer."
+    return "Could not reach your endpoint."
 
 
 @router.post("/test", response_model=WebhookTestResponse)
@@ -323,12 +328,16 @@ async def test_subscription(
     text: str | None = None
     error: str | None = None
     try:
-        status, text = await httpx_post(
-            body.target_url,
-            payload,
-            headers,
-            allow_private_networks=settings.hail_webhook_allow_private_networks,
-            timeout_seconds=_TEST_TIMEOUT_SECONDS,
+        # One deadline for the whole request: httpx times each phase alone.
+        status, text = await asyncio.wait_for(
+            httpx_post(
+                body.target_url,
+                payload,
+                headers,
+                allow_private_networks=settings.hail_webhook_allow_private_networks,
+                timeout_seconds=_TEST_TIMEOUT_SECONDS,
+            ),
+            _TEST_TIMEOUT_SECONDS,
         )
     except Exception as exc:  # the answer is the receiver's problem to show
         error = _test_error(exc)
