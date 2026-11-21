@@ -37,6 +37,12 @@ drop_spec = importlib.util.spec_from_file_location(
 )
 drop_migration = importlib.util.module_from_spec(drop_spec)
 drop_spec.loader.exec_module(drop_migration)
+rename_spec = importlib.util.spec_from_file_location(
+    "hail_mail_prefix_names",
+    Path(__file__).parents[1] / "migrations/versions/0088_hail_mail_prefix_names.py",
+)
+rename_migration = importlib.util.module_from_spec(rename_spec)
+rename_spec.loader.exec_module(rename_migration)
 
 T0 = datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc)
 
@@ -281,6 +287,19 @@ def test_function_text_matches_the_code() -> None:
     assert _squash(drop_migration.RETIRE_FUNCTION) == _squash(
         EMAIL_DOMAINS_RETIRE_FUNCTION
     )
+    # Its downgrade restores the step A text exactly.
+    assert _squash(drop_migration.OLD_GUARD_FUNCTION) == _squash(
+        migration.GUARD_FUNCTION
+    )
+    assert _squash(drop_migration.OLD_RETIRE_FUNCTION) == _squash(
+        migration.RETIRE_FUNCTION
+    )
+    assert _squash(drop_migration.OLD_SYNC_FUNCTION) == _squash(
+        rename_migration.SYNC_FUNCTION
+    )
+    assert [_squash(t) for t in drop_migration.OLD_SYNC_TRIGGERS] == [
+        _squash(t) for t in rename_migration.SYNC_TRIGGERS
+    ]
     assert _squash(migration.GUARD_TRIGGER) == _squash(EMAIL_DOMAINS_GUARD_TRIGGER)
     assert _squash(migration.RETIRE_TRIGGER) == _squash(EMAIL_DOMAINS_RETIRE_TRIGGER)
 

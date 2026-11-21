@@ -6,7 +6,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Changed
 
-- Self-host: the database drops the old `local_prefix_user` and `local_prefix_org` columns. Read `local_prefix_workspace` and `local_prefix_name`. The API still accepts the old field names.
+- Self-host: the database drops the old `local_prefix_user` and `local_prefix_org` columns. Read `local_prefix_workspace` and `local_prefix_name`. The API still accepts the old field names. Upgrade to 0.35.0 first.
 
 ## [0.35.0] (2026-11-21)
 

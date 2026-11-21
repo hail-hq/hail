@@ -1523,7 +1523,8 @@ class EmailDomain(Base):
             "AND local_prefix_name IS NULL)",
             name="email_domains_prefix_kind_consistency",
         ),
-        # Mirrors migration 0056: ``noreply+<org>@`` is Hail's own sender.
+        # Mirrors the migrations (0056, moved to the new column by 0090):
+        # ``noreply+<org>@`` is Hail's own sender.
         CheckConstraint(
             "local_prefix_workspace IS NULL "
             "OR local_prefix_workspace NOT IN ('noreply','forwarder')",

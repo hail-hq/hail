@@ -12,7 +12,8 @@ pair, on ``email_domains`` and ``retired_hail_mail_addresses``:
   stops if one does not.
 * The unique head index, the two CHECK constraints and the retired table's
   primary key are rebuilt on the new columns, with the same rules. The
-  reserved-name CHECK stays NOT VALID: older rows may hold a name it refuses.
+  reserved-name CHECK stays NOT VALID, as before: Postgres skips the check
+  of existing rows, but still checks each row an INSERT or UPDATE writes.
 * The guard and retire functions read the new columns. Their messages say
   "workspace prefix". Their error codes do not change.
 * The sync trigger and its function are dropped.
@@ -275,7 +276,7 @@ def _prefix_kind_check(head: str, tail: str) -> None:
 
 
 def _reserved_check(name: str, head: str) -> None:
-    # NOT VALID, as before: older rows may hold a name the rule refuses.
+    # NOT VALID, as before: skips the check of existing rows only.
     op.execute(
         f"ALTER TABLE email_domains ADD CONSTRAINT {name} CHECK ("
         f"{head} IS NULL OR {head} NOT IN ('noreply','forwarder')) NOT VALID"
