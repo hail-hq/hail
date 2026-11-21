@@ -62,15 +62,38 @@ def _tctx():
     )
 
 
-async def test_empty_opt_out_leaves_no_tools():
+async def test_empty_opt_out_keeps_only_end_call(db):
+    """`tools: []` turns off every tool but end_call: a call can always hang
+    up. Without it the model writes "end_call" as text and the call stays
+    open after the goodbye."""
     tools, api = await build_agent_tools(
         {"organization_id": str(uuid.uuid4()), "tools": []},
         call_id=uuid.uuid4(),
         hangup=None,
         send_dtmf=None,
     )
-    assert tools == []
-    assert api is None
+    try:
+        assert [t.info.name for t in tools] == ["end_call"]
+    finally:
+        if api is not None:
+            await api.aclose()
+
+
+async def test_a_tools_list_without_end_call_still_gets_it(db):
+    tools, api = await build_agent_tools(
+        {
+            "organization_id": str(uuid.uuid4()),
+            "tools": ["send_email", "send_sms", "list_contacts"],
+        },
+        call_id=uuid.uuid4(),
+        hangup=None,
+        send_dtmf=None,
+    )
+    try:
+        assert "end_call" in [t.info.name for t in tools]
+    finally:
+        if api is not None:
+            await api.aclose()
 
 
 async def test_missing_organization_id_disables_tools():
@@ -226,6 +249,7 @@ async def test_cancel_comes_with_transfer_call_in_a_tools_list(db) -> None:
     try:
         assert sorted(t.info.name for t in tools) == [
             "cancel_transfer",
+            "end_call",
             "hail_settings_help",
             "transfer_call",
         ]
@@ -355,8 +379,8 @@ async def test_http_tools_load_for_the_calls_agent(db, session_factory, monkeypa
         meta, call_id=uuid.uuid4(), hangup=None, send_dtmf=None
     )
     try:
-        assert [t.info.name for t in tools] == ["lookup_order"]
-        assert tools[0].info.raw_schema["description"] == "Find an order."
+        assert [t.info.name for t in tools] == ["end_call", "lookup_order"]
+        assert tools[1].info.raw_schema["description"] == "Find an order."
     finally:
         if api is not None:
             await api.aclose()
@@ -371,10 +395,14 @@ async def test_http_tools_of_another_org_are_not_loaded(
         "agent_id": str(agent_id),
         "tools": [],
     }
-    tools, _api = await build_agent_tools(
+    tools, api = await build_agent_tools(
         meta, call_id=uuid.uuid4(), hangup=None, send_dtmf=None
     )
-    assert tools == []
+    try:
+        assert [t.info.name for t in tools] == ["end_call"]
+    finally:
+        if api is not None:
+            await api.aclose()
 
 
 async def test_http_tool_load_failure_keeps_built_in_tools(db, monkeypatch):

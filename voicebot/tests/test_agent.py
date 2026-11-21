@@ -19,8 +19,11 @@ from uuid import UUID
 
 import pytest
 from cryptography.fernet import InvalidToken
+from hailhq.core.agent_tools import hail_help, transfer_call
+from hailhq.core.agent_tools.registry import all_tools
 from hailhq.core.agent_tools.spec import BridgeRoute
 from hailhq.core.call_end_reasons import CallEndReason
+from hailhq.core.directory import DirectoryEntry
 from hailhq.core.models import Call, CallEvent, PhoneNumber, UsageEvent
 from hailhq.core.pool import CALL_META_FROM_POOL
 from hailhq.core.prompts import PRIVACY_REMINDER
@@ -33,6 +36,7 @@ from hailhq.voicebot.agent import (
     _sanitize_tts_stream,
     attach_event_handlers,
     build_instructions,
+    contact_section,
     build_tools_safely,
     disconnect_reason_to_status,
     entrypoint,
@@ -2513,3 +2517,53 @@ def test_greeting_with_ai_line_in_other_languages(message, spoken):
     from hailhq.voicebot.agent import greeting_with_ai_line
 
     assert greeting_with_ai_line(message, "AI line.") == spoken
+
+
+# Every tool a call can have: the registry, the settings guide, and the
+# transfer pair (cancel_transfer is not in the registry).
+_ALL_TOOL_NAMES = {s.name for s in all_tools()} | {
+    hail_help.SPEC.name,
+    transfer_call.CANCEL_SPEC.name,
+}
+
+
+@pytest.mark.parametrize("direction", ["inbound", "outbound"])
+@pytest.mark.parametrize(
+    "tool_names",
+    [
+        ["end_call"],  # `tools: []`
+        ["end_call", "send_sms", "list_contacts"],
+        ["end_call", "send_email", "hail_settings_help"],
+    ],
+)
+def test_prompt_names_only_the_calls_tools(direction, tool_names):
+    """A prompt that names a missing tool makes the model write the name as
+    text, and the voice reads it aloud ("Take care. end_call")."""
+    known = DirectoryEntry(
+        name="Sam Lee", has_email=True, has_phone=True, source="contact"
+    )
+    out = build_instructions(
+        "Book a table.",
+        direction,
+        other_party=contact_section(known, tool_names),
+        tool_names=tool_names,
+    )
+    named = {name for name in _ALL_TOOL_NAMES if name in out}
+    assert named <= set(tool_names)
+
+
+def test_prompt_with_every_tool_names_its_helpers():
+    """The check above is not empty: with the tools, the prompt names them."""
+    known = DirectoryEntry(
+        name="Sam Lee", has_email=True, has_phone=True, source="contact"
+    )
+    names = sorted(_ALL_TOOL_NAMES)
+    out = build_instructions(
+        "Book a table.",
+        "outbound",
+        other_party=contact_section(known, names),
+        tool_names=names,
+    )
+    assert {"end_call", "send_email", "hail_settings_help"} <= {
+        name for name in _ALL_TOOL_NAMES if name in out
+    }

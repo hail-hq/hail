@@ -61,6 +61,13 @@ reply before closing. The `end_call` description and voice framing share
 these rules; this is model guidance, not a new runtime permission check.
 Existing duration limits and interruption handling still apply.
 
+Every call has `end_call`, even when its `tools` list is empty or leaves it
+out. The voice prompt names a tool only when the call has it: settings help
+and the "email me" hint drop out without `hail_settings_help` and
+`send_email`. A prompt that names a missing tool makes the model write the
+name as text, and the voice reads it aloud. `voicebot/tests/test_agent.py`
+checks this for every built-in tool.
+
 The opt-in synthetic model checks use the configured Bedrock conversation
 model. With AWS credentials, `ANTHROPIC_MODEL`, and
 `ANTHROPIC_BEDROCK_REGION` set in the environment, run from the repo root:

@@ -195,6 +195,7 @@ Notes that follow from the capture, not from the spec:
   ```
 
   Restrict which tools a call may use with `--tools` / the `tools` field.
+  `end_call` stays on every call, so the agent can hang up.
 
 - **`tool_choice` is absent on the first turn**, and appears as
   `"auto"` on the request that follows a tool result. Treat it as optional

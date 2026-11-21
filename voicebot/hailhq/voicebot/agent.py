@@ -28,7 +28,7 @@ import logging
 import math
 import re
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Collection
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
@@ -36,7 +36,7 @@ from uuid import UUID
 from cryptography.fernet import InvalidToken
 from google.protobuf.duration_pb2 import Duration
 from hailhq.core import threads
-from hailhq.core.agent_tools import transfer_call
+from hailhq.core.agent_tools import hail_help, send_email, transfer_call
 from hailhq.core.agent_tools.client import AgentApiClient
 from hailhq.core.agent_tools.send_dtmf import DTMF_CODES
 from hailhq.core.agent_tools.spec import BridgeOutcome, BridgeRoute
@@ -314,8 +314,12 @@ def build_instructions(
     language: str | None = None,
     other_party: str | None = None,
     clock: str | None = None,
+    tool_names: Collection[str] | None = None,
 ) -> str:
-    """The call's instructions (see :func:`hailhq.core.prompts.build_voice_instructions`)."""
+    """The call's instructions (see :func:`hailhq.core.prompts.build_voice_instructions`).
+    ``tool_names`` are the call's tools; None means every tool. The prompt
+    never names a tool the call lacks: the model would write its name as
+    text, and the voice would read it aloud."""
     # The language line goes before the privacy reminder, which stays last.
     spoken = (
         f"Speak in {SUPPORTED_LANGUAGES[language].name} for this call."
@@ -323,7 +327,23 @@ def build_instructions(
         else None
     )
     tail = "\n\n".join(part for part in (other_party, clock, spoken) if part) or None
-    return build_voice_instructions(system_prompt, direction, other_party=tail)
+    return build_voice_instructions(
+        system_prompt,
+        direction,
+        other_party=tail,
+        settings_tool=tool_names is None or hail_help.SPEC.name in tool_names,
+    )
+
+
+def contact_section(
+    known: DirectoryEntry | None, tool_names: Collection[str]
+) -> str | None:
+    """Who is on the line (see :func:`hailhq.core.prompts.other_party_section`).
+    The send_email hint needs the send_email tool and an email on file."""
+    if known is None:
+        return None
+    can_email = known.has_email and send_email.SPEC.name in tool_names
+    return other_party_section(known.name, can_email=can_email)
 
 
 def _call_clock(metadata: dict[str, Any], inbound: bool) -> str | None:
@@ -2551,12 +2571,9 @@ async def _run_call(
         cancel_bridge=make_bridge_cancel(ctx, call_id, bridge_state),
         prompt=lambda text: _prompt_agent(session, bridge_state, text),
     )
+    tool_names = [t.info.name for t in agent_tools]
     if agent_tools:
-        logger.info(
-            "call_id=%s agent tools enabled: %s",
-            call_id,
-            [t.info.name for t in agent_tools],
-        )
+        logger.info("call_id=%s agent tools enabled: %s", call_id, tool_names)
 
     known = await other_party_task
     if known is not None and stt_takes_keyterms(session.stt):
@@ -2570,13 +2587,9 @@ async def _run_call(
             metadata.get("system_prompt"),
             metadata.get("direction"),
             language=language,
-            # send_email reaches members and contacts that have an email.
-            other_party=(
-                other_party_section(known.name, can_email=known.has_email)
-                if known is not None
-                else None
-            ),
+            other_party=contact_section(known, tool_names),
             clock=_call_clock(metadata, inbound),
+            tool_names=tool_names,
         ),
         tools=agent_tools,
     )

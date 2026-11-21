@@ -28,8 +28,9 @@ curl -X POST "$HAIL_API_URL/v1/calls" -H "Authorization: Bearer $HAIL_API_KEY" \
 
 CLI: `hail agents create "Front desk" --prompt-file ./front-desk.md`, then
 `hail numbers route <number-id> --calls <agent-id> --texts <agent-id>`.
-Restrict tools with `hail agents update <id> --tools end_call,send_sms`; allow
-all again with `hail agents update <id> --all-tools`.
+Restrict tools with `hail agents update <id> --tools send_sms`; allow
+all again with `hail agents update <id> --all-tools`. Calls always keep
+`end_call`, so the agent can hang up.
 MCP: `list_agents`, `get_agent`, `create_agent`, `update_agent`, `delete_agent`, `route_number`, and `place_call(agent_id=...)`.
 SDK: `client.agents.create(...)`, `client.numbers.route(...)`.
 

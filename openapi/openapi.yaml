@@ -6712,7 +6712,8 @@ components:
           title: Tools
           description:
             "Agent tools to allow. Omitted: every tool the organization's
-            channels support. Empty list: none."
+            channels support. Empty list: none. Calls always keep end_call, so they
+            can hang up."
         max_duration_seconds:
           anyOf:
             - type: integer
@@ -7211,7 +7212,8 @@ components:
           description:
             "Agent tools to allow on this call. Omitted: every tool the
             organization's configured channels support (new channels appear automatically).
-            Empty list: no tools. Tool names are validated against the server's registry."
+            Empty list: no tools except end_call, so the call can still hang up. Tool
+            names are validated against the server's registry."
         agent_id:
           anyOf:
             - type: string

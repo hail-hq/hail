@@ -76,6 +76,22 @@ PLATFORM_PRIVACY = (
     "or claim that Hail built the underlying voice technology."
 )
 
+# The sentence of SETTINGS_HELP_STUB that names the settings tool, and its
+# replacement on a call without that tool (`tools: []`). A prompt that names a
+# tool the call lacks makes the model write the name as text, and the voice
+# reads it aloud.
+_SETTINGS_TOOL_LINE = (
+    "When asked, use "
+    "the hail_settings_help tool before you answer (never say its name aloud), "
+    "and never guess a menu or a voice name. You cannot see or change settings during this call. If the "
+    "tool is missing or fails, say you cannot look that up right now."
+)
+_SETTINGS_NO_TOOL_LINE = (
+    "When asked, say you cannot look that up during this call, and never "
+    "guess a menu or a voice name. You cannot see or change settings during "
+    "this call."
+)
+
 # In every call's prompt, inbound and outbound. The full guide below is returned
 # by the hail_settings_help tool, so calls that never ask about settings do not
 # carry it.
@@ -85,10 +101,7 @@ SETTINGS_HELP_STUB = (
     "do not promise to announce it on every call. Disclosure requirements "
     "vary by location and call type. Always identify honestly as AI if asked. "
     "Only discuss Hail settings when asked about the voice, greeting, behavior, "
-    "or configuration. Otherwise stay with the call's purpose. When asked, use "
-    "the hail_settings_help tool before you answer (never say its name aloud), "
-    "and never guess a menu or a voice name. You cannot see or change settings during this call. If the "
-    "tool is missing or fails, say you cannot look that up right now."
+    "or configuration. Otherwise stay with the call's purpose. " + _SETTINGS_TOOL_LINE
 )
 
 # Returned by the hail_settings_help tool (core/hailhq/core/agent_tools/hail_help.py).
@@ -556,14 +569,19 @@ def build_voice_instructions(
     direction: str | None = None,
     *,
     other_party: str | None = None,
+    settings_tool: bool = True,
 ) -> str:
     """Assemble a call's instructions: voice preamble first, the agent's own
     instructions after. The preamble is non-overridable framing
     (:data:`VOICE_PREAMBLE_INBOUND` when ``direction`` is ``"inbound"``);
     with no instructions it alone is the instruction set. Mode-agnostic: the
     same for the fallback chain and a BYO endpoint. ``other_party`` (see
-    :func:`other_party_section`) goes last."""
+    :func:`other_party_section`) goes last. ``settings_tool`` is False when
+    the call has no ``hail_settings_help`` tool: the prompt then never names
+    it."""
     preamble = VOICE_PREAMBLE_INBOUND if direction == "inbound" else VOICE_PREAMBLE
+    if not settings_tool:
+        preamble = preamble.replace(_SETTINGS_TOOL_LINE, _SETTINGS_NO_TOOL_LINE)
     caller = (system_prompt or "").strip()
     out = preamble if not caller else f"{preamble}\n\n{VOICE_HEADING}\n\n{caller}"
     if other_party:

@@ -321,7 +321,8 @@ class CallCreate(ConsentAttestationMixin):
         description=(
             "Agent tools to allow on this call. Omitted: every tool the "
             "organization's configured channels support (new channels appear "
-            "automatically). Empty list: no tools. Tool names are validated "
+            "automatically). Empty list: no tools except end_call, so the call "
+            "can still hang up. Tool names are validated "
             "against the server's registry."
         ),
     )
@@ -1382,7 +1383,11 @@ class AgentCreate(BaseModel):
     )
     tools: list[str] | None = Field(
         default=None,
-        description="Agent tools to allow. Omitted: every tool the organization's channels support. Empty list: none.",
+        description=(
+            "Agent tools to allow. Omitted: every tool the organization's "
+            "channels support. Empty list: none. Calls always keep end_call, "
+            "so they can hang up."
+        ),
     )
     max_duration_seconds: int | None = Field(
         default=None,

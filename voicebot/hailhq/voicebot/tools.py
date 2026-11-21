@@ -1,7 +1,7 @@
 """Adapt the core agent-tool registry to LiveKit function tools.
 
 Per-call filtering: the dispatch metadata's ``tools`` list (None ⇒ all,
-[] ⇒ none) then each spec's per-org ``is_available`` check. Send tools
+[] ⇒ none but end_call) then each spec's per-org ``is_available`` check. Send tools
 require HAIL_INTERNAL_SECRET (they call the API's internal agent routes);
 without it only local/read-only tools remain.
 
@@ -17,7 +17,7 @@ import time
 from typing import Any
 from uuid import UUID
 
-from hailhq.core.agent_tools import hail_help, transfer_call
+from hailhq.core.agent_tools import end_call, hail_help, transfer_call
 from hailhq.core.agent_tools.client import AgentApiClient
 from hailhq.core.agent_tools.http_tool import Conversation, load_http_tool_specs
 from hailhq.core.agent_tools.registry import all_tools
@@ -197,7 +197,10 @@ async def build_agent_tools(
         return [], None
     specs: list[ToolSpec] = []
     for s in all_tools():
-        if allowed is not None and s.name not in allowed:
+        # Every call can hang up: a list without end_call (or `tools: []`)
+        # still gets it. Without it the call stays open after the goodbye,
+        # and a prompt that names it makes the model write "end_call" aloud.
+        if allowed is not None and s.name not in allowed and s is not end_call.SPEC:
             continue
         if s.bind is not None:
             # Per-call tools (transfer_call) shape themselves from the

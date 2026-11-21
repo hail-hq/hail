@@ -2266,8 +2266,10 @@ _AGENT_VOICE_ID = _d(
     "such as an ElevenLabs voice ID."
 )
 _AGENT_TOOLS = _d(
-    "Names of allowed built-in tools for calls or replies. An empty list "
-    "selects none. Hail adds call transfer when handover contacts are configured."
+    "Names of the tools the agent may use during a call or reply. "
+    "Omitted: every tool the workspace's channels support. An empty list: none "
+    "except end_call, so calls can still hang up."
+    " Hail adds call transfer when handover contacts are configured."
 )
 _AGENT_MAX_DURATION = _d(
     "Longest a call with this agent may last, in seconds, counted from "

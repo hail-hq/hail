@@ -79,7 +79,7 @@ Example (minimal):
 	cmd.Flags().StringVar(&f.language, "language", "", "Spoken language for the call, lowercase ISO 639-1 (e.g. da); one of the 39 supported codes, see docs/languages.md; default English")
 	cmd.Flags().BoolVar(&f.aiDisclosure, "ai-disclosure", true, "Speak the AI self-disclosure line first on the call; --ai-disclosure=false skips it (your responsibility — disclosure laws may require it)")
 	cmd.Flags().BoolVar(&f.recordingEnabled, "recording", false, "Best-effort recording; requires workspace permission and selects the disclosed combined call rate")
-	cmd.Flags().StringSliceVar(&f.tools, "tools", nil, "Agent tools to allow (comma-separated or repeated); omit for all available, 'none' to disable all")
+	cmd.Flags().StringSliceVar(&f.tools, "tools", nil, "Agent tools to allow (comma-separated or repeated); omit for all available, 'none' to disable all but end_call")
 	cmd.Flags().StringVar(&f.idempotencyKey, "idempotency-key", "", "Defaults to a fresh UUID")
 	f.registerConsentFlags(cmd, "call")
 	markOneOfRequired(cmd, "mode", "prompt", "llm-url", "llm-key", "llm-model")
