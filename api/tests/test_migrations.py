@@ -478,22 +478,38 @@ def test_0090_drops_the_old_hail_mail_prefix_columns(empty_db: str) -> None:
             (other,),
         )
 
-    # The upgrade stops when the two pairs differ on a row of either table.
-    for table, good in (
-        ("email_domains", "amber"),
-        ("retired_hail_mail_addresses", "heron"),
+    # The upgrade stops when either part of either pair differs on a row.
+    # All user triggers are off while a row is broken, so nothing else moves.
+    for table, column, good, key, value in (
+        ("email_domains", "local_prefix_user", "acme", "id", kept),
+        ("email_domains", "local_prefix_org", "amber", "id", kept),
+        (
+            "retired_hail_mail_addresses",
+            "local_prefix_user",
+            "globex",
+            "organization_id",
+            other,
+        ),
+        (
+            "retired_hail_mail_addresses",
+            "local_prefix_org",
+            "heron",
+            "organization_id",
+            other,
+        ),
     ):
-        trigger = f"{table}_00_sync_prefix_columns"
         with psycopg.connect(url, autocommit=True) as conn:
-            conn.execute(f"ALTER TABLE {table} DISABLE TRIGGER {trigger}")
-            conn.execute(f"UPDATE {table} SET local_prefix_org = 'other'")
-        try:
-            with pytest.raises(RuntimeError, match="prefix columns differ"):
-                _run_alembic(empty_db, ["upgrade", "0090"])
-        finally:
-            with psycopg.connect(url, autocommit=True) as conn:
-                conn.execute(f"UPDATE {table} SET local_prefix_org = %s", (good,))
-                conn.execute(f"ALTER TABLE {table} ENABLE TRIGGER {trigger}")
+            conn.execute(f"ALTER TABLE {table} DISABLE TRIGGER USER")
+            conn.execute(
+                f"UPDATE {table} SET {column} = 'other' WHERE {key} = %s", (value,)
+            )
+        with pytest.raises(RuntimeError, match="prefix columns differ"):
+            _run_alembic(empty_db, ["upgrade", "0090"])
+        with psycopg.connect(url, autocommit=True) as conn:
+            conn.execute(
+                f"UPDATE {table} SET {column} = %s WHERE {key} = %s", (good, value)
+            )
+            conn.execute(f"ALTER TABLE {table} ENABLE TRIGGER USER")
 
     _run_alembic(empty_db, ["upgrade", "0090"])
     with psycopg.connect(url, autocommit=True) as conn:
