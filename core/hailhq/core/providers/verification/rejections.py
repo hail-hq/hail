@@ -103,6 +103,8 @@ def sentence(text: str) -> str:
     return text if text.endswith((".", "!", "?")) else text + "."
 
 
+# The keys a carrier puts its words under, best first.
+TEXT_KEYS = ("description", "detail", "message", "reason", "title")
 # The longest carrier text quoted to the customer; longer text is cut.
 CARRIER_TEXT_MAX = 600
 # A leading field tag in a carrier's text, like "[email] - ".
@@ -114,12 +116,12 @@ _SDK_PREFIX = re.compile(r"^\s*Unable to \w+ record\s*:?\s*", re.IGNORECASE)
 
 def carrier_texts(raw: object) -> list[str]:
     """The carrier's readable sentences in a refusal. ``raw`` is a string,
-    a dict (its ``description``, ``detail`` or ``title``), or a list of
+    a dict (its first text key in ``TEXT_KEYS``), or a list of
     these. A leading field tag (``[email] - ``) and twilio-python's
     "Unable to create record:" are dropped. Anything else
     (numbers, codes on their own) gives nothing."""
     if isinstance(raw, dict):
-        for key in ("description", "detail", "title"):
+        for key in TEXT_KEYS:
             if isinstance(raw.get(key), str) and raw[key].strip():
                 return carrier_texts(raw[key])
         return []

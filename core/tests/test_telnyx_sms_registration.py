@@ -1785,6 +1785,24 @@ async def test_brand_refused_later_gets_the_reused_email_fix() -> None:
     )
 
 
+def test_reasons_under_other_text_keys_are_read():
+    from hailhq.core.providers.verification.sms_review import campaign_repair_reason
+
+    reason = campaign_repair_reason([{"reason": "Privacy policy missing"}])
+    assert reason.startswith("Review your privacy policy")
+    assert reason.endswith("The carrier said: Privacy policy missing.")
+
+
+def test_same_field_reason_with_a_semicolon_is_quoted_once():
+    from hailhq.core.providers.verification.telnyx_sms import _reason_problems
+
+    text = "Invalid email; domain unknown"
+    problems = _reason_problems(
+        [{"fields": ["email"], "description": text}] * 2, "person"
+    )
+    assert problems[0].message.count("domain unknown") == 1
+
+
 def test_topic_match_reads_named_fields():
     from hailhq.core.providers.verification.sms_review import campaign_repair_reason
 

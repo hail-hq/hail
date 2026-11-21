@@ -13,6 +13,7 @@ from hailhq.core.providers.verification.rejections import (
     FIX_AND_START_AGAIN,
     FIX_THESE_AND_START_AGAIN,
     START_AGAIN,
+    TEXT_KEYS,
     with_carrier_text,
 )
 from hailhq.core.providers.verification.sms_form import (
@@ -127,7 +128,7 @@ def _topic_text(raw: object) -> str:
     if not isinstance(raw, dict):
         return ""
     parts: list[str] = []
-    for key in ("description", "detail", "title", "code", "error_code"):
+    for key in (*TEXT_KEYS, "code", "error_code"):
         if isinstance(raw.get(key), (str, int)):
             parts.append(str(raw[key]))
     for key in ("fields", "field"):

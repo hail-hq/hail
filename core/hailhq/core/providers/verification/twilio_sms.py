@@ -945,12 +945,14 @@ def _company_type(key: str) -> str:
 
 
 def _evaluation_message(ev) -> str:
-    """The carrier's text for the first failed field, or "" when it gave none."""
+    """The carrier's text for every failed field, or "" when it gave none."""
+    said: list[str] = []
     for result in getattr(ev, "results", None) or []:
         for field in result.get("fields", []) if isinstance(result, dict) else []:
-            if not field.get("passed", True):
-                return field.get("failure_reason") or ""
-    return ""
+            text = field.get("failure_reason")
+            if not field.get("passed", True) and text and text not in said:
+                said.append(text)
+    return "; ".join(said)
 
 
 # Hail's fix for each brand refusal Twilio documents. By error code: the
@@ -1022,7 +1024,7 @@ def _brand_customer_reason(brand) -> str:
     for error in errors:
         text = str(error.get("description") or "").lower()
         code = str(error.get("error_code") or "").strip()
-        fix = _BRAND_FIXES_BY_CODE.get(int(code)) if code.isdigit() else None
+        fix = _BRAND_FIXES_BY_CODE.get(int(code)) if code.isdecimal() else None
         if fix is None:
             fix = next(
                 (

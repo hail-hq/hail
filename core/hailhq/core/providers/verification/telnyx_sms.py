@@ -1468,12 +1468,13 @@ def _add_carrier_text(
     problem, next to the field they name. The quote is built again from all
     of them, so the cap and tag cleanup cover the whole of it. ``lead``
     replaces Hail's sentence (a reused email or phone found later)."""
-    texts = problem.raw.split("; ") if problem.raw else []
+    # One reason per line: a reason's own "; " must not split it.
+    texts = problem.raw.split("\n") if problem.raw else []
     if text and text not in texts:
         texts.append(text)
     head = lead or problem.message.split(" The carrier said: ", 1)[0]
     problem.message = with_carrier_text(head, texts)
-    problem.raw = "; ".join(texts) or None
+    problem.raw = "\n".join(texts) or None
 
 
 def _general_problem(unmatched: list) -> Problem:
