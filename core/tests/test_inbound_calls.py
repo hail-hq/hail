@@ -373,3 +373,30 @@ async def test_org_name_falls_back_to_hail_so_when_the_db_fails(monkeypatch) -> 
 
     monkeypatch.setattr(inbound_calls, "session_scope", broken)
     assert await inbound_calls._organization_name(uuid.uuid4()) == "Acme Dental"
+
+
+async def test_shared_trunk_is_accepted_while_numbers_move(
+    async_session, monkeypatch
+) -> None:
+    """A carrier with its own trunk: a number not moved yet still arrives on
+    the shared trunk and is answered; another carrier's trunk is refused."""
+    monkeypatch.setattr(settings, "livekit_sip_inbound_trunk_id", "ST_shared")
+    monkeypatch.setattr(settings, "livekit_twilio_sip_inbound_trunk_id", "ST_in_tw")
+    await _seed(async_session)
+    outcome = await inbound_calls.open_inbound_call(
+        async_session, _attrs(trunk_id="ST_shared")
+    )
+    assert isinstance(outcome, inbound_calls.Accepted)
+
+
+async def test_another_carriers_trunk_is_refused_while_numbers_move(
+    async_session, monkeypatch
+) -> None:
+    monkeypatch.setattr(settings, "livekit_sip_inbound_trunk_id", "ST_shared")
+    monkeypatch.setattr(settings, "livekit_twilio_sip_inbound_trunk_id", "ST_in_tw")
+    monkeypatch.setattr(settings, "livekit_telnyx_sip_inbound_trunk_id", "ST_in_tx")
+    await _seed(async_session)
+    outcome = await inbound_calls.open_inbound_call(
+        async_session, _attrs(trunk_id="ST_in_tx")
+    )
+    assert isinstance(outcome, inbound_calls.Rejected)

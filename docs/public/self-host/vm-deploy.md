@@ -165,7 +165,7 @@ Push a commit to `main` that changes service code, or run **Actions → Deploy �
   Repeat for each service. The cleanest rollback is to revert the commit on `main` and let CI deploy again.
 
 - **Update Caddy config**: edit `/opt/hail/Caddyfile`, then `docker compose -f docker-compose.yml -f docker-compose.prod.yml exec caddy caddy reload --config /etc/caddy/Caddyfile`.
-- **Reclaim disk**: deploys remove unused Hail images older than 48 hours before pulling and after rollout, preserving all container-referenced images. A pull requires at least 20 GiB free. To recover manually: `docker image prune -af --filter "until=48h" --filter "label=org.opencontainers.image.source=https://github.com/hail-hq/hail"`. A dangling-only prune misses tagged `sha-<commit>` images. Older rollback tags remain in GHCR.
+- **Reclaim disk**: deploys keep the 2 newest builds of each Hail service, before pulling and after rollout, and never remove an image a container uses. A pull requires at least 20 GiB free. To recover manually: `docker builder prune -af`, then `docker image prune -af --filter "until=24h" --filter "label=org.opencontainers.image.source=https://github.com/hail-hq/hail"`. This can also remove the kept rollback build. Older rollback tags remain in GHCR.
 - **Bound logs**: the production overlay rotates each service’s Docker JSON logs at 10 MB with three files. The limit takes effect when containers are recreated.
 
 ## Footguns

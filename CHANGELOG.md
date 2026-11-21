@@ -4,11 +4,13 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
-## [0.34.0] (2026-11-20)
+## [0.34.0] (2026-11-21)
 
 Webhooks can send your receiver's own `Authorization` header. Companies
 register for US texting at low volume by default, with lower fees. Agent emails
 to callers go only to their saved address and use the call's language.
+Self-hosts with per-carrier inbound trunks must update the shared trunk
+before upgrading (see Changed).
 
 Component versions cut alongside this release:
 **`sdk-v0.24.0`** (PyPI). Database migrations run on deploy.
@@ -18,6 +20,12 @@ Component versions cut alongside this release:
 - Webhooks can send an `Authorization` header to your receiver: set `authorization` on `POST`/`PATCH /v1/webhooks` (SDK too). Hail encrypts it and never returns it.
 - US texting registration: companies register at low volume (up to 2,000 texts a day, lower fees) unless they set `daily_texts` to `OVER_2000`.
 - US texting registration: when the faster lane still cannot verify your company, the registration waits for you (`step: needs_information`) and can be cancelled, so you can register again.
+
+### Changed
+
+- Self-host: inbound calls can use one LiveKit trunk per carrier, locked to that carrier ([LiveKit Cloud §4](docs/public/self-host/livekit-cloud.md#4-inbound-calls)).
+- Self-host: the voicebot image is about 0.9 GB smaller, and a release that changes only Hail code adds a few MB of new image layers instead of every package again.
+- **Breaking.** Self-host with a `LIVEKIT_<CARRIER>_SIP_INBOUND_TRUNK_ID` set: before upgrading, add `hail-placeholder-shared` to the shared inbound trunk's `numbers`, or empty `LIVEKIT_SIP_INBOUND_TRUNK_ID`. A shared trunk with no numbers now takes calls to every number.
 
 ### Fixed
 

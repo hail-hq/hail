@@ -118,18 +118,20 @@ Release tags follow `costs-v0.X.Y`. The latest release is what `git tag --list '
 
 Every Monday these jobs run in this order (UTC). Each one writes its own files, so two jobs never edit the same file.
 
-| Time  | Workflow             | Writes                                         | Output                          |
-| ----- | -------------------- | ---------------------------------------------- | ------------------------------- |
-| 05:00 | `costs-refresh`      | `llm.json`, `stt.json`, `tts.json`, `sms.json` | PR `costs/weekly-refresh`       |
-| 08:00 | `costs-sync-numbers` | `twilio.json`, `telnyx.json`, `didww.json`     | PR `costs/numbers-sync`         |
-| 08:30 | `costs-sync-voice`   | `voice.json`                                   | PR `costs/voice-sync`           |
-| 09:00 | `costs-stale`        | nothing (reads `main`)                         | issue "Model costs: stale rows" |
+| Time  | Workflow              | Writes                                         | Output                                      |
+| ----- | --------------------- | ---------------------------------------------- | ------------------------------------------- |
+| 05:00 | `costs-refresh`       | `llm.json`, `stt.json`, `tts.json`, `sms.json` | PR `costs/weekly-refresh`                   |
+| 08:00 | `costs-sync-numbers`  | `twilio.json`, `telnyx.json`, `didww.json`     | PR `costs/numbers-sync`                     |
+| 08:30 | `costs-sync-voice`    | `voice.json`                                   | PR `costs/voice-sync`                       |
+| 09:00 | `costs-stale`         | nothing (reads `main`)                         | issue "Model costs: stale rows"             |
+| 09:30 | `sip-allowlist-check` | nothing (reads `main`)                         | issue "SIP allow-list: carrier IPs changed" |
 
 Rules:
 
-1. The stale check runs last. It reads `main` only, so a row refreshed in a sync PR that is not merged yet still shows as stale. Merge the Monday sync PRs, then rerun **Actions → costs-stale → Run workflow** if the issue lists rows those PRs fixed.
+1. The stale check runs after the syncs. It reads `main` only, so a row refreshed in a sync PR that is not merged yet still shows as stale. Merge the Monday sync PRs, then rerun **Actions → costs-stale → Run workflow** if the issue lists rows those PRs fixed.
 2. A new job gets its own time slot and its own files. Never let two jobs write the same file: their PRs would conflict.
-3. Moving a job's time? Update this table and the `cron` comment in each workflow file in the same PR.
+3. `sip-allowlist-check` compares the carriers' published SIP signaling IPs with `infra/livekit/inbound-trunks.json` ([runbook](../docs/operations/inbound-trunk-lockdown.md#when-the-weekly-check-fails)). It is its own job: when it fails, the cost jobs still run.
+4. Moving a job's time? Update this table and the `cron` comment in each workflow file in the same PR.
 
 ## Refresh cadence
 
