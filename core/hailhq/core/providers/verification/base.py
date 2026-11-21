@@ -376,8 +376,10 @@ class DocumentInput(BaseModel):
     file: UploadedFile | None = None
 
 
-# Hail's own wording for a carrier refusal. The carrier's text goes in
-# ``Problem.raw`` / ``ProviderStatus.raw_reason`` for the operator.
+# Hail's own wording for a carrier refusal. The carrier's full text goes in
+# ``Problem.raw`` / ``ProviderStatus.raw_reason`` for the operator. For US
+# texting, the customer's message quotes it after Hail's sentence
+# (``with_carrier_text``), so never log ``Problem.message`` either.
 NOT_ACCEPTED = (
     "The carrier did not accept the details. Check your entries and try again."
 )

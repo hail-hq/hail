@@ -1615,7 +1615,5 @@ def _safe_message(response: httpx.Response) -> str:
     """Hail's sentence for each detail Telnyx names (``detail_fixes``),
     then Telnyx's own words."""
     errors = _errors(response)
-    fixes = detail_fixes(
-        [f"{e.get('title', '')} {e.get('detail', '')}" for e in errors]
-    )
+    fixes = detail_fixes([t for t in map(_original_text, errors) if t])
     return with_carrier_text(" ".join(fixes) or SMS_REFUSED, errors)

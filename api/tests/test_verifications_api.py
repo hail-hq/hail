@@ -8787,8 +8787,7 @@ async def test_an_amendment_at_a_carrier_with_no_low_volume_filing_stays_vetted(
     assert "low_volume" not in stored
 
 
-def test_billed_refusal_reason_is_capped() -> None:
-
+def test_the_sms_reason_cap_marks_the_cut() -> None:
     reason = "x" * 3000 + ". Fix these and start again."
     capped = _cap_reason(reason)
     assert len(capped) <= _SMS_REASON_MAX

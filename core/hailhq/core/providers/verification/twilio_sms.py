@@ -82,7 +82,9 @@ class _NotCompliant(TwilioRestException):
     ``reasons`` holds each failed field's text."""
 
     def __init__(self, reasons: list[str]) -> None:
-        super().__init__(400, "", msg="; ".join(reasons))
+        # The message stays neutral: an exception's text can reach a
+        # traceback log, and the reasons can quote the customer's details.
+        super().__init__(400, "", msg="not compliant")
         self.reasons = reasons
 
 

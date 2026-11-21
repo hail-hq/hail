@@ -1153,6 +1153,9 @@ async def test_failed_brand_with_unknown_reason_quotes_twilio() -> None:
     assert (await _brand_status(brand)).raw_reason == (
         "Invalid street; 30701; General Error"
     )
+    # Several carrier reasons and no Hail fix: "Fix these".
+    st = await _brand_status(_failed_brand((1, "Website down"), (2, "Vertical bad")))
+    assert st.reason.endswith("Vertical bad. Fix these and start again.")
 
 
 async def test_failed_brand_without_errors_keeps_the_generic_line() -> None:
