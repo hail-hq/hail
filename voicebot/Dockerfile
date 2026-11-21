@@ -12,7 +12,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     UV_COMPILE_BYTECODE=1 \
     HF_HOME=/app/.cache/huggingface \
     TORCH_HOME=/app/.cache/torch \
-    XDG_CACHE_HOME=/app/.cache
+    XDG_CACHE_HOME=/app/.cache \
+    UV_CACHE_DIR=/root/.cache/uv
 
 WORKDIR /app
 
@@ -27,11 +28,13 @@ COPY mcp/pyproject.toml /app/mcp/pyproject.toml
 COPY sdk/pyproject.toml /app/sdk/pyproject.toml
 RUN uv sync --frozen --package hailhq-voicebot --no-install-workspace --no-dev
 
-# Pre-download model weights (Silero VAD and the other installed plugins) so
+# Pre-download model weights for any installed plugin that needs them, so
 # the runtime image is self-contained: the first call doesn't pay a
 # multi-second download at the start of the prewarm step. LiveKit's own
-# command finds every installed plugin, so it needs no Hail code.
-RUN /app/.venv/bin/python -m livekit.agents download-files
+# command finds every installed plugin, so it needs no Hail code. The folder
+# may stay empty (Silero ships its weights inside its package).
+RUN mkdir -p /app/.cache && \
+    /app/.venv/bin/python -m livekit.agents download-files
 
 # ─── Stage 2: builder ─────────────────────────────────────────────
 # Our own code, installed on top of the deps venv. Only these files go into
@@ -62,7 +65,8 @@ RUN groupadd --system --gid 1000 hail && \
 # Copy to the SAME path the builder used so the venv's entry-point script
 # shebangs (#!/app/.venv/bin/python) still resolve.
 COPY --from=deps --chown=hail:hail /app/.venv /app/.venv
-# Pre-baked model weights.
+# Pre-baked model weights. uv's download cache stays in the deps stage
+# (UV_CACHE_DIR above): XDG_CACHE_HOME would otherwise put it here too.
 COPY --from=deps --chown=hail:hail /app/.cache /app/.cache
 COPY --from=builder --chown=hail:hail /app/own/ /app/.venv/lib/python3.12/site-packages/
 

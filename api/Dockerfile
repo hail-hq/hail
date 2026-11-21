@@ -51,7 +51,6 @@ RUN groupadd --system --gid 1000 hail && \
 # shebangs (#!/app/.venv/bin/python) still resolve. Renaming to /opt/venv
 # breaks them — see https://docs.astral.sh/uv/guides/integration/docker/.
 COPY --from=deps --chown=hail:hail /app/.venv /app/.venv
-COPY --from=builder --chown=hail:hail /app/own/ /app/.venv/lib/python3.12/site-packages/
 
 # Alembic config + migrations are read from the filesystem (not the venv) at
 # `alembic upgrade head` time. Without these, `docker compose run --rm api
@@ -65,6 +64,10 @@ COPY --chown=hail:hail api/migrations  /app/api/migrations
 # (the acquire allow-list / price / capability source of truth).
 COPY --chown=hail:hail costs /app/costs
 ENV HAIL_TELEPHONY_CATALOG_DIR=/app/costs
+
+# Our code last: it changes on almost every release, and the layers above
+# stay cached when it does.
+COPY --from=builder --chown=hail:hail /app/own/ /app/.venv/lib/python3.12/site-packages/
 WORKDIR /app/api
 
 USER hail
