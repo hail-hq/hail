@@ -909,3 +909,25 @@ async def test_test_send_refuses_bad_targets_and_other_orgs(
     )
     assert foreign.status_code == 404
     assert receiver.calls == []
+
+
+@pytest.mark.asyncio
+async def test_test_send_holds_no_db_transaction_during_post(
+    client, auth_headers, async_session, monkeypatch
+):
+    seen: list[bool] = []
+
+    async def fake_post(url, body, headers, **kwargs):
+        seen.append(async_session.in_transaction())
+        return 200, "ok"
+
+    monkeypatch.setattr(webhooks_routes, "httpx_post", fake_post)
+    # The second request skips the throttled API key stamp, which commits.
+    for _ in range(2):
+        response = await client.post(
+            "/webhooks/test",
+            headers=auth_headers,
+            json={"target_url": "https://hooks.example.com/receive"},
+        )
+        assert response.status_code == 200, response.text
+    assert seen == [False, False]

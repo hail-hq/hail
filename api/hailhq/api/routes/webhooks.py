@@ -273,16 +273,6 @@ async def test_subscription(
     not signed: a new subscription gets its secret when it is created.
     """
     authorization = _authorization_value(body.authorization)
-    try:
-        # DNS lookup: keep it off the event loop.
-        await asyncio.to_thread(
-            validate_webhook_target,
-            body.target_url,
-            allow_private_networks=settings.hail_webhook_allow_private_networks,
-        )
-    except ValueError as exc:
-        raise unprocessable(str(exc), loc=["body", "target_url"]) from exc
-
     delivery_id = uuid4()
     headers = {
         "Content-Type": "application/json",
@@ -303,8 +293,19 @@ async def test_subscription(
                     loc=["body", "authorization"],
                 )
             authorization = cipher.decrypt(sub.authorization_encrypted)
-        # Return the pooled connection before a slow receiver holds it.
-        await db.commit()
+    # The auth lookup also opened a transaction. End it so neither the DNS
+    # check nor a slow receiver holds a pooled connection.
+    await db.commit()
+
+    try:
+        # DNS lookup: keep it off the event loop.
+        await asyncio.to_thread(
+            validate_webhook_target,
+            body.target_url,
+            allow_private_networks=settings.hail_webhook_allow_private_networks,
+        )
+    except ValueError as exc:
+        raise unprocessable(str(exc), loc=["body", "target_url"]) from exc
 
     payload = build_event_payload(
         delivery_id=delivery_id,
