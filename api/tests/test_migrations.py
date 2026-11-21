@@ -478,25 +478,22 @@ def test_0090_drops_the_old_hail_mail_prefix_columns(empty_db: str) -> None:
             (other,),
         )
 
-    # The upgrade stops when the two pairs differ on a row.
-    with psycopg.connect(url, autocommit=True) as conn:
-        conn.execute(
-            "ALTER TABLE retired_hail_mail_addresses "
-            "DISABLE TRIGGER retired_hail_mail_addresses_00_sync_prefix_columns"
-        )
-        conn.execute(
-            "UPDATE retired_hail_mail_addresses SET local_prefix_org = 'other'"
-        )
-    with pytest.raises(RuntimeError, match="prefix columns differ"):
-        _run_alembic(empty_db, ["upgrade", "0090"])
-    with psycopg.connect(url, autocommit=True) as conn:
-        conn.execute(
-            "UPDATE retired_hail_mail_addresses SET local_prefix_org = 'heron'"
-        )
-        conn.execute(
-            "ALTER TABLE retired_hail_mail_addresses "
-            "ENABLE TRIGGER retired_hail_mail_addresses_00_sync_prefix_columns"
-        )
+    # The upgrade stops when the two pairs differ on a row of either table.
+    for table, good in (
+        ("email_domains", "amber"),
+        ("retired_hail_mail_addresses", "heron"),
+    ):
+        trigger = f"{table}_00_sync_prefix_columns"
+        with psycopg.connect(url, autocommit=True) as conn:
+            conn.execute(f"ALTER TABLE {table} DISABLE TRIGGER {trigger}")
+            conn.execute(f"UPDATE {table} SET local_prefix_org = 'other'")
+        try:
+            with pytest.raises(RuntimeError, match="prefix columns differ"):
+                _run_alembic(empty_db, ["upgrade", "0090"])
+        finally:
+            with psycopg.connect(url, autocommit=True) as conn:
+                conn.execute(f"UPDATE {table} SET local_prefix_org = %s", (good,))
+                conn.execute(f"ALTER TABLE {table} ENABLE TRIGGER {trigger}")
 
     _run_alembic(empty_db, ["upgrade", "0090"])
     with psycopg.connect(url, autocommit=True) as conn:
