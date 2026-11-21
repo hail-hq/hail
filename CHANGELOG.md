@@ -4,6 +4,18 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+## [0.35.0] (2026-11-21)
+
+Hail-mail address fields have clearer names: `local_prefix_workspace` is the
+part before the `+`, and `local_prefix_name` is the part after it. The old
+names are deprecated. Used alone in CLI flags or SDK client methods, they still
+work with any server. With an older server, requests that use the new names
+fail with a 422 error.
+
+Component versions cut alongside this release:
+**`cli-v0.33.0`** (Homebrew + GitHub Releases) and **`sdk-v0.25.0`** (PyPI).
+Database migrations run on deploy.
+
 ### Changed
 
 - Email: hail-mail prefix fields are now `local_prefix_workspace` (before the `+`) and `local_prefix_name` (after it). The old `local_prefix_user` and `local_prefix_org` still work and are deprecated.
