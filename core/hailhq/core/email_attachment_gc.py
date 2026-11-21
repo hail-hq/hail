@@ -11,6 +11,9 @@ Three rules, run on every tick:
   past the hour.
 * An email attachment uploaded and never used by a send within
   ``UNUSED_TTL`` (24h). Used ones are reusable and kept.
+* A knowledge file uploaded and never turned into a document
+  (``POST /knowledge/documents`` sets ``first_used_at``) within
+  ``UNUSED_TTL``. A document's file is deleted with the document.
 
 Same run_forever/tick shape as OutboundForwardWorker
 (core/hailhq/core/outbound_worker.py), gated in api/hailhq/api/main.py's
@@ -88,7 +91,7 @@ class EmailAttachmentGcWorker:
             )
         )
         deleted += await self._sweep_uploaded(
-            (FileUpload.purpose == "email_attachment")
+            FileUpload.purpose.in_(("email_attachment", "knowledge_document"))
             & FileUpload.first_used_at.is_(None)
             & (FileUpload.uploaded_at < func.statement_timestamp() - UNUSED_TTL)
         )

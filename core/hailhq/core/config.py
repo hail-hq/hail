@@ -366,7 +366,7 @@ class Settings(BaseSettings):
     # the carrier's decision for submitted ones. 0 disables the worker.
     hail_verification_poll_seconds: int = 600
     # Knowledge base: the folder holding the embedding model (model.onnx and
-    # tokenizer.json). The API and voicebot images carry it here; a checkout
+    # sentencepiece.bpe.model). The API and voicebot images carry it here; a checkout
     # without it runs with the knowledge base off for calls and with ingest
     # retrying (docs/operations/knowledge-base.md). Code default only.
     hail_embedding_model_dir: str = "/app/models/embedding"

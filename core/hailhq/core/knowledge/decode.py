@@ -35,6 +35,8 @@ import sys
 import zipfile
 from xml.etree import ElementTree
 
+import pypdfium2 as pdfium
+
 try:
     import resource
 except ImportError:  # pragma: no cover - not on Linux/macOS
@@ -113,8 +115,6 @@ def _paragraphs(text: str, page: int | None, budget: _Budget, *, markdown: bool)
 
 
 def _pdf(raw: bytes, budget: _Budget):
-    import pypdfium2 as pdfium
-
     try:
         pdf = pdfium.PdfDocument(raw)
     except Exception:
@@ -173,7 +173,7 @@ def _docx(raw: bytes, budget: _Budget):
     except ElementTree.ParseError:
         raise DecodeError("the Word document could not be read") from None
     body = root.find(f"{_W}body")
-    blocks = []
+    blocks: list[dict] = []
 
     def run_text(node) -> str:
         return "".join(
@@ -181,21 +181,33 @@ def _docx(raw: bytes, budget: _Budget):
             for t in node.iter()
         )
 
-    for child in list(body) if body is not None else []:
-        if child.tag == f"{_W}p":
-            text = run_text(child).strip()
-            if not text:
-                continue
-            style = child.find(f"{_W}pPr/{_W}pStyle")
-            name = (style.get(f"{_W}val") or "") if style is not None else ""
-            heading = name.lower().startswith(("heading", "title"))
-            blocks.append({"t": budget.take(text), "p": None, "h": heading})
-        elif child.tag == f"{_W}tbl":
-            for row in child.iter(f"{_W}tr"):
-                cells = [run_text(c).strip() for c in row.iter(f"{_W}tc")]
-                line = " | ".join(c for c in cells if c)
-                if line:
-                    blocks.append({"t": budget.take(line), "p": None, "h": False})
+    def walk(container) -> None:
+        for child in list(container):
+            if child.tag == f"{_W}p":
+                text = run_text(child).strip()
+                if not text:
+                    continue
+                style = child.find(f"{_W}pPr/{_W}pStyle")
+                name = (style.get(f"{_W}val") or "") if style is not None else ""
+                heading = name.lower().startswith(("heading", "title"))
+                blocks.append({"t": budget.take(text), "p": None, "h": heading})
+            elif child.tag == f"{_W}tbl":
+                # Direct rows and cells only: a table nested in a cell is
+                # read once, as that cell's text.
+                for row in child.findall(f"{_W}tr"):
+                    cells = [run_text(c).strip() for c in row.findall(f"{_W}tc")]
+                    line = " | ".join(c for c in cells if c)
+                    if line:
+                        blocks.append({"t": budget.take(line), "p": None, "h": False})
+            elif child.tag == f"{_W}sdt":
+                # A content control (templates, cover pages, tables of
+                # contents) holds paragraphs and tables of its own.
+                content = child.find(f"{_W}sdtContent")
+                if content is not None:
+                    walk(content)
+
+    if body is not None:
+        walk(body)
     return blocks
 
 

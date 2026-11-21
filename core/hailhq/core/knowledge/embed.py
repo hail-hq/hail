@@ -7,12 +7,15 @@ loads it once in prewarm, the voicebot's text worker and the API load it on
 first use. The model files are baked into the Docker images
 (``hail_embedding_model_dir``); nothing is downloaded at call time.
 
-Model: ``intfloat/multilingual-e5-small`` (MIT), int8 ONNX export, 384
-dimensions, about 100 languages, inputs up to 512 tokens. E5 wants
+Model: ``intfloat/multilingual-e5-small`` (MIT), its own int8 ONNX export
+(``onnx/model_qint8_avx512_vnni.onnx``, saved as ``model.onnx``), 384
+dimensions, about 100 languages, inputs up to 512 tokens. Chosen over
+``paraphrase-multilingual-MiniLM-L12-v2``, which reads only the first 128
+tokens of a piece. E5 wants
 ``query: `` before a question and ``passage: `` before a document piece.
 Mean pooling over the attention mask, then L2 normalization, so a dot
-product is the cosine similarity. Runtime: onnxruntime (MIT) and Hugging
-Face tokenizers (Apache-2.0), both AGPL-compatible. The model choice and
+product is the cosine similarity. Runtime: onnxruntime (MIT) and
+SentencePiece (Apache-2.0), both AGPL-compatible. The model choice and
 its benchmark are in docs/operations/knowledge-base.md.
 
 One intra-op thread: the voicebot runs live calls side by side on a few
@@ -26,6 +29,8 @@ import threading
 from pathlib import Path
 
 import numpy as np
+import onnxruntime as ort
+import sentencepiece
 from hailhq.core.config import settings
 
 __all__ = [
@@ -44,7 +49,10 @@ MAX_TOKENS = 512
 QUERY_PREFIX = "query: "
 PASSAGE_PREFIX = "passage: "
 MODEL_FILE = "model.onnx"
-TOKENIZER_FILE = "tokenizer.json"
+TOKENIZER_FILE = "sentencepiece.bpe.model"
+# XLM-RoBERTa ids around the SentencePiece ones (fairseq layout): every
+# piece id is shifted by one, SentencePiece's unknown (0) is 3.
+_BOS, _PAD, _EOS, _UNK = 0, 1, 2, 3
 # Passages per model run at ingest. Small, so one batch never holds a CPU
 # long while calls run beside it.
 BATCH = 8
@@ -55,13 +63,10 @@ class EmbedderUnavailable(RuntimeError):
 
 
 class Embedder:
-    """One loaded model. Thread-safe: onnxruntime sessions and the Rust
-    tokenizer may be used from several threads at once."""
+    """One loaded model. Thread-safe: an onnxruntime session and a
+    SentencePiece processor may be used from several threads at once."""
 
     def __init__(self, model_dir: str | Path, *, threads: int = 1) -> None:
-        import onnxruntime as ort
-        from tokenizers import Tokenizer
-
         folder = Path(model_dir)
         model, vocab = folder / MODEL_FILE, folder / TOKENIZER_FILE
         if not model.is_file() or not vocab.is_file():
@@ -69,27 +74,35 @@ class Embedder:
         options = ort.SessionOptions()
         options.intra_op_num_threads = threads
         options.inter_op_num_threads = 1
+        # No arena: measured about 450 MB lower peak at ingest, no slower.
+        options.enable_cpu_mem_arena = False
         options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
         self._session = ort.InferenceSession(
             str(model), options, providers=["CPUExecutionProvider"]
         )
         self._inputs = {i.name for i in self._session.get_inputs()}
-        self._tokenizer = Tokenizer.from_file(str(vocab))
-        self._tokenizer.enable_truncation(max_length=MAX_TOKENS)
-        self._tokenizer.enable_padding()
-        # Counting must see the whole text: a second copy with no truncation.
-        self._counter = Tokenizer.from_file(str(vocab))
-        self._counter.no_truncation()
-        self._counter.no_padding()
+        # SentencePiece, not Hugging Face's tokenizer.json: the same ids
+        # (checked on 112 multilingual texts; only a trailing space differs)
+        # for about 280 MB less memory per process.
+        self._sp = sentencepiece.SentencePieceProcessor(model_file=str(vocab))
 
     def count_tokens(self, text: str) -> int:
         """Model tokens in ``text``, without the special ones."""
-        return len(self._counter.encode(text, add_special_tokens=False).ids)
+        return len(self._sp.encode(text))
+
+    def _ids(self, text: str) -> list[int]:
+        pieces = [p + 1 if p else _UNK for p in self._sp.encode(text)]
+        # Keep the first tokens that fit with the two special ones.
+        return [_BOS, *pieces[: MAX_TOKENS - 2], _EOS]
 
     def _run(self, texts: list[str]) -> np.ndarray:
-        encodings = self._tokenizer.encode_batch(texts)
-        ids = np.array([e.ids for e in encodings], dtype=np.int64)
-        mask = np.array([e.attention_mask for e in encodings], dtype=np.int64)
+        rows = [self._ids(t) for t in texts]
+        width = max(len(r) for r in rows)
+        ids = np.full((len(rows), width), _PAD, dtype=np.int64)
+        mask = np.zeros((len(rows), width), dtype=np.int64)
+        for i, row in enumerate(rows):
+            ids[i, : len(row)] = row
+            mask[i, : len(row)] = 1
         feed = {"input_ids": ids, "attention_mask": mask}
         if "token_type_ids" in self._inputs:
             feed["token_type_ids"] = np.zeros_like(ids)

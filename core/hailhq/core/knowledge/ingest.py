@@ -25,7 +25,8 @@ is older than ``LEASE`` is taken again (a crashed worker). A document
 deleted while it is read is simply skipped at step 6.
 
 Each tick also deletes the knowledge base of closed accounts
-(``access.delete_org_knowledge``), so a failure at close is retried here.
+(``access.delete_org_knowledge``): documents, uploads never made into a
+document, and the limits row. So a failure at close is retried here.
 
 Same run_forever/tick/stop shape as ``OutboundForwardWorker``, started from
 the API's lifespan when the mail bucket is configured. Nothing here logs
@@ -52,15 +53,17 @@ from hailhq.core.knowledge.access import (
     storage_full,
 )
 from hailhq.core.knowledge.decode import MAX_TEXT_BYTES
-from hailhq.core.knowledge.embed import Embedder, load_embedder
+from hailhq.core.knowledge.embed import Embedder, EmbedderUnavailable, load_embedder
 from hailhq.core.knowledge.search import vector_literal
 from hailhq.core.knowledge.text import Block, Chunk, chunk_blocks, terms
 from hailhq.core.models import (
     FileUpload,
     KnowledgeDocument,
     KnowledgePiece,
+    OrganizationKnowledge,
     OrgClosure,
 )
+from hailhq.core.retention import closed_org_ids
 from hailhq.core.s3_mail import S3MailClient
 from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -70,6 +73,7 @@ __all__ = ["DECODE_SECONDS", "LEASE", "MAX_ATTEMPTS", "KnowledgeIngestWorker"]
 logger = logging.getLogger(__name__)
 
 MAX_ATTEMPTS = 3
+RETRY_MINUTES = 5
 LEASE = timedelta(minutes=15)
 # Wall-clock limit of one decode. The child also has a 30 s CPU limit.
 DECODE_SECONDS = 60.0
@@ -83,8 +87,16 @@ class _Refused(Exception):
     """The file cannot be used; the message is for the customer."""
 
 
+class _Unavailable(Exception):
+    """The bucket or the model is down: not the file's fault, so the try
+    does not count toward ``MAX_ATTEMPTS``."""
+
+
 def _claimable(now: datetime):
-    retry_after = func.make_interval(0, 0, 0, 0, 0, KnowledgeDocument.attempts)
+    # 5 minutes, then 10, then 15 between tries.
+    retry_after = func.make_interval(
+        0, 0, 0, 0, 0, RETRY_MINUTES * (KnowledgeDocument.attempts + 1)
+    )
     return (
         (KnowledgeDocument.status == "pending")
         & (
@@ -146,17 +158,22 @@ class KnowledgeIngestWorker:
         return done
 
     async def _forget_closed_orgs(self) -> None:
+        # Uploads too: a closed workspace may hold files never made into a
+        # document, or only its limits row.
         async with self._session_factory() as db:
             org_ids = list(
                 (
                     await db.execute(
-                        select(KnowledgeDocument.organization_id)
-                        .join(
-                            OrgClosure,
-                            OrgClosure.organization_id
-                            == KnowledgeDocument.organization_id,
+                        closed_org_ids(datetime.now(timezone.utc)).where(
+                            OrgClosure.organization_id.in_(
+                                select(FileUpload.organization_id).where(
+                                    FileUpload.purpose == "knowledge_document"
+                                )
+                            )
+                            | OrgClosure.organization_id.in_(
+                                select(OrganizationKnowledge.organization_id)
+                            )
                         )
-                        .distinct()
                     )
                 ).scalars()
             )
@@ -179,10 +196,23 @@ class KnowledgeIngestWorker:
     async def _claim(self) -> tuple[UUID, int] | None:
         async with self._session_factory() as db:
             now = (await db.execute(select(func.now()))).scalar_one()
+            # Rows that used every try fail first, in one statement.
+            await db.execute(
+                update(KnowledgeDocument)
+                .where(_claimable(now), KnowledgeDocument.attempts >= MAX_ATTEMPTS)
+                .values(
+                    status="failed",
+                    error="the file could not be processed; delete it and "
+                    "upload it again",
+                    claimed_at=None,
+                    updated_at=func.now(),
+                )
+            )
+            await db.commit()
             row = (
                 await db.execute(
                     select(KnowledgeDocument.id, KnowledgeDocument.attempts)
-                    .where(_claimable(now))
+                    .where(_claimable(now), KnowledgeDocument.attempts < MAX_ATTEMPTS)
                     .order_by(KnowledgeDocument.created_at)
                     .limit(1)
                     .with_for_update(skip_locked=True)
@@ -191,20 +221,6 @@ class KnowledgeIngestWorker:
             if row is None:
                 await db.rollback()
                 return None
-            if row.attempts >= MAX_ATTEMPTS:
-                await db.execute(
-                    update(KnowledgeDocument)
-                    .where(KnowledgeDocument.id == row.id)
-                    .values(
-                        status="failed",
-                        error="the file could not be processed; delete it and "
-                        "upload it again",
-                        claimed_at=None,
-                        updated_at=func.now(),
-                    )
-                )
-                await db.commit()
-                return await self._claim()
             attempt = row.attempts + 1
             await db.execute(
                 update(KnowledgeDocument)
@@ -228,6 +244,13 @@ class KnowledgeIngestWorker:
             logger.info("knowledge: document %s refused", document_id)
         except asyncio.CancelledError:
             raise
+        except _Unavailable as exc:
+            logger.warning(
+                "knowledge: document %s waits: %s unavailable; will retry",
+                document_id,
+                exc,
+            )
+            await self._finish(document_id, attempt, "pending", attempts=attempt - 1)
         except Exception as exc:
             logger.warning(
                 "knowledge: document %s attempt %d failed (%s); will retry",
@@ -238,8 +261,17 @@ class KnowledgeIngestWorker:
             await self._finish(document_id, attempt, "pending")
 
     async def _finish(
-        self, document_id: UUID, attempt: int, status: str, *, error: str | None = None
+        self,
+        document_id: UUID,
+        attempt: int,
+        status: str,
+        *,
+        error: str | None = None,
+        attempts: int | None = None,
     ) -> None:
+        values: dict = {"status": status, "error": error, "updated_at": func.now()}
+        if attempts is not None:
+            values["attempts"] = attempts
         async with self._session_factory() as db:
             await db.execute(
                 update(KnowledgeDocument)
@@ -248,7 +280,7 @@ class KnowledgeIngestWorker:
                     KnowledgeDocument.status == "processing",
                     KnowledgeDocument.attempts == attempt,
                 )
-                .values(status=status, error=error, updated_at=func.now())
+                .values(**values)
             )
             await db.commit()
 
@@ -273,16 +305,23 @@ class KnowledgeIngestWorker:
         if limits is None:
             raise _Refused("the knowledge base is not turned on for this workspace")
 
-        data = await self._get_s3().fetch_raw(
-            row.s3_key, max_bytes=(row.size_bytes or 0) + 1
-        )
+        try:
+            data = await self._get_s3().fetch_raw(
+                row.s3_key, max_bytes=(row.size_bytes or 0) + 1
+            )
+        except Exception as exc:
+            raise _Unavailable(f"bucket ({type(exc).__name__})") from exc
         if not data or not matches_declared_type(data, row.content_type):
             raise _Refused(f"the file does not look like {row.content_type}")
         decoded = await self._decode(row.content_type, data)
         del data
 
-        embedder = await asyncio.to_thread(self._embedder)
-        chunks = _chunks(decoded, embedder, limits.max_pieces)
+        try:
+            embedder = await asyncio.to_thread(self._embedder)
+        except EmbedderUnavailable as exc:
+            raise _Unavailable("embedding model") from exc
+        # Cutting 8 MB of text counts tokens many times: off the event loop.
+        chunks = await asyncio.to_thread(_chunks, decoded, embedder, limits.max_pieces)
         if not chunks:
             raise _Refused("the file has no text")
         if len(chunks) > limits.max_pieces:
@@ -305,7 +344,7 @@ class KnowledgeIngestWorker:
             raise _Refused("reading the file took too long") from None
         except ValueError:
             raise _Refused("the file could not be read") from None
-        result = json.loads(out)
+        result = await asyncio.to_thread(json.loads, out)
         if "error" in result:
             raise _Refused(str(result["error"])[:300])
         return result
@@ -318,6 +357,10 @@ class KnowledgeIngestWorker:
         chunks: list[Chunk],
         vectors,
     ) -> None:
+        # Search words for every piece: before the lock, off the event loop.
+        rows = await asyncio.to_thread(
+            _piece_rows, document_id, org_id, chunks, vectors
+        )
         async with self._session_factory() as db:
             await knowledge_lock(db, org_id)
             doc = (
@@ -358,19 +401,6 @@ class KnowledgeIngestWorker:
             await db.execute(
                 delete(KnowledgePiece).where(KnowledgePiece.document_id == document_id)
             )
-            rows = [
-                {
-                    "document_id": document_id,
-                    "organization_id": org_id,
-                    "ordinal": i,
-                    "text": chunk.text,
-                    "page": chunk.page,
-                    "csv_row": chunk.csv_row,
-                    "embedding": vector_literal(vector),
-                    "terms": list(dict.fromkeys(terms(chunk.text))) or ["_"],
-                }
-                for i, (chunk, vector) in enumerate(zip(chunks, vectors, strict=True))
-            ]
             for start in range(0, len(rows), _INSERT_BATCH):
                 await db.execute(_INSERT_PIECES, rows[start : start + _INSERT_BATCH])
             doc.status = "ready"
@@ -389,6 +419,24 @@ _INSERT_PIECES = text("""
         (:document_id, :organization_id, :ordinal, :text, :page, :csv_row,
          CAST(:embedding AS vector), array_to_tsvector(CAST(:terms AS text[])))
     """)
+
+
+def _piece_rows(
+    document_id: UUID, org_id: UUID, chunks: list[Chunk], vectors
+) -> list[dict]:
+    return [
+        {
+            "document_id": document_id,
+            "organization_id": org_id,
+            "ordinal": i,
+            "text": chunk.text,
+            "page": chunk.page,
+            "csv_row": chunk.csv_row,
+            "embedding": vector_literal(vector),
+            "terms": list(dict.fromkeys(terms(chunk.text))) or ["_"],
+        }
+        for i, (chunk, vector) in enumerate(zip(chunks, vectors, strict=True))
+    ]
 
 
 def _too_many(limit: int, held: int = 0) -> str:

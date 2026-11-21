@@ -179,21 +179,68 @@ async def test_wrong_type_is_refused(async_session, worker, s3) -> None:
     assert doc.status == "failed" and "does not look like" in doc.error
 
 
-async def test_bucket_error_retries_then_fails(async_session, worker, s3) -> None:
+async def test_bucket_error_waits_without_using_a_try(
+    async_session, worker, s3
+) -> None:
     org = uuid.uuid4()
     doc_id = await add_document(async_session, s3, org, b"Hello there.")
     s3.fail = True
-    await worker.tick()
-    doc = await async_session.get(KnowledgeDocument, doc_id)
-    await async_session.refresh(doc)
-    assert doc.status == "pending" and doc.attempts == 1
-    # Later attempts: make the row claimable at once.
-    for _ in range(MAX_ATTEMPTS):
+    for _ in range(MAX_ATTEMPTS + 2):
+        doc = await async_session.get(KnowledgeDocument, doc_id)
         doc.claimed_at = None
         await async_session.commit()
         await worker.tick()
         await async_session.refresh(doc)
-    assert doc.status == "failed"
+        assert doc.status == "pending" and doc.attempts == 0
+    s3.fail = False
+    doc.claimed_at = None
+    await async_session.commit()
+    await worker.tick()
+    await async_session.refresh(doc)
+    assert doc.status == "ready"
+
+
+async def test_other_errors_use_tries_then_fail(
+    async_session, session_factory, s3
+) -> None:
+    class Broken(FakeEmbedder):
+        def embed_passages(self, texts):
+            raise RuntimeError("model crashed")
+
+    @asynccontextmanager
+    async def scope():
+        async with session_factory() as session:
+            yield session
+
+    worker = KnowledgeIngestWorker(
+        session_factory=scope, s3_factory=lambda: s3, embedder=Broken
+    )
+    org = uuid.uuid4()
+    doc_id = await add_document(async_session, s3, org, b"Hello there.")
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        await worker.tick()
+        doc = await async_session.get(KnowledgeDocument, doc_id)
+        await async_session.refresh(doc)
+        assert doc.status == "pending" and doc.attempts == attempt
+        doc.claimed_at = None
+        await async_session.commit()
+    await worker.tick()
+    await async_session.refresh(doc)
+    assert doc.status == "failed" and "upload it again" in doc.error
+
+
+async def test_many_spent_documents_fail_in_one_tick(async_session, worker, s3) -> None:
+    org = uuid.uuid4()
+    ids = [await add_document(async_session, s3, org, b"Hi.") for _ in range(5)]
+    for doc_id in ids:
+        doc = await async_session.get(KnowledgeDocument, doc_id)
+        doc.attempts = MAX_ATTEMPTS
+    await async_session.commit()
+    assert await worker.tick() == 0
+    for doc_id in ids:
+        doc = await async_session.get(KnowledgeDocument, doc_id)
+        await async_session.refresh(doc)
+        assert doc.status == "failed"
 
 
 async def test_document_off_workspace_is_refused(async_session, worker, s3) -> None:
@@ -260,3 +307,37 @@ def test_memory_index_hybrid(monkeypatch) -> None:
     monkeypatch.setattr(index_module, "MIN_SIMILARITY", -1.0)
     hits = index.search("zzz", np.asarray(fake.embed_query("warranty")), 1)
     assert hits[0].piece.text.startswith("The inverter")
+
+
+async def test_closed_workspace_with_only_uploads_is_cleaned(
+    async_session, worker, s3
+) -> None:
+    """A closed workspace that uploaded files but made no document (and its
+    limits row) is found and cleaned too."""
+    org = uuid.uuid4()
+    async_session.add(OrganizationKnowledge(organization_id=org))
+    upload_id = uuid.uuid4()
+    key = object_key("knowledge_document", org, upload_id) + ".a"
+    s3.objects[key] = b"x"
+    async_session.add(
+        FileUpload(
+            id=upload_id,
+            organization_id=org,
+            purpose="knowledge_document",
+            filename="f.md",
+            content_type="text/markdown",
+            s3_key=key,
+            size_bytes=1,
+            uploaded_at=datetime.now(timezone.utc),
+        )
+    )
+    async_session.add(
+        OrgClosure(
+            organization_id=org, closed_at=datetime.now(timezone.utc), source="test"
+        )
+    )
+    await async_session.commit()
+    await worker.tick()
+    assert not s3.objects
+    assert await async_session.get(FileUpload, upload_id) is None
+    assert await async_session.get(OrganizationKnowledge, org) is None

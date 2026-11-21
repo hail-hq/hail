@@ -37,10 +37,12 @@ __all__ = [
 CANDIDATES = 20
 # Reciprocal rank fusion constant (Cormack et al. 2009).
 RRF_K = 60
-# Cosine floor for a piece found by meaning only. E5 scores unrelated text
-# high (about 0.7 to 0.8), so the floor sits above that band; see
-# docs/operations/knowledge-base.md for the measurements.
-MIN_SIMILARITY = 0.80
+# Cosine floor for a piece found by meaning only. E5 scores even unrelated
+# text high: measured on an invented manual, right pieces 0.73 to 0.92
+# (median 0.81), off-topic questions' best match 0.72 to 0.81. No floor
+# splits the two; this one drops clear junk and the model judges the rest
+# (docs/operations/knowledge-base.md).
+MIN_SIMILARITY = 0.77
 # BM25 floor: about one fairly rare word in common.
 MIN_BM25 = 1.5
 # The idf counts at least this many pieces, so a workspace with a handful of
