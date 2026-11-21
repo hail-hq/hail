@@ -72,7 +72,7 @@ async def test_calls_create_happy_path_mode_a(base_url: str, api_key: str) -> No
 
 @respx.mock
 async def test_calls_create_tools_passthrough(base_url: str, api_key: str) -> None:
-    """tools=[] is meaningful (disable all agent tools) and must reach the
+    """tools=[] is meaningful (every agent tool off but end_call) and must reach the
     body; omitted tools must not appear at all."""
     route = respx.post(f"{base_url}/calls").mock(
         return_value=httpx.Response(201, json=make_call_response())

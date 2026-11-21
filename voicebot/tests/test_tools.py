@@ -115,14 +115,32 @@ async def test_malformed_organization_id_disables_tools():
     assert api is None
 
 
-async def test_malformed_tools_field_disables_tools():
+async def test_malformed_tools_field_keeps_only_end_call():
     tools, api = await build_agent_tools(
         {"organization_id": str(uuid.uuid4()), "tools": "send_sms"},
         call_id=uuid.uuid4(),
         hangup=None,
         send_dtmf=None,
     )
-    assert tools == []
+    assert [t.info.name for t in tools] == ["end_call"]
+    assert api is None
+
+
+async def test_end_call_only_opens_no_database(monkeypatch):
+    """`tools: []` needs no availability check, so a slow database does not
+    delay the call."""
+
+    def no_db():
+        raise AssertionError("session_scope opened")
+
+    monkeypatch.setattr(tools_mod, "session_scope", no_db)
+    tools, api = await build_agent_tools(
+        {"organization_id": str(uuid.uuid4()), "tools": []},
+        call_id=uuid.uuid4(),
+        hangup=None,
+        send_dtmf=None,
+    )
+    assert [t.info.name for t in tools] == ["end_call"]
     assert api is None
 
 

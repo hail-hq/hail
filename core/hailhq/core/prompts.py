@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone
+from collections.abc import Collection
 from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -15,6 +16,18 @@ import phonenumbers
 from phonenumbers import timezone as phone_timezones
 
 logger = logging.getLogger(__name__)
+
+# The call prompt's phone-menu rule, and its replacement on a call without
+# the send_dtmf tool: the model must not try to press keys it cannot press.
+_MENU_KEYS_LINE = (
+    "- If you reach an automated menu, press the keys it asks for instead of "
+    "speaking — a menu cannot hear you. Choose the option that advances the "
+    "call, or the one for a human operator when none fits."
+)
+_MENU_NO_KEYS_LINE = (
+    "- If you reach an automated menu, you cannot press keys on this call. "
+    "Stay quiet and wait for a person."
+)
 
 _INBOUND_CLOSING = """\
 - Never hang up on your own right after an answer. First ask if there is \
@@ -242,9 +255,7 @@ safe step first.
 Never call the other party by a name they did not clearly give you as their \
 own, and never repeat odd or unclear words back. If you did not understand \
 them, ask them to say it again.
-- If you reach an automated menu, press the keys it asks for instead of \
-speaking — a menu cannot hear you. Choose the option that advances the call, \
-or the one for a human operator when none fits.
+{menu}
 - Give information in small steps.
 - Briefly summarize the outcome when you finish a topic or end the call.
 {closing}
@@ -267,6 +278,8 @@ harmful or outside the purpose of the call.
 suggest speaking with a qualified professional.
 - Protect privacy: share only what the call requires.""".replace(
         "{closing}", _OUTBOUND_CLOSING
+    ).replace(
+        "{menu}", _MENU_KEYS_LINE
     )
     + f"\n\n{PLATFORM_PRIVACY}\n\n{SETTINGS_HELP_STUB}"
 )
@@ -379,7 +392,7 @@ THREAD_TOOL_HINT_TEXT = (
 )
 
 
-def other_party_section(name: str, *, can_email: bool) -> str:
+def other_party_section(name: str, *, can_email: bool, can_text: bool = True) -> str:
     """Who is on the line, when their number matched a contact. Without it
     the model asks "who should I email?" when the caller says "email me"."""
     line = (
@@ -395,9 +408,12 @@ def other_party_section(name: str, *, can_email: bool) -> str:
             " who to email or use their name for it. If they told you a"
             f' different name, they are not "{name}": do not use "me", say'
             " you can only email addresses on file."
-            " If they only ask you to send something, ask once: by text or by"
-            " email?"
         )
+        if can_text:
+            line += (
+                " If they only ask you to send something, ask once: by text or"
+                " by email?"
+            )
     return f"{OTHER_PARTY_HEADING}\n\n{line}"
 
 
@@ -569,25 +585,32 @@ def build_voice_instructions(
     direction: str | None = None,
     *,
     other_party: str | None = None,
-    settings_tool: bool = True,
-    end_call_tool: bool = True,
+    tool_names: Collection[str] | None = None,
 ) -> str:
     """Assemble a call's instructions: voice preamble first, the agent's own
     instructions after. The preamble is non-overridable framing
     (:data:`VOICE_PREAMBLE_INBOUND` when ``direction`` is ``"inbound"``);
     with no instructions it alone is the instruction set. Mode-agnostic: the
     same for the fallback chain and a BYO endpoint. ``other_party`` (see
-    :func:`other_party_section`) goes last. ``settings_tool`` is False when
-    the call has no ``hail_settings_help`` tool: the prompt then never names
-    it."""
+    :func:`other_party_section`) goes last.
+
+    ``tool_names`` are the call's tools; None means every tool. The prompt
+    never names or asks for a tool the call lacks: the model would write the
+    name as text, and the voice would read it aloud."""
+
+    def has(name: str) -> bool:
+        return tool_names is None or name in tool_names
+
     preamble = VOICE_PREAMBLE_INBOUND if direction == "inbound" else VOICE_PREAMBLE
-    if not settings_tool:
+    if not has("hail_settings_help"):
         preamble = preamble.replace(_SETTINGS_TOOL_LINE, _SETTINGS_NO_TOOL_LINE)
-    if not end_call_tool:
+    if not has("end_call"):
         # Tools failed to build (the call then has none): say "hang up".
         preamble = preamble.replace("or use end_call in", "or hang up in").replace(
             "and use end_call.", "and hang up."
         )
+    if not has("send_dtmf"):
+        preamble = preamble.replace(_MENU_KEYS_LINE, _MENU_NO_KEYS_LINE)
     caller = (system_prompt or "").strip()
     out = preamble if not caller else f"{preamble}\n\n{VOICE_HEADING}\n\n{caller}"
     if other_party:

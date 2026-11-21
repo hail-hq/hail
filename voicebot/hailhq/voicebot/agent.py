@@ -36,7 +36,7 @@ from uuid import UUID
 from cryptography.fernet import InvalidToken
 from google.protobuf.duration_pb2 import Duration
 from hailhq.core import threads
-from hailhq.core.agent_tools import hail_help, send_email, transfer_call
+from hailhq.core.agent_tools import send_email, send_sms, transfer_call
 from hailhq.core.agent_tools.client import AgentApiClient
 from hailhq.core.agent_tools.send_dtmf import DTMF_CODES
 from hailhq.core.agent_tools.spec import BridgeOutcome, BridgeRoute
@@ -111,7 +111,7 @@ from hailhq.voicebot.recording import start_recording, stop_recording
 from hailhq.voicebot.recovery import ConversationRecovery
 from hailhq.voicebot.spoken_lines import spoken_lines
 from hailhq.voicebot.telemetry import connect_livekit_tracing
-from hailhq.voicebot.tools import SpeechTracker, build_agent_tools
+from hailhq.voicebot.tools import SpeechTracker, build_agent_tools, end_call_only
 from livekit import rtc
 from livekit.agents import Agent, JobContext, JobProcess, StopResponse
 from livekit.agents.llm import LLM, LLMError
@@ -332,11 +332,7 @@ def build_instructions(
     )
     tail = "\n\n".join(part for part in (other_party, clock, spoken) if part) or None
     return build_voice_instructions(
-        system_prompt,
-        direction,
-        other_party=tail,
-        settings_tool=tool_names is None or hail_help.SPEC.name in tool_names,
-        end_call_tool=tool_names is None or "end_call" in tool_names,
+        system_prompt, direction, other_party=tail, tool_names=tool_names
     )
 
 
@@ -348,7 +344,9 @@ def contact_section(
     if known is None:
         return None
     can_email = known.has_email and send_email.SPEC.name in tool_names
-    return other_party_section(known.name, can_email=can_email)
+    return other_party_section(
+        known.name, can_email=can_email, can_text=send_sms.SPEC.name in tool_names
+    )
 
 
 def _call_clock(metadata: dict[str, Any], inbound: bool) -> str | None:
@@ -939,10 +937,16 @@ async def build_tools_safely(
         )
     except Exception:
         logger.exception(
-            "call_id=%s build_agent_tools failed; continuing without agent tools",
+            "call_id=%s build_agent_tools failed; continuing with end_call only",
             call_id,
         )
-        return [], None
+        # The call can still hang up: end_call needs no database or API.
+        return (
+            end_call_only(
+                metadata, call_id=call_id, hangup=hangup, spoke_since=spoke_since
+            ),
+            None,
+        )
 
 
 # Spoken opening when the caller supplied no ``first_message``. A real LLM

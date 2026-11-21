@@ -8,13 +8,13 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 - Webhooks: send a test event to an endpoint before you save it with `POST /v1/webhooks/test`, and see the receiver's answer.
 
-### Fixed
-
-- Calls can always hang up, even when `tools` is an empty list or leaves out `end_call`. The agent no longer says a tool's name aloud.
-
 ### Changed
 
 - `end_call` can no longer be turned off: every call keeps it, whatever `tools` says.
+
+### Fixed
+
+- Calls can always hang up, even when `tools` is an empty list or leaves out `end_call`. The agent no longer says a tool's name aloud.
 
 ## [0.37.0] (2026-11-23)
 

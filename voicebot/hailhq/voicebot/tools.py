@@ -155,6 +155,27 @@ async def _http_tools(
     )
 
 
+def end_call_only(
+    metadata: dict[str, Any], *, call_id: UUID, hangup, spoke_since=None
+) -> list:
+    """Just end_call, for a call whose other tools could not be built. It
+    needs no database or API, so a call can still hang up when those fail.
+    Empty when the dispatch has no valid ``organization_id``."""
+    try:
+        organization_id = UUID(str(metadata.get("organization_id")))
+    except ValueError:
+        return []
+    tctx = ToolContext(
+        call_id=call_id,
+        organization_id=organization_id,
+        api=None,
+        hangup=hangup,
+        send_dtmf=None,
+        spoke_since=spoke_since,
+    )
+    return [wrap_tool(end_call.SPEC, tctx)]
+
+
 async def build_agent_tools(
     metadata: dict[str, Any],
     *,
@@ -191,10 +212,15 @@ async def build_agent_tools(
         # matching on a string instead of list membership. Fail closed,
         # matching the malformed-organization_id posture above.
         logger.warning(
-            "dispatch metadata 'tools' is not a list (%r); agent tools disabled",
+            "dispatch metadata 'tools' is not a list (%r); only end_call enabled",
             type(allowed).__name__,
         )
-        return [], None
+        return (
+            end_call_only(
+                metadata, call_id=call_id, hangup=hangup, spoke_since=spoke_since
+            ),
+            None,
+        )
     specs: list[ToolSpec] = []
     for s in all_tools():
         # Every call can hang up: a list without end_call (or `tools: []`)
@@ -221,11 +247,11 @@ async def build_agent_tools(
     # The agent's own HTTP tools are not built-ins: a `tools` list does not
     # name them, and they stay on with `tools: []`.
     specs.extend(await _http_tools(metadata, call_id, organization_id))
-    if not specs:
-        return [], None
-
+    # end_call is always available and needs no database or API: a call with
+    # only end_call (`tools: []`) opens neither.
+    checked = [s for s in specs if s is not end_call.SPEC]
     api: AgentApiClient | None = None
-    if settings.hail_internal_secret:
+    if checked and settings.hail_internal_secret:
         api = AgentApiClient(settings.hail_api_url, settings.hail_internal_secret)
 
     tctx = ToolContext(
@@ -240,21 +266,24 @@ async def build_agent_tools(
         prompt=prompt,
     )
 
-    available: list[ToolSpec] = []
-    async with session_scope() as session:
-        for spec in specs:
-            try:
-                if await spec.is_available(organization_id, session):
-                    available.append(spec)
-            except Exception:
-                logger.exception("availability check failed for tool %s", spec.name)
-                # Load-bearing: a failed statement leaves the shared session's
-                # transaction aborted; without this rollback every later
-                # is_available check raises PendingRollbackError and gets
-                # swallowed too, silently disabling available tools.
-                await session.rollback()
+    passed: set[str] = set()
+    if checked:
+        async with session_scope() as session:
+            for spec in checked:
+                try:
+                    if await spec.is_available(organization_id, session):
+                        passed.add(spec.name)
+                except Exception:
+                    logger.exception("availability check failed for tool %s", spec.name)
+                    # Load-bearing: a failed statement leaves the shared
+                    # session's transaction aborted; without this rollback
+                    # every later is_available check raises
+                    # PendingRollbackError and gets swallowed too, silently
+                    # disabling available tools.
+                    await session.rollback()
 
+    available = [s for s in specs if s is end_call.SPEC or s.name in passed]
     return [wrap_tool(s, tctx) for s in available], api
 
 
-__all__ = ["SPOKEN_TOOL_FAILURE", "build_agent_tools", "wrap_tool"]
+__all__ = ["SPOKEN_TOOL_FAILURE", "build_agent_tools", "end_call_only", "wrap_tool"]

@@ -15,7 +15,7 @@ from hailhq.voicebot.ivr import (
     try_classify_remote_speech,
 )
 from livekit.agents import Agent, AgentSession
-from livekit.agents.llm import ChatContext, ChatMessage
+from livekit.agents.llm import ChatContext, ChatMessage, function_tool
 from livekit.agents.voice.amd import AMDCategory
 
 from ._fakes import FakeLLM
@@ -40,7 +40,14 @@ async def test_menu_narration_never_reaches_tts(monkeypatch):
 async def test_every_menu_generation_receives_navigation_rules(monkeypatch):
     llm = FakeLLM(reply="...")
     llm.chat = Mock(wraps=llm.chat)
-    agent = SpeechSanitizingAgent(instructions="Check an existing reservation.")
+
+    async def send_dtmf(digits: str) -> str:
+        return "ok"
+
+    agent = SpeechSanitizingAgent(
+        instructions="Check an existing reservation.",
+        tools=[function_tool(send_dtmf, name="send_dtmf")],
+    )
     agent.phone_menu = SimpleNamespace(active=True, checking=False, can_navigate=True)
     async with AgentSession(llm=llm) as session:
         await session.start(agent=agent)

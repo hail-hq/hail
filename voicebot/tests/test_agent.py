@@ -36,8 +36,8 @@ from hailhq.voicebot.agent import (
     _sanitize_tts_stream,
     attach_event_handlers,
     build_instructions,
-    contact_section,
     build_tools_safely,
+    contact_section,
     disconnect_reason_to_status,
     entrypoint,
     handle_sip_disconnect,
@@ -1553,6 +1553,12 @@ async def test_build_tools_safely_degrades_on_failure(
     assert tools == []
     assert api is None
 
+    # With a valid organization the call keeps end_call, so it can hang up.
+    meta = {"organization_id": "11111111-2222-3333-4444-555555555555"}
+    tools, api = await build_tools_safely(meta, call_id, _hangup, _send_dtmf)
+    assert [t.info.name for t in tools] == ["end_call"]
+    assert api is None
+
 
 async def test_build_tools_safely_passes_through_on_success(
     monkeypatch: pytest.MonkeyPatch,
@@ -2535,6 +2541,7 @@ _ALL_TOOL_NAMES = {s.name for s in all_tools()} | {
         ["end_call"],  # `tools: []`
         ["end_call", "send_sms", "list_contacts"],
         ["end_call", "send_email", "hail_settings_help"],
+        ["end_call", "send_dtmf"],
     ],
 )
 def test_prompt_names_only_the_calls_tools(direction, tool_names):
@@ -2551,6 +2558,11 @@ def test_prompt_names_only_the_calls_tools(direction, tool_names):
     )
     named = {name for name in _ALL_TOOL_NAMES if name in out}
     assert named <= set(tool_names)
+    # It does not ask for what a missing tool does either.
+    if "send_dtmf" not in tool_names:
+        assert "press the keys" not in out
+    if "send_sms" not in tool_names:
+        assert "by text or" not in out
 
 
 def test_prompt_with_every_tool_names_its_helpers():

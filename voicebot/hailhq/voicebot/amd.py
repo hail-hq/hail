@@ -398,19 +398,21 @@ starts, end the call without selecting a rating."""
 # write the name as text, and the voice reads it into the menu.
 _IVR_PRESS_LINE = (
     "Use the send_dtmf tool to press the option that best advances the reason for "
-    "your call."
+    "your call. Wait for the complete menu before choosing. A pause or one "
+    "offered digit does not mean the list has finished. Only choose an offered "
+    "option that matches the call's goal. An extension option is only useful "
+    "when you know the requested extension. Never invent a zero/operator option. "
+    "If the full menu offers no relevant option, wait for a repeat."
 )
-_IVR_NO_KEYS_LINE = (
-    "You cannot press keys on this call. Wait for the menu to pass you to a " "person."
-)
+_IVR_NO_KEYS_LINE = "You cannot press keys on this call. Wait for a person."
 _IVR_KEYS_ONLY_LINE = (
     "Press keys, do not speak your choice, the menu cannot hear you. Key "
     "presses happen only through the send_dtmf tool, never write JSON, code, or "
     "tool-call syntax in your reply."
 )
 _IVR_NO_KEYS_SILENT_LINE = (
-    "Do not speak your choice, the menu cannot hear you. Never write JSON, "
-    "code, or tool-call syntax in your reply."
+    "Do not speak to the menu, it cannot hear you. Never write JSON, code, or "
+    "tool-call syntax in your reply."
 )
 
 

@@ -2408,8 +2408,9 @@ def register_tools(
         tools: Annotated[
             list[str] | None,
             _d(
-                "Names of the agent tools allowed on this call. An empty list "
-                "disables them. Omitted: every tool the workspace's channels support."
+                "Names of the agent tools allowed on this call. An empty list: "
+                "none except end_call, so the call can still hang up. Omitted: "
+                "every tool the workspace's channels support."
             ),
         ] = None,
         idempotency_key: Annotated[str | None, _IDEMPOTENCY_KEY] = None,
