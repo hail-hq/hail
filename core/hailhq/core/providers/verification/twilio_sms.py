@@ -958,10 +958,11 @@ def _company_type(key: str) -> str:
 
 def _refused_answers(exc: TwilioRestException) -> bool:
     """A refusal of the customer's answers, not an outage. A failed
-    evaluation is one when any failed field's own text is (each is checked
-    alone, so one field's wording cannot hide another's)."""
+    evaluation is one unless a failed field's own text names an account or
+    configuration problem (each field is checked alone): that stays an
+    outage, retried, since no answer the customer changes can fix it."""
     if isinstance(exc, _NotCompliant):
-        return any(
+        return all(
             application_validation_error(exc.status, text, known_field=True)
             for text in exc.reasons or [""]
         )
@@ -1099,6 +1100,7 @@ def _safe_message(msg) -> str:
     for one in msg if isinstance(msg, list) else [msg or ""]:
         low = str(one).lower()
         for words, text in (
+            (("email",), "Check the email address."),
             (
                 ("ein", "tax id", "registration number"),
                 "Check the business tax number.",

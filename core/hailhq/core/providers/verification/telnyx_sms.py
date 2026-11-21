@@ -1449,7 +1449,7 @@ def _response_problems(response: httpx.Response, subject_type) -> list[Problem]:
                 Problem(
                     field=field,
                     message=with_carrier_text(SMS_VALUE_REFUSED, _detail(e)),
-                    raw=_detail(e),
+                    raw=_one_line(_detail(e)),
                 )
             )
         else:
@@ -1475,11 +1475,18 @@ def _add_carrier_text(
     replaces Hail's sentence (a reused email or phone found later)."""
     # One reason per line: a reason's own "; " must not split it.
     texts = problem.raw.split("\n") if problem.raw else []
+    text = _one_line(text)
     if text and text not in texts:
         texts.append(text)
     head = lead or problem.message.split(" The carrier said: ", 1)[0]
     problem.message = with_carrier_text(head, texts)
     problem.raw = "\n".join(texts) or None
+
+
+def _one_line(text: str | None) -> str | None:
+    """``text`` on one line: a problem's ``raw`` holds one reason per line,
+    so a reason's own line breaks would split it on the way back."""
+    return " ".join((text or "").split()) or None
 
 
 def _general_problem(unmatched: list) -> Problem:
@@ -1542,7 +1549,7 @@ def _reason_problems(reasons, subject_type) -> list[Problem]:
                 Problem(
                     field=field,
                     message=with_carrier_text(message, text),
-                    raw=text or None,
+                    raw=_one_line(text),
                 )
             )
         if not shown:

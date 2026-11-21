@@ -4,10 +4,12 @@ from types import SimpleNamespace
 import pytest
 import requests
 from hailhq.core.providers.verification.base import (
+    BRAND_REJECTED,
     Address,
     DiscardRefused,
     VerificationProviderError,
 )
+from hailhq.core.providers.verification.rejections import with_carrier_text
 from hailhq.core.providers.verification.twilio_sms import TwilioSmsRegistrationProvider
 from twilio.base.exceptions import TwilioRestException
 
@@ -812,7 +814,6 @@ async def test_draft_4xx_gives_hail_sentence_then_carrier_text() -> None:
 
 
 def test_sdk_wrapper_is_not_quoted() -> None:
-    from hailhq.core.providers.verification.rejections import with_carrier_text
 
     # twilio-python wraps Twilio's message as "Unable to create record: ...".
     assert with_carrier_text("Hi.", "Unable to create record: Bad EIN") == (
@@ -885,28 +886,38 @@ async def test_draft_noncompliant_evaluation_is_problem_whatever_its_wording(
     assert draft.refs == {}
 
 
-async def test_noncompliant_fields_are_each_checked_alone() -> None:
-    """One field's wording (here "configuration") cannot turn another
-    field's fixable refusal into an outage."""
+async def test_noncompliant_account_problem_in_any_field_stays_an_outage() -> None:
+    """A field that names an account problem keeps the filing retryable,
+    whatever order the fields come in."""
+    for reasons in (
+        ["bad website", "messaging service misconfigured"],
+        ["messaging service misconfigured", "bad website"],
+    ):
+        r = _ok_responses()
+        r["customer_profiles_evaluations.create"] = SimpleNamespace(
+            status="noncompliant",
+            results=[
+                {"fields": [{"passed": False, "failure_reason": t} for t in reasons]}
+            ],
+        )
+        with pytest.raises(VerificationProviderError):
+            await _draft(_provider(r))
+
+
+async def test_email_error_gets_the_email_sentence() -> None:
     r = _ok_responses()
     r["customer_profiles_evaluations.create"] = SimpleNamespace(
         status="noncompliant",
         results=[
             {
                 "fields": [
-                    {"passed": False, "failure_reason": "bad website"},
-                    {"passed": False, "failure_reason": "configuration mismatch"},
+                    {"passed": False, "failure_reason": "Email address is invalid"}
                 ]
             }
         ],
     )
     draft = await _draft(_provider(r))
-    assert [pr.message for pr in draft.problems] == [
-        (
-            "Check the website address. The carrier said: bad website. "
-            "configuration mismatch."
-        )
-    ]
+    assert draft.problems[0].message.startswith("Check the email address.")
 
 
 async def test_each_failed_field_gets_its_own_hail_sentence() -> None:
@@ -1067,14 +1078,12 @@ async def test_failed_brand_with_unknown_reason_quotes_twilio() -> None:
 
 
 async def test_failed_brand_without_errors_keeps_the_generic_line() -> None:
-    from hailhq.core.providers.verification.base import BRAND_REJECTED
 
     st = await _brand_status(_failed_brand())
     assert st.reason == BRAND_REJECTED
 
 
 async def test_failed_brand_general_error_placeholder_is_not_quoted() -> None:
-    from hailhq.core.providers.verification.base import BRAND_REJECTED
 
     brand = _failed_brand()
     brand.failure_reason = "General Error."

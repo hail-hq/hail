@@ -22,6 +22,8 @@ from hailhq.api.funds import BILLING_URL
 from hailhq.api.main import app
 from hailhq.api.routes import verifications as verifications_routes
 from hailhq.api.routes.verifications import (
+    _BILLED_REASON_MAX,
+    _cap_reason,
     get_verification_registry,
 )
 from hailhq.api.superadmin import require_superadmin
@@ -8767,7 +8769,6 @@ async def test_an_amendment_at_a_carrier_with_no_low_volume_filing_stays_vetted(
 
 
 def test_billed_refusal_reason_is_capped() -> None:
-    from hailhq.api.routes.verifications import _BILLED_REASON_MAX, _cap_reason
 
     reason = "x" * 3000 + ". Fix these and start again."
     capped = _cap_reason(reason)

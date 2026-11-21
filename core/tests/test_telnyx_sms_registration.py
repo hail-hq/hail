@@ -5,6 +5,7 @@ import httpx
 import pytest
 from hailhq.core.providers.verification import telnyx_sms
 from hailhq.core.providers.verification.base import (
+    CAMPAIGN_REJECTED,
     Address,
     DiscardRefused,
     Problem,
@@ -13,9 +14,11 @@ from hailhq.core.providers.verification.base import (
 )
 from hailhq.core.providers.verification.sms_review import (
     LOW_VOLUME_FASTER_LANE_FAILED,
+    campaign_repair_reason,
 )
 from hailhq.core.providers.verification.telnyx_sms import (
     TelnyxSmsRegistrationProvider,
+    _reason_problems,
 )
 
 
@@ -1729,7 +1732,6 @@ async def test_4xx_pointing_at_a_field_names_that_field() -> None:
 
 
 def test_two_brand_reasons_on_one_field_keep_both_texts():
-    from hailhq.core.providers.verification.telnyx_sms import _reason_problems
 
     problems = _reason_problems(
         [
@@ -1747,7 +1749,6 @@ def test_two_brand_reasons_on_one_field_keep_both_texts():
 
 
 def test_a_later_reused_email_reason_switches_the_fix():
-    from hailhq.core.providers.verification.telnyx_sms import _reason_problems
 
     problems = _reason_problems(
         [
@@ -1786,7 +1787,6 @@ async def test_brand_refused_later_gets_the_reused_email_fix() -> None:
 
 
 def test_reasons_under_other_text_keys_are_read():
-    from hailhq.core.providers.verification.sms_review import campaign_repair_reason
 
     reason = campaign_repair_reason([{"reason": "Privacy policy missing"}])
     assert reason.startswith("Review your privacy policy")
@@ -1794,17 +1794,20 @@ def test_reasons_under_other_text_keys_are_read():
 
 
 def test_same_field_reason_with_a_semicolon_is_quoted_once():
-    from hailhq.core.providers.verification.telnyx_sms import _reason_problems
 
     text = "Invalid email; domain unknown"
     problems = _reason_problems(
         [{"fields": ["email"], "description": text}] * 2, "person"
     )
     assert problems[0].message.count("domain unknown") == 1
+    problems = _reason_problems(
+        [{"fields": ["email"], "description": "Invalid email\ndomain unknown"}] * 2,
+        "person",
+    )
+    assert problems[0].message.count("domain unknown") == 1
 
 
 def test_topic_match_reads_named_fields():
-    from hailhq.core.providers.verification.sms_review import campaign_repair_reason
 
     reason = campaign_repair_reason(
         [{"fields": ["messageSamples"], "description": "No"}]
@@ -2836,8 +2839,6 @@ async def test_address_country_must_match_eligibility():
 
 
 def test_repair_reason_gives_guidance_then_the_carriers_words():
-    from hailhq.core.providers.verification.base import CAMPAIGN_REJECTED
-    from hailhq.core.providers.verification.sms_review import campaign_repair_reason
 
     message = campaign_repair_reason("Privacy policy link returns 404")
     assert message.startswith("Review your privacy policy")
@@ -3122,8 +3123,6 @@ def test_body_pointer_names_an_application_field() -> None:
 
 
 def test_repair_reason_matches_whole_word_starts_only() -> None:
-    from hailhq.core.providers.verification.base import CAMPAIGN_REJECTED
-    from hailhq.core.providers.verification.sms_review import campaign_repair_reason
 
     assert campaign_repair_reason("for example, it determines nothing") == (
         f"{CAMPAIGN_REJECTED} The carrier said: for example, it determines nothing."

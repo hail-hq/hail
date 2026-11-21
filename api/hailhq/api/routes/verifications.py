@@ -684,7 +684,8 @@ async def _uncharged_sms_steps(
     ]
 
 
-# The longest joined reason stored for a refusal billed at filing.
+# The longest joined reason stored for a refused filing (billed at filing,
+# or refused in the background pass or at an admin approve).
 _BILLED_REASON_MAX = 2000
 
 
@@ -3739,8 +3740,10 @@ async def _refuse_row(
         db,
         row,
         provider,
-        "; ".join(
-            f"{p.field}: {p.message}" if p.field else p.message for p in problems
+        _cap_reason(
+            "; ".join(
+                f"{p.field}: {p.message}" if p.field else p.message for p in problems
+            )
         ),
         carrier_reason="; ".join(p.raw for p in problems if p.raw) or None,
         kept_state=kept_state,
