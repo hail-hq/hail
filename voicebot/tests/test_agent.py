@@ -2531,6 +2531,7 @@ _ALL_TOOL_NAMES = {s.name for s in all_tools()} | {
 @pytest.mark.parametrize(
     "tool_names",
     [
+        [],  # tools failed to build
         ["end_call"],  # `tools: []`
         ["end_call", "send_sms", "list_contacts"],
         ["end_call", "send_email", "hail_settings_help"],

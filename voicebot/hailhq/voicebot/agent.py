@@ -332,6 +332,7 @@ def build_instructions(
         direction,
         other_party=tail,
         settings_tool=tool_names is None or hail_help.SPEC.name in tool_names,
+        end_call_tool=tool_names is None or "end_call" in tool_names,
     )
 
 

@@ -570,6 +570,7 @@ def build_voice_instructions(
     *,
     other_party: str | None = None,
     settings_tool: bool = True,
+    end_call_tool: bool = True,
 ) -> str:
     """Assemble a call's instructions: voice preamble first, the agent's own
     instructions after. The preamble is non-overridable framing
@@ -582,6 +583,11 @@ def build_voice_instructions(
     preamble = VOICE_PREAMBLE_INBOUND if direction == "inbound" else VOICE_PREAMBLE
     if not settings_tool:
         preamble = preamble.replace(_SETTINGS_TOOL_LINE, _SETTINGS_NO_TOOL_LINE)
+    if not end_call_tool:
+        # Tools failed to build (the call then has none): say "hang up".
+        preamble = preamble.replace("or use end_call in", "or hang up in").replace(
+            "and use end_call.", "and hang up."
+        )
     caller = (system_prompt or "").strip()
     out = preamble if not caller else f"{preamble}\n\n{VOICE_HEADING}\n\n{caller}"
     if other_party:
