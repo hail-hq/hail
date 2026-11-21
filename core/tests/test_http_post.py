@@ -1,6 +1,7 @@
 import re
 import socket
 
+import httpx
 import pytest
 from hailhq.core.http_post import (
     PrivateNetworkBlockedError,
@@ -78,12 +79,47 @@ async def test_httpx_post_allows_private_when_flag_true(respx_mock):
 
 @pytest.mark.asyncio
 async def test_httpx_post_returns_status_and_body(respx_mock, public_dns):
-    respx_mock.post("https://example.com/x").respond(200, text="ok")
+    route = respx_mock.post("https://93.184.216.34/x").respond(200, text="ok")
     status, body = await httpx_post(
         "https://example.com/x", b"{}", {}, allow_private_networks=False
     )
     assert status == 200
     assert body == "ok"
+    sent = route.calls.last.request
+    # Sent to the checked address, under the original name.
+    assert sent.headers["host"] == "example.com"
+    assert sent.extensions["sni_hostname"] == "example.com"
+
+
+@pytest.mark.asyncio
+async def test_httpx_post_connects_to_the_checked_address(respx_mock, monkeypatch):
+    """A second DNS answer (a rebind to a private address) is never used."""
+    answers = iter(["93.184.216.34", "169.254.169.254"])
+
+    def fake_getaddrinfo(host, port, **kw):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (next(answers), 0))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+    route = respx_mock.post("https://93.184.216.34:8443/x").respond(204)
+    status, _ = await httpx_post(
+        "https://rebind.example.com:8443/x", b"{}", {}, allow_private_networks=False
+    )
+    assert status == 204
+    assert route.calls.last.request.headers["host"] == "rebind.example.com:8443"
+
+
+@pytest.mark.asyncio
+async def test_httpx_post_stops_reading_at_max_body_bytes(respx_mock, public_dns):
+    respx_mock.post("https://93.184.216.34/x").respond(200, text="a" * 10_000)
+    status, body = await httpx_post(
+        "https://example.com/x",
+        b"{}",
+        {},
+        allow_private_networks=False,
+        max_body_bytes=100,
+    )
+    assert status == 200
+    assert body == "a" * 100
 
 
 # ---------------------------------------------------------------------------
@@ -279,3 +315,26 @@ async def test_errors_never_show_the_resolved_address(monkeypatch):
     for err in (write_err.value, send_err.value):
         assert "10.4.2.7" not in str(err)
         assert NOT_PUBLIC in str(err)
+
+
+@pytest.mark.asyncio
+async def test_httpx_post_tries_ipv4_first_then_the_next_address(
+    respx_mock, monkeypatch
+):
+    def fake_getaddrinfo(host, port, **kw):
+        return [
+            (socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("2606:4700::1", 0, 0, 0)),
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0)),
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.35", 0)),
+        ]
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+    first = respx_mock.post("https://93.184.216.34/x").mock(
+        side_effect=httpx.ConnectError("refused")
+    )
+    second = respx_mock.post("https://93.184.216.35/x").respond(200, text="ok")
+    status, body = await httpx_post(
+        "https://example.com/x", b"{}", {}, allow_private_networks=False
+    )
+    assert (status, body) == (200, "ok")
+    assert first.called and second.called

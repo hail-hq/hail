@@ -336,6 +336,8 @@ async def test_subscription(
                 headers,
                 allow_private_networks=settings.hail_webhook_allow_private_networks,
                 timeout_seconds=_TEST_TIMEOUT_SECONDS,
+                # UTF-8 uses up to 4 bytes a character.
+                max_body_bytes=RESPONSE_BODY_CAP * 4,
             ),
             _TEST_TIMEOUT_SECONDS,
         )
