@@ -89,7 +89,7 @@ def _make_handler(spec: ToolSpec, tctx: ToolContext):
                 if spec.name == "end_call":
                     # The speaking gate would hide someone who talks over the
                     # goodbye: keep listening until it has played.
-                    with listening_through(context.session):
+                    with listening_through(getattr(context, "session", None)):
                         await context.wait_for_playout()
                 else:
                     await context.wait_for_playout()

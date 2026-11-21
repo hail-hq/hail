@@ -19,7 +19,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-import weakref
 from collections import deque
 from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
@@ -43,8 +42,9 @@ TAIL = 0.3  # margin after the return delay before listening again
 CARRY = 3.0  # how long speech that began before a reply stays heard into it
 QUIET_WINDOWS = 24  # compared agent windows without a match before echo is dropped
 
-# Sessions whose input stays live through agent audio for now (a goodbye).
-_listening: weakref.WeakSet = weakref.WeakSet()
+# Sessions (by id) whose input stays live through agent audio for now (a
+# goodbye). Entries are removed when the goodbye has played.
+_listening: set[int] = set()
 
 
 @contextmanager
@@ -54,11 +54,12 @@ def listening_through(session: object) -> Iterator[None]:
     For the goodbye before a hang-up: someone who talks over it is not done,
     and the hang-up check must hear them.
     """
-    _listening.add(session)
+    key = id(session)
+    _listening.add(key)
     try:
         yield
     finally:
-        _listening.discard(session)
+        _listening.discard(key)
 
 
 def interruption_model_live(session: object) -> bool:
@@ -447,7 +448,7 @@ class SpeakingGuard:
         self.session.input.audio = SpeakingGate(
             source,
             self.playout,
-            lambda: self.enabled() and session not in _listening,
+            lambda: self.enabled() and id(session) not in _listening,
             lambda: getattr(session, "user_state", None) == "speaking",
         )
         self._raw_task = asyncio.create_task(self._observe_raw(), name="echo_raw_input")
