@@ -684,8 +684,8 @@ async def _uncharged_sms_steps(
     ]
 
 
-# The longest joined reason stored for a refused filing (billed at filing,
-# or refused in the background pass or at an admin approve).
+# The longest reason stored for a refused or held filing (billed at filing,
+# refused in the background pass or at an admin approve, or read on a poll).
 _BILLED_REASON_MAX = 2000
 
 
@@ -872,24 +872,25 @@ def _apply_status(row: CarrierVerification, status: ProviderStatus | None) -> bo
         # right after the commit (_refresh).
         _drop_number_answers(row)
     elif status.state == "rejected":
-        row.state, row.rejection_reason, row.updated_at = "rejected", status.reason, now
+        row.state, row.updated_at = "rejected", now
+        row.rejection_reason = _cap_reason(status.reason) if status.reason else None
     elif row.state == "submitting" and status.state == "pending":
         row.state, row.submitted_at, row.updated_at = "submitted", now, now
         if status.reason and (row.provider_refs or {}).get("needs_information"):
             # Held for answers on this same poll: most held rows are not
             # polled again, so keep the repair guidance now.
-            row.rejection_reason = status.reason
+            row.rejection_reason = _cap_reason(status.reason)
     elif row.state == "submitting" and status.state == "draft":
         row.state, row.approved_by, row.updated_at = "awaiting_review", None, now
     elif (
         status.state == "pending"
         and status.reason
         and (row.provider_refs or {}).get("needs_information")
-        and row.rejection_reason != status.reason
+        and row.rejection_reason != _cap_reason(status.reason)
     ):
         # A filing held for the customer's answers: say what to fix. The
         # amend route clears it.
-        row.rejection_reason, row.updated_at = status.reason, now
+        row.rejection_reason, row.updated_at = _cap_reason(status.reason), now
     else:
         return False
     _last_polled.pop(row.id, None)

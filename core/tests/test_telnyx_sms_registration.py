@@ -1816,6 +1816,14 @@ def test_a_single_field_name_as_a_string_is_read():
     assert "too many registrations" in problems[0].message
 
 
+def test_a_field_reason_under_another_text_key_is_quoted():
+    problems = _reason_problems(
+        [{"fields": ["email"], "reason": "Email domain invalid"}], "person"
+    )
+    assert problems[0].message.endswith("The carrier said: Email domain invalid.")
+    assert problems[0].raw == "Email domain invalid"
+
+
 def test_numeric_topic_codes_match_whole_words_only():
     assert campaign_repair_reason([{"code": "309081", "detail": "Odd"}]).startswith(
         CAMPAIGN_REJECTED

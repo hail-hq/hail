@@ -259,6 +259,12 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
                                     if isinstance(exc, _NotCompliant)
                                     else exc.msg
                                 ),
+                                raw=(
+                                    "; ".join(exc.reasons)
+                                    if isinstance(exc, _NotCompliant)
+                                    else exc.msg
+                                )
+                                or None,
                             )
                         ],
                     )
@@ -598,8 +604,16 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
             )
             return ProviderStatus(
                 state="rejected",
+                # The topic match reads every error (codes included); the
+                # quote skips Twilio's "General Error" placeholder.
                 reason=campaign_repair_reason(
-                    [e for e in errors if not _placeholder(e.get("description"))]
+                    [e for e in errors if isinstance(e, dict)],
+                    quote=[
+                        e
+                        for e in errors
+                        if isinstance(e, dict)
+                        and not _placeholder(e.get("description"))
+                    ],
                 ),
                 raw_reason=raw or None,
             )

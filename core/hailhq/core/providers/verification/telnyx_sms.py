@@ -1515,7 +1515,7 @@ def _duplicate_fixes(reasons, subject_type) -> list[str]:
     for reason in reasons if isinstance(reasons, list) else []:
         if not isinstance(reason, dict):
             continue
-        if "duplicate" not in str(reason.get("description") or "").lower():
+        if "duplicate" not in " ".join(carrier_texts(reason)).lower():
             continue
         for name in _field_names(reason):
             fix = _DUPLICATE.get(names.get(name) or "")
@@ -1536,7 +1536,7 @@ def _reason_problems(reasons, subject_type) -> list[Problem]:
         if not isinstance(reason, dict):
             unmatched.append(reason)
             continue
-        text = str(reason.get("description") or "")
+        text = " ".join(carrier_texts(reason))
         shown = False
         for name in _field_names(reason):
             field = names.get(name)

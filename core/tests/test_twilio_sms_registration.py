@@ -1167,7 +1167,7 @@ async def test_failed_campaign_does_not_quote_the_general_error_placeholder() ->
     r["us_app_to_person.fetch"] = SimpleNamespace(
         sid="QE1",
         campaign_status="FAILED",
-        errors=[{"error_code": 30794, "description": "General Error"}],
+        errors=[{"error_code": 30794, "description": "General Error"}, None],
     )
     st = await _provider(r).status(
         {
@@ -1179,6 +1179,23 @@ async def test_failed_campaign_does_not_quote_the_general_error_placeholder() ->
         }
     )
     assert st.reason == CAMPAIGN_REJECTED
+    # The placeholder's code still picks the topic.
+    r["us_app_to_person.fetch"] = SimpleNamespace(
+        sid="QE1",
+        campaign_status="FAILED",
+        errors=[{"error_code": 30908, "description": "General Error"}],
+    )
+    st = await _provider(r).status(
+        {
+            "brand_sid": "BN1",
+            "messaging_service_sid": "MG1",
+            "campaign_sid": "QE1",
+            "subject_type": "business",
+            "campaign": {},
+        }
+    )
+    assert st.reason.startswith("Review your privacy policy")
+    assert "General Error" not in st.reason
 
 
 async def test_business_draft_uses_the_org_service() -> None:
