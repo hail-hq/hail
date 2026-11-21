@@ -1926,6 +1926,52 @@ async def test_a_field_error_under_description_is_quoted():
     assert draft.problems[0].message.endswith("The carrier said: Email domain invalid.")
 
 
+async def test_a_detail_named_only_in_the_title_gets_its_fix():
+    def handler(req):
+        return httpx.Response(
+            422,
+            json={
+                "errors": [
+                    {
+                        "title": "Invalid EIN",
+                        "detail": "The value provided is not valid",
+                    }
+                ]
+            },
+        )
+
+    draft = await _draft(_provider(handler), subject="person", fields=PERSON_FIELDS)
+    assert draft.problems[0].message.startswith("Check the business tax number.")
+
+
+async def test_a_duplicate_email_error_on_the_field_gets_the_reuse_fix():
+    def handler(req):
+        return httpx.Response(
+            422,
+            json={
+                "errors": [
+                    {
+                        "detail": "Email duplicate threshold reached",
+                        "source": {"pointer": "/email"},
+                    }
+                ]
+            },
+        )
+
+    draft = await _draft(_provider(handler), subject="person", fields=PERSON_FIELDS)
+    assert draft.problems[0].message.startswith(
+        "This email is on too many registrations."
+    )
+
+
+def test_a_line_break_in_a_reason_is_not_quoted():
+    problems = _reason_problems(
+        [{"fields": ["email"], "description": "Invalid email\ndomain unknown"}],
+        "person",
+    )
+    assert "\n" not in problems[0].message
+
+
 def test_raw_keeps_the_carriers_own_text():
     problems = _reason_problems(
         [{"fields": ["email"], "description": "[email] - Email domain invalid"}],

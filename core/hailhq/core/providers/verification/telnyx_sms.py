@@ -1449,16 +1449,21 @@ def _response_problems(response: httpx.Response, subject_type) -> list[Problem]:
             unmatched.append(e)
             continue
         problem = next((p for p in problems if p.field == field), None)
+        text = _original_text(e)
+        # A reused email or phone gets its own sentence, as at brand refusal.
+        lead = _DUPLICATE.get(field) if "duplicate" in _all_text(e).lower() else None
         if problem is None:
             problems.append(
                 Problem(
                     field=field,
-                    message=with_carrier_text(SMS_VALUE_REFUSED, _original_text(e)),
-                    raw=_one_line(_original_text(e)),
+                    message=with_carrier_text(
+                        lead or SMS_VALUE_REFUSED, _one_line(text)
+                    ),
+                    raw=_one_line(text),
                 )
             )
         else:
-            _add_carrier_text(problem, _original_text(e))
+            _add_carrier_text(problem, text, lead)
     if not problems:
         originals = [t for t in map(_original_text, _errors(response)) if t]
         return [
@@ -1532,12 +1537,22 @@ def _original_text(item: object) -> str | None:
     return None
 
 
+def _all_text(item: object) -> str:
+    """Every text key of one reason or error joined, for the detail match:
+    Telnyx can name the detail in ``title`` and explain it in ``detail``."""
+    if isinstance(item, str):
+        return item
+    if isinstance(item, dict):
+        return " ".join(item[k] for k in TEXT_KEYS if isinstance(item.get(k), str))
+    return ""
+
+
 def _general_problem(unmatched: list) -> Problem:
     """One problem for carrier reasons on no form field: Hail's sentence for
     each detail they name (else the generic one), then their words. ``raw``
     keeps the carrier's own text, so the audit row has what was shown."""
     originals = [t for t in map(_original_text, unmatched) if t]
-    fixes = detail_fixes(originals)
+    fixes = detail_fixes([_all_text(item) for item in unmatched])
     return Problem(
         field="",
         message=with_carrier_text(" ".join(fixes) or SMS_REFUSED, unmatched),
@@ -1598,7 +1613,7 @@ def _reason_problems(reasons, subject_type) -> list[Problem]:
             problems.append(
                 Problem(
                     field=field,
-                    message=with_carrier_text(message, original),
+                    message=with_carrier_text(message, _one_line(original)),
                     raw=_one_line(original),
                 )
             )
@@ -1615,5 +1630,5 @@ def _safe_message(response: httpx.Response) -> str:
     """Hail's sentence for each detail Telnyx names (``detail_fixes``),
     then Telnyx's own words."""
     errors = _errors(response)
-    fixes = detail_fixes([t for t in map(_original_text, errors) if t])
+    fixes = detail_fixes([_all_text(e) for e in errors])
     return with_carrier_text(" ".join(fixes) or SMS_REFUSED, errors)
