@@ -93,6 +93,10 @@
         "href": "/blog"
       },
       {
+        "label": "Newsletter",
+        "href": "/newsletter"
+      },
+      {
         "label": "MCP",
         "href": "/mcp"
       },
