@@ -36,5 +36,4 @@ Nothing is submitted to a directory. Each post is written in the Substack editor
 ## Notes
 
 - Never import Hail users who did not opt in. Substack's content guidelines (<https://substack.com/content>, read 2026-11-20): "Don't add people to your mailing list without their consent." An imported list must be "made up of people who explicitly opted-in to receive emails from your specific publication."
-- Only people who opted in are imported: the sign-up box or a confirmed form signup. The daily review exports each opt-in once, and the owner uploads the file in Substack. People leave with Substack's unsubscribe link.
-- Removal requests: the privacy policy (section 3.5) promises removal within 14 days after a request to hi@hail.so. The owner forwards the request to the agent, the agent runs the `remove` command of the hail-website newsletter export script (it stops the export), and the owner removes the address in Substack.
+- Only people who opted in are added: the sign-up box, or the form on hail.so after its confirm link. People leave with the unsubscribe link in every newsletter. The privacy policy (section 3.5) promises removal within 14 days after a request to hi@hail.so or after an account is deleted.
