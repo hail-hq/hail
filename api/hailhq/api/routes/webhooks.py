@@ -248,6 +248,8 @@ _TEST_TIMEOUT_SECONDS = 10.0
 
 def _test_error(exc: Exception) -> str:
     """A fixed category, never the exception text: it can name internal hosts."""
+    if isinstance(exc, httpx.ConnectTimeout):
+        return "Could not connect to your endpoint in time."
     if isinstance(exc, (httpx.TimeoutException, TimeoutError)):
         return f"No answer within {_TEST_TIMEOUT_SECONDS:.0f} seconds."
     if isinstance(exc, PrivateNetworkBlockedError):

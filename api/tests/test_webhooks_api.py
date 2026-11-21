@@ -875,6 +875,14 @@ async def test_test_send_reports_receiver_errors(client, auth_headers, receiver)
     assert timed_out.json()["status_code"] is None
     assert timed_out.json()["error"] == "No answer within 10 seconds."
 
+    receiver.exc = httpx.ConnectTimeout("timed out")
+    no_connect = await client.post(
+        "/webhooks/test",
+        headers=auth_headers,
+        json={"target_url": "https://hooks.example.com/receive"},
+    )
+    assert no_connect.json()["error"] == "Could not connect to your endpoint in time."
+
 
 @pytest.mark.asyncio
 async def test_test_send_refuses_bad_targets_and_other_orgs(
