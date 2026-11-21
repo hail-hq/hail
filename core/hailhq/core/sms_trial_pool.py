@@ -7,6 +7,7 @@ docs/operations/sms-trial-numbers.md."""
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from uuid import UUID
 
 from hailhq.core.models import Call, CarrierVerification, PhoneNumber
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
@@ -77,6 +78,28 @@ async def _check_not_on_a_call(db: AsyncSession, number: PhoneNumber) -> None:
         raise TrialPoolError(f"{number.e164}: on a call now. Try again after it ends.")
 
 
+async def _check_no_live_purchase_verification(
+    db: AsyncSession, number: PhoneNumber
+) -> None:
+    """A number bought with a number verification that is still live: an
+    account close of that workspace cancels it at the carrier (it covers
+    the number through ``offer.verification_row_id``)."""
+    offer = number.provisioning_metadata.get("offer") or {}
+    row_id = offer.get("verification_row_id")
+    if not row_id:
+        return
+    try:
+        verification = await db.get(CarrierVerification, UUID(str(row_id)))
+    except ValueError:
+        verification = None
+    if verification is not None and verification.state != "cancelled":
+        raise TrialPoolError(
+            f"{number.e164}: bought with verification {verification.id} "
+            f"({verification.state}). A trial number cannot depend on a "
+            "workspace's verification."
+        )
+
+
 def _trial_number(number: PhoneNumber) -> None:
     if not number.is_pool or number.pool_purpose != POOL_PURPOSE:
         raise TrialPoolError(f"{number.e164}: not a trial texting number.")
@@ -98,6 +121,7 @@ async def mark(db: AsyncSession, e164: str, *, apply: bool) -> list[str]:
         raise TrialPoolError(f"{e164}: already a trial texting number.")
     await _check_not_on_a_call(db, number)
     _check_can_send_trial_texts(number)
+    await _check_no_live_purchase_verification(db, number)
     if apply:
         number.pool_purpose = POOL_PURPOSE
         await db.flush()
@@ -163,6 +187,7 @@ async def move(db: AsyncSession, e164: str, *, apply: bool) -> list[str]:
         raise TrialPoolError(f"{e164}: already a pool number. Use mark.")
     _check_can_send_trial_texts(number)
     await _check_not_on_a_call(db, number)
+    await _check_no_live_purchase_verification(db, number)
     if number.sms_registration_id is not None:
         registration = await db.get(CarrierVerification, number.sms_registration_id)
         if registration is not None and registration.number_id != number.id:

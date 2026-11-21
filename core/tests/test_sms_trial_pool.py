@@ -309,3 +309,38 @@ async def test_move_refuses_a_number_on_another_numbers_registration(async_sessi
     await async_session.flush()
     with pytest.raises(TrialPoolError, match="registration of another number"):
         await sms_trial_pool.move(async_session, E164, apply=True)
+
+
+@pytest.mark.parametrize("command", ["mark", "move"])
+@pytest.mark.parametrize("state,refused", [("approved", True), ("cancelled", False)])
+async def test_mark_and_move_refuse_a_number_bought_with_a_live_verification(
+    async_session, command, state, refused
+):
+    """A number bought with a number verification: an account close would
+    cancel that verification at the carrier, so the number cannot become a
+    trial number while it is live."""
+    org = await _org(async_session)
+    verification = CarrierVerification(
+        id=uuid.uuid4(),
+        organization_id=org,
+        provider="twilio",
+        country_code="US",
+        number_type="toll_free",
+        subject_type="business",
+        purpose="number",
+        state=state,
+        requirements_version="test",
+    )
+    async_session.add(verification)
+    await async_session.flush()
+    await _number(
+        async_session,
+        org=org if command == "move" else None,
+        provisioning_metadata={"offer": {"verification_row_id": str(verification.id)}},
+    )
+    change = getattr(sms_trial_pool, command)
+    if refused:
+        with pytest.raises(TrialPoolError, match="bought with verification"):
+            await change(async_session, E164, apply=True)
+    else:
+        await change(async_session, E164, apply=True)
