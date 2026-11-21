@@ -2131,15 +2131,15 @@ class EmailDomainResponse(BaseModel):
         description="'hail_mail' (Hail-hosted address) or 'custom' (your own domain)."
     )
     domain: str = Field(description="The DNS domain mail is sent from.")
+    # Required (nullable). The before-validator fills them from the old keys
+    # when a reply has only those.
     local_prefix_workspace: str | None = Field(
-        default=None,
         description=(
             f"Workspace prefix of a hail_mail address: {_WORKSPACE_PREFIX_DOC} "
             "Null for kind='custom'."
         ),
     )
     local_prefix_name: str | None = Field(
-        default=None,
         description=(
             f"Name prefix of a hail_mail address: {_NAME_PREFIX_DOC} Null for "
             "kind='custom'."

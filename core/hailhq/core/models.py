@@ -1589,8 +1589,8 @@ class RetiredHailMailAddress(Base):
 
     __tablename__ = "retired_hail_mail_addresses"
 
-    local_prefix_workspace: Mapped[str] = mapped_column(Text, nullable=True)
-    local_prefix_name: Mapped[str] = mapped_column(Text, nullable=True)
+    local_prefix_workspace: Mapped[str | None] = mapped_column(Text, nullable=True)
+    local_prefix_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Old names of the pair above, filled by the sync trigger. They hold the
     # table's primary key until the old columns are dropped. See EmailDomain.
     local_prefix_user: Unmapped[str] = unmapped_column(

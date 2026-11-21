@@ -161,6 +161,26 @@ func TestEmailDomain_RegisterRefusesConflictingPrefixFlags(t *testing.T) {
 	}
 }
 
+func TestEmailDomain_RegisterCustomNamesTheFlagsSet(t *testing.T) {
+	srv := newFakeServer(t, http.StatusCreated, sampleEmailDomainResponse("custom"))
+
+	_, stderr, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"email", "domain", "register",
+		"--kind", "custom", "--domain", "acme.com",
+		"--local-prefix-org", "amber",
+	)
+	if err == nil || !strings.Contains(stderr, "--local-prefix-org is not allowed with --kind=custom") {
+		t.Fatalf("want the old flag named, got %v, stderr %q", err, stderr)
+	}
+	if first, _, _ := strings.Cut(stderr, "\n"); strings.Contains(first, "--local-prefix-name") {
+		t.Errorf("error names a flag that was not set: %q", first)
+	}
+	if got := atomic.LoadInt32(&srv.hits); got != 0 {
+		t.Fatalf("expected no request, got %d", got)
+	}
+}
+
 func TestEmailDomain_PrintsPrefixesFromAnOlderServer(t *testing.T) {
 	resp := sampleEmailDomainResponse("hail_mail")
 	resp.LocalPrefixWorkspace = nil

@@ -505,7 +505,7 @@ async def test_email_domains_deprecated_kwargs_send_the_deprecated_names(
         with pytest.warns(DeprecationWarning, match="local_prefix_org"):
             await c.email_domains.patch(payload["id"], local_prefix_org="amber")
         with pytest.warns(DeprecationWarning), pytest.raises(
-            ValueError, match="not both"
+            ValueError, match="the two values differ"
         ):
             await c.email_domains.patch(
                 payload["id"], local_prefix_workspace="acme", local_prefix_user="bob"

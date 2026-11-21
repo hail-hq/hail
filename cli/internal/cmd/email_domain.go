@@ -115,8 +115,25 @@ func runEmailDomainRegister(
 	if err := checkPrefixFlags(f.namePrefix, f.oldNamePrefix, "--local-prefix-name", "--local-prefix-org"); err != nil {
 		return helpAndFail(cmd, err.Error())
 	}
-	if f.kind == "custom" && (f.workspacePrefix != "" || f.namePrefix != "" || f.oldWorkspacePrefix != "" || f.oldNamePrefix != "") {
-		return helpAndFail(cmd, "--local-prefix-workspace/--local-prefix-name are not allowed with --kind=custom")
+	if f.kind == "custom" {
+		var set []string
+		for _, p := range []struct{ flag, value string }{
+			{"--local-prefix-workspace", f.workspacePrefix},
+			{"--local-prefix-user", f.oldWorkspacePrefix},
+			{"--local-prefix-name", f.namePrefix},
+			{"--local-prefix-org", f.oldNamePrefix},
+		} {
+			if p.value != "" {
+				set = append(set, p.flag)
+			}
+		}
+		if len(set) > 0 {
+			verb := "are"
+			if len(set) == 1 {
+				verb = "is"
+			}
+			return helpAndFail(cmd, fmt.Sprintf("%s %s not allowed with --kind=custom", strings.Join(set, "/"), verb))
+		}
 	}
 
 	body := client.EmailDomainCreate{

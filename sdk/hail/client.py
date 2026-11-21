@@ -512,7 +512,10 @@ def _prefix_fields(
                 f"{old} is deprecated; use {new}", DeprecationWarning, stacklevel=3
             )
             if value is not None and _fold_prefix(value) != _fold_prefix(old_value):
-                raise ValueError(f"pass {new} or {old}, not both")
+                raise ValueError(
+                    f"{old} is the deprecated name of {new}, and the two values "
+                    f"differ; pass only {new}"
+                )
             if value is None:
                 body[old] = old_value
                 continue

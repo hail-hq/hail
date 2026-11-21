@@ -16,15 +16,17 @@ values into them, and keeps both pairs equal with a trigger:
 * On UPDATE, the pair that changed wins. When both changed, the new pair wins.
 
 The trigger name sorts before every other trigger on these tables. Postgres
-fires triggers of the same timing in name order, so the 0070 guard and the
-retire trigger, which still read the old columns, see filled values.
+fires triggers of the same timing in name order, so
+``email_domains_guard_hail_mail_head`` and ``email_domains_retire_hail_mail``,
+which still read the old columns, see filled values.
 
 Two plain indexes on the new columns serve the lookups that now read them:
 inbound routing by workspace prefix, and the retired-address checks.
 
 The unique indexes, CHECK constraints, the primary key of
-``retired_hail_mail_addresses`` and the 0070 trigger functions stay on the
-old columns. A later step moves them to the new columns and drops the old
+``retired_hail_mail_addresses`` and the functions
+``email_domains_guard_hail_mail_head()`` and ``email_domains_retire_hail_mail()``
+stay on the old columns. A later step moves them to the new columns and drops the old
 ones, once no writer uses the old names.
 
 Downgrade drops the triggers, the function and the new columns. The old
