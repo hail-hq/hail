@@ -181,6 +181,19 @@ hail contacts clear-phone me
 
 `create` requires one of `--phone` / `--email`. `list` takes `--q`, `--limit`, `--cursor`, `--all`.
 
+## Knowledge base
+
+Documents agents answer calls, texts and email from ([agents](agents.md#answer-from-your-documents-knowledge-base)). Off until Hail support turns it on for the workspace.
+
+```bash
+hail knowledge add manual.pdf --name "NS-5000 manual"   # upload + add; .pdf .docx .txt .md .csv
+hail knowledge list
+hail knowledge get <id>                                  # pending, processing, ready or failed
+hail knowledge search "error E-204" --limit 3
+hail knowledge delete <id>
+hail agents update <agent_id> --knowledge                # --knowledge=false turns it off
+```
+
 ## Providers
 
 Standing BYO provider config for the org's `llm`, `tts`, and `stt` layers — the same rows the console's Providers page writes. Applies to every call unless that call carries its own `--llm-*` block. See [byo-llm.md](./byo-llm.md).

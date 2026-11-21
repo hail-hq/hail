@@ -38,6 +38,9 @@ _READ_ONLY = {
     "get_sms_application",
     "preview_sms_application",
     "check_verification",
+    "list_knowledge_documents",
+    "get_knowledge_document",
+    "search_knowledge",
 }
 # Read-only tools that talk to outside systems.
 _READ_ONLY_OPEN_WORLD = {
@@ -54,6 +57,7 @@ _READ_ONLY_OPEN_WORLD = {
 # submit_verification cannot be undone; cancel_verification discards a draft.
 _DESTRUCTIVE = {
     "release_number",
+    "delete_knowledge_document",
     "delete_agent",
     "acquire_number",
     "submit_verification",
@@ -78,7 +82,7 @@ _OPEN_WORLD_WRITES = {
     "check_verification_documents",
 }
 
-_EXPECTED_COUNT = 46
+_EXPECTED_COUNT = 51
 
 
 async def test_tool_count(tools_by_name) -> None:

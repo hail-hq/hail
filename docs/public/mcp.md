@@ -21,9 +21,9 @@ Example. Ask your agent: "Find me a US number that can call and text." It calls 
 { "country_code": "US", "capabilities": ["voice", "sms"] }
 ```
 
-The server exposes 43 tools. Schemas (args, validation, return shapes) are the source of truth — refer to [`mcp/hailhq/mcp/tools.py`](https://github.com/hail-hq/hail/blob/main/mcp/hailhq/mcp/tools.py).
+The server exposes 51 tools. Schemas (args, validation, return shapes) are the source of truth — refer to [`mcp/hailhq/mcp/tools.py`](https://github.com/hail-hq/hail/blob/main/mcp/hailhq/mcp/tools.py).
 
-Every tool sets the MCP hints `readOnlyHint`, `destructiveHint`, `idempotentHint` and `openWorldHint`, so clients can ask for approval before a write. `release_number`, `delete_agent`, `acquire_number`, `submit_verification`, `resubmit_verification` and `cancel_verification` are marked destructive. The first three also need a confirmation argument (`confirm_e164`, `confirm_name`, `confirm_total_cents`). `submit_verification` and `resubmit_verification` need `attest_authorized: true`.
+Every tool sets the MCP hints `readOnlyHint`, `destructiveHint`, `idempotentHint` and `openWorldHint`, so clients can ask for approval before a write. `release_number`, `delete_agent`, `delete_knowledge_document`, `acquire_number`, `submit_verification`, `resubmit_verification` and `cancel_verification` are marked destructive. The first four also need a confirmation argument (`confirm_e164`, `confirm_name`, `confirm_name`, `confirm_total_cents`). `submit_verification` and `resubmit_verification` need `attest_authorized: true`.
 
 `place_call`, `send_sms` and `send_email` need `recipient_consent` set to the JSON boolean `true`. Strings such as `"true"` and numbers such as `1` are refused before any request is sent.
 
@@ -37,7 +37,7 @@ Every tool sets the MCP hints `readOnlyHint`, `destructiveHint`, `idempotentHint
 | `list_sms`                      | List recent SMS messages (cursor-paginated).                                                                                    |
 | `send_email`                    | Send an outbound email (supports `attachment_ids`).                                                                             |
 | `upload_email_attachment`       | Upload a small file (under about 50 KB) as base64, get back a reusable id.                                                      |
-| `create_file_upload`            | A one-time link to upload a file with `curl`, for an email attachment or a verification document.                               |
+| `create_file_upload`            | A one-time link to upload a file with `curl`, for an email attachment, a verification document or a knowledge document.         |
 | `get_email`                     | Fetch one email's full record (body + inbound headers).                                                                         |
 | `list_emails`                   | List emails (`direction="inbound"` for replies).                                                                                |
 | `get_email_raw`                 | Presigned URL for an inbound email's raw MIME.                                                                                  |
@@ -55,6 +55,11 @@ Every tool sets the MCP hints `readOnlyHint`, `destructiveHint`, `idempotentHint
 | `create_agent`                  | Save an agent that answers calls and texts.                                                                                     |
 | `update_agent`                  | Change an agent. `clear_fields` removes optional values.                                                                        |
 | `delete_agent`                  | Delete an agent. Destructive. Needs `confirm_name`.                                                                             |
+| `add_knowledge_document`        | Add an uploaded file to the knowledge base agents answer from ([agents](agents.md#answer-from-your-documents-knowledge-base)).  |
+| `list_knowledge_documents`      | List knowledge documents and their status (read-only).                                                                          |
+| `get_knowledge_document`        | Fetch one knowledge document; poll it for `ready` (read-only).                                                                  |
+| `delete_knowledge_document`     | Delete a knowledge document, its file and pieces. Destructive. Needs `confirm_name`.                                            |
+| `search_knowledge`              | Search the knowledge base the way agents do (read-only).                                                                        |
 | `route_number`                  | Choose which agent answers a number.                                                                                            |
 | `route_email_domain`            | Choose which agent answers an email address, and who it answers.                                                                |
 | `quote_numbers`                 | Compare live carrier offers for a new number (read-only).                                                                       |

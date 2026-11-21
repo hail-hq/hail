@@ -57,6 +57,11 @@ from hailhq.core.schemas import (
     EventStreamResponse,
     FileUploadCreate,
     FileUploadLinkResponse,
+    KnowledgeDocumentCreate,
+    KnowledgeDocumentListResponse,
+    KnowledgeDocumentResponse,
+    KnowledgeSearchRequest,
+    KnowledgeSearchResponse,
     NumberAcquireRequest,
     NumberQuoteRequest,
     PhoneNumberListResponse,
@@ -373,6 +378,49 @@ class HailClient:
         """DELETE /agents/{id} — 204; the API clears routing on its numbers."""
         agent_id_ = _path_id(agent_id, name="agent_id")
         _decode_empty(await self._client.delete(f"/agents/{agent_id_}"))
+
+    # ------------------------------------------------------------------ #
+    # /knowledge
+    # ------------------------------------------------------------------ #
+
+    async def add_knowledge_document(
+        self, *, upload_id: str, name: str | None = None
+    ) -> dict[str, Any]:
+        """POST /knowledge/documents — validated by the shared model first."""
+        body = KnowledgeDocumentCreate.model_validate(
+            {"upload_id": upload_id, "name": name}
+        ).model_dump(mode="json", exclude_none=True)
+        resp = await self._client.post("/knowledge/documents", json=body)
+        return KnowledgeDocumentResponse.model_validate(_decode(resp)).model_dump(
+            mode="json"
+        )
+
+    async def list_knowledge_documents(
+        self, *, cursor: str | None = None, limit: int | None = None
+    ) -> dict[str, Any]:
+        params = {k: v for k, v in (("cursor", cursor), ("limit", limit)) if v}
+        resp = await self._client.get("/knowledge/documents", params=params)
+        return KnowledgeDocumentListResponse.model_validate(_decode(resp)).model_dump(
+            mode="json"
+        )
+
+    async def get_knowledge_document(self, document_id: str) -> dict[str, Any]:
+        doc_id = _path_id(document_id, name="document_id")
+        resp = await self._client.get(f"/knowledge/documents/{doc_id}")
+        return KnowledgeDocumentResponse.model_validate(_decode(resp)).model_dump(
+            mode="json"
+        )
+
+    async def delete_knowledge_document(self, document_id: str) -> None:
+        doc_id = _path_id(document_id, name="document_id")
+        _decode_empty(await self._client.delete(f"/knowledge/documents/{doc_id}"))
+
+    async def search_knowledge(self, *, query: str, limit: int = 5) -> dict[str, Any]:
+        body = KnowledgeSearchRequest(query=query, limit=limit).model_dump(mode="json")
+        resp = await self._client.post("/knowledge/search", json=body)
+        return KnowledgeSearchResponse.model_validate(_decode(resp)).model_dump(
+            mode="json"
+        )
 
     # ------------------------------------------------------------------ #
     # /numbers

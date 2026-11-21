@@ -294,7 +294,10 @@ docker compose -f docker-compose.yml -f docker-compose.local.yml run --rm api al
 docker compose -f docker-compose.yml -f docker-compose.local.yml up -d
 ```
 
-**Managed Postgres (Neon / Supabase / RDS / …)** — use only the base file:
+**Managed Postgres (Neon / Supabase / RDS / …)** — use only the base file.
+The database needs the `pgvector` extension (0.5 or newer; the knowledge base
+migration runs `CREATE EXTENSION vector`, into an `extensions` schema when one
+exists, as on Supabase). The bundled container is `pgvector/pgvector`.
 
 ```bash
 # 1. Provision the DB; grab the postgres URL (sslmode=require for most hosted providers)
@@ -802,6 +805,36 @@ burst of legitimate STOPs, not abuse). Otherwise, the next hourly tick
 suspends the org again. There is no cooldown/backoff yet, so a
 persistently-abusive org trips again on the next run. If you see false
 positives, tune `HAIL_SMS_ABUSE_MAX_OPT_OUT_RATE` up.
+
+## Knowledge base
+
+Off for every workspace until you add its limits row. The defaults (10
+documents, 10 MB per file, 1,000 pieces) apply; pass columns to change them:
+
+```bash
+# Turn it on for one workspace
+psql "$DATABASE_URL" -c \
+  "INSERT INTO organization_knowledge (organization_id) VALUES ('<org-uuid>');"
+
+# Turn it off (documents stay; agents stop using them; routes answer 403)
+psql "$DATABASE_URL" -c \
+  "DELETE FROM organization_knowledge WHERE organization_id = '<org-uuid>';"
+```
+
+- The API reads uploaded files in its ingest worker (needs `HAIL_MAIL_BUCKET`:
+  files live under `knowledge-documents/` in the mail bucket; the Terraform
+  module grants it).
+- The embedding model (`intfloat/multilingual-e5-small`, MIT) is baked into
+  the API and voicebot images at `/app/models/embedding` and checked at build
+  time with `python -m hailhq.core.knowledge.selftest`. Outside Docker, put
+  `model.onnx` and `sentencepiece.bpe.model` in a folder and point
+  `HAIL_EMBEDDING_MODEL_DIR` at it; without it, calls go without the
+  knowledge base and searches use keywords only.
+- A loaded model holds about 260 MB in each process that uses it: the API,
+  the voicebot's text worker, and each call whose agent has `knowledge` on.
+- All knowledge data together is capped at 300 MB (new uploads answer 409
+  past it). The abuse monitor also emails `HAIL_SUPPORT_EMAIL` once a day
+  while the whole database is over 200 MB (needs `HAIL_MAIL_BASE_DOMAIN`).
 
 ## Carry-forwards / open work
 

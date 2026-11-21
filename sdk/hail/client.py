@@ -49,6 +49,9 @@ from hail.models import (
     EmailResponse,
     EmailStatus,
     EventStreamResponse,
+    KnowledgeDocumentListResponse,
+    KnowledgeDocumentResponse,
+    KnowledgeSearchResponse,
     LLMConfig,
     NumberQuotesResponse,
     NumberRegionsResponse,
@@ -862,6 +865,7 @@ class _AgentsResource:
         voice_enabled: bool = True,
         sms_enabled: bool = True,
         email_enabled: bool = True,
+        knowledge: bool = False,
         status: str = "live",
         http_tools: list[dict[str, Any]] | None = None,
     ) -> AgentResponse:
@@ -872,7 +876,8 @@ class _AgentsResource:
         ``http_tools`` lists your APIs the agent may call (name, description,
         url, parameters, headers, timeout_seconds, wait_message); the
         response's ``http_tool_secret`` signs their requests and is shown
-        only once."""
+        only once. ``knowledge`` makes the agent answer from the
+        workspace's knowledge base (needs it turned on by Hail)."""
         body: dict[str, Any] = {
             "name": name,
             "system_prompt": system_prompt,
@@ -883,6 +888,8 @@ class _AgentsResource:
             "email_enabled": email_enabled,
             "status": status,
         }
+        if knowledge:
+            body["knowledge"] = True
         if first_message is not None:
             body["first_message"] = first_message
         if ai_disclosure_line is not None:
@@ -928,6 +935,69 @@ class _AgentsResource:
             "POST", f"/agents/{agent_id}/rotate-tool-secret"
         )
         return AgentResponse.model_validate(data)
+
+
+class _KnowledgeResource:
+    """``client.knowledge.*`` — documents your agents answer calls, texts
+    and email from. Off until Hail turns it on for the workspace (403)."""
+
+    def __init__(self, http: _HailHTTP) -> None:
+        self._http = http
+
+    async def add_document(
+        self,
+        *,
+        filename: str,
+        content: bytes,
+        content_type: str,
+        name: str | None = None,
+    ) -> KnowledgeDocumentResponse:
+        """Upload a file (PDF with text, DOCX, TXT, Markdown or CSV) and add
+        it. Three requests: an upload link (``POST /uploads``), the PUT of
+        the bytes, then ``POST /knowledge/documents``. The document starts
+        ``pending``; poll :meth:`get_document` until ``ready`` or ``failed``."""
+        link = await self._http.request(
+            "POST",
+            "/uploads",
+            json={
+                "purpose": "knowledge_document",
+                "filename": filename,
+                "content_type": content_type,
+            },
+        )
+        await self._http.put_upload(link["upload_url"], content)
+        body: dict[str, Any] = {"upload_id": link["id"]}
+        if name is not None:
+            body["name"] = name
+        data = await self._http.request("POST", "/knowledge/documents", json=body)
+        return KnowledgeDocumentResponse.model_validate(data)
+
+    async def list_documents(
+        self, *, cursor: str | None = None, limit: int | None = None
+    ) -> KnowledgeDocumentListResponse:
+        """The workspace's documents, newest first, one page."""
+        data = await self._http.request(
+            "GET",
+            "/knowledge/documents",
+            params={"cursor": cursor, "limit": limit},
+        )
+        return KnowledgeDocumentListResponse.model_validate(data)
+
+    async def get_document(self, document_id: str | UUID) -> KnowledgeDocumentResponse:
+        data = await self._http.request("GET", f"/knowledge/documents/{document_id}")
+        return KnowledgeDocumentResponse.model_validate(data)
+
+    async def delete_document(self, document_id: str | UUID) -> None:
+        """Delete a document, its stored file and its pieces."""
+        await self._http.request("DELETE", f"/knowledge/documents/{document_id}")
+
+    async def search(self, query: str, *, limit: int = 5) -> KnowledgeSearchResponse:
+        """The best pieces for ``query`` (any language), the way agents
+        search: by meaning and by words, merged by rank."""
+        data = await self._http.request(
+            "POST", "/knowledge/search", json={"query": query, "limit": limit}
+        )
+        return KnowledgeSearchResponse.model_validate(data)
 
 
 class _WebhooksResource:
@@ -1236,6 +1306,7 @@ class Client:
         self.sms = _SmsResource(self._http)
         self.numbers = _NumbersResource(self._http)
         self.agents = _AgentsResource(self._http)
+        self.knowledge = _KnowledgeResource(self._http)
         self.emails = _EmailsResource(self._http)
         self.email_attachments = _EmailAttachmentsResource(self._http)
         self.email_domains = _EmailDomainsResource(self._http)

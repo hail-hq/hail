@@ -351,6 +351,7 @@ or pass --api-key.`,
 	root.AddCommand(newEmailCmd(opts))
 	root.AddCommand(newContactsCmd(opts))
 	root.AddCommand(newAgentsCmd(opts))
+	root.AddCommand(newKnowledgeCmd(opts))
 	root.AddCommand(newProvidersCmd(opts))
 	root.AddCommand(newTailCmd(opts))
 	root.AddCommand(newLoginCmd(opts))
