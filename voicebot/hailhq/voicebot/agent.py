@@ -300,7 +300,7 @@ class SpeechSanitizingAgent(Agent):
             chat_ctx.add_message(
                 role="system",
                 content=ivr_navigation_instructions(
-                    None, can_press_keys="send_dtmf" in names
+                    None, can_press_keys=DTMF_TOOL_NAME in names
                 ),
             )
         return Agent.default.llm_node(self, chat_ctx, tools, model_settings)
@@ -917,12 +917,13 @@ async def build_tools_safely(
     cancel_bridge: Callable[[], Awaitable[bool]] | None = None,
     prompt: Callable[[str], Awaitable[None]] | None = None,
 ) -> tuple[list, AgentApiClient | None]:
-    """Build this call's agent tools, degrading to none on any failure.
+    """Build this call's agent tools, degrading to end_call only on any
+    failure (none when the organization_id is invalid).
 
     A tool-layer startup failure (e.g. a DB rollback on a dead connection
-    inside ``build_agent_tools``) must never kill the call, degrade to no
-    tools rather than let the exception escape ``entrypoint()`` and abort
-    the session.
+    inside ``build_agent_tools``) must never kill the call: it degrades
+    rather than let the exception escape ``entrypoint()`` and abort the
+    session. end_call stays so the call can still hang up.
     """
     try:
         return await build_agent_tools(
@@ -2895,7 +2896,7 @@ async def _run_call(
         )
         session.generate_reply(
             instructions=ivr_navigation_instructions(
-                amd_result.transcript, can_press_keys="send_dtmf" in tool_names
+                amd_result.transcript, can_press_keys=DTMF_TOOL_NAME in tool_names
             )
         )
     else:

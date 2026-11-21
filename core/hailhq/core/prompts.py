@@ -7,8 +7,8 @@ through customer APIs or the console. See docs/operations/agent-prompts.md.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
 from collections.abc import Collection
+from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 

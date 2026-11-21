@@ -62,9 +62,12 @@ these rules; this is model guidance, not a new runtime permission check.
 Existing duration limits and interruption handling still apply.
 
 Every call has `end_call`, even when its `tools` list is empty or leaves it
-out. The voice prompt names a tool only when the call has it: settings help
-and the "email me" hint drop out without `hail_settings_help` and
-`send_email`. A prompt that names a missing tool makes the model write the
+out. The voice prompt names a tool, or asks for what it does, only when the
+call has it. Settings help needs `hail_settings_help`, the "email me" hint
+needs `send_email`, the "by text or by email?" question needs `send_sms`,
+and the phone-menu key lines (call prompt and menu prompt) need
+`send_dtmf`. Each swap matches the exact sentence in `prompts.py` or
+`amd.py`, so edit a sentence and its replacement together. A prompt that names a missing tool makes the model write the
 name as text, and the voice reads it aloud. `voicebot/tests/test_agent.py`
 checks this for every built-in tool.
 
