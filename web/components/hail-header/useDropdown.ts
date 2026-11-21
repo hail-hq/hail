@@ -120,7 +120,9 @@ export function useDropdown(initialOpen = false) {
     }
     // A press that ended without a click, such as a touch scroll.
     function onPointerCancel(e: PointerEvent) {
-      pressedInside = false;
+      // A second finger's cancelled gesture leaves the first finger's press alone.
+      if (e.isPrimary || (e.pointerType !== "touch" && e.pointerType !== "pen"))
+        pressedInside = false;
       if (tap?.id === e.pointerId) tap = null;
     }
     // Opening a context menu outside closes the menu. On a Mac, Control+click
