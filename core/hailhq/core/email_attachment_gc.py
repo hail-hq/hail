@@ -106,13 +106,13 @@ class EmailAttachmentGcWorker:
         to retry (see ``OutboundForwardWorker``'s module docstring for the
         same "commit per row" rationale).
 
-        Unlike that worker, GC isn't racing other GC replicas over who
-        "claims" a row — a duplicate ``s3.delete`` and a duplicate
-        ``DELETE ... WHERE id = x`` are both harmless no-ops — so there's no
-        need for ``FOR UPDATE SKIP LOCKED`` or a re-query per row. The batch
-        of stale candidates is listed once, up front, in its own short-lived
-        session, then processed one row (its own S3 delete + DB delete +
-        commit) at a time.
+        The batch of stale candidates is listed once, up front, in its own
+        short-lived session. Each row is then checked again under its row
+        lock (``FOR UPDATE``) before its objects and row are deleted:
+        ``POST /knowledge/documents`` sets ``first_used_at`` under the same
+        lock, and deleting a knowledge upload a document just took would
+        delete the document too (ON DELETE CASCADE). A duplicate S3 delete
+        is harmless, so other GC replicas need no SKIP LOCKED.
         """
         async with self._session_factory() as session:
             stmt = (

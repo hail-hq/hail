@@ -11,9 +11,11 @@
   also lose their accents, so "garantia" finds "garantía".
 * IDs and serial numbers: speech-to-text writes "NS-BAT-48V-100" as
   "NS BAT 48V 100" or "nsbat 48 v 100". A run of short parts with a digit
-  among them (or joined by dashes, like "Wi-Fi") also gives its parts joined, lowercased, with no spaces,
-  dashes, dots, slashes or underscores (``compact_id``), so every spelling
-  meets the same word.
+  among them, apart by spaces, dashes, dots, slashes or underscores, also
+  gives its parts joined and lowercased (``compact_id``), so every spelling
+  meets the same word. Two or three parts with no digit are joined only
+  across dashes ("Wi-Fi" gives "wifi"); joining "e.g" or "and/or" would only
+  add noise.
 
 ``chunk_blocks`` cuts prose into pieces of about 300 to 500 tokens on
 headings and paragraphs, with about 50 tokens of overlap, keeping the page
@@ -48,6 +50,8 @@ OVERLAP_TOKENS = 50
 _MIN_TOKENS_BEFORE_HEADING = 200
 # A heading repeated in front of a piece is cut to this many characters.
 _HEADING_CHARS = 120
+# A part is cut again to fit only into at least this much room.
+_MIN_RECUT_TOKENS = 20
 # Longer words are cut: Postgres refuses a lexeme over 2047 bytes, and no
 # question names such a word anyway.
 _MAX_WORD_CHARS = 100
@@ -80,7 +84,8 @@ def _fold(word: str) -> str:
 
 def compact_id(text: str) -> str:
     """``text`` lowercased with spaces, dashes, dots, slashes and underscores
-    removed: "NS-BAT 48V/100" is "nsbat48v100"."""
+    removed: "NS-BAT 48V/100" is "nsbat48v100". The search words hold this
+    form for runs with a digit (see the module docstring)."""
     return "".join(_ID_PART.findall(unicodedata.normalize("NFKC", text).casefold()))
 
 
@@ -257,8 +262,11 @@ def chunk_blocks(
 
     def set_heading(value: str | None) -> None:
         nonlocal current_heading, heading_cost
-        current_heading = value
-        heading_cost = count_tokens(value) + 1 if value else 0
+        cost = count_tokens(value) + 1 if value else 0
+        # A heading that would take much of the piece is not repeated.
+        if cost > max_tokens // 5:
+            value, cost = None, 0
+        current_heading, heading_cost = value, cost
 
     def flush(*, keep_overlap: bool) -> None:
         nonlocal current, tokens, carried
@@ -297,12 +305,12 @@ def chunk_blocks(
                 if max_pieces is not None and len(chunks) > max_pieces:
                     return chunks
             room = max_tokens - tokens - heading_cost
-            if size > room and len(part) > 1:
+            if size > room >= _MIN_RECUT_TOKENS:
                 # A flush brought a longer heading: cut the part to fit.
-                parts.extendleft(
-                    reversed(_split_long(part, max(room, 1), count_tokens))
-                )
-                continue
+                cut = _split_long(part, room, count_tokens)
+                if len(cut) > 1:
+                    parts.extendleft(reversed(cut))
+                    continue
             current.append((part, block.page))
             tokens += size
             if tokens + heading_cost >= target and not block.heading:

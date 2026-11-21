@@ -76,7 +76,8 @@ logger = logging.getLogger(__name__)
 MAX_ATTEMPTS = 3
 RETRY_MINUTES = 5
 # Bucket errors that never clear: the object is gone or not ours to read.
-_GONE = frozenset({"NoSuchKey", "404", "NotFound", "AccessDenied", "403"})
+# A 403 is not here: a policy change can cause it, and it clears when fixed.
+_GONE = frozenset({"NoSuchKey", "404", "NotFound"})
 _SPENT = "the file could not be processed; delete it and upload it again"
 LEASE = timedelta(minutes=15)
 # Wall-clock limit of one decode. The child also has a 30 s CPU limit.
@@ -320,9 +321,9 @@ class KnowledgeIngestWorker:
             raise _Refused("the knowledge base is not turned on for this workspace")
 
         try:
-            data = await self._get_s3().fetch_raw(
-                row.s3_key, max_bytes=(row.size_bytes or 0) + 1
-            )
+            data = await self._get_s3().fetch_raw(row.s3_key, max_bytes=row.size_bytes)
+            if len(data) != row.size_bytes:
+                raise ValueError("size mismatch")
         except ValueError:
             raise _Refused("the stored file is not the one uploaded; upload it again")
         except ClientError as exc:

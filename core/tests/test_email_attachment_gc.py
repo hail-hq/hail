@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -105,6 +106,9 @@ async def test_tick_commits_each_row_independently_of_mid_batch_failure(
     s3 = AsyncMock()
     s3.delete_prefix.side_effect = [None, RuntimeError("s3 down"), None]
     worker = _worker(async_session, s3)
+    # The failed row rolls the shared test session back, which expires the
+    # loaded rows: keep their ids first.
+    row1, row2, row3 = (SimpleNamespace(id=r.id) for r in (row1, row2, row3))
 
     processed = await worker.tick()
 
