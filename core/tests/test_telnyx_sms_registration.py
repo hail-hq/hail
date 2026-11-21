@@ -5,7 +5,7 @@ import httpx
 import pytest
 from hailhq.core.providers.verification import telnyx_sms
 from hailhq.core.providers.verification.base import (
-    BRAND_REJECTED,
+    CAMPAIGN_REJECTED,
     Address,
     DiscardRefused,
     Problem,
@@ -14,9 +14,11 @@ from hailhq.core.providers.verification.base import (
 )
 from hailhq.core.providers.verification.sms_review import (
     LOW_VOLUME_FASTER_LANE_FAILED,
+    campaign_repair_reason,
 )
 from hailhq.core.providers.verification.telnyx_sms import (
     TelnyxSmsRegistrationProvider,
+    _reason_problems,
 )
 
 
@@ -427,7 +429,11 @@ async def test_status_rejected_brand() -> None:
         )
     )
     st = await p.status({"brand_id": "B1", "subject_type": "business", "campaign": {}})
-    assert st.state == "rejected" and st.reason == BRAND_REJECTED
+    assert st.state == "rejected"
+    assert st.reason == (
+        "The 10DLC registry rejected the registration. "
+        "The carrier said: EIN mismatch. Fix that and start again."
+    )
     assert "EIN" in st.raw_reason
 
 
@@ -490,7 +496,11 @@ async def test_4xx_gives_neutral_problem_and_cleans_up() -> None:
     assert draft.refs == {}
     assert len(draft.problems) == 1
     msg = draft.problems[0].message
-    assert "123456789" not in msg and "Telnyx" not in msg
+    # Hail's sentence first, then the carrier's own words.
+    assert msg == (
+        "Check the business tax number. "
+        "The carrier said: Telnyx says the EIN 123456789 is bad."
+    )
     assert ("DELETE", "/v2/10dlc/brand/B1") in calls
 
 
@@ -1291,7 +1301,7 @@ async def test_a_brand_that_fails_after_its_campaign_is_not_kept() -> None:
         "subject_type": "person",
         "identity_verified": True,
     }
-    assert (await p.status(refs)).reason == BRAND_REJECTED
+    assert "Identity mismatch" in (await p.status(refs)).reason
     calls.clear()
     assert await p.discard_rejected(refs) == {}
     assert ("DELETE", "/v2/10dlc/brand/B1") in calls
@@ -1562,7 +1572,8 @@ async def test_refused_brand_names_the_fields_and_is_deleted() -> None:
     assert "too many registrations" in by_field["email"].message
     assert (
         by_field["address.region"].message
-        == "The 10DLC registry did not accept this value."
+        == "The 10DLC registry did not accept this value. "
+        "The carrier said: Invalid state."
     )
     assert by_field["email"].raw == "Email duplicate threshold reached"
     assert not any(p.endswith("/smsOtp") for _, p in calls)
@@ -1710,7 +1721,276 @@ async def test_4xx_pointing_at_a_field_names_that_field() -> None:
 
     draft = await _draft(_provider(handler), subject="person", fields=PERSON_FIELDS)
     assert [(p.field, p.message) for p in draft.problems] == [
-        ("email", "The 10DLC registry did not accept this value.")
+        (
+            "email",
+            (
+                "The 10DLC registry did not accept this value. "
+                "The carrier said: Invalid email ada@example.com."
+            ),
+        )
+    ]
+
+
+def test_two_brand_reasons_on_one_field_keep_both_texts():
+
+    problems = _reason_problems(
+        [
+            {"fields": ["email"], "description": "Email duplicate threshold reached"},
+            {"fields": ["email"], "description": "Email domain invalid"},
+        ],
+        "person",
+    )
+    # Both texts stay on the field they name.
+    assert [p.field for p in problems] == ["email"]
+    assert problems[0].message == (
+        "This email is on too many registrations. Use another one. The carrier "
+        "said: Email duplicate threshold reached. Email domain invalid."
+    )
+
+
+def test_a_later_reused_email_reason_switches_the_fix():
+
+    problems = _reason_problems(
+        [
+            {"fields": ["email"], "description": "[email] - Email domain invalid"},
+            {"fields": ["email"], "description": "Email duplicate threshold reached"},
+            {"fields": [], "description": "Vertical not allowed"},
+        ],
+        "person",
+    )
+    assert [p.field for p in problems] == ["email", ""]
+    assert problems[0].message == (
+        "This email is on too many registrations. Use another one. The carrier "
+        "said: Email domain invalid. Email duplicate threshold reached."
+    )
+    # The audit row keeps the text of a reason on no form field too.
+    assert problems[1].raw == "Vertical not allowed"
+
+
+async def test_brand_refused_later_gets_the_reused_email_fix() -> None:
+    p = _provider(
+        lambda req: httpx.Response(
+            200,
+            json={
+                "status": "REGISTRATION_FAILED",
+                "failureReasons": [
+                    {"fields": ["email"], "description": "Email duplicate reached"}
+                ],
+            },
+        )
+    )
+    st = await p.status({"brand_id": "B1", "subject_type": "person", "campaign": {}})
+    assert st.reason == (
+        "This email is on too many registrations. Use another one. "
+        "The carrier said: Email duplicate reached. Fix that and start again."
+    )
+
+
+def test_reasons_under_other_text_keys_are_read():
+
+    reason = campaign_repair_reason([{"reason": "Privacy policy missing"}])
+    assert reason.startswith("Review your privacy policy")
+    assert reason.endswith("The carrier said: Privacy policy missing.")
+
+
+def test_same_field_reason_with_a_semicolon_is_quoted_once():
+
+    text = "Invalid email; domain unknown"
+    problems = _reason_problems(
+        [{"fields": ["email"], "description": text}] * 2, "person"
+    )
+    assert problems[0].message.count("domain unknown") == 1
+    problems = _reason_problems(
+        [{"fields": ["email"], "description": "Invalid email\ndomain unknown"}] * 2,
+        "person",
+    )
+    assert problems[0].message.count("domain unknown") == 1
+
+
+def test_a_single_field_name_as_a_string_is_read():
+    problems = _reason_problems(
+        [{"fields": "email", "description": "Email duplicate threshold reached"}],
+        "person",
+    )
+    assert problems[0].field == "email"
+    assert "too many registrations" in problems[0].message
+
+
+def test_a_field_reason_under_another_text_key_is_quoted():
+    problems = _reason_problems(
+        [{"fields": ["email"], "reason": "Email domain invalid"}], "person"
+    )
+    assert problems[0].message.endswith("The carrier said: Email domain invalid.")
+    assert problems[0].raw == "Email domain invalid"
+
+
+async def test_an_email_refusal_off_the_form_gets_the_email_sentence():
+    def handler(req):
+        return httpx.Response(
+            422, json={"errors": [{"detail": "Email address is invalid"}]}
+        )
+
+    draft = await _draft(_provider(handler), subject="person", fields=PERSON_FIELDS)
+    assert draft.problems[0].message == (
+        "Check the email address. The carrier said: Email address is invalid."
+    )
+
+
+async def test_one_refusal_naming_email_and_ein_gets_both_sentences():
+    def handler(req):
+        return httpx.Response(
+            422, json={"errors": [{"detail": "Email and EIN do not match records"}]}
+        )
+
+    draft = await _draft(_provider(handler), subject="person", fields=PERSON_FIELDS)
+    assert draft.problems[0].message.startswith(
+        "Check the email address. Check the business tax number."
+    )
+
+
+async def test_failure_reasons_sent_as_json_text_are_read() -> None:
+    reasons = json.dumps([{"fields": ["email"], "description": "Email duplicate"}])
+    p = _provider(
+        lambda req: httpx.Response(
+            200, json={"status": "REGISTRATION_FAILED", "failureReasons": reasons}
+        )
+    )
+    st = await p.status({"brand_id": "B1", "subject_type": "person", "campaign": {}})
+    assert "{" not in st.reason
+    assert st.reason.startswith("This email is on too many registrations.")
+
+
+async def test_one_failure_reason_object_as_json_gets_the_reuse_fix() -> None:
+    reasons = json.dumps({"fields": ["email"], "description": "Email duplicate"})
+    p = _provider(
+        lambda req: httpx.Response(
+            200, json={"status": "REGISTRATION_FAILED", "failureReasons": reasons}
+        )
+    )
+    st = await p.status({"brand_id": "B1", "subject_type": "person", "campaign": {}})
+    assert st.reason.startswith("This email is on too many registrations.")
+
+
+async def test_audit_text_off_the_form_matches_the_quote():
+    def handler(req):
+        return httpx.Response(
+            422,
+            json={"errors": [{"detail": "Bad EIN", "description": "EIN mismatch"}]},
+        )
+
+    draft = await _draft(_provider(handler), subject="person", fields=PERSON_FIELDS)
+    assert draft.problems[0].message.endswith("The carrier said: EIN mismatch.")
+    assert draft.problems[0].raw == "EIN mismatch"
+
+
+async def test_an_off_form_error_next_to_a_field_error_gets_its_fix():
+    def handler(req):
+        return httpx.Response(
+            422,
+            json={
+                "errors": [
+                    {"detail": "Invalid email", "source": {"pointer": "/email"}},
+                    {
+                        "detail": "[ein] - EIN does not match",
+                        "source": {"pointer": "/x"},
+                    },
+                ]
+            },
+        )
+
+    draft = await _draft(_provider(handler), subject="person", fields=PERSON_FIELDS)
+    general = draft.problems[-1]
+    assert general.field == ""
+    assert general.message == (
+        "Check the business tax number. The carrier said: EIN does not match."
+    )
+    assert general.raw == "[ein] - EIN does not match"
+
+
+async def test_a_field_error_under_description_is_quoted():
+    def handler(req):
+        return httpx.Response(
+            422,
+            json={
+                "errors": [
+                    {
+                        "description": "Email domain invalid",
+                        "source": {"pointer": "/email"},
+                    }
+                ]
+            },
+        )
+
+    draft = await _draft(_provider(handler), subject="person", fields=PERSON_FIELDS)
+    assert draft.problems[0].field == "email"
+    assert draft.problems[0].message.endswith("The carrier said: Email domain invalid.")
+
+
+def test_raw_keeps_the_carriers_own_text():
+    problems = _reason_problems(
+        [{"fields": ["email"], "description": "[email] - Email domain invalid"}],
+        "person",
+    )
+    assert problems[0].raw == "[email] - Email domain invalid"
+    assert problems[0].message.endswith("The carrier said: Email domain invalid.")
+
+
+async def test_a_non_text_detail_does_not_crash_the_filing():
+    def handler(req):
+        return httpx.Response(
+            422,
+            json={"errors": [{"detail": ["x"], "source": {"pointer": "/email"}}]},
+        )
+
+    draft = await _draft(_provider(handler), subject="person", fields=PERSON_FIELDS)
+    assert [p.field for p in draft.problems] == ["email"]
+    assert draft.problems[0].raw is None
+
+
+def test_numeric_topic_codes_match_whole_words_only():
+    assert campaign_repair_reason([{"code": "309081", "detail": "Odd"}]).startswith(
+        CAMPAIGN_REJECTED
+    )
+    assert "privacy policy" in campaign_repair_reason([{"code": "30908"}])
+
+
+def test_topic_match_reads_named_fields():
+
+    reason = campaign_repair_reason(
+        [{"fields": ["messageSamples"], "description": "No"}]
+    )
+    assert "message examples" in reason
+    assert "message examples" in campaign_repair_reason([[{"field": "sample1"}]])
+
+
+async def test_refusal_on_a_field_and_off_the_form_keeps_both_reasons():
+    def handler(req):
+        return httpx.Response(
+            422,
+            json={
+                "errors": [
+                    {"detail": "Invalid email", "source": {"pointer": "/email"}},
+                    {"detail": "Vertical not allowed", "source": {"pointer": "/x"}},
+                ]
+            },
+        )
+
+    draft = await _draft(_provider(handler), subject="person", fields=PERSON_FIELDS)
+    assert [(p.field, p.message) for p in draft.problems] == [
+        (
+            "email",
+            (
+                "The 10DLC registry did not accept this value. "
+                "The carrier said: Invalid email."
+            ),
+        ),
+        (
+            "",
+            (
+                "The 10DLC registry refused a detail. Check your entries and "
+                "try again. The carrier said: Vertical not allowed."
+            ),
+        ),
     ]
 
 
@@ -1735,7 +2015,13 @@ async def test_generic_structured_validation_returns_field_without_further_write
 
     draft = await _draft(_provider(handler), subject="person", fields=PERSON_FIELDS)
     assert [(p.field, p.message) for p in draft.problems] == [
-        (field, "The 10DLC registry did not accept this value.")
+        (
+            field,
+            (
+                "The 10DLC registry did not accept this value. "
+                "The carrier said: Invalid value."
+            ),
+        )
     ]
     assert draft.refs == {} and not draft.billed_refs
     assert calls == [("POST", "/v2/10dlc/brand")]
@@ -2699,16 +2985,20 @@ async def test_address_country_must_match_eligibility():
     assert any(p.field == "address.country_code" for p in result.problems)
 
 
-def test_provider_repair_reason_never_echoes_personal_details():
-    from hailhq.core.providers.verification.sms_review import campaign_repair_reason
+def test_repair_reason_gives_guidance_then_the_carriers_words():
 
+    message = campaign_repair_reason("Privacy policy link returns 404")
+    assert message.startswith("Review your privacy policy")
+    assert message.endswith("The carrier said: Privacy policy link returns 404.")
+    # Structured errors quote their text, never the dict.
+    message = campaign_repair_reason([{"code": "1", "detail": "Sample 2 is vague"}])
+    assert message.endswith("The carrier said: Sample 2 is vague.")
+    assert "{" not in message
+    # Key names and links in the structure never pick the topic.
     message = campaign_repair_reason(
-        "Privacy policy absent for Person Secret, mobile +15125550199, EIN 12-3456789"
+        [{"code": "1", "detail": "Campaign rejected", "meta": {"url": "https://x"}}]
     )
-    assert "privacy policy" in message
-    assert not any(
-        value in message for value in ("Person Secret", "+15125550199", "12-3456789")
-    )
+    assert message.startswith(CAMPAIGN_REJECTED)
 
 
 async def test_campaign_submission_refusal_returns_safe_repair_guidance():
@@ -2735,7 +3025,9 @@ async def test_campaign_submission_refusal_returns_safe_repair_guidance():
     }
     result = await _provider(handler).status(refs)
     assert result.state == "pending" and "privacy policy" in result.reason
-    assert "Ada Secret" not in result.reason and "12-3456789" not in result.reason
+    assert result.reason.endswith(
+        "The carrier said: Privacy policy absent for Ada Secret EIN 12-3456789."
+    )
     assert "Ada Secret" in result.raw_reason
     assert "campaign_id" not in refs
     # Held for the customer's answers on the same paid brand.
@@ -2978,11 +3270,9 @@ def test_body_pointer_names_an_application_field() -> None:
 
 
 def test_repair_reason_matches_whole_word_starts_only() -> None:
-    from hailhq.core.providers.verification.base import CAMPAIGN_REJECTED
-    from hailhq.core.providers.verification.sms_review import campaign_repair_reason
 
     assert campaign_repair_reason("for example, it determines nothing") == (
-        CAMPAIGN_REJECTED
+        f"{CAMPAIGN_REJECTED} The carrier said: for example, it determines nothing."
     )
     assert "message examples" in campaign_repair_reason("Samples are generic")
     for raw in ("Invalid MessageSamples", "MESSAGE_SAMPLES", "/body/sample1"):

@@ -157,8 +157,8 @@ remain approved; this evidence gate applies before a new campaign is filed.
 A campaign create the carrier refuses for an answer the customer gave gets the same hold, on
 Telnyx and Twilio, for a person or a company: `provider_refs.needs_information` and
 `campaign_needs_repair` are set, the paid brand stays, and `rejection_reason` holds Hail's
-repair guidance. The carrier's own text goes only to the audit row
-`verification.campaign_refused` (it can quote personal data). Before this, the row was
+repair guidance followed by the carrier's own words (see [Rejection reasons](#rejection-reasons)).
+The audit row `verification.campaign_refused` keeps the carrier's full text. Before this, the row was
 `rejected` and dismissing it deleted a company's paid brand.
 
 Use `PATCH /verifications/{id}/application` with the complete replacement `fields` and complete
@@ -437,4 +437,16 @@ The plug-in builds it in `status()` with [`rejections.py`](../../core/hailhq/cor
 - **Telnyx.** The requirement group lists each `declined` or `expired` requirement. Hail names it from `GET /requirement_types/{id}`.
 - **DIDWW.** DIDWW rejects the registration when a number is ordered. The order step (`rejected_registration` in `api/hailhq/api/number_orders.py`) puts the address verification's `reject_reasons` and `reject_comment` after "The carrier said:".
 
-The carrier's text can quote what the customer filed. It is shown to the workspace (console, API, MCP) and in the rejection email to the workspace owners, sent through the email provider. It is kept in the audit row `verification.reject` (`carrier_reason`), and never logged.
+US texting registrations (`purpose='sms'`) follow one rule: Hail's sentence first, then "The carrier said:" and the carrier's own words ([`with_carrier_text`](../../core/hailhq/core/providers/verification/rejections.py), cut at 600 characters). A leading field tag such as `[email] - ` is dropped. It applies to a refused brand, a refused or held campaign, a toll-free review, and a refusal at filing:
+
+- **Twilio brand.** Twilio puts the reason in `errors[]` (`error_code`, `description`). Code: `_brand_customer_reason` in `twilio_sms.py`, `brand_rejected_reason` in `sms_review.py`.
+  - Hail's fix for each refusal Twilio documents: by code from the error pages, and by text for the email and address reasons in the Sole Proprietor guide (they come under the general codes 30701 and 30794).
+  - Any other refusal: "The 10DLC registry rejected the registration.", Twilio's words, then "Fix that and start again."
+  - No text in `errors`: Hail quotes `failure_reason`. Twilio's "General Error" placeholder is never quoted.
+  - `SUSPENDED`: "The carrier suspended your US texting registration.", Twilio's words, then "Email hi@hail.so and we will look into it. Do not file a new registration." (owner decision 2026-11-21: a new filing cannot fix a suspension).
+  - The next step comes last. Campaign and toll-free reasons keep their guidance first, then the carrier's words.
+- **Telnyx brand.** The same lead sentence, then `failureReasons`. At filing, a second reason on a field joins that field's problem (a reused email or phone switches it to the reuse fix); a reason on no form field goes in one general problem, with its text kept in the audit row too.
+- **twilio-python's wrapper** ("Unable to create record:") is dropped from the quote.
+- **Campaigns and toll-free.** Hail's topic guidance (`campaign_repair_reason` in `sms_review.py`) is a keyword guess, so the carrier's words always follow it.
+
+The carrier's text can quote what the customer filed. It is shown to the workspace (console, API, MCP) and in the rejection email to the workspace owners, sent through the email provider. It is kept in the audit row `verification.reject` (`carrier_reason`). Hail never logs it, except Telnyx's error text at filing and on failed status polls (`_error_log` in `telnyx_sms.py`, owner decision 2026-10-28).

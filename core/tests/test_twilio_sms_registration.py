@@ -4,10 +4,14 @@ from types import SimpleNamespace
 import pytest
 import requests
 from hailhq.core.providers.verification.base import (
+    BRAND_REJECTED,
+    CAMPAIGN_REJECTED,
     Address,
     DiscardRefused,
     VerificationProviderError,
 )
+from hailhq.core.providers.verification.rejections import with_carrier_text
+from hailhq.core.providers.verification.sms_review import detail_fixes
 from hailhq.core.providers.verification.twilio_sms import TwilioSmsRegistrationProvider
 from twilio.base.exceptions import TwilioRestException
 
@@ -799,15 +803,42 @@ async def test_bad_link_is_a_problem_and_sends_nothing() -> None:
     assert draft.refs == {} and p._client.calls == []
 
 
-async def test_draft_4xx_becomes_neutral_problem() -> None:
+async def test_draft_4xx_gives_hail_sentence_then_carrier_text() -> None:
     r = _ok_responses()
     r["brand_registrations.create"] = _raise(_tw(400, "EIN 12-3456789 not found"))
     r["trust_products.delete"] = True
     r["customer_profiles.delete"] = True
     draft = await _draft(_provider(r))
     assert draft.refs == {}
-    assert [pr.message for pr in draft.problems] == ["Check the business tax number."]
-    assert "12-3456789" not in repr(draft.problems)
+    assert [pr.message for pr in draft.problems] == [
+        "Check the business tax number. The carrier said: EIN 12-3456789 not found."
+    ]
+
+
+def test_sdk_wrapper_is_not_quoted() -> None:
+
+    # twilio-python wraps Twilio's message as "Unable to create record: ...".
+    assert with_carrier_text("Hi.", "Unable to create record: Bad EIN") == (
+        "Hi. The carrier said: Bad EIN."
+    )
+    assert with_carrier_text("Hi.", "Unable to create record") == "Hi."
+    assert with_carrier_text("Hi.", "Unable to fetch page: Bad EIN") == (
+        "Hi. The carrier said: Bad EIN."
+    )
+    assert with_carrier_text("Hi.", "Unable to create recordings now") == (
+        "Hi. The carrier said: Unable to create recordings now."
+    )
+    # Only the SDK's own verbs, and only identifier-like tags, are dropped.
+    assert with_carrier_text("Hi.", "Unable to verify record: EIN mismatch") == (
+        "Hi. The carrier said: Unable to verify record: EIN mismatch."
+    )
+    assert with_carrier_text("Hi.", "[Sample 2] has no opt-out") == (
+        "Hi. The carrier said: [Sample 2] has no opt-out."
+    )
+    # A field tag goes with or without its separator.
+    assert with_carrier_text("Hi.", "[address_sids]: Invalid Postal Code.") == (
+        "Hi. The carrier said: Invalid Postal Code."
+    )
 
 
 async def test_draft_4xx_unknown_message_is_generic() -> None:
@@ -835,7 +866,9 @@ async def test_draft_noncompliant_evaluation_is_problem() -> None:
         results=[{"fields": [{"passed": False, "failure_reason": "bad website"}]}],
     )
     draft = await _draft(_provider(r))
-    assert [pr.message for pr in draft.problems] == ["Check the website address."]
+    assert [pr.message for pr in draft.problems] == [
+        "Check the website address. The carrier said: bad website."
+    ]
 
 
 @pytest.mark.parametrize(
@@ -856,6 +889,135 @@ async def test_draft_noncompliant_evaluation_is_problem_whatever_its_wording(
     draft = await _draft(_provider(r))
     assert [pr.field for pr in draft.problems] == [""]
     assert draft.refs == {}
+
+
+async def test_noncompliant_account_problem_in_any_field_stays_an_outage() -> None:
+    """A field that names an account problem keeps the filing retryable,
+    whatever order the fields come in."""
+    for reasons in (
+        ["bad website", "messaging service misconfigured"],
+        ["messaging service misconfigured", "bad website"],
+    ):
+        r = _ok_responses()
+        r["customer_profiles_evaluations.create"] = SimpleNamespace(
+            status="noncompliant",
+            results=[
+                {"fields": [{"passed": False, "failure_reason": t} for t in reasons]}
+            ],
+        )
+        with pytest.raises(VerificationProviderError):
+            await _draft(_provider(r))
+
+
+async def test_one_text_naming_two_details_gets_both_sentences() -> None:
+    r = _ok_responses()
+    r["customer_profiles_evaluations.create"] = SimpleNamespace(
+        status="noncompliant",
+        results=[
+            {
+                "fields": [
+                    {"passed": False, "failure_reason": "EIN and address do not match"}
+                ]
+            }
+        ],
+    )
+    draft = await _draft(_provider(r))
+    assert draft.problems[0].message.startswith(
+        "Check the business tax number. Check the address."
+    )
+
+
+async def test_email_syntax_error_does_not_point_at_the_postal_address() -> None:
+    r = _ok_responses()
+    r["customer_profiles_evaluations.create"] = SimpleNamespace(
+        status="noncompliant",
+        results=[
+            {
+                "fields": [
+                    {
+                        "passed": False,
+                        "failure_reason": "Email domain has an invalid address syntax.",
+                    }
+                ]
+            }
+        ],
+    )
+    draft = await _draft(_provider(r))
+    assert draft.problems[0].message.startswith("Check the email address. The")
+
+
+def test_one_text_naming_email_and_postal_address_gets_both() -> None:
+    assert detail_fixes(["Email bounced and business address not verified"]) == [
+        "Check the email address.",
+        "Check the address.",
+    ]
+    # A bare "address" in an email text is the email's.
+    for text in (
+        "[email] - Email is a suspected disposable address",
+        "Email domain has an invalid address syntax.",
+        "Email address is invalid",
+    ):
+        assert detail_fixes([text]) == ["Check the email address."]
+    assert detail_fixes(["Invalid web address"]) == ["Check the website address."]
+
+
+async def test_email_and_street_errors_get_both_sentences() -> None:
+    r = _ok_responses()
+    r["customer_profiles_evaluations.create"] = SimpleNamespace(
+        status="noncompliant",
+        results=[
+            {
+                "fields": [
+                    {"passed": False, "failure_reason": "Email is invalid"},
+                    {"passed": False, "failure_reason": "Invalid street address"},
+                ]
+            }
+        ],
+    )
+    draft = await _draft(_provider(r))
+    assert draft.problems[0].message.startswith(
+        "Check the email address. Check the address."
+    )
+
+
+async def test_email_error_gets_the_email_sentence() -> None:
+    r = _ok_responses()
+    r["customer_profiles_evaluations.create"] = SimpleNamespace(
+        status="noncompliant",
+        results=[
+            {
+                "fields": [
+                    {"passed": False, "failure_reason": "Email address is invalid"}
+                ]
+            }
+        ],
+    )
+    draft = await _draft(_provider(r))
+    assert draft.problems[0].message == (
+        "Check the email address. The carrier said: Email address is invalid."
+    )
+
+
+async def test_each_failed_field_gets_its_own_hail_sentence() -> None:
+    r = _ok_responses()
+    r["customer_profiles_evaluations.create"] = SimpleNamespace(
+        status="noncompliant",
+        results=[
+            {
+                "fields": [
+                    {"passed": False, "failure_reason": "bad website"},
+                    {"passed": False, "failure_reason": "EIN invalid"},
+                ]
+            }
+        ],
+    )
+    draft = await _draft(_provider(r))
+    assert [pr.message for pr in draft.problems] == [
+        (
+            "Check the website address. Check the business tax number. "
+            "The carrier said: bad website. EIN invalid."
+        )
+    ]
 
 
 async def test_draft_noncompliant_account_configuration_stays_retryable() -> None:
@@ -918,6 +1080,130 @@ async def test_status_brand_failed_or_suspended_is_rejected(brand_status) -> Non
     assert st.state == "rejected" and st.reason
 
 
+def _failed_brand(*errors: tuple[int, str]) -> SimpleNamespace:
+    return SimpleNamespace(
+        status="FAILED",
+        identity_status=None,
+        brand_feedback=None,
+        failure_reason="General Error",
+        errors=[
+            {"error_code": code, "description": text, "fields": []}
+            for code, text in errors
+        ],
+    )
+
+
+async def _brand_status(brand: SimpleNamespace):
+    r = _ok_responses()
+    r["brand_registrations.fetch"] = brand
+    return await _provider(r).status(
+        {"brand_sid": "BN1", "messaging_service_sid": "MG1", "campaign": {}}
+    )
+
+
+@pytest.mark.parametrize(
+    ("description", "fix"),
+    [
+        # The Sole Proprietor guide's email reasons, all under general codes.
+        ("[email] - Email is a suspected disposable address", "temporary"),
+        ("[email] - Unknown email domain.", "domain does not exist"),
+        ("[email] - Email domain has an invalid address syntax.", "typos"),
+        ("[email] - Email is invalid.", "could not confirm the email"),
+        ("The provided address is not a valid US or Canada address", "Canadian"),
+        ("[address_sids] - Invalid Postal Code.", "known postal address"),
+    ],
+)
+async def test_failed_brand_shows_hail_fix_and_twilio_text(description, fix) -> None:
+    st = await _brand_status(_failed_brand((30794, description)))
+    assert st.state == "rejected"
+    assert fix in st.reason
+    _, _, quote = st.reason.partition(" The carrier said: ")
+    # The next step comes last, after Twilio's words.
+    assert quote.endswith(" Fix that and start again.")
+    quote = quote.removesuffix(" Fix that and start again.")
+    # The field tag goes; Twilio's sentence stays.
+    assert quote and not quote.startswith("[")
+    assert quote.rstrip(".") in description
+
+
+async def test_failed_brand_with_documented_code_uses_its_fix() -> None:
+    st = await _brand_status(_failed_brand((30795, "Tax ID does not match")))
+    assert st.reason == (
+        "The tax number does not match the legal company name. Type both "
+        "exactly as they appear on your tax documents. "
+        "The carrier said: Tax ID does not match. Fix that and start again."
+    )
+    # Twilio may send the code as a string.
+    brand = _failed_brand((30795, "Tax ID does not match"))
+    brand.errors[0]["error_code"] = "30795"
+    assert (await _brand_status(brand)).reason == st.reason
+
+
+async def test_failed_brand_with_unknown_reason_quotes_twilio() -> None:
+
+    st = await _brand_status(_failed_brand((30794, "Something new went wrong")))
+    assert st.reason == (
+        "The 10DLC registry rejected the registration. The carrier said: "
+        "Something new went wrong. Fix that and start again."
+    )
+    # The audit row keeps every part Twilio sent.
+    assert st.raw_reason == "30794: Something new went wrong; General Error"
+    brand = _failed_brand((30794, "x"))
+    brand.errors = [{"description": "Invalid street"}, {"error_code": 30701}]
+    assert (await _brand_status(brand)).raw_reason == (
+        "Invalid street; 30701; General Error"
+    )
+    # Several carrier reasons and no Hail fix: "Fix these".
+    st = await _brand_status(_failed_brand((1, "Website down"), (2, "Vertical bad")))
+    assert st.reason.endswith("Vertical bad. Fix these and start again.")
+    # One Hail fix plus another carrier reason: still "Fix these".
+    st = await _brand_status(
+        _failed_brand((30795, "Tax ID does not match"), (30794, "Website down"))
+    )
+    assert st.reason.endswith("Website down. Fix these and start again.")
+
+
+async def test_failed_brand_without_errors_keeps_the_generic_line() -> None:
+
+    st = await _brand_status(_failed_brand())
+    assert st.reason == BRAND_REJECTED
+
+
+async def test_failed_brand_general_error_placeholder_is_not_quoted() -> None:
+
+    brand = _failed_brand()
+    brand.failure_reason = "General Error."
+    assert (await _brand_status(brand)).reason == BRAND_REJECTED
+    # A real reason that starts with those words is still quoted.
+    brand.failure_reason = "General Error: EIN does not match"
+    assert "EIN does not match" in (await _brand_status(brand)).reason
+
+
+async def test_failed_brand_without_errors_quotes_failure_reason() -> None:
+    brand = _failed_brand()
+    brand.failure_reason = "Website unreachable"
+    st = await _brand_status(brand)
+    assert st.reason == (
+        "The 10DLC registry rejected the registration. The carrier said: "
+        "Website unreachable. Fix that and start again."
+    )
+    # A placeholder in errors is never quoted either.
+    brand = _failed_brand((30794, "General Error"))
+    assert "General Error" not in (await _brand_status(brand)).reason
+
+
+async def test_suspended_brand_asks_to_contact_hail_not_refile() -> None:
+    brand = _failed_brand((30794, "Brand suspended by review"))
+    brand.status = "SUSPENDED"
+    st = await _brand_status(brand)
+    assert st.state == "rejected"
+    assert st.reason == (
+        "The carrier suspended your US texting registration. The carrier said: "
+        "Brand suspended by review. Email hi@hail.so and we will look into it. "
+        "Do not file a new registration."
+    )
+
+
 async def test_status_campaign_failed_without_errors_has_generic_reason() -> None:
     r = _ok_responses()
     r["brand_registrations.fetch"] = SimpleNamespace(
@@ -936,6 +1222,45 @@ async def test_status_campaign_failed_without_errors_has_generic_reason() -> Non
         }
     )
     assert st.state == "rejected" and st.reason
+
+
+async def test_failed_campaign_does_not_quote_the_general_error_placeholder() -> None:
+    r = _ok_responses()
+    r["brand_registrations.fetch"] = SimpleNamespace(
+        status="APPROVED", identity_status="VERIFIED", brand_feedback=None
+    )
+    r["us_app_to_person.fetch"] = SimpleNamespace(
+        sid="QE1",
+        campaign_status="FAILED",
+        errors=[{"error_code": 30794, "description": "General Error"}, None],
+    )
+    st = await _provider(r).status(
+        {
+            "brand_sid": "BN1",
+            "messaging_service_sid": "MG1",
+            "campaign_sid": "QE1",
+            "subject_type": "business",
+            "campaign": {},
+        }
+    )
+    assert st.reason == CAMPAIGN_REJECTED
+    # The placeholder's code still picks the topic.
+    r["us_app_to_person.fetch"] = SimpleNamespace(
+        sid="QE1",
+        campaign_status="FAILED",
+        errors=[{"error_code": 30908, "description": "General Error"}],
+    )
+    st = await _provider(r).status(
+        {
+            "brand_sid": "BN1",
+            "messaging_service_sid": "MG1",
+            "campaign_sid": "QE1",
+            "subject_type": "business",
+            "campaign": {},
+        }
+    )
+    assert st.reason.startswith("Review your privacy policy")
+    assert "General Error" not in st.reason
 
 
 async def test_business_draft_uses_the_org_service() -> None:
@@ -1241,7 +1566,7 @@ async def test_mobile_ownership_lookup_outage_does_not_submit():
     assert not _calls(provider, "customer_profiles.create")
 
 
-async def test_campaign_refusal_is_actionable_without_exposing_provider_text():
+async def test_campaign_refusal_gives_guidance_and_the_carriers_words():
     from twilio.base.exceptions import TwilioRestException
 
     def refused():
@@ -1256,7 +1581,9 @@ async def test_campaign_refusal_is_actionable_without_exposing_provider_text():
     refs = {"brand_sid": "BN1", "messaging_service_sid": "MG1", "campaign": _campaign()}
     result = await provider.status(refs)
     assert result.state == "pending" and "privacy policy" in result.reason
-    assert "Ada Secret" not in result.reason and "12-3456789" not in result.reason
+    assert result.reason.endswith(
+        "The carrier said: Privacy policy absent for Ada Secret, EIN 12-3456789."
+    )
     assert "Ada Secret" in result.raw_reason
     # Held for the customer's answers on the same paid brand.
     assert refs["needs_information"] is True and refs["brand_sid"] == "BN1"
