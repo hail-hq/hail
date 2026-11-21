@@ -23,6 +23,7 @@ from hailhq.api.main import app
 from hailhq.api.routes import verifications as verifications_routes
 from hailhq.api.routes.verifications import (
     _SMS_REASON_MAX,
+    _billed_reason,
     _cap_reason,
     get_verification_registry,
 )
@@ -7940,9 +7941,13 @@ async def test_incomplete_legacy_provider_address_returns_support_guidance(
     assert response.status_code == 404 and "support" in response.json()["detail"]
 
 
-def test_a_long_sms_reason_from_a_poll_is_capped() -> None:
-    from datetime import datetime, timezone
+def test_a_billed_refusal_reason_is_cut_by_purpose() -> None:
+    reason = "z" * 3000
+    assert len(_billed_reason(reason, "sms")) == _SMS_REASON_MAX
+    assert _billed_reason(reason, "number") == "z" * 500
 
+
+def test_a_long_sms_reason_from_a_poll_is_capped() -> None:
     row = CarrierVerification(
         state="submitted",
         purpose="sms",

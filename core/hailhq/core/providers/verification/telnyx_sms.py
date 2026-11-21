@@ -1453,12 +1453,12 @@ def _response_problems(response: httpx.Response, subject_type) -> list[Problem]:
             problems.append(
                 Problem(
                     field=field,
-                    message=with_carrier_text(SMS_VALUE_REFUSED, _detail(e)),
-                    raw=_one_line(_detail(e)),
+                    message=with_carrier_text(SMS_VALUE_REFUSED, _original_text(e)),
+                    raw=_one_line(_original_text(e)),
                 )
             )
         else:
-            _add_carrier_text(problem, _detail(e))
+            _add_carrier_text(problem, _original_text(e))
     if not problems:
         originals = [t for t in map(_original_text, _errors(response)) if t]
         return [

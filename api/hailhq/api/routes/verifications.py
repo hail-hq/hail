@@ -698,6 +698,12 @@ def _cap_reason(reason: str, purpose: str = "sms") -> str:
     return reason[: _SMS_REASON_MAX - 1].rstrip() + "\u2026"
 
 
+def _billed_reason(reason: str, purpose: str) -> str:
+    """The stored reason of a refusal billed at filing: US texting gets the
+    US texting cap; other purposes keep their old 500 character cut."""
+    return _cap_reason(reason) if purpose == "sms" else reason[:500]
+
+
 async def _record_billed_refusal(
     db: AsyncSession,
     principal: Principal,
@@ -722,10 +728,7 @@ async def _record_billed_refusal(
         subject_name=subject_name,
         state="rejected",
         # Each message caps the carrier's words, not their sum: cap it too.
-        # Other purposes keep their old 500 character cut.
-        rejection_reason=(
-            _cap_reason(reason) if sub.purpose == "sms" else reason[:500]
-        ),
+        rejection_reason=_billed_reason(reason, sub.purpose),
         provider_refs={**billed_refs, "refused_at_filing": True},
         requirements_version=requirements_version,
     )

@@ -11,6 +11,7 @@ from hailhq.core.providers.verification.base import (
     VerificationProviderError,
 )
 from hailhq.core.providers.verification.rejections import with_carrier_text
+from hailhq.core.providers.verification.sms_review import detail_fixes
 from hailhq.core.providers.verification.twilio_sms import TwilioSmsRegistrationProvider
 from twilio.base.exceptions import TwilioRestException
 
@@ -946,8 +947,6 @@ async def test_email_syntax_error_does_not_point_at_the_postal_address() -> None
 
 
 def test_one_text_naming_email_and_postal_address_gets_both() -> None:
-    from hailhq.core.providers.verification.sms_review import detail_fixes
-
     assert detail_fixes(["Email bounced and business address not verified"]) == [
         "Check the email address.",
         "Check the address.",
@@ -1120,8 +1119,8 @@ async def test_failed_brand_shows_hail_fix_and_twilio_text(description, fix) -> 
     assert fix in st.reason
     _, _, quote = st.reason.partition(" The carrier said: ")
     # The next step comes last, after Twilio's words.
-    assert quote.endswith(" Fix these and start again.")
-    quote = quote.removesuffix(" Fix these and start again.")
+    assert quote.endswith(" Fix that and start again.")
+    quote = quote.removesuffix(" Fix that and start again.")
     # The field tag goes; Twilio's sentence stays.
     assert quote and not quote.startswith("[")
     assert quote.rstrip(".") in description
@@ -1132,7 +1131,7 @@ async def test_failed_brand_with_documented_code_uses_its_fix() -> None:
     assert st.reason == (
         "The tax number does not match the legal company name. Type both "
         "exactly as they appear on your tax documents. "
-        "The carrier said: Tax ID does not match. Fix these and start again."
+        "The carrier said: Tax ID does not match. Fix that and start again."
     )
     # Twilio may send the code as a string.
     brand = _failed_brand((30795, "Tax ID does not match"))

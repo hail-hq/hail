@@ -1782,7 +1782,7 @@ async def test_brand_refused_later_gets_the_reused_email_fix() -> None:
     st = await p.status({"brand_id": "B1", "subject_type": "person", "campaign": {}})
     assert st.reason == (
         "This email is on too many registrations. Use another one. "
-        "The carrier said: Email duplicate reached. Fix these and start again."
+        "The carrier said: Email duplicate reached. Fix that and start again."
     )
 
 
@@ -1905,6 +1905,25 @@ async def test_an_off_form_error_next_to_a_field_error_gets_its_fix():
         "Check the business tax number. The carrier said: EIN does not match."
     )
     assert general.raw == "[ein] - EIN does not match"
+
+
+async def test_a_field_error_under_description_is_quoted():
+    def handler(req):
+        return httpx.Response(
+            422,
+            json={
+                "errors": [
+                    {
+                        "description": "Email domain invalid",
+                        "source": {"pointer": "/email"},
+                    }
+                ]
+            },
+        )
+
+    draft = await _draft(_provider(handler), subject="person", fields=PERSON_FIELDS)
+    assert draft.problems[0].field == "email"
+    assert draft.problems[0].message.endswith("The carrier said: Email domain invalid.")
 
 
 def test_raw_keeps_the_carriers_own_text():

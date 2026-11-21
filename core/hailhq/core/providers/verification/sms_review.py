@@ -164,7 +164,7 @@ def brand_rejected_reason(
     if fixes and not said:
         return f"{' '.join(fixes)} {START_AGAIN}"
     body = with_carrier_text(" ".join(fixes) or BRAND_REJECTED_LEAD, raw)
-    end = FIX_THESE_AND_START_AGAIN if fixes else FIX_AND_START_AGAIN
+    end = FIX_THESE_AND_START_AGAIN if len(fixes) > 1 else FIX_AND_START_AGAIN
     return f"{body} {end}"
 
 
