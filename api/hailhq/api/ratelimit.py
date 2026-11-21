@@ -49,6 +49,7 @@ from typing import Any
 from hailhq.api.route_prefixes import INTERNAL_PREFIX as _INTERNAL_PREFIX
 from hailhq.api.route_prefixes import V1_PREFIX as _V1_PREFIX
 from hailhq.core.config import settings
+from fastapi import HTTPException
 from limits import RateLimitItem, parse
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -204,6 +205,25 @@ class GeneralRateLimitMiddleware(BaseHTTPMiddleware):
         response.headers["RateLimit-Remaining"] = str(remaining)
         response.headers["RateLimit-Reset"] = str(reset_in)
         return response
+
+
+def enforce_route_limit(request: Request, name: str, per_minute: int) -> None:
+    """Stricter per-caller limit for one expensive route, on top of the general one.
+
+    Same caller key and in-memory storage as the middleware. Raises 429.
+    """
+    item: RateLimitItem = parse(f"{per_minute}/minute")
+    storage_key = item.key_for(name, _rate_limit_key(request))
+    count = limiter.limiter.storage.incr(storage_key, item.get_expiry())
+    if count > item.amount:
+        reset_in = max(
+            int(limiter.limiter.storage.get_expiry(storage_key) - time.time()), 1
+        )
+        raise HTTPException(
+            status_code=429,
+            detail="Rate limit exceeded. Retry after the Retry-After header (seconds).",
+            headers={"Retry-After": str(reset_in)},
+        )
 
 
 # OpenAPI doc for the 429 this middleware can return. FastAPI does not infer

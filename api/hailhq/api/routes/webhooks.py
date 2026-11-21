@@ -27,13 +27,13 @@ from typing import Annotated
 from uuid import UUID, uuid4
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi import status as http_status
 from hailhq.api.audit import actor_of, write_audit_log
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
 from hailhq.api.pagination import fetch_cursor_page
-from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
+from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES, enforce_route_limit
 from hailhq.core.config import settings
 from hailhq.core.db import get_session
 from hailhq.core.http_post import (
@@ -56,7 +56,7 @@ from hailhq.core.schemas import (
 )
 from hailhq.core.secret_cipher import SecretCipher
 from hailhq.core.urls import same_request_url
-from hailhq.core.webhook_events import WebhookEventType
+from hailhq.core.webhook_events import WEBHOOK_TEST_EVENT, WebhookEventType
 from hailhq.core.webhook_worker import RESPONSE_BODY_CAP, redact_credentials
 from hailhq.core.webhooks import build_event_payload, sign_payload
 from pydantic import SecretStr
@@ -242,8 +242,9 @@ async def list_event_types() -> WebhookEventCatalogResponse:
     )
 
 
-_TEST_EVENT = "webhook.test"
 _TEST_TIMEOUT_SECONDS = 10.0
+# Each test holds a worker for up to 10 seconds and posts from Hail's address.
+_TEST_LIMIT_PER_MINUTE = 20
 
 
 def _test_error(exc: Exception) -> str:
@@ -268,6 +269,7 @@ def _test_error(exc: Exception) -> str:
 
 @router.post("/test", response_model=WebhookTestResponse)
 async def test_subscription(
+    request: Request,
     body: WebhookTestRequest,
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
@@ -282,11 +284,12 @@ async def test_subscription(
     omitted ``authorization`` sends the saved header. Without it the test is
     not signed: a new subscription gets its secret when it is created.
     """
+    enforce_route_limit(request, "webhook-test", _TEST_LIMIT_PER_MINUTE)
     authorization = _authorization_value(body.authorization)
     delivery_id = uuid4()
     headers = {
         "Content-Type": "application/json",
-        "X-Hail-Event": _TEST_EVENT,
+        "X-Hail-Event": WEBHOOK_TEST_EVENT,
         "X-Hail-Delivery": str(delivery_id),
     }
     secret: str | None = None
@@ -319,7 +322,7 @@ async def test_subscription(
 
     payload = build_event_payload(
         delivery_id=delivery_id,
-        event_type=_TEST_EVENT,
+        event_type=WEBHOOK_TEST_EVENT,
         organization_id=principal.organization_id,
         data={"message": "Test event from Hail. No action needed."},
     )

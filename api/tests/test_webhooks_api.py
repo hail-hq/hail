@@ -939,3 +939,14 @@ async def test_test_send_holds_no_db_transaction_during_post(
         )
         assert response.status_code == 200, response.text
     assert seen == [False, False]
+
+
+@pytest.mark.asyncio
+async def test_test_send_has_its_own_per_minute_limit(client, auth_headers, receiver):
+    body = {"target_url": "https://hooks.example.com/receive"}
+    for _ in range(webhooks_routes._TEST_LIMIT_PER_MINUTE):
+        ok = await client.post("/webhooks/test", headers=auth_headers, json=body)
+        assert ok.status_code == 200, ok.text
+    limited = await client.post("/webhooks/test", headers=auth_headers, json=body)
+    assert limited.status_code == 429
+    assert "Retry-After" in limited.headers
