@@ -181,7 +181,12 @@ async def test_editable_tollfree_rejection_is_repaired_on_same_request():
         "provider_resource_id": "PN1",
         "e164": "+18005550100",
     }
-    assert (await p.status(refs)).state == "pending"
+    result = await p.status(refs)
+    assert result.state == "pending"
+    # Guidance from the text and code, then Twilio's text without the code.
+    assert result.reason.startswith("Review recipient consent")
+    assert result.reason.endswith("The carrier said: opt-in evidence.")
+    assert "30513" not in result.reason and "30513" in result.raw_reason
     assert refs["needs_information"]
     assert p.step(refs) == "needs_information"
     await p.amend_filed_application(refs, TF_FIELDS, ADDRESS, "business")

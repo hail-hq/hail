@@ -32,6 +32,7 @@ from hailhq.core.providers.verification.base import (
     VerificationProviderError,
 )
 from hailhq.core.providers.verification.forms import display_name, text_length
+from hailhq.core.providers.verification.rejections import with_carrier_text
 from hailhq.core.providers.verification.sms_form import (
     NINE_DIGIT_COUNTRIES,
     campaign_text,
@@ -752,7 +753,9 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                 refs.pop("identity_verified", None)
                 return ProviderStatus(
                     state="rejected",
-                    reason=BRAND_REJECTED,
+                    reason=with_carrier_text(
+                        BRAND_REJECTED, brand.get("failureReasons")
+                    ),
                     raw_reason=str(brand.get("failureReasons") or brand["status"]),
                 )
             if brand.get("status") == "REGISTRATION_PENDING":
@@ -886,12 +889,12 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                     # the background pass files the campaign again.
                     refs["campaign_needs_repair"] = True
                     refs["needs_information"] = True
-                    raw = str(_errors(exc.response))
+                    errors = _errors(exc.response)
                     logger.warning("10DLC campaign refused; held for answers")
                     return ProviderStatus(
                         state="pending",
-                        reason=campaign_repair_reason(raw),
-                        raw_reason=raw,
+                        reason=campaign_repair_reason(errors),
+                        raw_reason=str(errors),
                     )
                 logger.warning(
                     "10DLC status failed: status=%s errors=%s",
@@ -1429,14 +1432,19 @@ def _response_problems(response: httpx.Response, subject_type) -> list[Problem]:
         field = names.get((_pointer(e) or "").rsplit("/", 1)[-1])
         if field and all(p.field != field for p in problems):
             problems.append(
-                Problem(field=field, message=SMS_VALUE_REFUSED, raw=_detail(e))
+                Problem(
+                    field=field,
+                    message=with_carrier_text(SMS_VALUE_REFUSED, _detail(e)),
+                    raw=_detail(e),
+                )
             )
     return problems or [Problem(field="", message=_safe_message(response))]
 
 
 def _reason_problems(reasons, subject_type) -> list[Problem]:
     """A refused brand's ``failureReasons`` as problems on the form fields
-    they name. A reused phone or email gets its own sentence."""
+    they name, each with Telnyx's own words. A reused phone or email gets
+    its own sentence."""
     names = _FORM_FIELDS[subject_type]
     problems: list[Problem] = []
     for reason in reasons or []:
@@ -1450,12 +1458,21 @@ def _reason_problems(reasons, subject_type) -> list[Problem]:
             message = SMS_VALUE_REFUSED
             if "duplicate" in text.lower():
                 message = _DUPLICATE.get(field, message)
-            problems.append(Problem(field=field, message=message, raw=text or None))
-    return problems or [Problem(field="", message=SMS_REFUSED)]
+            problems.append(
+                Problem(
+                    field=field,
+                    message=with_carrier_text(message, text),
+                    raw=text or None,
+                )
+            )
+    return problems or [
+        Problem(field="", message=with_carrier_text(SMS_REFUSED, reasons))
+    ]
 
 
 def _safe_message(response: httpx.Response) -> str:
-    """A short neutral sentence; never the carrier's own text."""
+    """Hail's short sentence for the detail Telnyx names, then Telnyx's own
+    words."""
     low = " ".join(
         f"{e.get('title', '')} {e.get('detail', '')}" for e in _errors(response)
     ).lower()
@@ -1466,5 +1483,5 @@ def _safe_message(response: httpx.Response) -> str:
         (("phone", "mobile"), "Check the phone number."),
     ):
         if any(re.search(rf"\b{w}\b", low) for w in words):
-            return text
-    return SMS_REFUSED
+            return with_carrier_text(text, _errors(response))
+    return with_carrier_text(SMS_REFUSED, _errors(response))

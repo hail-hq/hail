@@ -9,6 +9,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 - Agents: "email me" on a call reaches only the caller's own saved email.
 - Agents: one phone call sends at most 3 emails, and emails to the caller say they came from a phone call.
 - Agents: the fixed lines of an email to the caller are in the call's language.
+- US texting registration: a rejection now shows the carrier's own reason after Hail's fix, in the console, the API and the email.
 
 ## [0.33.0] (2026-11-19)
 

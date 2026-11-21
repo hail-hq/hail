@@ -1,4 +1,4 @@
-"""Local SMS preflight and fixed, customer-safe repair guidance."""
+"""Local SMS preflight and repair guidance, with the carrier's own words."""
 
 import re
 
@@ -8,6 +8,7 @@ from hailhq.core.providers.verification.base import (
     Address,
     Problem,
 )
+from hailhq.core.providers.verification.rejections import with_carrier_text
 from hailhq.core.providers.verification.sms_form import (
     NINE_DIGIT_COUNTRIES,
     tax_number,
@@ -89,12 +90,15 @@ def sender_problems(
     return problems
 
 
-def campaign_repair_reason(raw: object) -> str:
-    """Match review topics; never interpolate provider text or personal data.
-
-    Codes and descriptions differ across carriers. Ambiguous feedback retains
-    general guidance; raw feedback belongs only in the protected audit record.
+def campaign_repair_reason(raw: object, *, quote: object = ...) -> str:
+    """Hail's guidance for the review topic ``raw`` names, then the carrier's
+    own words (``with_carrier_text``). Codes and descriptions differ across
+    carriers, so a topic match is a guess: the carrier's text says what was
+    really wrong. ``raw`` is a string, a dict or a list of them; pass the
+    carrier's structure, never ``str()`` of it. ``quote``, when given, is
+    the part of ``raw`` to quote (its text without a bare error code).
     """
+    said = raw if quote is ... else quote
     # Split field names into words first ("MessageSamples", "MESSAGE_SAMPLES"
     # and "subUsecases" hold "message samples" and "usecases"), so the word
     # start match below still finds them.
@@ -138,8 +142,8 @@ def campaign_repair_reason(raw: object) -> str:
         # Match at a word start: "terms" must not hit "determines", nor
         # "url" "curl", nor "link" "unlinked".
         if any(re.search(rf"\b{re.escape(word)}", text) for word in words):
-            return message
-    return CAMPAIGN_REJECTED
+            return with_carrier_text(message, said)
+    return with_carrier_text(CAMPAIGN_REJECTED, said)
 
 
 def application_validation_error(

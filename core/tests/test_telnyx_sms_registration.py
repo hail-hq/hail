@@ -427,7 +427,8 @@ async def test_status_rejected_brand() -> None:
         )
     )
     st = await p.status({"brand_id": "B1", "subject_type": "business", "campaign": {}})
-    assert st.state == "rejected" and st.reason == BRAND_REJECTED
+    assert st.state == "rejected"
+    assert st.reason == f"{BRAND_REJECTED} The carrier said: EIN mismatch."
     assert "EIN" in st.raw_reason
 
 
@@ -490,7 +491,11 @@ async def test_4xx_gives_neutral_problem_and_cleans_up() -> None:
     assert draft.refs == {}
     assert len(draft.problems) == 1
     msg = draft.problems[0].message
-    assert "123456789" not in msg and "Telnyx" not in msg
+    # Hail's sentence first, then the carrier's own words.
+    assert msg == (
+        "Check the business tax number. "
+        "The carrier said: Telnyx says the EIN 123456789 is bad."
+    )
     assert ("DELETE", "/v2/10dlc/brand/B1") in calls
 
 
@@ -1291,7 +1296,7 @@ async def test_a_brand_that_fails_after_its_campaign_is_not_kept() -> None:
         "subject_type": "person",
         "identity_verified": True,
     }
-    assert (await p.status(refs)).reason == BRAND_REJECTED
+    assert (await p.status(refs)).reason.startswith(BRAND_REJECTED)
     calls.clear()
     assert await p.discard_rejected(refs) == {}
     assert ("DELETE", "/v2/10dlc/brand/B1") in calls
@@ -1562,7 +1567,8 @@ async def test_refused_brand_names_the_fields_and_is_deleted() -> None:
     assert "too many registrations" in by_field["email"].message
     assert (
         by_field["address.region"].message
-        == "The 10DLC registry did not accept this value."
+        == "The 10DLC registry did not accept this value. "
+        "The carrier said: Invalid state."
     )
     assert by_field["email"].raw == "Email duplicate threshold reached"
     assert not any(p.endswith("/smsOtp") for _, p in calls)
@@ -1710,7 +1716,13 @@ async def test_4xx_pointing_at_a_field_names_that_field() -> None:
 
     draft = await _draft(_provider(handler), subject="person", fields=PERSON_FIELDS)
     assert [(p.field, p.message) for p in draft.problems] == [
-        ("email", "The 10DLC registry did not accept this value.")
+        (
+            "email",
+            (
+                "The 10DLC registry did not accept this value. "
+                "The carrier said: Invalid email ada@example.com."
+            ),
+        )
     ]
 
 
@@ -1735,7 +1747,13 @@ async def test_generic_structured_validation_returns_field_without_further_write
 
     draft = await _draft(_provider(handler), subject="person", fields=PERSON_FIELDS)
     assert [(p.field, p.message) for p in draft.problems] == [
-        (field, "The 10DLC registry did not accept this value.")
+        (
+            field,
+            (
+                "The 10DLC registry did not accept this value. "
+                "The carrier said: Invalid value."
+            ),
+        )
     ]
     assert draft.refs == {} and not draft.billed_refs
     assert calls == [("POST", "/v2/10dlc/brand")]
@@ -2699,16 +2717,16 @@ async def test_address_country_must_match_eligibility():
     assert any(p.field == "address.country_code" for p in result.problems)
 
 
-def test_provider_repair_reason_never_echoes_personal_details():
+def test_repair_reason_gives_guidance_then_the_carriers_words():
     from hailhq.core.providers.verification.sms_review import campaign_repair_reason
 
-    message = campaign_repair_reason(
-        "Privacy policy absent for Person Secret, mobile +15125550199, EIN 12-3456789"
-    )
-    assert "privacy policy" in message
-    assert not any(
-        value in message for value in ("Person Secret", "+15125550199", "12-3456789")
-    )
+    message = campaign_repair_reason("Privacy policy link returns 404")
+    assert message.startswith("Review your privacy policy")
+    assert message.endswith("The carrier said: Privacy policy link returns 404.")
+    # Structured errors quote their text, never the dict.
+    message = campaign_repair_reason([{"code": "1", "detail": "Sample 2 is vague"}])
+    assert message.endswith("The carrier said: Sample 2 is vague.")
+    assert "{" not in message
 
 
 async def test_campaign_submission_refusal_returns_safe_repair_guidance():
@@ -2735,7 +2753,9 @@ async def test_campaign_submission_refusal_returns_safe_repair_guidance():
     }
     result = await _provider(handler).status(refs)
     assert result.state == "pending" and "privacy policy" in result.reason
-    assert "Ada Secret" not in result.reason and "12-3456789" not in result.reason
+    assert result.reason.endswith(
+        "The carrier said: Privacy policy absent for Ada Secret EIN 12-3456789."
+    )
     assert "Ada Secret" in result.raw_reason
     assert "campaign_id" not in refs
     # Held for the customer's answers on the same paid brand.
@@ -2982,7 +3002,7 @@ def test_repair_reason_matches_whole_word_starts_only() -> None:
     from hailhq.core.providers.verification.sms_review import campaign_repair_reason
 
     assert campaign_repair_reason("for example, it determines nothing") == (
-        CAMPAIGN_REJECTED
+        f"{CAMPAIGN_REJECTED} The carrier said: for example, it determines nothing."
     )
     assert "message examples" in campaign_repair_reason("Samples are generic")
     for raw in ("Invalid MessageSamples", "MESSAGE_SAMPLES", "/body/sample1"):

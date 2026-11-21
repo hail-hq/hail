@@ -405,9 +405,10 @@ class Problem(BaseModel):
     """A per-field problem the customer can fix. ``field`` is a neutral name
     (a field name, a slot name, or ``address``), or ``""`` for a general one.
 
-    ``message`` is Hail's own wording and is shown to the customer. ``raw`` is
-    the carrier's own text, if any. It is never logged and never sent to the
-    customer: a background refusal keeps it in the audit row, a superadmin
+    ``message`` is shown to the customer: Hail's own wording and, for US
+    texting, the carrier's own words after it (``with_carrier_text`` in
+    ``rejections.py``). ``raw`` is the carrier's own text, if any. It is never
+    logged: a background refusal keeps it in the audit row, a superadmin
     approve shows it to the superadmin, and a refusal at creation drops it."""
 
     field: str

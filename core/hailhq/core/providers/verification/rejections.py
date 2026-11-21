@@ -13,6 +13,7 @@ the rejection email to the workspace owners, and kept in the audit row.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 
 from hailhq.core.providers.verification.base import DETAILS_REJECTED
@@ -100,6 +101,44 @@ def sentence(text: str) -> str:
     """``text`` as one sentence: trimmed, ending in . ! or ?."""
     text = text.strip()
     return text if text.endswith((".", "!", "?")) else text + "."
+
+
+# The longest carrier text quoted to the customer; longer text is cut.
+CARRIER_TEXT_MAX = 600
+# A leading field tag in a carrier's text, like "[email] - ".
+_FIELD_TAG = re.compile(r"^\s*\[[^\]]*\]\s*-\s*")
+
+
+def carrier_texts(raw: object) -> list[str]:
+    """The carrier's readable sentences in a refusal. ``raw`` is a string,
+    a dict (its ``description``, ``detail`` or ``title``), or a list of
+    these. A leading field tag (``[email] - ``) is dropped. Anything else
+    (numbers, codes on their own) gives nothing."""
+    if isinstance(raw, dict):
+        for key in ("description", "detail", "title"):
+            if isinstance(raw.get(key), str) and raw[key].strip():
+                return carrier_texts(raw[key])
+        return []
+    if isinstance(raw, (list, tuple)):
+        return [text for item in raw for text in carrier_texts(item)]
+    if not isinstance(raw, str):
+        return []
+    text = _FIELD_TAG.sub("", raw).strip()
+    return [text] if text else []
+
+
+def with_carrier_text(message: str, raw: object) -> str:
+    """``message`` (Hail's own sentence, with the next step) followed by the
+    carrier's own words, so the customer always sees why. The carrier's
+    text can quote what the customer filed: it goes to the workspace (the
+    console, the API, the owners' email) and is never logged."""
+    said = list(dict.fromkeys(sentence(t) for t in carrier_texts(raw)))
+    if not said:
+        return message
+    quote = " ".join(said)
+    if len(quote) > CARRIER_TEXT_MAX:
+        quote = quote[: CARRIER_TEXT_MAX - 1].rstrip() + "\u2026"
+    return f"{message} The carrier said: {quote}"
 
 
 def customer_reason(

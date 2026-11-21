@@ -27,6 +27,7 @@ from hailhq.core.providers.verification.base import (
     VerificationProviderError,
 )
 from hailhq.core.providers.verification.forms import display_name
+from hailhq.core.providers.verification.rejections import with_carrier_text
 from hailhq.core.providers.verification.sms_form import (
     campaign_text,
     sms_requirements,
@@ -488,7 +489,7 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
         if brand.status in ("FAILED", "SUSPENDED"):
             return ProviderStatus(
                 state="rejected",
-                reason=BRAND_REJECTED,
+                reason=_brand_customer_reason(brand),
                 raw_reason=_brand_reason(brand),
             )
         if brand.status != "APPROVED":
@@ -574,7 +575,7 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
             )
             return ProviderStatus(
                 state="rejected",
-                reason=campaign_repair_reason(raw),
+                reason=campaign_repair_reason(errors),
                 raw_reason=raw or None,
             )
         return ProviderStatus(state="pending")
@@ -933,22 +934,115 @@ def _company_type(key: str) -> str:
 
 
 def _evaluation_message(ev) -> str:
+    """The carrier's text for the first failed field, or "" when it gave none."""
     for result in getattr(ev, "results", None) or []:
         for field in result.get("fields", []) if isinstance(result, dict) else []:
             if not field.get("passed", True):
-                return field.get("failure_reason") or "the carrier refused a detail"
-    return "the carrier refused a detail"
+                return field.get("failure_reason") or ""
+    return ""
+
+
+# Hail's fix for each brand refusal Twilio documents. By error code: the
+# error pages (https://www.twilio.com/docs/api/errors/<code>). By text: the
+# email and address reasons in Twilio's "Troubleshooting Sole Proprietor
+# Brand Registration Failures" guide, which all come under general codes
+# (30701, 30794). Any other refusal shows Twilio's own words alone.
+_BRAND_FIXES_BY_CODE: dict[int, str] = {
+    30795: "The tax number does not match the legal company name. Type both "
+    "exactly as they appear on your tax documents.",
+    30796: "The company type or stock details do not match public records. "
+    "Give stock details only for a publicly traded company.",
+    21736: "The carrier could not link the contact email's domain to your "
+    "business. Use an email address on your business's own domain.",
+    21738: "The carrier could not deliver mail to the contact email. Use an "
+    "address that receives mail.",
+    21740: "The carrier needs a contact email on your business's own domain, "
+    "not a free email provider.",
+}
+_BRAND_FIXES_BY_TEXT: tuple[tuple[tuple[str, ...], str], ...] = (
+    (
+        ("invalid address syntax",),
+        "The email address is not written correctly. Check it for typos.",
+    ),
+    (
+        ("unknown email domain",),
+        "The email address's domain does not exist. Check the part after the @.",
+    ),
+    (
+        ("disposable address",),
+        (
+            "The carrier does not accept temporary or throwaway email "
+            "addresses. Use a lasting email address that you own."
+        ),
+    ),
+    (
+        ("email is invalid",),
+        (
+            "The carrier could not confirm the email address. Use one that "
+            "receives mail."
+        ),
+    ),
+    (
+        ("not a valid us or canada address",),
+        "A person registering for US texting needs a US or Canadian address.",
+    ),
+    (
+        (
+            "invalid postal code",
+            "invalid street",
+            "invalid locality",
+            "invalid region",
+            "invalid house number",
+        ),
+        (
+            "The address does not match a known postal address. Check the "
+            "street, city, state and postal code."
+        ),
+    ),
+)
+
+
+def _brand_customer_reason(brand) -> str:
+    """Why the brand failed, for the customer: Hail's fix for each refusal
+    Twilio documents, then Twilio's own words. Twilio puts both in
+    ``errors`` (``brand_feedback`` holds only feedback ids)."""
+    errors = [e for e in getattr(brand, "errors", None) or [] if isinstance(e, dict)]
+    fixes: list[str] = []
+    for error in errors:
+        text = str(error.get("description") or "").lower()
+        fix = _BRAND_FIXES_BY_CODE.get(error.get("error_code"))  # type: ignore[arg-type]
+        if fix is None:
+            fix = next(
+                (
+                    f
+                    for words, f in _BRAND_FIXES_BY_TEXT
+                    if any(w in text for w in words)
+                ),
+                None,
+            )
+        if fix and fix not in fixes:
+            fixes.append(fix)
+    message = f"{' '.join(fixes)} Then start again." if fixes else BRAND_REJECTED
+    return with_carrier_text(message, errors)
 
 
 def _brand_reason(brand) -> str | None:
-    """The carrier's feedback on a refused brand. Kept in the audit log
-    only (see ``ProviderStatus.raw_reason``)."""
-    fb = getattr(brand, "brand_feedback", None) or []
-    return "; ".join(str(f) for f in fb) or None
+    """Everything Twilio said about a refused brand, for the audit row
+    (see ``ProviderStatus.raw_reason``)."""
+    parts = [
+        f"{e.get('error_code')}: {e.get('description')}"
+        for e in getattr(brand, "errors", None) or []
+        if isinstance(e, dict)
+    ]
+    parts += [str(f) for f in getattr(brand, "brand_feedback", None) or []]
+    if getattr(brand, "failure_reason", None):
+        parts.append(str(brand.failure_reason))
+    return "; ".join(parts) or None
 
 
 def _safe_message(msg) -> str:
-    """A short neutral sentence; never the carrier's own text."""
+    """Hail's short sentence for the detail ``msg`` names, then the
+    carrier's own words."""
     low = (msg or "").lower()
     for words, text in (
         (("ein", "tax id", "registration number"), "Check the business tax number."),
@@ -957,5 +1051,5 @@ def _safe_message(msg) -> str:
         (("phone", "mobile"), "Check the phone number."),
     ):
         if any(re.search(rf"\b{w}\b", low) for w in words):
-            return text
-    return SMS_REFUSED
+            return with_carrier_text(text, msg)
+    return with_carrier_text(SMS_REFUSED, msg)
