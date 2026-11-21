@@ -945,6 +945,25 @@ async def test_email_syntax_error_does_not_point_at_the_postal_address() -> None
     assert draft.problems[0].message.startswith("Check the email address. The")
 
 
+async def test_email_and_street_errors_get_both_sentences() -> None:
+    r = _ok_responses()
+    r["customer_profiles_evaluations.create"] = SimpleNamespace(
+        status="noncompliant",
+        results=[
+            {
+                "fields": [
+                    {"passed": False, "failure_reason": "Email is invalid"},
+                    {"passed": False, "failure_reason": "Invalid street address"},
+                ]
+            }
+        ],
+    )
+    draft = await _draft(_provider(r))
+    assert draft.problems[0].message.startswith(
+        "Check the email address. Check the address."
+    )
+
+
 async def test_email_error_gets_the_email_sentence() -> None:
     r = _ok_responses()
     r["customer_profiles_evaluations.create"] = SimpleNamespace(

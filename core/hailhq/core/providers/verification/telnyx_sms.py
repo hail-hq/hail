@@ -32,6 +32,7 @@ from hailhq.core.providers.verification.base import (
 )
 from hailhq.core.providers.verification.forms import display_name, text_length
 from hailhq.core.providers.verification.rejections import (
+    TEXT_KEYS,
     carrier_texts,
     with_carrier_text,
 )
@@ -49,6 +50,7 @@ from hailhq.core.providers.verification.sms_review import (
     application_validation_error,
     brand_rejected_reason,
     campaign_repair_reason,
+    detail_fixes,
 )
 
 logger = logging.getLogger(__name__)
@@ -1540,6 +1542,16 @@ def _reason_problems(reasons, subject_type) -> list[Problem]:
             unmatched.append(reason)
             continue
         text = " ".join(carrier_texts(reason))
+        # raw keeps the carrier's own text, field tag and all; the message
+        # quotes it cleaned (with_carrier_text).
+        original = next(
+            (
+                reason[k]
+                for k in TEXT_KEYS
+                if isinstance(reason.get(k), str) and reason[k].strip()
+            ),
+            None,
+        )
         shown = False
         for name in _field_names(reason):
             field = names.get(name)
@@ -1550,7 +1562,7 @@ def _reason_problems(reasons, subject_type) -> list[Problem]:
             if problem is not None:
                 duplicate = "duplicate" in text.lower() and field in _DUPLICATE
                 _add_carrier_text(
-                    problem, text, _DUPLICATE[field] if duplicate else None
+                    problem, original, _DUPLICATE[field] if duplicate else None
                 )
                 continue
             message = SMS_VALUE_REFUSED
@@ -1559,8 +1571,8 @@ def _reason_problems(reasons, subject_type) -> list[Problem]:
             problems.append(
                 Problem(
                     field=field,
-                    message=with_carrier_text(message, text),
-                    raw=_one_line(text),
+                    message=with_carrier_text(message, original),
+                    raw=_one_line(original),
                 )
             )
         if not shown:
@@ -1573,19 +1585,10 @@ def _reason_problems(reasons, subject_type) -> list[Problem]:
 
 
 def _safe_message(response: httpx.Response) -> str:
-    """Hail's short sentence for the detail Telnyx names, then Telnyx's own
-    words."""
-    low = " ".join(
-        f"{e.get('title', '')} {e.get('detail', '')}" for e in _errors(response)
-    ).lower()
-    for words, text in (
-        # Before the postal address: "email address" is the email.
-        (("email",), "Check the email address."),
-        (("ein", "tax id", "registration number"), "Check the business tax number."),
-        (("website", "url"), "Check the website address."),
-        (("address", "street", "postal", "zip"), "Check the address."),
-        (("phone", "mobile"), "Check the phone number."),
-    ):
-        if any(re.search(rf"\b{w}\b", low) for w in words):
-            return with_carrier_text(text, _errors(response))
-    return with_carrier_text(SMS_REFUSED, _errors(response))
+    """Hail's sentence for each detail Telnyx names (``detail_fixes``),
+    then Telnyx's own words."""
+    errors = _errors(response)
+    fixes = detail_fixes(
+        [f"{e.get('title', '')} {e.get('detail', '')}" for e in errors]
+    )
+    return with_carrier_text(" ".join(fixes) or SMS_REFUSED, errors)

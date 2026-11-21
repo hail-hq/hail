@@ -97,6 +97,34 @@ def sender_problems(
     return problems
 
 
+# Hail's sentence for each detail a carrier's refusal at filing names.
+_ADDRESS_FIX = "Check the address."
+_DETAIL_FIXES: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("email",), "Check the email address."),
+    (("ein", "tax id", "registration number"), "Check the business tax number."),
+    (("website", "url"), "Check the website address."),
+    (("address", "street", "postal", "zip"), _ADDRESS_FIX),
+    (("phone", "mobile"), "Check the phone number."),
+)
+
+
+def detail_fixes(texts: list[str]) -> list[str]:
+    """Hail's sentence for every detail the carrier's ``texts`` name, each
+    text on its own, without repeats. In a text about the email, the bare
+    word "address" is the email's ("email address", "invalid address
+    syntax"): only street, postal or zip then point at the postal address."""
+    fixes: list[str] = []
+    for one in texts:
+        low = str(one or "").lower()
+        about_email = re.search(r"\bemail\b", low) is not None
+        for words, fix in _DETAIL_FIXES:
+            if fix == _ADDRESS_FIX and about_email:
+                words = ("street", "postal", "zip")
+            if fix not in fixes and any(re.search(rf"\b{w}\b", low) for w in words):
+                fixes.append(fix)
+    return fixes
+
+
 # Hail's lead sentence for a refused brand with no fix of Hail's own.
 BRAND_REJECTED_LEAD = "The 10DLC registry rejected the registration."
 

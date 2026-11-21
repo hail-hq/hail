@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 from datetime import datetime, timedelta, timezone
 
 import requests
@@ -39,6 +38,7 @@ from hailhq.core.providers.verification.sms_review import (
     application_validation_error,
     brand_rejected_reason,
     campaign_repair_reason,
+    detail_fixes,
 )
 from twilio.base.exceptions import TwilioException, TwilioRestException
 from twilio.rest import Client as TwilioClient
@@ -1116,23 +1116,5 @@ def _safe_message(msg) -> str:
     """Hail's short sentence for each detail ``msg`` names (one per text,
     without repeats), then the carrier's own words. ``msg`` is one text or
     a list of them."""
-    fixes: list[str] = []
-    for one in msg if isinstance(msg, list) else [msg or ""]:
-        # "email address" is the email, not the postal address.
-        low = re.sub(r"\bemail address\b", "email", str(one).lower())
-        for words, text in (
-            (("email",), "Check the email address."),
-            (
-                ("ein", "tax id", "registration number"),
-                "Check the business tax number.",
-            ),
-            (("website", "url"), "Check the website address."),
-            (("address", "street", "postal", "zip"), "Check the address."),
-            (("phone", "mobile"), "Check the phone number."),
-        ):
-            if text == "Check the address." and "Check the email address." in fixes:
-                # "Email ... invalid address syntax" is about the email.
-                continue
-            if any(re.search(rf"\b{w}\b", low) for w in words) and text not in fixes:
-                fixes.append(text)
+    fixes = detail_fixes(msg if isinstance(msg, list) else [msg or ""])
     return with_carrier_text(" ".join(fixes) or SMS_REFUSED, msg)

@@ -1836,6 +1836,27 @@ async def test_an_email_refusal_off_the_form_gets_the_email_sentence():
     )
 
 
+async def test_one_refusal_naming_email_and_ein_gets_both_sentences():
+    def handler(req):
+        return httpx.Response(
+            422, json={"errors": [{"detail": "Email and EIN do not match records"}]}
+        )
+
+    draft = await _draft(_provider(handler), subject="person", fields=PERSON_FIELDS)
+    assert draft.problems[0].message.startswith(
+        "Check the email address. Check the business tax number."
+    )
+
+
+def test_raw_keeps_the_carriers_own_text():
+    problems = _reason_problems(
+        [{"fields": ["email"], "description": "[email] - Email domain invalid"}],
+        "person",
+    )
+    assert problems[0].raw == "[email] - Email domain invalid"
+    assert problems[0].message.endswith("The carrier said: Email domain invalid.")
+
+
 async def test_a_non_text_detail_does_not_crash_the_filing():
     def handler(req):
         return httpx.Response(

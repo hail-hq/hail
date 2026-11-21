@@ -722,7 +722,7 @@ async def _record_billed_refusal(
         subject_name=subject_name,
         state="rejected",
         # Each message caps the carrier's words, not their sum: cap it too.
-        rejection_reason=_cap_reason(reason),
+        rejection_reason=_cap_reason(reason, sub.purpose),
         provider_refs={**billed_refs, "refused_at_filing": True},
         requirements_version=requirements_version,
     )
