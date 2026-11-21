@@ -912,6 +912,21 @@ async def test_noncompliant_outage_only_when_every_field_names_the_account() -> 
         )
         draft = await _draft(_provider(r))
         assert draft.problems[0].message.startswith("Check the website address.")
+    # A single form reason that says "permission" reaches the customer.
+    r = _ok_responses()
+    r["customer_profiles_evaluations.create"] = SimpleNamespace(
+        status="noncompliant",
+        results=[
+            {
+                "fields": [
+                    {"passed": False, "failure_reason": "Opt-in permission missing"},
+                    {"passed": False, "failure_reason": {"code": 1}},
+                ]
+            }
+        ],
+    )
+    draft = await _draft(_provider(r))
+    assert draft.problems[0].message.endswith("Opt-in permission missing.")
     r = _ok_responses()
     r["customer_profiles_evaluations.create"] = SimpleNamespace(
         status="noncompliant",
@@ -1152,6 +1167,10 @@ async def test_failed_brand_with_documented_code_uses_its_fix() -> None:
         "exactly as they appear on your tax documents. "
         "The carrier said: Tax ID does not match. Fix that and start again."
     )
+    # Twilio may send the code as a float.
+    brand = _failed_brand((30795, "Tax ID does not match"))
+    brand.errors[0]["error_code"] = 30795.0
+    assert (await _brand_status(brand)).reason == st.reason
     # Twilio may send the code as a string.
     brand = _failed_brand((30795, "Tax ID does not match"))
     brand.errors[0]["error_code"] = "30795"

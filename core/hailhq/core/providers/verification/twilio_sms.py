@@ -986,11 +986,30 @@ def _refused_answers(exc: TwilioRestException) -> bool:
     retried: then no answer the customer changes can fix it. So a form
     reason that happens to say "permission" still reaches the customer."""
     if isinstance(exc, _NotCompliant):
-        return any(
-            application_validation_error(exc.status, text, known_field=True)
-            for text in exc.reasons or [""]
-        )
+        return any(not _account_problem(text) for text in exc.reasons or [""])
     return application_validation_error(exc.status, exc.msg)
+
+
+# Words that put a failed evaluation field on Hail's account, not the
+# customer's answers. "permission" is left out: in a form field it is about
+# the customer's opt-in wording ("Opt-in permission language missing").
+_ACCOUNT_WORDS = (
+    "credential",
+    "api key",
+    "authentication",
+    "unauthorized",
+    "forbidden",
+    "account suspend",
+    "account inactive",
+    "insufficient balance",
+    "messaging service",
+    "configuration",
+)
+
+
+def _account_problem(text: str) -> bool:
+    low = (text or "").lower()
+    return any(word in low for word in _ACCOUNT_WORDS)
 
 
 def _evaluation_reasons(ev) -> list[str]:
@@ -999,7 +1018,12 @@ def _evaluation_reasons(ev) -> list[str]:
     for result in getattr(ev, "results", None) or []:
         for field in result.get("fields", []) if isinstance(result, dict) else []:
             text = field.get("failure_reason")
-            if not field.get("passed", True) and text and text not in said:
+            if (
+                not field.get("passed", True)
+                and isinstance(text, str)
+                and text.strip()
+                and text not in said
+            ):
                 said.append(text)
     return said
 
@@ -1072,8 +1096,7 @@ def _brand_customer_reason(brand) -> str:
     fixes: list[str] = []
     for error in errors:
         text = str(error.get("description") or "").lower()
-        code = str(error.get("error_code") or "").strip()
-        fix = _BRAND_FIXES_BY_CODE.get(int(code)) if code.isdecimal() else None
+        fix = _BRAND_FIXES_BY_CODE.get(_error_code(error.get("error_code")))
         if fix is None:
             fix = next(
                 (
@@ -1096,6 +1119,15 @@ def _brand_customer_reason(brand) -> str:
     return brand_rejected_reason(
         fixes, said, suspended=getattr(brand, "status", None) == "SUSPENDED"
     )
+
+
+def _error_code(value: object) -> int | None:
+    """Twilio's error code as an int: sent as an int, a digit string or a
+    float."""
+    try:
+        return int(float(str(value).strip()))
+    except (TypeError, ValueError, OverflowError):
+        return None
 
 
 def _placeholder(text: object) -> bool:

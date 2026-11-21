@@ -1848,6 +1848,37 @@ async def test_one_refusal_naming_email_and_ein_gets_both_sentences():
     )
 
 
+@pytest.mark.parametrize(
+    ("reasons", "start"),
+    [
+        (
+            [{"fields": [], "description": "Email duplicate threshold reached"}],
+            "This email is on too many registrations.",
+        ),
+        (
+            [{"fields": ["ein"], "description": "Invalid value"}],
+            "Check the business tax number.",
+        ),
+    ],
+)
+async def test_brand_refused_later_reads_text_and_fields(reasons, start) -> None:
+    p = _provider(
+        lambda req: httpx.Response(
+            200, json={"status": "REGISTRATION_FAILED", "failureReasons": reasons}
+        )
+    )
+    st = await p.status({"brand_id": "B1", "subject_type": "business", "campaign": {}})
+    assert st.reason.startswith(start)
+
+
+def test_an_off_form_duplicate_at_filing_gets_the_reuse_fix():
+    problems = _reason_problems(
+        [{"fields": [], "description": "Email duplicate threshold reached"}],
+        "person",
+    )
+    assert problems[-1].message.startswith("This email is on too many registrations.")
+
+
 async def test_brand_refused_later_gets_the_detail_fix() -> None:
     p = _provider(
         lambda req: httpx.Response(

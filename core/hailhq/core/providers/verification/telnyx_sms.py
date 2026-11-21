@@ -1552,7 +1552,14 @@ def _general_problem(unmatched: list) -> Problem:
     each detail they name (else the generic one), then their words. ``raw``
     keeps the carrier's own text, so the audit row has what was shown."""
     originals = [t for t in map(_original_text, unmatched) if t]
-    fixes = detail_fixes([_all_text(item) for item in unmatched])
+    texts = [_all_text(item) for item in unmatched]
+    # A reused email or phone gets the reuse sentence, as on its field.
+    fixes = [f for f in map(_duplicate_by_text, texts) if f]
+    fixes += [
+        f
+        for f in detail_fixes([t for t in texts if not _duplicate_by_text(t)])
+        if f not in fixes
+    ]
     return Problem(
         field="",
         message=with_carrier_text(" ".join(fixes) or SMS_REFUSED, unmatched),
@@ -1565,9 +1572,37 @@ def _brand_fixes(reasons, subject_type) -> list[str]:
     reuse sentence for a reused email or phone, and the detail sentence
     (tax number, website, address...) for any other reason."""
     items = reasons if isinstance(reasons, list) else [reasons]
-    others = [t for t in map(_all_text, items) if "duplicate" not in t.lower()]
+    # The text plus the fields it names, so a bare "Invalid value" on the
+    # EIN field still gets the tax number sentence.
+    others = [
+        f"{_all_text(r)} {_named_fields(r)}"
+        for r in items
+        if "duplicate" not in _all_text(r).lower()
+    ]
     fixes = _duplicate_fixes(reasons, subject_type)
     return fixes + [f for f in detail_fixes(others) if f not in fixes]
+
+
+def _named_fields(reason: object) -> str:
+    """The field names a reason lists, as words ("mobile phone number")."""
+    if not isinstance(reason, dict):
+        return ""
+    return " ".join(re.sub(r"[._]", " ", n) for n in _field_names(reason))
+
+
+def _duplicate_by_text(text: str) -> str | None:
+    """The reuse sentence for a duplicate reason that names no form field,
+    read from its words."""
+    low = text.lower()
+    if "duplicate" not in low:
+        return None
+    if re.search(r"\bemail\b", low):
+        return _DUPLICATE["email"]
+    if re.search(r"\bmobile\b", low):
+        return _DUPLICATE["mobile_phone_number"]
+    if re.search(r"\bphone\b", low):
+        return _DUPLICATE["rep_phone"]
+    return None
 
 
 def _duplicate_fixes(reasons, subject_type) -> list[str]:
@@ -1581,8 +1616,9 @@ def _duplicate_fixes(reasons, subject_type) -> list[str]:
             continue
         if "duplicate" not in " ".join(carrier_texts(reason)).lower():
             continue
-        for name in _field_names(reason):
-            fix = _DUPLICATE.get(names.get(name) or "")
+        found = [_DUPLICATE.get(names.get(n) or "") for n in _field_names(reason)]
+        found = [f for f in found if f] or [_duplicate_by_text(_all_text(reason))]
+        for fix in found:
             if fix and fix not in fixes:
                 fixes.append(fix)
     return fixes
