@@ -12,7 +12,7 @@ from hailhq.api.main import app
 from hailhq.api.routes import emails as emails_routes
 from hailhq.core.config import settings
 from hailhq.core.email_attachment_limits import MAX_EMAIL_ATTACHMENT_BYTES
-from hailhq.core.hail_mail import default_user_prefix, org_prefix_from_id
+from hailhq.core.hail_mail import default_workspace_prefix, org_prefix_from_id
 from hailhq.core.models import (
     ApiKey,
     AuditLog,
@@ -629,8 +629,8 @@ async def test_post_emails_auto_mints_hail_mail_when_no_sender_exists(
     sd = (await async_session.execute(select(EmailDomain))).scalar_one()
     assert sd.kind == "hail_mail"
     assert sd.verification_status == "verified"
-    assert sd.local_prefix_user == f"admin-{expected_org}"
-    assert sd.local_prefix_org == expected_org
+    assert sd.local_prefix_workspace == f"admin-{expected_org}"
+    assert sd.local_prefix_name == expected_org
 
 
 async def test_post_emails_auto_mint_recovers_from_race(
@@ -659,8 +659,8 @@ async def test_post_emails_auto_mint_recovers_from_race(
         organization_id=org_id,
         kind="hail_mail",
         domain=address,
-        local_prefix_user=f"admin-{expected_org}",
-        local_prefix_org=expected_org,
+        local_prefix_workspace=f"admin-{expected_org}",
+        local_prefix_name=expected_org,
         verification_status="verified",
         dns_records=[],
         mail_from_domain=None,
@@ -701,9 +701,9 @@ async def test_post_emails_auto_mint_is_per_org_no_cross_org_conflict(
 ) -> None:
     """Two orgs sending their first email each auto-mint their OWN address.
 
-    Previously the org prefix was a deploy-wide constant, so org A claimed
+    Previously the name prefix was a deploy-wide constant, so org A claimed
     the one address and org B's send 409'd on the global unique index. The
-    org prefix is now derived per-org, so both sends succeed against distinct
+    name prefix is now derived per-org, so both sends succeed against distinct
     rows and no org can intercept another's mail.
     """
     monkeypatch.setattr(settings, "hail_mail_base_domain", "mail.hail.so")
@@ -737,8 +737,8 @@ async def test_post_emails_auto_mint_is_per_org_no_cross_org_conflict(
 
     from_a = resp_a.json()["from_address"]
     from_b = resp_b.json()["from_address"]
-    assert from_a.split("+")[0] == default_user_prefix("admin", org_a)
-    assert from_b.split("+")[0] == default_user_prefix("admin", org_b)
+    assert from_a.split("+")[0] == default_workspace_prefix("admin", org_a)
+    assert from_b.split("+")[0] == default_workspace_prefix("admin", org_b)
     assert from_a != from_b
 
     # Each org got its own row — neither blocked the other.

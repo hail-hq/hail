@@ -12,7 +12,7 @@ from hailhq.core.hail_mail import ROLE_MAILBOXES
 def test_classify_full_address():
     r = classify_hail_mail_recipient("alice+acme@mail.hail.so", "mail.hail.so")
     assert r == HailMailRecipient(
-        user_prefix="alice", tail="acme", base_domain="mail.hail.so"
+        workspace_prefix="alice", tail="acme", base_domain="mail.hail.so"
     )
 
 
@@ -31,7 +31,7 @@ def test_unknown_domain_returns_none():
 def test_address_without_plus_routes_on_the_head():
     r = classify_hail_mail_recipient("alice@mail.hail.so", "mail.hail.so")
     assert r == HailMailRecipient(
-        user_prefix="alice", tail="", base_domain="mail.hail.so"
+        workspace_prefix="alice", tail="", base_domain="mail.hail.so"
     )
 
 
@@ -39,7 +39,7 @@ def test_any_tail_routes_on_the_head():
     for tail in ("sales", "a.b_c", "x" * 40, ""):
         r = classify_hail_mail_recipient(f"alice+{tail}@mail.hail.so", "mail.hail.so")
         assert r == HailMailRecipient(
-            user_prefix="alice", tail=tail, base_domain="mail.hail.so"
+            workspace_prefix="alice", tail=tail, base_domain="mail.hail.so"
         )
 
 
@@ -71,7 +71,7 @@ def test_empty_tail_before_a_second_plus_is_bare():
 def test_role_name_with_a_tail_is_a_tenant_alias():
     r = classify_hail_mail_recipient("admin+acme@mail.hail.so", "mail.hail.so")
     assert r == HailMailRecipient(
-        user_prefix="admin", tail="acme", base_domain="mail.hail.so"
+        workspace_prefix="admin", tail="acme", base_domain="mail.hail.so"
     )
 
 
@@ -115,4 +115,4 @@ def test_pattern_rejects_invalid_prefixes():
 def test_mixed_case_local_part_routes():
     r = classify_hail_mail_recipient("Alice+Acme@MAIL.HAIL.SO", "mail.hail.so")
     assert r is not None
-    assert r.user_prefix == "alice"
+    assert r.workspace_prefix == "alice"

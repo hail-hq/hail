@@ -311,8 +311,8 @@ async def test_delete_agent_records_the_email_route(
         organization_id=org_id,
         kind="hail_mail",
         domain="amber-heron-42+acme@mail.hail.so",
-        local_prefix_user="amber-heron-42",
-        local_prefix_org="acme",
+        local_prefix_workspace="amber-heron-42",
+        local_prefix_name="acme",
         provider="ses",
         email_agent_id=uuid.UUID(agent["id"]),
     )

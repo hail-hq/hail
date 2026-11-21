@@ -22,8 +22,8 @@ from sqlalchemy import func, select, text
 FIX = Path(__file__).parent / "fixtures" / "inbound"
 
 
-def _make_inbound_domain(org_id, user_prefix="alice", org_prefix="acme"):
-    """An EmailDomain row for routing inbound to (user_prefix, org_prefix).
+def _make_inbound_domain(org_id, workspace_prefix="alice", name_prefix="acme"):
+    """An EmailDomain row for routing inbound to (workspace_prefix, name_prefix).
 
     ``inbound_enabled`` stays False here because the ingest service
     persists rows regardless of the flag — the flag only gates the
@@ -34,9 +34,9 @@ def _make_inbound_domain(org_id, user_prefix="alice", org_prefix="acme"):
     return EmailDomain(
         organization_id=org_id,
         kind="hail_mail",
-        domain=f"{user_prefix}+{org_prefix}@mail.hail.so",
-        local_prefix_user=user_prefix,
-        local_prefix_org=org_prefix,
+        domain=f"{workspace_prefix}+{name_prefix}@mail.hail.so",
+        local_prefix_workspace=workspace_prefix,
+        local_prefix_name=name_prefix,
         verification_status="verified",
         provider="ses",
         verified_at=datetime.now(timezone.utc),
@@ -211,7 +211,7 @@ async def test_ingest_persists_inbound_row_with_attachment(async_session):
 @pytest.mark.asyncio
 async def test_ingest_is_idempotent(async_session):
     org_id = uuid.uuid4()
-    domain = _make_inbound_domain(org_id, user_prefix="bob", org_prefix="globex")
+    domain = _make_inbound_domain(org_id, workspace_prefix="bob", name_prefix="globex")
     async_session.add(domain)
     await async_session.commit()
 
@@ -257,7 +257,9 @@ async def test_ingest_is_idempotent(async_session):
 @pytest.mark.asyncio
 async def test_ingest_suppresses_spam(async_session):
     org_id = uuid.uuid4()
-    domain = _make_inbound_domain(org_id, user_prefix="carol", org_prefix="initech")
+    domain = _make_inbound_domain(
+        org_id, workspace_prefix="carol", name_prefix="initech"
+    )
     async_session.add(domain)
     await async_session.commit()
 
@@ -296,7 +298,7 @@ async def test_ingest_suppresses_spam(async_session):
 @pytest.mark.asyncio
 async def test_ingest_suppresses_virus(async_session):
     org_id = uuid.uuid4()
-    domain = _make_inbound_domain(org_id, user_prefix="dave", org_prefix="hooli")
+    domain = _make_inbound_domain(org_id, workspace_prefix="dave", name_prefix="hooli")
     async_session.add(domain)
     await async_session.commit()
 
@@ -350,7 +352,9 @@ async def test_ingest_skips_unknown_recipient(async_session):
 @pytest.mark.asyncio
 async def test_forward_enqueues_per_target(async_session):
     org_id = uuid.uuid4()
-    domain = _make_inbound_domain(org_id, user_prefix="eve", org_prefix="evilcorp")
+    domain = _make_inbound_domain(
+        org_id, workspace_prefix="eve", name_prefix="evilcorp"
+    )
     # Inbound_enabled requires forward_to, so setting forward_to here is
     # what unlocks forwarding.
     domain.inbound_enabled = True
@@ -386,14 +390,16 @@ async def test_forward_enqueues_per_target(async_session):
     )
 
     assert [c["to"] for c in captured] == ["ops@example.com", "billing@example.com"]
-    # Forwarder address derived from local_prefix_org.
+    # Forwarder address derived from local_prefix_name.
     assert all(c["from_address"] == "noreply+evilcorp@mail.hail.so" for c in captured)
 
 
 @pytest.mark.asyncio
 async def test_forward_skipped_when_inbound_disabled(async_session):
     org_id = uuid.uuid4()
-    domain = _make_inbound_domain(org_id, user_prefix="frank", org_prefix="dunder")
+    domain = _make_inbound_domain(
+        org_id, workspace_prefix="frank", name_prefix="dunder"
+    )
     # inbound_enabled stays False (default). forward_to alone is meaningless
     # without the flag — ingest persists but doesn't enqueue forwards.
     domain.forward_to = ["ops@example.com"]
@@ -429,7 +435,9 @@ async def test_forward_skipped_when_inbound_disabled(async_session):
 @pytest.mark.asyncio
 async def test_forward_loop_header_suppresses(async_session):
     org_id = uuid.uuid4()
-    domain = _make_inbound_domain(org_id, user_prefix="grace", org_prefix="loopco")
+    domain = _make_inbound_domain(
+        org_id, workspace_prefix="grace", name_prefix="loopco"
+    )
     domain.inbound_enabled = True
     domain.forward_to = ["ops@example.com"]
     async_session.add_all(_verified_targets(org_id, *["ops@example.com"]))
@@ -477,7 +485,9 @@ async def test_forward_loop_header_suppresses(async_session):
 @pytest.mark.asyncio
 async def test_forward_rejects_target_on_base_domain(async_session):
     org_id = uuid.uuid4()
-    domain = _make_inbound_domain(org_id, user_prefix="hank", org_prefix="selfloop")
+    domain = _make_inbound_domain(
+        org_id, workspace_prefix="hank", name_prefix="selfloop"
+    )
     domain.inbound_enabled = True
     domain.forward_to = ["other@mail.hail.so"]  # base domain — loop trap
     async_session.add_all(_verified_targets(org_id, *["other@mail.hail.so"]))
@@ -515,7 +525,9 @@ async def test_base_domain_target_skips_sibling_survives(async_session):
     """A base-domain forward target is skipped, but valid sibling targets
     still get enqueued (base_domain cause → continue, not return)."""
     org_id = uuid.uuid4()
-    domain = _make_inbound_domain(org_id, user_prefix="ivan", org_prefix="sibling")
+    domain = _make_inbound_domain(
+        org_id, workspace_prefix="ivan", name_prefix="sibling"
+    )
     domain.inbound_enabled = True
     domain.forward_to = ["self@mail.hail.so", "valid@external.com"]
     async_session.add_all(
@@ -585,7 +597,9 @@ async def test_persist_one_survives_unique_violation(async_session):
     from hailhq.core.email_mime import ParsedMime
 
     org_id = uuid.uuid4()
-    domain = _make_inbound_domain(org_id, user_prefix="zara", org_prefix="zerocorp")
+    domain = _make_inbound_domain(
+        org_id, workspace_prefix="zara", name_prefix="zerocorp"
+    )
     async_session.add(domain)
     await async_session.commit()
 
@@ -656,7 +670,9 @@ async def test_persist_one_savepoint_catches_race(async_session):
     from hailhq.core.email_mime import ParsedMime
 
     org_id = uuid.uuid4()
-    domain = _make_inbound_domain(org_id, user_prefix="yvonne", org_prefix="yolocorp")
+    domain = _make_inbound_domain(
+        org_id, workspace_prefix="yvonne", name_prefix="yolocorp"
+    )
     async_session.add(domain)
     await async_session.commit()
 
@@ -739,7 +755,9 @@ async def test_persist_one_savepoint_catches_race(async_session):
 async def test_raw_url_no_double_slash_when_base_has_trailing_slash(async_session):
     """join_url must produce a single-slash join even when api_base_url ends with /."""
     org_id = uuid.uuid4()
-    domain = _make_inbound_domain(org_id, user_prefix="ursula", org_prefix="urlco")
+    domain = _make_inbound_domain(
+        org_id, workspace_prefix="ursula", name_prefix="urlco"
+    )
     async_session.add(domain)
     await async_session.commit()
 
@@ -786,7 +804,7 @@ async def test_org_inbound_cap_skips_fanout_but_persists(async_session):
     but fan-out is skipped and 'inbound_rate_limit' is recorded in suppressed_reasons.
     """
     org_id = uuid.uuid4()
-    domain = _make_inbound_domain(org_id, user_prefix="zoe", org_prefix="capco")
+    domain = _make_inbound_domain(org_id, workspace_prefix="zoe", name_prefix="capco")
     async_session.add(domain)
     await async_session.commit()
 
@@ -861,7 +879,9 @@ async def test_attachment_url_no_double_slash_when_base_has_trailing_slash(
 ):
     """Attachment URL must be well-formed with no double slash when base has trailing slash."""
     org_id = uuid.uuid4()
-    domain = _make_inbound_domain(org_id, user_prefix="viktor", org_prefix="vaultco")
+    domain = _make_inbound_domain(
+        org_id, workspace_prefix="viktor", name_prefix="vaultco"
+    )
     async_session.add(domain)
     await async_session.commit()
 
@@ -1538,7 +1558,9 @@ async def test_mixed_kind_recipients_same_org_yield_two_rows(async_session, reci
     silently suppressed the hail_mail row.
     """
     org_id = uuid.uuid4()
-    hm_domain = _make_inbound_domain(org_id, user_prefix="alice", org_prefix="acme")
+    hm_domain = _make_inbound_domain(
+        org_id, workspace_prefix="alice", name_prefix="acme"
+    )
     cu_domain = _make_custom_inbound_domain(org_id, "mail.acme.com")
     async_session.add(hm_domain)
     async_session.add(cu_domain)
@@ -1864,8 +1886,8 @@ async def test_mail_to_an_address_another_org_retired_is_dropped(async_session):
     async_session.add(_make_inbound_domain(keeper, "alice", "acme"))
     async_session.add(
         RetiredHailMailAddress(
-            local_prefix_user="alice",
-            local_prefix_org="globex",
+            local_prefix_workspace="alice",
+            local_prefix_name="globex",
             organization_id=renamed,
         )
     )
@@ -1885,8 +1907,8 @@ async def test_a_nested_alias_of_a_retired_address_is_dropped(async_session):
     async_session.add(_make_inbound_domain(uuid.uuid4(), "alice", "acme"))
     async_session.add(
         RetiredHailMailAddress(
-            local_prefix_user="alice",
-            local_prefix_org="globex",
+            local_prefix_workspace="alice",
+            local_prefix_name="globex",
             organization_id=uuid.uuid4(),
         )
     )
@@ -1907,8 +1929,8 @@ async def test_the_holders_live_tail_arrives_even_if_another_org_retired_it(
     async_session.add(_make_inbound_domain(uuid.uuid4(), "alice", "acme"))
     async_session.add(
         RetiredHailMailAddress(
-            local_prefix_user="alice",
-            local_prefix_org="acme",
+            local_prefix_workspace="alice",
+            local_prefix_name="acme",
             organization_id=uuid.uuid4(),
         )
     )
@@ -1955,8 +1977,8 @@ async def test_mail_to_an_address_the_same_org_retired_arrives(async_session):
     async_session.add(_make_inbound_domain(org_id, "alice", "acme"))
     async_session.add(
         RetiredHailMailAddress(
-            local_prefix_user="alice",
-            local_prefix_org="old",
+            local_prefix_workspace="alice",
+            local_prefix_name="old",
             organization_id=org_id,
         )
     )

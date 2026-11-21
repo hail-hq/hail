@@ -134,8 +134,8 @@ def make_email_domain_response(
     kind: str = "hail_mail",
     domain: str = "alice+acme@mail.hail.so",
     verification_status: str = "verified",
-    local_prefix_user: str | None = "alice",
-    local_prefix_org: str | None = "acme",
+    local_prefix_workspace: str | None = "alice",
+    local_prefix_name: str | None = "acme",
     dns_records: list[dict] | None = None,
     dkim_records: list[dict] | None = None,
 ) -> dict:
@@ -147,8 +147,13 @@ def make_email_domain_response(
         "organization_id": str(uuid4()),
         "kind": kind,
         "domain": domain,
-        "local_prefix_user": local_prefix_user if kind == "hail_mail" else None,
-        "local_prefix_org": local_prefix_org if kind == "hail_mail" else None,
+        "local_prefix_workspace": (
+            local_prefix_workspace if kind == "hail_mail" else None
+        ),
+        "local_prefix_name": local_prefix_name if kind == "hail_mail" else None,
+        # Deprecated names, same values: the server still sends them.
+        "local_prefix_user": local_prefix_workspace if kind == "hail_mail" else None,
+        "local_prefix_org": local_prefix_name if kind == "hail_mail" else None,
         "verification_status": verification_status,
         "dns_records": dns_records or dkim_records or [],
         "mail_from_domain": None,

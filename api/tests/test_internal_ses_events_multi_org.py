@@ -106,14 +106,14 @@ async def test_two_orgs_same_provider_message_id_persists_both(
     both rows land and the route returns 200 with two email_ids.
     """
     # Seed org A — hail-mail address alice+orgalpha@mail.hail.so
-    # The routing lookup matches on local_prefix_user.
+    # The routing lookup matches on local_prefix_workspace.
     org_a = uuid.uuid4()
     domain_a = EmailDomain(
         organization_id=org_a,
         kind="hail_mail",
         domain="alice+orgalpha@mail.hail.so",
-        local_prefix_user="alice",
-        local_prefix_org="orgalpha",
+        local_prefix_workspace="alice",
+        local_prefix_name="orgalpha",
         verification_status="verified",
         provider="ses",
         verified_at=datetime.now(timezone.utc),
@@ -126,8 +126,8 @@ async def test_two_orgs_same_provider_message_id_persists_both(
         organization_id=org_b,
         kind="hail_mail",
         domain="bob+orgbeta@mail.hail.so",
-        local_prefix_user="bob",
-        local_prefix_org="orgbeta",
+        local_prefix_workspace="bob",
+        local_prefix_name="orgbeta",
         verification_status="verified",
         provider="ses",
         verified_at=datetime.now(timezone.utc),
