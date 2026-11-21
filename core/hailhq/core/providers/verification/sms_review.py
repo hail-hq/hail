@@ -4,6 +4,7 @@ import re
 
 import phonenumbers
 from hailhq.core.providers.verification.base import (
+    BRAND_REJECTED,
     CAMPAIGN_REJECTED,
     Address,
     Problem,
@@ -88,6 +89,22 @@ def sender_problems(
                     )
                 )
     return problems
+
+
+# Hail's lead sentence for a refused brand with no fix of Hail's own.
+BRAND_REJECTED_LEAD = "The 10DLC registry rejected the registration."
+
+
+def brand_rejected_reason(fixes: list[str], raw: object) -> str:
+    """Why a brand was refused: Hail's fixes (or its lead sentence), then
+    the carrier's own words, then the next step. No fix and no carrier
+    text gives the generic ``BRAND_REJECTED``."""
+    if not fixes and not with_carrier_text("", raw):
+        return BRAND_REJECTED
+    body = with_carrier_text(" ".join(fixes) or BRAND_REJECTED_LEAD, raw)
+    if fixes:
+        return f"{body} Then start again."
+    return f"{body} Fix that and start again."
 
 
 def _topic_text(raw: object) -> str:

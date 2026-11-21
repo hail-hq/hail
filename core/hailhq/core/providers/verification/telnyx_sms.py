@@ -19,7 +19,6 @@ import httpx
 from hailhq.core.providers.sms.telnyx import TelnyxSmsProvider
 from hailhq.core.providers.telnyx import TelnyxClient, path_id
 from hailhq.core.providers.verification.base import (
-    BRAND_REJECTED,
     SMS_REFUSED,
     SMS_VALUE_REFUSED,
     DiscardFailures,
@@ -45,6 +44,7 @@ from hailhq.core.providers.verification.sms_review import (
     LOW_VOLUME_FASTER_LANE,
     LOW_VOLUME_FASTER_LANE_FAILED,
     application_validation_error,
+    brand_rejected_reason,
     campaign_repair_reason,
 )
 
@@ -753,9 +753,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                 refs.pop("identity_verified", None)
                 return ProviderStatus(
                     state="rejected",
-                    reason=with_carrier_text(
-                        BRAND_REJECTED, brand.get("failureReasons")
-                    ),
+                    reason=brand_rejected_reason([], brand.get("failureReasons")),
                     raw_reason=str(brand.get("failureReasons") or brand["status"]),
                 )
             if brand.get("status") == "REGISTRATION_PENDING":
@@ -1425,9 +1423,11 @@ def _error_log(response: httpx.Response) -> list:
 
 def _response_problems(response: httpx.Response, subject_type) -> list[Problem]:
     """One problem per form field Telnyx points at (``source.pointer``),
-    else one neutral problem."""
+    each with Telnyx's own words. Errors on no form field (or a second one
+    on the same field) go in one general problem, so no reason is lost."""
     names = _FORM_FIELDS[subject_type]
     problems: list[Problem] = []
+    unmatched: list[dict] = []
     for e in _errors(response):
         field = names.get((_pointer(e) or "").rsplit("/", 1)[-1])
         if field and all(p.field != field for p in problems):
@@ -1438,7 +1438,15 @@ def _response_problems(response: httpx.Response, subject_type) -> list[Problem]:
                     raw=_detail(e),
                 )
             )
-    return problems or [Problem(field="", message=_safe_message(response))]
+        else:
+            unmatched.append(e)
+    if not problems:
+        return [Problem(field="", message=_safe_message(response))]
+    if with_carrier_text("", unmatched):
+        problems.append(
+            Problem(field="", message=with_carrier_text(SMS_REFUSED, unmatched))
+        )
+    return problems
 
 
 def _reason_problems(reasons, subject_type) -> list[Problem]:
@@ -1447,10 +1455,15 @@ def _reason_problems(reasons, subject_type) -> list[Problem]:
     its own sentence."""
     names = _FORM_FIELDS[subject_type]
     problems: list[Problem] = []
-    for reason in reasons or []:
+    unmatched: list[object] = []
+    items = reasons if isinstance(reasons, list) else [reasons]
+    for reason in items:
         if not isinstance(reason, dict):
+            unmatched.append(reason)
             continue
         text = str(reason.get("description") or "")
+        if not any(names.get(name) for name in reason.get("fields") or []):
+            unmatched.append(reason)
         for name in reason.get("fields") or []:
             field = names.get(name)
             if not field or any(p.field == field for p in problems):
@@ -1465,9 +1478,11 @@ def _reason_problems(reasons, subject_type) -> list[Problem]:
                     raw=text or None,
                 )
             )
-    return problems or [
-        Problem(field="", message=with_carrier_text(SMS_REFUSED, reasons))
-    ]
+    if not problems or with_carrier_text("", unmatched):
+        problems.append(
+            Problem(field="", message=with_carrier_text(SMS_REFUSED, unmatched))
+        )
+    return problems
 
 
 def _safe_message(response: httpx.Response) -> str:

@@ -5,7 +5,6 @@ import httpx
 import pytest
 from hailhq.core.providers.verification import telnyx_sms
 from hailhq.core.providers.verification.base import (
-    BRAND_REJECTED,
     Address,
     DiscardRefused,
     Problem,
@@ -428,7 +427,10 @@ async def test_status_rejected_brand() -> None:
     )
     st = await p.status({"brand_id": "B1", "subject_type": "business", "campaign": {}})
     assert st.state == "rejected"
-    assert st.reason == f"{BRAND_REJECTED} The carrier said: EIN mismatch."
+    assert st.reason == (
+        "The 10DLC registry rejected the registration. "
+        "The carrier said: EIN mismatch. Fix that and start again."
+    )
     assert "EIN" in st.raw_reason
 
 
@@ -1296,7 +1298,7 @@ async def test_a_brand_that_fails_after_its_campaign_is_not_kept() -> None:
         "subject_type": "person",
         "identity_verified": True,
     }
-    assert (await p.status(refs)).reason.startswith(BRAND_REJECTED)
+    assert "Identity mismatch" in (await p.status(refs)).reason
     calls.clear()
     assert await p.discard_rejected(refs) == {}
     assert ("DELETE", "/v2/10dlc/brand/B1") in calls
@@ -1723,6 +1725,37 @@ async def test_4xx_pointing_at_a_field_names_that_field() -> None:
                 "The carrier said: Invalid email ada@example.com."
             ),
         )
+    ]
+
+
+async def test_refusal_on_a_field_and_off_the_form_keeps_both_reasons():
+    def handler(req):
+        return httpx.Response(
+            422,
+            json={
+                "errors": [
+                    {"detail": "Invalid email", "source": {"pointer": "/email"}},
+                    {"detail": "Vertical not allowed", "source": {"pointer": "/x"}},
+                ]
+            },
+        )
+
+    draft = await _draft(_provider(handler), subject="person", fields=PERSON_FIELDS)
+    assert [(p.field, p.message) for p in draft.problems] == [
+        (
+            "email",
+            (
+                "The 10DLC registry did not accept this value. "
+                "The carrier said: Invalid email."
+            ),
+        ),
+        (
+            "",
+            (
+                "The 10DLC registry refused a detail. Check your entries and "
+                "try again. The carrier said: Vertical not allowed."
+            ),
+        ),
     ]
 
 

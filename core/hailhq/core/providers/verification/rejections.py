@@ -107,12 +107,16 @@ def sentence(text: str) -> str:
 CARRIER_TEXT_MAX = 600
 # A leading field tag in a carrier's text, like "[email] - ".
 _FIELD_TAG = re.compile(r"^\s*\[[^\]]*\]\s*-\s*")
+# twilio-python's own wrapper around Twilio's message ("Unable to create
+# record: <message>"); not the carrier's words.
+_SDK_PREFIX = re.compile(r"^\s*Unable to \w+ record\s*:?\s*", re.IGNORECASE)
 
 
 def carrier_texts(raw: object) -> list[str]:
     """The carrier's readable sentences in a refusal. ``raw`` is a string,
     a dict (its ``description``, ``detail`` or ``title``), or a list of
-    these. A leading field tag (``[email] - ``) is dropped. Anything else
+    these. A leading field tag (``[email] - ``) and twilio-python's
+    "Unable to create record:" are dropped. Anything else
     (numbers, codes on their own) gives nothing."""
     if isinstance(raw, dict):
         for key in ("description", "detail", "title"):
@@ -123,7 +127,7 @@ def carrier_texts(raw: object) -> list[str]:
         return [text for item in raw for text in carrier_texts(item)]
     if not isinstance(raw, str):
         return []
-    text = _FIELD_TAG.sub("", raw).strip()
+    text = _FIELD_TAG.sub("", _SDK_PREFIX.sub("", raw)).strip()
     return [text] if text else []
 
 

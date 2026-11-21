@@ -16,7 +16,6 @@ from hailhq.core.providers.sms.base import SmsProvisioningError
 from hailhq.core.providers.sms.twilio import TwilioSmsProvider
 from hailhq.core.providers.verification import twilio_tollfree
 from hailhq.core.providers.verification.base import (
-    BRAND_REJECTED,
     SMS_REFUSED,
     DiscardFailures,
     DraftResult,
@@ -38,6 +37,7 @@ from hailhq.core.providers.verification.sms_review import (
     LEGACY_APPLICATION,
     LOW_VOLUME_NEEDS_NEW_FILING,
     application_validation_error,
+    brand_rejected_reason,
     campaign_repair_reason,
 )
 from twilio.base.exceptions import TwilioException, TwilioRestException
@@ -1023,13 +1023,13 @@ def _brand_customer_reason(brand) -> str:
             )
         if fix and fix not in fixes:
             fixes.append(fix)
-    # The next step goes last, after the carrier's words (as customer_reason).
-    body = with_carrier_text(" ".join(fixes), errors).strip()
-    if fixes:
-        return f"{body} Then start again."
-    if body:
-        return f"{body} Fix that and start again."
-    return BRAND_REJECTED
+    said: object = errors
+    if not with_carrier_text("", errors):
+        # No text in errors: Twilio's failure_reason, unless it is only
+        # its placeholder.
+        failure = str(getattr(brand, "failure_reason", None) or "")
+        said = "" if failure.strip().lower() == "general error" else failure
+    return brand_rejected_reason(fixes, said)
 
 
 def _brand_reason(brand) -> str | None:

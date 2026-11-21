@@ -811,6 +811,16 @@ async def test_draft_4xx_gives_hail_sentence_then_carrier_text() -> None:
     ]
 
 
+def test_sdk_wrapper_is_not_quoted() -> None:
+    from hailhq.core.providers.verification.rejections import with_carrier_text
+
+    # twilio-python wraps Twilio's message as "Unable to create record: ...".
+    assert with_carrier_text("Hi.", "Unable to create record: Bad EIN") == (
+        "Hi. The carrier said: Bad EIN."
+    )
+    assert with_carrier_text("Hi.", "Unable to create record") == "Hi."
+
+
 async def test_draft_4xx_unknown_message_is_generic() -> None:
     r = _ok_responses()
     r["brand_registrations.create"] = _raise(_tw(400, "Twilio internal thing"))
@@ -981,13 +991,12 @@ async def test_failed_brand_with_documented_code_uses_its_fix() -> None:
 
 
 async def test_failed_brand_with_unknown_reason_quotes_twilio() -> None:
-    from hailhq.core.providers.verification.base import BRAND_REJECTED
 
     st = await _brand_status(_failed_brand((30794, "Something new went wrong")))
     assert st.reason == (
-        "The carrier said: Something new went wrong. Fix that and start again."
+        "The 10DLC registry rejected the registration. The carrier said: "
+        "Something new went wrong. Fix that and start again."
     )
-    assert BRAND_REJECTED not in st.reason
     # The audit row keeps every part Twilio sent.
     assert st.raw_reason == "30794: Something new went wrong; General Error"
 
@@ -997,6 +1006,16 @@ async def test_failed_brand_without_errors_keeps_the_generic_line() -> None:
 
     st = await _brand_status(_failed_brand())
     assert st.reason == BRAND_REJECTED
+
+
+async def test_failed_brand_without_errors_quotes_failure_reason() -> None:
+    brand = _failed_brand()
+    brand.status, brand.failure_reason = "SUSPENDED", "Brand suspended by review"
+    st = await _brand_status(brand)
+    assert st.reason == (
+        "The 10DLC registry rejected the registration. The carrier said: "
+        "Brand suspended by review. Fix that and start again."
+    )
 
 
 async def test_status_campaign_failed_without_errors_has_generic_reason() -> None:
