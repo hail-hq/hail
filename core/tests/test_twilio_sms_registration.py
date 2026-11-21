@@ -1023,6 +1023,9 @@ async def test_failed_brand_general_error_placeholder_is_not_quoted() -> None:
     brand = _failed_brand()
     brand.failure_reason = "General Error."
     assert (await _brand_status(brand)).reason == BRAND_REJECTED
+    # A real reason that starts with those words is still quoted.
+    brand.failure_reason = "General Error: EIN does not match"
+    assert "EIN does not match" in (await _brand_status(brand)).reason
 
 
 async def test_failed_brand_without_errors_quotes_failure_reason() -> None:

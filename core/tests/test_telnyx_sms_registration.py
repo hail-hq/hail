@@ -1746,6 +1746,26 @@ def test_two_brand_reasons_on_one_field_keep_both_texts():
     )
 
 
+def test_a_later_reused_email_reason_switches_the_fix():
+    from hailhq.core.providers.verification.telnyx_sms import _reason_problems
+
+    problems = _reason_problems(
+        [
+            {"fields": ["email"], "description": "[email] - Email domain invalid"},
+            {"fields": ["email"], "description": "Email duplicate threshold reached"},
+            {"fields": [], "description": "Vertical not allowed"},
+        ],
+        "person",
+    )
+    assert [p.field for p in problems] == ["email", ""]
+    assert problems[0].message == (
+        "This email is on too many registrations. Use another one. The carrier "
+        "said: Email domain invalid. Email duplicate threshold reached."
+    )
+    # The audit row keeps the text of a reason on no form field too.
+    assert problems[1].raw == "Vertical not allowed"
+
+
 async def test_brand_refused_later_gets_the_reused_email_fix() -> None:
     p = _provider(
         lambda req: httpx.Response(

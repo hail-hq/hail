@@ -689,14 +689,11 @@ _BILLED_REASON_MAX = 2000
 
 
 def _cap_reason(reason: str) -> str:
-    """``reason`` cut to the cap, keeping its last sentence (Hail's next
-    step) when that is short."""
+    """``reason`` (the joined problem messages) cut to the cap, with an
+    ellipsis where it was cut."""
     if len(reason) <= _BILLED_REASON_MAX:
         return reason
-    tail = reason.rsplit(". ", 1)[-1] if ". " in reason else ""
-    tail = tail if len(tail) <= 80 else ""
-    keep = _BILLED_REASON_MAX - len(tail) - 2
-    return f"{reason[:keep].rstrip()}\u2026 {tail}".rstrip()
+    return reason[: _BILLED_REASON_MAX - 1].rstrip() + "\u2026"
 
 
 async def _record_billed_refusal(

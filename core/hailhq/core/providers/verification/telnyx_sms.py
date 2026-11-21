@@ -32,7 +32,7 @@ from hailhq.core.providers.verification.base import (
 )
 from hailhq.core.providers.verification.forms import display_name, text_length
 from hailhq.core.providers.verification.rejections import (
-    sentence,
+    carrier_texts,
     with_carrier_text,
 )
 from hailhq.core.providers.verification.sms_form import (
@@ -1457,22 +1457,33 @@ def _response_problems(response: httpx.Response, subject_type) -> list[Problem]:
     if not problems:
         return [Problem(field="", message=_safe_message(response))]
     if with_carrier_text("", unmatched):
-        problems.append(
-            Problem(field="", message=with_carrier_text(SMS_REFUSED, unmatched))
-        )
+        problems.append(_general_problem(unmatched))
     return problems
 
 
-def _add_carrier_text(problem: Problem, text: str | None) -> None:
+def _add_carrier_text(
+    problem: Problem, text: str | None, lead: str | None = None
+) -> None:
     """Another carrier reason on the same field: its words join that
-    problem, next to the field they name."""
-    if not text or text in (problem.raw or "").split("; "):
-        return
-    if " The carrier said: " in problem.message:
-        problem.message = f"{problem.message} {sentence(text)}"
-    else:
-        problem.message = with_carrier_text(problem.message, text)
-    problem.raw = f"{problem.raw}; {text}" if problem.raw else text
+    problem, next to the field they name. The quote is built again from all
+    of them, so the cap and tag cleanup cover the whole of it. ``lead``
+    replaces Hail's sentence (a reused email or phone found later)."""
+    texts = problem.raw.split("; ") if problem.raw else []
+    if text and text not in texts:
+        texts.append(text)
+    head = lead or problem.message.split(" The carrier said: ", 1)[0]
+    problem.message = with_carrier_text(head, texts)
+    problem.raw = "; ".join(texts) or None
+
+
+def _general_problem(unmatched: list) -> Problem:
+    """One problem for carrier reasons on no form field, with their text
+    in ``raw`` too, so the audit row keeps what the customer sees."""
+    return Problem(
+        field="",
+        message=with_carrier_text(SMS_REFUSED, unmatched),
+        raw="; ".join(carrier_texts(unmatched)) or None,
+    )
 
 
 def _duplicate_fixes(reasons, subject_type) -> list[str]:
@@ -1513,7 +1524,10 @@ def _reason_problems(reasons, subject_type) -> list[Problem]:
             shown = True
             problem = next((p for p in problems if p.field == field), None)
             if problem is not None:
-                _add_carrier_text(problem, text)
+                duplicate = "duplicate" in text.lower() and field in _DUPLICATE
+                _add_carrier_text(
+                    problem, text, _DUPLICATE[field] if duplicate else None
+                )
                 continue
             message = SMS_VALUE_REFUSED
             if "duplicate" in text.lower():
@@ -1530,9 +1544,7 @@ def _reason_problems(reasons, subject_type) -> list[Problem]:
             # reason is lost.
             unmatched.append(reason)
     if not problems or with_carrier_text("", unmatched):
-        problems.append(
-            Problem(field="", message=with_carrier_text(SMS_REFUSED, unmatched))
-        )
+        problems.append(_general_problem(unmatched))
     return problems
 
 

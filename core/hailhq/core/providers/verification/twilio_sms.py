@@ -1039,7 +1039,7 @@ def _brand_customer_reason(brand) -> str:
         # No text in errors: Twilio's failure_reason, unless it is only
         # its placeholder.
         failure = str(getattr(brand, "failure_reason", None) or "")
-        placeholder = failure.strip().lower().startswith("general error")
+        placeholder = failure.strip().rstrip(".").lower() == "general error"
         said = "" if placeholder else failure
     return brand_rejected_reason(fixes, said)
 
