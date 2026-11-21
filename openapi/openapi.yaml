@@ -1969,8 +1969,8 @@ paths:
       summary: Patch Email Domain
       description:
         "Edit hail-mail prefixes, the send switch, and/or inbound action.\n\
-        \nFour modes, mutually compatible:\n\n* **Prefix edit** (``local_prefix_user``\
-        \ / ``local_prefix_org``):\n  hail_mail rows only. The managed-cloud console\
+        \nFour modes, mutually compatible:\n\n* **Prefix edit** (``local_prefix_workspace``\
+        \ / ``local_prefix_name``):\n  hail_mail rows only. The managed-cloud console\
         \ writes here when\n  an org admin changes the visible hail-mail address.\n\
         * **Send switch** (``sends_enabled``): custom rows only. ``false``\n  stops\
         \ the domain from sending at all \u2014 it is skipped by sender\n  selection\
@@ -8335,25 +8335,40 @@ components:
           description:
             DNS domain to send from (e.g. 'acme.com'). Required for kind='custom';
             must be omitted for kind='hail_mail'.
+        local_prefix_workspace:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Local Prefix Workspace
+          description:
+            "Workspace prefix of a hail_mail address: the part before the
+            '+'. It names the workspace, and one workspace only may hold it. A taken
+            prefix returns 409. Only valid for kind='hail_mail'. Falls back to HAIL_MAIL_DEFAULT_USER_PREFIX
+            plus a per-organization token if omitted."
+        local_prefix_name:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Local Prefix Name
+          description:
+            "Name prefix of a hail_mail address: the part after the '+'.
+            A free name inside the workspace, such as a person or team. Only valid
+            for kind='hail_mail'. Falls back to a prefix derived from the organization
+            id if omitted."
         local_prefix_user:
           anyOf:
             - type: string
             - type: "null"
           title: Local Prefix User
-          description:
-            User-chosen local-part prefix for a hail_mail address. One
-            organization only may hold it; a taken prefix returns 409. Only valid
-            for kind='hail_mail'. Falls back to HAIL_MAIL_DEFAULT_USER_PREFIX plus
-            a per-organization token if omitted.
+          description: "Deprecated: use local_prefix_workspace. Same meaning."
+          deprecated: true
         local_prefix_org:
           anyOf:
             - type: string
             - type: "null"
           title: Local Prefix Org
-          description:
-            Org-chosen local-part prefix for a hail_mail address. Only
-            valid for kind='hail_mail'. Falls back to a prefix derived from the organization
-            id if omitted.
+          description: "Deprecated: use local_prefix_name. Same meaning."
+          deprecated: true
       additionalProperties: false
       type: object
       required:
@@ -8364,15 +8379,17 @@ components:
 
         For ``kind='hail_mail'`` ``domain`` is omitted; the server composes
 
-        the full address as ``<local_prefix_user>+<local_prefix_org>@<base>``.
+        the full address as ``<local_prefix_workspace>+<local_prefix_name>@<base>``.
 
-        Both prefixes are optional in the body and fall back to the
+        Both prefixes are optional in the body. The workspace prefix falls back
 
-        ``HAIL_MAIL_DEFAULT_*_PREFIX`` env vars; the server returns 503 if
+        to ``HAIL_MAIL_FROM`` or ``HAIL_MAIL_DEFAULT_USER_PREFIX``; the server
 
-        neither is supplied. For ``kind='custom'`` ``domain`` is required and
+        returns 503 if none is set. For ``kind='custom'`` ``domain`` is required
 
-        the prefix fields must be omitted."
+        and the prefix fields must be omitted. ``local_prefix_user`` and
+
+        ``local_prefix_org`` are the deprecated names of the two prefix fields."
     EmailDomainDnsCheck:
       properties:
         kind:
@@ -8467,23 +8484,37 @@ components:
       title: EmailDomainListResponse
     EmailDomainPatch:
       properties:
+        local_prefix_workspace:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Local Prefix Workspace
+          description: "New workspace prefix: the part before the '+'. It names
+            the workspace, and one workspace only may hold it. A taken prefix returns
+            409. Only valid on kind='hail_mail' rows. Omit to leave unchanged."
+        local_prefix_name:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Local Prefix Name
+          description:
+            "New name prefix: the part after the '+'. A free name inside
+            the workspace, such as a person or team. Only valid on kind='hail_mail'
+            rows. Omit to leave unchanged."
         local_prefix_user:
           anyOf:
             - type: string
             - type: "null"
           title: Local Prefix User
-          description:
-            New user local-part prefix. One organization only may hold
-            it; a taken prefix returns 409. Only valid on kind='hail_mail' rows. Omit
-            to leave unchanged.
+          description: "Deprecated: use local_prefix_workspace. Same meaning."
+          deprecated: true
         local_prefix_org:
           anyOf:
             - type: string
             - type: "null"
           title: Local Prefix Org
-          description:
-            New org local-part prefix. Only valid on kind='hail_mail' rows.
-            Omit to leave unchanged.
+          description: "Deprecated: use local_prefix_name. Same meaning."
+          deprecated: true
         inbound_enabled:
           anyOf:
             - type: boolean
@@ -8550,20 +8581,21 @@ components:
       title: EmailDomainPatch
       description:
         "Body for PATCH /email-domains/{id}.\n\nTwo clusters of mutable\
-        \ fields:\n\n* Hail-mail addressing \u2014 the user/org prefix pair (only\
-        \ valid on\n  ``kind='hail_mail'`` rows; the handler returns 422 if a tenant\
-        \ tries\n  to PATCH these on a custom row).\n* Send switch \u2014 ``sends_enabled``\
-        \ (only valid on ``kind='custom'``\n  rows; the handler returns 422 otherwise).\
-        \ ``false`` stops the\n  domain from sending at all: skipped by sender selection,\
-        \ explicit\n  ``from`` refused.\n* Inbound action \u2014 ``inbound_enabled``\
-        \ + ``forward_to`` + the optional\n  ``forward_rate_per_hour`` cap. These\
-        \ apply to either kind, but this\n  milestone routes inbound only to ``hail_mail``\
-        \ rows; custom-domain\n  inbound (MX delegation) is the next milestone.\n\n\
-        Every field is independently optional so ``PATCH`` semantics work the\nway\
-        \ callers expect: send only what you want to change. The route\nenforces the\
-        \ cross-field rules (the CHECK constraint on the table\nrequires an action\
-        \ when ``inbound_enabled`` is true) \u2014 we don't\nre-implement it here\
-        \ because the patch may merge with existing row\nstate to satisfy the invariant."
+        \ fields:\n\n* Hail-mail addressing \u2014 the workspace/name prefix pair\
+        \ (only valid on\n  ``kind='hail_mail'`` rows; the handler returns 422 if\
+        \ a tenant tries\n  to PATCH these on a custom row).\n* Send switch \u2014\
+        \ ``sends_enabled`` (only valid on ``kind='custom'``\n  rows; the handler\
+        \ returns 422 otherwise). ``false`` stops the\n  domain from sending at all:\
+        \ skipped by sender selection, explicit\n  ``from`` refused.\n* Inbound action\
+        \ \u2014 ``inbound_enabled`` + ``forward_to`` + the optional\n  ``forward_rate_per_hour``\
+        \ cap. These apply to either kind, but this\n  milestone routes inbound only\
+        \ to ``hail_mail`` rows; custom-domain\n  inbound (MX delegation) is the next\
+        \ milestone.\n\nEvery field is independently optional so ``PATCH`` semantics\
+        \ work the\nway callers expect: send only what you want to change. The route\n\
+        enforces the cross-field rules (the CHECK constraint on the table\nrequires\
+        \ an action when ``inbound_enabled`` is true) \u2014 we don't\nre-implement\
+        \ it here because the patch may merge with existing row\nstate to satisfy\
+        \ the invariant."
     EmailDomainResponse:
       properties:
         id:
@@ -8588,18 +8620,23 @@ components:
           type: string
           title: Domain
           description: The DNS domain mail is sent from.
-        local_prefix_user:
+        local_prefix_workspace:
           anyOf:
             - type: string
             - type: "null"
-          title: Local Prefix User
-          description: User local-part prefix for a hail_mail address. Null for kind='custom'.
-        local_prefix_org:
+          title: Local Prefix Workspace
+          description:
+            "Workspace prefix of a hail_mail address: the part before the
+            '+'. It names the workspace, and one workspace only may hold it. Null
+            for kind='custom'."
+        local_prefix_name:
           anyOf:
             - type: string
             - type: "null"
-          title: Local Prefix Org
-          description: Org local-part prefix for a hail_mail address. Null for kind='custom'.
+          title: Local Prefix Name
+          description:
+            "Name prefix of a hail_mail address: the part after the '+'.
+            A free name inside the workspace, such as a person or team. Null for kind='custom'."
         verification_status:
           type: string
           enum:
@@ -8712,14 +8749,30 @@ components:
             True when the domain's published MX points at Hail's inbound
             host. Only populated by POST /{id}/verify on custom domains; null everywhere
             else.
+        local_prefix_user:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Local Prefix User
+          description: "Deprecated: use local_prefix_workspace. Same value."
+          deprecated: true
+          readOnly: true
+        local_prefix_org:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Local Prefix Org
+          description: "Deprecated: use local_prefix_name. Same value."
+          deprecated: true
+          readOnly: true
       type: object
       required:
         - id
         - organization_id
         - kind
         - domain
-        - local_prefix_user
-        - local_prefix_org
+        - local_prefix_workspace
+        - local_prefix_name
         - verification_status
         - dns_records
         - mail_from_domain
@@ -8727,6 +8780,8 @@ components:
         - verified_at
         - created_at
         - updated_at
+        - local_prefix_user
+        - local_prefix_org
       title: EmailDomainResponse
       description: "Read view for an email domain.
 

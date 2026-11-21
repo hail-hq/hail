@@ -225,6 +225,8 @@ def _email_domain_handler(seen: dict[str, Any]):
                 "organization_id": str(uuid4()),
                 "kind": "hail_mail",
                 "domain": "amber-heron+acme@mail.hail.so",
+                "local_prefix_workspace": "amber-heron",
+                "local_prefix_name": "acme",
                 "local_prefix_user": "amber-heron",
                 "local_prefix_org": "acme",
                 "verification_status": "verified",

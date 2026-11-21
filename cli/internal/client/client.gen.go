@@ -2391,11 +2391,12 @@ type EmailCreateMessageType string
 // EmailDomainCreate Request body for POST /email-domains.
 //
 // For “kind='hail_mail'“ “domain“ is omitted; the server composes
-// the full address as “<local_prefix_user>+<local_prefix_org>@<base>“.
-// Both prefixes are optional in the body and fall back to the
-// “HAIL_MAIL_DEFAULT_*_PREFIX“ env vars; the server returns 503 if
-// neither is supplied. For “kind='custom'“ “domain“ is required and
-// the prefix fields must be omitted.
+// the full address as “<local_prefix_workspace>+<local_prefix_name>@<base>“.
+// Both prefixes are optional in the body. The workspace prefix falls back
+// to “HAIL_MAIL_FROM“ or “HAIL_MAIL_DEFAULT_USER_PREFIX“; the server
+// returns 503 if none is set. For “kind='custom'“ “domain“ is required
+// and the prefix fields must be omitted. “local_prefix_user“ and
+// “local_prefix_org“ are the deprecated names of the two prefix fields.
 type EmailDomainCreate struct {
 	// Domain DNS domain to send from (e.g. 'acme.com'). Required for kind='custom'; must be omitted for kind='hail_mail'.
 	Domain *string `json:"domain,omitempty"`
@@ -2403,11 +2404,19 @@ type EmailDomainCreate struct {
 	// Kind 'hail_mail' for a Hail-hosted address (domain omitted, composed from the prefix fields), or 'custom' to send from your own domain (domain required, prefix fields omitted).
 	Kind EmailDomainCreateKind `json:"kind"`
 
-	// LocalPrefixOrg Org-chosen local-part prefix for a hail_mail address. Only valid for kind='hail_mail'. Falls back to a prefix derived from the organization id if omitted.
+	// LocalPrefixName Name prefix of a hail_mail address: the part after the '+'. A free name inside the workspace, such as a person or team. Only valid for kind='hail_mail'. Falls back to a prefix derived from the organization id if omitted.
+	LocalPrefixName *string `json:"local_prefix_name,omitempty"`
+
+	// LocalPrefixOrg Deprecated: use local_prefix_name. Same meaning.
+	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
 	LocalPrefixOrg *string `json:"local_prefix_org,omitempty"`
 
-	// LocalPrefixUser User-chosen local-part prefix for a hail_mail address. One organization only may hold it; a taken prefix returns 409. Only valid for kind='hail_mail'. Falls back to HAIL_MAIL_DEFAULT_USER_PREFIX plus a per-organization token if omitted.
+	// LocalPrefixUser Deprecated: use local_prefix_workspace. Same meaning.
+	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
 	LocalPrefixUser *string `json:"local_prefix_user,omitempty"`
+
+	// LocalPrefixWorkspace Workspace prefix of a hail_mail address: the part before the '+'. It names the workspace, and one workspace only may hold it. A taken prefix returns 409. Only valid for kind='hail_mail'. Falls back to HAIL_MAIL_DEFAULT_USER_PREFIX plus a per-organization token if omitted.
+	LocalPrefixWorkspace *string `json:"local_prefix_workspace,omitempty"`
 }
 
 // EmailDomainCreateKind 'hail_mail' for a Hail-hosted address (domain omitted, composed from the prefix fields), or 'custom' to send from your own domain (domain required, prefix fields omitted).
@@ -2453,7 +2462,7 @@ type EmailDomainListResponse struct {
 //
 // Two clusters of mutable fields:
 //
-//   - Hail-mail addressing — the user/org prefix pair (only valid on
+//   - Hail-mail addressing — the workspace/name prefix pair (only valid on
 //     “kind='hail_mail'“ rows; the handler returns 422 if a tenant tries
 //     to PATCH these on a custom row).
 //   - Send switch — “sends_enabled“ (only valid on “kind='custom'“
@@ -2487,11 +2496,19 @@ type EmailDomainPatch struct {
 	// InboundEnabled Whether to accept inbound mail on this domain. Requires forward_to (or an existing one) when true. Omit to leave unchanged.
 	InboundEnabled *bool `json:"inbound_enabled,omitempty"`
 
-	// LocalPrefixOrg New org local-part prefix. Only valid on kind='hail_mail' rows. Omit to leave unchanged.
+	// LocalPrefixName New name prefix: the part after the '+'. A free name inside the workspace, such as a person or team. Only valid on kind='hail_mail' rows. Omit to leave unchanged.
+	LocalPrefixName *string `json:"local_prefix_name,omitempty"`
+
+	// LocalPrefixOrg Deprecated: use local_prefix_name. Same meaning.
+	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
 	LocalPrefixOrg *string `json:"local_prefix_org,omitempty"`
 
-	// LocalPrefixUser New user local-part prefix. One organization only may hold it; a taken prefix returns 409. Only valid on kind='hail_mail' rows. Omit to leave unchanged.
+	// LocalPrefixUser Deprecated: use local_prefix_workspace. Same meaning.
+	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
 	LocalPrefixUser *string `json:"local_prefix_user,omitempty"`
+
+	// LocalPrefixWorkspace New workspace prefix: the part before the '+'. It names the workspace, and one workspace only may hold it. A taken prefix returns 409. Only valid on kind='hail_mail' rows. Omit to leave unchanged.
+	LocalPrefixWorkspace *string `json:"local_prefix_workspace,omitempty"`
 
 	// SendsEnabled Send switch for kind='custom' rows. False stops the domain from sending at all: skipped by default sender selection and a send naming it explicitly returns 422. Only allowed on custom rows; Omit to leave unchanged.
 	SendsEnabled *bool `json:"sends_enabled,omitempty"`
@@ -2536,11 +2553,19 @@ type EmailDomainResponse struct {
 	// Kind 'hail_mail' (Hail-hosted address) or 'custom' (your own domain).
 	Kind EmailDomainResponseKind `json:"kind"`
 
-	// LocalPrefixOrg Org local-part prefix for a hail_mail address. Null for kind='custom'.
-	LocalPrefixOrg *string `json:"local_prefix_org"`
+	// LocalPrefixName Name prefix of a hail_mail address: the part after the '+'. A free name inside the workspace, such as a person or team. Null for kind='custom'.
+	LocalPrefixName *string `json:"local_prefix_name"`
 
-	// LocalPrefixUser User local-part prefix for a hail_mail address. Null for kind='custom'.
-	LocalPrefixUser *string `json:"local_prefix_user"`
+	// LocalPrefixOrg Deprecated: use local_prefix_name. Same value.
+	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
+	LocalPrefixOrg *string `json:"local_prefix_org,omitempty"`
+
+	// LocalPrefixUser Deprecated: use local_prefix_workspace. Same value.
+	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
+	LocalPrefixUser *string `json:"local_prefix_user,omitempty"`
+
+	// LocalPrefixWorkspace Workspace prefix of a hail_mail address: the part before the '+'. It names the workspace, and one workspace only may hold it. Null for kind='custom'.
+	LocalPrefixWorkspace *string `json:"local_prefix_workspace"`
 
 	// MailFromDomain Custom MAIL FROM domain, if configured. Null when using the provider default.
 	MailFromDomain *string `json:"mail_from_domain"`

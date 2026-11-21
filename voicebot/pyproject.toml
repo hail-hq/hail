@@ -8,7 +8,7 @@ classifiers = ["Private :: Do Not Upload"]
 dependencies = [
     "hailhq-core[knowledge]",
     "asyncpg>=0.30",
-    "sqlalchemy[asyncio]>=2.0",
+    "sqlalchemy[asyncio]>=2.1.5",
     # google-auth needs post-quantum TLS support from grpcio 1.83 (April 2027).
     "grpcio>=1.83",
     "livekit==1.1.20",

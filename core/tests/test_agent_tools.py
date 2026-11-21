@@ -196,7 +196,7 @@ async def test_send_email_available_only_with_verified_domain(
 async def test_send_email_available_via_hail_mail_mint_fallback(
     async_session, monkeypatch
 ):
-    """No verified domain, but HAIL_MAIL_BASE_DOMAIN + a user prefix are
+    """No verified domain, but HAIL_MAIL_BASE_DOMAIN + a workspace prefix are
     configured: resolve_sender's auto-mint path would succeed on first
     send, so the tool must report available (mirrors routes/emails.py)."""
     monkeypatch.setattr(settings, "hail_internal_secret", "s3cret")
@@ -242,8 +242,8 @@ async def test_send_email_unavailable_when_another_org_retired_the_head(
     other = uuid.uuid4()
     async_session.add(
         RetiredHailMailAddress(
-            local_prefix_user="team",
-            local_prefix_org="shared",
+            local_prefix_workspace="team",
+            local_prefix_name="shared",
             organization_id=other,
         )
     )

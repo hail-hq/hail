@@ -25,8 +25,10 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    PrivateAttr,
     SecretStr,
     ValidationInfo,
+    computed_field,
     field_validator,
     model_validator,
 )
@@ -1710,12 +1712,86 @@ DOMAIN_NAME = re.compile(
 # parenthesized suffix is optional, so we don't need an explicit alternation.
 LOCAL_PREFIX = re.compile(r"^[a-z0-9]([a-z0-9-]{0,18}[a-z0-9])?$")
 
-# User prefixes no tenant may mint. ``noreply+<org>@<base>`` is the sender
-# of every forward and system mail; ``forwarder`` was its old name. Org
-# prefixes are free text, so without this another org could own the
+# Workspace prefixes no tenant may mint. ``noreply+<name>@<base>`` is the
+# sender of every forward and system mail; ``forwarder`` was its old name.
+# Name prefixes are free text, so without this another org could own the
 # address a tenant's forwards come from and receive its bounces. Role names
 # belong to the operator of the base domain.
-RESERVED_USER_PREFIXES = frozenset({"noreply", "forwarder"}) | ROLE_MAILBOXES
+RESERVED_WORKSPACE_PREFIXES = frozenset({"noreply", "forwarder"}) | ROLE_MAILBOXES
+
+# Old request and response names of the two hail-mail prefix fields. They had
+# the meanings swapped in the name: local_prefix_user held the workspace part
+# (before the plus), local_prefix_org the name part (after it). Requests still
+# accept them and responses still return them, so released SDK, CLI and MCP
+# versions keep working.
+DEPRECATED_PREFIX_FIELDS = {
+    "local_prefix_user": "local_prefix_workspace",
+    "local_prefix_org": "local_prefix_name",
+}
+
+_PREFIX_RULE = (
+    "must be 1–20 chars of lowercase a–z, 0–9, or '-', "
+    "with no leading or trailing '-'"
+)
+
+
+def _merge_deprecated_prefix_fields(model: BaseModel) -> dict[str, str]:
+    """Read an old prefix field as its new name.
+
+    The old fields are validated on their own first, so an error names the
+    field the caller sent. Both names may be sent with the same value.
+    Different values are refused: no guess about which one the caller meant.
+
+    Returns, for each new field name, the name the caller used, so later
+    errors can name that field.
+    """
+    sent: dict[str, str] = {}
+    for old, new in DEPRECATED_PREFIX_FIELDS.items():
+        value = getattr(model, old)
+        sent[new] = new if value is None or getattr(model, new) is not None else old
+        if value is None:
+            continue
+        given = getattr(model, new)
+        if given is None:
+            setattr(model, new, value)
+        elif given != value:
+            raise ValueError(f"{old} is the deprecated name of {new}; send only {new}")
+    return sent
+
+
+class _PrefixNames(BaseModel):
+    """Remembers which prefix field names the caller sent."""
+
+    _sent_prefix_names: dict[str, str] = PrivateAttr(default_factory=dict)
+
+    def prefix_field(self, new: str) -> str:
+        """The name the caller used for ``new``: itself or its deprecated name."""
+        return self._sent_prefix_names.get(new, new)
+
+
+def _normalize_local_prefix(v: str | None) -> str | None:
+    if v is None:
+        return v
+    v = v.strip().lower()
+    if not LOCAL_PREFIX.match(v):
+        raise ValueError(_PREFIX_RULE)
+    return v
+
+
+def _workspace_prefix_not_reserved(v: str | None) -> str | None:
+    if v is not None and v in RESERVED_WORKSPACE_PREFIXES:
+        raise ValueError(f"workspace prefix {v!r} is reserved")
+    return v
+
+
+_WORKSPACE_PREFIX_DOC = (
+    "the part before the '+'. It names the workspace, and one workspace only "
+    "may hold it."
+)
+_NAME_PREFIX_DOC = (
+    "the part after the '+'. A free name inside the workspace, such as a "
+    "person or team."
+)
 
 
 def _normalize_domain(addr: str) -> str:
@@ -1779,15 +1855,16 @@ class DomainCheckResponse(BaseModel):
     )
 
 
-class EmailDomainCreate(BaseModel):
+class EmailDomainCreate(_PrefixNames):
     """Request body for POST /email-domains.
 
     For ``kind='hail_mail'`` ``domain`` is omitted; the server composes
-    the full address as ``<local_prefix_user>+<local_prefix_org>@<base>``.
-    Both prefixes are optional in the body and fall back to the
-    ``HAIL_MAIL_DEFAULT_*_PREFIX`` env vars; the server returns 503 if
-    neither is supplied. For ``kind='custom'`` ``domain`` is required and
-    the prefix fields must be omitted.
+    the full address as ``<local_prefix_workspace>+<local_prefix_name>@<base>``.
+    Both prefixes are optional in the body. The workspace prefix falls back
+    to ``HAIL_MAIL_FROM`` or ``HAIL_MAIL_DEFAULT_USER_PREFIX``; the server
+    returns 503 if none is set. For ``kind='custom'`` ``domain`` is required
+    and the prefix fields must be omitted. ``local_prefix_user`` and
+    ``local_prefix_org`` are the deprecated names of the two prefix fields.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -1803,23 +1880,32 @@ class EmailDomainCreate(BaseModel):
         default=None,
         description="DNS domain to send from (e.g. 'acme.com'). Required for kind='custom'; must be omitted for kind='hail_mail'.",
     )
-    local_prefix_user: str | None = Field(
+    local_prefix_workspace: str | None = Field(
         default=None,
         description=(
-            "User-chosen local-part prefix for a hail_mail address. One "
-            "organization only may hold it; a taken prefix returns 409. Only "
-            "valid for kind='hail_mail'. Falls back to "
+            f"Workspace prefix of a hail_mail address: {_WORKSPACE_PREFIX_DOC} "
+            "A taken prefix returns 409. Only valid for kind='hail_mail'. Falls back to "
             "HAIL_MAIL_DEFAULT_USER_PREFIX plus a per-organization token if "
             "omitted."
         ),
     )
-    local_prefix_org: str | None = Field(
+    local_prefix_name: str | None = Field(
         default=None,
         description=(
-            "Org-chosen local-part prefix for a hail_mail address. Only "
-            "valid for kind='hail_mail'. Falls back to "
-            "a prefix derived from the organization id if omitted."
+            f"Name prefix of a hail_mail address: {_NAME_PREFIX_DOC} Only "
+            "valid for kind='hail_mail'. Falls back to a prefix derived from "
+            "the organization id if omitted."
         ),
+    )
+    local_prefix_user: str | None = Field(
+        default=None,
+        json_schema_extra={"deprecated": True},
+        description="Deprecated: use local_prefix_workspace. Same meaning.",
+    )
+    local_prefix_org: str | None = Field(
+        default=None,
+        json_schema_extra={"deprecated": True},
+        description="Deprecated: use local_prefix_name. Same meaning.",
     )
 
     @field_validator("domain")
@@ -1834,40 +1920,44 @@ class EmailDomainCreate(BaseModel):
             )
         return v
 
-    @field_validator("local_prefix_user", "local_prefix_org")
+    @field_validator(
+        "local_prefix_workspace",
+        "local_prefix_name",
+        "local_prefix_user",
+        "local_prefix_org",
+    )
     @classmethod
     def _validate_local_prefix(cls, v: str | None) -> str | None:
-        if v is None:
-            return v
-        v = v.strip().lower()
-        if not LOCAL_PREFIX.match(v):
-            raise ValueError(
-                "must be 1–20 chars of lowercase a–z, 0–9, or '-', "
-                "with no leading or trailing '-'"
-            )
-        return v
+        return _normalize_local_prefix(v)
 
-    @field_validator("local_prefix_user")
+    @field_validator("local_prefix_workspace", "local_prefix_user")
     @classmethod
-    def _user_prefix_not_reserved(cls, v: str | None) -> str | None:
-        if v is not None and v in RESERVED_USER_PREFIXES:
-            raise ValueError(f"user prefix {v!r} is reserved")
-        return v
+    def _not_reserved(cls, v: str | None) -> str | None:
+        return _workspace_prefix_not_reserved(v)
 
     @model_validator(mode="after")
     def _kind_field_consistency(self):
+        self._sent_prefix_names = _merge_deprecated_prefix_fields(self)
         if self.kind == "custom":
             if not self.domain:
                 raise ValueError("domain is required when kind='custom'")
-            if self.local_prefix_user is not None or self.local_prefix_org is not None:
+            if (
+                self.local_prefix_workspace is not None
+                or self.local_prefix_name is not None
+            ):
+                sent = [
+                    self.prefix_field(field)
+                    for field in ("local_prefix_workspace", "local_prefix_name")
+                    if getattr(self, field) is not None
+                ]
+                verb = "is" if len(sent) == 1 else "are"
                 raise ValueError(
-                    "local_prefix_user/local_prefix_org are only valid when "
-                    "kind='hail_mail'"
+                    f"{'/'.join(sent)} {verb} only valid when kind='hail_mail'"
                 )
         if self.kind == "hail_mail" and self.domain is not None:
             raise ValueError(
                 "domain must be omitted when kind='hail_mail'; the server "
-                "composes it from local_prefix_user + local_prefix_org"
+                "composes it from local_prefix_workspace + local_prefix_name"
             )
         return self
 
@@ -1890,12 +1980,12 @@ RESERVED_EMAIL_METADATA_KEYS = frozenset(
 )
 
 
-class EmailDomainPatch(BaseModel):
+class EmailDomainPatch(_PrefixNames):
     """Body for PATCH /email-domains/{id}.
 
     Two clusters of mutable fields:
 
-    * Hail-mail addressing — the user/org prefix pair (only valid on
+    * Hail-mail addressing — the workspace/name prefix pair (only valid on
       ``kind='hail_mail'`` rows; the handler returns 422 if a tenant tries
       to PATCH these on a custom row).
     * Send switch — ``sends_enabled`` (only valid on ``kind='custom'``
@@ -1917,13 +2007,29 @@ class EmailDomainPatch(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    local_prefix_workspace: str | None = Field(
+        default=None,
+        description=(
+            f"New workspace prefix: {_WORKSPACE_PREFIX_DOC} A taken prefix "
+            "returns 409. Only valid on kind='hail_mail' rows. Omit to leave unchanged."
+        ),
+    )
+    local_prefix_name: str | None = Field(
+        default=None,
+        description=(
+            f"New name prefix: {_NAME_PREFIX_DOC} Only valid on "
+            "kind='hail_mail' rows. Omit to leave unchanged."
+        ),
+    )
     local_prefix_user: str | None = Field(
         default=None,
-        description="New user local-part prefix. One organization only may hold it; a taken prefix returns 409. Only valid on kind='hail_mail' rows. Omit to leave unchanged.",
+        json_schema_extra={"deprecated": True},
+        description="Deprecated: use local_prefix_workspace. Same meaning.",
     )
     local_prefix_org: str | None = Field(
         default=None,
-        description="New org local-part prefix. Only valid on kind='hail_mail' rows. Omit to leave unchanged.",
+        json_schema_extra={"deprecated": True},
+        description="Deprecated: use local_prefix_name. Same meaning.",
     )
     inbound_enabled: bool | None = Field(
         default=None,
@@ -1973,25 +2079,20 @@ class EmailDomainPatch(BaseModel):
         ),
     )
 
-    @field_validator("local_prefix_user", "local_prefix_org")
+    @field_validator(
+        "local_prefix_workspace",
+        "local_prefix_name",
+        "local_prefix_user",
+        "local_prefix_org",
+    )
     @classmethod
     def _validate_local_prefix(cls, v: str | None) -> str | None:
-        if v is None:
-            return v
-        v = v.strip().lower()
-        if not LOCAL_PREFIX.match(v):
-            raise ValueError(
-                "must be 1–20 chars of lowercase a–z, 0–9, or '-', "
-                "with no leading or trailing '-'"
-            )
-        return v
+        return _normalize_local_prefix(v)
 
-    @field_validator("local_prefix_user")
+    @field_validator("local_prefix_workspace", "local_prefix_user")
     @classmethod
-    def _user_prefix_not_reserved(cls, v: str | None) -> str | None:
-        if v is not None and v in RESERVED_USER_PREFIXES:
-            raise ValueError(f"user prefix {v!r} is reserved")
-        return v
+    def _not_reserved(cls, v: str | None) -> str | None:
+        return _workspace_prefix_not_reserved(v)
 
     @field_validator("forward_to")
     @classmethod
@@ -2006,9 +2107,10 @@ class EmailDomainPatch(BaseModel):
 
     @model_validator(mode="after")
     def _at_least_one_field(self):
+        self._sent_prefix_names = _merge_deprecated_prefix_fields(self)
         if (
-            self.local_prefix_user is None
-            and self.local_prefix_org is None
+            self.local_prefix_workspace is None
+            and self.local_prefix_name is None
             and self.inbound_enabled is None
             and self.forward_to is None
             and self.forward_rate_per_hour is None
@@ -2017,7 +2119,7 @@ class EmailDomainPatch(BaseModel):
             and self.email_agent_scope is None
         ):
             raise ValueError(
-                "at least one of local_prefix_user, local_prefix_org, "
+                "at least one of local_prefix_workspace, local_prefix_name, "
                 "inbound_enabled, forward_to, forward_rate_per_hour, "
                 "sends_enabled, email_agent_id, or email_agent_scope must be set"
             )
@@ -2034,17 +2136,38 @@ class EmailDomainResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _read_deprecated_prefix_keys(cls, data: Any) -> Any:
+        # A reply from a server before the rename (or a stored idempotent
+        # reply) has only the old keys.
+        if not isinstance(data, dict):
+            return data
+        data = dict(data)
+        for old, new in DEPRECATED_PREFIX_FIELDS.items():
+            if data.get(new) is None and data.get(old) is not None:
+                data[new] = data[old]
+        return data
+
     id: UUID = Field(description="Unique identifier for this email domain.")
     organization_id: UUID = Field(description="Organization that owns this domain.")
     kind: EmailDomainKind = Field(
         description="'hail_mail' (Hail-hosted address) or 'custom' (your own domain)."
     )
     domain: str = Field(description="The DNS domain mail is sent from.")
-    local_prefix_user: str | None = Field(
-        description="User local-part prefix for a hail_mail address. Null for kind='custom'."
+    # Required (nullable). The before-validator fills them from the old keys
+    # when a reply has only those.
+    local_prefix_workspace: str | None = Field(
+        description=(
+            f"Workspace prefix of a hail_mail address: {_WORKSPACE_PREFIX_DOC} "
+            "Null for kind='custom'."
+        ),
     )
-    local_prefix_org: str | None = Field(
-        description="Org local-part prefix for a hail_mail address. Null for kind='custom'."
+    local_prefix_name: str | None = Field(
+        description=(
+            f"Name prefix of a hail_mail address: {_NAME_PREFIX_DOC} Null for "
+            "kind='custom'."
+        ),
     )
     verification_status: EmailDomainVerificationStatus = Field(
         description="'pending' (not yet verified), 'verified' (ready to send), or 'failed'."
@@ -2110,6 +2233,23 @@ class EmailDomainResponse(BaseModel):
             "null everywhere else."
         ),
     )
+
+    # Old names, kept so released SDK, CLI and MCP versions keep working.
+    @computed_field(
+        json_schema_extra={"deprecated": True},
+        description="Deprecated: use local_prefix_workspace. Same value.",
+    )
+    @property
+    def local_prefix_user(self) -> str | None:
+        return self.local_prefix_workspace
+
+    @computed_field(
+        json_schema_extra={"deprecated": True},
+        description="Deprecated: use local_prefix_name. Same value.",
+    )
+    @property
+    def local_prefix_org(self) -> str | None:
+        return self.local_prefix_name
 
 
 class DnsProviderSchema(BaseModel):

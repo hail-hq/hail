@@ -4,6 +4,12 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+### Changed
+
+- Email: hail-mail prefix fields are now `local_prefix_workspace` (before the `+`) and `local_prefix_name` (after it). The old `local_prefix_user` and `local_prefix_org` still work and are deprecated.
+- CLI and SDK: the new prefix names (`--local-prefix-workspace` and `--local-prefix-name` in the CLI, `local_prefix_workspace` and `local_prefix_name` in the SDK) need a Hail server from this release or newer. The old names, used alone, still work with older servers.
+- CLI: `hail email domain` commands (register, get, verify, route) print `Workspace:` and `Name:` instead of `User prefix:` and `Org prefix:`.
+
 ## [0.34.0] (2026-11-21)
 
 Webhooks can send your receiver's own `Authorization` header. Companies

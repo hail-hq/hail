@@ -29,8 +29,8 @@ No vector index: every search filters on one organization and scans its
 pieces exactly (``knowledge_pieces_org_idx``), which is exact and costs no
 index storage at the early-access limits.
 
-Revision ID: 0088
-Revises: 0087
+Revision ID: 0089
+Revises: 0088
 """
 
 from __future__ import annotations
@@ -39,8 +39,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision: str = "0088"
-down_revision: str | None = "0087"
+revision: str = "0089"
+down_revision: str | None = "0088"
 branch_labels = None
 depends_on = None
 

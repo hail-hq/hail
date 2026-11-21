@@ -17,6 +17,7 @@ One intentional deviation from core:
 from __future__ import annotations
 
 import re
+import warnings
 from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
@@ -666,22 +667,79 @@ class DnsRecord(BaseModel):
 DkimRecord = DnsRecord
 
 
+# Old names of the two hail-mail prefix fields. They had the meanings swapped
+# in the name: ``local_prefix_user`` held the workspace part (before the
+# ``+``), ``local_prefix_org`` the name part (after it).
+DEPRECATED_PREFIX_FIELDS = {
+    "local_prefix_user": "local_prefix_workspace",
+    "local_prefix_org": "local_prefix_name",
+}
+
+
+def fold_prefix(value: Any) -> Any:
+    """The server strips and lowercases a prefix before it compares one."""
+    return value.strip().lower() if isinstance(value, str) else value
+
+
+def _move_deprecated_prefix_fields(data: Any) -> Any:
+    """Read an old prefix field name as its new name (request models)."""
+    if not isinstance(data, dict):
+        return data
+    data = dict(data)
+    for old, new in DEPRECATED_PREFIX_FIELDS.items():
+        value = data.pop(old, None)
+        if value is None:
+            continue
+        if data.get(new) is None:
+            data[new] = value
+        elif fold_prefix(data[new]) != fold_prefix(value):
+            raise ValueError(f"{old} is the deprecated name of {new}; send only {new}")
+    return data
+
+
 class EmailDomainCreate(BaseModel):
     """Body for ``POST /email-domains``.
 
     For ``kind='hail_mail'``, ``domain`` is omitted; the server composes
-    ``<local_prefix_user>+<local_prefix_org>@<HAIL_MAIL_BASE_DOMAIN>``.
+    ``<local_prefix_workspace>+<local_prefix_name>@<HAIL_MAIL_BASE_DOMAIN>``.
     Prefixes are optional in the body — when omitted the server falls back
     to the operator's env-var defaults. For ``kind='custom'``, ``domain``
     is required and the prefix fields must be omitted.
+    ``local_prefix_user`` and ``local_prefix_org`` are accepted as the
+    deprecated names of ``local_prefix_workspace`` and ``local_prefix_name``.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     kind: EmailDomainKind
     domain: str | None = None
-    local_prefix_user: str | None = None
-    local_prefix_org: str | None = None
+    local_prefix_workspace: str | None = None
+    local_prefix_name: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _deprecated_names(cls, data: Any) -> Any:
+        return _move_deprecated_prefix_fields(data)
+
+    @property
+    def local_prefix_user(self) -> str | None:
+        """Deprecated: use ``local_prefix_workspace``."""
+        warnings.warn(
+            "local_prefix_user is deprecated; use local_prefix_workspace",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.local_prefix_workspace
+
+    @property
+    def local_prefix_org(self) -> str | None:
+        """Deprecated: use ``local_prefix_name``."""
+        warnings.warn(
+            "local_prefix_org is deprecated; use local_prefix_name",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.local_prefix_name
 
     @field_validator("domain")
     @classmethod
@@ -695,7 +753,7 @@ class EmailDomainCreate(BaseModel):
             )
         return v
 
-    @field_validator("local_prefix_user", "local_prefix_org")
+    @field_validator("local_prefix_workspace", "local_prefix_name")
     @classmethod
     def _validate_local_prefix(cls, v: str | None) -> str | None:
         if v is None:
@@ -713,15 +771,18 @@ class EmailDomainCreate(BaseModel):
         if self.kind == "custom":
             if not self.domain:
                 raise ValueError("domain is required when kind='custom'")
-            if self.local_prefix_user is not None or self.local_prefix_org is not None:
+            if (
+                self.local_prefix_workspace is not None
+                or self.local_prefix_name is not None
+            ):
                 raise ValueError(
-                    "local_prefix_user/local_prefix_org are only valid when "
-                    "kind='hail_mail'"
+                    "local_prefix_workspace/local_prefix_name are only valid "
+                    "when kind='hail_mail'"
                 )
         if self.kind == "hail_mail" and self.domain is not None:
             raise ValueError(
                 "domain must be omitted when kind='hail_mail'; the server "
-                "composes it from local_prefix_user + local_prefix_org"
+                "composes it from local_prefix_workspace + local_prefix_name"
             )
         return self
 
@@ -734,8 +795,9 @@ class EmailDomainPatch(BaseModel):
 
     Two clusters of mutable fields, mirroring the server contract:
 
-    * Hail-mail addressing — ``local_prefix_user`` / ``local_prefix_org``
-      (``kind='hail_mail'`` rows only; the server 422s otherwise).
+    * Hail-mail addressing — ``local_prefix_workspace`` / ``local_prefix_name``
+      (``kind='hail_mail'`` rows only; the server 422s otherwise). The old
+      names ``local_prefix_user`` / ``local_prefix_org`` still work.
     * Inbound action — ``inbound_enabled``, ``forward_to``,
       ``webhook_url`` (empty string clears it; the server returns the new
       plaintext secret once when set), ``forward_rate_per_hour``.
@@ -746,8 +808,8 @@ class EmailDomainPatch(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    local_prefix_user: str | None = None
-    local_prefix_org: str | None = None
+    local_prefix_workspace: str | None = None
+    local_prefix_name: str | None = None
     inbound_enabled: bool | None = None
     forward_to: list[str] | None = None
     webhook_url: str | None = None
@@ -755,7 +817,7 @@ class EmailDomainPatch(BaseModel):
     email_agent_id: UUID | None = None
     email_agent_scope: EmailAgentScope | None = None
 
-    @field_validator("local_prefix_user", "local_prefix_org")
+    @field_validator("local_prefix_workspace", "local_prefix_name")
     @classmethod
     def _validate_local_prefix(cls, v: str | None) -> str | None:
         if v is None:
@@ -768,6 +830,31 @@ class EmailDomainPatch(BaseModel):
             )
         return v
 
+    @model_validator(mode="before")
+    @classmethod
+    def _deprecated_names(cls, data: Any) -> Any:
+        return _move_deprecated_prefix_fields(data)
+
+    @property
+    def local_prefix_user(self) -> str | None:
+        """Deprecated: use ``local_prefix_workspace``."""
+        warnings.warn(
+            "local_prefix_user is deprecated; use local_prefix_workspace",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.local_prefix_workspace
+
+    @property
+    def local_prefix_org(self) -> str | None:
+        """Deprecated: use ``local_prefix_name``."""
+        warnings.warn(
+            "local_prefix_org is deprecated; use local_prefix_name",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.local_prefix_name
+
     @model_validator(mode="after")
     def _at_least_one_field(self):
         if not self.model_fields_set:
@@ -778,10 +865,29 @@ class EmailDomainPatch(BaseModel):
 class EmailDomainResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _fill_both_prefix_names(cls, data: Any) -> Any:
+        # Servers before the rename send only the old names, newer ones send
+        # both. Fill each pair from the other.
+        if not isinstance(data, dict):
+            return data
+        data = dict(data)
+        for old, new in DEPRECATED_PREFIX_FIELDS.items():
+            if data.get(new) is None:
+                data[new] = data.get(old)
+            if data.get(old) is None:
+                data[old] = data.get(new)
+        return data
+
     id: UUID
     organization_id: UUID
     kind: EmailDomainKind
     domain: str
+    # ``<workspace>+<name>@<base>`` for a hail_mail row; None for custom.
+    local_prefix_workspace: str | None = None
+    local_prefix_name: str | None = None
+    # Deprecated: the same values under their old names.
     local_prefix_user: str | None = None
     local_prefix_org: str | None = None
     verification_status: EmailDomainVerificationStatus
@@ -1021,4 +1127,5 @@ __all__ = [
     "SuppressionResponse",
     "VoiceConfig",
     "WhoamiResponse",
+    "fold_prefix",
 ]

@@ -8,7 +8,7 @@
 
 services:
   postgres:
-    # pgvector for the knowledge base (migration 0088). Same pgvector
+    # pgvector for the knowledge base (knowledge_pieces). Same pgvector
     # release as the managed database.
     image: pgvector/pgvector:0.8.0-pg16
     environment:

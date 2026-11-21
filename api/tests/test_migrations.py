@@ -345,6 +345,114 @@ def test_0083_renames_call_analyzed(empty_db: str) -> None:
     )
 
 
+def test_0088_copies_and_syncs_the_hail_mail_prefixes(empty_db: str) -> None:
+    """0088 adds local_prefix_workspace/local_prefix_name, copies the old
+    columns into them, and keeps both pairs equal for old and new writers.
+    The 0070 guard, which reads the old columns, still sees every head."""
+    _run_alembic(empty_db, ["upgrade", "0087"])
+    url = _to_libpq_url(to_sync_url(empty_db))
+    org = "11111111-1111-1111-1111-111111111111"
+    other = "22222222-2222-2222-2222-222222222222"
+    third = "33333333-3333-3333-3333-333333333333"
+    pairs = (
+        "local_prefix_user, local_prefix_org, "
+        "local_prefix_workspace, local_prefix_name"
+    )
+    insert = (
+        "INSERT INTO email_domains (organization_id, kind, domain, "
+        "verification_status, {cols}) VALUES (%s, 'hail_mail', %s, "
+        "'verified', %s, %s) RETURNING id"
+    )
+    with psycopg.connect(url, autocommit=True) as conn:
+        before = conn.execute(
+            insert.format(cols="local_prefix_user, local_prefix_org"),
+            (org, "acme+amber@mail.example.com", "acme", "amber"),
+        ).fetchone()[0]
+        stamped = conn.execute(
+            "SELECT updated_at FROM email_domains WHERE id = %s", (before,)
+        ).fetchone()[0]
+        conn.execute(
+            "INSERT INTO retired_hail_mail_addresses "
+            "(local_prefix_user, local_prefix_org, organization_id) "
+            "VALUES ('globex', 'heron', %s)",
+            (other,),
+        )
+
+    _run_alembic(empty_db, ["upgrade", "0088"])
+    with psycopg.connect(url, autocommit=True) as conn:
+        row = conn.execute(
+            f"SELECT {pairs} FROM email_domains WHERE id = %s", (before,)
+        ).fetchone()
+        assert row == ("acme", "amber", "acme", "amber")
+        # The copy is not an edit, and the updated_at trigger is back on.
+        assert (
+            conn.execute(
+                "SELECT updated_at FROM email_domains WHERE id = %s", (before,)
+            ).fetchone()[0]
+            == stamped
+        )
+        trigger_enabled = conn.execute(
+            "SELECT tgenabled FROM pg_trigger WHERE tgname = 'email_domains_updated_at'"
+        ).fetchone()[0]
+        assert trigger_enabled == "O"
+        for index in (
+            "email_domains_hail_mail_workspace_idx",
+            "retired_hail_mail_addresses_workspace_idx",
+        ):
+            assert _index_def(conn, index) is not None, index
+        retired = conn.execute(
+            f"SELECT {pairs} FROM retired_hail_mail_addresses"
+        ).fetchone()
+        assert retired == ("globex", "heron", "globex", "heron")
+
+        # An old writer (the website) sets only the old pair.
+        conn.execute(
+            "UPDATE email_domains SET local_prefix_org = 'heron' WHERE id = %s",
+            (before,),
+        )
+        # A new writer sets only the new pair; the guard still refuses a
+        # role name and a head another org retired.
+        for head in ("admin", "globex"):
+            with pytest.raises(psycopg.errors.IntegrityError):
+                conn.execute(
+                    insert.format(cols="local_prefix_workspace, local_prefix_name"),
+                    (third, f"{head}+x@mail.example.com", head, "x"),
+                )
+        after = conn.execute(
+            insert.format(cols="local_prefix_workspace, local_prefix_name"),
+            (
+                other,
+                "initech+amber-heron-42@mail.example.com",
+                "initech",
+                "amber-heron-42",
+            ),
+        ).fetchone()[0]
+        rows = conn.execute(
+            f"SELECT {pairs} FROM email_domains WHERE id IN (%s, %s) ORDER BY 1",
+            (before, after),
+        ).fetchall()
+        assert rows == [
+            ("acme", "heron", "acme", "heron"),
+            ("initech", "amber-heron-42", "initech", "amber-heron-42"),
+        ]
+
+    _run_alembic(empty_db, ["downgrade", "0087"])
+    with psycopg.connect(url) as conn:
+        assert _column_data_type(conn, "email_domains", "local_prefix_name") is None
+        assert (
+            _column_data_type(
+                conn, "retired_hail_mail_addresses", "local_prefix_workspace"
+            )
+            is None
+        )
+        assert conn.execute(
+            "SELECT local_prefix_user, local_prefix_org FROM email_domains "
+            "WHERE id = %s",
+            (before,),
+        ).fetchone() == ("acme", "heron")
+    _run_alembic(empty_db, ["upgrade", "head"])
+
+
 def test_forward_queue_poll_index_exists(empty_db: str) -> None:
     """After 0010 a partial index covers the forward worker's 1s poll
     (status='queued' AND direction='outbound') so it never seq-scans
@@ -843,8 +951,8 @@ def test_0054_handover_members(empty_db: str) -> None:
         assert _constraint_exists(conn, "agent_handover_contacts_pkey")
 
 
-def test_0088_knowledge_tables(empty_db: str) -> None:
-    """0088 installs pgvector and the knowledge tables, and widens the
+def test_0089_knowledge_tables(empty_db: str) -> None:
+    """0089 installs pgvector and the knowledge tables, and widens the
     upload purposes."""
     _run_alembic(empty_db, ["upgrade", "head"])
     with psycopg.connect(_to_libpq_url(to_sync_url(empty_db))) as conn:
@@ -859,7 +967,7 @@ def test_0088_knowledge_tables(empty_db: str) -> None:
         assert "knowledge_document" in (
             _constraint_src(conn, "file_uploads_purpose_check") or ""
         )
-    _run_alembic(empty_db, ["downgrade", "0087"])
+    _run_alembic(empty_db, ["downgrade", "0088"])
     with psycopg.connect(_to_libpq_url(to_sync_url(empty_db))) as conn:
         assert not _table_exists(conn, "knowledge_pieces")
         assert "knowledge_document" not in (
@@ -867,9 +975,9 @@ def test_0088_knowledge_tables(empty_db: str) -> None:
         )
 
 
-def test_0088_uses_an_extensions_schema(empty_db: str) -> None:
+def test_0089_uses_an_extensions_schema(empty_db: str) -> None:
     """Supabase keeps extensions in an ``extensions`` schema on the search
-    path: 0088 installs pgvector there and its tables still work."""
+    path: 0089 installs pgvector there and its tables still work."""
     url = _to_libpq_url(to_sync_url(empty_db))
     with psycopg.connect(url, autocommit=True) as conn:
         conn.execute("DROP EXTENSION IF EXISTS vector CASCADE")
