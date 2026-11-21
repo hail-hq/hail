@@ -186,6 +186,10 @@ async def active_browser_sms_call(db, number, sender):
     return call if held is not None and held.id == number.id else None
 
 
+# ``suppressions.source`` of an opt-out made by STOP to a trial number.
+TRIAL_STOP_SOURCE = "trial_stop_keyword"
+
+
 async def _trial_number_keyword(
     db: AsyncSession, from_e164: str, body: str, opt_out_type: str | None
 ) -> IngestResult:
@@ -193,7 +197,8 @@ async def _trial_number_keyword(
     the phone out in every workspace that holds it as its trial phone:
     verified, waiting for its code, or the new phone waiting beside a
     verified one. The consent check then refuses trial texts and
-    ``start_phone_proof`` sends no more codes. START opts it back in. Every
+    ``start_phone_proof`` sends no more codes. START removes only those
+    opt-outs (``TRIAL_STOP_SOURCE``); a workspace's own STOP stays. Every
     other text, and a phone no workspace holds, is dropped: Hail does not
     read replies."""
     action = _opt_out_action(body, opt_out_type)
@@ -217,17 +222,23 @@ async def _trial_number_keyword(
         return IngestResult(sms_id=None, dropped_reason="unknown_number")
     for organization_id in organization_ids:
         if action == "STOP":
+            # Its own source: START to a trial number removes only these,
+            # never a STOP the phone sent to the workspace's own number.
             await add_suppression(
                 db,
                 organization_id=organization_id,
                 recipient=from_e164,
                 channel="sms",
-                reason="recipient replied STOP",
-                source="stop_keyword",
+                reason="recipient replied STOP to a trial number",
+                source=TRIAL_STOP_SOURCE,
             )
-        elif await is_suppressed(db, organization_id, from_e164, "sms"):
+        else:
             await remove_suppression(
-                db, organization_id=organization_id, recipient=from_e164, channel="sms"
+                db,
+                organization_id=organization_id,
+                recipient=from_e164,
+                channel="sms",
+                source=TRIAL_STOP_SOURCE,
             )
     return IngestResult(sms_id=None, dropped_reason="trial_number_keyword")
 

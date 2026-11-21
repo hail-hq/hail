@@ -292,7 +292,8 @@ class Suppression(Base):
     A voice row IS an internal DNC entry; there is no separate DNC table.
     Populated by the unsubscribe link (``GET /unsubscribe``,
     ``source='unsubscribe_link'``), an SMS STOP reply
-    (``hailhq.core.sms_ingest``, ``source='stop_keyword'``), and a hard
+    (``hailhq.core.sms_ingest``, ``source='stop_keyword'``, or
+    ``'trial_stop_keyword'`` for a STOP to a trial texting number), and a hard
     bounce or spam complaint on an outbound email
     (``hailhq.core.email_delivery_events``, ``source='bounce'``).
     ``'manual'`` (ops action) is reserved; nothing writes it yet.

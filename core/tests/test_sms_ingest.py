@@ -7,7 +7,11 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from hailhq.core.compliance_gate import check_sms_allowed, is_suppressed
+from hailhq.core.compliance_gate import (
+    add_suppression,
+    check_sms_allowed,
+    is_suppressed,
+)
 from hailhq.core.models import (
     PhoneNumber,
     Sms,
@@ -635,7 +639,7 @@ async def test_stop_to_a_trial_number_suppresses_the_trial_phone(async_session):
     assert await is_suppressed(async_session, org, "+14155550142", "sms")
     assert not await is_suppressed(async_session, other, "+14155550142", "sms")
     row = (await async_session.execute(select(Suppression))).scalar_one()
-    assert row.source == "stop_keyword"
+    assert row.source == "trial_stop_keyword"
     gate = await check_sms_allowed(async_session, org, "+14155550142")
     assert not gate.allowed
 
@@ -679,3 +683,34 @@ async def test_stop_to_a_trial_number_suppresses_every_workspace_with_the_phone(
     await async_session.commit()
     for org in (verified, pending, switching):
         assert not await is_suppressed(async_session, org, phone, "sms")
+
+
+async def test_start_to_a_trial_number_keeps_a_workspaces_own_stop(async_session):
+    """START to a trial number removes only the opt-out a STOP to a trial
+    number made. A STOP the phone sent to the workspace's own number stays."""
+    phone = "+14155550142"
+    await _trial_number(async_session)
+    own = await _verified_trial_phone(async_session, phone)
+    trial_only = await _verified_trial_phone(async_session, phone, status="pending")
+    await add_suppression(
+        async_session,
+        organization_id=own,
+        recipient=phone,
+        channel="sms",
+        reason="recipient replied STOP",
+        source="stop_keyword",
+    )
+    await async_session.commit()
+
+    await _reply(async_session, "STOP", sender=phone)
+    await async_session.commit()
+    rows = {
+        r.organization_id: r.source
+        for r in (await async_session.execute(select(Suppression))).scalars()
+    }
+    assert rows == {own: "stop_keyword", trial_only: "trial_stop_keyword"}
+
+    await _reply(async_session, "START", sender=phone)
+    await async_session.commit()
+    assert await is_suppressed(async_session, own, phone, "sms")
+    assert not await is_suppressed(async_session, trial_only, phone, "sms")

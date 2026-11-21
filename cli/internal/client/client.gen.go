@@ -3899,7 +3899,7 @@ type SuppressionResponse struct {
 	// Recipient The suppressed recipient — E.164 phone number for voice/sms, lowercased email address for email.
 	Recipient string `json:"recipient"`
 
-	// Source How this entry was created: 'unsubscribe_link' (email unsubscribe link) or 'stop_keyword' (recipient replied STOP by SMS). 'manual' (operator action) and 'bounce' (bounce handler) are reserved; nothing writes them yet.
+	// Source How this entry was created: 'unsubscribe_link' (email unsubscribe link), 'stop_keyword' (recipient replied STOP by SMS) or 'trial_stop_keyword' (your trial phone replied STOP to Hail's trial number). 'manual' (operator action) and 'bounce' (bounce handler) are reserved; nothing writes them yet.
 	Source string `json:"source"`
 }
 
