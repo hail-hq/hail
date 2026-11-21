@@ -108,9 +108,10 @@ TEXT_KEYS = ("description", "detail", "message", "reason", "title")
 # The longest carrier text quoted to the customer; longer text is cut.
 CARRIER_TEXT_MAX = 600
 # A leading field tag in a carrier's text, like "[email] - ".
-# Only an identifier-like tag ("[email]", "[address_sids]"): a label with
-# words in it ("[Sample 2]") says which part to fix, so it stays.
-_FIELD_TAG = re.compile(r"^\s*\[[A-Za-z_][\w.]*\]\s*[-:]?\s*")
+# Only an identifier-like tag ("[email]", "[address_sids]") with a "-" or
+# ":" after it. A label with words ("[Sample 2]"), or a tag the sentence
+# goes on from ("[website] is unreachable"), says what to fix, so it stays.
+_FIELD_TAG = re.compile(r"^\s*\[[A-Za-z_][\w.]*\]\s*[-:]\s*")
 # twilio-python's own wrapper around Twilio's message ("Unable to create
 # record: <message>"); not the carrier's words.
 _SDK_PREFIX = re.compile(

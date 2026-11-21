@@ -707,8 +707,9 @@ def _joined_problems(problems: list[Problem]) -> str:
 
 
 def _billed_reason(reason: str, purpose: str) -> str:
-    """The stored reason of a refusal billed at filing: US texting gets the
-    US texting cap; other purposes keep their old 500 character cut."""
+    """The stored reason of a refusal billed at filing. Only US texting
+    carriers bill at filing today; they get the US texting cap. Another
+    purpose, if one ever bills, is cut at 500 characters."""
     return _cap_reason(reason, purpose) if purpose == "sms" else reason[:500]
 
 

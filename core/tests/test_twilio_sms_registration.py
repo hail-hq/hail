@@ -828,6 +828,10 @@ def test_sdk_wrapper_is_not_quoted() -> None:
     assert with_carrier_text("Hi.", "Unable to create recordings now") == (
         "Hi. The carrier said: Unable to create recordings now."
     )
+    # A tag the sentence goes on from stays.
+    assert with_carrier_text("Hi.", "[website] is unreachable") == (
+        "Hi. The carrier said: [website] is unreachable."
+    )
     # Only the SDK's own verbs, and only identifier-like tags, are dropped.
     assert with_carrier_text("Hi.", "Unable to verify record: EIN mismatch") == (
         "Hi. The carrier said: Unable to verify record: EIN mismatch."
@@ -1161,6 +1165,9 @@ async def test_failed_brand_with_unknown_reason_quotes_twilio() -> None:
         _failed_brand((30795, "Tax ID does not match"), (30794, "Website down"))
     )
     assert st.reason.endswith("Website down. Fix these and start again.")
+    # The same reason twice is one reason: "Fix that".
+    st = await _brand_status(_failed_brand((1, "Site down"), (2, "Site down")))
+    assert st.reason.endswith("Site down. Fix that and start again.")
 
 
 async def test_failed_brand_without_errors_keeps_the_generic_line() -> None:

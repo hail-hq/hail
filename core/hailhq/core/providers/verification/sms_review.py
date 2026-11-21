@@ -15,6 +15,7 @@ from hailhq.core.providers.verification.rejections import (
     START_AGAIN,
     TEXT_KEYS,
     carrier_texts,
+    sentence,
     with_carrier_text,
 )
 from hailhq.core.providers.verification.sms_form import (
@@ -166,7 +167,8 @@ def brand_rejected_reason(
         return f"{' '.join(fixes)} {START_AGAIN}"
     body = with_carrier_text(" ".join(fixes) or BRAND_REJECTED_LEAD, raw)
     # Several things to fix: several Hail fixes or several carrier reasons.
-    several = len(fixes) > 1 or len(carrier_texts(raw)) > 1
+    quoted = {sentence(t) for t in carrier_texts(raw)}
+    several = len(fixes) > 1 or len(quoted) > 1
     end = FIX_THESE_AND_START_AGAIN if several else FIX_AND_START_AGAIN
     return f"{body} {end}"
 
