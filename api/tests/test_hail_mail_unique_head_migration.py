@@ -28,17 +28,32 @@ spec = importlib.util.spec_from_file_location(
 migration = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(migration)
 
+# The models no longer have the old prefix columns that 0070 reads. Each test
+# first runs this migration's downgrade to put them back.
+drop_spec = importlib.util.spec_from_file_location(
+    "drop_old_hail_mail_prefix_columns",
+    Path(__file__).parents[1]
+    / "migrations/versions/0090_drop_old_hail_mail_prefix_columns.py",
+)
+drop_migration = importlib.util.module_from_spec(drop_spec)
+drop_spec.loader.exec_module(drop_migration)
+
 T0 = datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc)
 
 
-async def _run(db, step) -> None:
+async def _run(db, step, module=migration) -> None:
     async with db.begin() as connection:
 
         def go(sync):
-            migration.op = Operations(MigrationContext.configure(sync))
+            module.op = Operations(MigrationContext.configure(sync))
             step()
 
         await connection.run_sync(go)
+
+
+@pytest.fixture(autouse=True)
+async def _old_prefix_columns(db) -> None:
+    await _run(db, drop_migration.downgrade, drop_migration)
 
 
 def _hash(domain_id: uuid.UUID) -> str:
@@ -259,8 +274,13 @@ async def test_no_merge_leaves_those_tables_unlocked(db) -> None:
 
 
 def test_function_text_matches_the_code() -> None:
-    assert _squash(migration.GUARD_FUNCTION) == _squash(EMAIL_DOMAINS_GUARD_FUNCTION)
-    assert _squash(migration.RETIRE_FUNCTION) == _squash(EMAIL_DOMAINS_RETIRE_FUNCTION)
+    # The functions now read the new columns: the drop migration holds their text.
+    assert _squash(drop_migration.GUARD_FUNCTION) == _squash(
+        EMAIL_DOMAINS_GUARD_FUNCTION
+    )
+    assert _squash(drop_migration.RETIRE_FUNCTION) == _squash(
+        EMAIL_DOMAINS_RETIRE_FUNCTION
+    )
     assert _squash(migration.GUARD_TRIGGER) == _squash(EMAIL_DOMAINS_GUARD_TRIGGER)
     assert _squash(migration.RETIRE_TRIGGER) == _squash(EMAIL_DOMAINS_RETIRE_TRIGGER)
 

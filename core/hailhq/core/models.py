@@ -1,7 +1,6 @@
 import uuid
 from datetime import datetime
 from decimal import Decimal
-from typing import ClassVar
 
 from hailhq.core.call_end_reasons import CallEndReasonDB
 from hailhq.core.call_failures import call_failure_message
@@ -14,7 +13,6 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     DateTime,
-    FetchedValue,
     ForeignKey,
     Index,
     Integer,
@@ -31,9 +29,7 @@ from sqlalchemy.dialects.postgresql import INET, JSONB, UUID
 from sqlalchemy.orm import (
     DeclarativeBase,
     Mapped,
-    Unmapped,
     mapped_column,
-    unmapped_column,
 )
 
 
@@ -1444,17 +1440,6 @@ class EmailDomain(Base):
     # convenience materialization other callers can read without re-parsing.
     local_prefix_workspace: Mapped[str | None] = mapped_column(Text, nullable=True)
     local_prefix_name: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # Old names of the two columns above, with the meanings swapped in the
-    # name: local_prefix_user holds the workspace part, local_prefix_org the
-    # name part. Not mapped: code reads and writes the new pair, and the
-    # sync trigger below copies it here. The unique index, the CHECKs and the
-    # guard and retire triggers still read these until the old columns are dropped.
-    local_prefix_user: Unmapped[str | None] = unmapped_column(
-        Text, nullable=True, server_default=FetchedValue()
-    )
-    local_prefix_org: Unmapped[str | None] = unmapped_column(
-        Text, nullable=True, server_default=FetchedValue()
-    )
     verification_status: Mapped[str] = mapped_column(
         Text, server_default="pending", nullable=False
     )
@@ -1532,17 +1517,17 @@ class EmailDomain(Base):
         # Mirrors the migration so Base.metadata.create_all (tests) produces
         # the same shape.
         CheckConstraint(
-            "(kind = 'hail_mail' AND local_prefix_user IS NOT NULL "
-            "AND local_prefix_org IS NOT NULL) "
-            "OR (kind = 'custom' AND local_prefix_user IS NULL "
-            "AND local_prefix_org IS NULL)",
+            "(kind = 'hail_mail' AND local_prefix_workspace IS NOT NULL "
+            "AND local_prefix_name IS NOT NULL) "
+            "OR (kind = 'custom' AND local_prefix_workspace IS NULL "
+            "AND local_prefix_name IS NULL)",
             name="email_domains_prefix_kind_consistency",
         ),
         # Mirrors migration 0056: ``noreply+<org>@`` is Hail's own sender.
         CheckConstraint(
-            "local_prefix_user IS NULL "
-            "OR local_prefix_user NOT IN ('noreply','forwarder')",
-            name="email_domains_user_prefix_not_reserved",
+            "local_prefix_workspace IS NULL "
+            "OR local_prefix_workspace NOT IN ('noreply','forwarder')",
+            name="email_domains_workspace_prefix_not_reserved",
         ),
         # An org can't register the same domain twice.  Custom domains are
         # globally unique (one org per domain) — see the partial index below.
@@ -1568,14 +1553,8 @@ class EmailDomain(Base):
         # HAIL_MAIL_BASE_DOMAIN changed between the two registrations.
         Index(
             "email_domains_hail_mail_head_uq",
-            "local_prefix_user",
-            unique=True,
-            postgresql_where=text("kind = 'hail_mail'"),
-        ),
-        # Inbound routing reads the new column. Mirrors the migration.
-        Index(
-            "email_domains_hail_mail_workspace_idx",
             "local_prefix_workspace",
+            unique=True,
             postgresql_where=text("kind = 'hail_mail'"),
         ),
         # One hail-mail address per org.
@@ -1598,34 +1577,14 @@ class RetiredHailMailAddress(Base):
 
     __tablename__ = "retired_hail_mail_addresses"
 
-    local_prefix_workspace: Mapped[str | None] = mapped_column(Text, nullable=True)
-    local_prefix_name: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # Old names of the pair above, filled by the sync trigger. They hold the
-    # table's primary key until the old columns are dropped. See EmailDomain.
-    local_prefix_user: Unmapped[str] = unmapped_column(
-        Text, primary_key=True, server_default=FetchedValue()
-    )
-    local_prefix_org: Unmapped[str] = unmapped_column(
-        Text, primary_key=True, server_default=FetchedValue()
-    )
+    local_prefix_workspace: Mapped[str] = mapped_column(Text, primary_key=True)
+    local_prefix_name: Mapped[str] = mapped_column(Text, primary_key=True)
     organization_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True
     )
     retired_at: Mapped[datetime] = mapped_column(
         TS, server_default=text("now()"), nullable=False
     )
-
-    __table_args__ = (
-        # The retired-address checks read the new columns. Mirrors the migration.
-        Index(
-            "retired_hail_mail_addresses_workspace_idx",
-            "local_prefix_workspace",
-            "local_prefix_name",
-        ),
-    )
-    __mapper_args__: ClassVar[dict] = {
-        "primary_key": [local_prefix_workspace, local_prefix_name, organization_id]
-    }
 
 
 # Rules on a NEW head or tail only, so an older row with a role-name head keeps
@@ -1645,49 +1604,49 @@ BEGIN
     -- index. Heads are locked in sorted order for the same reason.
     IF TG_OP = 'DELETE' THEN
         IF OLD.kind = 'hail_mail' THEN
-            PERFORM pg_advisory_xact_lock(hashtext(OLD.local_prefix_user));
+            PERFORM pg_advisory_xact_lock(hashtext(OLD.local_prefix_workspace));
         END IF;
         RETURN OLD;
     END IF;
     IF NEW.kind <> 'hail_mail'
        OR (TG_OP = 'UPDATE'
-           AND NEW.local_prefix_user IS NOT DISTINCT FROM OLD.local_prefix_user
-           AND NEW.local_prefix_org IS NOT DISTINCT FROM OLD.local_prefix_org) THEN
+           AND NEW.local_prefix_workspace IS NOT DISTINCT FROM OLD.local_prefix_workspace
+           AND NEW.local_prefix_name IS NOT DISTINCT FROM OLD.local_prefix_name) THEN
         RETURN NEW;
     END IF;
     head_changed := TG_OP = 'INSERT'
-        OR NEW.local_prefix_user IS DISTINCT FROM OLD.local_prefix_user;
-    IF head_changed AND NEW.local_prefix_user = ANY (ARRAY[{_ROLE_MAILBOXES_SQL}]) THEN
+        OR NEW.local_prefix_workspace IS DISTINCT FROM OLD.local_prefix_workspace;
+    IF head_changed AND NEW.local_prefix_workspace = ANY (ARRAY[{_ROLE_MAILBOXES_SQL}]) THEN
         RAISE EXCEPTION USING ERRCODE = '23514',
-            MESSAGE = 'hail-mail user prefix ' || NEW.local_prefix_user || ' is reserved';
+            MESSAGE = 'hail-mail workspace prefix ' || NEW.local_prefix_workspace || ' is reserved';
     END IF;
     PERFORM pg_advisory_xact_lock(hashtext(head))
        FROM (SELECT DISTINCT head
-               FROM unnest(ARRAY[OLD.local_prefix_user, NEW.local_prefix_user]) AS head
+               FROM unnest(ARRAY[OLD.local_prefix_workspace, NEW.local_prefix_workspace]) AS head
               WHERE head IS NOT NULL
               ORDER BY head) AS heads;
     -- Only the org that gave the head up last may take it back.
     IF head_changed THEN
         SELECT r.organization_id INTO newest_org
           FROM retired_hail_mail_addresses r
-         WHERE r.local_prefix_user = NEW.local_prefix_user
+         WHERE r.local_prefix_workspace = NEW.local_prefix_workspace
          ORDER BY r.retired_at DESC, r.organization_id
          LIMIT 1;
         IF FOUND AND newest_org <> NEW.organization_id THEN
             RAISE EXCEPTION USING ERRCODE = '23505',
-                MESSAGE = 'hail-mail user prefix ' || NEW.local_prefix_user || ' is retired';
+                MESSAGE = 'hail-mail workspace prefix ' || NEW.local_prefix_workspace || ' is retired';
         END IF;
     END IF;
     -- A new tail must not claim the exact address another org gave up: ingest
     -- would then hold mail that was meant for that org.
     IF EXISTS (
            SELECT 1 FROM retired_hail_mail_addresses r
-            WHERE r.local_prefix_user = NEW.local_prefix_user
-              AND r.local_prefix_org = NEW.local_prefix_org
+            WHERE r.local_prefix_workspace = NEW.local_prefix_workspace
+              AND r.local_prefix_name = NEW.local_prefix_name
               AND r.organization_id <> NEW.organization_id) THEN
         RAISE EXCEPTION USING ERRCODE = '23505',
-            MESSAGE = 'hail-mail address ' || NEW.local_prefix_user || '+'
-                || NEW.local_prefix_org || ' is retired';
+            MESSAGE = 'hail-mail address ' || NEW.local_prefix_workspace || '+'
+                || NEW.local_prefix_name || ' is retired';
     END IF;
     RETURN NEW;
 END
@@ -1703,17 +1662,17 @@ CREATE OR REPLACE FUNCTION email_domains_retire_hail_mail() RETURNS trigger AS $
 BEGIN
     IF OLD.kind = 'hail_mail'
        AND (TG_OP = 'DELETE'
-            OR NEW.local_prefix_user IS DISTINCT FROM OLD.local_prefix_user) THEN
+            OR NEW.local_prefix_workspace IS DISTINCT FROM OLD.local_prefix_workspace) THEN
         -- The guard already holds this lock on any normal path. It stays here
         -- so a release can never run unserialized, even with the guard disabled.
-        PERFORM pg_advisory_xact_lock(hashtext(OLD.local_prefix_user));
+        PERFORM pg_advisory_xact_lock(hashtext(OLD.local_prefix_workspace));
         -- clock_timestamp, not now(): two rewrites in one transaction need an
         -- order, and the newest record decides who may take the head back.
         INSERT INTO retired_hail_mail_addresses
-            (local_prefix_user, local_prefix_org, organization_id, retired_at)
-        VALUES (OLD.local_prefix_user, OLD.local_prefix_org, OLD.organization_id,
+            (local_prefix_workspace, local_prefix_name, organization_id, retired_at)
+        VALUES (OLD.local_prefix_workspace, OLD.local_prefix_name, OLD.organization_id,
                 clock_timestamp())
-        ON CONFLICT (local_prefix_user, local_prefix_org, organization_id)
+        ON CONFLICT (local_prefix_workspace, local_prefix_name, organization_id)
         DO UPDATE SET retired_at = EXCLUDED.retired_at;
     END IF;
     RETURN NULL;
@@ -1725,47 +1684,12 @@ CREATE OR REPLACE TRIGGER email_domains_retire_hail_mail
 AFTER UPDATE OR DELETE ON email_domains
 FOR EACH ROW EXECUTE FUNCTION email_domains_retire_hail_mail()
 """
-# Keeps the old prefix columns equal to the new ones while old writers (the
-# website) still use them. Mirrors the migration that added the new pair.
-HAIL_MAIL_SYNC_FUNCTION = """
-CREATE OR REPLACE FUNCTION hail_mail_sync_prefix_columns() RETURNS trigger AS $$
-BEGIN
-    -- local_prefix_workspace = local_prefix_user, local_prefix_name =
-    -- local_prefix_org. The new pair wins a conflict.
-    IF TG_OP = 'INSERT' THEN
-        NEW.local_prefix_workspace :=
-            COALESCE(NEW.local_prefix_workspace, NEW.local_prefix_user);
-        NEW.local_prefix_name := COALESCE(NEW.local_prefix_name, NEW.local_prefix_org);
-    ELSE
-        IF NEW.local_prefix_workspace IS NOT DISTINCT FROM OLD.local_prefix_workspace THEN
-            NEW.local_prefix_workspace := NEW.local_prefix_user;
-        END IF;
-        IF NEW.local_prefix_name IS NOT DISTINCT FROM OLD.local_prefix_name THEN
-            NEW.local_prefix_name := NEW.local_prefix_org;
-        END IF;
-    END IF;
-    NEW.local_prefix_user := NEW.local_prefix_workspace;
-    NEW.local_prefix_org := NEW.local_prefix_name;
-    RETURN NEW;
-END
-$$ LANGUAGE plpgsql
-"""
-# "00" sorts before every other trigger name: Postgres fires triggers of one
-# timing in name order, and the guard trigger reads the old columns.
-HAIL_MAIL_SYNC_TRIGGERS = tuple(f"""
-CREATE OR REPLACE TRIGGER {table}_00_sync_prefix_columns
-BEFORE INSERT OR UPDATE ON {table}
-FOR EACH ROW EXECUTE FUNCTION hail_mail_sync_prefix_columns()
-""" for table in ("email_domains", "retired_hail_mail_addresses"))
-
 # Base.metadata.create_all (tests) must produce the same shape as the migration.
 for _statement in (
     EMAIL_DOMAINS_GUARD_FUNCTION,
     EMAIL_DOMAINS_GUARD_TRIGGER,
     EMAIL_DOMAINS_RETIRE_FUNCTION,
     EMAIL_DOMAINS_RETIRE_TRIGGER,
-    HAIL_MAIL_SYNC_FUNCTION,
-    *HAIL_MAIL_SYNC_TRIGGERS,
 ):
     event.listen(Base.metadata, "after_create", DDL(_statement))
 
