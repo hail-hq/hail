@@ -195,7 +195,15 @@ Notes that follow from the capture, not from the spec:
   ```
 
   Restrict which tools a call may use with `--tools` / the `tools` field.
-  `end_call` stays on every call, so the agent can hang up.
+
+- **Your model must support tool calling.** Every request carries at
+  least `end_call`, even when the call sets `tools: []`. Hail hangs up
+  only when the model calls `end_call`. A model without tool calling
+  cannot end the call: it says goodbye, may say the tool's name aloud,
+  and the line stays open (and billed) until the other person hangs up
+  or the call hits its time limit. An endpoint that rejects requests with
+  a `tools` field fails every turn. If your model has no tool calling,
+  put it behind a proxy that does, or use Hail's built-in model.
 
 - **`tool_choice` is absent on the first turn**, and appears as
   `"auto"` on the request that follows a tool result. Treat it as optional

@@ -10,7 +10,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Changed
 
-- `end_call` can no longer be turned off: every call keeps it, whatever `tools` says.
+- `end_call` can no longer be turned off: every call keeps it, whatever `tools` says. A bring-your-own model now always gets the `end_call` tool, so it must support tool calling (see the bring-your-own-LLM doc).
 
 ### Fixed
 
