@@ -14,7 +14,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Fixed
 
-- Calls can always hang up, even when `tools` is an empty list or leaves out `end_call`. The agent no longer says a tool's name aloud.
+- Calls can always hang up, even when `tools` is empty or leaves out `end_call`.
 
 ## [0.37.0] (2026-11-23)
 

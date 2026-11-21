@@ -1803,7 +1803,7 @@ type AgentCreate struct {
 	// SystemPrompt Task instructions, sent as the agent's leading system message.
 	SystemPrompt string `json:"system_prompt"`
 
-	// Tools Agent tools to allow. Omitted: every tool the organization's channels support. Empty list: none. Calls always keep end_call, so they can hang up.
+	// Tools Agent tools to allow. Omitted: every tool the organization's channels support. Empty list: no built-in tools. Calls always keep end_call, so they can hang up, and HTTP tools stay on.
 	Tools       *[]string    `json:"tools,omitempty"`
 	VoiceConfig *VoiceConfig `json:"voice_config,omitempty"`
 
@@ -1992,7 +1992,7 @@ type CallCreate struct {
 	// To Recipient phone number, E.164 format (e.g. +14155551234).
 	To string `json:"to"`
 
-	// Tools Agent tools to allow on this call. Omitted: every tool the organization's configured channels support (new channels appear automatically). Empty list: no tools except end_call, so the call can still hang up. Tool names are validated against the server's registry.
+	// Tools Agent tools to allow on this call. Omitted: every tool the organization's configured channels support (new channels appear automatically). Empty list: no built-in tools except end_call, so the call can still hang up (a saved agent's HTTP tools stay on). Tool names are validated against the server's registry.
 	Tools       *[]string    `json:"tools,omitempty"`
 	VoiceConfig *VoiceConfig `json:"voice_config,omitempty"`
 }

@@ -103,7 +103,8 @@ class CallCreate(BaseModel):
     voice_config: VoiceConfig = Field(default_factory=VoiceConfig)
     metadata: dict[str, Any] = Field(default_factory=dict)
     # Agent tools opt-out. Omitted (None): every tool the org's configured
-    # channels support; []: no tools except end_call. Names are validated server-side
+    # channels support; []: no built-in tools except end_call (a saved agent's
+    # HTTP tools stay on). Names are validated server-side
     # against the registry (unknown names 422).
     tools: list[str] | None = None
     recipient_consent: bool

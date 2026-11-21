@@ -404,7 +404,10 @@ _IVR_PRESS_LINE = (
     "when you know the requested extension. Never invent a zero/operator option. "
     "If the full menu offers no relevant option, wait for a repeat."
 )
-_IVR_NO_KEYS_LINE = "You cannot press keys on this call. Wait for a person."
+_IVR_NO_KEYS_LINE = (
+    "You cannot press keys on this call. Wait for a person. If no person "
+    "comes on the line, end the call."
+)
 _IVR_KEYS_ONLY_LINE = (
     "Press keys, do not speak your choice, the menu cannot hear you. Key "
     "presses happen only through the send_dtmf tool, never write JSON, code, or "
