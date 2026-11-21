@@ -120,7 +120,7 @@ func runCall(cmd *cobra.Command, opts *Options, f *callFlags, toNumber string) e
 		body.AiDisclosure = &f.aiDisclosure
 	}
 	if cmd.Flags().Changed("tools") {
-		// [] disables all agent tools; the sentinel word "none" maps to []
+		// [] disables every agent tool but end_call; the sentinel word "none" maps to []
 		// because cobra cannot express an empty list on the command line.
 		tools := f.tools
 		if len(tools) == 1 && tools[0] == "none" {

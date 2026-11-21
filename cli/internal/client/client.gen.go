@@ -1932,7 +1932,7 @@ type AgentUpdate struct {
 	// SystemPrompt New task instructions.
 	SystemPrompt *string `json:"system_prompt,omitempty"`
 
-	// Tools New allowed tools; null allows every tool.
+	// Tools New allowed tools; null allows every tool. Calls always keep end_call, so they can hang up.
 	Tools *[]string `json:"tools,omitempty"`
 
 	// VoiceConfig New TTS voice and language settings.

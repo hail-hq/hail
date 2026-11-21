@@ -1483,7 +1483,11 @@ class AgentUpdate(BaseModel):
         default=None, description="New TTS voice and language settings."
     )
     tools: list[str] | None = Field(
-        default=None, description="New allowed tools; null allows every tool."
+        default=None,
+        description=(
+            "New allowed tools; null allows every tool. Calls always keep "
+            "end_call, so they can hang up."
+        ),
     )
     max_duration_seconds: int | None = Field(
         default=None,

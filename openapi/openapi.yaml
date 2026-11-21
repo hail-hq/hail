@@ -7001,7 +7001,9 @@ components:
               type: array
             - type: "null"
           title: Tools
-          description: New allowed tools; null allows every tool.
+          description:
+            New allowed tools; null allows every tool. Calls always keep
+            end_call, so they can hang up.
         max_duration_seconds:
           anyOf:
             - type: integer

@@ -393,10 +393,40 @@ the line. A hold announcement is still a recording. If a post-call survey \
 starts, end the call without selecting a rating."""
 
 
-def ivr_navigation_instructions(transcript: str | None) -> str:
-    """The prompt handed to the LLM when AMD reports a phone tree."""
+# The menu prompt's sentences that name send_dtmf, and their replacements on
+# a call without that tool. A prompt that names a missing tool makes the model
+# write the name as text, and the voice reads it into the menu.
+_IVR_PRESS_LINE = (
+    "Use the send_dtmf tool to press the option that best advances the reason for "
+    "your call."
+)
+_IVR_NO_KEYS_LINE = (
+    "You cannot press keys on this call. Wait for the menu to pass you to a " "person."
+)
+_IVR_KEYS_ONLY_LINE = (
+    "Press keys, do not speak your choice, the menu cannot hear you. Key "
+    "presses happen only through the send_dtmf tool, never write JSON, code, or "
+    "tool-call syntax in your reply."
+)
+_IVR_NO_KEYS_SILENT_LINE = (
+    "Do not speak your choice, the menu cannot hear you. Never write JSON, "
+    "code, or tool-call syntax in your reply."
+)
+
+
+def ivr_navigation_instructions(
+    transcript: str | None, *, can_press_keys: bool = True
+) -> str:
+    """The prompt handed to the LLM when AMD reports a phone tree.
+    ``can_press_keys`` is False when the call has no send_dtmf tool: the
+    prompt then never names it."""
     menu = (transcript or "").strip() or "(the menu text was not captured)"
-    return IVR_NAVIGATION_INSTRUCTIONS.format(transcript=menu)
+    text = IVR_NAVIGATION_INSTRUCTIONS.format(transcript=menu)
+    if not can_press_keys:
+        text = text.replace(_IVR_PRESS_LINE, _IVR_NO_KEYS_LINE).replace(
+            _IVR_KEYS_ONLY_LINE, _IVR_NO_KEYS_SILENT_LINE
+        )
+    return text
 
 
 def amd_end_reason(category: str) -> str:

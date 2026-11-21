@@ -249,7 +249,8 @@ func (f *agentFlags) body(cmd *cobra.Command, create bool, voice map[string]any)
 		}
 	}
 	if changed("tools") {
-		// pflag hands `--tools ''` over as an empty, non-nil slice: no tools.
+		// pflag hands `--tools ''` over as an empty, non-nil slice: no tools
+		// but end_call, which calls always keep.
 		b["tools"] = f.tools
 	}
 	if changed("handover") {

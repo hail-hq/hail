@@ -296,8 +296,12 @@ class SpeechSanitizingAgent(Agent):
             if self.phone_menu.checking or not self.phone_menu.can_navigate:
                 return None
             chat_ctx = chat_ctx.copy()
+            names = {t.info.name for t in tools or [] if hasattr(t, "info")}
             chat_ctx.add_message(
-                role="system", content=ivr_navigation_instructions(None)
+                role="system",
+                content=ivr_navigation_instructions(
+                    None, can_press_keys="send_dtmf" in names
+                ),
             )
         return Agent.default.llm_node(self, chat_ctx, tools, model_settings)
 
@@ -2886,7 +2890,9 @@ async def _run_call(
             language=language,
         )
         session.generate_reply(
-            instructions=ivr_navigation_instructions(amd_result.transcript)
+            instructions=ivr_navigation_instructions(
+                amd_result.transcript, can_press_keys="send_dtmf" in tool_names
+            )
         )
     else:
         # AMD holds the greeting for up to its detection window, and the

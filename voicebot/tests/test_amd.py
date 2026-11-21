@@ -23,6 +23,7 @@ from hailhq.voicebot.amd import (
     MACHINE_HANGUP_CATEGORIES,
     NO_SPEECH_THRESHOLD_SECONDS,
     amd_end_reason,
+    ivr_navigation_instructions,
     run_amd,
 )
 from hailhq.voicebot.classify import classify_speech
@@ -711,6 +712,7 @@ async def _drive_entrypoint(
     real_amd_models: bool = False,
     shutdown: bool = True,
     org_cfgs: dict | None = None,
+    tools: list[str] | None = None,
 ) -> tuple[UUID, _FakeAmdCtx, _FakeAmdSession]:
     """Run ``entrypoint`` with AMD stubbed, then fire the shutdown callback.
 
@@ -748,7 +750,7 @@ async def _drive_entrypoint(
             {
                 "call_id": str(call_id),
                 "organization_id": str(org_id),
-                "tools": [],
+                "tools": tools or [],
                 "first_message": "Is this a good time?",
             }
         ),
@@ -967,7 +969,10 @@ async def test_ivr_reply_carries_the_menu_and_orders_keypresses(
     async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _call_id, _ctx, session = await _drive_entrypoint(
-        async_session, monkeypatch, amd_result=_prediction("machine-ivr")
+        async_session,
+        monkeypatch,
+        amd_result=_prediction("machine-ivr"),
+        tools=["send_dtmf"],
     )
 
     instructions = session.replies[0]
@@ -1170,3 +1175,12 @@ async def test_amd_result_event_written_when_detection_failed(
         "reason": "detection_failed",
         "delay": None,
     }
+
+
+def test_menu_prompt_names_send_dtmf_only_when_the_call_has_it():
+    """A prompt that names a missing tool makes the model write the name as
+    text, and the voice reads it into the menu."""
+    assert "send_dtmf" in ivr_navigation_instructions("Press 1 for sales.")
+    without = ivr_navigation_instructions("Press 1 for sales.", can_press_keys=False)
+    assert "send_dtmf" not in without
+    assert "cannot press keys" in without

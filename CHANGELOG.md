@@ -12,6 +12,10 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 - Calls can always hang up, even when `tools` is an empty list or leaves out `end_call`. The agent no longer says a tool's name aloud.
 
+### Changed
+
+- `end_call` can no longer be turned off: every call keeps it, whatever `tools` says.
+
 ## [0.37.0] (2026-11-23)
 
 A refused US texting registration now says why: Hail's fix first, then the
