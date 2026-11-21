@@ -86,6 +86,8 @@ async def sms_sender(db, org, recipient, *, claim=False, call=None):
                     PhoneNumber.provisioning_state == "active",
                     PhoneNumber.capabilities.any("sms"),
                     PhoneNumber.is_pool.is_(pool),
+                    # Trial texting numbers are never browser senders.
+                    PhoneNumber.pool_purpose.is_(None),
                     PhoneNumber.reserved_call_id.is_(None),
                     (
                         PhoneNumber.organization_id.is_(None)

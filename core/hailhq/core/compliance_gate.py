@@ -395,7 +395,12 @@ async def add_suppression(
 
 
 async def remove_suppression(
-    db: AsyncSession, *, organization_id: UUID | None, recipient: str, channel: str
+    db: AsyncSession,
+    *,
+    organization_id: UUID | None,
+    recipient: str,
+    channel: str,
+    source: str | None = None,
 ) -> bool:
     """Delete the suppression row matching (recipient, channel) that belongs
     to this org — the mirror of ``add_suppression`` for the STOP->START
@@ -408,14 +413,17 @@ async def remove_suppression(
     tenant-authority path — a tenant deleting one would un-suppress that
     number for every org on the platform. A unique index allows at most
     one org-scoped row per (organization_id, recipient, channel), so this
-    deletes zero or one row. Flushes but does not commit, matching this
-    module's session convention. Returns True iff a row was deleted."""
+    deletes zero or one row. With ``source``, only a row from that source
+    is deleted. Flushes but does not commit, matching this module's session
+    convention. Returns True iff a row was deleted."""
     normalized = normalize_recipient(recipient)
     stmt = delete(Suppression).where(
         Suppression.recipient == normalized,
         Suppression.channel == channel,
         Suppression.organization_id == organization_id,
     )
+    if source is not None:
+        stmt = stmt.where(Suppression.source == source)
     result = await db.execute(stmt)
     await db.flush()
     return result.rowcount > 0

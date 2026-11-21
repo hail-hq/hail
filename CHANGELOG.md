@@ -8,6 +8,18 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 - Webhooks: send a test event to an endpoint before you save it with `POST /v1/webhooks/test`, and see the receiver's answer.
 
+## [0.35.0] (2026-11-21)
+
+Hail-mail address fields have clearer names: `local_prefix_workspace` is the
+part before the `+`, and `local_prefix_name` is the part after it. The old
+names are deprecated. Used alone in CLI flags or SDK client methods, they still
+work with any server. With an older server, requests that use the new names
+fail with a 422 error.
+
+Component versions cut alongside this release:
+**`cli-v0.33.0`** (Homebrew + GitHub Releases) and **`sdk-v0.25.0`** (PyPI).
+Database migrations run on deploy.
+
 ### Changed
 
 - Email: hail-mail prefix fields are now `local_prefix_workspace` (before the `+`) and `local_prefix_name` (after it). The old `local_prefix_user` and `local_prefix_org` still work and are deprecated.
@@ -35,6 +47,7 @@ Component versions cut alongside this release:
 
 - Self-host: inbound calls can use one LiveKit trunk per carrier, locked to that carrier ([LiveKit Cloud §4](docs/public/self-host/livekit-cloud.md#4-inbound-calls)).
 - Self-host: the voicebot image is about 0.9 GB smaller, and a release that changes only Hail code adds a few MB of new image layers instead of every package again.
+- Self-host: US trial texts come from pool numbers marked with `scripts/ops/sms_trial_numbers.py` ([Twilio setup](docs/public/self-host/twilio.md)). `HAIL_SMS_TRIAL_NUMBER` and `HAIL_SMS_TRIAL_SENDING` are gone.
 - **Breaking.** Self-host with a `LIVEKIT_<CARRIER>_SIP_INBOUND_TRUNK_ID` set: before upgrading, add `hail-placeholder-shared` to the shared inbound trunk's `numbers`, or empty `LIVEKIT_SIP_INBOUND_TRUNK_ID`. A shared trunk with no numbers now takes calls to every number.
 
 ### Fixed

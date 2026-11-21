@@ -37,6 +37,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 # to distinguish pool-backed calls from org-owned ones.
 CALL_META_FROM_POOL = "from_pool"
 
+# The shared call pool: pool numbers with no ``pool_purpose``. A marked
+# number (US trial texts, ``hailhq.core.sms_trial``) is never claimed.
+CALL_POOL = (PhoneNumber.is_pool.is_(True), PhoneNumber.pool_purpose.is_(None))
+
 
 async def claim_pool_number(
     session: AsyncSession,
@@ -77,7 +81,7 @@ async def claim_pool_number(
     stmt = (
         select(PhoneNumber)
         .where(
-            PhoneNumber.is_pool.is_(True),
+            *CALL_POOL,
             PhoneNumber.provisioning_state == "active",
             PhoneNumber.reserved_call_id.is_(None),
         )
@@ -104,7 +108,7 @@ async def claim_pool_number(
                 await session.execute(
                     select(PhoneNumber.id)
                     .where(
-                        PhoneNumber.is_pool.is_(True),
+                        *CALL_POOL,
                         PhoneNumber.provisioning_state == "active",
                         PhoneNumber.reserved_call_id.is_(None),
                         PhoneNumber.provider == number.provider,
@@ -224,6 +228,7 @@ async def sweep_pool_reservations(
 
 __all__ = [
     "CALL_META_FROM_POOL",
+    "CALL_POOL",
     "claim_pool_number",
     "release_pool_reservation",
     "sweep_pool_reservations",

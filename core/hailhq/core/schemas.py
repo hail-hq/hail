@@ -1604,7 +1604,7 @@ class SuppressionResponse(BaseModel):
         description="Why the recipient was suppressed (e.g. an unsubscribe or a bounce)."
     )
     source: str = Field(
-        description="How this entry was created: 'unsubscribe_link' (email unsubscribe link) or 'stop_keyword' (recipient replied STOP by SMS). 'manual' (operator action) and 'bounce' (bounce handler) are reserved; nothing writes them yet."
+        description="How this entry was created: 'unsubscribe_link' (email unsubscribe link), 'stop_keyword' (recipient replied STOP by SMS) or 'trial_stop_keyword' (your trial phone replied STOP to Hail's trial number). 'manual' (operator action) and 'bounce' (bounce handler) are reserved; nothing writes them yet."
     )
     created_at: datetime = Field(
         description="When this entry was created, ISO 8601 timestamp."

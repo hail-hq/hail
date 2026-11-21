@@ -174,6 +174,8 @@ psql "$DATABASE_URL" -c "INSERT INTO phone_numbers (organization_id, e164, count
 
 Attach the number to the same Twilio SIP trunk that you wired in [Twilio setup](./twilio.md). The trunk is chosen per carrier (`provider` column: `twilio` or `didww`, see [DIDWW](./didww.md)), not per number. To grow the pool, repeat the INSERT with a different `e164` / `PN_SID`. To quarantine a bad pool number without deletion, run `UPDATE phone_numbers SET provisioning_state='failed' WHERE e164=...`. The claim query skips non-`active` rows.
 
+A pool number with `pool_purpose = 'sms_trial'` sends only US trial texts and is never claimed for a call ([Twilio setup](./twilio.md)). Leave `pool_purpose` NULL for call pool numbers.
+
 Callers cannot address a pool number explicitly with the `from` field of `POST /calls`. The number is shared, so a caller that names one would cross tenants. The fallback fires only when an org has zero active numbers of its own.
 
 #### Managed cloud
