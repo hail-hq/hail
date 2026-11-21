@@ -145,12 +145,15 @@ jobs:
             # Docker refuses to remove an image a container still uses (a
             # draining voicebot, a manual rollback); that refusal is expected.
             # Reclaim BEFORE pulling, and again after the rollout.
+            # Counted by image ID, not by tag: a cached build gives several
+            # sha-<commit> tags the same image, and those count as 1 release.
             prune_hail_images() {
               for svc in api mcp voicebot; do
                 docker image ls "ghcr.io/hail-hq/hail-$svc" \
-                  --format '{{.CreatedAt}}|{{.Repository}}:{{.Tag}}' \
-                  | awk -F'|' '$2 ~ /:sha-/' | sort -r | cut -d'|' -f2 \
-                  | tail -n +3 \
+                  --format '{{.CreatedAt}}|{{.ID}}|{{.Repository}}:{{.Tag}}' \
+                  | awk -F'|' '$3 ~ /:sha-/' | sort -r \
+                  | awk -F'|' '!($2 in keep) && n < 2 { keep[$2] = 1; n++ }
+                      !($2 in keep) { print $3 }' \
                   | while read -r tag; do
                       docker image rm "$tag" >/dev/null 2>&1 || true
                     done || true
