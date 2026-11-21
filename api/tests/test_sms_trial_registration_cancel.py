@@ -64,9 +64,14 @@ async def test_console_cancel_keeps_a_trial_numbers_registration(
     async_session.add(row)
     await async_session.commit()
 
-    resp = await client.delete(
-        f"/verifications/{row.id}", headers={"Authorization": f"Bearer {plain}"}
-    )
+    auth = {"Authorization": f"Bearer {plain}"}
+    # The console shows no cancel button that would fail.
+    one = (await client.get(f"/verifications/{row.id}", headers=auth)).json()
+    listed = (await client.get("/verifications", headers=auth)).json()
+    assert one["cancellable"] is not in_trial_pool
+    assert [v["cancellable"] for v in listed] == [not in_trial_pool]
+
+    resp = await client.delete(f"/verifications/{row.id}", headers=auth)
 
     await async_session.refresh(row)
     if in_trial_pool:
