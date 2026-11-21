@@ -7,8 +7,8 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 ### Changed
 
 - Email: hail-mail prefix fields are now `local_prefix_workspace` (before the `+`) and `local_prefix_name` (after it). The old `local_prefix_user` and `local_prefix_org` still work and are deprecated.
-- CLI and SDK: they send the new prefix field names, so they need a Hail server from this release or newer.
-- CLI: `hail email domain register` prints `Workspace:` and `Name:` instead of `User prefix:` and `Org prefix:`.
+- CLI and SDK: the new prefix names (`--local-prefix-workspace`, `--local-prefix-name` and the new SDK arguments) need a Hail server from this release or newer. The old names still work with older servers.
+- CLI: `hail email domain` commands (register, get, verify, route) print `Workspace:` and `Name:` instead of `User prefix:` and `Org prefix:`.
 
 ### Fixed
 

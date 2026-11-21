@@ -1082,4 +1082,5 @@ __all__ = [
     "SuppressionResponse",
     "VoiceConfig",
     "WhoamiResponse",
+    "fold_prefix",
 ]
