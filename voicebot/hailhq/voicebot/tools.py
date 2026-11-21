@@ -25,6 +25,7 @@ from hailhq.core.agent_tools.spec import SPOKEN_FALLBACK, ToolContext, ToolSpec
 from hailhq.core.config import settings
 from hailhq.core.db import session_scope
 from hailhq.voicebot.attachment_reader import inspect_tool_file
+from hailhq.voicebot.speaking_gate import listening_through
 from livekit.agents.llm import function_tool
 from livekit.agents.voice import RunContext
 
@@ -85,7 +86,13 @@ def _make_handler(spec: ToolSpec, tctx: ToolContext):
             # and "okay"s, so speech must not cancel them.
             if spec.risk_tier == "session_control" and spec.waits_for_speech:
                 started = time.monotonic()
-                await context.wait_for_playout()
+                if spec.name == "end_call":
+                    # The speaking gate would hide someone who talks over the
+                    # goodbye: keep listening until it has played.
+                    with listening_through(context.session):
+                        await context.wait_for_playout()
+                else:
+                    await context.wait_for_playout()
                 if (
                     spec.name == "end_call"
                     and tctx.spoke_since is not None

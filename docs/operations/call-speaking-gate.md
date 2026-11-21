@@ -19,7 +19,10 @@ LIMIT 20;
 | Agent stopped, no echo measured           | Live at once. A quick "yes" is heard.                |
 | Agent stopped, echo measured on this call | Silent for the measured delay plus 0.3 s, then live. |
 | Agent is thinking                         | Live.                                                |
-| Outbound call, phone menu not yet passed  | Live all the time.                                   |
+| Outbound call, the agent's opening | Live. A menu or voicemail greeting that passed as a person stays heard. |
+| Outbound call, phone menu being followed | Live all the time. |
+| The goodbye before a hang-up | Live. Someone who talks over it keeps the call open. |
+| Someone already talking when a reply starts | Live for up to 3 s, so they are not cut mid-word. |
 | A transferred call is connected           | Live all the time (the agent is muted).              |
 
 Code: [`speaking_gate.py`](../../voicebot/hailhq/voicebot/speaking_gate.py),
@@ -31,8 +34,8 @@ not use it.
 
 The worker compares the raw caller track with the audio it really played
 (waveform, not transcript). Three 0.5 s windows that match at the same delay
-confirm echo. The delay is kept for the rest of the call and updated when
-measured again. Each confirmed call writes one `audio_echo_detected` call
+confirm echo. The delay is updated when measured again, and dropped after
+about 12 s of agent speech that comes back without it. Each confirmed call writes one `audio_echo_detected` call
 event: `delay_ms`, `correlation`, `matched_windows`.
 
 Checked on recordings before release: one call with echo (delay about 1.0 s)

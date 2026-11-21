@@ -8,14 +8,19 @@ import numpy as np
 import pytest
 from hailhq.voicebot import speaking_gate
 from hailhq.voicebot.speaking_gate import (
+    CARRY,
+    QUIET_WINDOWS,
     TAIL,
     WINDOW,
     EchoDetector,
     Playout,
     SpeakingGuard,
+    interruption_model_live,
+    listening_through,
 )
 from livekit import rtc
 from livekit.agents.voice import io
+from livekit.agents.voice.agent_activity import AgentActivity
 
 from .test_recovery import Session
 
@@ -73,14 +78,17 @@ class Source(io.AudioInput):
         return self.frame
 
 
-def call(enabled=lambda: True, on_echo=None, always=True):
+def call(enabled=lambda: True, on_echo=None, skip_replies=0):
     loud = rtc.AudioFrame(np.full(400, 5000, "<i2").tobytes(), RATE, 1, 400)
     session = Session()
     sink = Sink()
     session.output = SimpleNamespace(audio=sink)
     session.input = SimpleNamespace(audio=Source(loud), audio_enabled=True)
     session.room_io = SimpleNamespace(linked_participant=None)
-    guard = SpeakingGuard(session, enabled=enabled, always=always, on_echo=on_echo)
+    session.user_state = "listening"
+    guard = SpeakingGuard(
+        session, enabled=enabled, skip_replies=skip_replies, on_echo=on_echo
+    )
     guard.attach()
     return session, sink, guard, loud
 
@@ -304,11 +312,88 @@ async def test_raw_frames_are_timed_by_sample_count_through_a_stall(monkeypatch)
     await guard.aclose()
 
 
-async def test_with_the_interruption_model_on_only_echo_calls_are_gated():
-    session, _sink, guard, loud = call(always=False)
+async def test_with_the_interruption_model_working_only_echo_calls_are_gated():
+    session, _sink, guard, loud = call()
     gate = session.input.audio
+    session._activity = SimpleNamespace(_interruption_detection_enabled=True)
     await session.output.audio.capture_frame(agent_frame())
     assert await gate.__anext__() is loud  # the model decides; input stays live
     guard.playout.echo_delay = 0.8
     assert silent(await gate.__anext__())
+    guard.playout.echo_delay = None
+    # The model was refused or failed: the gate takes over.
+    session._activity._interruption_detection_enabled = False
+    assert silent(await gate.__anext__())
+    await guard.aclose()
+
+
+def test_the_sdk_still_has_the_flag_the_gate_reads():
+    assert "_interruption_detection_enabled" in AgentActivity.__init__.__code__.co_names
+    assert interruption_model_live(object()) is False  # unknown counts as off
+
+
+async def test_a_paused_reply_is_not_on_the_line():
+    session, _sink, guard, loud = call()
+    gate = session.input.audio
+    await session.output.audio.capture_frame(agent_frame())
+    playout = guard.playout
+    end = playout._expected_end
+    playout.pause()
+    assert await gate.__anext__() is loud
+    playout._paused_at -= 2.0  # two seconds pass while paused
+    playout.resume()
+    assert playout._expected_end == pytest.approx(end + 2.0, abs=0.05)
+    assert silent(await gate.__anext__())
+    await guard.aclose()
+
+
+async def test_speech_that_began_before_a_reply_is_not_cut_mid_word():
+    session, _sink, guard, loud = call()
+    gate = session.input.audio
+    session.user_state = "speaking"
+    await session.output.audio.capture_frame(agent_frame())
+    assert await gate.__anext__() is loud
+    session.user_state = "listening"  # they stopped: now nobody can start
+    assert silent(await gate.__anext__())
+    session.user_state = "speaking"
+    guard.playout._started_at -= CARRY + 0.1  # background talk that never pauses
+    assert silent(await gate.__anext__())
+    await guard.aclose()
+
+
+async def test_the_opening_of_a_placed_call_is_not_gated():
+    session, sink, guard, loud = call(skip_replies=1)
+    gate = session.input.audio
+    await session.output.audio.capture_frame(agent_frame())
+    assert await gate.__anext__() is loud  # a menu over the opening stays heard
+    sink.on_playback_finished(playback_position=1.0, interrupted=False)
+    await session.output.audio.capture_frame(agent_frame())
+    assert silent(await gate.__anext__())
+    await guard.aclose()
+
+
+async def test_the_goodbye_before_a_hang_up_stays_heard():
+    session, _sink, guard, loud = call()
+    gate = session.input.audio
+    await session.output.audio.capture_frame(agent_frame())
+    with listening_through(session):
+        assert await gate.__anext__() is loud
+    assert silent(await gate.__anext__())
+    await guard.aclose()
+
+
+async def test_echo_is_forgotten_after_enough_agent_audio_without_it():
+    _session, _sink, guard, _loud = call()
+    guard.playout.echo_delay = 0.8
+    guard.detector.scored = QUIET_WINDOWS - 1
+    await guard.check(now=1.0)
+    assert guard.playout.echo_delay == 0.8
+    # One window that matches at the known delay keeps it.
+    guard.detector.last_match = (5.0, 0.81)
+    guard.detector.scored = QUIET_WINDOWS + 5
+    await guard.check(now=2.0)
+    assert guard.playout.echo_delay == 0.8
+    guard.detector.scored += QUIET_WINDOWS
+    await guard.check(now=3.0)
+    assert guard.playout.echo_delay is None
     await guard.aclose()

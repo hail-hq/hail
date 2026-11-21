@@ -2692,9 +2692,9 @@ async def _run_call(
             and not bridge_state.get("picked_up")
             and not bridge_state.get("connected")
         ),
-        # With LiveKit's interruption model on, the model decides what stops
-        # the agent; the gate then closes only on calls with measured echo.
-        always=not settings.hail_adaptive_interruption,
+        # A placed call can reach a menu or voicemail that passed as a person
+        # and talks over the opening: the opening is not gated.
+        skip_replies=0 if metadata.get("direction") == "inbound" else 1,
         on_echo=lambda payload: write_call_event(
             call_id, "audio_echo_detected", payload
         ),

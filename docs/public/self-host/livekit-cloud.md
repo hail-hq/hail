@@ -47,6 +47,7 @@ Hail API dispatches it into a room for each call.
 For the full flow, refer to [Architecture](../architecture.md).
 
 Noise filtering, interruption handling, and call recovery are enabled automatically.
+Run the API and voicebot worker from the same release.
 
 By default the agent does not listen while its own voice plays, and listens
 again the moment it stops. Background talk and a short "okay" cannot cut a
@@ -58,8 +59,8 @@ long after each reply. See
 LiveKit's
 [adaptive interruption model](https://docs.livekit.io/agents/logic/turns/adaptive-interruption-handling/)
 is the alternative: the agent keeps talking over a short "okay" and stops for a
-real interruption. With it on, the agent listens while it talks, except on
-calls with measured echo. It is off by default, because LiveKit meters it for
+real interruption. While the model is working, the agent listens while it
+talks, except on calls with measured echo. It is off by default, because LiveKit meters it for
 self-hosted workers:
 
 ```bash
@@ -74,8 +75,8 @@ HAIL_ADAPTIVE_INTERRUPTION=true
   after about a minute.
 - Past the monthly allowance, the free plan stops the model and paid plans
   bill per request.
-- Whenever the model is refused or fails, one transcribed word stops the
-  agent for the rest of the call. No call fails because of it.
+- Whenever the model is refused or fails, the call goes on with the default
+  behavior above. No call fails because of it.
 
 Current numbers:
 [Quotas and limits](https://docs.livekit.io/deploy/admin/quotas-and-limits/),

@@ -19,8 +19,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import weakref
 from collections import deque
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 
 import numpy as np
@@ -38,6 +40,36 @@ MIN_CORRELATION = 0.2
 PEAK_RATIO = 1.08
 LAG_TOLERANCE = 0.025
 TAIL = 0.3  # margin after the return delay before listening again
+CARRY = 3.0  # how long speech that began before a reply stays heard into it
+QUIET_WINDOWS = 24  # compared agent windows without a match before echo is dropped
+
+# Sessions whose input stays live through agent audio for now (a goodbye).
+_listening: weakref.WeakSet = weakref.WeakSet()
+
+
+@contextmanager
+def listening_through(session: object) -> Iterator[None]:
+    """Keep the session's input live while agent audio plays.
+
+    For the goodbye before a hang-up: someone who talks over it is not done,
+    and the hang-up check must hear them.
+    """
+    _listening.add(session)
+    try:
+        yield
+    finally:
+        _listening.discard(session)
+
+
+def interruption_model_live(session: object) -> bool:
+    """Whether LiveKit's interruption model is deciding for this session now.
+
+    False when it was never created, was refused, or failed: the SDK then uses
+    plain voice activity. Read from the SDK's own flag; unknown counts as off,
+    so the gate closes.
+    """
+    activity = getattr(session, "_activity", None)
+    return getattr(activity, "_interruption_detection_enabled", False) is True
 
 
 @dataclass(frozen=True)
@@ -54,6 +86,8 @@ class EchoDetector:
         self.references: deque[tuple[float, np.ndarray]] = deque()
         self.matches: deque[tuple[float, float, float]] = deque(maxlen=12)
         self.evidence: EchoEvidence | None = None
+        self.scored = 0  # reference windows compared with the caller audio
+        self.last_match: tuple[float, float] | None = None
         self._latest = 0.0
         self.active = True
         self._partial = np.empty(0)
@@ -144,6 +178,7 @@ class EchoDetector:
                 continue
             # Search all positive delays, using normalized correlation so gain
             # and polarity changes do not defeat detection.
+            self.scored += 1
             heard = self._input_window(at, at + WINDOW / RATE + MAX_DELAY)
             size = 1 << (len(heard) + WINDOW - 1).bit_length()
             correlation = np.fft.irfft(
@@ -171,6 +206,7 @@ class EchoDetector:
             if score < PEAK_RATIO * float(outside.max()):
                 continue
             self.matches.append((at, delay, score))
+            self.last_match = (at, delay)
             consistent = [
                 m
                 for m in self.matches
@@ -217,7 +253,11 @@ class Playout(io.AudioOutput):
         self.echo_delay: float | None = None
         # False: stay open during playout unless echo is measured (an
         # interruption model then decides what stops the agent).
-        self.always = True
+        self.always: Callable[[], bool] = lambda: True
+        # Replies still to play before the gate applies (an outbound opening).
+        self.skip_replies = 0
+        self._started_at = 0.0
+        self._paused_at = 0.0
         self._playing = False
         self._expected_end = 0.0
         self._finished_at = 0.0
@@ -226,19 +266,41 @@ class Playout(io.AudioOutput):
 
     def _finished(self, _event) -> None:
         self._playing = False
+        self._paused_at = 0.0
         self._expected_end = 0.0  # unplayed audio of an interrupted reply is gone
         self._finished_at = time.time()
+        if self.skip_replies:
+            self.skip_replies -= 1
         self.reset()
+
+    def pause(self) -> None:
+        # Paused audio is not on the line: listen, and do not let the time
+        # spent paused count as playout.
+        if not self._paused_at:
+            self._paused_at = time.time()
+        super().pause()
+
+    def resume(self) -> None:
+        if self._paused_at:
+            self._expected_end += time.time() - self._paused_at
+            self._paused_at = 0.0
+        super().resume()
 
     def playing(self, now: float) -> bool:
         # Bounded by the audio handed over, so a lost finish event cannot
         # leave the agent deaf.
-        return self._playing and now < self._expected_end + 1.0
+        return self._playing and not self._paused_at and now < self._expected_end + 1.0
+
+    def carrying(self, now: float) -> bool:
+        """Early in a reply: speech that began before it is still let through."""
+        return self._playing and now < self._started_at + CARRY
 
     def muted(self, now: float) -> bool:
         """Whether agent audio, or its measured return, can be on the line."""
+        if self.skip_replies:
+            return False
         if self.playing(now):
-            return self.always or self.echo_delay is not None
+            return self.always() or self.echo_delay is not None
         return (
             self.echo_delay is not None
             and now < self._finished_at + self.echo_delay + TAIL
@@ -259,6 +321,8 @@ class Playout(io.AudioOutput):
 
     def _observe(self, frame: rtc.AudioFrame) -> None:
         now = time.time()
+        if not self._playing:
+            self._started_at = now
         self._playing = True
         self._expected_end = max(self._expected_end, now) + frame.duration
         if self.detector.active and frame.num_channels == 1:
@@ -300,16 +364,30 @@ class SpeakingGate(io.AudioInput):
     """Silence the agent's input while its own voice can be on the line."""
 
     def __init__(
-        self, source: io.AudioInput, playout: Playout, enabled: Callable[[], bool]
+        self,
+        source: io.AudioInput,
+        playout: Playout,
+        enabled: Callable[[], bool],
+        user_speaking: Callable[[], bool] = lambda: False,
     ) -> None:
         super().__init__(label="SpeakingGate", source=source)
         self._playout = playout
         self._enabled = enabled
+        self._user_speaking = user_speaking
 
     async def __anext__(self) -> rtc.AudioFrame:
         frame = await self.source.__anext__()
         try:
-            muted = self._enabled() and self._playout.muted(time.time())
+            now = time.time()
+            muted = (
+                self._enabled()
+                and self._playout.muted(now)
+                # Someone already talking when the reply starts is not cut
+                # mid-word: the agent yields to them, as it always did. While
+                # the gate is closed nobody can start, so this only carries
+                # speech that began before it.
+                and not (self._playout.carrying(now) and self._user_speaking())
+            )
         except Exception:
             # The gate must never cost the call its input.
             logger.exception("speaking gate check failed; listening")
@@ -328,11 +406,13 @@ class SpeakingGuard:
         session: AgentSession,
         *,
         enabled: Callable[[], bool],
-        always: bool = True,
+        skip_replies: int = 0,
         on_echo: Callable[[dict], Awaitable[None]] | None = None,
     ) -> None:
         self.session = session
-        self.always = always  # False: gate only calls with measured echo
+        self.skip_replies = skip_replies  # replies played before the gate applies
+        self._echo_scored = 0
+        self._seen_match: tuple[float, float] | None = None
         self.enabled = enabled  # False keeps the input untouched (phone menus)
         self.on_echo = on_echo  # called once, when echo is first confirmed
         self.detector = EchoDetector()
@@ -357,9 +437,19 @@ class SpeakingGuard:
         if sink is None or source is None:
             return
         self.playout = Playout(sink, self.detector)
-        self.playout.always = self.always
+        session = self.session
+        # With LiveKit's interruption model deciding, the gate closes only on
+        # calls with measured echo. Once the model is refused or fails, the
+        # gate takes over.
+        self.playout.always = lambda: not interruption_model_live(session)
+        self.playout.skip_replies = self.skip_replies
         self.session.output.audio = self.playout
-        self.session.input.audio = SpeakingGate(source, self.playout, self.enabled)
+        self.session.input.audio = SpeakingGate(
+            source,
+            self.playout,
+            lambda: self.enabled() and session not in _listening,
+            lambda: getattr(session, "user_state", None) == "speaking",
+        )
         self._raw_task = asyncio.create_task(self._observe_raw(), name="echo_raw_input")
         self._task = asyncio.create_task(self._run(), name="echo_detector")
 
@@ -411,10 +501,10 @@ class SpeakingGuard:
             return
         evidence = self.detector.check(time.time() if now is None else now)
         if evidence is None:
+            self._drop_stale_echo()
             return
-        # Kept for the rest of the call and updated when measured again: a
-        # short reply cannot prove the echo is gone.
         self.playout.echo_delay = evidence.delay_ms / 1000
+        self._echo_scored = self.detector.scored
         if self._reported:
             return
         self._reported = True
@@ -426,6 +516,25 @@ class SpeakingGuard:
                     "matched_windows": evidence.matches,
                 }
             )
+
+    def _drop_stale_echo(self) -> None:
+        """Forget the echo once enough agent audio came back without it."""
+        delay = self.playout.echo_delay if self.playout else None
+        if delay is None:
+            return
+        # Short replies never give three matches in a row. One window that
+        # matches at the known delay still shows the echo is there.
+        match = self.detector.last_match
+        if (
+            match is not None
+            and match != self._seen_match
+            and abs(match[1] - delay) < 2 * LAG_TOLERANCE
+        ):
+            self._seen_match = match
+            self._echo_scored = self.detector.scored
+        if self.detector.scored - self._echo_scored >= QUIET_WINDOWS:
+            # The caller left speakerphone, or the one confirmation was wrong.
+            self.playout.echo_delay = None
 
     async def _run(self) -> None:
         while not self._closed:
