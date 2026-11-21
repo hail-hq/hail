@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import uuid
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock
 
 import pytest
@@ -11,6 +12,7 @@ from hailhq.core import carrier_routing, inbound_routing
 from hailhq.core.config import settings
 from hailhq.core.models import PhoneNumber
 from hailhq.core.providers.voice.base import CarrierNotConfigured
+from livekit.api import TwirpError
 
 
 @pytest.fixture()
@@ -177,3 +179,79 @@ async def test_livekit_failure_undoes_the_carrier_attach(async_session, hooks) -
     with pytest.raises(inbound_routing.InboundRoutingError):
         await inbound_routing.register(async_session, lk, number)
     hooks["detach"].assert_awaited_once_with("PN1", "+14155550100")
+
+
+async def test_unregister_also_clears_the_shared_trunk_while_numbers_move(
+    async_session, hooks, monkeypatch
+) -> None:
+    """Left on the shared trunk, a later register to the carrier's trunk
+    would be refused (LiveKit lists a number on one trunk only)."""
+    monkeypatch.setattr(settings, "livekit_sip_inbound_trunk_id", "ST_shared")
+    lk = AsyncMock()
+    number = _number()
+    number.inbound_registered_at = datetime.now(timezone.utc)
+    async_session.add(number)
+    await async_session.flush()
+
+    await inbound_routing.unregister(async_session, lk, number)
+
+    assert [c.args for c in lk.remove_inbound_number.await_args_list] == [
+        ("ST_in_tw", "+14155550100"),
+        ("ST_shared", "+14155550100"),
+    ]
+    assert number.inbound_registered_at is None
+
+
+async def test_failed_shared_trunk_removal_keeps_the_row_registered(
+    async_session, hooks, monkeypatch
+) -> None:
+    monkeypatch.setattr(settings, "livekit_sip_inbound_trunk_id", "ST_shared")
+    lk = AsyncMock()
+    lk.remove_inbound_number.side_effect = [None, RuntimeError("timeout")]
+    number = _number()
+    number.inbound_registered_at = datetime.now(timezone.utc)
+    async_session.add(number)
+    await async_session.flush()
+
+    with pytest.raises(inbound_routing.InboundRoutingError) as err:
+        await inbound_routing.unregister(async_session, lk, number)
+
+    assert err.value.stage == "livekit_remove"
+    assert number.inbound_registered_at is not None
+
+
+async def test_register_clears_a_stale_shared_entry_first(
+    async_session, hooks, monkeypatch
+) -> None:
+    monkeypatch.setattr(settings, "livekit_sip_inbound_trunk_id", "ST_shared")
+    lk = AsyncMock()
+    number = _number()
+    async_session.add(number)
+    await async_session.flush()
+
+    await inbound_routing.register(async_session, lk, number)
+
+    lk.remove_inbound_number.assert_awaited_once_with("ST_shared", "+14155550100")
+    lk.add_inbound_number.assert_awaited_once_with("ST_in_tw", "+14155550100")
+    assert number.inbound_registered_at is not None
+
+
+async def test_unregister_after_the_shared_trunk_is_retired(
+    async_session, hooks, monkeypatch
+) -> None:
+    """Between retire-shared and the restart that empties its key, the
+    shared trunk is gone: not found there is done."""
+    monkeypatch.setattr(settings, "livekit_sip_inbound_trunk_id", "ST_shared")
+    lk = AsyncMock()
+    lk.remove_inbound_number.side_effect = [
+        None,
+        TwirpError("not_found", "trunk not found", status=404),
+    ]
+    number = _number()
+    number.inbound_registered_at = datetime.now(timezone.utc)
+    async_session.add(number)
+    await async_session.flush()
+
+    await inbound_routing.unregister(async_session, lk, number)
+
+    assert number.inbound_registered_at is None

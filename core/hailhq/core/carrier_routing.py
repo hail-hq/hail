@@ -77,7 +77,8 @@ def _inbound(provider: str, setting: str) -> str:
     trunk_id = getattr(settings, setting)
     if not trunk_id:
         raise ValueError(
-            f"{provider} inbound is not configured (LIVEKIT_SIP_INBOUND_TRUNK_ID)"
+            f"{provider} inbound is not configured "
+            f"({setting.upper()} or LIVEKIT_SIP_INBOUND_TRUNK_ID)"
         )
     return trunk_id
 

@@ -86,7 +86,8 @@ Internal runbooks (not published) live in `docs/operations/`:
 [didww-by-request.md](docs/operations/didww-by-request.md) (ordering a DIDWW number a customer asked support for; routing a number by hand),
 [first-number-call-test.md](docs/operations/first-number-call-test.md) (one test call to the first number of a new carrier, country or type),
 [call-record-deletion.md](docs/operations/call-record-deletion.md) (deleting one call, its recording and its charges from a workspace),
-[voice-llm.md](docs/operations/voice-llm.md) (the house LLM chain, Bedrock access and model ids).
+[voice-llm.md](docs/operations/voice-llm.md) (the house LLM chain, Bedrock access and model ids),
+[inbound-trunk-lockdown.md](docs/operations/inbound-trunk-lockdown.md) (one LiveKit inbound trunk per carrier, locked by IP or password; cutover, negative test, weekly IP check).
 
 ## Order of work
 

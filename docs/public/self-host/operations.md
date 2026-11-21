@@ -107,7 +107,7 @@ Put new adapters under `core/hailhq/core/providers/<channel>/<name>.py`. Each ad
 
 - **Twilio**: account SID + auth token + a phone number with voice capability + an Elastic SIP Trunk (Origination URI → LiveKit's inbound, Termination → Twilio's PSTN).
 - **Telnyx** (optional second carrier): API key + outbound voice profile + SIP connection + LiveKit trunk + webhook public key ([Telnyx](./telnyx.md)). Quotes compare it with Twilio.
-- **LiveKit Cloud**: project + URL + API key + secret + an outbound SIP trunk (`LIVEKIT_TWILIO_SIP_OUTBOUND_TRUNK_ID`) + one inbound trunk shared by every carrier (`LIVEKIT_SIP_INBOUND_TRUNK_ID`, [LiveKit Cloud §4](./livekit-cloud.md#4-inbound-calls)). Optional per-carrier trunks: `LIVEKIT_TELNYX_SIP_OUTBOUND_TRUNK_ID`, `LIVEKIT_DIDWW_SIP_OUTBOUND_TRUNK_ID` ([DIDWW](./didww.md)).
+- **LiveKit Cloud**: project + URL + API key + secret + an outbound SIP trunk (`LIVEKIT_TWILIO_SIP_OUTBOUND_TRUNK_ID`) + one inbound trunk shared by every carrier (`LIVEKIT_SIP_INBOUND_TRUNK_ID`, [LiveKit Cloud §4](./livekit-cloud.md#4-inbound-calls)), or one per carrier locked to that carrier (`LIVEKIT_<CARRIER>_SIP_INBOUND_TRUNK_ID`). Optional per-carrier trunks: `LIVEKIT_TELNYX_SIP_OUTBOUND_TRUNK_ID`, `LIVEKIT_DIDWW_SIP_OUTBOUND_TRUNK_ID` ([DIDWW](./didww.md)).
 - **Deepgram** (STT): API key. Required; used for semantic turn detection and as the fallback when Speechmatics is unavailable.
 - **Speechmatics** (STT, optional): API key. Enables language-specific STT routing and end-of-utterance detection for 22 languages. Deepgram-only self-hosts keep working; if absent, calls fall back to Deepgram with VAD turn detection.
 - **Cartesia** (primary TTS): API key + a voice ID from the Cartesia voice library.
