@@ -43,6 +43,7 @@ from .conftest import (
     approve_us_sms,
     seed_sms_trial,
     seed_trial_texts,
+    set_sms_trial,
     verify_trial_phone,
 )
 
@@ -325,7 +326,7 @@ async def _outbound(s, org) -> list[Sms]:
 async def test_agent_trial_refused(
     client, async_session, sms_mock, monkeypatch, site, case
 ):
-    await seed_sms_trial(async_session, monkeypatch)
+    await seed_sms_trial(async_session)
     org = uuid.uuid4()
     to = PHONE
     if case == "not_verified_phone":
@@ -340,7 +341,7 @@ async def test_agent_trial_refused(
         await seed_trial_texts(async_session, org, 25)
     elif case == "feature_off":
         await verify_trial_phone(async_session, org, PHONE)
-        monkeypatch.setattr(settings, "hail_sms_trial_sending", False)
+        await set_sms_trial(async_session, ready=False)
     send = await SETUP[site](async_session, org, to, registered=False)
 
     assert await send(client) == REFUSED[site]
@@ -360,7 +361,7 @@ async def test_agent_trial_refused(
 async def test_agent_trial_sent_with_prefix_and_footer(
     client, async_session, sms_mock, monkeypatch, site
 ):
-    await seed_sms_trial(async_session, monkeypatch)
+    await seed_sms_trial(async_session)
     org = uuid.uuid4()
     await verify_trial_phone(async_session, org, PHONE)
     send = await SETUP[site](async_session, org, PHONE, registered=False)
@@ -382,7 +383,7 @@ async def test_agent_trial_sent_with_prefix_and_footer(
 async def test_agent_registered_number_preferred(
     client, async_session, sms_mock, monkeypatch, site
 ):
-    await seed_sms_trial(async_session, monkeypatch)
+    await seed_sms_trial(async_session)
     org = uuid.uuid4()
     await verify_trial_phone(async_session, org, PHONE)
     send = await SETUP[site](async_session, org, PHONE, registered=True)
@@ -397,7 +398,7 @@ async def test_agent_registered_number_preferred(
 
 @pytest.mark.parametrize("site", ["in_call", "email_run"])
 async def test_long_body_refused(client, async_session, sms_mock, monkeypatch, site):
-    await seed_sms_trial(async_session, monkeypatch)
+    await seed_sms_trial(async_session)
     org = uuid.uuid4()
     await verify_trial_phone(async_session, org, PHONE)
     send = await SETUP[site](
@@ -418,7 +419,7 @@ async def test_in_call_unregistered_number_uses_trial_and_keeps_the_bind_audit(
 ):
     """The agent's free, unregistered number is bound to it as on any send,
     and the bind is audited with that number, not the trial number."""
-    await seed_sms_trial(async_session, monkeypatch)
+    await seed_sms_trial(async_session)
     org = uuid.uuid4()
     await verify_trial_phone(async_session, org, PHONE)
     number = await _number(async_session, org, registered=False)
@@ -468,7 +469,7 @@ async def test_in_call_unregistered_number_uses_trial_and_keeps_the_bind_audit(
 async def test_in_call_unregistered_number_refused_keeps_todays_block(
     client, async_session, sms_mock, monkeypatch
 ):
-    await seed_sms_trial(async_session, monkeypatch)
+    await seed_sms_trial(async_session)
     org = uuid.uuid4()
     await verify_trial_phone(async_session, org, PHONE)
     await _number(async_session, org, registered=False)
@@ -490,7 +491,7 @@ async def test_in_call_unregistered_number_refused_keeps_todays_block(
 async def test_handover_long_notice_keeps_footer(
     client, async_session, sms_mock, monkeypatch
 ):
-    await seed_sms_trial(async_session, monkeypatch)
+    await seed_sms_trial(async_session)
     org = uuid.uuid4()
     await verify_trial_phone(async_session, org, PHONE)
     send = await _handover(
@@ -507,7 +508,7 @@ async def test_handover_long_notice_keeps_footer(
 async def test_handover_voice_only_number_texts_the_verified_phone(
     client, async_session, sms_mock, monkeypatch
 ):
-    await seed_sms_trial(async_session, monkeypatch)
+    await seed_sms_trial(async_session)
     org = uuid.uuid4()
     await verify_trial_phone(async_session, org, PHONE)
     send = await _handover(
@@ -522,7 +523,7 @@ async def test_handover_voice_only_number_texts_the_verified_phone(
 async def test_handover_voice_only_number_still_skips_other_contacts(
     client, async_session, sms_mock, monkeypatch, case
 ):
-    await seed_sms_trial(async_session, monkeypatch)
+    await seed_sms_trial(async_session)
     org = uuid.uuid4()
     async_session.add(Organization(id=org, origin="agent"))
     await async_session.commit()
@@ -531,7 +532,7 @@ async def test_handover_voice_only_number_still_skips_other_contacts(
     if case == "cap_used_25":
         await seed_trial_texts(async_session, org, 25)
     if case == "feature_off":
-        monkeypatch.setattr(settings, "hail_sms_trial_sending", False)
+        await set_sms_trial(async_session, ready=False)
     send = await _handover(
         async_session, org, to, registered=False, capabilities=("voice",)
     )
@@ -556,7 +557,7 @@ async def test_browser_demo_call_never_uses_trial(
     client, async_session, sms_mock, monkeypatch
 ):
     """The hail.so demo keeps its own sender rules."""
-    await seed_sms_trial(async_session, monkeypatch)
+    await seed_sms_trial(async_session)
     org = uuid.uuid4()
     await verify_trial_phone(async_session, org, PHONE)
     send = await _browser(async_session, org, PHONE, registered=False, demo=True)
@@ -567,7 +568,7 @@ async def test_browser_demo_call_never_uses_trial(
 
 async def test_reply_sms_never_uses_trial(client, async_session, sms_mock, monkeypatch):
     """Replies to an inbound text stay on the number the person wrote to."""
-    await seed_sms_trial(async_session, monkeypatch)
+    await seed_sms_trial(async_session)
     org = uuid.uuid4()
     await verify_trial_phone(async_session, org, PHONE)
     async_session.add(_credit(org))
@@ -615,12 +616,12 @@ async def test_handover_blocked_notice_skips_trial_work_for_other_contacts(
     phone answers before the notice text is built or a trial is claimed."""
     from hailhq.api.routes.internal import agent as agent_routes
 
-    await seed_sms_trial(async_session, monkeypatch)
+    await seed_sms_trial(async_session)
     org = uuid.uuid4()
     await verify_trial_phone(async_session, org, PHONE)
     to = OTHER_PHONE if case == "not_verified_phone" else PHONE
     if case == "feature_off":
-        monkeypatch.setattr(settings, "hail_sms_trial_sending", False)
+        await set_sms_trial(async_session, ready=False)
     calls: list[str] = []
     real_claim = agent_routes.claim_trial_send
     real_text = agent_routes._notice_text

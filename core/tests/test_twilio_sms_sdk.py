@@ -246,3 +246,20 @@ async def test_legacy_tollfree_requires_exact_current_owned_resource(change, app
         is approved
     )
     assert all(method == "GET" for method, _, _ in http.calls)
+
+
+@pytest.mark.parametrize("status,answer", [(404, False), (500, None), (429, None)])
+async def test_tollfree_approval_failed_lookup_is_no_answer(status, answer):
+    """A carrier error is no answer (None), so a cached approval is kept; a
+    number Twilio no longer holds (404) is a no."""
+    sms, http = _tollfree_sms([{"status": "TWILIO_APPROVED"}])
+
+    def request(method, uri, **kwargs):
+        http.calls.append((method, uri, kwargs))
+        return Response(status, json.dumps({"code": 20404, "message": "x"}))
+
+    http.request = request
+    assert (
+        await sms.tollfree_approved(provider_resource_id="PN1", e164="+18005550100")
+        is answer
+    )

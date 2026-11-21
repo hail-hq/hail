@@ -75,8 +75,11 @@ class SmsProvider(ABC):
         that does not need one ignores it.
         """
 
-    async def tollfree_approved(self, *, provider_resource_id: str, e164: str) -> bool:
-        """Read-only proof of approval for this exact, currently owned number."""
+    async def tollfree_approved(
+        self, *, provider_resource_id: str, e164: str
+    ) -> bool | None:
+        """Read-only proof of approval for this exact, currently owned number.
+        None: the lookup failed, so neither yes nor no."""
         return False
 
     @abstractmethod

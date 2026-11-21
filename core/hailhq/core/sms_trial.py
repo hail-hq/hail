@@ -1,29 +1,44 @@
 """US trial texting: a workspace can send up to 25 texts to its own verified
-phone from one Hail-owned toll-free number. With no ``from`` the trial is
+phone from a Hail-owned toll-free number. With no ``from`` the trial is
 used only when the workspace's own number cannot text that US phone; a
-``from`` equal to the trial number uses a trial text directly."""
+``from`` equal to a ready trial number uses a trial text directly.
+
+Trial numbers are pool numbers (``is_pool``, no organization) with
+``pool_purpose = 'sms_trial'``; ``scripts/ops/sms_trial_numbers.py`` marks
+them. A marked number is ready while ``provisioning_metadata`` holds
+``APPROVED_AT_KEY``: ``refresh_trial_approvals`` (the verification worker's
+pass) sets it when the carrier says its toll-free verification is approved
+and removes it on a no. Requests read only the database."""
 
 from __future__ import annotations
 
 import hashlib
 import hmac
 import json
+import logging
 import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import phonenumbers
-from hailhq.core.config import settings
+from hailhq.core.carrier_routing import sms_route
 from hailhq.core.db import key_lock, org_lock
 from hailhq.core.models import PhoneNumber, Sms, SmsTrialPhone
-from hailhq.core.sms_registration_gate import is_us, on_approved_registration
-from sqlalchemy import func, literal_column, select, text
+from hailhq.core.sms_registration_gate import is_us
+from sqlalchemy import func, literal_column, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+logger = logging.getLogger(__name__)
+
 SMS_TRIAL_LIMIT = 25
 SMS_TRIAL_META_KEY = "sms_trial"
+# ``phone_numbers.pool_purpose`` of a trial texting number.
+POOL_PURPOSE = "sms_trial"
+# ``provisioning_metadata`` key: when the carrier last said the number's
+# toll-free verification is approved. Absent = not ready.
+APPROVED_AT_KEY = "sms_trial_approved_at"
 TRIAL_PREFIX = "[Hail trial] "
 TRIAL_FOOTER = "\nHail does not read replies."
 TRIAL_HINT = (
@@ -148,10 +163,6 @@ def _hash_code(organization_id: UUID, phone: str, code: str) -> str:
     return hashlib.sha256(f"{organization_id}:{phone}:{code}".encode()).hexdigest()
 
 
-def trial_enabled() -> bool:
-    return bool(settings.hail_sms_trial_number) and settings.hail_sms_trial_sending
-
-
 def trial_body(body: str, *, limit: int, truncate: bool = False) -> str | None:
     """Prefix and footer around ``body``. None when it exceeds ``limit``;
     with ``truncate`` the body is cut so the footer stays."""
@@ -163,43 +174,48 @@ def trial_body(body: str, *, limit: int, truncate: bool = False) -> str | None:
     return TRIAL_PREFIX + body + TRIAL_FOOTER
 
 
-async def trial_number(db: AsyncSession) -> PhoneNumber | None:
-    """The configured trial number: active and able to text."""
-    if not settings.hail_sms_trial_number:
-        return None
+def _trial_numbers():
+    """Active marked trial numbers that can text, oldest first. Pool rows
+    only: ``organization_id IS NULL`` too, so a workspace never trial-texts
+    from a number it owns (the pool CHECKs hold that in the database)."""
     return (
-        await db.execute(
-            select(PhoneNumber)
-            .where(
-                PhoneNumber.e164 == settings.hail_sms_trial_number,
-                PhoneNumber.provisioning_state == "active",
-                PhoneNumber.capabilities.any("sms"),
-            )
-            .limit(1)
+        select(PhoneNumber)
+        .where(
+            PhoneNumber.is_pool.is_(True),
+            PhoneNumber.organization_id.is_(None),
+            PhoneNumber.pool_purpose == POOL_PURPOSE,
+            PhoneNumber.provisioning_state == "active",
+            PhoneNumber.capabilities.any("sms"),
         )
-    ).scalar_one_or_none()
+        .order_by(PhoneNumber.created_at, PhoneNumber.id)
+    )
+
+
+def _ready(stmt):
+    """Only numbers whose carrier approval is cached as approved."""
+    return stmt.where(PhoneNumber.provisioning_metadata.has_key(APPROVED_AT_KEY))
+
+
+async def trial_configured(db: AsyncSession) -> bool:
+    """At least one number is marked for trial texts."""
+    return (await db.execute(_trial_numbers().limit(1))).first() is not None
 
 
 async def trial_sender(db: AsyncSession) -> PhoneNumber | None:
-    """The trial number when sending is on and it is on an approved
-    registration. Database only, no carrier call."""
-    if not settings.hail_sms_trial_sending:
-        return None
-    return await trial_sender_of(db, await trial_number(db))
+    """The number that sends codes and trial texts: the oldest ready one.
+    Database only, no carrier call. Adding a newer number keeps the sender;
+    it changes only when this number stops being ready or is unmarked."""
+    return (await db.execute(_ready(_trial_numbers()).limit(1))).scalar_one_or_none()
 
 
-async def trial_sender_of(
-    db: AsyncSession, number: PhoneNumber | None
+async def trial_number_by_e164(
+    db: AsyncSession, e164: str, *, ready: bool = False
 ) -> PhoneNumber | None:
-    """``number`` (from ``trial_number``) when sending is on and it is on an
-    approved registration, for a caller that already fetched it."""
-    if not settings.hail_sms_trial_sending:
-        return None
-    if number is None or number.organization_id is None:
-        return None
-    if not await on_approved_registration(db, number.organization_id, number):
-        return None
-    return number
+    """The marked trial number ``e164`` (ready only, with ``ready``)."""
+    stmt = _trial_numbers().where(PhoneNumber.e164 == e164).limit(1)
+    if ready:
+        stmt = _ready(stmt)
+    return (await db.execute(stmt)).scalar_one_or_none()
 
 
 async def get_trial_phone(
@@ -425,12 +441,11 @@ async def trial_texts_used(db: AsyncSession, organization_id: UUID) -> int:
 
 
 async def trial_hint_applies(db: AsyncSession, organization_id: UUID) -> bool:
-    """True when the trial can still send for this workspace: sending is on,
-    the workspace is not the trial number's owner, and it has trial texts
-    left. Refusals add ``TRIAL_HINT`` only then; the caller checks that the
-    destination is US."""
-    number = await trial_sender(db)
-    if number is None or number.organization_id == organization_id:
+    """True when the trial can still send for this workspace: a trial number
+    is ready and the workspace has trial texts left. Refusals add
+    ``TRIAL_HINT`` only then; the caller checks that the destination is
+    US."""
+    if await trial_sender(db) is None:
         return False
     return await trial_texts_used(db, organization_id) < SMS_TRIAL_LIMIT
 
@@ -446,7 +461,9 @@ async def claim_trial_send(
     truncate: bool = False,
 ) -> TrialSend | None:
     """The trial send for this text, or None when the trial does not apply
-    (the caller then answers as it does without the trial).
+    (the caller then answers as it does without the trial). It sends from
+    ``trial_sender``, or from ``explicit_from`` when that is a ready trial
+    number.
 
     Raises ``TrialBodyTooLong`` when the wrapped body exceeds ``limit`` and
     ``truncate`` is off.
@@ -460,20 +477,17 @@ async def claim_trial_send(
     The verified phone is checked under the lock too, so a text never goes
     to a phone the workspace switched away from.
     """
-    # Cheapest checks first: settings, then one indexed lookup, then the
-    # trial number and its registration.
-    if not trial_enabled():
-        return None
-    if explicit_from is not None and explicit_from != settings.hail_sms_trial_number:
-        return None
+    # Cheapest checks first: the destination, then one indexed lookup, then
+    # the trial number.
     if not is_us(to):
         return None
     if not await is_verified_trial_phone(db, organization_id, to):
         return None
-    number = await trial_sender(db)
-    if number is None:
-        return None
-    if organization_id == number.organization_id:
+    if explicit_from is not None:
+        number = await trial_number_by_e164(db, explicit_from, ready=True)
+    else:
+        number = await trial_sender(db)
+    if number is None or number.organization_id is not None:
         return None
     await org_lock(db, organization_id)
     # Again under the lock: start_phone_proof and confirm_phone take the same
@@ -490,18 +504,80 @@ async def claim_trial_send(
 
 
 async def trial_refusal_reason(
-    db: AsyncSession, organization_id: UUID, *, to: str
+    db: AsyncSession, organization_id: UUID, *, to: str, explicit_from: str
 ) -> str | None:
-    """Why a text from the trial number to ``to`` cannot go out, for a
-    workspace whose ``claim_trial_send`` was refused. None for the trial
-    number's owner, which sends from it as its own number."""
-    number = await trial_number(db)
-    if number is not None and number.organization_id == organization_id:
-        return None
-    if await trial_sender_of(db, number) is None:
+    """Why a text from the trial number ``explicit_from`` to ``to`` cannot
+    go out, for a workspace whose ``claim_trial_send`` was refused."""
+    if await trial_number_by_e164(db, explicit_from, ready=True) is None:
         return TRIAL_NOT_AVAILABLE
     if not is_us(to) or not await is_verified_trial_phone(db, organization_id, to):
         return TRIAL_WRONG_PHONE
     if await trial_texts_used(db, organization_id) >= SMS_TRIAL_LIMIT:
         return TRIAL_NONE_LEFT
     return None
+
+
+async def _carrier_approval(provider: str, resource_id: str | None, e164: str):
+    """The carrier's answer for one number: True, False, or None when there
+    is no answer (carrier not configured here, lookup failed)."""
+    if resource_id is None:
+        return False
+    try:
+        route = sms_route(provider)
+        return await route.tollfree_approved(
+            provider_resource_id=resource_id, e164=e164
+        )
+    except Exception:
+        logger.warning("trial number approval lookup failed: %s", e164, exc_info=True)
+        return None
+
+
+async def refresh_trial_approvals(
+    db: AsyncSession, *, number_ids: list[UUID] | None = None
+) -> dict[str, int]:
+    """Ask the carrier whether each marked trial number's toll-free
+    verification is approved, and cache the answer on the row: a yes stamps
+    ``APPROVED_AT_KEY``, a no removes it, no answer keeps the last one, so a
+    slow carrier never turns the trial off. Runs in the verification
+    worker's pass and in the ops script, never on a request. No row lock
+    is held during the carrier calls."""
+    stmt = select(
+        PhoneNumber.id,
+        PhoneNumber.provider,
+        PhoneNumber.provider_resource_id,
+        PhoneNumber.e164,
+    ).where(
+        PhoneNumber.is_pool.is_(True),
+        PhoneNumber.pool_purpose == POOL_PURPOSE,
+        PhoneNumber.provisioning_state == "active",
+    )
+    if number_ids is not None:
+        stmt = stmt.where(PhoneNumber.id.in_(number_ids))
+    rows = (await db.execute(stmt)).all()
+    # End the read transaction before the carrier calls. The caller has no
+    # pending changes (each row's answer is committed on its own below).
+    await db.commit()
+    counts = {"approved": 0, "not_approved": 0, "no_answer": 0}
+    for row in rows:
+        answer = await _carrier_approval(
+            row.provider, row.provider_resource_id, row.e164
+        )
+        if answer is None:
+            counts["no_answer"] += 1
+            continue
+        if answer:
+            value = func.jsonb_build_object(
+                APPROVED_AT_KEY, datetime.now(UTC).isoformat()
+            )
+            new = PhoneNumber.provisioning_metadata.op("||")(value)
+            counts["approved"] += 1
+        else:
+            new = PhoneNumber.provisioning_metadata.op("-")(APPROVED_AT_KEY)
+            counts["not_approved"] += 1
+        await db.execute(
+            update(PhoneNumber)
+            .where(PhoneNumber.id == row.id, PhoneNumber.pool_purpose == POOL_PURPOSE)
+            .values(provisioning_metadata=new)
+        )
+        await db.commit()
+    return counts

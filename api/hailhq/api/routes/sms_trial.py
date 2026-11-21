@@ -45,9 +45,8 @@ from hailhq.core.sms_trial import (
     confirm_phone,
     get_trial_phone,
     start_phone_proof,
-    trial_number,
+    trial_configured,
     trial_sender,
-    trial_sender_of,
     trial_texts_used,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -74,16 +73,9 @@ _CONSOLE_ONLY_RESPONSE: dict = {
 async def _trial_status(db: AsyncSession, organization_id: UUID) -> SmsTrialResponse:
     row = await get_trial_phone(db, organization_id)
     used = await trial_texts_used(db, organization_id)
-    number = await trial_number(db)
     return SmsTrialResponse(
-        configured=number is not None,
-        # The trial number's owner sends from it as its own number, never
-        # as trial texts.
-        available=(
-            number is not None
-            and number.organization_id != organization_id
-            and await trial_sender_of(db, number) is not None
-        ),
+        configured=await trial_configured(db),
+        available=await trial_sender(db) is not None,
         status=row.status if row is not None else "none",
         phone=row.phone_e164 if row is not None else None,
         pending_phone=row.pending_phone_e164 if row is not None else None,

@@ -81,6 +81,7 @@ from hailhq.core.sms_trial import (
     TrialBodyTooLong,
     claim_trial_send,
     trial_hint_applies,
+    trial_number_by_e164,
     trial_refusal_reason,
 )
 from hailhq.core.telemetry_identity import tag_context
@@ -357,7 +358,10 @@ async def create_sms(
     # own number is missing or blocked, as at the agent send sites.
     # ``claim_trial_send`` decides the rest.
     trial = None
-    trial_from = body.from_ is not None and body.from_ == settings.hail_sms_trial_number
+    trial_from = (
+        body.from_ is not None
+        and await trial_number_by_e164(db, body.from_) is not None
+    )
     if trial_from or (own_checked and (own_number is None or own_block is not None)):
         try:
             trial = await claim_trial_send(
@@ -449,7 +453,10 @@ async def create_sms(
                 # name why, not that the number belongs to someone else.
                 reason = (
                     await trial_refusal_reason(
-                        db, principal.organization_id, to=body.to
+                        db,
+                        principal.organization_id,
+                        to=body.to,
+                        explicit_from=body.from_,
                     )
                     if trial_from
                     else None

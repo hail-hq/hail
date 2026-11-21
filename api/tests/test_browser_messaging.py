@@ -1135,3 +1135,35 @@ async def test_history_paginates_equal_timestamps_without_skipping_messages(
             client, "/internal/browser-sessions/history", {**body, "cursor": "bad"}
         )
     ).status_code == 422
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("claim", [False, True])
+async def test_browser_sms_never_sends_from_a_trial_texting_number(
+    async_session, claim
+):
+    """A trial texting pool number is never a browser sender, with or
+    without a claim."""
+    from hailhq.api.browser_messaging import sms_sender
+
+    call, _ = await seed(async_session)
+    async_session.add(
+        PhoneNumber(
+            organization_id=None,
+            is_pool=True,
+            pool_purpose="sms_trial",
+            e164="+18005550199",
+            country_code="US",
+            number_type="toll_free",
+            provider="twilio",
+            provider_resource_id="PN_trial",
+            provisioning_state="active",
+        )
+    )
+    await async_session.commit()
+    assert (
+        await sms_sender(
+            async_session, call.organization_id, "+46705550123", claim=claim
+        )
+        is None
+    )

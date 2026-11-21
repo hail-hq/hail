@@ -555,3 +555,34 @@ async def test_sms_received_payload_names_the_compliance_keyword(async_session) 
     for _, body, _, keyword in texts:
         assert by_body[body]["compliance_keyword"] == keyword
         assert event_by_body[body]["compliance_keyword"] == keyword
+
+
+async def test_reply_to_a_trial_texting_number_is_dropped(async_session):
+    """A trial number is a pool number with no workspace: a reply (the trial
+    footer says Hail does not read replies) is stored nowhere."""
+    number = PhoneNumber(
+        organization_id=None,
+        is_pool=True,
+        pool_purpose="sms_trial",
+        e164="+18005550199",
+        country_code="US",
+        number_type="toll_free",
+        capabilities=["sms"],
+        provider="twilio",
+        provider_resource_id="PN_trial",
+        provisioning_state="active",
+    )
+    async_session.add(number)
+    await async_session.commit()
+    result = await ingest_inbound_sms(
+        async_session,
+        carrier="twilio",
+        from_e164="+14155550142",
+        to_e164=number.e164,
+        body="thanks",
+        provider_message_sid="SM_trial_reply",
+        opt_out_type=None,
+    )
+    assert result.sms_id is None
+    assert result.dropped_reason == "unknown_number"
+    assert (await async_session.execute(select(Sms))).first() is None
