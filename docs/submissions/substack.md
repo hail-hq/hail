@@ -23,7 +23,7 @@ Hail's newsletter on Substack: guides, tips, and product news, about twice a mon
 
 Nothing is submitted to a directory. Each post is written in the Substack editor at <https://hailhq.substack.com/publish>.
 
-1. Open the next post draft (about two a month).
+1. Open the next post draft in the website repo, `marketing/substack/` (about two a month). The agent also pastes the full text in chat.
 2. Paste the title, subtitle, and body.
 3. Publish and send it to subscribers.
 4. Record the date and the post link in **Notes**.

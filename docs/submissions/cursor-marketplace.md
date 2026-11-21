@@ -17,6 +17,7 @@ It is not the community site `cursor.directory` (see `cursor-directory-community
 - [x] Plugin manifest at the repo root: `.cursor-plugin/plugin.json`
 - [x] MCP config: `mcp.json` (remote server `https://mcp.hail.so`, OAuth, no secrets)
 - [x] Logo committed and referenced by a relative path: `docs/assets/hail-messenger.svg`
+- [ ] A 1:1 logo with a background plate for the publish form (the committed SVG is transparent)
 - [x] README documents setup: the "Cursor plugin" section of `README.md`
 - [ ] Plugin tested locally in Cursor (steps below), with one tool call that works
 - [x] Submitted (owner, before 2026-11-20; no review result yet). Submitted before the local test, so if Cursor rejects it for a failing tool call, run the local test first.
@@ -50,5 +51,5 @@ It is not the community site `cursor.directory` (see `cursor-directory-community
   - `displayName` is not in the docs field table, but Cursor's plugin template uses it.
   - Cursor also loads `skills/`, `rules/`, `agents/`, `commands/` and `hooks/hooks.json` at the plugin root by default. This repo has none of them, so the plugin contains only the MCP server.
 - 2026-11-20: checked the repo against Cursor's submission checklist. The manifest, `name`, `description`, `mcp.json`, the logo (committed, relative path), `README.md`, and relative paths all pass. No `${VAR}` and no `skills/`, `rules/`, `agents/`, `commands/` or `hooks/` folders at the root. Not a multi-plugin repo, so no `marketplace.json`. The local test is the owner's step.
-- 2026-11-20: the publish form is a publisher application: organization name, handle, contact email, logotype URL (1:1 SVG or PNG with a background plate), description, GitHub repository, owner, website URL. The values below under **Content** cover the description, repository, website, and contact. Not recorded: the logo file given in the form. `docs/assets/hail-messenger.svg` has a transparent background, so a resubmit needs a logo with a background plate.
+- 2026-11-20: the publish form is a publisher application: organization name, handle, contact email, logotype URL (1:1 SVG or PNG with a background plate), description, GitHub repository, owner, website URL. The values above under **Content** cover the description, repository, website, and contact. Not recorded: the logo file given in the form. `docs/assets/hail-messenger.svg` has a transparent background, so a resubmit needs a logo with a background plate.
 - Not verified: the review time, and where to see review status. The docs say only "Plugins are reviewed by the Cursor team."
