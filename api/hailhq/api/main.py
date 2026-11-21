@@ -30,6 +30,7 @@ from hailhq.api.routes import email_domains as email_domains_routes
 from hailhq.api.routes import emails as emails_routes
 from hailhq.api.routes import events as events_routes
 from hailhq.api.routes import forward_targets as forward_targets_routes
+from hailhq.api.routes import knowledge as knowledge_routes
 from hailhq.api.routes import numbers as numbers_routes
 from hailhq.api.routes import providers as providers_routes
 from hailhq.api.routes import recordings as recordings_routes
@@ -61,9 +62,11 @@ from hailhq.core.call_legs import fetch_leg_costs
 from hailhq.core.carrier_routing import CARRIERS
 from hailhq.core.config import settings
 from hailhq.core.db import background_context, dispose_engine, session_scope
+from hailhq.core.db_size_alert import ses_sender
 from hailhq.core.domain_verification_worker import DomainVerificationWorker
 from hailhq.core.email_attachment_gc import EmailAttachmentGcWorker
 from hailhq.core.http_post import httpx_post
+from hailhq.core.knowledge.ingest import KnowledgeIngestWorker
 from hailhq.core.outbound_worker import OutboundForwardWorker
 from hailhq.core.pool import sweep_pool_reservations
 from hailhq.core.providers.email.ses import SesEmailProvider
@@ -289,6 +292,20 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             attachment_gc_worker.run_forever(), name="email-attachment-gc-worker"
         )
 
+    # Knowledge base: reads uploaded documents into searchable pieces. Needs
+    # the bucket the files live in.
+    knowledge_worker: KnowledgeIngestWorker | None = None
+    knowledge_task: asyncio.Task | None = None
+    if settings.hail_mail_bucket and settings.hail_knowledge_poll_seconds > 0:
+        knowledge_worker = KnowledgeIngestWorker(
+            session_factory=session_scope,
+            s3_factory=lambda: S3MailClient(bucket=settings.hail_mail_bucket),
+            poll_interval=settings.hail_knowledge_poll_seconds,
+        )
+        knowledge_task = _background_task(
+            knowledge_worker.run_forever(), name="knowledge-ingest-worker"
+        )
+
     verify_worker: DomainVerificationWorker | None = None
     verify_task: asyncio.Task | None = None
     if settings.hail_domain_verify_poll_seconds > 0:
@@ -307,6 +324,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         abuse_worker = AbuseMonitorWorker(
             session_factory=session_scope,
             poll_interval=settings.hail_abuse_monitor_poll_seconds,
+            size_alert=ses_sender(),
         )
         abuse_task = _background_task(abuse_worker.run_forever(), name="abuse-monitor")
 
@@ -345,6 +363,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             await _stop_worker(forward_worker, forward_task)
         if attachment_gc_worker is not None and attachment_gc_task is not None:
             await _stop_worker(attachment_gc_worker, attachment_gc_task)
+        if knowledge_worker is not None and knowledge_task is not None:
+            await _stop_worker(knowledge_worker, knowledge_task)
         if verify_worker is not None and verify_task is not None:
             await _stop_worker(verify_worker, verify_task)
         if abuse_worker is not None and abuse_task is not None:
@@ -530,6 +550,7 @@ _CUSTOMER_ROUTERS = [
     sms_routes.router,
     *sms_webhooks.routers,
     contacts_routes.router,
+    knowledge_routes.router,
     whoami_routes.router,
     providers_routes.router,
     sms_evidence_routes.router,

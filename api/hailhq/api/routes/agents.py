@@ -43,6 +43,7 @@ from hailhq.core.http_tools import (
     new_tool_secret,
     replace_http_tools,
 )
+from hailhq.core.knowledge.access import KNOWLEDGE_OFF, knowledge_limits
 from hailhq.core.livekit import LiveKitClient
 from hailhq.core.models import Agent, EmailDomain, PhoneNumber
 from hailhq.core.provider_config import provider_cipher
@@ -72,7 +73,13 @@ _CONFLICT = {
             "An agent with this name already exists, or a handover contact "
             "changed while saving."
         )
-    }
+    },
+    403: {
+        "description": (
+            "`knowledge` is true but the knowledge base is not turned on for "
+            "this workspace."
+        )
+    },
 }
 
 
@@ -154,6 +161,15 @@ async def _check_http_tools(items: list[HttpToolIn] | None) -> None:
             raise result
 
 
+async def _check_knowledge_on(db: AsyncSession, organization_id: UUID) -> None:
+    """403 when the workspace's knowledge base is off: an agent cannot be
+    set to use it."""
+    if await knowledge_limits(db, organization_id) is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_403_FORBIDDEN, detail=KNOWLEDGE_OFF
+        )
+
+
 def _no_secret_key() -> HTTPException:
     return HTTPException(
         status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -206,6 +222,8 @@ async def create_agent(
     place calls with it via ``agent_id`` on POST /calls."""
     _check_tools(body.tools)
     await _check_http_tools(body.http_tools)
+    if body.knowledge:
+        await _check_knowledge_on(db, principal.organization_id)
     handover = await _check_handover(
         db, principal.organization_id, body.handover_contacts
     )
@@ -224,6 +242,7 @@ async def create_agent(
         voice_enabled=body.voice_enabled,
         sms_enabled=body.sms_enabled,
         email_enabled=body.email_enabled,
+        knowledge=body.knowledge,
         status=body.status,
     )
     db.add(agent)
@@ -321,6 +340,7 @@ async def update_agent(
         "voice_enabled",
         "sms_enabled",
         "email_enabled",
+        "knowledge",
         "status",
     ):
         if field in changes and changes[field] is None:
@@ -330,6 +350,8 @@ async def update_agent(
             changes.pop(field)
     if "voice_config" in changes:
         changes["voice_config"] = body.voice_config.model_dump(mode="json")
+    if changes.get("knowledge"):
+        await _check_knowledge_on(db, principal.organization_id)
     # Validate before any attribute is set: the validation queries would
     # autoflush a pending name change outside the conflict handler below.
     items = None

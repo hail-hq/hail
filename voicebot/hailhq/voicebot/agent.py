@@ -94,6 +94,7 @@ from hailhq.voicebot.audio import prewarm_audio, room_options
 from hailhq.voicebot.browser import run_browser_session
 from hailhq.voicebot.handover_watch import contact_speaks
 from hailhq.voicebot.ivr import PhoneMenu
+from hailhq.voicebot.knowledge import CallKnowledge, last_user_text
 from hailhq.voicebot.leg_tracker import LegTracker
 from hailhq.voicebot.pipeline import (
     ProviderKeyError,
@@ -220,9 +221,16 @@ class SpeechSanitizingAgent(Agent):
     documented ``Agent.default.tts_node`` delegation pattern.
     """
 
-    def __init__(self, *, opening_pending: bool = False, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        *,
+        opening_pending: bool = False,
+        knowledge: CallKnowledge | None = None,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(**kwargs)
         self._opening_pending = opening_pending
+        self.knowledge = knowledge
         self._held_words: list[str] = []
         self.phone_menu: PhoneMenu | None = None
 
@@ -294,12 +302,32 @@ class SpeechSanitizingAgent(Agent):
             chat_ctx.add_message(
                 role="system", content=ivr_navigation_instructions(None)
             )
+        elif self.knowledge is not None:
+            # This model call only (a copy): pieces never stay in the history.
+            section = await self.knowledge.context_for(last_user_text(chat_ctx))
+            if section:
+                chat_ctx = chat_ctx.copy()
+                chat_ctx.add_message(role="system", content=section)
         return Agent.default.llm_node(self, chat_ctx, tools, model_settings)
 
     async def tts_node(self, text: Any, model_settings: Any) -> Any:
         if self.phone_menu is not None and self.phone_menu.active:
             return None
         return Agent.default.tts_node(self, _sanitize_tts_stream(text), model_settings)
+
+
+def call_knowledge(metadata: dict[str, Any]) -> CallKnowledge | None:
+    """Start loading the call's knowledge base in the background, when the
+    dispatch names an agent and its organization. Whether the agent and the
+    workspace use it is checked in the database by the load itself."""
+    try:
+        org_id = UUID(str(metadata["organization_id"]))
+        agent_id = UUID(str(metadata["agent_id"]))
+    except (KeyError, TypeError, ValueError):
+        return None
+    knowledge = CallKnowledge(org_id, agent_id)
+    knowledge.start()
+    return knowledge
 
 
 def build_instructions(
@@ -2522,6 +2550,7 @@ async def _run_call(
     def _on_speech_state(ev: Any) -> None:
         speech.on_state(getattr(ev, "new_state", None), time.monotonic())
 
+    knowledge = call_knowledge(metadata)
     other_party_task = asyncio.create_task(other_party(call_id))
     agent_tools, agent_api = await build_tools_safely(
         metadata,
@@ -2558,6 +2587,7 @@ async def _run_call(
 
     agent = SpeechSanitizingAgent(
         opening_pending=not inbound,
+        knowledge=knowledge,
         instructions=build_instructions(
             metadata.get("system_prompt"),
             metadata.get("direction"),

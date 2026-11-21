@@ -11,7 +11,9 @@ carrier registrations (``hailhq.api.org_close.close_org_carrier_items``),
 then deletes the registration answers
 (``hailhq.core.retention.clear_closed_org_registrations``) and the files a
 number registration kept for a resubmit
-(``hailhq.api.routes.verifications.forget_kept_registrations``). The carrier
+(``hailhq.api.routes.verifications.forget_kept_registrations``), and the
+knowledge base (``hailhq.core.knowledge.access.delete_org_knowledge``; the
+knowledge ingest worker retries it). The carrier
 calls can take longer than the caller waits, so they run after the
 response. The verification worker runs both for every closed org on each
 pass, so a failure here is retried there, and a closure row with no call is
@@ -38,11 +40,14 @@ from hailhq.api.org_close import close_org_carrier_items
 from hailhq.api.routes.calls import get_livekit_optional
 from hailhq.api.routes.internal.auth import verify_internal_request
 from hailhq.api.routes.verifications import forget_kept_registrations
+from hailhq.core.config import settings
 from hailhq.core.db import background_context, get_session, session_scope
+from hailhq.core.knowledge.access import delete_org_knowledge
 from hailhq.core.livekit import LiveKitClient
 from hailhq.core.models import OrgClosure
 from hailhq.core.providers.verification import get_verification_provider
 from hailhq.core.retention import clear_closed_org_registrations
+from hailhq.core.s3_mail import S3MailClient
 from pydantic import BaseModel
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -90,6 +95,17 @@ async def close_org(organization_id: UUID, lk: LiveKitClient | None) -> None:
         except Exception:
             await db.rollback()
             logger.exception("org closure: could not delete kept registration files")
+        try:
+            store = (
+                S3MailClient(bucket=settings.hail_mail_bucket)
+                if settings.hail_mail_bucket
+                else None
+            )
+            documents = await delete_org_knowledge(db, organization_id, store)
+            logger.info("org closure: %d knowledge document(s) deleted", documents)
+        except Exception:
+            await db.rollback()
+            logger.exception("org closure: could not delete the knowledge base")
 
 
 async def _close_after_response(
