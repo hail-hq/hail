@@ -240,4 +240,11 @@ trunk and the capacity group (`PATCH /v3/dids/{id}`, relationships
 LiveKit trunk; `null` clears the trunk and the LiveKit entry
 ([Agents](../agents.md)).
 A DID added by hand without a stored DID id is looked up by number.
+To lock calls to DIDWW, give DIDWW its own LiveKit inbound trunk with a
+digest password: set `DIDWW_SIP_INBOUND_PASSWORD`, and
+`scripts/ops/sip_trunks.py apply --carrier didww` sets it on the LiveKit
+trunk and on the voice IN trunk (**Authorization**: `auth_user`,
+`auth_password`). Then set `LIVEKIT_DIDWW_SIP_INBOUND_TRUNK_ID`
+([LiveKit Cloud §4](./livekit-cloud.md#4-inbound-calls)). Keep a placeholder entry in
+the shared trunk's `numbers`, or empty `LIVEKIT_SIP_INBOUND_TRUNK_ID`.
 Reference: DIDWW [voice IN trunks](https://doc.didww.com/voice/inbound-trunks/index.html).

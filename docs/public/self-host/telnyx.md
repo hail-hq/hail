@@ -153,4 +153,9 @@ it routes calls to an agent; you set up the connection once.
 `PATCH /v1/numbers/{id}` with `voice_agent_id` then sets
 `connection_id` on the number (`PATCH /v2/phone_numbers/{id}/voice`) and
 lists it on the LiveKit trunk; `null` clears both ([Agents](../agents.md)).
+To lock calls to Telnyx, give Telnyx its own LiveKit inbound trunk with the
+`signaling` addresses of [voice.json](https://sip.telnyx.com/voice.json) in
+`allowed_addresses` and set `LIVEKIT_TELNYX_SIP_INBOUND_TRUNK_ID`
+([LiveKit Cloud §4](./livekit-cloud.md#4-inbound-calls)). Keep a placeholder entry in
+the shared trunk's `numbers`, or empty `LIVEKIT_SIP_INBOUND_TRUNK_ID`.
 Reference: LiveKit [Telnyx guide](https://docs.livekit.io/telephony/start/providers/telnyx/).
