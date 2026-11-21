@@ -359,3 +359,24 @@ async def test_httpx_post_tries_the_next_address_after_a_connect_timeout(
         "https://example.com/x", b"{}", {}, allow_private_networks=False
     )
     assert (status, body) == (200, "ok")
+
+
+@pytest.mark.asyncio
+async def test_httpx_post_tries_at_most_three_addresses(respx_mock, monkeypatch):
+    ips = [f"93.184.216.{n}" for n in range(30, 35)]
+
+    def fake_getaddrinfo(host, port, **kw):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 0)) for ip in ips]
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+    routes = [
+        respx_mock.post(f"https://{ip}/x").mock(
+            side_effect=httpx.ConnectError("refused")
+        )
+        for ip in ips
+    ]
+    with pytest.raises(httpx.ConnectError):
+        await httpx_post(
+            "https://example.com/x", b"{}", {}, allow_private_networks=False
+        )
+    assert [route.called for route in routes] == [True, True, True, False, False]

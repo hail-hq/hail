@@ -52,6 +52,11 @@ def validate_webhook_target(url: str, *, allow_private_networks: bool) -> None:
         raise ValueError(f"target_url is not allowed: {exc}") from exc
 
 
+# Fallback addresses tried after a failed connect, and the connect budget each.
+_MAX_ADDRESSES = 3
+_CONNECT_SECONDS = 3.0
+
+
 async def httpx_post(
     url: str,
     body: bytes,
@@ -71,7 +76,8 @@ async def httpx_post(
     With the guard on, the request goes to the address that passed the
     check, not to a second DNS answer: the Host header and the TLS name
     check keep the original host. ``max_body_bytes`` stops reading the
-    answer after that many bytes.
+    answer after that many bytes. Raises ``TimeoutError`` when the whole
+    send takes longer than twice ``timeout_seconds``.
     """
     parsed, host, port = connect_target(url)
     targets = [parsed]
@@ -85,7 +91,8 @@ async def httpx_post(
         # IPv4 first: a host without an IPv6 route fails every IPv6 connect.
         # The rest stay as fallbacks, as httpx's own connect would try them.
         ordered = sorted(dict.fromkeys(addresses), key=lambda ip: ":" in ip)
-        targets = [parsed.copy_with(host=ip) for ip in ordered]
+        # A name with many records must not multiply the send time.
+        targets = [parsed.copy_with(host=ip) for ip in ordered[:_MAX_ADDRESSES]]
         send_headers["Host"] = parsed.netloc.decode("ascii")
         if parsed.scheme == "https":
             extensions["sni_hostname"] = host
@@ -96,7 +103,15 @@ async def httpx_post(
         if any(name.lower() == "authorization" for name in send_headers)
         else httpx.USE_CLIENT_DEFAULT
     )
-    async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+    # One deadline for the whole send: httpx times each phase alone, so a
+    # receiver that drips its answer, or several dead addresses, could hold a
+    # worker slot far longer. Connects get a shorter budget for fallbacks.
+    timeout = httpx.Timeout(
+        timeout_seconds, connect=min(_CONNECT_SECONDS, timeout_seconds)
+    )
+    async with asyncio.timeout(timeout_seconds * 2), httpx.AsyncClient(
+        timeout=timeout
+    ) as client:
         for index, target in enumerate(targets):
             try:
                 async with client.stream(
