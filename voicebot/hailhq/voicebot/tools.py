@@ -269,6 +269,22 @@ async def build_agent_tools(
     )
 
     passed: set[str] = set()
+    try:
+        await _check_availability(checked, organization_id, passed)
+    except BaseException:
+        # The caller gets no client on a failure, so close it here.
+        if api is not None:
+            await api.aclose()
+        raise
+
+    available = [s for s in specs if s is end_call.SPEC or s.name in passed]
+    return [wrap_tool(s, tctx) for s in available], api
+
+
+async def _check_availability(
+    checked: list[ToolSpec], organization_id: UUID, passed: set[str]
+) -> None:
+    """Add to ``passed`` the name of each spec available to the org."""
     if checked:
         async with session_scope() as session:
             for spec in checked:
@@ -283,9 +299,6 @@ async def build_agent_tools(
                     # PendingRollbackError and gets swallowed too, silently
                     # disabling available tools.
                     await session.rollback()
-
-    available = [s for s in specs if s is end_call.SPEC or s.name in passed]
-    return [wrap_tool(s, tctx) for s in available], api
 
 
 __all__ = ["SPOKEN_TOOL_FAILURE", "build_agent_tools", "end_call_only", "wrap_tool"]

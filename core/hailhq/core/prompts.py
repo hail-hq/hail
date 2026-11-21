@@ -17,6 +17,11 @@ from phonenumbers import timezone as phone_timezones
 
 logger = logging.getLogger(__name__)
 
+# The call prompt's line about send tools, dropped when the call has neither.
+_SEND_RULES_LINE = (
+    "\n- Sending a text or email follows the rules in that tool's description."
+)
+
 # The call prompt's phone-menu rule, and its replacement on a call without
 # the send_dtmf tool: the model must not try to press keys it cannot press.
 _MENU_KEYS_LINE = (
@@ -611,6 +616,8 @@ def build_voice_instructions(
         )
     if not has("send_dtmf"):
         preamble = preamble.replace(_MENU_KEYS_LINE, _MENU_NO_KEYS_LINE)
+    if not has("send_sms") and not has("send_email"):
+        preamble = preamble.replace(_SEND_RULES_LINE, "")
     caller = (system_prompt or "").strip()
     out = preamble if not caller else f"{preamble}\n\n{VOICE_HEADING}\n\n{caller}"
     if other_party:

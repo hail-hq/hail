@@ -7,6 +7,8 @@ import json
 import uuid
 from unittest.mock import AsyncMock
 
+import pytest
+
 import hailhq.voicebot.tools as tools_mod
 from hailhq.core.agent_tools import http_tool
 from hailhq.core.config import settings
@@ -466,3 +468,30 @@ async def test_wait_message_is_said_without_waiting():
     assert await _make_handler(spec, _tctx())({}, rc) == "shipped"
     assert order == ["say:One moment.", "request"]
     assert rc.waited is False
+
+
+async def test_failed_availability_check_closes_the_api_client(monkeypatch):
+    """The caller gets no client when the build fails, so the build closes it."""
+    closed = []
+
+    class FakeClient:
+        def __init__(self, *_args):
+            pass
+
+        async def aclose(self):
+            closed.append(True)
+
+    def db_down():
+        raise RuntimeError("database down")
+
+    monkeypatch.setattr(tools_mod, "AgentApiClient", FakeClient)
+    monkeypatch.setattr(tools_mod, "session_scope", db_down)
+    monkeypatch.setattr(settings, "hail_internal_secret", "secret", raising=False)
+    with pytest.raises(RuntimeError):
+        await build_agent_tools(
+            {"organization_id": str(uuid.uuid4()), "tools": ["send_sms"]},
+            call_id=uuid.uuid4(),
+            hangup=None,
+            send_dtmf=None,
+        )
+    assert closed == [True]

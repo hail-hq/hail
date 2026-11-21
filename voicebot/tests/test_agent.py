@@ -1529,12 +1529,17 @@ async def test_build_tools_safely_degrades_on_failure(
 
     `build_tools_safely` is the entrypoint's guard around `build_agent_tools`:
     any exception (e.g. a DB rollback on a dead connection) degrades to
-    `([], None)`, no tools beats a dead call.
+    end_call only, or `([], None)` without a valid organization.
     """
     from hailhq.voicebot import agent as agent_mod
 
     async def _boom(
-        _metadata: dict, *, call_id: UUID, hangup: object, send_dtmf: object
+        _metadata: dict,
+        *,
+        call_id: UUID,
+        hangup: object,
+        send_dtmf: object,
+        **_kwargs: object,
     ) -> tuple:
         raise RuntimeError("dead connection during availability checks")
 
@@ -2563,6 +2568,8 @@ def test_prompt_names_only_the_calls_tools(direction, tool_names):
         assert "press the keys" not in out
     if "send_sms" not in tool_names:
         assert "by text or" not in out
+    if "send_sms" not in tool_names and "send_email" not in tool_names:
+        assert "Sending a text or email" not in out
 
 
 def test_prompt_with_every_tool_names_its_helpers():
