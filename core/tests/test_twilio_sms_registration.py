@@ -1156,6 +1156,11 @@ async def test_failed_brand_with_unknown_reason_quotes_twilio() -> None:
     # Several carrier reasons and no Hail fix: "Fix these".
     st = await _brand_status(_failed_brand((1, "Website down"), (2, "Vertical bad")))
     assert st.reason.endswith("Vertical bad. Fix these and start again.")
+    # One Hail fix plus another carrier reason: still "Fix these".
+    st = await _brand_status(
+        _failed_brand((30795, "Tax ID does not match"), (30794, "Website down"))
+    )
+    assert st.reason.endswith("Website down. Fix these and start again.")
 
 
 async def test_failed_brand_without_errors_keeps_the_generic_line() -> None:

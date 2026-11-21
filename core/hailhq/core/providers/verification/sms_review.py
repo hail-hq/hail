@@ -165,9 +165,8 @@ def brand_rejected_reason(
     if fixes and not said:
         return f"{' '.join(fixes)} {START_AGAIN}"
     body = with_carrier_text(" ".join(fixes) or BRAND_REJECTED_LEAD, raw)
-    # Several things to fix: several Hail fixes, or (with no fix of Hail's
-    # own) several carrier reasons.
-    several = len(fixes) > 1 or (not fixes and len(carrier_texts(raw)) > 1)
+    # Several things to fix: several Hail fixes or several carrier reasons.
+    several = len(fixes) > 1 or len(carrier_texts(raw)) > 1
     end = FIX_THESE_AND_START_AGAIN if several else FIX_AND_START_AGAIN
     return f"{body} {end}"
 

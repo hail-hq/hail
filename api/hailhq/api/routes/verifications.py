@@ -690,7 +690,7 @@ async def _uncharged_sms_steps(
 _SMS_REASON_MAX = 2000
 
 
-def _cap_reason(reason: str, purpose: str = "sms") -> str:
+def _cap_reason(reason: str, purpose: str) -> str:
     """A US texting ``reason`` (it quotes the carrier) cut to the cap, with
     an ellipsis where it was cut. Other purposes keep their reason whole."""
     if purpose != "sms" or len(reason) <= _SMS_REASON_MAX:
@@ -698,10 +698,18 @@ def _cap_reason(reason: str, purpose: str = "sms") -> str:
     return reason[: _SMS_REASON_MAX - 1].rstrip() + "\u2026"
 
 
+def _joined_problems(problems: list[Problem]) -> str:
+    """Every problem in one stored reason, each named by its field, since
+    the carrier's words can be the same on several fields."""
+    return "; ".join(
+        f"{p.field}: {p.message}" if p.field else p.message for p in problems
+    )
+
+
 def _billed_reason(reason: str, purpose: str) -> str:
     """The stored reason of a refusal billed at filing: US texting gets the
     US texting cap; other purposes keep their old 500 character cut."""
-    return _cap_reason(reason) if purpose == "sms" else reason[:500]
+    return _cap_reason(reason, purpose) if purpose == "sms" else reason[:500]
 
 
 async def _record_billed_refusal(
@@ -2793,7 +2801,7 @@ async def _file(
                 prepared.sub,
                 prepared.subject_name,
                 draft.billed_refs,
-                "; ".join(p.message for p in draft.problems),
+                _joined_problems(draft.problems),
                 prepared.requirements.version,
             )
         raise _problems_422(
@@ -3751,13 +3759,10 @@ async def _refuse_row(
         db,
         row,
         provider,
-        _cap_reason(
-            "; ".join(
-                f"{p.field}: {p.message}" if p.field else p.message for p in problems
-            ),
-            row.purpose,
-        ),
-        carrier_reason="; ".join(p.raw for p in problems if p.raw) or None,
+        _cap_reason(_joined_problems(problems), row.purpose),
+        # One separator: a problem's raw holds one carrier reason per line.
+        carrier_reason="; ".join(p.raw.replace("\n", "; ") for p in problems if p.raw)
+        or None,
         kept_state=kept_state,
     )
 

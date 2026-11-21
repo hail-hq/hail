@@ -8789,9 +8789,9 @@ async def test_an_amendment_at_a_carrier_with_no_low_volume_filing_stays_vetted(
 
 def test_the_sms_reason_cap_marks_the_cut() -> None:
     reason = "x" * 3000 + ". Fix these and start again."
-    capped = _cap_reason(reason)
+    capped = _cap_reason(reason, "sms")
     assert len(capped) <= _SMS_REASON_MAX
     assert capped.endswith("x…")
-    assert _cap_reason("short.") == "short."
+    assert _cap_reason("short.", "sms") == "short."
     # Number verifications keep their reason whole.
     assert _cap_reason(reason, "number") == reason
