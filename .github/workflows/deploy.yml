@@ -138,8 +138,8 @@ jobs:
             # Containers read the release SHA from the VM .env (env_file).
             sed -i "s|^LOGFIRE_SERVICE_VERSION=.*|LOGFIRE_SERVICE_VERSION=$DEPLOY_GITHUB_SHA|" .env
             COMPOSE="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
-            # Keep the 2 newest releases of each service: the one running and
-            # the one before it, for rollback. A time window (14 days, then
+            # Keep the 2 newest builds of each service: normally the one
+            # running and the one before it, for rollback. A time window (14 days, then
             # 48 hours) kept every release of a busy day and filled the VM on
             # 2026-10-19 and 2026-11-20. Older sha-<commit> tags stay in GHCR.
             # Docker refuses to remove an image a container still uses (a

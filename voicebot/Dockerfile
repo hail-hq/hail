@@ -33,7 +33,11 @@ RUN uv sync --frozen --package hailhq-voicebot --no-install-workspace --no-dev
 # multi-second download at the start of the prewarm step. LiveKit's own
 # command finds every installed plugin, so it needs no Hail code. The folder
 # may stay empty (Silero ships its weights inside its package).
-RUN mkdir -p /app/.cache && \
+# download-files only warns when a plugin fails to import, so import each
+# installed plugin first and fail the build instead.
+RUN /app/.venv/bin/python -c "import importlib, pkgutil, livekit.plugins as p; \
+[importlib.import_module('livekit.plugins.' + m.name) for m in pkgutil.iter_modules(p.__path__)]" && \
+    mkdir -p /app/.cache && \
     /app/.venv/bin/python -m livekit.agents download-files
 
 # ─── Stage 2: builder ─────────────────────────────────────────────
