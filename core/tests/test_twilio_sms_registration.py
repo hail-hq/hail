@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 import requests
+from hailhq.core.config import settings
 from hailhq.core.providers.verification.base import (
     BRAND_REJECTED,
     CAMPAIGN_REJECTED,
@@ -912,6 +913,7 @@ async def test_noncompliant_outage_only_when_every_field_names_the_account() -> 
         )
         draft = await _draft(_provider(r))
         assert draft.problems[0].message.startswith("Check the website address.")
+        assert "messaging service" not in draft.problems[0].message.lower()
     # A single form reason that says "permission" reaches the customer.
     r = _ok_responses()
     r["customer_profiles_evaluations.create"] = SimpleNamespace(
@@ -1240,8 +1242,8 @@ async def test_suspended_brand_asks_to_contact_hail_not_refile() -> None:
     assert st.state == "rejected"
     assert st.reason == (
         "The carrier suspended your US texting registration. The carrier said: "
-        "Brand suspended by review. Email hi@hail.so and we will look into it. "
-        "Do not file a new registration."
+        f"Brand suspended by review. Email {settings.hail_support_email} and we "
+        "will look into it. Do not file a new registration."
     )
 
 

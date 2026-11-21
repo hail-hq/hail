@@ -33,7 +33,6 @@ from hailhq.core.providers.verification.base import (
 from hailhq.core.providers.verification.forms import display_name, text_length
 from hailhq.core.providers.verification.rejections import (
     TEXT_KEYS,
-    carrier_texts,
     with_carrier_text,
 )
 from hailhq.core.providers.verification.sms_form import (
@@ -1614,7 +1613,7 @@ def _duplicate_fixes(reasons, subject_type) -> list[str]:
     for reason in items:
         if not isinstance(reason, dict):
             continue
-        if "duplicate" not in " ".join(carrier_texts(reason)).lower():
+        if "duplicate" not in _all_text(reason).lower():
             continue
         found = [_DUPLICATE.get(names.get(n) or "") for n in _field_names(reason)]
         found = [f for f in found if f] or [_duplicate_by_text(_all_text(reason))]
@@ -1636,7 +1635,6 @@ def _reason_problems(reasons, subject_type) -> list[Problem]:
         if not isinstance(reason, dict):
             unmatched.append(reason)
             continue
-        text = " ".join(carrier_texts(reason))
         # raw keeps the carrier's own text, field tag and all; the message
         # quotes it cleaned (with_carrier_text).
         original = _original_text(reason)
@@ -1648,13 +1646,15 @@ def _reason_problems(reasons, subject_type) -> list[Problem]:
             shown = True
             problem = next((p for p in problems if p.field == field), None)
             if problem is not None:
-                duplicate = "duplicate" in text.lower() and field in _DUPLICATE
+                duplicate = (
+                    "duplicate" in _all_text(reason).lower() and field in _DUPLICATE
+                )
                 _add_carrier_text(
                     problem, original, _DUPLICATE[field] if duplicate else None
                 )
                 continue
             message = SMS_VALUE_REFUSED
-            if "duplicate" in text.lower():
+            if "duplicate" in _all_text(reason).lower():
                 message = _DUPLICATE.get(field, message)
             problems.append(
                 Problem(

@@ -262,6 +262,30 @@ def campaign_repair_reason(raw: object, *, quote: object = ...) -> str:
     return with_carrier_text(CAMPAIGN_REJECTED, said)
 
 
+# Words that put a carrier refusal on Hail's account, not the customer's
+# answers. Outside a form field "permission" counts too (see
+# application_validation_error); in a form field it is about the
+# customer's opt-in wording ("Opt-in permission language missing").
+ACCOUNT_WORDS = (
+    "credential",
+    "api key",
+    "authentication",
+    "unauthorized",
+    "forbidden",
+    "account suspend",
+    "account inactive",
+    "insufficient balance",
+    "messaging service",
+    "configuration",
+)
+
+
+def account_problem(text: object) -> bool:
+    """True when ``text`` names a problem with Hail's own account."""
+    low = str(text or "").lower()
+    return any(word in low for word in ACCOUNT_WORDS)
+
+
 def application_validation_error(
     status: int | None, raw: object, *, known_field: bool = False
 ) -> bool:
@@ -275,22 +299,7 @@ def application_validation_error(
     if status not in (400, 422):
         return False
     text = str(raw or "").lower()
-    if any(
-        word in text
-        for word in (
-            "credential",
-            "api key",
-            "authentication",
-            "permission",
-            "unauthorized",
-            "forbidden",
-            "account suspend",
-            "account inactive",
-            "insufficient balance",
-            "messaging service",
-            "configuration",
-        )
-    ):
+    if account_problem(text) or "permission" in text:
         return False
     return known_field or any(
         re.search(rf"\b{re.escape(word)}\b", text)

@@ -35,6 +35,7 @@ from hailhq.core.providers.verification.sms_form import (
 from hailhq.core.providers.verification.sms_review import (
     LEGACY_APPLICATION,
     LOW_VOLUME_NEEDS_NEW_FILING,
+    account_problem,
     application_validation_error,
     brand_rejected_reason,
     campaign_repair_reason,
@@ -257,7 +258,7 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
                             Problem(
                                 field="",
                                 message=_safe_message(
-                                    exc.reasons
+                                    _customer_reasons(exc)
                                     if isinstance(exc, _NotCompliant)
                                     else exc.msg
                                 ),
@@ -986,30 +987,14 @@ def _refused_answers(exc: TwilioRestException) -> bool:
     retried: then no answer the customer changes can fix it. So a form
     reason that happens to say "permission" still reaches the customer."""
     if isinstance(exc, _NotCompliant):
-        return any(not _account_problem(text) for text in exc.reasons or [""])
+        return any(not account_problem(text) for text in exc.reasons or [""])
     return application_validation_error(exc.status, exc.msg)
 
 
-# Words that put a failed evaluation field on Hail's account, not the
-# customer's answers. "permission" is left out: in a form field it is about
-# the customer's opt-in wording ("Opt-in permission language missing").
-_ACCOUNT_WORDS = (
-    "credential",
-    "api key",
-    "authentication",
-    "unauthorized",
-    "forbidden",
-    "account suspend",
-    "account inactive",
-    "insufficient balance",
-    "messaging service",
-    "configuration",
-)
-
-
-def _account_problem(text: str) -> bool:
-    low = (text or "").lower()
-    return any(word in low for word in _ACCOUNT_WORDS)
+def _customer_reasons(exc: _NotCompliant) -> list[str]:
+    """The failed fields the customer can fix: Hail's own account problems
+    are not theirs to fix, so they are not quoted to them."""
+    return [t for t in exc.reasons if not account_problem(t)]
 
 
 def _evaluation_reasons(ev) -> list[str]:
