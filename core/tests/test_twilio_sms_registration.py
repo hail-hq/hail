@@ -895,12 +895,13 @@ async def test_draft_noncompliant_evaluation_is_problem_whatever_its_wording(
     assert draft.refs == {}
 
 
-async def test_noncompliant_account_problem_in_any_field_stays_an_outage() -> None:
-    """A field that names an account problem keeps the filing retryable,
-    whatever order the fields come in."""
+async def test_noncompliant_outage_only_when_every_field_names_the_account() -> None:
+    """A form reason reaches the customer whatever other fields say and in
+    any order; only account problems on every field are an outage."""
     for reasons in (
         ["bad website", "messaging service misconfigured"],
         ["messaging service misconfigured", "bad website"],
+        ["bad website", "Opt-in permission language missing"],
     ):
         r = _ok_responses()
         r["customer_profiles_evaluations.create"] = SimpleNamespace(
@@ -909,8 +910,22 @@ async def test_noncompliant_account_problem_in_any_field_stays_an_outage() -> No
                 {"fields": [{"passed": False, "failure_reason": t} for t in reasons]}
             ],
         )
-        with pytest.raises(VerificationProviderError):
-            await _draft(_provider(r))
+        draft = await _draft(_provider(r))
+        assert draft.problems[0].message.startswith("Check the website address.")
+    r = _ok_responses()
+    r["customer_profiles_evaluations.create"] = SimpleNamespace(
+        status="noncompliant",
+        results=[
+            {
+                "fields": [
+                    {"passed": False, "failure_reason": "messaging service missing"},
+                    {"passed": False, "failure_reason": "account configuration error"},
+                ]
+            }
+        ],
+    )
+    with pytest.raises(VerificationProviderError):
+        await _draft(_provider(r))
 
 
 async def test_one_text_naming_two_details_gets_both_sentences() -> None:

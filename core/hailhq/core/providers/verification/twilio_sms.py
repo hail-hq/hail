@@ -980,11 +980,13 @@ def _company_type(key: str) -> str:
 
 def _refused_answers(exc: TwilioRestException) -> bool:
     """A refusal of the customer's answers, not an outage. A failed
-    evaluation is one unless a failed field's own text names an account or
-    configuration problem (each field is checked alone): that stays an
-    outage, retried, since no answer the customer changes can fix it."""
+    evaluation is one when any failed field's own text reads as a refusal
+    of an answer (each field is checked alone). Only when every failed
+    field names an account or configuration problem is it an outage,
+    retried: then no answer the customer changes can fix it. So a form
+    reason that happens to say "permission" still reaches the customer."""
     if isinstance(exc, _NotCompliant):
-        return all(
+        return any(
             application_validation_error(exc.status, text, known_field=True)
             for text in exc.reasons or [""]
         )

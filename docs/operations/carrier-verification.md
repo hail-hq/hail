@@ -442,10 +442,11 @@ US texting registrations (`purpose='sms'`) follow one rule: Hail's sentence firs
 - **Twilio brand.** Twilio puts the reason in `errors[]` (`error_code`, `description`). Code: `_brand_customer_reason` in `twilio_sms.py`, `brand_rejected_reason` in `sms_review.py`.
   - Hail's fix for each refusal Twilio documents: by code from the error pages, and by text for the email and address reasons in the Sole Proprietor guide (they come under the general codes 30701 and 30794).
   - Any other refusal: "The 10DLC registry rejected the registration.", Twilio's words, then "Fix that and start again."
+- **Twilio refusal at filing (Trust Hub evaluation).** Each failed field is checked alone. It is an outage (retried) only when every failed field names an account or configuration problem; otherwise the customer sees the form errors.
   - No text in `errors`: Hail quotes `failure_reason`. Twilio's "General Error" placeholder is never quoted.
-  - `SUSPENDED`: "The carrier suspended your US texting registration.", Twilio's words, then "Email hi@hail.so and we will look into it. Do not file a new registration." (owner decision 2026-11-21: a new filing cannot fix a suspension).
+  - `SUSPENDED`: "The carrier suspended your US texting registration.", Twilio's words, then "Email <support address> and we will look into it. Do not file a new registration." (the address is `HAIL_SUPPORT_EMAIL`; owner decision 2026-11-21: a new filing cannot fix a suspension).
   - The next step comes last. Campaign and toll-free reasons keep their guidance first, then the carrier's words.
-- **Telnyx brand.** The same lead sentence, then `failureReasons`. At filing, a second reason on a field joins that field's problem (a reused email or phone switches it to the reuse fix); a reason on no form field goes in one general problem, with its text kept in the audit row too.
+- **Telnyx brand.** Hail's fixes (reused email or phone, then the detail named: tax number, website, address...), else the same lead sentence, then `failureReasons`. At filing, a second reason on a field joins that field's problem (a reused email or phone switches it to the reuse fix); a reason on no form field goes in one general problem, with its text kept in the audit row too.
 - **twilio-python's wrapper** ("Unable to create record:") is dropped from the quote.
 - **Campaigns and toll-free.** Hail's topic guidance (`campaign_repair_reason` in `sms_review.py`) is a keyword guess, so the carrier's words always follow it.
 

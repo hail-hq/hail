@@ -759,7 +759,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                 return ProviderStatus(
                     state="rejected",
                     reason=brand_rejected_reason(
-                        _duplicate_fixes(
+                        _brand_fixes(
                             _reasons(brand.get("failureReasons")),
                             refs.get("subject_type") or "business",
                         ),
@@ -1558,6 +1558,16 @@ def _general_problem(unmatched: list) -> Problem:
         message=with_carrier_text(" ".join(fixes) or SMS_REFUSED, unmatched),
         raw="; ".join(originals) or None,
     )
+
+
+def _brand_fixes(reasons, subject_type) -> list[str]:
+    """Hail's fixes for a brand refused after filing, as at filing: the
+    reuse sentence for a reused email or phone, and the detail sentence
+    (tax number, website, address...) for any other reason."""
+    items = reasons if isinstance(reasons, list) else [reasons]
+    others = [t for t in map(_all_text, items) if "duplicate" not in t.lower()]
+    fixes = _duplicate_fixes(reasons, subject_type)
+    return fixes + [f for f in detail_fixes(others) if f not in fixes]
 
 
 def _duplicate_fixes(reasons, subject_type) -> list[str]:

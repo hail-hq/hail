@@ -3,6 +3,7 @@
 import re
 
 import phonenumbers
+from hailhq.core.config import settings
 from hailhq.core.providers.verification.base import (
     BRAND_REJECTED,
     CAMPAIGN_REJECTED,
@@ -145,8 +146,9 @@ BRAND_REJECTED_LEAD = "The 10DLC registry rejected the registration."
 # A suspended brand: a compliance action a new filing cannot fix. Twilio
 # warns that texting the same way from a new brand can close the account.
 BRAND_SUSPENDED_LEAD = "The carrier suspended your US texting registration."
+# The support address is the deployment's own (HAIL_SUPPORT_EMAIL).
 BRAND_SUSPENDED_NEXT = (
-    "Email hi@hail.so and we will look into it. Do not file a new registration."
+    "Email {support} and we will look into it. Do not file a new registration."
 )
 
 
@@ -159,7 +161,8 @@ def brand_rejected_reason(
     generic ``BRAND_REJECTED``. A suspended brand asks the customer to
     contact Hail instead of filing again."""
     if suspended:
-        return f"{with_carrier_text(BRAND_SUSPENDED_LEAD, raw)} {BRAND_SUSPENDED_NEXT}"
+        next_step = BRAND_SUSPENDED_NEXT.format(support=settings.hail_support_email)
+        return f"{with_carrier_text(BRAND_SUSPENDED_LEAD, raw)} {next_step}"
     said = bool(with_carrier_text("", raw))
     if not fixes and not said:
         return BRAND_REJECTED

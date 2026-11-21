@@ -431,7 +431,7 @@ async def test_status_rejected_brand() -> None:
     st = await p.status({"brand_id": "B1", "subject_type": "business", "campaign": {}})
     assert st.state == "rejected"
     assert st.reason == (
-        "The 10DLC registry rejected the registration. "
+        "Check the business tax number. "
         "The carrier said: EIN mismatch. Fix that and start again."
     )
     assert "EIN" in st.raw_reason
@@ -1846,6 +1846,20 @@ async def test_one_refusal_naming_email_and_ein_gets_both_sentences():
     assert draft.problems[0].message.startswith(
         "Check the email address. Check the business tax number."
     )
+
+
+async def test_brand_refused_later_gets_the_detail_fix() -> None:
+    p = _provider(
+        lambda req: httpx.Response(
+            200,
+            json={
+                "status": "REGISTRATION_FAILED",
+                "failureReasons": [{"fields": [], "description": "EIN does not match"}],
+            },
+        )
+    )
+    st = await p.status({"brand_id": "B1", "subject_type": "business", "campaign": {}})
+    assert st.reason.startswith("Check the business tax number.")
 
 
 async def test_failure_reasons_sent_as_json_text_are_read() -> None:
