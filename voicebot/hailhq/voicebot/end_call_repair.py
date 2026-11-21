@@ -33,22 +33,23 @@ class EndCallTextFilter:
 
     def feed(self, text: str) -> str:
         out: list[str] = []
-        lines = text.split("\n")
-        for index, part in enumerate(lines):
+        for line in text.splitlines(keepends=True):
+            part = line.splitlines()[0]
+            ending = line[len(part) :]
             if self._passthrough:
                 out.append(part)
             else:
                 self._pending += part
-                value = self._pending.lstrip(" \t\r")
+                value = self._pending.lstrip()
                 if not any(
-                    command.startswith(value) or value.rstrip(" \t\r") == command
+                    command.startswith(value) or value.rstrip() == command
                     for command in _COMMANDS
                 ):
                     out.append(self._pending)
                     self._pending = ""
                     self._passthrough = True
-            if index < len(lines) - 1:
-                out.extend((self.finish(), "\n"))
+            if ending:
+                out.extend((self.finish(), ending))
         return "".join(out)
 
 

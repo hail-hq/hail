@@ -228,6 +228,9 @@ async def test_normal_speech_starts_before_model_finishes():
         "Goodbye Joe.\n\n\nend_call",
         "Au revoir.\r\n \tend_call() \r\n",
         "さようなら。\nend_call\n\n",
+        "Bye.\n\u00a0end_call",
+        "Bye.\rend_call",
+        "Bye.\u2028end_call",
     ],
 )
 async def test_repair_accepts_only_complete_terminal_command_lines(text):
@@ -235,6 +238,8 @@ async def test_repair_accepts_only_complete_terminal_command_lines(text):
     assert len(tool_calls(parts)) == 1
     clean = "".join(part for part in parts if isinstance(part, str))
     assert "end_call" not in clean
+    spoken = "".join([part async for part in _sanitize_tts_stream(chunks(*text))])
+    assert "end_call" not in spoken
 
 
 @pytest.mark.parametrize(
