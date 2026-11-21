@@ -7940,6 +7940,20 @@ async def test_incomplete_legacy_provider_address_returns_support_guidance(
     assert response.status_code == 404 and "support" in response.json()["detail"]
 
 
+def test_a_long_sms_reason_from_a_poll_is_capped() -> None:
+    from datetime import datetime, timezone
+
+    row = CarrierVerification(
+        state="submitted",
+        purpose="sms",
+        updated_at=datetime.now(timezone.utc),
+        provider_refs={},
+    )
+    status = ProviderStatus(state="rejected", reason="y" * 5000, raw_reason="x")
+    assert verifications_routes._apply_status(row, status) is True
+    assert len(row.rejection_reason) <= _SMS_REASON_MAX
+
+
 def test_a_hold_found_while_submitting_keeps_its_repair_guidance() -> None:
     from datetime import datetime, timezone
 

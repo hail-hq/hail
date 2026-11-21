@@ -561,7 +561,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                 refs["vetting_requested"] = False
             return []
         if brand.get("failureReasons") or brand.get("status") != "OK":
-            return _reason_problems(brand.get("failureReasons"), subject_type)
+            return _reason_problems(_reasons(brand.get("failureReasons")), subject_type)
         # A failure here keeps the brand unless Telnyx refused a value
         # (create_draft). ``otp_sent_at`` stays unset for a person.
         if subject_type == "person":
@@ -760,10 +760,10 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                     state="rejected",
                     reason=brand_rejected_reason(
                         _duplicate_fixes(
-                            brand.get("failureReasons"),
+                            _reasons(brand.get("failureReasons")),
                             refs.get("subject_type") or "business",
                         ),
-                        brand.get("failureReasons"),
+                        _reasons(brand.get("failureReasons")),
                     ),
                     raw_reason=str(brand.get("failureReasons") or brand["status"]),
                 )
@@ -919,7 +919,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
             refs["runtime_ready"] = False
             return ProviderStatus(
                 state="rejected",
-                reason=campaign_repair_reason(campaign.get("failureReasons")),
+                reason=campaign_repair_reason(_reasons(campaign.get("failureReasons"))),
                 raw_reason=(
                     str(campaign["failureReasons"])
                     if campaign.get("failureReasons")
@@ -1460,10 +1460,12 @@ def _response_problems(response: httpx.Response, subject_type) -> list[Problem]:
         else:
             _add_carrier_text(problem, _detail(e))
     if not problems:
-        texts = carrier_texts(_errors(response))
+        originals = [t for t in map(_detail, _errors(response)) if t]
         return [
             Problem(
-                field="", message=_safe_message(response), raw="; ".join(texts) or None
+                field="",
+                message=_safe_message(response),
+                raw="; ".join(originals) or None,
             )
         ]
     if with_carrier_text("", unmatched):
@@ -1502,13 +1504,44 @@ def _one_line(text: str | None) -> str | None:
     return " ".join(text.split()) or None if isinstance(text, str) else None
 
 
+def _reasons(value: object) -> object:
+    """Telnyx ``failureReasons``: a list of dicts, a plain string, or that
+    list sent as JSON text. JSON text is parsed, so its descriptions are
+    quoted, not the raw payload."""
+    if isinstance(value, str) and value.strip()[:1] in ("[", "{"):
+        try:
+            return json.loads(value)
+        except ValueError:
+            return value
+    return value
+
+
+def _original_text(item: object) -> str | None:
+    """The carrier's own text in one reason or error, field tag and all."""
+    if isinstance(item, str):
+        return item.strip() or None
+    if isinstance(item, dict):
+        return next(
+            (
+                item[k]
+                for k in TEXT_KEYS
+                if isinstance(item.get(k), str) and item[k].strip()
+            ),
+            None,
+        )
+    return None
+
+
 def _general_problem(unmatched: list) -> Problem:
-    """One problem for carrier reasons on no form field, with their text
-    in ``raw`` too, so the audit row keeps what the customer sees."""
+    """One problem for carrier reasons on no form field: Hail's sentence for
+    each detail they name (else the generic one), then their words. ``raw``
+    keeps the carrier's own text, so the audit row has what was shown."""
+    originals = [t for t in map(_original_text, unmatched) if t]
+    fixes = detail_fixes(originals)
     return Problem(
         field="",
-        message=with_carrier_text(SMS_REFUSED, unmatched),
-        raw="; ".join(carrier_texts(unmatched)) or None,
+        message=with_carrier_text(" ".join(fixes) or SMS_REFUSED, unmatched),
+        raw="; ".join(originals) or None,
     )
 
 
@@ -1544,14 +1577,7 @@ def _reason_problems(reasons, subject_type) -> list[Problem]:
         text = " ".join(carrier_texts(reason))
         # raw keeps the carrier's own text, field tag and all; the message
         # quotes it cleaned (with_carrier_text).
-        original = next(
-            (
-                reason[k]
-                for k in TEXT_KEYS
-                if isinstance(reason.get(k), str) and reason[k].strip()
-            ),
-            None,
-        )
+        original = _original_text(reason)
         shown = False
         for name in _field_names(reason):
             field = names.get(name)

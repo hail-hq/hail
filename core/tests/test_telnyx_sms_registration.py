@@ -1848,6 +1848,42 @@ async def test_one_refusal_naming_email_and_ein_gets_both_sentences():
     )
 
 
+async def test_failure_reasons_sent_as_json_text_are_read() -> None:
+    reasons = json.dumps([{"fields": ["email"], "description": "Email duplicate"}])
+    p = _provider(
+        lambda req: httpx.Response(
+            200, json={"status": "REGISTRATION_FAILED", "failureReasons": reasons}
+        )
+    )
+    st = await p.status({"brand_id": "B1", "subject_type": "person", "campaign": {}})
+    assert "{" not in st.reason
+    assert st.reason.startswith("This email is on too many registrations.")
+
+
+async def test_an_off_form_error_next_to_a_field_error_gets_its_fix():
+    def handler(req):
+        return httpx.Response(
+            422,
+            json={
+                "errors": [
+                    {"detail": "Invalid email", "source": {"pointer": "/email"}},
+                    {
+                        "detail": "[ein] - EIN does not match",
+                        "source": {"pointer": "/x"},
+                    },
+                ]
+            },
+        )
+
+    draft = await _draft(_provider(handler), subject="person", fields=PERSON_FIELDS)
+    general = draft.problems[-1]
+    assert general.field == ""
+    assert general.message == (
+        "Check the business tax number. The carrier said: EIN does not match."
+    )
+    assert general.raw == "[ein] - EIN does not match"
+
+
 def test_raw_keeps_the_carriers_own_text():
     problems = _reason_problems(
         [{"fields": ["email"], "description": "[email] - Email domain invalid"}],

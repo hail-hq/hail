@@ -945,6 +945,15 @@ async def test_email_syntax_error_does_not_point_at_the_postal_address() -> None
     assert draft.problems[0].message.startswith("Check the email address. The")
 
 
+def test_one_text_naming_email_and_postal_address_gets_both() -> None:
+    from hailhq.core.providers.verification.sms_review import detail_fixes
+
+    assert detail_fixes(["Email bounced and business address not verified"]) == [
+        "Check the email address.",
+        "Check the address.",
+    ]
+
+
 async def test_email_and_street_errors_get_both_sentences() -> None:
     r = _ok_responses()
     r["customer_profiles_evaluations.create"] = SimpleNamespace(
