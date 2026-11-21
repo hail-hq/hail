@@ -766,3 +766,47 @@ async def test_a_refused_brand_delete_with_the_real_telnyx_plugin(
     assert row.state == "approved"
     assert row.provider_refs["close_refused"]["status"] == answer
     assert row.provider_refs["brand_id"] == "B1"
+
+
+async def test_close_keeps_the_registration_of_a_trial_texting_number(
+    async_session, voice_provider_mock, verifier
+) -> None:
+    """A toll-free number moved into the trial pool keeps its old
+    workspace's registration. Closing that workspace must not delete the
+    toll-free verification at the carrier: the row is kept for ops."""
+    org = uuid.uuid4()
+    await _close(async_session, org)
+    trial = PhoneNumber(
+        organization_id=None,
+        is_pool=True,
+        pool_purpose="sms_trial",
+        e164="+18005550199",
+        country_code="US",
+        number_type="toll_free",
+        capabilities=["sms"],
+        provider="twilio",
+        provider_resource_id="PN_trial",
+        provisioning_state="active",
+    )
+    async_session.add(trial)
+    await async_session.commit()
+    row = await _verification(
+        async_session,
+        org,
+        "approved",
+        "TFV1",
+        purpose="sms",
+        number_type="toll_free",
+        number_id=trial.id,
+    )
+
+    counts = await _run(async_session, verifier)
+
+    assert counts.cancelled == 0 and counts.refused == 1
+    assert verifier.discarded == []
+    voice_provider_mock.release_number.assert_not_awaited()
+    await async_session.refresh(row)
+    await async_session.refresh(trial)
+    assert row.state == "approved"
+    assert row.provider_refs["close_refused"]["number_id"] == str(trial.id)
+    assert trial.provisioning_state == "active"

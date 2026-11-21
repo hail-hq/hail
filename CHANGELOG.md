@@ -31,6 +31,7 @@ Component versions cut alongside this release:
 
 - Self-host: inbound calls can use one LiveKit trunk per carrier, locked to that carrier ([LiveKit Cloud §4](docs/public/self-host/livekit-cloud.md#4-inbound-calls)).
 - Self-host: the voicebot image is about 0.9 GB smaller, and a release that changes only Hail code adds a few MB of new image layers instead of every package again.
+- Self-host: US trial texts come from pool numbers marked with `scripts/ops/sms_trial_numbers.py` ([Twilio setup](docs/public/self-host/twilio.md)). `HAIL_SMS_TRIAL_NUMBER` and `HAIL_SMS_TRIAL_SENDING` are gone.
 - **Breaking.** Self-host with a `LIVEKIT_<CARRIER>_SIP_INBOUND_TRUNK_ID` set: before upgrading, add `hail-placeholder-shared` to the shared inbound trunk's `numbers`, or empty `LIVEKIT_SIP_INBOUND_TRUNK_ID`. A shared trunk with no numbers now takes calls to every number.
 
 ### Fixed

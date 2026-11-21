@@ -6,6 +6,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -13,7 +14,6 @@ import pytest
 from hailhq.core.config import settings
 from hailhq.core.models import (
     AgentSendLog,
-    CarrierVerification,
     Organization,
     PhoneNumber,
     Sms,
@@ -26,13 +26,14 @@ from hailhq.core.sms_trial import (
     TrialBodyTooLong,
     trial_texts_used,
 )
-from sqlalchemy import event, func, select, text, update
+from sqlalchemy import event, func, select, text
 
 from .conftest import (
     approve_us_sms,
     insert_org_and_key,
     seed_sms_trial,
     seed_trial_texts,
+    set_sms_trial,
     verify_trial_phone,
 )
 from .test_sms_api import STATUS_AUTH_TOKEN, _signed_status_form
@@ -82,27 +83,6 @@ async def _own_number(session, org_id, e164: str = OWN_NUMBER) -> None:
     await session.commit()
 
 
-async def _own_trial_number(session, org_id) -> None:
-    """Move the trial number and its registration to ``org_id``: that
-    workspace becomes the trial number's owner."""
-    number_id = (
-        await session.execute(
-            select(PhoneNumber.id).where(PhoneNumber.e164 == TRIAL_E164)
-        )
-    ).scalar_one()
-    await session.execute(
-        update(PhoneNumber)
-        .where(PhoneNumber.id == number_id)
-        .values(organization_id=org_id)
-    )
-    await session.execute(
-        update(CarrierVerification)
-        .where(CarrierVerification.number_id == number_id)
-        .values(organization_id=org_id)
-    )
-    await session.commit()
-
-
 async def _holds_advisory_lock(session) -> bool:
     """True when this session's connection holds an advisory lock, such as
     the workspace lock a trial claim takes."""
@@ -133,7 +113,6 @@ def _trial_sends(sms_mock) -> list:
         ("cap_used_25", False),
         ("explicit_own_unregistered_from", True),
         ("feature_off", False),
-        ("owner_workspace", False),
     ],
 )
 async def test_trial_send_refused(
@@ -141,7 +120,7 @@ async def test_trial_send_refused(
 ) -> None:
     """Each case is the passing setup with one condition changed."""
     org_id, _, plaintext = org_and_key
-    await seed_sms_trial(async_session, monkeypatch)
+    await seed_sms_trial(async_session)
     payload = _payload()
     if case == "not_verified_phone":
         await verify_trial_phone(async_session, org_id)
@@ -163,14 +142,7 @@ async def test_trial_send_refused(
         payload = _payload(**{"from": OWN_NUMBER})
     elif case == "feature_off":
         await verify_trial_phone(async_session, org_id)
-        monkeypatch.setattr(settings, "hail_sms_trial_sending", False)
-    elif case == "owner_workspace":
-        # Hail's own workspace (the trial number's owner) sends from another
-        # of its numbers that is not registered.
-        await verify_trial_phone(async_session, org_id)
-        await _own_trial_number(async_session, org_id)
-        await _own_number(async_session, org_id)
-        payload = _payload(**{"from": OWN_NUMBER})
+        await set_sms_trial(async_session, ready=False)
     before = await _sms_count(async_session, org_id)
 
     resp = await client.post("/sms", json=payload, headers=_auth(plaintext))
@@ -186,7 +158,7 @@ async def test_explicit_own_from_422_names_the_trial(
     client, async_session, org_and_key, sms_mock, monkeypatch
 ) -> None:
     org_id, _, plaintext = org_and_key
-    await seed_sms_trial(async_session, monkeypatch)
+    await seed_sms_trial(async_session)
     await verify_trial_phone(async_session, org_id)
     await _own_number(async_session, org_id)
 
@@ -203,7 +175,7 @@ async def test_trial_send_with_no_number(
     client, async_session, org_and_key, sms_mock, monkeypatch
 ) -> None:
     org_id, _, plaintext = org_and_key
-    await seed_sms_trial(async_session, monkeypatch)
+    await seed_sms_trial(async_session)
     await verify_trial_phone(async_session, org_id)
 
     resp = await client.post(
@@ -237,7 +209,7 @@ async def test_from_equal_to_trial_number_uses_trial(
     client, async_session, org_and_key, sms_mock, monkeypatch
 ) -> None:
     org_id, _, plaintext = org_and_key
-    await seed_sms_trial(async_session, monkeypatch)
+    await seed_sms_trial(async_session)
     await verify_trial_phone(async_session, org_id)
 
     resp = await client.post(
@@ -248,6 +220,42 @@ async def test_from_equal_to_trial_number_uses_trial(
     assert resp.json()["from_e164"] == TRIAL_E164
     assert sms_mock.send_sms.call_args.kwargs["body"] == WRAPPED_HI
     assert await trial_texts_used(async_session, org_id) == 1
+
+
+async def test_sends_pick_a_ready_trial_number(
+    client, async_session, org_and_key, sms_mock
+) -> None:
+    """With no ``from`` the oldest ready trial number sends; a ``from`` that
+    names another ready trial number sends from it; a call pool number is
+    never a trial sender."""
+    org_id, _, plaintext = org_and_key
+    await seed_sms_trial(async_session, e164="+18005550197", ready=False)
+    await seed_sms_trial(async_session)
+    second = await seed_sms_trial(async_session, e164="+18005550198")
+    second.created_at = datetime(2099, 1, 1, tzinfo=timezone.utc)
+    pool = PhoneNumber(
+        organization_id=None,
+        is_pool=True,
+        e164="+18005550196",
+        country_code="US",
+        number_type="toll_free",
+        capabilities=["voice", "sms"],
+        provider="twilio",
+        provider_resource_id="PN_pool",
+        provisioning_state="active",
+    )
+    async_session.add(pool)
+    await async_session.commit()
+    await verify_trial_phone(async_session, org_id)
+
+    senders = []
+    for from_ in (None, "+18005550198", "+18005550197", "+18005550196"):
+        payload = _payload(**({"from": from_} if from_ else {}))
+        resp = await client.post("/sms", json=payload, headers=_auth(plaintext))
+        senders.append(
+            resp.json()["from_e164"] if resp.status_code == 201 else resp.status_code
+        )
+    assert senders == [TRIAL_E164, "+18005550198", 422, 422]
 
 
 @pytest.mark.parametrize(
@@ -265,7 +273,7 @@ async def test_from_trial_number_refusal_names_the_reason(
     """``from`` is the trial number and the claim is refused: the 422 says
     why, not that the number belongs to another workspace."""
     org_id, _, plaintext = org_and_key
-    await seed_sms_trial(async_session, monkeypatch)
+    await seed_sms_trial(async_session)
     payload = _payload(**{"from": TRIAL_E164})
     if case != "no_trial_phone":
         await verify_trial_phone(async_session, org_id)
@@ -274,7 +282,7 @@ async def test_from_trial_number_refusal_names_the_reason(
     elif case == "not_verified_phone":
         payload = _payload(to=OTHER_PHONE, **{"from": TRIAL_E164})
     elif case == "feature_off":
-        monkeypatch.setattr(settings, "hail_sms_trial_sending", False)
+        await set_sms_trial(async_session, ready=False)
     before = await _sms_count(async_session, org_id)
 
     resp = await client.post("/sms", json=payload, headers=_auth(plaintext))
@@ -292,7 +300,7 @@ async def test_own_unregistered_number_omits_from_for_trial(
     """The path the hint names: a workspace whose own number is not
     registered omits ``from`` and the text goes out as a trial text."""
     org_id, _, plaintext = org_and_key
-    await seed_sms_trial(async_session, monkeypatch)
+    await seed_sms_trial(async_session)
     await verify_trial_phone(async_session, org_id)
     await _own_number(async_session, org_id)
 
@@ -307,7 +315,7 @@ async def test_registered_number_preferred(
     client, async_session, org_and_key, sms_mock, monkeypatch
 ) -> None:
     org_id, _, plaintext = org_and_key
-    await seed_sms_trial(async_session, monkeypatch)
+    await seed_sms_trial(async_session)
     await verify_trial_phone(async_session, org_id)
     await _own_number(async_session, org_id)
     await approve_us_sms(async_session, org_id)
@@ -328,7 +336,7 @@ async def test_own_ca_number_sends_without_trial(
     """A Canadian own number passes the US registration gate, so a from-less
     text to the verified trial phone goes out from it, not as a trial."""
     org_id, _, plaintext = org_and_key
-    await seed_sms_trial(async_session, monkeypatch)
+    await seed_sms_trial(async_session)
     await verify_trial_phone(async_session, org_id)
     async_session.add(
         PhoneNumber(
@@ -364,7 +372,7 @@ async def test_live_approved_tollfree_sends_without_trial(
     from hailhq.core import carrier_routing
 
     org_id, _, plaintext = org_and_key
-    await seed_sms_trial(async_session, monkeypatch)
+    await seed_sms_trial(async_session)
     await verify_trial_phone(async_session, org_id)
     async_session.add(
         PhoneNumber(
@@ -396,33 +404,11 @@ async def test_live_approved_tollfree_sends_without_trial(
     lookup.assert_awaited_once()
 
 
-async def test_hail_own_workspace_sends_normally(
-    client, async_session, org_and_key, sms_mock, monkeypatch
-) -> None:
-    """The trial number's owner sends from it as its own number, with no
-    trial wrapping, even to a verified trial phone of its own."""
-    org_id, _, plaintext = org_and_key
-    await seed_sms_trial(async_session, monkeypatch)
-    await _own_trial_number(async_session, org_id)
-    await verify_trial_phone(async_session, org_id)
-
-    resp = await client.post(
-        "/sms", json=_payload(**{"from": TRIAL_E164}), headers=_auth(plaintext)
-    )
-
-    assert resp.status_code == 201, resp.text
-    out = resp.json()
-    assert out["body"] == "hi"
-    assert sms_mock.send_sms.call_args.kwargs["body"] == "hi"
-    row = await async_session.get(Sms, uuid.UUID(out["id"]))
-    assert SMS_TRIAL_META_KEY not in row.metadata_
-
-
 async def test_trial_body_too_long_is_422(
     client, async_session, org_and_key, sms_mock, monkeypatch
 ) -> None:
     org_id, _, plaintext = org_and_key
-    await seed_sms_trial(async_session, monkeypatch)
+    await seed_sms_trial(async_session)
     await verify_trial_phone(async_session, org_id)
 
     resp = await client.post(
@@ -449,7 +435,7 @@ async def test_metadata_cannot_plant_marker(
     client, async_session, org_and_key, sms_mock, monkeypatch
 ) -> None:
     org_id, _, plaintext = org_and_key
-    await seed_sms_trial(async_session, monkeypatch)
+    await seed_sms_trial(async_session)
     await verify_trial_phone(async_session, org_id)
     await _own_number(async_session, org_id)
     await approve_us_sms(async_session, org_id)
@@ -471,7 +457,7 @@ async def test_26th_trial_text_refused(
 ) -> None:
     """The route's own text carries the marker and counts toward the cap."""
     org_id, _, plaintext = org_and_key
-    await seed_sms_trial(async_session, monkeypatch)
+    await seed_sms_trial(async_session)
     await verify_trial_phone(async_session, org_id)
     await seed_trial_texts(async_session, org_id, 24)
 
@@ -494,7 +480,7 @@ async def test_cap_counts_only_this_workspace(
     client, async_session, org_and_key, sms_mock, monkeypatch
 ) -> None:
     org_id, _, plaintext = org_and_key
-    await seed_sms_trial(async_session, monkeypatch)
+    await seed_sms_trial(async_session)
     other_id, _, _ = await insert_org_and_key(
         async_session, org_name="Other", org_slug="other"
     )
@@ -513,7 +499,7 @@ async def test_trial_text_refused_at_create_is_recorded_and_not_counted(
     from hailhq.core.providers.sms import ProviderSmsResult
 
     org_id, _, plaintext = org_and_key
-    await seed_sms_trial(async_session, monkeypatch)
+    await seed_sms_trial(async_session)
     await verify_trial_phone(async_session, org_id)
     sms_mock.send_sms.side_effect = None
     sms_mock.send_sms.return_value = ProviderSmsResult(
@@ -535,7 +521,7 @@ async def test_trial_text_refused_by_callback_frees_the_cap(
     client, async_session, org_and_key, sms_mock, monkeypatch
 ) -> None:
     org_id, _, plaintext = org_and_key
-    await seed_sms_trial(async_session, monkeypatch)
+    await seed_sms_trial(async_session)
     await verify_trial_phone(async_session, org_id)
     monkeypatch.setattr(settings, "twilio_auth_token", STATUS_AUTH_TOKEN)
     monkeypatch.setattr(settings, "hail_api_url", "http://t")
@@ -632,7 +618,7 @@ async def test_refused_trial_claim_keeps_agent_caps(
     org_id, _, plaintext = org_and_key
     await _agent_org_with_ca_number(async_session, org_id, monkeypatch)
     if trial == "all_used":
-        await seed_sms_trial(async_session, monkeypatch)
+        await seed_sms_trial(async_session)
         await verify_trial_phone(async_session, org_id)
         await seed_trial_texts(async_session, org_id, 25)
 
@@ -650,43 +636,6 @@ async def test_refused_trial_claim_keeps_agent_caps(
     assert not await _holds_advisory_lock(async_session)
 
 
-async def test_refused_owner_claim_keeps_agent_caps(
-    client, async_session, org_and_key, sms_mock, monkeypatch
-) -> None:
-    """The trial number's owner sends from it to its own verified phone: the
-    claim is refused and rolled back, then the send goes out as a normal
-    text and must still count toward the agent caps."""
-    org_id, _, plaintext = org_and_key
-    async_session.add(Organization(id=org_id, origin="agent"))
-    await async_session.commit()
-    monkeypatch.setattr(settings, "agent_sms_per_hour", 2)
-    await seed_sms_trial(async_session, monkeypatch)
-    await _own_trial_number(async_session, org_id)
-    await verify_trial_phone(async_session, org_id)
-
-    codes = []
-    with _rolled_back_statements(async_session) as rolled_back:
-        for _ in range(4):
-            resp = await client.post(
-                "/sms",
-                json=_payload(**{"from": TRIAL_E164}),
-                headers=_auth(plaintext),
-            )
-            codes.append(resp.status_code)
-
-    assert codes == [201, 201, 429, 429]
-    assert await _agent_send_logs(async_session, org_id) == 2
-    bodies = [c.kwargs["body"] for c in sms_mock.send_sms.call_args_list]
-    assert bodies == ["hi", "hi"]
-    # Each refused claim read the trial phone and rolled back reads only.
-    claim_txns = [
-        txn for txn in rolled_back if any("sms_trial_phones" in s for s in txn)
-    ]
-    assert len(claim_txns) == 4
-    for txn in claim_txns:
-        assert all(s.lstrip().split(None, 1)[0].upper() == "SELECT" for s in txn)
-
-
 async def test_refused_trial_claim_rolls_back_only_reads(
     client, async_session, org_and_key, sms_mock, monkeypatch
 ) -> None:
@@ -698,7 +647,7 @@ async def test_refused_trial_claim_rolls_back_only_reads(
     async_session.add(Organization(id=org_id, origin="agent"))
     await async_session.commit()
     await _own_number(async_session, org_id)
-    await seed_sms_trial(async_session, monkeypatch)
+    await seed_sms_trial(async_session)
     await verify_trial_phone(async_session, org_id)
     await seed_trial_texts(async_session, org_id, 25)
 
@@ -731,7 +680,7 @@ async def test_trial_send_counts_toward_agent_caps(
     async_session.add(Organization(id=org_id, origin="agent"))
     await async_session.commit()
     monkeypatch.setattr(settings, "agent_sms_per_hour", 1)
-    await seed_sms_trial(async_session, monkeypatch)
+    await seed_sms_trial(async_session)
     await verify_trial_phone(async_session, org_id)
 
     first = await client.post("/sms", json=_payload(), headers=_auth(plaintext))

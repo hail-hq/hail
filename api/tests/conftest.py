@@ -47,6 +47,7 @@ from hailhq.core.testing.fixtures import (  # noqa: F401
     session_factory,
 )
 from jwt.algorithms import OKPAlgorithm as _OKPAlgorithm
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from twilio.request_validator import RequestValidator
 
@@ -513,21 +514,19 @@ def base_claims() -> Callable[..., dict[str, Any]]:
 
 async def seed_sms_trial(
     session: AsyncSession,
-    monkeypatch: pytest.MonkeyPatch,
     *,
     e164: str = "+18005550199",
+    ready: bool = True,
 ) -> PhoneNumber:
-    """Hail's own workspace with a toll-free trial number on an approved
-    registration, and both trial settings on."""
-    from hailhq.core.config import settings
-    from hailhq.core.models import CarrierVerification, Organization
+    """A Hail pool toll-free number marked for trial texts, committed. With
+    ``ready`` its carrier approval is cached as approved."""
+    from hailhq.core.sms_trial import APPROVED_AT_KEY, POOL_PURPOSE
 
-    owner_id = uuid.uuid4()
-    session.add(Organization(id=owner_id, origin="human"))
-    await session.flush()
     number = PhoneNumber(
         id=uuid.uuid4(),
-        organization_id=owner_id,
+        organization_id=None,
+        is_pool=True,
+        pool_purpose=POOL_PURPOSE,
         e164=e164,
         country_code="US",
         number_type="toll_free",
@@ -535,29 +534,39 @@ async def seed_sms_trial(
         provider="twilio",
         provider_resource_id="PN_trial",
         provisioning_state="active",
+        provisioning_metadata=(
+            {APPROVED_AT_KEY: datetime.now(timezone.utc).isoformat()} if ready else {}
+        ),
     )
     session.add(number)
-    await session.flush()
-    registration = CarrierVerification(
-        id=uuid.uuid4(),
-        organization_id=owner_id,
-        number_id=number.id,
-        provider="twilio",
-        country_code="US",
-        number_type="toll_free",
-        subject_type="business",
-        purpose="sms",
-        state="approved",
-        provider_refs={},
-        requirements_version="test",
-    )
-    session.add(registration)
-    await session.flush()
-    number.sms_registration_id = registration.id
     await session.commit()
-    monkeypatch.setattr(settings, "hail_sms_trial_number", e164)
-    monkeypatch.setattr(settings, "hail_sms_trial_sending", True)
     return number
+
+
+async def set_sms_trial(session: AsyncSession, *, marked=True, ready=True) -> None:
+    """Change every seeded trial number: unmark it (no trial configured) or
+    drop its cached approval (configured, not available). Committed."""
+    from hailhq.core.sms_trial import APPROVED_AT_KEY, POOL_PURPOSE
+
+    numbers = (
+        (
+            await session.execute(
+                select(PhoneNumber).where(PhoneNumber.pool_purpose == POOL_PURPOSE)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for number in numbers:
+        if not marked:
+            number.pool_purpose = None
+        if not ready:
+            number.provisioning_metadata = {
+                k: v
+                for k, v in number.provisioning_metadata.items()
+                if k != APPROVED_AT_KEY
+            }
+    await session.commit()
 
 
 async def verify_trial_phone(
@@ -591,7 +600,6 @@ async def seed_trial_texts(
     to: str = "+14155550142",
 ) -> None:
     """``n`` outbound trial texts of the workspace, committed."""
-    from hailhq.core.config import settings
     from hailhq.core.models import Sms
     from hailhq.core.sms_trial import SMS_TRIAL_META_KEY
 
@@ -599,7 +607,7 @@ async def seed_trial_texts(
         session.add(
             Sms(
                 organization_id=organization_id,
-                from_e164=settings.hail_sms_trial_number or "+18005550199",
+                from_e164="+18005550199",
                 to_e164=to,
                 direction="outbound",
                 status=status,

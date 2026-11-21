@@ -166,6 +166,10 @@ from hailhq.core.schemas import (
 )
 from hailhq.core.secret_cipher import SecretCipher
 from hailhq.core.sms_registration_gate import US_SMS_COUNTRY_CODES
+from hailhq.core.sms_trial import (
+    registration_trial_number,
+    registrations_kept_for_trial,
+)
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import (
     DateTime,
@@ -1736,11 +1740,14 @@ def _out(
     model: type[VerificationResponse] = VerificationResponse,
     *,
     credit_needed_cents: int | None = None,
+    kept_for_trial: bool = False,
 ) -> VerificationResponse:
     """The response for a row, with ``confirmation``, ``step`` and
     ``identity_confirmed`` filled in. ``credit_needed_cents``: the row's
     credit need from ``_campaign_unfunded`` (the caller reads the balance),
-    None when it does not wait for credit."""
+    None when it does not wait for credit. ``kept_for_trial``: the row
+    covers a trial texting number (``registration_trial_number``), so it
+    cannot be cancelled."""
     refs = row.provider_refs or {}
     identity_confirmed = bool(refs.get("kept_brand_id"))
     if row.purpose == "sms" and row.state == "rejected":
@@ -1765,7 +1772,7 @@ def _out(
             "runtime_ready": (
                 refs.get("runtime_ready") if row.purpose == "sms" else None
             ),
-            "cancellable": _can_cancel(row),
+            "cancellable": _can_cancel(row) and not kept_for_trial,
             "kept_until": (row.created_at + REGISTRATION_KEPT_FOR) if kept else None,
             "resubmittable": kept and row.state == "rejected",
             "waiting_for_credit": credit_needed_cents is not None,
@@ -1783,7 +1790,13 @@ async def _out_checked(
     """``_out`` with ``waiting_for_credit`` and ``credit_needed_cents`` read
     from the balance."""
     waiting = await _campaign_unfunded(db, [row], registry)
-    return _out(row, registry, model, credit_needed_cents=waiting.get(row.id))
+    return _out(
+        row,
+        registry,
+        model,
+        credit_needed_cents=waiting.get(row.id),
+        kept_for_trial=await registration_trial_number(db, row) is not None,
+    )
 
 
 async def approved_handles(
@@ -4125,7 +4138,16 @@ async def list_verifications(
     for row in sorted(gated, key=lambda r: r.created_at):  # oldest first
         await _refresh(db, row, registry)
     waiting = await _campaign_unfunded(db, rows, registry)
-    return [_out(r, registry, credit_needed_cents=waiting.get(r.id)) for r in rows]
+    kept = await registrations_kept_for_trial(db, rows)
+    return [
+        _out(
+            r,
+            registry,
+            credit_needed_cents=waiting.get(r.id),
+            kept_for_trial=r.id in kept,
+        )
+        for r in rows
+    ]
 
 
 @router.get(
@@ -4711,6 +4733,13 @@ async def cancel_verification(
             status_code=409,
             detail="This verification is under review or cannot be cancelled in its current state.",
         )
+    if await registration_trial_number(db, row) is not None:
+        # The number moved into Hail's trial texting pool: the cancel would
+        # delete its toll-free verification at the carrier.
+        raise HTTPException(
+            status_code=409,
+            detail="This registration covers a Hail trial texting number and cannot be cancelled.",
+        )
     provider = registry(row.provider, row.purpose)
     # Billing releases the transaction so its own org lock can be acquired.
     # Re-read under both locks afterwards: a poll may have approved/attached
@@ -4981,8 +5010,15 @@ async def admin_list(
         .all()
     )
     waiting = await _campaign_unfunded(db, rows, registry)
+    kept = await registrations_kept_for_trial(db, rows)
     return [
-        _out(r, registry, AdminVerification, credit_needed_cents=waiting.get(r.id))
+        _out(
+            r,
+            registry,
+            AdminVerification,
+            credit_needed_cents=waiting.get(r.id),
+            kept_for_trial=r.id in kept,
+        )
         for r in rows
     ]
 

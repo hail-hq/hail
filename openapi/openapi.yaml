@@ -11362,9 +11362,10 @@ components:
           title: Source
           description:
             "How this entry was created: 'unsubscribe_link' (email unsubscribe
-            link) or 'stop_keyword' (recipient replied STOP by SMS). 'manual'
-            (operator action) and 'bounce' (bounce handler) are reserved; nothing
-            writes them yet."
+            link), 'stop_keyword' (recipient replied STOP by SMS) or 'trial_stop_keyword'
+            (your trial phone replied STOP to Hail's trial number). 'manual' (operator
+            action) and 'bounce' (bounce handler) are reserved; nothing writes them
+            yet."
         created_at:
           type: string
           format: date-time

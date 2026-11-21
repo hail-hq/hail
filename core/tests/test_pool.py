@@ -13,6 +13,7 @@ from hailhq.core.pool import (
     sweep_pool_reservations,
 )
 from sqlalchemy import update
+from sqlalchemy.exc import IntegrityError
 
 
 async def _make_number(
@@ -479,3 +480,63 @@ async def test_browser_sms_checks_other_candidates_when_first_has_no_voice_spare
     )
     assert claimed.id == sms.id
     assert (await claim_pool_number(async_session, capability="voice")).id == voice.id
+
+
+# ---------------------------------------------------------------------------
+# Trial texting numbers (pool_purpose = 'sms_trial') are never claimed
+# ---------------------------------------------------------------------------
+
+
+async def _make_trial_number(session, *, e164: str = "+18005550199") -> PhoneNumber:
+    pn = PhoneNumber(
+        organization_id=None,
+        e164=e164,
+        country_code="US",
+        number_type="toll_free",
+        capabilities=["voice", "sms"],
+        provider="twilio",
+        provider_resource_id=f"PN-{e164}",
+        provisioning_state="active",
+        is_pool=True,
+        pool_purpose="sms_trial",
+    )
+    session.add(pn)
+    await session.commit()
+    return pn
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("capability", [None, "voice", "sms"])
+async def test_claim_pool_never_returns_a_trial_number(async_session, capability):
+    await _make_trial_number(async_session)
+    assert await claim_pool_number(async_session, capability=capability) is None
+    voice = await _make_pool_number(async_session)
+    claimed = await claim_pool_number(async_session, capability=capability)
+    assert claimed is not None and claimed.id == voice.id
+
+
+@pytest.mark.asyncio
+async def test_trial_number_is_not_the_voice_spare(async_session):
+    """A browser SMS claim keeps a voice number free for calls; a trial
+    number does not count as that spare."""
+    await _make_trial_number(async_session)
+    await _make_pool_number(async_session)
+    assert (
+        await claim_pool_number(
+            async_session, capability="sms", preserve_voice_capacity=True
+        )
+        is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_reserved_number_cannot_be_marked(async_session):
+    number = await _make_trial_number(async_session)
+    number.pool_purpose = None
+    await async_session.commit()
+    call = await _make_call(async_session, from_number_id=number.id)
+    number.reserved_call_id = call.id
+    await async_session.commit()
+    number.pool_purpose = "sms_trial"
+    with pytest.raises(IntegrityError):
+        await async_session.commit()

@@ -300,7 +300,8 @@ class Suppression(Base):
     A voice row IS an internal DNC entry; there is no separate DNC table.
     Populated by the unsubscribe link (``GET /unsubscribe``,
     ``source='unsubscribe_link'``), an SMS STOP reply
-    (``hailhq.core.sms_ingest``, ``source='stop_keyword'``), and a hard
+    (``hailhq.core.sms_ingest``, ``source='stop_keyword'``, or
+    ``'trial_stop_keyword'`` for a STOP to a trial texting number), and a hard
     bounce or spam complaint on an outbound email
     (``hailhq.core.email_delivery_events``, ``source='bounce'``).
     ``'manual'`` (ops action) is reserved; nothing writes it yet.
@@ -740,6 +741,9 @@ class PhoneNumber(Base):
     is_pool: Mapped[bool] = mapped_column(
         Boolean, server_default=text("FALSE"), nullable=False
     )
+    # Pool numbers only. NULL: the shared call pool. 'sms_trial': sends US
+    # trial texts only (hailhq.core.sms_trial), never claimed for a call.
+    pool_purpose: Mapped[str | None] = mapped_column(Text, nullable=True)
     # use_alter=True so the circular FK (calls.from_number_id ↔
     # phone_numbers.reserved_call_id) can be created/dropped via ALTER TABLE
     # rather than inline — required for Base.metadata.create_all/drop_all in
@@ -788,6 +792,11 @@ class PhoneNumber(Base):
             "(is_pool = TRUE AND organization_id IS NULL)"
             " OR (is_pool = FALSE AND organization_id IS NOT NULL)",
             name="phone_numbers_pool_owner_xor",
+        ),
+        CheckConstraint(
+            "pool_purpose IS NULL OR (pool_purpose = 'sms_trial' AND is_pool"
+            " AND reserved_call_id IS NULL AND number_type = 'toll_free')",
+            name="phone_numbers_pool_purpose_check",
         ),
         Index(
             "phone_numbers_e164_live_uniq",

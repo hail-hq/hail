@@ -148,7 +148,7 @@ from hailhq.core.sms_trial import (
     TrialBodyTooLong,
     claim_trial_send,
     is_verified_trial_phone,
-    trial_enabled,
+    trial_sender,
 )
 from hailhq.core.telemetry import bind_organization
 from hailhq.core.telemetry_identity import tag_context
@@ -276,6 +276,15 @@ async def _tag_call(db: AsyncSession, call: Call | None) -> None:
         call_id=call.id,
         from_=call.from_e164,
         to=call.to_e164,
+    )
+
+
+async def _trial_may_send(db: AsyncSession, org: UUID, to: str) -> bool:
+    """``to`` is the workspace's verified trial phone and a trial number is
+    ready. ``claim_trial_send`` still decides."""
+    return (
+        await is_verified_trial_phone(db, org, to)
+        and await trial_sender(db) is not None
     )
 
 
@@ -2355,12 +2364,10 @@ async def agent_handover_sms(
     from_number = await db.get(PhoneNumber, number_id) if number_id else None
     org = call.organization_id
     cannot_text = from_number is None or "sms" not in from_number.capabilities
-    # A number that cannot text skips the notice, unless trial texting is on
-    # and the contact is the workspace's verified trial phone: then the
-    # trial number may send it.
-    if cannot_text and not (
-        trial_enabled() and await is_verified_trial_phone(db, org, to)
-    ):
+    # A number that cannot text skips the notice, unless a trial number is
+    # ready and the contact is the workspace's verified trial phone: then
+    # the trial number may send it.
+    if cannot_text and not await _trial_may_send(db, org, to):
         return AgentHandoverSmsResponse(sms="skipped:number_cannot_text")
     denial = await _shared_denial(db, call)
     if denial is not None:
@@ -2387,7 +2394,7 @@ async def agent_handover_sms(
     )
     # A blocked notice to any contact but the verified trial phone answers
     # now, before the notice text is built or a trial claimed.
-    if blocked and not (trial_enabled() and await is_verified_trial_phone(db, org, to)):
+    if blocked and not await _trial_may_send(db, org, to):
         return AgentHandoverSmsResponse(
             sms=await _notice_blocked(call, body, "sms", "us_registration")
         )
