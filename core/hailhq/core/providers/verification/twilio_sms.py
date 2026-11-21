@@ -984,7 +984,7 @@ _BRAND_FIXES_BY_TEXT: tuple[tuple[tuple[str, ...], str], ...] = (
     ),
     (
         ("not a valid us or canada address",),
-        "A person registering for US texting needs a US or Canadian address.",
+        "US texting registration needs a US or Canadian address.",
     ),
     (
         (
@@ -1010,7 +1010,8 @@ def _brand_customer_reason(brand) -> str:
     fixes: list[str] = []
     for error in errors:
         text = str(error.get("description") or "").lower()
-        fix = _BRAND_FIXES_BY_CODE.get(error.get("error_code"))  # type: ignore[arg-type]
+        code = str(error.get("error_code") or "").strip()
+        fix = _BRAND_FIXES_BY_CODE.get(int(code)) if code.isdigit() else None
         if fix is None:
             fix = next(
                 (
@@ -1022,8 +1023,13 @@ def _brand_customer_reason(brand) -> str:
             )
         if fix and fix not in fixes:
             fixes.append(fix)
-    message = f"{' '.join(fixes)} Then start again." if fixes else BRAND_REJECTED
-    return with_carrier_text(message, errors)
+    # The next step goes last, after the carrier's words (as customer_reason).
+    body = with_carrier_text(" ".join(fixes), errors).strip()
+    if fixes:
+        return f"{body} Then start again."
+    if body:
+        return f"{body} Fix that and start again."
+    return BRAND_REJECTED
 
 
 def _brand_reason(brand) -> str | None:

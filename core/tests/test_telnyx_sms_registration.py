@@ -2718,6 +2718,7 @@ async def test_address_country_must_match_eligibility():
 
 
 def test_repair_reason_gives_guidance_then_the_carriers_words():
+    from hailhq.core.providers.verification.base import CAMPAIGN_REJECTED
     from hailhq.core.providers.verification.sms_review import campaign_repair_reason
 
     message = campaign_repair_reason("Privacy policy link returns 404")
@@ -2727,6 +2728,11 @@ def test_repair_reason_gives_guidance_then_the_carriers_words():
     message = campaign_repair_reason([{"code": "1", "detail": "Sample 2 is vague"}])
     assert message.endswith("The carrier said: Sample 2 is vague.")
     assert "{" not in message
+    # Key names and links in the structure never pick the topic.
+    message = campaign_repair_reason(
+        [{"code": "1", "detail": "Campaign rejected", "meta": {"url": "https://x"}}]
+    )
+    assert message.startswith(CAMPAIGN_REJECTED)
 
 
 async def test_campaign_submission_refusal_returns_safe_repair_guidance():

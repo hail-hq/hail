@@ -90,19 +90,39 @@ def sender_problems(
     return problems
 
 
+def _topic_text(raw: object) -> str:
+    """What the topic match reads in ``raw``: the carrier's text (with its
+    field tag), its error codes and the field it points at
+    (``source.pointer``). Never key names or links."""
+    parts: list[str] = []
+    for item in raw if isinstance(raw, (list, tuple)) else [raw]:
+        if isinstance(item, str):
+            parts.append(item)
+        elif isinstance(item, dict):
+            for key in ("description", "detail", "title", "code", "error_code"):
+                if isinstance(item.get(key), (str, int)):
+                    parts.append(str(item[key]))
+            source = item.get("source")
+            if isinstance(source, dict) and isinstance(source.get("pointer"), str):
+                parts.append(source["pointer"])
+    return " ".join(parts)
+
+
 def campaign_repair_reason(raw: object, *, quote: object = ...) -> str:
     """Hail's guidance for the review topic ``raw`` names, then the carrier's
     own words (``with_carrier_text``). Codes and descriptions differ across
     carriers, so a topic match is a guess: the carrier's text says what was
     really wrong. ``raw`` is a string, a dict or a list of them; pass the
-    carrier's structure, never ``str()`` of it. ``quote``, when given, is
-    the part of ``raw`` to quote (its text without a bare error code).
+    carrier's structure, never ``str()`` of it. The topic match reads only
+    its text, error codes and field pointers (``_topic_text``), never key
+    names or links. ``quote``, when given, is the part of ``raw`` to quote
+    (its text without a bare error code).
     """
     said = raw if quote is ... else quote
     # Split field names into words first ("MessageSamples", "MESSAGE_SAMPLES"
     # and "subUsecases" hold "message samples" and "usecases"), so the word
     # start match below still finds them.
-    text = re.sub(r"(?<=[a-z])(?=[A-Z])|_", " ", str(raw or "")).lower()
+    text = re.sub(r"(?<=[a-z])(?=[A-Z])|_", " ", _topic_text(raw)).lower()
     rules = (
         (
             ("privacy", "30908"),

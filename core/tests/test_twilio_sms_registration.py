@@ -958,8 +958,10 @@ async def test_failed_brand_shows_hail_fix_and_twilio_text(description, fix) -> 
     st = await _brand_status(_failed_brand((30794, description)))
     assert st.state == "rejected"
     assert fix in st.reason
-    head, _, quote = st.reason.partition(" The carrier said: ")
-    assert head.endswith("Then start again.")
+    _, _, quote = st.reason.partition(" The carrier said: ")
+    # The next step comes last, after Twilio's words.
+    assert quote.endswith(" Then start again.")
+    quote = quote.removesuffix(" Then start again.")
     # The field tag goes; Twilio's sentence stays.
     assert quote and not quote.startswith("[")
     assert quote.rstrip(".") in description
@@ -969,16 +971,23 @@ async def test_failed_brand_with_documented_code_uses_its_fix() -> None:
     st = await _brand_status(_failed_brand((30795, "Tax ID does not match")))
     assert st.reason == (
         "The tax number does not match the legal company name. Type both "
-        "exactly as they appear on your tax documents. Then start again. "
-        "The carrier said: Tax ID does not match."
+        "exactly as they appear on your tax documents. "
+        "The carrier said: Tax ID does not match. Then start again."
     )
+    # Twilio may send the code as a string.
+    brand = _failed_brand((30795, "Tax ID does not match"))
+    brand.errors[0]["error_code"] = "30795"
+    assert (await _brand_status(brand)).reason == st.reason
 
 
 async def test_failed_brand_with_unknown_reason_quotes_twilio() -> None:
     from hailhq.core.providers.verification.base import BRAND_REJECTED
 
     st = await _brand_status(_failed_brand((30794, "Something new went wrong")))
-    assert st.reason == f"{BRAND_REJECTED} The carrier said: Something new went wrong."
+    assert st.reason == (
+        "The carrier said: Something new went wrong. Fix that and start again."
+    )
+    assert BRAND_REJECTED not in st.reason
     # The audit row keeps every part Twilio sent.
     assert st.raw_reason == "30794: Something new went wrong; General Error"
 

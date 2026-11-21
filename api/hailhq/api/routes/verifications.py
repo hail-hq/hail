@@ -435,8 +435,9 @@ def _log_carrier_refusal(
     carrier: str,
 ) -> None:
     """Log which fields the carrier refused, for the operator. Never the
-    carrier's own text: it can quote the customer's personal data, and logs
-    leave this server. The customer gets ``Problem.message``."""
+    carrier's own text, nor ``Problem.message``, which can quote it: it can
+    hold the customer's personal data, and logs leave this server. The
+    customer gets ``Problem.message``."""
     for p in problems:
         logger.warning(
             "carrier %s refused verification details (org %s, verification %s, "
@@ -706,7 +707,8 @@ async def _record_billed_refusal(
         subject_type=sub.subject_type,
         subject_name=subject_name,
         state="rejected",
-        rejection_reason=reason[:500],
+        # Not cut: each message already caps the carrier's words.
+        rejection_reason=reason,
         provider_refs={**billed_refs, "refused_at_filing": True},
         requirements_version=requirements_version,
     )
@@ -731,8 +733,9 @@ def _problems_422(
     carrier: str,
     verification_id: UUID | None = None,
 ) -> HTTPException:
-    """422 with one entry per problem: the field as ``loc`` and Hail's own
-    wording as ``msg``. The carrier's text is neither returned nor logged."""
+    """422 with one entry per problem: the field as ``loc`` and
+    ``Problem.message`` as ``msg``: Hail's wording, which for US texting
+    quotes the carrier's words. Returned to the workspace, never logged."""
     _log_carrier_refusal(problems, organization_id, verification_id, carrier)
     return HTTPException(status_code=422, detail=_problem_details(problems))
 
