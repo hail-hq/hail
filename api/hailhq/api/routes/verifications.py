@@ -684,6 +684,16 @@ async def _uncharged_sms_steps(
     ]
 
 
+# The longest joined reason stored for a refusal billed at filing.
+_BILLED_REASON_MAX = 2000
+
+
+def _cap_reason(reason: str) -> str:
+    if len(reason) <= _BILLED_REASON_MAX:
+        return reason
+    return reason[: _BILLED_REASON_MAX - 1].rstrip() + "\u2026"
+
+
 async def _record_billed_refusal(
     db: AsyncSession,
     principal: Principal,
@@ -707,8 +717,8 @@ async def _record_billed_refusal(
         subject_type=sub.subject_type,
         subject_name=subject_name,
         state="rejected",
-        # Not cut: each message already caps the carrier's words.
-        rejection_reason=reason,
+        # Each message caps the carrier's words, not their sum: cap it too.
+        rejection_reason=_cap_reason(reason),
         provider_refs={**billed_refs, "refused_at_filing": True},
         requirements_version=requirements_version,
     )

@@ -1728,6 +1728,50 @@ async def test_4xx_pointing_at_a_field_names_that_field() -> None:
     ]
 
 
+def test_two_brand_reasons_on_one_field_keep_both_texts():
+    from hailhq.core.providers.verification.telnyx_sms import _reason_problems
+
+    problems = _reason_problems(
+        [
+            {"fields": ["email"], "description": "Email duplicate threshold reached"},
+            {"fields": ["email"], "description": "Email domain invalid"},
+        ],
+        "person",
+    )
+    assert [p.field for p in problems] == ["email", ""]
+    assert "too many registrations" in problems[0].message
+    assert problems[1].message.endswith("The carrier said: Email domain invalid.")
+
+
+async def test_brand_refused_later_gets_the_reused_email_fix() -> None:
+    p = _provider(
+        lambda req: httpx.Response(
+            200,
+            json={
+                "status": "REGISTRATION_FAILED",
+                "failureReasons": [
+                    {"fields": ["email"], "description": "Email duplicate reached"}
+                ],
+            },
+        )
+    )
+    st = await p.status({"brand_id": "B1", "subject_type": "person", "campaign": {}})
+    assert st.reason == (
+        "This email is on too many registrations. Use another one. "
+        "The carrier said: Email duplicate reached. Fix these and start again."
+    )
+
+
+def test_topic_match_reads_named_fields():
+    from hailhq.core.providers.verification.sms_review import campaign_repair_reason
+
+    reason = campaign_repair_reason(
+        [{"fields": ["messageSamples"], "description": "No"}]
+    )
+    assert "message examples" in reason
+    assert "message examples" in campaign_repair_reason([[{"field": "sample1"}]])
+
+
 async def test_refusal_on_a_field_and_off_the_form_keeps_both_reasons():
     def handler(req):
         return httpx.Response(

@@ -1036,9 +1036,9 @@ def _brand_reason(brand) -> str | None:
     """Everything Twilio said about a refused brand, for the audit row
     (see ``ProviderStatus.raw_reason``)."""
     parts = [
-        f"{e.get('error_code')}: {e.get('description')}"
+        ": ".join(str(v) for v in (e.get("error_code"), e.get("description")) if v)
         for e in getattr(brand, "errors", None) or []
-        if isinstance(e, dict)
+        if isinstance(e, dict) and (e.get("error_code") or e.get("description"))
     ]
     parts += [str(f) for f in getattr(brand, "brand_feedback", None) or []]
     if getattr(brand, "failure_reason", None):

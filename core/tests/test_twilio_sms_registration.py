@@ -970,8 +970,8 @@ async def test_failed_brand_shows_hail_fix_and_twilio_text(description, fix) -> 
     assert fix in st.reason
     _, _, quote = st.reason.partition(" The carrier said: ")
     # The next step comes last, after Twilio's words.
-    assert quote.endswith(" Then start again.")
-    quote = quote.removesuffix(" Then start again.")
+    assert quote.endswith(" Fix these and start again.")
+    quote = quote.removesuffix(" Fix these and start again.")
     # The field tag goes; Twilio's sentence stays.
     assert quote and not quote.startswith("[")
     assert quote.rstrip(".") in description
@@ -982,7 +982,7 @@ async def test_failed_brand_with_documented_code_uses_its_fix() -> None:
     assert st.reason == (
         "The tax number does not match the legal company name. Type both "
         "exactly as they appear on your tax documents. "
-        "The carrier said: Tax ID does not match. Then start again."
+        "The carrier said: Tax ID does not match. Fix these and start again."
     )
     # Twilio may send the code as a string.
     brand = _failed_brand((30795, "Tax ID does not match"))
@@ -999,6 +999,11 @@ async def test_failed_brand_with_unknown_reason_quotes_twilio() -> None:
     )
     # The audit row keeps every part Twilio sent.
     assert st.raw_reason == "30794: Something new went wrong; General Error"
+    brand = _failed_brand((30794, "x"))
+    brand.errors = [{"description": "Invalid street"}, {"error_code": 30701}]
+    assert (await _brand_status(brand)).raw_reason == (
+        "Invalid street; 30701; General Error"
+    )
 
 
 async def test_failed_brand_without_errors_keeps_the_generic_line() -> None:

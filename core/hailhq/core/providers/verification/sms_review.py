@@ -9,7 +9,11 @@ from hailhq.core.providers.verification.base import (
     Address,
     Problem,
 )
-from hailhq.core.providers.verification.rejections import with_carrier_text
+from hailhq.core.providers.verification.rejections import (
+    FIX_THESE_AND_START_AGAIN,
+    START_AGAIN,
+    with_carrier_text,
+)
 from hailhq.core.providers.verification.sms_form import (
     NINE_DIGIT_COUNTRIES,
     tax_number,
@@ -97,31 +101,40 @@ BRAND_REJECTED_LEAD = "The 10DLC registry rejected the registration."
 
 def brand_rejected_reason(fixes: list[str], raw: object) -> str:
     """Why a brand was refused: Hail's fixes (or its lead sentence), then
-    the carrier's own words, then the next step. No fix and no carrier
-    text gives the generic ``BRAND_REJECTED``."""
-    if not fixes and not with_carrier_text("", raw):
+    the carrier's own words, then the next step, worded as
+    ``customer_reason`` words it. No fix and no carrier text gives the
+    generic ``BRAND_REJECTED``."""
+    said = bool(with_carrier_text("", raw))
+    if not fixes and not said:
         return BRAND_REJECTED
+    if fixes and not said:
+        return f"{' '.join(fixes)} {START_AGAIN}"
     body = with_carrier_text(" ".join(fixes) or BRAND_REJECTED_LEAD, raw)
-    if fixes:
-        return f"{body} Then start again."
-    return f"{body} Fix that and start again."
+    end = FIX_THESE_AND_START_AGAIN if fixes else "Fix that and start again."
+    return f"{body} {end}"
 
 
 def _topic_text(raw: object) -> str:
     """What the topic match reads in ``raw``: the carrier's text (with its
-    field tag), its error codes and the field it points at
-    (``source.pointer``). Never key names or links."""
+    field tag), its error codes, the fields it names (``fields``, ``field``)
+    and the field it points at (``source.pointer``). Nested lists are read
+    too. Never other key names or links."""
+    if isinstance(raw, str):
+        return raw
+    if isinstance(raw, (list, tuple)):
+        return " ".join(_topic_text(item) for item in raw)
+    if not isinstance(raw, dict):
+        return ""
     parts: list[str] = []
-    for item in raw if isinstance(raw, (list, tuple)) else [raw]:
-        if isinstance(item, str):
-            parts.append(item)
-        elif isinstance(item, dict):
-            for key in ("description", "detail", "title", "code", "error_code"):
-                if isinstance(item.get(key), (str, int)):
-                    parts.append(str(item[key]))
-            source = item.get("source")
-            if isinstance(source, dict) and isinstance(source.get("pointer"), str):
-                parts.append(source["pointer"])
+    for key in ("description", "detail", "title", "code", "error_code"):
+        if isinstance(raw.get(key), (str, int)):
+            parts.append(str(raw[key]))
+    for key in ("fields", "field"):
+        if isinstance(raw.get(key), (str, list, tuple)):
+            parts.append(_topic_text(raw[key]))
+    source = raw.get("source")
+    if isinstance(source, dict) and isinstance(source.get("pointer"), str):
+        parts.append(source["pointer"])
     return " ".join(parts)
 
 

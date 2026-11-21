@@ -753,7 +753,13 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                 refs.pop("identity_verified", None)
                 return ProviderStatus(
                     state="rejected",
-                    reason=brand_rejected_reason([], brand.get("failureReasons")),
+                    reason=brand_rejected_reason(
+                        _duplicate_fixes(
+                            brand.get("failureReasons"),
+                            refs.get("subject_type") or "business",
+                        ),
+                        brand.get("failureReasons"),
+                    ),
                     raw_reason=str(brand.get("failureReasons") or brand["status"]),
                 )
             if brand.get("status") == "REGISTRATION_PENDING":
@@ -1449,6 +1455,23 @@ def _response_problems(response: httpx.Response, subject_type) -> list[Problem]:
     return problems
 
 
+def _duplicate_fixes(reasons, subject_type) -> list[str]:
+    """Hail's sentence for each reused phone or email in ``failureReasons``
+    (the same sentences ``_reason_problems`` gives at filing)."""
+    names = _FORM_FIELDS.get(subject_type, {})
+    fixes: list[str] = []
+    for reason in reasons if isinstance(reasons, list) else []:
+        if not isinstance(reason, dict):
+            continue
+        if "duplicate" not in str(reason.get("description") or "").lower():
+            continue
+        for name in reason.get("fields") or []:
+            fix = _DUPLICATE.get(names.get(name) or "")
+            if fix and fix not in fixes:
+                fixes.append(fix)
+    return fixes
+
+
 def _reason_problems(reasons, subject_type) -> list[Problem]:
     """A refused brand's ``failureReasons`` as problems on the form fields
     they name, each with Telnyx's own words. A reused phone or email gets
@@ -1462,12 +1485,12 @@ def _reason_problems(reasons, subject_type) -> list[Problem]:
             unmatched.append(reason)
             continue
         text = str(reason.get("description") or "")
-        if not any(names.get(name) for name in reason.get("fields") or []):
-            unmatched.append(reason)
+        shown = False
         for name in reason.get("fields") or []:
             field = names.get(name)
             if not field or any(p.field == field for p in problems):
                 continue
+            shown = True
             message = SMS_VALUE_REFUSED
             if "duplicate" in text.lower():
                 message = _DUPLICATE.get(field, message)
@@ -1478,6 +1501,10 @@ def _reason_problems(reasons, subject_type) -> list[Problem]:
                     raw=text or None,
                 )
             )
+        if not shown:
+            # On no form field, or on one that already has a problem: its
+            # text goes in the general problem, so no reason is lost.
+            unmatched.append(reason)
     if not problems or with_carrier_text("", unmatched):
         problems.append(
             Problem(field="", message=with_carrier_text(SMS_REFUSED, unmatched))
