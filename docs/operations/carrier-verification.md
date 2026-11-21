@@ -441,6 +441,7 @@ US texting registrations (`purpose='sms'`) follow one rule: Hail's sentence firs
 
 - **Twilio brand.** Twilio puts the reason in `errors[]` (`error_code`, `description`). Code: `_brand_customer_reason` in `twilio_sms.py`, `brand_rejected_reason` in `sms_review.py`.
   - Hail's fix for each refusal Twilio documents: by code from the error pages, and by text for the email and address reasons in the Sole Proprietor guide (they come under the general codes 30701 and 30794).
+  - Nothing documented: the detail the text names, as on Telnyx (`detail_fixes`: tax number, website, address, phone, email).
   - Any other refusal: "The 10DLC registry rejected the registration.", Twilio's words, then "Fix that and start again."
   - No text in `errors`: Hail quotes `failure_reason`. Twilio's "General Error" placeholder is never quoted.
   - `SUSPENDED`: "The carrier suspended your US texting registration.", Twilio's words, then "Email <support address> and we will look into it. Do not file a new registration." (the address is `HAIL_SUPPORT_EMAIL`; owner decision 2026-11-21: a new filing cannot fix a suspension).

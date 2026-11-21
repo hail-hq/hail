@@ -1546,19 +1546,20 @@ def _all_text(item: object) -> str:
     return ""
 
 
+def _text_fixes(texts: list[str]) -> list[str]:
+    """Hail's sentences for carrier texts on no form field: the reuse
+    sentence for a reused email or phone, the detail sentence for the rest."""
+    fixes = [f for f in map(_duplicate_by_text, texts) if f]
+    others = [t for t in texts if not _duplicate_by_text(t)]
+    return list(dict.fromkeys(fixes + detail_fixes(others)))
+
+
 def _general_problem(unmatched: list) -> Problem:
     """One problem for carrier reasons on no form field: Hail's sentence for
     each detail they name (else the generic one), then their words. ``raw``
     keeps the carrier's own text, so the audit row has what was shown."""
     originals = [t for t in map(_original_text, unmatched) if t]
-    texts = [_all_text(item) for item in unmatched]
-    # A reused email or phone gets the reuse sentence, as on its field.
-    fixes = [f for f in map(_duplicate_by_text, texts) if f]
-    fixes += [
-        f
-        for f in detail_fixes([t for t in texts if not _duplicate_by_text(t)])
-        if f not in fixes
-    ]
+    fixes = _text_fixes([_all_text(item) for item in unmatched])
     return Problem(
         field="",
         message=with_carrier_text(" ".join(fixes) or SMS_REFUSED, unmatched),
@@ -1612,6 +1613,10 @@ def _duplicate_fixes(reasons, subject_type) -> list[str]:
     items = reasons if isinstance(reasons, list) else [reasons]
     for reason in items:
         if not isinstance(reason, dict):
+            # A plain text reason names no field: read it by its words.
+            fix = _duplicate_by_text(_all_text(reason))
+            if fix and fix not in fixes:
+                fixes.append(fix)
             continue
         if "duplicate" not in _all_text(reason).lower():
             continue
@@ -1673,8 +1678,8 @@ def _reason_problems(reasons, subject_type) -> list[Problem]:
 
 
 def _safe_message(response: httpx.Response) -> str:
-    """Hail's sentence for each detail Telnyx names (``detail_fixes``),
-    then Telnyx's own words."""
+    """Hail's sentence for each detail Telnyx names (``_text_fixes``: a
+    reused email or phone gets the reuse sentence), then Telnyx's words."""
     errors = _errors(response)
-    fixes = detail_fixes([_all_text(e) for e in errors])
+    fixes = _text_fixes([_all_text(e) for e in errors])
     return with_carrier_text(" ".join(fixes) or SMS_REFUSED, errors)

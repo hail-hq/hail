@@ -1091,6 +1091,9 @@ def _brand_customer_reason(brand) -> str:
                 ),
                 None,
             )
+        if fix is None:
+            # Nothing documented: the detail the text names, as on Telnyx.
+            fix = next(iter(detail_fixes([text])), None)
         if fix and fix not in fixes:
             fixes.append(fix)
     # Twilio's "General Error" placeholder says nothing: never quote it.

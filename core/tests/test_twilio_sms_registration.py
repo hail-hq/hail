@@ -1179,6 +1179,11 @@ async def test_failed_brand_with_documented_code_uses_its_fix() -> None:
     assert (await _brand_status(brand)).reason == st.reason
 
 
+async def test_failed_brand_names_the_detail_when_nothing_is_documented() -> None:
+    st = await _brand_status(_failed_brand((30794, "Website unreachable")))
+    assert st.reason.startswith("Check the website address. The carrier said:")
+
+
 async def test_failed_brand_with_unknown_reason_quotes_twilio() -> None:
 
     st = await _brand_status(_failed_brand((30794, "Something new went wrong")))

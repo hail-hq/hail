@@ -1871,6 +1871,32 @@ async def test_brand_refused_later_reads_text_and_fields(reasons, start) -> None
     assert st.reason.startswith(start)
 
 
+async def test_an_off_form_duplicate_error_alone_gets_the_reuse_fix():
+    def handler(req):
+        return httpx.Response(
+            422, json={"errors": [{"detail": "Email duplicate threshold reached"}]}
+        )
+
+    draft = await _draft(_provider(handler), subject="person", fields=PERSON_FIELDS)
+    assert draft.problems[0].message.startswith(
+        "This email is on too many registrations."
+    )
+
+
+async def test_a_plain_text_duplicate_after_filing_gets_the_reuse_fix() -> None:
+    p = _provider(
+        lambda req: httpx.Response(
+            200,
+            json={
+                "status": "REGISTRATION_FAILED",
+                "failureReasons": "Email duplicate threshold reached",
+            },
+        )
+    )
+    st = await p.status({"brand_id": "B1", "subject_type": "person", "campaign": {}})
+    assert st.reason.startswith("This email is on too many registrations.")
+
+
 def test_an_off_form_duplicate_at_filing_gets_the_reuse_fix():
     problems = _reason_problems(
         [{"fields": [], "description": "Email duplicate threshold reached"}],
