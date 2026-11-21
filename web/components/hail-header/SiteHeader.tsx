@@ -2,6 +2,31 @@
 
 import { useEffect, useId, useRef, type ReactNode } from "react";
 import { AnswerButton } from "./AnswerButton";
+const HEADER_COPY = {
+  en: {
+    home: "/",
+    pricing: "/pricing",
+    homeLabel: "hail home",
+    navLabel: "main navigation",
+    product: "Product",
+    compare: "Compare and estimate",
+    setup: "Setup guide",
+    startHere: "Start here",
+    templates: "Agent templates",
+    phoneEmail: "Phone and email",
+    docs: "Docs",
+    blog: "Blog",
+    pricingLabel: "Pricing",
+    contact: "Contact",
+    signIn: "Sign in",
+    console: "Console",
+    getStarted: "Get started",
+    openMenu: "Open navigation",
+    closeMenu: "Close navigation",
+  },
+} as const;
+const chromeLabel = (_lang: Lang, label: string) => label;
+type Lang = "en";
 import { useDropdown } from "./useDropdown";
 import { Mascot } from "./Mascot";
 import styles from "./SiteHeader.module.css";
@@ -15,9 +40,12 @@ export type SiteHeaderActive =
   | "contact"
   | null;
 
-const RESOURCES = [
+type MenuGroup = { label: string; items: { label: string; href: string }[] };
+
+// Group headings are dictionary keys. Item labels are English and go through `chromeLabel`.
+const RESOURCES: (MenuGroup & { label: "product" | "compare" })[] = [
   {
-    label: "Product",
+    label: "product",
     items: [
       { label: "Voice API", href: "/voice" },
       { label: "SMS API", href: "/sms" },
@@ -27,7 +55,7 @@ const RESOURCES = [
     ],
   },
   {
-    label: "Compare and estimate",
+    label: "compare",
     items: [
       { label: "Compare platforms", href: "/compare" },
       { label: "Free tools", href: "/tools" },
@@ -36,13 +64,15 @@ const RESOURCES = [
   },
 ];
 
-const SETUP_GUIDES = [
+const SETUP_GUIDES: (MenuGroup & {
+  label: "startHere" | "templates" | "phoneEmail";
+})[] = [
   {
-    label: "Start here",
+    label: "startHere",
     items: [{ label: "Create an AI agent", href: "/create-ai-agent" }],
   },
   {
-    label: "Agent templates",
+    label: "templates",
     items: [
       { label: "Front desk", href: "/agent-templates/front-desk" },
       { label: "Appointments", href: "/agent-templates/appointments" },
@@ -54,7 +84,7 @@ const SETUP_GUIDES = [
     ],
   },
   {
-    label: "Phone and email",
+    label: "phoneEmail",
     items: [
       { label: "10DLC timeline guide", href: "/sms#10dlc-registration" },
       { label: "Domain warmup guide", href: "/email#domain-warmup" },
@@ -76,13 +106,16 @@ export function SiteHeader({
   accountAction,
   themeControl,
   origin = "https://hail.so",
+  lang = "en",
 }: {
   active?: SiteHeaderActive;
   loggedIn?: boolean;
   themeControl: ReactNode;
   origin?: string;
   accountAction?: { href: string; label: string };
+  lang?: Lang;
 }) {
+  const t = HEADER_COPY[lang];
   const current = active;
   const siteHref = (path: string) => new URL(path, origin).href;
   const { open, setOpen, ref } = useDropdown();
@@ -150,14 +183,18 @@ export function SiteHeader({
           }
         }}
       >
-        <a className={styles.logo} href={siteHref("/")} aria-label="hail home">
+        <a
+          className={styles.logo}
+          href={siteHref(t.home)}
+          aria-label={t.homeLabel}
+        >
           <Mascot size={26} />
           hail
         </a>
         <nav
           id={navId}
           className={`${styles.nav} ${mobileOpen ? styles.navOpen : ""}`}
-          aria-label="main navigation"
+          aria-label={t.navLabel}
           onClick={(event) => {
             if ((event.target as HTMLElement).closest("a")) {
               setMobileOpen(false);
@@ -187,7 +224,7 @@ export function SiteHeader({
                 setSetupOpen(false);
               }}
             >
-              Product
+              {t.product}
               <svg
                 className={styles.chev}
                 width="10"
@@ -207,14 +244,14 @@ export function SiteHeader({
               <div className={styles.panel}>
                 {RESOURCES.map((group) => (
                   <div key={group.label}>
-                    <div className={styles.panelGroup}>{group.label}</div>
+                    <div className={styles.panelGroup}>{t[group.label]}</div>
                     {group.items.map((item) => (
                       <a
                         key={item.href}
                         href={siteHref(item.href)}
                         onClick={() => setOpen(false)}
                       >
-                        {item.label}
+                        {chromeLabel(lang, item.label)}
                       </a>
                     ))}
                   </div>
@@ -243,7 +280,7 @@ export function SiteHeader({
                 setOpen(false);
               }}
             >
-              Setup guide
+              {t.setup}
               <svg
                 className={styles.chev}
                 width="10"
@@ -263,14 +300,14 @@ export function SiteHeader({
               <div className={styles.panel}>
                 {SETUP_GUIDES.map((group) => (
                   <div key={group.label}>
-                    <div className={styles.panelGroup}>{group.label}</div>
+                    <div className={styles.panelGroup}>{t[group.label]}</div>
                     {group.items.map((item) => (
                       <a
                         key={item.href}
                         href={siteHref(item.href)}
                         onClick={() => setSetupOpen(false)}
                       >
-                        {item.label}
+                        {chromeLabel(lang, item.label)}
                       </a>
                     ))}
                   </div>
@@ -283,21 +320,21 @@ export function SiteHeader({
             aria-current={current === "docs" ? "true" : undefined}
             className={navLinkClass(current === "docs")}
           >
-            Docs
+            {t.docs}
           </a>
           <a
             href={siteHref("/blog")}
             aria-current={current === "blog" ? "true" : undefined}
             className={navLinkClass(current === "blog")}
           >
-            Blog
+            {t.blog}
           </a>
           <a
-            href={siteHref("/pricing")}
+            href={siteHref(t.pricing)}
             aria-current={current === "pricing" ? "true" : undefined}
             className={navLinkClass(current === "pricing")}
           >
-            Pricing
+            {t.pricingLabel}
           </a>
           {/* Only in the phone menu. The desktop bar keeps Contact in the footer. */}
           <a
@@ -305,14 +342,14 @@ export function SiteHeader({
             aria-current={current === "contact" ? "true" : undefined}
             className={`${navLinkClass(current === "contact")} ${styles.menuOnly}`}
           >
-            Contact
+            {t.contact}
           </a>
           {!accountAction && !loggedIn && (
             <a
               className={`${styles.navLink} ${styles.menuSignIn}`}
               href={siteHref("/signin")}
             >
-              Sign in
+              {t.signIn}
             </a>
           )}
         </nav>
@@ -330,18 +367,18 @@ export function SiteHeader({
               className={styles.primary}
               href={siteHref("/console")}
             >
-              Console
+              {t.console}
             </AnswerButton>
           ) : (
             <>
               <a className={styles.account} href={siteHref("/signin")}>
-                Sign in
+                {t.signIn}
               </a>
               <AnswerButton
                 className={styles.primary}
                 href={siteHref("/signup")}
               >
-                Get started
+                {t.getStarted}
               </AnswerButton>
             </>
           )}
@@ -349,7 +386,7 @@ export function SiteHeader({
             ref={menuButton}
             type="button"
             className={`${styles.menuToggle} ${mobileOpen ? styles.menuOpen : ""}`}
-            aria-label={mobileOpen ? "Close navigation" : "Open navigation"}
+            aria-label={mobileOpen ? t.closeMenu : t.openMenu}
             aria-expanded={mobileOpen}
             aria-controls={navId}
             onClick={() => {

@@ -183,6 +183,10 @@
         "href": "/brand"
       },
       {
+        "label": "Français",
+        "href": "/fr"
+      },
+      {
         "label": "Terms",
         "href": "/legal/terms"
       },

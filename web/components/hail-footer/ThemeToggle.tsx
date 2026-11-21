@@ -2,6 +2,30 @@
 
 import { useEffect, useSyncExternalStore } from "react";
 
+/**
+ * The switch's words. English by default. Other languages pass their copy (THEME_COPY in lib/i18n/chrome-copy.ts).
+ * scripts/sync-footer.mjs copies this file as is to the hail repo, so it imports nothing from the site.
+ */
+export type ThemeCopy = {
+  heading: string;
+  group: string;
+  system: string;
+  light: string;
+  dark: string;
+  switchToLight: string;
+  switchToDark: string;
+};
+
+const ENGLISH: ThemeCopy = {
+  heading: "theme",
+  group: "Color theme",
+  system: "system",
+  light: "light",
+  dark: "dark",
+  switchToLight: "Switch to light theme",
+  switchToDark: "Switch to dark theme",
+};
+
 type Theme = "system" | "light" | "dark";
 
 /** The saved choice: system (default), light, or dark. Shared by every control. */
@@ -24,7 +48,7 @@ export function selectTheme(next: Theme) {
   window.dispatchEvent(new Event("hail-theme-change"));
 }
 
-export function ThemeToggle() {
+export function ThemeToggle({ copy: t = ENGLISH }: { copy?: ThemeCopy } = {}) {
   const theme = useTheme();
 
   useEffect(() => {
@@ -34,7 +58,7 @@ export function ThemeToggle() {
 
   const select = selectTheme;
 
-  return <div><b>theme</b><div className={styles} role="group" aria-label="Color theme"><button type="button" aria-pressed={theme === "system"} onClick={() => select("system")}>system</button><button type="button" aria-pressed={theme === "light"} onClick={() => select("light")}>light</button><button type="button" aria-pressed={theme === "dark"} onClick={() => select("dark")}>dark</button></div></div>;
+  return <div><b>{t.heading}</b><div className={styles} role="group" aria-label={t.group}><button type="button" aria-pressed={theme === "system"} onClick={() => select("system")}>{t.system}</button><button type="button" aria-pressed={theme === "light"} onClick={() => select("light")}>{t.light}</button><button type="button" aria-pressed={theme === "dark"} onClick={() => select("dark")}>{t.dark}</button></div></div>;
 }
 
 /**
@@ -44,19 +68,20 @@ export function ThemeToggle() {
  * offers the way back to system. Before hydration the effective theme is
  * unknown, so the server render shows a neutral half-disc.
  */
-export function ThemeButton({ className }: { className?: string }) {
+export function ThemeButton({ className, copy: t = ENGLISH }: { className?: string; copy?: ThemeCopy }) {
   const theme = useTheme();
   const systemDark = useSyncExternalStore(subscribeSystem, getSystemDark, () => null);
   const effective: "light" | "dark" | null =
     theme === "system" ? (systemDark === null ? null : systemDark ? "dark" : "light") : theme;
   const next = effective === "dark" ? "light" : "dark";
+  const label = next === "light" ? t.switchToLight : t.switchToDark;
   return (
     <button
       type="button"
       className={className}
       onClick={() => selectTheme(next)}
-      aria-label={`Switch to ${next} theme`}
-      title={`Switch to ${next} theme`}
+      aria-label={label}
+      title={label}
     >
       <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true">
         {effective === "light" && (

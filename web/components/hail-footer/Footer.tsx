@@ -30,17 +30,30 @@ function FooterLinks({ group }: { group: FooterGroup }) {
   );
 }
 
+/** The footer's own words. English by default; hail.so passes French on its French pages. */
+export type FooterText = { about: string; featuredOn: string; findOn: string; profiles: string; profileLabel: (network: string) => string };
+
+const FOOTER_TEXT_EN: FooterText = {
+  about: `${PRODUCT_COPY.tagline} ${PRODUCT_COPY.availability}`,
+  featuredOn: "Featured on",
+  findOn: "Find Hail on",
+  profiles: "Hail profiles",
+  profileLabel: (network) => `Hail on ${network}`,
+};
+
 /** Framework-independent, server-rendered footer. Native anchors cross Next zones safely. */
 export function Footer({
   groups,
   themeControl,
   badges = [],
   homeHref = "/",
+  text = FOOTER_TEXT_EN,
 }: {
   groups: FooterGroup[];
   themeControl: ReactNode;
   badges?: FooterBadge[];
   homeHref?: string;
+  text?: FooterText;
 }) {
   return (
     <footer className="hail-footer" aria-label="Hail">
@@ -53,9 +66,9 @@ export function Footer({
               <span>hail</span>
             </a>
             <p>
-              {PRODUCT_COPY.tagline} {PRODUCT_COPY.availability}
+              {text.about}
             </p>
-            <SocialLinks />
+            <SocialLinks navLabel={text.profiles} profileLabel={text.profileLabel} />
           </div>
           {groups.map((group) => (
             <details key={group.title} className="hail-footer-column">
@@ -66,14 +79,14 @@ export function Footer({
           <FooterAccordion />
         </div>
         {badges.length > 0 && (
-          <ul id="footer-badges" className="hail-footer-badges" aria-label="Featured on">
+          <ul id="footer-badges" className="hail-footer-badges" aria-label={text.featuredOn}>
             {badges.map((badge) => (
               <li key={badge.id}>
                 <a href={badge.href} target="_blank" rel="noopener" aria-label={badge.alt}>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={badge.icon} alt="" width={36} height={36} loading="lazy" />
                   <span className="hail-footer-badge-copy">
-                    <span className="hail-footer-badge-label">Find Hail on</span>
+                    <span className="hail-footer-badge-label">{text.findOn}</span>
                     <span className="hail-footer-badge-name">{badge.name}</span>
                   </span>
                 </a>
