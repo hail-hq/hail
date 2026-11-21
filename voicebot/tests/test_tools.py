@@ -79,22 +79,6 @@ async def test_empty_opt_out_keeps_only_end_call(db):
             await api.aclose()
 
 
-async def test_end_call_list_matches_the_empty_list(monkeypatch):
-    """`["end_call"]` means end_call only, the same as `[]`."""
-
-    def no_db():
-        raise AssertionError("session_scope opened")
-
-    monkeypatch.setattr(tools_mod, "session_scope", no_db)
-    tools, _api = await build_agent_tools(
-        {"organization_id": str(uuid.uuid4()), "tools": ["end_call"]},
-        call_id=uuid.uuid4(),
-        hangup=None,
-        send_dtmf=None,
-    )
-    assert [t.info.name for t in tools] == ["end_call"]
-
-
 async def test_a_tools_list_without_end_call_still_gets_it(db):
     tools, api = await build_agent_tools(
         {

@@ -242,8 +242,9 @@ async def build_agent_tools(
             specs.append(transfer_call.CANCEL_SPEC)
     # The settings guide is loaded by tool, not carried in the prompt. No
     # `tools` list names it, so every call gets it here, as cancel_transfer is.
-    # `tools: []` and `tools: ["end_call"]` both mean end_call only.
-    if allowed is None or set(allowed) - {end_call.SPEC.name}:
+    # `tools: []` drops it too; any non-empty list (even `["end_call"]`,
+    # which the console sends when every other tool is off) keeps it.
+    if allowed != []:
         specs.append(hail_help.SPEC)
     # The agent's own HTTP tools are not built-ins: a `tools` list does not
     # name them, and they stay on with `tools: []`.

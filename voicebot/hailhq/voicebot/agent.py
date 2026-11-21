@@ -942,12 +942,14 @@ async def build_tools_safely(
             call_id,
         )
         # The call can still hang up: end_call needs no database or API.
-        return (
-            end_call_only(
+        try:
+            tools = end_call_only(
                 metadata, call_id=call_id, hangup=hangup, spoke_since=spoke_since
-            ),
-            None,
-        )
+            )
+        except Exception:
+            logger.exception("call_id=%s end_call fallback failed", call_id)
+            tools = []
+        return tools, None
 
 
 # Spoken opening when the caller supplied no ``first_message``. A real LLM
