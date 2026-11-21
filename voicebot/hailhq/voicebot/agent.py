@@ -92,6 +92,11 @@ from hailhq.voicebot.amd import (
 )
 from hailhq.voicebot.audio import prewarm_audio, room_options
 from hailhq.voicebot.browser import run_browser_session
+from hailhq.voicebot.end_call_repair import (
+    repair_end_call_stream,
+    strip_end_call_stream,
+    strip_end_call_text,
+)
 from hailhq.voicebot.handover_watch import contact_speaks
 from hailhq.voicebot.ivr import PhoneMenu
 from hailhq.voicebot.leg_tracker import LegTracker
@@ -141,7 +146,7 @@ def speech_text(text: str) -> str:
     event writer (so the stored transcript reflects what was actually
     said).
     """
-    t = text.strip()
+    t = strip_end_call_text(text).strip()
     cut = _syntax_cut(t)
     if cut != -1:
         t = t[:cut].strip()
@@ -178,7 +183,7 @@ async def _sanitize_tts_stream(source: Any) -> Any:
     """
     started = False
     carry = ""
-    async for chunk in source:
+    async for chunk in strip_end_call_stream(source):
         buf = carry + chunk
         if not started:
             stripped = buf.lstrip()
@@ -294,7 +299,11 @@ class SpeechSanitizingAgent(Agent):
             chat_ctx.add_message(
                 role="system", content=ivr_navigation_instructions(None)
             )
-        return Agent.default.llm_node(self, chat_ctx, tools, model_settings)
+        return repair_end_call_stream(
+            Agent.default.llm_node(self, chat_ctx, tools, model_settings),
+            tools=tools,
+            model_settings=model_settings,
+        )
 
     async def tts_node(self, text: Any, model_settings: Any) -> Any:
         if self.phone_menu is not None and self.phone_menu.active:
