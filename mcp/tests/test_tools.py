@@ -1477,6 +1477,8 @@ def _email_domain(domain: str = "acme.com", kind: str = "custom") -> dict:
         "organization_id": str(uuid4()),
         "kind": kind,
         "domain": domain,
+        "local_prefix_workspace": None,
+        "local_prefix_name": None,
         "local_prefix_user": None,
         "local_prefix_org": None,
         "verification_status": "verified",

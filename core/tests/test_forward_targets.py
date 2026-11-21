@@ -210,8 +210,8 @@ async def _queued_confirm_mails(session, org_id, n, *, to=None):
         organization_id=org_id,
         kind="hail_mail",
         domain=f"a{org_id.hex[:8]}+{org_id.hex[:8]}@mail.hail.so",
-        local_prefix_user=f"a{org_id.hex[:8]}",
-        local_prefix_org=org_id.hex[:8],
+        local_prefix_workspace=f"a{org_id.hex[:8]}",
+        local_prefix_name=org_id.hex[:8],
         verification_status="verified",
         provider="ses",
     )

@@ -147,28 +147,30 @@ class Settings(BaseSettings):
     aws_secret_access_key: str = ""
 
     # Email, operator-managed parent domain used to mint hail-mail
-    # addresses of the form ``<user>+<org>@<HAIL_MAIL_BASE_DOMAIN>``
-    # (e.g. ``alice+acme@mail.hail.so``). The operator pre-verifies this
+    # addresses of the form ``<workspace>+<name>@<HAIL_MAIL_BASE_DOMAIN>``
+    # (e.g. ``acme+amber@mail.hail.so``). The operator pre-verifies this
     # one SES identity out-of-band; per-org rows land already-verified.
     # Leave empty to disable hail-mail mode (only custom domains accepted).
     hail_mail_base_domain: str = ""
 
     # Shortcut for self-hosters running a SINGLE org: one full address the
-    # server splits into the user/org prefix pair internally. Wins over the
-    # per-org derived org prefix when set. Example:
+    # server splits into the workspace/name prefix pair internally. Wins over
+    # the per-org derived name prefix when set. Example:
     #   HAIL_MAIL_FROM=hi+selfhost@mail.hail.so
     # The domain portion must match ``HAIL_MAIL_BASE_DOMAIN`` (the
     # SES-verified parent); each side of the ``+`` must match the
     # ``^[a-z0-9]([a-z0-9-]{0,18}[a-z0-9])?$`` prefix regex.
-    # Do NOT set this on a multi-tenant deployment, a fixed org prefix is
-    # shared across orgs and only the first org can claim it.
+    # Do NOT set this on a multi-tenant deployment, a fixed workspace prefix
+    # is shared across orgs and only the first org can claim it.
     hail_mail_from: str = ""
 
-    # Default USER prefix for ``POST /email-domains`` (``kind='hail_mail'``)
-    # when the request omits ``local_prefix_user``. Hail appends a per-org
-    # token (see ``hailhq.core.hail_mail.default_user_prefix``), because one
-    # org only may hold a user prefix. The ORG prefix is never a deploy-wide
-    # constant, it is derived per-org from the organization id. Must match
+    # Default WORKSPACE prefix (the part before the '+') for
+    # ``POST /email-domains`` (``kind='hail_mail'``) when the request omits
+    # ``local_prefix_workspace``. Hail appends a per-org token (see
+    # ``hailhq.core.hail_mail.default_workspace_prefix``), because one org only
+    # may hold a workspace prefix. The NAME prefix (after the '+') is never a
+    # deploy-wide constant, it is derived per-org from the organization id.
+    # The env key keeps its old USER name. Must match
     # ``^[a-z0-9]([a-z0-9-]{0,18}[a-z0-9])?$``.
     hail_mail_default_user_prefix: str = ""
 
