@@ -8764,3 +8764,13 @@ async def test_an_amendment_at_a_carrier_with_no_low_volume_filing_stays_vetted(
     stored = await _stored_refs(async_session, vid)
     assert stored["campaign"]["use_case"] != "LOW_VOLUME"
     assert "low_volume" not in stored
+
+
+def test_billed_refusal_reason_cap_keeps_the_next_step() -> None:
+    from hailhq.api.routes.verifications import _BILLED_REASON_MAX, _cap_reason
+
+    reason = "x" * 3000 + ". Fix these and start again."
+    capped = _cap_reason(reason)
+    assert len(capped) <= _BILLED_REASON_MAX
+    assert capped.endswith("… Fix these and start again.")
+    assert _cap_reason("short.") == "short."

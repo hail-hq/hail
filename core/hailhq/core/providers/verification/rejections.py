@@ -106,7 +106,7 @@ def sentence(text: str) -> str:
 # The longest carrier text quoted to the customer; longer text is cut.
 CARRIER_TEXT_MAX = 600
 # A leading field tag in a carrier's text, like "[email] - ".
-_FIELD_TAG = re.compile(r"^\s*\[[^\]]*\]\s*-\s*")
+_FIELD_TAG = re.compile(r"^\s*\[[^\]]*\]\s*[-:]?\s*")
 # twilio-python's own wrapper around Twilio's message ("Unable to create
 # record: <message>"); not the carrier's words.
 _SDK_PREFIX = re.compile(r"^\s*Unable to \w+ record\s*:?\s*", re.IGNORECASE)
@@ -135,7 +135,9 @@ def with_carrier_text(message: str, raw: object) -> str:
     """``message`` (Hail's own sentence, with the next step) followed by the
     carrier's own words, so the customer always sees why. The carrier's
     text can quote what the customer filed: it goes to the workspace (the
-    console, the API, the owners' email) and is never logged."""
+    console, the API, the owners' email). Hail never logs it, except
+    Telnyx's error text (``_error_log`` in ``telnyx_sms.py``, owner
+    decision 2026-10-28)."""
     said = list(dict.fromkeys(sentence(t) for t in carrier_texts(raw)))
     if not said:
         return message

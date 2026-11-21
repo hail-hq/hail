@@ -570,8 +570,19 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
             return ProviderStatus(state="approved")
         if campaign.campaign_status == "FAILED":
             errors = campaign.errors or []
+            # For the audit row: what the topic match read, codes included.
             raw = "; ".join(
-                e.get("description", "") for e in errors if isinstance(e, dict)
+                ": ".join(
+                    str(v)
+                    for v in (
+                        e.get("error_code"),
+                        e.get("description"),
+                        e.get("fields"),
+                    )
+                    if v
+                )
+                for e in errors
+                if isinstance(e, dict)
             )
             return ProviderStatus(
                 state="rejected",
@@ -1028,7 +1039,8 @@ def _brand_customer_reason(brand) -> str:
         # No text in errors: Twilio's failure_reason, unless it is only
         # its placeholder.
         failure = str(getattr(brand, "failure_reason", None) or "")
-        said = "" if failure.strip().lower() == "general error" else failure
+        placeholder = failure.strip().lower().startswith("general error")
+        said = "" if placeholder else failure
     return brand_rejected_reason(fixes, said)
 
 

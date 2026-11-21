@@ -819,6 +819,10 @@ def test_sdk_wrapper_is_not_quoted() -> None:
         "Hi. The carrier said: Bad EIN."
     )
     assert with_carrier_text("Hi.", "Unable to create record") == "Hi."
+    # A field tag goes with or without its separator.
+    assert with_carrier_text("Hi.", "[address_sids]: Invalid Postal Code.") == (
+        "Hi. The carrier said: Invalid Postal Code."
+    )
 
 
 async def test_draft_4xx_unknown_message_is_generic() -> None:
@@ -1011,6 +1015,14 @@ async def test_failed_brand_without_errors_keeps_the_generic_line() -> None:
 
     st = await _brand_status(_failed_brand())
     assert st.reason == BRAND_REJECTED
+
+
+async def test_failed_brand_general_error_placeholder_is_not_quoted() -> None:
+    from hailhq.core.providers.verification.base import BRAND_REJECTED
+
+    brand = _failed_brand()
+    brand.failure_reason = "General Error."
+    assert (await _brand_status(brand)).reason == BRAND_REJECTED
 
 
 async def test_failed_brand_without_errors_quotes_failure_reason() -> None:

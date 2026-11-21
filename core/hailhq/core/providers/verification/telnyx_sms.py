@@ -31,7 +31,10 @@ from hailhq.core.providers.verification.base import (
     VerificationProviderError,
 )
 from hailhq.core.providers.verification.forms import display_name, text_length
-from hailhq.core.providers.verification.rejections import with_carrier_text
+from hailhq.core.providers.verification.rejections import (
+    sentence,
+    with_carrier_text,
+)
 from hailhq.core.providers.verification.sms_form import (
     NINE_DIGIT_COUNTRIES,
     campaign_text,
@@ -1429,14 +1432,19 @@ def _error_log(response: httpx.Response) -> list:
 
 def _response_problems(response: httpx.Response, subject_type) -> list[Problem]:
     """One problem per form field Telnyx points at (``source.pointer``),
-    each with Telnyx's own words. Errors on no form field (or a second one
-    on the same field) go in one general problem, so no reason is lost."""
+    each with Telnyx's own words (a second error on the same field adds its
+    words to that problem). Errors on no form field go in one general
+    problem, so no reason is lost."""
     names = _FORM_FIELDS[subject_type]
     problems: list[Problem] = []
     unmatched: list[dict] = []
     for e in _errors(response):
         field = names.get((_pointer(e) or "").rsplit("/", 1)[-1])
-        if field and all(p.field != field for p in problems):
+        if not field:
+            unmatched.append(e)
+            continue
+        problem = next((p for p in problems if p.field == field), None)
+        if problem is None:
             problems.append(
                 Problem(
                     field=field,
@@ -1445,7 +1453,7 @@ def _response_problems(response: httpx.Response, subject_type) -> list[Problem]:
                 )
             )
         else:
-            unmatched.append(e)
+            _add_carrier_text(problem, _detail(e))
     if not problems:
         return [Problem(field="", message=_safe_message(response))]
     if with_carrier_text("", unmatched):
@@ -1453,6 +1461,18 @@ def _response_problems(response: httpx.Response, subject_type) -> list[Problem]:
             Problem(field="", message=with_carrier_text(SMS_REFUSED, unmatched))
         )
     return problems
+
+
+def _add_carrier_text(problem: Problem, text: str | None) -> None:
+    """Another carrier reason on the same field: its words join that
+    problem, next to the field they name."""
+    if not text or text in (problem.raw or "").split("; "):
+        return
+    if " The carrier said: " in problem.message:
+        problem.message = f"{problem.message} {sentence(text)}"
+    else:
+        problem.message = with_carrier_text(problem.message, text)
+    problem.raw = f"{problem.raw}; {text}" if problem.raw else text
 
 
 def _duplicate_fixes(reasons, subject_type) -> list[str]:
@@ -1488,9 +1508,13 @@ def _reason_problems(reasons, subject_type) -> list[Problem]:
         shown = False
         for name in reason.get("fields") or []:
             field = names.get(name)
-            if not field or any(p.field == field for p in problems):
+            if not field:
                 continue
             shown = True
+            problem = next((p for p in problems if p.field == field), None)
+            if problem is not None:
+                _add_carrier_text(problem, text)
+                continue
             message = SMS_VALUE_REFUSED
             if "duplicate" in text.lower():
                 message = _DUPLICATE.get(field, message)
@@ -1502,8 +1526,8 @@ def _reason_problems(reasons, subject_type) -> list[Problem]:
                 )
             )
         if not shown:
-            # On no form field, or on one that already has a problem: its
-            # text goes in the general problem, so no reason is lost.
+            # On no form field: its text goes in the general problem, so no
+            # reason is lost.
             unmatched.append(reason)
     if not problems or with_carrier_text("", unmatched):
         problems.append(

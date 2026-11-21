@@ -1738,9 +1738,12 @@ def test_two_brand_reasons_on_one_field_keep_both_texts():
         ],
         "person",
     )
-    assert [p.field for p in problems] == ["email", ""]
-    assert "too many registrations" in problems[0].message
-    assert problems[1].message.endswith("The carrier said: Email domain invalid.")
+    # Both texts stay on the field they name.
+    assert [p.field for p in problems] == ["email"]
+    assert problems[0].message == (
+        "This email is on too many registrations. Use another one. The carrier "
+        "said: Email duplicate threshold reached. Email domain invalid."
+    )
 
 
 async def test_brand_refused_later_gets_the_reused_email_fix() -> None:

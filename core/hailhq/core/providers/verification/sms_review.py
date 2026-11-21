@@ -10,6 +10,7 @@ from hailhq.core.providers.verification.base import (
     Problem,
 )
 from hailhq.core.providers.verification.rejections import (
+    FIX_AND_START_AGAIN,
     FIX_THESE_AND_START_AGAIN,
     START_AGAIN,
     with_carrier_text,
@@ -110,7 +111,7 @@ def brand_rejected_reason(fixes: list[str], raw: object) -> str:
     if fixes and not said:
         return f"{' '.join(fixes)} {START_AGAIN}"
     body = with_carrier_text(" ".join(fixes) or BRAND_REJECTED_LEAD, raw)
-    end = FIX_THESE_AND_START_AGAIN if fixes else "Fix that and start again."
+    end = FIX_THESE_AND_START_AGAIN if fixes else FIX_AND_START_AGAIN
     return f"{body} {end}"
 
 
