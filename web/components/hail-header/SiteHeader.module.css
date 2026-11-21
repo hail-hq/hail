@@ -207,7 +207,8 @@
 }
 .menuToggle,
 .menuOnly,
-.menuSignIn {
+.menuSignIn,
+.menuLanguage {
   display: none;
 }
 .menuToggle span {
@@ -284,6 +285,16 @@
   .menuOnly.menuOnly,
   .menuSignIn.menuSignIn {
     display: flex;
+  }
+  .languageMenu {
+    display: none;
+  }
+  .menuLanguage.menuLanguage {
+    display: inline-flex;
+    align-self: flex-start;
+    margin-top: 24px;
+    font-size: 15px;
+    color: var(--ink);
   }
   .menuToggle {
     position: relative;

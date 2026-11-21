@@ -61,6 +61,7 @@
 .hail-footer-badge-label { color: var(--hf-muted); font-size: 9px; font-weight: 400; }
 .hail-footer-badge-name { font-size: 16px; font-weight: 600; line-height: 20px; }
 .hail-footer-end { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 20px; padding-block: 22px 28px; border-top: 1px solid var(--hf-line); color: var(--hf-muted); font-size: 11px; }
+.hail-footer-theme { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 .hail-footer-theme > div > b { display: none; }
 .hail-footer .theme-toggle { display: inline-flex; gap: 3px; padding: 3px; border: 1px solid var(--hf-line); border-radius: 999px; }
 .hail-footer .theme-toggle button { min-width: 44px; min-height: 38px; padding: 6px 10px; border: 0; border-radius: 999px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
