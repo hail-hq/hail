@@ -8,10 +8,11 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 Hail-mail address fields have clearer names: `local_prefix_workspace` is the
 part before the `+`, and `local_prefix_name` is the part after it. The old
-names still work and are deprecated.
+names still work and are deprecated. The new names in the CLI and SDK need a
+Hail server from this release or newer.
 
 Component versions cut alongside this release:
-**`sdk-v0.25.0`** (PyPI) and **`cli-v0.33.0`**. Database migrations run on deploy.
+**`sdk-v0.25.0`** (PyPI) and **`cli-v0.33.0`** (Homebrew + GitHub Releases). Database migrations run on deploy.
 
 ### Changed
 
