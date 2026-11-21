@@ -1860,6 +1860,29 @@ async def test_failure_reasons_sent_as_json_text_are_read() -> None:
     assert st.reason.startswith("This email is on too many registrations.")
 
 
+async def test_one_failure_reason_object_as_json_gets_the_reuse_fix() -> None:
+    reasons = json.dumps({"fields": ["email"], "description": "Email duplicate"})
+    p = _provider(
+        lambda req: httpx.Response(
+            200, json={"status": "REGISTRATION_FAILED", "failureReasons": reasons}
+        )
+    )
+    st = await p.status({"brand_id": "B1", "subject_type": "person", "campaign": {}})
+    assert st.reason.startswith("This email is on too many registrations.")
+
+
+async def test_audit_text_off_the_form_matches_the_quote():
+    def handler(req):
+        return httpx.Response(
+            422,
+            json={"errors": [{"detail": "Bad EIN", "description": "EIN mismatch"}]},
+        )
+
+    draft = await _draft(_provider(handler), subject="person", fields=PERSON_FIELDS)
+    assert draft.problems[0].message.endswith("The carrier said: EIN mismatch.")
+    assert draft.problems[0].raw == "EIN mismatch"
+
+
 async def test_an_off_form_error_next_to_a_field_error_gets_its_fix():
     def handler(req):
         return httpx.Response(

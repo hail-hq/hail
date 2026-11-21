@@ -108,16 +108,29 @@ _DETAIL_FIXES: tuple[tuple[tuple[str, ...], str], ...] = (
 )
 
 
+# The postal address in a text that is also about the email.
+_POSTAL_IN_EMAIL_TEXT = re.compile(
+    r"\b(?:street|postal|zip)\b"
+    r"|\b(?:business|mailing|physical|home|street|postal|billing) address\b"
+)
+
+
 def detail_fixes(texts: list[str]) -> list[str]:
     """Hail's sentence for every detail the carrier's ``texts`` name, each
-    text on its own, without repeats. "email address" and "address syntax"
-    are about the email, not the postal address."""
+    text on its own, without repeats. "web address" is the website. In a
+    text about the email, a bare "address" is the email's ("suspected
+    disposable address", "invalid address syntax"): the postal address
+    fix then needs street, postal, zip or a postal kind of address
+    ("business address", "mailing address")."""
     fixes: list[str] = []
     for one in texts:
-        low = re.sub(
-            r"\bemail address\b|\baddress syntax\b", "email", str(one or "").lower()
-        )
+        low = re.sub(r"\bweb address\b", "website", str(one or "").lower())
+        about_email = re.search(r"\bemail\b", low) is not None
         for words, fix in _DETAIL_FIXES:
+            if fix == _ADDRESS_FIX and about_email:
+                if fix not in fixes and _POSTAL_IN_EMAIL_TEXT.search(low):
+                    fixes.append(fix)
+                continue
             if fix not in fixes and any(re.search(rf"\b{w}\b", low) for w in words):
                 fixes.append(fix)
     return fixes

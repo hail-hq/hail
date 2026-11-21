@@ -1460,7 +1460,7 @@ def _response_problems(response: httpx.Response, subject_type) -> list[Problem]:
         else:
             _add_carrier_text(problem, _detail(e))
     if not problems:
-        originals = [t for t in map(_detail, _errors(response)) if t]
+        originals = [t for t in map(_original_text, _errors(response)) if t]
         return [
             Problem(
                 field="",
@@ -1550,7 +1550,8 @@ def _duplicate_fixes(reasons, subject_type) -> list[str]:
     (the same sentences ``_reason_problems`` gives at filing)."""
     names = _FORM_FIELDS.get(subject_type, {})
     fixes: list[str] = []
-    for reason in reasons if isinstance(reasons, list) else []:
+    items = reasons if isinstance(reasons, list) else [reasons]
+    for reason in items:
         if not isinstance(reason, dict):
             continue
         if "duplicate" not in " ".join(carrier_texts(reason)).lower():

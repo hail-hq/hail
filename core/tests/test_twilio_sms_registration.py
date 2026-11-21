@@ -952,6 +952,14 @@ def test_one_text_naming_email_and_postal_address_gets_both() -> None:
         "Check the email address.",
         "Check the address.",
     ]
+    # A bare "address" in an email text is the email's.
+    for text in (
+        "[email] - Email is a suspected disposable address",
+        "Email domain has an invalid address syntax.",
+        "Email address is invalid",
+    ):
+        assert detail_fixes([text]) == ["Check the email address."]
+    assert detail_fixes(["Invalid web address"]) == ["Check the website address."]
 
 
 async def test_email_and_street_errors_get_both_sentences() -> None:
