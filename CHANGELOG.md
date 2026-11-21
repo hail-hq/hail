@@ -6,7 +6,8 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [0.34.0] (2026-11-20)
 
-Webhooks can send your receiver's own `Authorization` header. Agent emails
+Webhooks can send your receiver's own `Authorization` header. Companies
+register for US texting at low volume by default, with lower fees. Agent emails
 to callers go only to their saved address and use the call's language.
 
 Component versions cut alongside this release:
@@ -15,6 +16,8 @@ Component versions cut alongside this release:
 ### Added
 
 - Webhooks can send an `Authorization` header to your receiver: set `authorization` on `POST`/`PATCH /v1/webhooks` (SDK too). Hail encrypts it and never returns it.
+- US texting registration: companies register at low volume (up to 2,000 texts a day, lower fees) unless they set `daily_texts` to `OVER_2000`.
+- US texting registration: when the faster lane still cannot verify your company, the registration waits for you (`step: needs_information`) and can be cancelled, so you can register again.
 
 ### Fixed
 
@@ -40,8 +43,6 @@ The MCP registry entry moves to 0.2.0. Database migrations run on deploy.
 - Call agents know the date, time and time zone at the start of each call.
 - Text and email reply agents know the date, time and time zone too.
 - Calls: `GET /v1/calls/{id}` returns the call's transcript, and the new `call.summarized` webhook sends the transcript and a short summary after each call.
-- US texting registration: companies register at low volume (up to 2,000 texts a day, lower fees) unless they set `daily_texts` to `OVER_2000`.
-- US texting registration: when the faster lane still cannot verify your company, the registration waits for you (`step: needs_information`) and can be cancelled, so you can register again.
 - US trial texting: a workspace can send up to 25 texts, ever, to its own verified phone from a Hail number, with no US registration needed. Set it up in the console under Numbers.
 - Rejected number registrations can be fixed and sent again for 30 days with `POST /v1/verifications/{id}/resubmit` (MCP: `resubmit_verification`).
 - `sms.received` webhooks and `received` SMS events have a new `compliance_keyword` field: `STOP`, `START` or `HELP` when the text is one of those keywords, otherwise `null`.
