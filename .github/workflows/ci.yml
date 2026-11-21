@@ -51,7 +51,8 @@ jobs:
         package: [core, api, voicebot, sdk, mcp]
     services:
       postgres:
-        image: postgres:16-alpine
+        # pgvector for the knowledge base; same image as docker-compose.local.yml.
+        image: pgvector/pgvector:0.8.0-pg16
         env:
           POSTGRES_USER: hail
           POSTGRES_PASSWORD: hail

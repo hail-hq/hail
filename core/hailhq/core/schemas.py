@@ -10,7 +10,11 @@ from uuid import UUID
 import phonenumbers
 import regex
 from hailhq.core.contact_ids import normalize_contact_id
-from hailhq.core.file_uploads import VERIFICATION_FILE_TYPES, valid_content_type
+from hailhq.core.file_uploads import (
+    KNOWLEDGE_FILE_TYPES,
+    VERIFICATION_FILE_TYPES,
+    valid_content_type,
+)
 from hailhq.core.hail_mail import ROLE_MAILBOXES
 from hailhq.core.languages import Language
 from hailhq.core.regions import REGIONS
@@ -1405,6 +1409,14 @@ class AgentCreate(BaseModel):
         default=True,
         description="Answer email on addresses that route email to this agent.",
     )
+    knowledge: bool = Field(
+        default=False,
+        description=(
+            "Answer from the workspace's knowledge base (POST "
+            "/v1/knowledge/documents) on calls, texts and email. Needs the "
+            "knowledge base turned on for the workspace (403 otherwise)."
+        ),
+    )
     status: AgentStatus = Field(
         default="live",
         description="'paused' agents do not answer; calls to their numbers fail with end_reason 'no_agent'.",
@@ -1495,6 +1507,14 @@ class AgentUpdate(BaseModel):
     email_enabled: bool | None = Field(
         default=None, description="Whether the agent answers email."
     )
+    knowledge: bool | None = Field(
+        default=None,
+        description=(
+            "Whether the agent answers from the workspace's knowledge base. "
+            "Turning it on needs the knowledge base turned on for the "
+            "workspace (403 otherwise)."
+        ),
+    )
     status: AgentStatus | None = Field(default=None, description="'live' or 'paused'.")
     handover_contacts: list[HandoverContactIn] | None = Field(
         default=None,
@@ -1555,6 +1575,10 @@ class AgentResponse(BaseModel):
     sms_enabled: bool = Field(description="Whether the agent answers texts.")
     email_enabled: bool = Field(
         default=True, description="Whether the agent answers email."
+    )
+    knowledge: bool = Field(
+        default=False,
+        description="Whether the agent answers from the workspace's knowledge base.",
     )
     status: AgentStatus = Field(description="'live' or 'paused'.")
     handover_contacts: list[HandoverContactOut] = Field(
@@ -2676,12 +2700,16 @@ class EmailAttachmentUploadResponse(BaseModel):
 class FileUploadCreate(BaseModel):
     """Body of ``POST /uploads``: what the file is for, and its name and type."""
 
-    purpose: Literal["email_attachment", "verification_document"] = Field(
+    purpose: Literal[
+        "email_attachment", "verification_document", "knowledge_document"
+    ] = Field(
         description=(
             "What the file is for. `email_attachment`: the id works in "
             "`POST /v1/emails` `attachment_ids`. `verification_document`: the "
             "id works as the `upload.<slot>` part of `POST /v1/verifications` "
-            "and `POST /v1/verifications/check`."
+            "and `POST /v1/verifications/check`. `knowledge_document`: the id "
+            "works in `POST /v1/knowledge/documents`; needs the knowledge "
+            "base turned on for the workspace."
         )
     )
     filename: str = Field(
@@ -2693,8 +2721,11 @@ class FileUploadCreate(BaseModel):
         description=(
             "MIME type, `type/subtype` with no parameters. A "
             "`verification_document` takes `image/jpeg`, `image/png` or "
-            "`application/pdf` only. This type is stored; the PUT request's "
-            "own `Content-Type` header is not used."
+            "`application/pdf` only. A `knowledge_document` takes "
+            "`application/pdf`, "
+            "`application/vnd.openxmlformats-officedocument.wordprocessingml.document`, "
+            "`text/plain`, `text/markdown` or `text/csv`. This type is "
+            "stored; the PUT request's own `Content-Type` header is not used."
         )
     )
 
@@ -2727,6 +2758,14 @@ class FileUploadCreate(BaseModel):
                 "a verification_document must be image/jpeg, image/png or "
                 "application/pdf"
             )
+        if (
+            self.purpose == "knowledge_document"
+            and self.content_type not in KNOWLEDGE_FILE_TYPES
+        ):
+            raise ValueError(
+                "a knowledge_document must be one of: "
+                + ", ".join(KNOWLEDGE_FILE_TYPES)
+            )
         return self
 
 
@@ -2734,9 +2773,9 @@ class FileUploadLinkResponse(BaseModel):
     """Returned by ``POST /uploads``: a one-time link to send the bytes to."""
 
     id: UUID = Field(description="The upload's id.")
-    purpose: Literal["email_attachment", "verification_document"] = Field(
-        description="What the file is for."
-    )
+    purpose: Literal[
+        "email_attachment", "verification_document", "knowledge_document"
+    ] = Field(description="What the file is for.")
     upload_url: str = Field(
         description=(
             "Send the raw file bytes here with `PUT`. No Authorization "
@@ -2754,9 +2793,9 @@ class FileUploadResponse(BaseModel):
     """Returned by ``PUT /uploads/{id}``: what Hail stored."""
 
     id: UUID = Field(description="The upload's id.")
-    purpose: Literal["email_attachment", "verification_document"] = Field(
-        description="What the file is for."
-    )
+    purpose: Literal[
+        "email_attachment", "verification_document", "knowledge_document"
+    ] = Field(description="What the file is for.")
     filename: str = Field(description="The name given when the link was made.")
     content_type: str = Field(description="The type given when the link was made.")
     size_bytes: int = Field(description="Bytes stored. Compare with the local file.")
@@ -3813,4 +3852,105 @@ class VerificationResponse(BaseModel):
             "one top-up lets them all go. It follows the balance, so read it "
             "again before you pay."
         ),
+    )
+
+
+KnowledgeDocumentStatus = Literal["pending", "processing", "ready", "failed"]
+
+
+class KnowledgeDocumentCreate(BaseModel):
+    """Body of ``POST /knowledge/documents``: an uploaded file to add."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    upload_id: UUID = Field(
+        description=(
+            "A `knowledge_document` upload (`POST /v1/uploads`, then the "
+            "PUT), stored and not yet used by another document."
+        )
+    )
+    name: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=255,
+        description="Display name. Omitted: the upload's filename.",
+    )
+
+    @field_validator("name")
+    @classmethod
+    def _name_printable(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip()
+        if not v or any(ord(c) < 0x20 or ord(c) == 0x7F for c in v):
+            raise ValueError("name must be printable and not blank")
+        return v
+
+
+class KnowledgeDocumentResponse(BaseModel):
+    """One knowledge base document and how far its reading got."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID = Field(description="The document's id.")
+    name: str = Field(description="Display name.")
+    content_type: str = Field(description="The file's MIME type.")
+    size_bytes: int = Field(description="The file's size in bytes.")
+    status: KnowledgeDocumentStatus = Field(
+        description=(
+            "`pending`: waiting to be read. `processing`: being read and "
+            "indexed. `ready`: agents answer from it. `failed`: see `error`."
+        )
+    )
+    error: str | None = Field(
+        description="Why the document failed, in plain words. Null otherwise."
+    )
+    piece_count: int = Field(
+        description="Searchable pieces made from the file (0 until ready)."
+    )
+    created_at: datetime = Field(description="ISO 8601 timestamp.")
+    updated_at: datetime = Field(description="ISO 8601 timestamp.")
+
+
+class KnowledgeDocumentListResponse(BaseModel):
+    items: list[KnowledgeDocumentResponse] = Field(
+        description="Documents in this page, newest first."
+    )
+    next_cursor: str | None = Field(
+        default=None,
+        description="Opaque cursor for the next page. Null when there are no more results.",
+    )
+
+
+class KnowledgeSearchRequest(BaseModel):
+    """Body of ``POST /knowledge/search``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    query: str = Field(
+        min_length=1,
+        max_length=1000,
+        description="A question or keywords, in any supported language.",
+    )
+    limit: int = Field(
+        default=5, ge=1, le=10, description="How many pieces to return (1 to 10)."
+    )
+
+
+class KnowledgeSearchResult(BaseModel):
+    document_id: UUID = Field(description="The document the piece comes from.")
+    document_name: str = Field(description="That document's name.")
+    text: str = Field(description="The piece's text.")
+    page: int | None = Field(description="The PDF page it starts on, or null.")
+    row: int | None = Field(
+        description="The CSV data row (1 = first row under the header), or null."
+    )
+    score: float = Field(
+        description="Fused rank score; higher is better. Compare within one response only."
+    )
+
+
+class KnowledgeSearchResponse(BaseModel):
+    results: list[KnowledgeSearchResult] = Field(
+        description="The best pieces, best first. Empty when nothing matches well."
     )

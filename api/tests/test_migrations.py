@@ -841,3 +841,57 @@ def test_0054_handover_members(empty_db: str) -> None:
         assert rows == [(agent, contact)]
         assert _column_data_type(conn, "agent_handover_contacts", "user_id") is None
         assert _constraint_exists(conn, "agent_handover_contacts_pkey")
+
+
+def test_0088_knowledge_tables(empty_db: str) -> None:
+    """0088 installs pgvector and the knowledge tables, and widens the
+    upload purposes."""
+    _run_alembic(empty_db, ["upgrade", "head"])
+    with psycopg.connect(_to_libpq_url(to_sync_url(empty_db))) as conn:
+        assert _table_exists(conn, "knowledge_documents")
+        assert _table_exists(conn, "knowledge_pieces")
+        assert _table_exists(conn, "organization_knowledge")
+        embedding = conn.execute(
+            "SELECT format_type(atttypid, atttypmod) FROM pg_attribute "
+            "WHERE attrelid = 'knowledge_pieces'::regclass AND attname = 'embedding'"
+        ).fetchone()
+        assert embedding is not None and embedding[0] == "vector(384)"
+        assert "knowledge_document" in (
+            _constraint_src(conn, "file_uploads_purpose_check") or ""
+        )
+    _run_alembic(empty_db, ["downgrade", "0087"])
+    with psycopg.connect(_to_libpq_url(to_sync_url(empty_db))) as conn:
+        assert not _table_exists(conn, "knowledge_pieces")
+        assert "knowledge_document" not in (
+            _constraint_src(conn, "file_uploads_purpose_check") or ""
+        )
+
+
+def test_0088_uses_an_extensions_schema(empty_db: str) -> None:
+    """Supabase keeps extensions in an ``extensions`` schema on the search
+    path: 0088 installs pgvector there and its tables still work."""
+    url = _to_libpq_url(to_sync_url(empty_db))
+    with psycopg.connect(url, autocommit=True) as conn:
+        conn.execute("DROP EXTENSION IF EXISTS vector CASCADE")
+        conn.execute("CREATE SCHEMA extensions")
+        database = conn.execute("SELECT current_database()").fetchone()[0]
+        conn.execute(
+            f'ALTER DATABASE "{database}" SET search_path = "$user", public, extensions'
+        )
+    try:
+        _run_alembic(empty_db, ["upgrade", "head"])
+        with psycopg.connect(url) as conn:
+            schema = conn.execute(
+                "SELECT extnamespace::regnamespace::text FROM pg_extension "
+                "WHERE extname = 'vector'"
+            ).fetchone()
+            assert schema == ("extensions",)
+            conn.execute("SELECT '[1,2]'::vector <=> '[2,1]'::vector").fetchone()
+    finally:
+        with psycopg.connect(url, autocommit=True) as conn:
+            conn.execute(f'ALTER DATABASE "{database}" RESET search_path')
+            conn.execute("DROP SCHEMA IF EXISTS public CASCADE")
+            conn.execute("CREATE SCHEMA public")
+            conn.execute("GRANT ALL ON SCHEMA public TO public")
+            conn.execute("DROP EXTENSION IF EXISTS vector CASCADE")
+            conn.execute("DROP SCHEMA IF EXISTS extensions CASCADE")

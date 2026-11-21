@@ -267,3 +267,26 @@ async def test_tick_deletes_every_attempt_object_of_an_uploaded_row(
     s3 = AsyncMock()
     assert await _worker(async_session, s3).tick() == 1
     s3.delete_prefix.assert_awaited_once_with(base)
+
+
+async def test_tick_deletes_unused_knowledge_uploads(
+    async_session: AsyncSession,
+) -> None:
+    """A knowledge file never made into a document goes after a day; one a
+    document uses (first_used_at set) stays."""
+    now = datetime.now(timezone.utc)
+    unused = await _make_row(
+        async_session,
+        created_at=now - timedelta(hours=25),
+        purpose="knowledge_document",
+    )
+    used = await _make_row(
+        async_session,
+        created_at=now - timedelta(hours=48),
+        first_used_at=now - timedelta(hours=47),
+        purpose="knowledge_document",
+    )
+    s3 = AsyncMock()
+    assert await _worker(async_session, s3).tick() == 1
+    remaining = set((await async_session.execute(select(FileUpload.id))).scalars())
+    assert unused.id not in remaining and used.id in remaining
