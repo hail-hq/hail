@@ -598,7 +598,9 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
             )
             return ProviderStatus(
                 state="rejected",
-                reason=campaign_repair_reason(errors),
+                reason=campaign_repair_reason(
+                    [e for e in errors if not _placeholder(e.get("description"))]
+                ),
                 raw_reason=raw or None,
             )
         return ProviderStatus(state="pending")
@@ -1098,7 +1100,8 @@ def _safe_message(msg) -> str:
     a list of them."""
     fixes: list[str] = []
     for one in msg if isinstance(msg, list) else [msg or ""]:
-        low = str(one).lower()
+        # "email address" is the email, not the postal address.
+        low = re.sub(r"\bemail address\b", "email", str(one).lower())
         for words, text in (
             (("email",), "Check the email address."),
             (

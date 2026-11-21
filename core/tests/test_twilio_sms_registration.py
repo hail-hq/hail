@@ -5,6 +5,7 @@ import pytest
 import requests
 from hailhq.core.providers.verification.base import (
     BRAND_REJECTED,
+    CAMPAIGN_REJECTED,
     Address,
     DiscardRefused,
     VerificationProviderError,
@@ -935,7 +936,9 @@ async def test_email_error_gets_the_email_sentence() -> None:
         ],
     )
     draft = await _draft(_provider(r))
-    assert draft.problems[0].message.startswith("Check the email address.")
+    assert draft.problems[0].message == (
+        "Check the email address. The carrier said: Email address is invalid."
+    )
 
 
 async def test_each_failed_field_gets_its_own_hail_sentence() -> None:
@@ -1154,6 +1157,28 @@ async def test_status_campaign_failed_without_errors_has_generic_reason() -> Non
         }
     )
     assert st.state == "rejected" and st.reason
+
+
+async def test_failed_campaign_does_not_quote_the_general_error_placeholder() -> None:
+    r = _ok_responses()
+    r["brand_registrations.fetch"] = SimpleNamespace(
+        status="APPROVED", identity_status="VERIFIED", brand_feedback=None
+    )
+    r["us_app_to_person.fetch"] = SimpleNamespace(
+        sid="QE1",
+        campaign_status="FAILED",
+        errors=[{"error_code": 30794, "description": "General Error"}],
+    )
+    st = await _provider(r).status(
+        {
+            "brand_sid": "BN1",
+            "messaging_service_sid": "MG1",
+            "campaign_sid": "QE1",
+            "subject_type": "business",
+            "campaign": {},
+        }
+    )
+    assert st.reason == CAMPAIGN_REJECTED
 
 
 async def test_business_draft_uses_the_org_service() -> None:
