@@ -235,10 +235,12 @@ class Settings(BaseSettings):
 
     # LiveKit's adaptive interruption model on calls (tells a nod from a real
     # interruption). LiveKit meters it per request for self-hosted workers.
-    # false: every call uses the plain one-word rule and sends no requests.
-    # Not in .env.example (working default); see
+    # Off by default: the free LiveKit plan allows too few requests per minute
+    # for a whole call, so the model is refused about a minute in. true turns
+    # it on; false sends no requests and every call uses the plain one-word
+    # rule. Not in .env.example (working default); see
     # docs/public/self-host/livekit-cloud.md.
-    hail_adaptive_interruption: bool = True
+    hail_adaptive_interruption: bool = False
 
     # Optional recording: deploy capability, separately from workspace consent.
     hail_recording_enabled: bool = False

@@ -824,9 +824,10 @@ def interruption_options() -> dict[str, Any]:
     - min_words: the plain rule, in both modes. A transcribed word, not VAD
       energy alone, is needed to interrupt the agent, also after the model
       says "interruption".
-    - LiveKit meters the model per request for self-hosted workers.
-      ``HAIL_ADAPTIVE_INTERRUPTION=false`` turns it off: mode "vad" sends no
-      requests. See docs/public/self-host/livekit-cloud.md.
+    - LiveKit meters the model per request for self-hosted workers, so it is
+      off by default: mode "vad" sends no requests.
+      ``HAIL_ADAPTIVE_INTERRUPTION=true`` turns it on. See
+      docs/public/self-host/livekit-cloud.md.
 
     https://docs.livekit.io/agents/logic/turns/adaptive-interruption-handling/
     """
