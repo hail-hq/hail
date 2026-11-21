@@ -19,7 +19,7 @@ It is not the community site `cursor.directory` (see `cursor-directory-community
 - [x] Logo committed and referenced by a relative path: `docs/assets/hail-messenger.svg`
 - [x] README documents setup: the "Cursor plugin" section of `README.md`
 - [ ] Plugin tested locally in Cursor (steps below), with one tool call that works
-- [x] Submitted (owner, before 2026-11-20; no review result yet)
+- [x] Submitted (owner, before 2026-11-20; no review result yet). Submitted before the local test, so if Cursor rejects it for a failing tool call, run the local test first.
 - [ ] Confirmed live
 
 ## Steps to submit
