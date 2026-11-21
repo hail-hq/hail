@@ -1130,6 +1130,9 @@ def _safe_message(msg) -> str:
             (("address", "street", "postal", "zip"), "Check the address."),
             (("phone", "mobile"), "Check the phone number."),
         ):
+            if text == "Check the address." and "Check the email address." in fixes:
+                # "Email ... invalid address syntax" is about the email.
+                continue
             if any(re.search(rf"\b{w}\b", low) for w in words) and text not in fixes:
                 fixes.append(text)
     return with_carrier_text(" ".join(fixes) or SMS_REFUSED, msg)

@@ -22,7 +22,7 @@ from hailhq.api.funds import BILLING_URL
 from hailhq.api.main import app
 from hailhq.api.routes import verifications as verifications_routes
 from hailhq.api.routes.verifications import (
-    _BILLED_REASON_MAX,
+    _SMS_REASON_MAX,
     _cap_reason,
     get_verification_registry,
 )
@@ -8772,6 +8772,8 @@ def test_billed_refusal_reason_is_capped() -> None:
 
     reason = "x" * 3000 + ". Fix these and start again."
     capped = _cap_reason(reason)
-    assert len(capped) <= _BILLED_REASON_MAX
+    assert len(capped) <= _SMS_REASON_MAX
     assert capped.endswith("x…")
     assert _cap_reason("short.") == "short."
+    # Number verifications keep their reason whole.
+    assert _cap_reason(reason, "number") == reason

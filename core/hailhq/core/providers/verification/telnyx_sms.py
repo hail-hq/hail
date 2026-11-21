@@ -1579,6 +1579,8 @@ def _safe_message(response: httpx.Response) -> str:
         f"{e.get('title', '')} {e.get('detail', '')}" for e in _errors(response)
     ).lower()
     for words, text in (
+        # Before the postal address: "email address" is the email.
+        (("email",), "Check the email address."),
         (("ein", "tax id", "registration number"), "Check the business tax number."),
         (("website", "url"), "Check the website address."),
         (("address", "street", "postal", "zip"), "Check the address."),

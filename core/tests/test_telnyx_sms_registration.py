@@ -1824,6 +1824,18 @@ def test_a_field_reason_under_another_text_key_is_quoted():
     assert problems[0].raw == "Email domain invalid"
 
 
+async def test_an_email_refusal_off_the_form_gets_the_email_sentence():
+    def handler(req):
+        return httpx.Response(
+            422, json={"errors": [{"detail": "Email address is invalid"}]}
+        )
+
+    draft = await _draft(_provider(handler), subject="person", fields=PERSON_FIELDS)
+    assert draft.problems[0].message == (
+        "Check the email address. The carrier said: Email address is invalid."
+    )
+
+
 async def test_a_non_text_detail_does_not_crash_the_filing():
     def handler(req):
         return httpx.Response(

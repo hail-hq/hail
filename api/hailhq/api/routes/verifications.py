@@ -684,17 +684,18 @@ async def _uncharged_sms_steps(
     ]
 
 
-# The longest reason stored for a refused or held filing (billed at filing,
-# refused in the background pass or at an admin approve, or read on a poll).
-_BILLED_REASON_MAX = 2000
+# The longest US texting reason stored for a refused or held filing (billed
+# at filing, refused in the background pass or at an admin approve, or read
+# on a poll). It quotes the carrier; other purposes are not cut.
+_SMS_REASON_MAX = 2000
 
 
-def _cap_reason(reason: str) -> str:
-    """``reason`` (the joined problem messages) cut to the cap, with an
-    ellipsis where it was cut."""
-    if len(reason) <= _BILLED_REASON_MAX:
+def _cap_reason(reason: str, purpose: str = "sms") -> str:
+    """A US texting ``reason`` (it quotes the carrier) cut to the cap, with
+    an ellipsis where it was cut. Other purposes keep their reason whole."""
+    if purpose != "sms" or len(reason) <= _SMS_REASON_MAX:
         return reason
-    return reason[: _BILLED_REASON_MAX - 1].rstrip() + "\u2026"
+    return reason[: _SMS_REASON_MAX - 1].rstrip() + "\u2026"
 
 
 async def _record_billed_refusal(
@@ -873,24 +874,27 @@ def _apply_status(row: CarrierVerification, status: ProviderStatus | None) -> bo
         _drop_number_answers(row)
     elif status.state == "rejected":
         row.state, row.updated_at = "rejected", now
-        row.rejection_reason = _cap_reason(status.reason) if status.reason else None
+        row.rejection_reason = (
+            _cap_reason(status.reason, row.purpose) if status.reason else None
+        )
     elif row.state == "submitting" and status.state == "pending":
         row.state, row.submitted_at, row.updated_at = "submitted", now, now
         if status.reason and (row.provider_refs or {}).get("needs_information"):
             # Held for answers on this same poll: most held rows are not
             # polled again, so keep the repair guidance now.
-            row.rejection_reason = _cap_reason(status.reason)
+            row.rejection_reason = _cap_reason(status.reason, row.purpose)
     elif row.state == "submitting" and status.state == "draft":
         row.state, row.approved_by, row.updated_at = "awaiting_review", None, now
     elif (
         status.state == "pending"
         and status.reason
         and (row.provider_refs or {}).get("needs_information")
-        and row.rejection_reason != _cap_reason(status.reason)
+        and row.rejection_reason != _cap_reason(status.reason, row.purpose)
     ):
         # A filing held for the customer's answers: say what to fix. The
         # amend route clears it.
-        row.rejection_reason, row.updated_at = _cap_reason(status.reason), now
+        row.rejection_reason = _cap_reason(status.reason, row.purpose)
+        row.updated_at = now
     else:
         return False
     _last_polled.pop(row.id, None)
@@ -3744,7 +3748,8 @@ async def _refuse_row(
         _cap_reason(
             "; ".join(
                 f"{p.field}: {p.message}" if p.field else p.message for p in problems
-            )
+            ),
+            row.purpose,
         ),
         carrier_reason="; ".join(p.raw for p in problems if p.raw) or None,
         kept_state=kept_state,

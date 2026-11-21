@@ -824,6 +824,9 @@ def test_sdk_wrapper_is_not_quoted() -> None:
     assert with_carrier_text("Hi.", "Unable to fetch page: Bad EIN") == (
         "Hi. The carrier said: Bad EIN."
     )
+    assert with_carrier_text("Hi.", "Unable to create recordings now") == (
+        "Hi. The carrier said: Unable to create recordings now."
+    )
     # Only the SDK's own verbs, and only identifier-like tags, are dropped.
     assert with_carrier_text("Hi.", "Unable to verify record: EIN mismatch") == (
         "Hi. The carrier said: Unable to verify record: EIN mismatch."
@@ -921,6 +924,25 @@ async def test_one_text_naming_two_details_gets_both_sentences() -> None:
     assert draft.problems[0].message.startswith(
         "Check the business tax number. Check the address."
     )
+
+
+async def test_email_syntax_error_does_not_point_at_the_postal_address() -> None:
+    r = _ok_responses()
+    r["customer_profiles_evaluations.create"] = SimpleNamespace(
+        status="noncompliant",
+        results=[
+            {
+                "fields": [
+                    {
+                        "passed": False,
+                        "failure_reason": "Email domain has an invalid address syntax.",
+                    }
+                ]
+            }
+        ],
+    )
+    draft = await _draft(_provider(r))
+    assert draft.problems[0].message.startswith("Check the email address. The")
 
 
 async def test_email_error_gets_the_email_sentence() -> None:
