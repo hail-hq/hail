@@ -35,6 +35,11 @@ from hailhq.core import sms_trial_pool
 from hailhq.core.db import dispose_engine, session_scope
 from hailhq.core.sms_trial import refresh_trial_approvals, trial_number_by_e164
 
+ANSWERS = {
+    "approved": "approved.",
+    "not_approved": "not approved. Get it approved at the carrier first.",
+    "no_answer": "no answer (lookup failed). The next verification pass asks again.",
+}
 CHANGES = {
     "mark": sms_trial_pool.mark,
     "unmark": sms_trial_pool.unmark,
@@ -55,7 +60,11 @@ async def run(args: argparse.Namespace) -> list[str]:
                 if args.command in {"mark", "move"}:
                     number = await trial_number_by_e164(db, args.number)
                     if number is not None:
-                        await refresh_trial_approvals(db, number_ids=[number.id])
+                        counts = await refresh_trial_approvals(
+                            db, number_ids=[number.id]
+                        )
+                        answer = next(k for k, n in counts.items() if n)
+                        lines.append(f"Carrier toll-free approval: {ANSWERS[answer]}")
             lines += await sms_trial_pool.status(db)
         return lines
     finally:

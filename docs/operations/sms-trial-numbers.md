@@ -12,12 +12,12 @@ Run from the repo root of a checkout whose `.env` reaches the production databas
 
 ## Commands
 
-| Command  | What it does                                                                                                     |
-| -------- | ---------------------------------------------------------------------------------------------------------------- |
-| `status` | Each trial number, ready or not, and which one sends now                                                         |
-| `mark`   | A call pool number becomes a trial number. It stops serving calls and browser sessions                           |
-| `unmark` | A trial number goes back to the shared call pool (calls and browser sessions)                                    |
-| `move`   | A workspace's number leaves the workspace and becomes a trial number (`organization_id` NULL, `is_pool`, marked) |
+| Command  | What it does                                                                                                         |
+| -------- | -------------------------------------------------------------------------------------------------------------------- |
+| `status` | Each trial number, ready or not, and which one sends now                                                             |
+| `mark`   | A call pool number becomes a trial number. It stops serving calls and browser sessions                               |
+| `unmark` | A trial number goes back to the shared call pool (calls and browser sessions). Refused for a number that cannot call |
+| `move`   | A workspace's number leaves the workspace and becomes a trial number (`organization_id` NULL, `is_pool`, marked)     |
 
 The number must be an active US toll-free number that can text and has a carrier id. `move` refuses a number an agent answers: remove the agent first. `move` clears `sms_registration_id` and keeps `messaging_service_sid` (the number keeps texting through its service).
 
@@ -29,7 +29,7 @@ The number must be an active US toll-free number that can text and has a carrier
 - Ready: `provisioning_metadata.sms_trial_approved_at` is set. The verification worker's pass (`HAIL_VERIFICATION_POLL_SECONDS`, default 600) asks the carrier for each marked number (`tollfree_approved`) and caches the answer: yes stamps the time, no removes it, a failed lookup keeps the last answer. `mark` and `move` with `--yes` ask once at once. With `HAIL_VERIFICATION_POLL_SECONDS=0` no pass runs, so an approval or a revocation is not seen until the script runs again.
 - Requests never ask the carrier. `GET /v1/sms/trial`: `configured` = an active marked number exists, `available` = one is ready.
 - Sender: the oldest ready number (`created_at`). Codes and trial texts come from it. Adding a newer number does not change it; unmarking it, or losing its approval, moves sends to the next ready one. A `from` that names another ready trial number sends from that number.
-- Replies to a trial number are dropped (no workspace owns it). Twilio still blocks texts to a phone that replied STOP to that number (error 21610), and the code request then answers `This phone replied STOP to Hail`. A STOP covers only the number that got it.
+- Replies to a trial number are dropped (no workspace owns it). Hail no longer records STOP or sends its own STOP and HELP replies for them. Twilio still blocks texts to a phone that replied STOP ([error 21610](https://www.twilio.com/docs/api/errors/21610): per sender number or messaging service), and the code request then answers `This phone replied STOP to Hail`. A STOP to one trial number may not block another.
 - Only Twilio answers `tollfree_approved` today. A Telnyx or DIDWW toll-free number never becomes ready.
 
 ## Toll-free verification

@@ -70,6 +70,11 @@ async def unmark(db: AsyncSession, e164: str, *, apply: bool) -> list[str]:
     number = await _locked(db, e164)
     if not number.is_pool or number.pool_purpose != POOL_PURPOSE:
         raise TrialPoolError(f"{e164}: not a trial texting number.")
+    if "voice" not in number.capabilities:
+        # The call pool claims numbers for calls with no capability check.
+        raise TrialPoolError(
+            f"{e164}: cannot make calls, so it cannot join the call pool."
+        )
     if apply:
         number.pool_purpose = None
         number.provisioning_metadata = {

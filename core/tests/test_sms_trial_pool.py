@@ -97,6 +97,12 @@ async def test_unmark_returns_the_number_to_the_call_pool(async_session):
     assert (await claim_pool_number(async_session)).id == number.id
 
 
+async def test_unmark_refuses_a_number_that_cannot_call(async_session):
+    await _number(async_session, pool_purpose="sms_trial", capabilities=["sms"])
+    with pytest.raises(TrialPoolError, match="cannot make calls"):
+        await sms_trial_pool.unmark(async_session, E164, apply=True)
+
+
 async def test_unmark_refuses_a_call_pool_number(async_session):
     await _number(async_session)
     with pytest.raises(TrialPoolError, match="not a trial texting number"):
