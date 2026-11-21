@@ -699,8 +699,8 @@ def _cap_reason(reason: str, purpose: str) -> str:
 
 
 def _joined_problems(problems: list[Problem]) -> str:
-    """Every problem in one stored reason, each named by its field, since
-    the carrier's words can be the same on several fields."""
+    """Every problem in one stored reason, each named by its field (a
+    refusal in the background pass or at an admin approve)."""
     return "; ".join(
         f"{p.field}: {p.message}" if p.field else p.message for p in problems
     )
@@ -2802,7 +2802,8 @@ async def _file(
                 prepared.sub,
                 prepared.subject_name,
                 draft.billed_refs,
-                _joined_problems(draft.problems),
+                # The messages alone: the form shows each field's problem.
+                "; ".join(p.message for p in draft.problems),
                 prepared.requirements.version,
             )
         raise _problems_422(
