@@ -822,6 +822,13 @@ def test_sdk_wrapper_is_not_quoted() -> None:
     assert with_carrier_text("Hi.", "Unable to fetch page: Bad EIN") == (
         "Hi. The carrier said: Bad EIN."
     )
+    # Only the SDK's own verbs, and only identifier-like tags, are dropped.
+    assert with_carrier_text("Hi.", "Unable to verify record: EIN mismatch") == (
+        "Hi. The carrier said: Unable to verify record: EIN mismatch."
+    )
+    assert with_carrier_text("Hi.", "[Sample 2] has no opt-out") == (
+        "Hi. The carrier said: [Sample 2] has no opt-out."
+    )
     # A field tag goes with or without its separator.
     assert with_carrier_text("Hi.", "[address_sids]: Invalid Postal Code.") == (
         "Hi. The carrier said: Invalid Postal Code."
@@ -898,6 +905,28 @@ async def test_noncompliant_fields_are_each_checked_alone() -> None:
         (
             "Check the website address. The carrier said: bad website. "
             "configuration mismatch."
+        )
+    ]
+
+
+async def test_each_failed_field_gets_its_own_hail_sentence() -> None:
+    r = _ok_responses()
+    r["customer_profiles_evaluations.create"] = SimpleNamespace(
+        status="noncompliant",
+        results=[
+            {
+                "fields": [
+                    {"passed": False, "failure_reason": "bad website"},
+                    {"passed": False, "failure_reason": "EIN invalid"},
+                ]
+            }
+        ],
+    )
+    draft = await _draft(_provider(r))
+    assert [pr.message for pr in draft.problems] == [
+        (
+            "Check the website address. Check the business tax number. "
+            "The carrier said: bad website. EIN invalid."
         )
     ]
 

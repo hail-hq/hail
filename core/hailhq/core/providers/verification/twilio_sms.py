@@ -1092,15 +1092,23 @@ def _brand_reason(brand) -> str | None:
 
 
 def _safe_message(msg) -> str:
-    """Hail's short sentence for the detail ``msg`` names, then the
-    carrier's own words. ``msg`` is one text or a list of them."""
-    low = " ".join(msg if isinstance(msg, list) else [msg or ""]).lower()
-    for words, text in (
-        (("ein", "tax id", "registration number"), "Check the business tax number."),
-        (("website", "url"), "Check the website address."),
-        (("address", "street", "postal", "zip"), "Check the address."),
-        (("phone", "mobile"), "Check the phone number."),
-    ):
-        if any(re.search(rf"\b{w}\b", low) for w in words):
-            return with_carrier_text(text, msg)
-    return with_carrier_text(SMS_REFUSED, msg)
+    """Hail's short sentence for each detail ``msg`` names (one per text,
+    without repeats), then the carrier's own words. ``msg`` is one text or
+    a list of them."""
+    fixes: list[str] = []
+    for one in msg if isinstance(msg, list) else [msg or ""]:
+        low = str(one).lower()
+        for words, text in (
+            (
+                ("ein", "tax id", "registration number"),
+                "Check the business tax number.",
+            ),
+            (("website", "url"), "Check the website address."),
+            (("address", "street", "postal", "zip"), "Check the address."),
+            (("phone", "mobile"), "Check the phone number."),
+        ):
+            if any(re.search(rf"\b{w}\b", low) for w in words):
+                if text not in fixes:
+                    fixes.append(text)
+                break
+    return with_carrier_text(" ".join(fixes) or SMS_REFUSED, msg)

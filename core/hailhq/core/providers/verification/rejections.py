@@ -108,10 +108,16 @@ TEXT_KEYS = ("description", "detail", "message", "reason", "title")
 # The longest carrier text quoted to the customer; longer text is cut.
 CARRIER_TEXT_MAX = 600
 # A leading field tag in a carrier's text, like "[email] - ".
-_FIELD_TAG = re.compile(r"^\s*\[[^\]]*\]\s*[-:]?\s*")
+# Only an identifier-like tag ("[email]", "[address_sids]"): a label with
+# words in it ("[Sample 2]") says which part to fix, so it stays.
+_FIELD_TAG = re.compile(r"^\s*\[[A-Za-z_][\w.]*\]\s*[-:]?\s*")
 # twilio-python's own wrapper around Twilio's message ("Unable to create
 # record: <message>"); not the carrier's words.
-_SDK_PREFIX = re.compile(r"^\s*Unable to \w+ (?:record|page)\s*:?\s*", re.IGNORECASE)
+_SDK_PREFIX = re.compile(
+    r"^\s*Unable to (?:create|fetch|update|delete|read|list) (?:record|page)"
+    r"\s*:?\s*",
+    re.IGNORECASE,
+)
 
 
 def carrier_texts(raw: object) -> list[str]:
@@ -129,7 +135,7 @@ def carrier_texts(raw: object) -> list[str]:
         return [text for item in raw for text in carrier_texts(item)]
     if not isinstance(raw, str):
         return []
-    text = _SDK_PREFIX.sub("", _FIELD_TAG.sub("", _SDK_PREFIX.sub("", raw))).strip()
+    text = _FIELD_TAG.sub("", _SDK_PREFIX.sub("", raw)).strip()
     return [text] if text else []
 
 
@@ -138,8 +144,8 @@ def with_carrier_text(message: str, raw: object) -> str:
     carrier's own words, so the customer always sees why. The carrier's
     text can quote what the customer filed: it goes to the workspace (the
     console, the API, the owners' email). Hail never logs it, except
-    Telnyx's error text (``_error_log`` in ``telnyx_sms.py``, owner
-    decision 2026-10-28)."""
+    Telnyx's error text at filing and on failed status polls (``_error_log``
+    in ``telnyx_sms.py``, owner decision 2026-10-28)."""
     said = list(dict.fromkeys(sentence(t) for t in carrier_texts(raw)))
     if not said:
         return message
