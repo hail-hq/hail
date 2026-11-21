@@ -2878,7 +2878,8 @@ async def _run_call(
         # turn in which to press a key, observed in production as the agent
         # reciting its disclosure into a "press one / press two" menu while
         # the tree timed out. `generate_reply` is a real LLM turn with
-        # `send_dtmf` attached, which is what actually navigates the menu.
+        # `send_dtmf` attached when the call has it, which is what actually
+        # navigates the menu; without it the no-keys menu prompt is used.
         # The disclosure is deferred, not dropped: `arm_deferred_greeting`
         # speaks it once speech is classified as a person, or after a bounded
         # wait when speech cannot be classified.

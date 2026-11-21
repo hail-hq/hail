@@ -31,8 +31,7 @@ _MENU_KEYS_LINE = (
 )
 _MENU_NO_KEYS_LINE = (
     "- If you reach an automated menu, you cannot press keys on this call. "
-    "Stay quiet and wait for a person. If no person comes on the line, end "
-    "the call."
+    "Stay quiet and wait for a person."
 )
 
 _INBOUND_CLOSING = """\
@@ -284,9 +283,7 @@ harmful or outside the purpose of the call.
 suggest speaking with a qualified professional.
 - Protect privacy: share only what the call requires.""".replace(
         "{closing}", _OUTBOUND_CLOSING
-    ).replace(
-        "{menu}", _MENU_KEYS_LINE
-    )
+    ).replace("{menu}", _MENU_KEYS_LINE)
     + f"\n\n{PLATFORM_PRIVACY}\n\n{SETTINGS_HELP_STUB}"
 )
 

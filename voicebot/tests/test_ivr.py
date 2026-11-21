@@ -63,6 +63,23 @@ async def test_every_menu_generation_receives_navigation_rules(monkeypatch):
             assert "Do not narrate" in instructions
 
 
+async def test_menu_generation_without_send_dtmf_names_no_tool():
+    """A call that cannot press keys gets the no-keys menu rules."""
+    llm = FakeLLM(reply="...")
+    llm.chat = Mock(wraps=llm.chat)
+    agent = SpeechSanitizingAgent(instructions="Check an existing reservation.")
+    agent.phone_menu = SimpleNamespace(active=True, checking=False, can_navigate=True)
+    async with AgentSession(llm=llm) as session:
+        await session.start(agent=agent)
+        await session.run(user_input="")
+        instructions = "\n".join(
+            m.text_content or ""
+            for m in llm.chat.call_args_list[0].kwargs["chat_ctx"].messages()
+        )
+        assert "cannot press keys" in instructions
+        assert "send_dtmf" not in instructions
+
+
 async def test_next_recorded_prompt_does_not_mean_person_detected(monkeypatch):
     from uuid import UUID
 

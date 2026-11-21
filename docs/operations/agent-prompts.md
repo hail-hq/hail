@@ -69,7 +69,8 @@ and the phone-menu key lines (call prompt and menu prompt) need
 `send_dtmf`. Each swap matches the exact sentence in `prompts.py` or
 `amd.py`, so edit a sentence and its replacement together. A prompt that names a missing tool makes the model write the
 name as text, and the voice reads it aloud. `voicebot/tests/test_agent.py`
-checks this for every built-in tool.
+checks the call prompt for every built-in tool; `test_amd.py` and
+`test_ivr.py` check the menu prompts with and without `send_dtmf`.
 
 The opt-in synthetic model checks use the configured Bedrock conversation
 model. With AWS credentials, `ANTHROPIC_MODEL`, and

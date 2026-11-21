@@ -7,9 +7,8 @@ import json
 import uuid
 from unittest.mock import AsyncMock
 
-import pytest
-
 import hailhq.voicebot.tools as tools_mod
+import pytest
 from hailhq.core.agent_tools import http_tool
 from hailhq.core.config import settings
 from hailhq.core.models import Agent, AgentHttpTool
