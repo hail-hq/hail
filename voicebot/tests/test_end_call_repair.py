@@ -259,6 +259,8 @@ async def test_allowed_tool_choices_support_recovery(choice):
         "End the call.",
         "end_call(42)",
         "end_call {}",
+        "Let me check.\r\nThen we can continue.",
+        "Let me check.\u2028Then we can continue.",
     ],
 )
 async def test_ordinary_mentions_remain_unchanged_at_every_split(text):
