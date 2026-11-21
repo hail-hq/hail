@@ -6,7 +6,7 @@ license = { text = "AGPL-3.0-or-later" }
 requires-python = ">=3.11"
 classifiers = ["Private :: Do Not Upload"]
 dependencies = [
-    "hailhq-core",
+    "hailhq-core[knowledge]",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
     "pydantic>=2.9",

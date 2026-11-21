@@ -10,6 +10,11 @@ Three kinds of file share one table and one mail-bucket layout:
   ``verification-uploads/<organization_id>/<id>.<attempt>``,
   read once by ``POST /verifications`` and deleted after; the GC removes any
   left over after ``VERIFICATION_UPLOAD_TTL``.
+* ``knowledge_document``: a file for the workspace's knowledge base (PDF,
+  DOCX, TXT, Markdown or CSV). Stored under
+  ``knowledge-documents/<organization_id>/<id>.<attempt>``; its id works in
+  ``POST /knowledge/documents``, which keeps it as long as the document
+  lives. The GC removes one never used within ``UNUSED_TTL``.
 * ``verification_kept``: a copy of a file a number registration was filed
   with, kept so a rejected filing can be fixed and sent again
   (``POST /verifications/{id}/resubmit``). Stored under
@@ -49,8 +54,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # What a client may upload (``POST /uploads``).
-Purpose = Literal["email_attachment", "verification_document"]
-PURPOSES: tuple[str, ...] = ("email_attachment", "verification_document")
+Purpose = Literal["email_attachment", "verification_document", "knowledge_document"]
+PURPOSES: tuple[str, ...] = (
+    "email_attachment",
+    "verification_document",
+    "knowledge_document",
+)
 # Files Hail keeps itself: never a client upload.
 KEPT_PURPOSE = "verification_kept"
 
@@ -61,6 +70,19 @@ VERIFICATION_FILE_TYPES: tuple[str, ...] = (
     "application/pdf",
 )
 VERIFICATION_MAX_FILE_BYTES = 10 * 1024 * 1024
+
+# What the knowledge base reads (hailhq.core.knowledge.decode).
+DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+KNOWLEDGE_TEXT_TYPES: tuple[str, ...] = ("text/plain", "text/markdown", "text/csv")
+KNOWLEDGE_FILE_TYPES: tuple[str, ...] = (
+    "application/pdf",
+    DOCX_TYPE,
+    *KNOWLEDGE_TEXT_TYPES,
+)
+# The largest knowledge file any workspace may hold: the body of an upload
+# is read into memory, like an email attachment. A workspace's own limit
+# (organization_knowledge.max_file_bytes) is at most this.
+KNOWLEDGE_MAX_FILE_BYTES = 25 * 1024 * 1024
 
 # How long an upload link works, and how many unused ones an org may hold.
 LINK_TTL = timedelta(minutes=15)
@@ -77,11 +99,13 @@ REGISTRATION_KEPT_FOR = timedelta(days=30)
 _PREFIXES = {
     "email_attachment": "outbound-attachments/",
     "verification_document": "verification-uploads/",
+    "knowledge_document": "knowledge-documents/",
     KEPT_PURPOSE: "verification-kept/",
 }
 EMAIL_ATTACHMENTS_PREFIX = _PREFIXES["email_attachment"]
 VERIFICATION_UPLOADS_PREFIX = _PREFIXES["verification_document"]
 VERIFICATION_KEPT_PREFIX = _PREFIXES[KEPT_PURPOSE]
+KNOWLEDGE_DOCUMENTS_PREFIX = _PREFIXES["knowledge_document"]
 
 # ``type/subtype`` only, no parameters: the value is put into a shell
 # command (the curl line the MCP returns), so no quote or space may pass.
@@ -98,11 +122,33 @@ def max_bytes(purpose: str) -> int:
     """The size limit of one file of this purpose."""
     if purpose in ("verification_document", KEPT_PURPOSE):
         return VERIFICATION_MAX_FILE_BYTES
+    if purpose == "knowledge_document":
+        # The ceiling; a workspace's own limit is checked on top of it.
+        return KNOWLEDGE_MAX_FILE_BYTES
     return MAX_EMAIL_ATTACHMENT_BYTES
 
 
+def _looks_like_text(content: bytes) -> bool:
+    """UTF-8 text with no NUL byte in the first 64 KiB (a cut character at
+    the end of the window is fine)."""
+    head = content[: 64 * 1024]
+    if b"\x00" in head:
+        return False
+    try:
+        head.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        # Only a character cut by the window, never a bad byte.
+        return exc.start >= len(head) - 3 and len(head) == 64 * 1024
+    return True
+
+
 def matches_declared_type(content: bytes, content_type: str) -> bool:
-    """True when the first bytes match the declared JPEG, PNG or PDF type."""
+    """True when the first bytes match the declared type: JPEG, PNG, PDF,
+    DOCX (a zip), or UTF-8 text for TXT, Markdown and CSV."""
+    if content_type in KNOWLEDGE_TEXT_TYPES:
+        return _looks_like_text(content)
+    if content_type == DOCX_TYPE:
+        return content.startswith(b"PK\x03\x04")
     if content_type == "application/pdf":
         return b"%PDF-" in content[:_PDF_MARKER_WINDOW]
     if content_type == "image/jpeg":
@@ -303,8 +349,13 @@ async def delete_org_verification_uploads(
 
 
 __all__ = [
+    "DOCX_TYPE",
     "EMAIL_ATTACHMENTS_PREFIX",
     "KEPT_PURPOSE",
+    "KNOWLEDGE_DOCUMENTS_PREFIX",
+    "KNOWLEDGE_FILE_TYPES",
+    "KNOWLEDGE_MAX_FILE_BYTES",
+    "KNOWLEDGE_TEXT_TYPES",
     "LINK_SWEEP_GRACE",
     "LINK_TTL",
     "MAX_PENDING_LINKS",

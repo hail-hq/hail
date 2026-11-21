@@ -365,6 +365,13 @@ class Settings(BaseSettings):
     # Background pass over carrier verifications: retry unsent drafts and pull
     # the carrier's decision for submitted ones. 0 disables the worker.
     hail_verification_poll_seconds: int = 600
+    # Knowledge base: the folder holding the embedding model (model.onnx and
+    # tokenizer.json). The API and voicebot images carry it here; a checkout
+    # without it runs with the knowledge base off for calls and with ingest
+    # retrying (docs/operations/knowledge-base.md). Code default only.
+    hail_embedding_model_dir: str = "/app/models/embedding"
+    # Poll cadence (seconds) of the knowledge ingest worker. 0 disables it.
+    hail_knowledge_poll_seconds: int = 5
 
     # Text worker (voicebot): an inbound text pending longer than this is
     # skipped, not answered; how many texts are answered at once per worker

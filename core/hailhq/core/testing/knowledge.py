@@ -1,0 +1,56 @@
+"""Test helpers for the knowledge base: a fake embedder and a sample
+document. The real model runs in the Docker image check (CI ``docker`` job,
+``python -m hailhq.core.knowledge.selftest``)."""
+
+from __future__ import annotations
+
+import hashlib
+
+import numpy as np
+from hailhq.core.knowledge.embed import DIMS
+from hailhq.core.knowledge.text import terms
+
+
+class FakeEmbedder:
+    """Bag of words hashed into ``DIMS`` buckets: texts sharing words point
+    the same way. Same interface as ``Embedder``."""
+
+    def count_tokens(self, text: str) -> int:
+        return len(text.split())
+
+    def _one(self, text: str) -> np.ndarray:
+        vector = np.zeros(DIMS, dtype=np.float32)
+        for word in terms(text):
+            bucket = int.from_bytes(hashlib.sha256(word.encode()).digest()[:4], "big")
+            vector[bucket % DIMS] += 1.0
+        norm = np.linalg.norm(vector)
+        return vector / norm if norm else vector
+
+    def embed_query(self, text: str) -> np.ndarray:
+        return self._one(text)
+
+    def embed_passages(self, texts: list[str]) -> np.ndarray:
+        if not texts:
+            return np.zeros((0, DIMS), dtype=np.float32)
+        return np.stack([self._one(t) for t in texts])
+
+
+# An invented product manual (no real company or product).
+NORTHGATE_MANUAL = """# Northgate Solar NS-5000 hybrid inverter
+
+## Installation
+Mount the NS-5000 on a vertical wall away from direct sunlight. Keep 30 cm
+of free space on every side for cooling. Use the wall bracket NS-WB-02.
+
+## Error codes
+E-204 means the grid voltage is out of range. Check the AC breaker and wait
+five minutes; the inverter reconnects by itself. E-310 means the battery
+temperature is too high.
+
+## Battery
+The NS-BAT-48V-100 battery stores 4.8 kWh. Charge it fully before first use.
+
+## Warranty
+The inverter has a ten year warranty from the date of purchase. Register
+the serial number within 90 days.
+"""

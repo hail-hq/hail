@@ -10,7 +10,11 @@ from uuid import UUID
 import phonenumbers
 import regex
 from hailhq.core.contact_ids import normalize_contact_id
-from hailhq.core.file_uploads import VERIFICATION_FILE_TYPES, valid_content_type
+from hailhq.core.file_uploads import (
+    KNOWLEDGE_FILE_TYPES,
+    VERIFICATION_FILE_TYPES,
+    valid_content_type,
+)
 from hailhq.core.hail_mail import ROLE_MAILBOXES
 from hailhq.core.languages import Language
 from hailhq.core.regions import REGIONS
@@ -2676,12 +2680,16 @@ class EmailAttachmentUploadResponse(BaseModel):
 class FileUploadCreate(BaseModel):
     """Body of ``POST /uploads``: what the file is for, and its name and type."""
 
-    purpose: Literal["email_attachment", "verification_document"] = Field(
+    purpose: Literal[
+        "email_attachment", "verification_document", "knowledge_document"
+    ] = Field(
         description=(
             "What the file is for. `email_attachment`: the id works in "
             "`POST /v1/emails` `attachment_ids`. `verification_document`: the "
             "id works as the `upload.<slot>` part of `POST /v1/verifications` "
-            "and `POST /v1/verifications/check`."
+            "and `POST /v1/verifications/check`. `knowledge_document`: the id "
+            "works in `POST /v1/knowledge/documents`; needs the knowledge "
+            "base turned on for the workspace."
         )
     )
     filename: str = Field(
@@ -2693,8 +2701,11 @@ class FileUploadCreate(BaseModel):
         description=(
             "MIME type, `type/subtype` with no parameters. A "
             "`verification_document` takes `image/jpeg`, `image/png` or "
-            "`application/pdf` only. This type is stored; the PUT request's "
-            "own `Content-Type` header is not used."
+            "`application/pdf` only. A `knowledge_document` takes "
+            "`application/pdf`, "
+            "`application/vnd.openxmlformats-officedocument.wordprocessingml.document`, "
+            "`text/plain`, `text/markdown` or `text/csv`. This type is "
+            "stored; the PUT request's own `Content-Type` header is not used."
         )
     )
 
@@ -2727,6 +2738,14 @@ class FileUploadCreate(BaseModel):
                 "a verification_document must be image/jpeg, image/png or "
                 "application/pdf"
             )
+        if (
+            self.purpose == "knowledge_document"
+            and self.content_type not in KNOWLEDGE_FILE_TYPES
+        ):
+            raise ValueError(
+                "a knowledge_document must be one of: "
+                + ", ".join(KNOWLEDGE_FILE_TYPES)
+            )
         return self
 
 
@@ -2734,9 +2753,9 @@ class FileUploadLinkResponse(BaseModel):
     """Returned by ``POST /uploads``: a one-time link to send the bytes to."""
 
     id: UUID = Field(description="The upload's id.")
-    purpose: Literal["email_attachment", "verification_document"] = Field(
-        description="What the file is for."
-    )
+    purpose: Literal[
+        "email_attachment", "verification_document", "knowledge_document"
+    ] = Field(description="What the file is for.")
     upload_url: str = Field(
         description=(
             "Send the raw file bytes here with `PUT`. No Authorization "
@@ -2754,9 +2773,9 @@ class FileUploadResponse(BaseModel):
     """Returned by ``PUT /uploads/{id}``: what Hail stored."""
 
     id: UUID = Field(description="The upload's id.")
-    purpose: Literal["email_attachment", "verification_document"] = Field(
-        description="What the file is for."
-    )
+    purpose: Literal[
+        "email_attachment", "verification_document", "knowledge_document"
+    ] = Field(description="What the file is for.")
     filename: str = Field(description="The name given when the link was made.")
     content_type: str = Field(description="The type given when the link was made.")
     size_bytes: int = Field(description="Bytes stored. Compare with the local file.")
