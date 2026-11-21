@@ -590,14 +590,17 @@ async def _reply(session, body, *, sender="+14155550142", sid=None):
     )
 
 
-async def _verified_trial_phone(session, phone="+14155550142") -> uuid.UUID:
+async def _verified_trial_phone(
+    session, phone="+14155550142", *, status="verified", pending_phone=None
+) -> uuid.UUID:
     org = uuid.uuid4()
     session.add(
         SmsTrialPhone(
             organization_id=org,
             phone_e164=phone,
-            status="verified",
-            verified_at=datetime.now(timezone.utc),
+            pending_phone_e164=pending_phone,
+            status=status,
+            verified_at=datetime.now(timezone.utc) if status == "verified" else None,
             consent_version="test",
             consent_at=datetime.now(timezone.utc),
         )
@@ -649,3 +652,30 @@ async def test_stop_to_a_trial_number_from_an_unknown_phone_is_dropped(
     result = await _reply(async_session, "STOP", sender="+14155550144")
     assert result.dropped_reason == "unknown_number"
     assert (await async_session.execute(select(Suppression))).first() is None
+
+
+async def test_stop_to_a_trial_number_suppresses_every_workspace_with_the_phone(
+    async_session,
+):
+    """A phone that got a code but is not verified yet (a pending row, or
+    the new phone waiting beside a verified one) is opted out too, in every
+    workspace that holds it, so no more codes go to it."""
+    phone = "+14155550142"
+    await _trial_number(async_session)
+    verified = await _verified_trial_phone(async_session, phone)
+    pending = await _verified_trial_phone(async_session, phone, status="pending")
+    switching = await _verified_trial_phone(
+        async_session, "+14155550143", pending_phone=phone
+    )
+    unrelated = await _verified_trial_phone(async_session, "+14155550144")
+
+    await _reply(async_session, "STOP", sender=phone)
+    await async_session.commit()
+    for org in (verified, pending, switching):
+        assert await is_suppressed(async_session, org, phone, "sms")
+    assert not await is_suppressed(async_session, unrelated, phone, "sms")
+
+    await _reply(async_session, "START", sender=phone)
+    await async_session.commit()
+    for org in (verified, pending, switching):
+        assert not await is_suppressed(async_session, org, phone, "sms")

@@ -283,3 +283,29 @@ def test_no_trial_env_vars_left():
             text = path.read_text(errors="ignore").lower()
             found += [f"{path.relative_to(root)}: {n}" for n in names if n in text]
     assert found == []
+
+
+async def test_move_refuses_a_number_on_another_numbers_registration(async_session):
+    """A number on a registration that names another number (a shared
+    campaign) cannot move: Hail could not keep that registration for it."""
+    org = await _org(async_session)
+    other = await _number(async_session, org=org, e164="+18005550198")
+    number = await _number(async_session, org=org)
+    registration = CarrierVerification(
+        id=uuid.uuid4(),
+        organization_id=org,
+        number_id=other.id,
+        provider="twilio",
+        country_code="US",
+        number_type="toll_free",
+        subject_type="business",
+        purpose="sms",
+        state="approved",
+        requirements_version="test",
+    )
+    async_session.add(registration)
+    await async_session.flush()
+    number.sms_registration_id = registration.id
+    await async_session.flush()
+    with pytest.raises(TrialPoolError, match="registration of another number"):
+        await sms_trial_pool.move(async_session, E164, apply=True)

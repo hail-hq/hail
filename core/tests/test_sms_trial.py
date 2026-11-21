@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from hailhq.core import sms_trial
+from hailhq.core.compliance_gate import add_suppression
 from hailhq.core.config import Settings
 from hailhq.core.db import org_lock
 from hailhq.core.models import (
@@ -28,6 +29,7 @@ from hailhq.core.sms_trial import (
     NoPendingCode,
     PhoneIsHailNumber,
     PhoneNotUs,
+    PhoneStopped,
     PhoneTaken,
     TrialBodyTooLong,
     TrialSend,
@@ -975,3 +977,22 @@ def test_only_a_carrier_that_answers_can_confirm_approval():
     base = SmsProvider.tollfree_approved
     assert TwilioSmsProvider.tollfree_approved is not base
     assert TelnyxSmsProvider.tollfree_approved is base
+
+
+async def test_start_refuses_a_phone_that_replied_stop(async_session):
+    """No new code goes to a phone the workspace has opted out (STOP to a
+    trial number), until it replies START."""
+    org = await _org(async_session)
+    await add_suppression(
+        async_session,
+        organization_id=org,
+        recipient=PHONE,
+        channel="sms",
+        reason="recipient replied STOP",
+        source="stop_keyword",
+    )
+    with pytest.raises(PhoneStopped) as e:
+        await _start(async_session, org)
+    assert str(e.value) == "This phone replied STOP to Hail. Reply START first."
+    other = await _org(async_session)
+    assert (await _start(async_session, other)).code is not None

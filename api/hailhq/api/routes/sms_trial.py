@@ -39,6 +39,7 @@ from hailhq.core.sms_trial import (
     NoPendingCode,
     PhoneIsHailNumber,
     PhoneNotUs,
+    PhoneStopped,
     PhoneTaken,
     WrongCode,
     code_text,
@@ -176,7 +177,7 @@ async def start_sms_trial_phone(
             consent_version=body.consent_version,
             user_id=principal.user_id,
         )
-    except (PhoneNotUs, PhoneIsHailNumber) as exc:
+    except (PhoneNotUs, PhoneIsHailNumber, PhoneStopped) as exc:
         await db.rollback()
         raise unprocessable(str(exc), loc=["body", "phone"]) from exc
     except PhoneTaken as exc:

@@ -23,6 +23,7 @@ from uuid import UUID
 
 import phonenumbers
 from hailhq.core.carrier_routing import sms_route
+from hailhq.core.compliance_gate import is_suppressed
 from hailhq.core.db import key_lock, org_lock
 from hailhq.core.models import CarrierVerification, PhoneNumber, Sms, SmsTrialPhone
 from hailhq.core.sms_registration_gate import is_us
@@ -72,6 +73,11 @@ class PhoneNotUs(Exception):
 class PhoneIsHailNumber(Exception):
     def __init__(self) -> None:
         super().__init__("Use your own mobile phone, not a Hail number.")
+
+
+class PhoneStopped(Exception):
+    def __init__(self) -> None:
+        super().__init__("This phone replied STOP to Hail. Reply START first.")
 
 
 class PhoneTaken(Exception):
@@ -266,6 +272,28 @@ async def registration_trial_number(
     ).scalar_one_or_none()
 
 
+async def registrations_kept_for_trial(
+    db: AsyncSession, registrations: list[CarrierVerification]
+) -> set[UUID]:
+    """Ids of ``registrations`` that ``registration_trial_number`` keeps,
+    in one query (for a list response's ``cancellable``)."""
+    by_number = {
+        r.number_id: r.id
+        for r in registrations
+        if r.purpose == "sms" and r.number_id is not None
+    }
+    if not by_number:
+        return set()
+    found = await db.execute(
+        select(PhoneNumber.id).where(
+            PhoneNumber.id.in_(by_number),
+            PhoneNumber.pool_purpose == POOL_PURPOSE,
+            PhoneNumber.provisioning_state.not_in(("released", "failed")),
+        )
+    )
+    return {by_number[number_id] for number_id in found.scalars()}
+
+
 async def get_trial_phone(
     db: AsyncSession, organization_id: UUID
 ) -> SmsTrialPhone | None:
@@ -316,6 +344,9 @@ async def start_phone_proof(
     await org_lock(db, organization_id)
     if not is_us(phone):
         raise PhoneNotUs()
+    if await is_suppressed(db, organization_id, phone, "sms"):
+        # STOP to a trial number opted it out for this workspace.
+        raise PhoneStopped()
     is_hail = await db.execute(
         select(PhoneNumber.id)
         .where(

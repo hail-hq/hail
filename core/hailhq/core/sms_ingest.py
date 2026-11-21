@@ -33,7 +33,7 @@ from hailhq.core.telemetry_identity import tag_context
 from hailhq.core.text_agent import should_queue_reply
 from hailhq.core.threads import ACTIVE_CALL_SKIP, active_call_for_thread
 from hailhq.core.webhook_fanout import fanout_sms_event
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -190,36 +190,45 @@ async def _trial_number_keyword(
     db: AsyncSession, from_e164: str, body: str, opt_out_type: str | None
 ) -> IngestResult:
     """A text to a trial texting number (no workspace owns it). STOP opts
-    the phone out for the workspace whose verified trial phone it is (one
-    workspace per phone), so the consent check refuses its trial texts;
-    START opts it back in. Every other text, and a phone no workspace
-    verified, is dropped: Hail does not read replies."""
+    the phone out in every workspace that holds it as its trial phone:
+    verified, waiting for its code, or the new phone waiting beside a
+    verified one. The consent check then refuses trial texts and
+    ``start_phone_proof`` sends no more codes. START opts it back in. Every
+    other text, and a phone no workspace holds, is dropped: Hail does not
+    read replies."""
     action = _opt_out_action(body, opt_out_type)
-    organization_id = None
+    organization_ids: list[UUID] = []
     if action in ("STOP", "START"):
-        organization_id = (
-            await db.execute(
-                select(SmsTrialPhone.organization_id).where(
-                    SmsTrialPhone.phone_e164 == from_e164,
-                    SmsTrialPhone.status == "verified",
+        organization_ids = list(
+            (
+                await db.execute(
+                    select(SmsTrialPhone.organization_id).where(
+                        or_(
+                            SmsTrialPhone.phone_e164 == from_e164,
+                            SmsTrialPhone.pending_phone_e164 == from_e164,
+                        )
+                    )
                 )
             )
-        ).scalar_one_or_none()
-    if organization_id is None:
+            .scalars()
+            .all()
+        )
+    if not organization_ids:
         return IngestResult(sms_id=None, dropped_reason="unknown_number")
-    if action == "STOP":
-        await add_suppression(
-            db,
-            organization_id=organization_id,
-            recipient=from_e164,
-            channel="sms",
-            reason="recipient replied STOP",
-            source="stop_keyword",
-        )
-    elif await is_suppressed(db, organization_id, from_e164, "sms"):
-        await remove_suppression(
-            db, organization_id=organization_id, recipient=from_e164, channel="sms"
-        )
+    for organization_id in organization_ids:
+        if action == "STOP":
+            await add_suppression(
+                db,
+                organization_id=organization_id,
+                recipient=from_e164,
+                channel="sms",
+                reason="recipient replied STOP",
+                source="stop_keyword",
+            )
+        elif await is_suppressed(db, organization_id, from_e164, "sms"):
+            await remove_suppression(
+                db, organization_id=organization_id, recipient=from_e164, channel="sms"
+            )
     return IngestResult(sms_id=None, dropped_reason="trial_number_keyword")
 
 

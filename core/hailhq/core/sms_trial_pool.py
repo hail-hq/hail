@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from hailhq.core.models import Call, PhoneNumber
+from hailhq.core.models import Call, CarrierVerification, PhoneNumber
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
 from hailhq.core.sms_trial import (
     APPROVED_AT_KEY,
@@ -163,6 +163,16 @@ async def move(db: AsyncSession, e164: str, *, apply: bool) -> list[str]:
         raise TrialPoolError(f"{e164}: already a pool number. Use mark.")
     _check_can_send_trial_texts(number)
     await _check_not_on_a_call(db, number)
+    if number.sms_registration_id is not None:
+        registration = await db.get(CarrierVerification, number.sms_registration_id)
+        if registration is not None and registration.number_id != number.id:
+            # Cancel and account close keep only a registration that names
+            # this number (registration_trial_number).
+            raise TrialPoolError(
+                f"{e164}: on the texting registration of another number "
+                f"({registration.id}). Move only a number with its own "
+                "toll-free registration."
+            )
     if number.voice_agent_id is not None or number.sms_agent_id is not None:
         raise TrialPoolError(
             f"{e164}: an agent answers it. Remove the agent from the number first."

@@ -679,3 +679,32 @@ async def test_stop_to_the_trial_number_refuses_trial_texts(
     )
     assert resp.status_code != 201, resp.text
     sms_mock.send_sms.assert_not_called()
+
+
+async def test_no_code_goes_to_a_phone_that_replied_stop(
+    jwt_client, org_and_key, async_session, sms_mock
+):
+    """A phone waiting for its code replies STOP to the trial number: the
+    next code request is refused with no text sent."""
+    await seed_sms_trial(async_session)
+    resp = await jwt_client.post("/v1/sms/trial/phone", json=START)
+    assert resp.status_code == 200, resp.text
+    await ingest_inbound_sms(
+        async_session,
+        carrier="twilio",
+        from_e164=PHONE,
+        to_e164=TRIAL_E164,
+        body="STOP",
+        provider_message_sid="SM_stop_pending",
+        opt_out_type="STOP",
+    )
+    await async_session.commit()
+    sms_mock.send_sms.reset_mock()
+
+    resp = await jwt_client.post("/v1/sms/trial/phone", json=START)
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"][0]["msg"] == (
+        "This phone replied STOP to Hail. Reply START first."
+    )
+    assert resp.json()["detail"][0]["loc"] == ["body", "phone"]
+    sms_mock.send_sms.assert_not_called()
