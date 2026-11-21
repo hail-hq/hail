@@ -54,7 +54,7 @@ async def head_retired_by_other_org(
     last_holder = (
         await db.execute(
             select(RetiredHailMailAddress.organization_id)
-            .where(RetiredHailMailAddress.local_prefix_user == head)
+            .where(RetiredHailMailAddress.local_prefix_workspace == head)
             .order_by(
                 RetiredHailMailAddress.retired_at.desc(),
                 RetiredHailMailAddress.organization_id,

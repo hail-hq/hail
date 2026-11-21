@@ -1,8 +1,9 @@
 """Hail-mail address derivation shared across the API and workers.
 
-A hail-mail address is ``<head>+<tail>@<base>``. The head names the mailbox:
-inbound mail routes on it alone, and one row per deployment may hold it. The
-tail is an alias.
+A hail-mail address is ``<head>+<tail>@<base>``. The head is the workspace
+prefix (``local_prefix_workspace``): it names the mailbox, inbound mail routes
+on it alone, and one row per deployment may hold it. The tail is the name
+prefix (``local_prefix_name``), a free name inside the workspace: an alias.
 
 The default tail is derived deterministically from the organization id rather
 than from a human name or an operator-wide constant. A default head adds the
@@ -68,14 +69,18 @@ ROLE_MAILBOXES = frozenset(
 
 
 def org_prefix_from_id(org_id: uuid.UUID | str) -> str:
-    """Derive a stable 8-char base32 org prefix from an organization id."""
+    """Derive a stable 8-char base32 token from an organization id.
+
+    It is the default name prefix, and the suffix of a default workspace
+    prefix.
+    """
     if not isinstance(org_id, uuid.UUID):
         org_id = uuid.UUID(str(org_id))
     digest = hashlib.sha256(org_id.bytes).digest()[:_ORG_PREFIX_BYTES]
     return base64.b32encode(digest).decode("ascii").lower()
 
 
-def default_user_prefix(prefix: str, org_id: uuid.UUID | str) -> str:
+def default_workspace_prefix(prefix: str, org_id: uuid.UUID | str) -> str:
     """``<prefix>-<org token>``: a shared default head made unique per org."""
     token = org_prefix_from_id(org_id)
     return f"{prefix[: _PREFIX_MAX_LEN - len(token) - 1].rstrip('-')}-{token}"

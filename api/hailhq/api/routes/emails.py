@@ -57,7 +57,7 @@ from hailhq.api.routes.email_domains import (
     first_pending_custom,
     get_email_provider,
     resolve_hail_mail_prefixes,
-    taken_user_prefix_detail,
+    taken_workspace_prefix_detail,
     verified_senders,
 )
 from hailhq.api.suppressions import (
@@ -247,16 +247,18 @@ async def resolve_hail_mail_sender(
     # Last resort: mint a hail-mail row. The default prefixes are derived
     # per-org from the organization id, so each tenant auto-mints its OWN
     # distinct address instead of colliding on one deployment-wide default. Either
-    # helper still bubbles a 503 if the base domain / user prefix is
+    # helper still bubbles a 503 if the base domain / workspace prefix is
     # unconfigured — the right response for a tenant who hasn't set up mail.
-    user_prefix, org_prefix = resolve_hail_mail_prefixes(None, None, organization_id)
-    address = compose_hail_mail_address(user_prefix, org_prefix)
+    workspace_prefix, name_prefix = resolve_hail_mail_prefixes(
+        None, None, organization_id
+    )
+    address = compose_hail_mail_address(workspace_prefix, name_prefix)
     sd = EmailDomain(
         organization_id=organization_id,
         kind="hail_mail",
         domain=address,
-        local_prefix_user=user_prefix,
-        local_prefix_org=org_prefix,
+        local_prefix_workspace=workspace_prefix,
+        local_prefix_name=name_prefix,
         verification_status="verified",
         dns_records=[],
         mail_from_domain=None,
@@ -271,7 +273,7 @@ async def resolve_hail_mail_sender(
         #
         # * This org holds a row — concurrent first-send race, or the website
         #   provisioned one. Benign: pick up the winner and send through it.
-        # * It does not — another org holds or retired this user prefix.
+        # * It does not — another org holds or retired this workspace prefix.
         #   Surface an actionable 409; silently sending through env-var
         #   defaults another tenant owns would let them intercept our replies.
         await db.rollback()
@@ -286,7 +288,7 @@ async def resolve_hail_mail_sender(
         if existing is None:
             raise HTTPException(
                 status_code=http_status.HTTP_409_CONFLICT,
-                detail=taken_user_prefix_detail(user_prefix),
+                detail=taken_workspace_prefix_detail(workspace_prefix),
             )
         return existing
     # Populate server-defaulted timestamps so any future read of this row

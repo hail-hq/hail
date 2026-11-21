@@ -94,8 +94,8 @@ async def _retired_by_other_org(
     """Did another org retire exactly this address? Its mail is not for this org."""
     stmt = (
         select(RetiredHailMailAddress.organization_id)
-        .where(RetiredHailMailAddress.local_prefix_user == head)
-        .where(RetiredHailMailAddress.local_prefix_org == tail)
+        .where(RetiredHailMailAddress.local_prefix_workspace == head)
+        .where(RetiredHailMailAddress.local_prefix_name == tail)
         .where(RetiredHailMailAddress.organization_id != organization_id)
         .limit(1)
     )
@@ -110,7 +110,7 @@ async def _find_domain_for_recipient(
         stmt = (
             select(EmailDomain)
             .where(EmailDomain.kind == "hail_mail")
-            .where(EmailDomain.local_prefix_user == classified.user_prefix)
+            .where(EmailDomain.local_prefix_workspace == classified.workspace_prefix)
             .limit(1)
         )
         row = (await db.execute(stmt)).scalar_one_or_none()
@@ -119,9 +119,9 @@ async def _find_domain_for_recipient(
             tail = classified.tail
             if (
                 tail
-                and tail != row.local_prefix_org
+                and tail != row.local_prefix_name
                 and await _retired_by_other_org(
-                    db, classified.user_prefix, tail, row.organization_id
+                    db, classified.workspace_prefix, tail, row.organization_id
                 )
             ):
                 return None
@@ -352,7 +352,7 @@ async def _enqueue_forwards(
         return ["forward_rate_limit"]
 
     forwarder_address = noreply_address(
-        domain.organization_id, domain.local_prefix_org, hail_mail_base_domain
+        domain.organization_id, domain.local_prefix_name, hail_mail_base_domain
     )
     # Only addresses that proved they want the mail receive it. A pending
     # (confirm link not clicked) or stopped (spam complaint) target is skipped
