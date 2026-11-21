@@ -206,7 +206,11 @@ def campaign_repair_reason(raw: object, *, quote: object = ...) -> str:
     for words, message in rules:
         # Match at a word start: "terms" must not hit "determines", nor
         # "url" "curl", nor "link" "unlinked".
-        if any(re.search(rf"\b{re.escape(word)}", text) for word in words):
+        # A numeric code matches as a whole word: "309081" is not 30908.
+        if any(
+            re.search(rf"\b{re.escape(word)}" + (r"\b" if word.isdigit() else ""), text)
+            for word in words
+        ):
             return with_carrier_text(message, said)
     return with_carrier_text(CAMPAIGN_REJECTED, said)
 

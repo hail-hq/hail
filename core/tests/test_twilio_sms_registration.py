@@ -904,6 +904,24 @@ async def test_noncompliant_account_problem_in_any_field_stays_an_outage() -> No
             await _draft(_provider(r))
 
 
+async def test_one_text_naming_two_details_gets_both_sentences() -> None:
+    r = _ok_responses()
+    r["customer_profiles_evaluations.create"] = SimpleNamespace(
+        status="noncompliant",
+        results=[
+            {
+                "fields": [
+                    {"passed": False, "failure_reason": "EIN and address do not match"}
+                ]
+            }
+        ],
+    )
+    draft = await _draft(_provider(r))
+    assert draft.problems[0].message.startswith(
+        "Check the business tax number. Check the address."
+    )
+
+
 async def test_email_error_gets_the_email_sentence() -> None:
     r = _ok_responses()
     r["customer_profiles_evaluations.create"] = SimpleNamespace(

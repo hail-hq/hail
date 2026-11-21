@@ -1109,8 +1109,6 @@ def _safe_message(msg) -> str:
             (("address", "street", "postal", "zip"), "Check the address."),
             (("phone", "mobile"), "Check the phone number."),
         ):
-            if any(re.search(rf"\b{w}\b", low) for w in words):
-                if text not in fixes:
-                    fixes.append(text)
-                break
+            if any(re.search(rf"\b{w}\b", low) for w in words) and text not in fixes:
+                fixes.append(text)
     return with_carrier_text(" ".join(fixes) or SMS_REFUSED, msg)

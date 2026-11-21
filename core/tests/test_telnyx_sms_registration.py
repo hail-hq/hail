@@ -1807,6 +1807,22 @@ def test_same_field_reason_with_a_semicolon_is_quoted_once():
     assert problems[0].message.count("domain unknown") == 1
 
 
+def test_a_single_field_name_as_a_string_is_read():
+    problems = _reason_problems(
+        [{"fields": "email", "description": "Email duplicate threshold reached"}],
+        "person",
+    )
+    assert problems[0].field == "email"
+    assert "too many registrations" in problems[0].message
+
+
+def test_numeric_topic_codes_match_whole_words_only():
+    assert campaign_repair_reason([{"code": "309081", "detail": "Odd"}]).startswith(
+        CAMPAIGN_REJECTED
+    )
+    assert "privacy policy" in campaign_repair_reason([{"code": "30908"}])
+
+
 def test_topic_match_reads_named_fields():
 
     reason = campaign_repair_reason(

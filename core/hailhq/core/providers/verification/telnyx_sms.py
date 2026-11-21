@@ -1483,6 +1483,14 @@ def _add_carrier_text(
     problem.raw = "\n".join(texts) or None
 
 
+def _field_names(reason: dict) -> list[str]:
+    """The form fields a Telnyx reason names: a list, or one name as a string."""
+    fields = reason.get("fields")
+    if isinstance(fields, str):
+        return [fields]
+    return [f for f in fields or [] if isinstance(f, str)]
+
+
 def _one_line(text: str | None) -> str | None:
     """``text`` on one line: a problem's ``raw`` holds one reason per line,
     so a reason's own line breaks would split it on the way back."""
@@ -1509,7 +1517,7 @@ def _duplicate_fixes(reasons, subject_type) -> list[str]:
             continue
         if "duplicate" not in str(reason.get("description") or "").lower():
             continue
-        for name in reason.get("fields") or []:
+        for name in _field_names(reason):
             fix = _DUPLICATE.get(names.get(name) or "")
             if fix and fix not in fixes:
                 fixes.append(fix)
@@ -1530,7 +1538,7 @@ def _reason_problems(reasons, subject_type) -> list[Problem]:
             continue
         text = str(reason.get("description") or "")
         shown = False
-        for name in reason.get("fields") or []:
+        for name in _field_names(reason):
             field = names.get(name)
             if not field:
                 continue
