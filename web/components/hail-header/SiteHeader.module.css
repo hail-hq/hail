@@ -207,8 +207,11 @@
 }
 .menuToggle,
 .menuOnly,
-.menuSignIn,
-.menuLanguage {
+.menuSignIn {
+  display: none;
+}
+/* Doubled and tripled classes: LanguageSwitch.module.css sets `display` on the same element and may load later. */
+.menuLanguage.menuLanguage {
   display: none;
 }
 .menuToggle span {
@@ -289,7 +292,7 @@
   .languageMenu {
     display: none;
   }
-  .menuLanguage.menuLanguage {
+  .menuLanguage.menuLanguage.menuLanguage {
     display: inline-flex;
     align-self: flex-start;
     margin-top: 24px;
