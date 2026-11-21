@@ -18,6 +18,14 @@ The CHECK keeps a marked number a toll-free pool number with no call
 reservation: trial texts need toll-free verification, and a trial number
 is never handed out for a call.
 
+No column for readiness. The carrier's answer ("toll-free verification
+approved", ``sms_trial_approved_at``) and an operator pause
+(``sms_trial_paused_at``) go in ``provisioning_metadata``, next to the
+number's other carrier-side facts (order id, attach refusals). They are
+facts about the number at the carrier, not a job's state (warn dates,
+retry counters) that schema rule 3 keeps off ``phone_numbers``; no state
+table holds per-number carrier facts.
+
 Revision ID: 0088
 Revises: 0087
 """

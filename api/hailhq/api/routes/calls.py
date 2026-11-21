@@ -533,7 +533,8 @@ async def create_call(
                     loc=["body", "from"],
                 ),
             )
-        pool_number = await claim_pool_number(db)
+        # Only a number that can call: an SMS-only pool number cannot.
+        pool_number = await claim_pool_number(db, capability="voice")
         if pool_number is None:
             # Transient (no dispatch happened): release the in-flight
             # idempotency sentinel so a same-key retry can succeed once the

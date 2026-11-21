@@ -51,3 +51,17 @@ def test_a_refused_change_exits_2(monkeypatch, capsys):
     monkeypatch.setattr(stn, "run", fake_run)
     assert stn.main(["unmark", "--number", "+18005550199"]) == 2
     assert "ERROR: +18005550199: not a trial texting number." in capsys.readouterr().err
+
+
+def test_pause_and_resume_are_commands(monkeypatch):
+    seen = []
+
+    async def fake_run(args):
+        seen.append(args.command)
+        return []
+
+    monkeypatch.setattr(stn, "run", fake_run)
+    for command in ("pause", "resume"):
+        assert stn.main([command, "--number", "+18005550199", "--yes"]) == 0
+    assert seen == ["pause", "resume"]
+    assert stn.CHANGES["pause"] is stn.sms_trial_pool.pause

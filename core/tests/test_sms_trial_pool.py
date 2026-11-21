@@ -2,13 +2,25 @@
 
 import os
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 from hailhq.core import sms_trial_pool
-from hailhq.core.models import Agent, CarrierVerification, Organization, PhoneNumber
+from hailhq.core.models import (
+    Agent,
+    Call,
+    CarrierVerification,
+    Organization,
+    PhoneNumber,
+)
 from hailhq.core.pool import claim_pool_number
-from hailhq.core.sms_trial import APPROVED_AT_KEY, trial_configured, trial_sender
+from hailhq.core.sms_trial import (
+    APPROVED_AT_KEY,
+    PAUSED_KEY,
+    trial_configured,
+    trial_sender,
+)
 from hailhq.core.sms_trial_pool import TrialPoolError
 
 E164 = "+18005550199"
@@ -29,7 +41,7 @@ async def _number(session, *, org=None, number_type="toll_free", **kw):
         country_code=kw.pop("country_code", "US"),
         number_type=number_type,
         capabilities=kw.pop("capabilities", ["voice", "sms"]),
-        provider="twilio",
+        provider=kw.pop("provider", "twilio"),
         provider_resource_id="PN0199",
         provisioning_state=kw.pop("state", "active"),
         **kw,
@@ -87,7 +99,7 @@ async def test_unmark_returns_the_number_to_the_call_pool(async_session):
     number = await _number(
         async_session,
         pool_purpose="sms_trial",
-        provisioning_metadata={APPROVED_AT_KEY: "2026-11-20T00:00:00+00:00"},
+        provisioning_metadata={APPROVED_AT_KEY: datetime.now(UTC).isoformat()},
     )
     assert await trial_sender(async_session) is not None
     await sms_trial_pool.unmark(async_session, E164, apply=True)
@@ -97,10 +109,85 @@ async def test_unmark_returns_the_number_to_the_call_pool(async_session):
     assert (await claim_pool_number(async_session)).id == number.id
 
 
-async def test_unmark_refuses_a_number_that_cannot_call(async_session):
-    await _number(async_session, pool_purpose="sms_trial", capabilities=["sms"])
-    with pytest.raises(TrialPoolError, match="cannot make calls"):
-        await sms_trial_pool.unmark(async_session, E164, apply=True)
+async def test_unmark_an_sms_only_number_keeps_it_out_of_calls(async_session):
+    number = await _number(
+        async_session, pool_purpose="sms_trial", capabilities=["sms"]
+    )
+    lines = await sms_trial_pool.unmark(async_session, E164, apply=True)
+    assert number.pool_purpose is None
+    assert "cannot make calls" in lines[0]
+    assert await claim_pool_number(async_session, capability="voice") is None
+
+
+async def test_pause_and_resume(async_session):
+    number = await _number(
+        async_session,
+        pool_purpose="sms_trial",
+        provisioning_metadata={APPROVED_AT_KEY: datetime.now(UTC).isoformat()},
+    )
+    dry = await sms_trial_pool.pause(async_session, E164, apply=False)
+    assert "stops sending trial texts" in dry[0]
+    assert await trial_sender(async_session) is not None
+    await sms_trial_pool.pause(async_session, E164, apply=True)
+    assert PAUSED_KEY in number.provisioning_metadata
+    assert await trial_sender(async_session) is None
+    # Still a trial number: never back in the call pool while paused.
+    assert number.pool_purpose == "sms_trial"
+    assert await claim_pool_number(async_session) is None
+    with pytest.raises(TrialPoolError, match="already paused"):
+        await sms_trial_pool.pause(async_session, E164, apply=True)
+    await sms_trial_pool.resume(async_session, E164, apply=True)
+    assert PAUSED_KEY not in number.provisioning_metadata
+    assert (await trial_sender(async_session)).id == number.id
+    with pytest.raises(TrialPoolError, match="not paused"):
+        await sms_trial_pool.resume(async_session, E164, apply=True)
+
+
+@pytest.mark.parametrize("command", ["pause", "resume"])
+async def test_pause_and_resume_need_a_trial_number(async_session, command):
+    await _number(async_session)
+    with pytest.raises(TrialPoolError, match="not a trial texting number"):
+        await getattr(sms_trial_pool, command)(async_session, E164, apply=True)
+
+
+@pytest.mark.parametrize("command", ["mark", "move"])
+async def test_mark_and_move_refuse_a_carrier_that_cannot_confirm(
+    async_session, command
+):
+    org = await _org(async_session) if command == "move" else None
+    await _number(async_session, org=org, provider="telnyx")
+    with pytest.raises(TrialPoolError, match="cannot confirm toll-free approval"):
+        await getattr(sms_trial_pool, command)(async_session, E164, apply=True)
+
+
+@pytest.mark.parametrize("how", ["reserved", "browser_sms"])
+async def test_move_refuses_a_number_on_a_live_call(async_session, how):
+    org = await _org(async_session)
+    number = await _number(async_session, org=org)
+    call = Call(
+        organization_id=org,
+        from_number_id=number.id,
+        from_e164=E164,
+        to_e164="+14155550142",
+        status="in_progress",
+        voice_config={},
+        metadata_=(
+            {"browser_sms_number_id": str(number.id)} if how == "browser_sms" else {}
+        ),
+    )
+    async_session.add(call)
+    await async_session.flush()
+    if how == "reserved":
+        number.reserved_call_id = call.id
+        await async_session.flush()
+    with pytest.raises(TrialPoolError, match="on a call now"):
+        await sms_trial_pool.move(async_session, E164, apply=True)
+    call.status = "completed"
+    call.end_reason = "normal_hangup"
+    number.reserved_call_id = None
+    await async_session.flush()
+    await sms_trial_pool.move(async_session, E164, apply=True)
+    assert number.pool_purpose == "sms_trial"
 
 
 async def test_unmark_refuses_a_call_pool_number(async_session):
@@ -132,7 +219,7 @@ async def test_move_puts_a_workspace_number_in_the_trial_pool(async_session):
 
     dry = await sms_trial_pool.move(async_session, E164, apply=False)
     assert number.organization_id == org
-    assert "Do not cancel that registration" in dry[1]
+    assert "Hail then refuses to cancel it" in dry[1]
 
     await sms_trial_pool.move(async_session, E164, apply=True)
     await async_session.flush()
@@ -165,13 +252,14 @@ async def test_status_names_the_sender(async_session):
     await _number(
         async_session,
         pool_purpose="sms_trial",
-        provisioning_metadata={APPROVED_AT_KEY: "2026-11-20T00:00:00+00:00"},
+        provisioning_metadata={APPROVED_AT_KEY: datetime.now(UTC).isoformat()},
     )
     await _number(async_session, e164="+18005550198", pool_purpose="sms_trial")
     lines = await sms_trial_pool.status(async_session)
     assert any(line.startswith(E164) and "sends now" in line for line in lines)
     assert any(
-        line.startswith("+18005550198") and "not ready" in line for line in lines
+        line.startswith("+18005550198") and "no carrier approval" in line
+        for line in lines
     )
 
 

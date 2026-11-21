@@ -12,6 +12,7 @@ import pytest
 from hailhq.api import deps
 from hailhq.core.models import AuditLog, Sms, SmsTrialPhone, UsageEvent
 from hailhq.core.providers.sms import ProviderSmsResult
+from hailhq.core.sms_ingest import ingest_inbound_sms
 from sqlalchemy import func, select, update
 
 from .conftest import (
@@ -651,3 +652,30 @@ async def test_asking_again_for_the_verified_phone_clears_the_pending_one(
     row = await _row(session_factory, org_id)
     assert row.pending_phone_e164 is None and row.code_hash is None
     assert (await jwt_client.get("/v1/sms/trial")).json()["pending_phone"] is None
+
+
+async def test_stop_to_the_trial_number_refuses_trial_texts(
+    jwt_client, org_and_key, async_session, sms_mock
+):
+    """After the trial phone replies STOP to a trial number, the consent
+    check refuses its trial texts until it replies START."""
+    org_id = org_and_key[0]
+    await seed_sms_trial(async_session)
+    await verify_trial_phone(async_session, org_id)
+    await ingest_inbound_sms(
+        async_session,
+        carrier="twilio",
+        from_e164=PHONE,
+        to_e164=TRIAL_E164,
+        body="STOP",
+        provider_message_sid="SM_stop",
+        opt_out_type="STOP",
+    )
+    await async_session.commit()
+
+    resp = await jwt_client.post(
+        "/v1/sms",
+        json={"to": PHONE, "body": "hi", "recipient_consent": True},
+    )
+    assert resp.status_code != 201, resp.text
+    sms_mock.send_sms.assert_not_called()

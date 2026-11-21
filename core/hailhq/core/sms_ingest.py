@@ -25,8 +25,9 @@ from hailhq.core.compliance_gate import (
 )
 from hailhq.core.config import settings
 from hailhq.core.db import org_lock
-from hailhq.core.models import Call, PhoneNumber, Sms, SmsEvent
+from hailhq.core.models import Call, PhoneNumber, Sms, SmsEvent, SmsTrialPhone
 from hailhq.core.providers.sms import ProviderSmsResult, SmsProvider
+from hailhq.core.sms_trial import POOL_PURPOSE as TRIAL_POOL_PURPOSE
 from hailhq.core.telemetry import bind_organization
 from hailhq.core.telemetry_identity import tag_context
 from hailhq.core.text_agent import should_queue_reply
@@ -185,6 +186,43 @@ async def active_browser_sms_call(db, number, sender):
     return call if held is not None and held.id == number.id else None
 
 
+async def _trial_number_keyword(
+    db: AsyncSession, from_e164: str, body: str, opt_out_type: str | None
+) -> IngestResult:
+    """A text to a trial texting number (no workspace owns it). STOP opts
+    the phone out for the workspace whose verified trial phone it is (one
+    workspace per phone), so the consent check refuses its trial texts;
+    START opts it back in. Every other text, and a phone no workspace
+    verified, is dropped: Hail does not read replies."""
+    action = _opt_out_action(body, opt_out_type)
+    organization_id = None
+    if action in ("STOP", "START"):
+        organization_id = (
+            await db.execute(
+                select(SmsTrialPhone.organization_id).where(
+                    SmsTrialPhone.phone_e164 == from_e164,
+                    SmsTrialPhone.status == "verified",
+                )
+            )
+        ).scalar_one_or_none()
+    if organization_id is None:
+        return IngestResult(sms_id=None, dropped_reason="unknown_number")
+    if action == "STOP":
+        await add_suppression(
+            db,
+            organization_id=organization_id,
+            recipient=from_e164,
+            channel="sms",
+            reason="recipient replied STOP",
+            source="stop_keyword",
+        )
+    elif await is_suppressed(db, organization_id, from_e164, "sms"):
+        await remove_suppression(
+            db, organization_id=organization_id, recipient=from_e164, channel="sms"
+        )
+    return IngestResult(sms_id=None, dropped_reason="trial_number_keyword")
+
+
 async def ingest_inbound_sms(
     db: AsyncSession,
     *,
@@ -213,6 +251,8 @@ async def ingest_inbound_sms(
                 return IngestResult(
                     sms_id=None, dropped_reason="wrong_carrier_or_capability"
                 )
+            if number.pool_purpose == TRIAL_POOL_PURPOSE:
+                return await _trial_number_keyword(db, from_e164, body, opt_out_type)
             browser_call = await active_browser_sms_call(db, number, from_e164)
         if browser_call is None:
             return IngestResult(sms_id=None, dropped_reason="unknown_number")

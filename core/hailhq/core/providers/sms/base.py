@@ -76,10 +76,12 @@ class SmsProvider(ABC):
         """
 
     async def tollfree_approved(
-        self, *, provider_resource_id: str, e164: str
+        self, *, provider_resource_id: str, e164: str, fresh: bool = False
     ) -> bool | None:
         """Read-only proof of approval for this exact, currently owned number.
-        None: the lookup failed, so neither yes nor no."""
+        None: the lookup failed, so neither yes nor no. ``fresh`` skips any
+        cached answer. A carrier that cannot confirm approval keeps this
+        default (always False)."""
         return False
 
     @abstractmethod

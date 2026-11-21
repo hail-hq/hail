@@ -24,9 +24,9 @@ from uuid import UUID
 import phonenumbers
 from hailhq.core.carrier_routing import sms_route
 from hailhq.core.db import key_lock, org_lock
-from hailhq.core.models import PhoneNumber, Sms, SmsTrialPhone
+from hailhq.core.models import CarrierVerification, PhoneNumber, Sms, SmsTrialPhone
 from hailhq.core.sms_registration_gate import is_us
-from sqlalchemy import func, literal_column, select, text, update
+from sqlalchemy import DateTime, cast, func, literal_column, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -39,6 +39,15 @@ POOL_PURPOSE = "sms_trial"
 # ``provisioning_metadata`` key: when the carrier last said the number's
 # toll-free verification is approved. Absent = not ready.
 APPROVED_AT_KEY = "sms_trial_approved_at"
+# A yes older than this no longer counts: lookups that keep failing (no
+# answer) must not keep a number ready forever.
+APPROVAL_MAX_AGE = timedelta(hours=24)
+# ``provisioning_metadata`` key: an operator paused trial sending from the
+# number (``scripts/ops/sms_trial_numbers.py pause``). Not ready while set.
+PAUSED_KEY = "sms_trial_paused_at"
+# Carriers whose SMS adapter answers ``tollfree_approved``. Any other
+# carrier's number never becomes ready, so it cannot be marked.
+TOLLFREE_APPROVAL_CARRIERS = frozenset({"twilio"})
 TRIAL_PREFIX = "[Hail trial] "
 TRIAL_FOOTER = "\nHail does not read replies."
 TRIAL_HINT = (
@@ -191,14 +200,33 @@ def _trial_numbers():
     )
 
 
+def confirms_tollfree_approval(provider: str) -> bool:
+    return provider in TOLLFREE_APPROVAL_CARRIERS
+
+
 def _ready(stmt):
-    """Only numbers whose carrier approval is cached as approved."""
-    return stmt.where(PhoneNumber.provisioning_metadata.has_key(APPROVED_AT_KEY))
+    """Only numbers whose carrier approval is cached as approved, with a yes
+    from the last ``APPROVAL_MAX_AGE``, and not paused."""
+    approved_at = cast(
+        PhoneNumber.provisioning_metadata[APPROVED_AT_KEY].astext,
+        DateTime(timezone=True),
+    )
+    return stmt.where(
+        PhoneNumber.provisioning_metadata.has_key(APPROVED_AT_KEY),
+        approved_at > func.now() - APPROVAL_MAX_AGE,
+        ~PhoneNumber.provisioning_metadata.has_key(PAUSED_KEY),
+    )
 
 
 async def trial_configured(db: AsyncSession) -> bool:
     """At least one number is marked for trial texts."""
     return (await db.execute(_trial_numbers().limit(1))).first() is not None
+
+
+async def ready_trial_number_ids(db: AsyncSession) -> list[UUID]:
+    """Ids of the ready trial numbers, the sender first."""
+    stmt = _ready(_trial_numbers()).with_only_columns(PhoneNumber.id)
+    return list((await db.execute(stmt)).scalars().all())
 
 
 async def trial_sender(db: AsyncSession) -> PhoneNumber | None:
@@ -216,6 +244,26 @@ async def trial_number_by_e164(
     if ready:
         stmt = _ready(stmt)
     return (await db.execute(stmt)).scalar_one_or_none()
+
+
+async def registration_trial_number(
+    db: AsyncSession, registration: CarrierVerification
+) -> UUID | None:
+    """The live trial number a workspace's toll-free registration still
+    covers (the number was moved into the trial pool with it). Its cancel
+    would delete the number's toll-free verification at the carrier, so
+    cancel and account close keep such a registration."""
+    if registration.purpose != "sms" or registration.number_id is None:
+        return None
+    return (
+        await db.execute(
+            select(PhoneNumber.id).where(
+                PhoneNumber.id == registration.number_id,
+                PhoneNumber.pool_purpose == POOL_PURPOSE,
+                PhoneNumber.provisioning_state.not_in(("released", "failed")),
+            )
+        )
+    ).scalar_one_or_none()
 
 
 async def get_trial_phone(
@@ -524,8 +572,9 @@ async def _carrier_approval(provider: str, resource_id: str | None, e164: str):
         return False
     try:
         route = sms_route(provider)
+        # ``fresh``: the cached answer is what this pass refreshes.
         return await route.tollfree_approved(
-            provider_resource_id=resource_id, e164=e164
+            provider_resource_id=resource_id, e164=e164, fresh=True
         )
     except Exception:
         logger.warning("trial number approval lookup failed: %s", e164, exc_info=True)
@@ -538,7 +587,7 @@ async def refresh_trial_approvals(
     """Ask the carrier whether each marked trial number's toll-free
     verification is approved, and cache the answer on the row: a yes stamps
     ``APPROVED_AT_KEY``, a no removes it, no answer keeps the last one, so a
-    slow carrier never turns the trial off. Runs in the verification
+    slow carrier never turns the trial off (for ``APPROVAL_MAX_AGE``). Runs in the verification
     worker's pass and in the ops script, never on a request. No row lock
     is held during the carrier calls."""
     stmt = select(
@@ -546,6 +595,7 @@ async def refresh_trial_approvals(
         PhoneNumber.provider,
         PhoneNumber.provider_resource_id,
         PhoneNumber.e164,
+        PhoneNumber.provisioning_metadata.has_key(APPROVED_AT_KEY).label("was"),
     ).where(
         PhoneNumber.is_pool.is_(True),
         PhoneNumber.pool_purpose == POOL_PURPOSE,
@@ -557,7 +607,8 @@ async def refresh_trial_approvals(
     # End the read transaction before the carrier calls. The caller has no
     # pending changes (each row's answer is committed on its own below).
     await db.commit()
-    counts = {"approved": 0, "not_approved": 0, "no_answer": 0}
+    # ``changed``: numbers whose answer flipped (yes to no or no to yes).
+    counts = {"approved": 0, "not_approved": 0, "no_answer": 0, "changed": 0}
     for row in rows:
         answer = await _carrier_approval(
             row.provider, row.provider_resource_id, row.e164
@@ -565,6 +616,8 @@ async def refresh_trial_approvals(
         if answer is None:
             counts["no_answer"] += 1
             continue
+        if bool(answer) != row.was:
+            counts["changed"] += 1
         if answer:
             value = func.jsonb_build_object(
                 APPROVED_AT_KEY, datetime.now(UTC).isoformat()

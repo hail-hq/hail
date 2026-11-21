@@ -573,6 +573,29 @@ async def test_post_calls_livekit_failure_emits_call_failed_webhook(
 # --------------------------------------------------------------------------- #
 
 
+async def test_post_calls_never_claims_a_pool_number_that_cannot_call(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    org_and_key: tuple[str, ApiKey, str],
+    add_phone_number,
+) -> None:
+    """An SMS-only pool number (for example a trial texting number put back
+    in the pool) is never handed out for a call."""
+    _, _, plain = org_and_key
+    number = await add_phone_number(
+        async_session, organization_id=None, e164="+14155550100", is_pool=True
+    )
+    number.capabilities = ["sms"]
+    await async_session.commit()
+    resp = await client.post(
+        "/calls",
+        json={"to": "+14155559999", "system_prompt": "hi", "recipient_consent": True},
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 503
+    assert "pool exhausted" in resp.json()["detail"]
+
+
 async def test_post_calls_falls_back_to_pool_when_org_has_no_number(
     client: httpx.AsyncClient,
     async_session: AsyncSession,

@@ -4,6 +4,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from hailhq.core import sms_trial
 from hailhq.core.config import Settings
 from hailhq.core.db import org_lock
 from hailhq.core.models import (
@@ -12,9 +13,13 @@ from hailhq.core.models import (
     Sms,
     SmsTrialPhone,
 )
+from hailhq.core.providers.sms.base import SmsProvider
+from hailhq.core.providers.sms.telnyx import TelnyxSmsProvider
+from hailhq.core.providers.sms.twilio import TwilioSmsProvider
 from hailhq.core.sms_trial import (
     APPROVED_AT_KEY,
     CODE_TTL,
+    PAUSED_KEY,
     SMS_TRIAL_LIMIT,
     TRIAL_FOOTER,
     TRIAL_PREFIX,
@@ -30,6 +35,7 @@ from hailhq.core.sms_trial import (
     claim_trial_send,
     code_text,
     confirm_phone,
+    confirms_tollfree_approval,
     get_trial_phone,
     is_verified_trial_phone,
     start_phone_proof,
@@ -93,7 +99,7 @@ async def _seed(
         provider_resource_id=f"PN{e164[-4:]}",
         provisioning_state=state,
         provisioning_metadata=(
-            {APPROVED_AT_KEY: "2026-11-20T00:00:00+00:00"} if approved else {}
+            {APPROVED_AT_KEY: datetime.now(UTC).isoformat()} if approved else {}
         ),
         **({"created_at": created_at} if created_at else {}),
     )
@@ -103,7 +109,7 @@ async def _seed(
 
 
 async def _approve(session, number):
-    number.provisioning_metadata = {APPROVED_AT_KEY: "2026-11-20T00:00:00+00:00"}
+    number.provisioning_metadata = {APPROVED_AT_KEY: datetime.now(UTC).isoformat()}
     await session.flush()
 
 
@@ -862,7 +868,8 @@ class _Carrier:
         self.answer = answer
         self.asked: list[str] = []
 
-    async def tollfree_approved(self, *, provider_resource_id, e164):
+    async def tollfree_approved(self, *, provider_resource_id, e164, fresh=False):
+        assert fresh, "the refresh must skip the in-process cache"
         self.asked.append(e164)
         if isinstance(self.answer, Exception):
             raise self.answer
@@ -884,8 +891,6 @@ class _Carrier:
 async def test_refresh_caches_the_carrier_answer(
     async_session, monkeypatch, before, answer, after
 ):
-    from hailhq.core import sms_trial
-
     number = await _seed(async_session, approved=before)
     await async_session.commit()
     carrier = _Carrier(answer)
@@ -898,8 +903,6 @@ async def test_refresh_caches_the_carrier_answer(
 
 
 async def test_refresh_asks_only_about_marked_numbers(async_session, monkeypatch):
-    from hailhq.core import sms_trial
-
     await _seed(async_session, marked=False, e164="+18005550198")
     await _seed(async_session)
     await async_session.commit()
@@ -907,13 +910,12 @@ async def test_refresh_asks_only_about_marked_numbers(async_session, monkeypatch
     monkeypatch.setattr(sms_trial, "sms_route", lambda provider: carrier)
     counts = await sms_trial.refresh_trial_approvals(async_session)
     assert carrier.asked == [TRIAL_E164]
-    assert counts == {"approved": 1, "not_approved": 0, "no_answer": 0}
+    assert counts == {"approved": 1, "not_approved": 0, "no_answer": 0, "changed": 1}
 
 
 async def test_requests_never_ask_the_carrier(async_session, monkeypatch):
     """Readiness is read from the row: GET, hints and claims make no
     carrier call."""
-    from hailhq.core import sms_trial
 
     def no_carrier(provider):
         raise AssertionError("carrier called on a request")
@@ -923,3 +925,53 @@ async def test_requests_never_ask_the_carrier(async_session, monkeypatch):
     assert await trial_configured(async_session)
     assert await trial_hint_applies(async_session, org)
     assert await _claim(async_session, org) is not None
+
+
+@pytest.mark.parametrize(
+    "stamp,ready",
+    [(timedelta(hours=1), True), (timedelta(hours=25), False)],
+)
+async def test_an_old_approval_is_not_ready(async_session, stamp, ready):
+    """Lookups that keep failing keep the last yes: after 24 hours without
+    a fresh yes the number is not ready."""
+    number = await _seed(async_session)
+    number.provisioning_metadata = {
+        APPROVED_AT_KEY: (datetime.now(UTC) - stamp).isoformat()
+    }
+    await async_session.flush()
+    assert (await trial_sender(async_session) is not None) is ready
+
+
+async def test_a_paused_number_is_not_ready(async_session):
+    number = await _seed(async_session, approved=True)
+    number.provisioning_metadata = {
+        **number.provisioning_metadata,
+        PAUSED_KEY: datetime.now(UTC).isoformat(),
+    }
+    await async_session.flush()
+    assert await trial_sender(async_session) is None
+    assert await trial_configured(async_session)
+
+
+@pytest.mark.parametrize(
+    "before,answer,changed",
+    [(False, True, 1), (True, True, 0), (True, False, 1), (True, None, 0)],
+)
+async def test_refresh_counts_only_changed_answers(
+    async_session, monkeypatch, before, answer, changed
+):
+    await _seed(async_session, approved=before)
+    await async_session.commit()
+    monkeypatch.setattr(sms_trial, "sms_route", lambda provider: _Carrier(answer))
+    counts = await sms_trial.refresh_trial_approvals(async_session)
+    assert counts["changed"] == changed
+
+
+def test_only_a_carrier_that_answers_can_confirm_approval():
+    assert confirms_tollfree_approval("twilio") is True
+    assert confirms_tollfree_approval("telnyx") is False
+    assert confirms_tollfree_approval("no-such-carrier") is False
+    # The list matches the adapters that answer the check.
+    base = SmsProvider.tollfree_approved
+    assert TwilioSmsProvider.tollfree_approved is not base
+    assert TelnyxSmsProvider.tollfree_approved is base

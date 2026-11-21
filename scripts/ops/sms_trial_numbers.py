@@ -7,17 +7,23 @@ values (``Settings`` reads ``.env`` from the working directory):
     uv run python scripts/ops/sms_trial_numbers.py mark --number +E164
     uv run python scripts/ops/sms_trial_numbers.py unmark --number +E164
     uv run python scripts/ops/sms_trial_numbers.py move --number +E164
+    uv run python scripts/ops/sms_trial_numbers.py pause --number +E164
+    uv run python scripts/ops/sms_trial_numbers.py resume --number +E164
 
 Every command except ``status`` prints its plan and changes nothing until
 ``--yes`` is added.
 
 * ``mark``: a shared call pool number becomes a trial texting number. It
   then never serves calls or browser sessions.
-* ``unmark``: a trial texting number goes back to the shared call pool.
+* ``unmark``: a trial texting number goes back to the shared pool (calls
+  only when it can make calls).
 * ``move``: a workspace's number leaves the workspace and becomes a trial
   texting pool number.
+* ``pause`` / ``resume``: stop trial texts from a number at once, and start
+  them again. A paused number stays a trial number.
 
-The number must be an active US toll-free number that can text. After
+``mark`` and ``move`` take an active US toll-free number that can text, on
+a carrier that confirms toll-free approval (Twilio). After
 ``mark`` or ``move`` with ``--yes``, the script asks the carrier once
 whether the number's toll-free verification is approved, so the number is
 ready at once (the verification worker repeats this every pass). Code:
@@ -44,6 +50,8 @@ CHANGES = {
     "mark": sms_trial_pool.mark,
     "unmark": sms_trial_pool.unmark,
     "move": sms_trial_pool.move,
+    "pause": sms_trial_pool.pause,
+    "resume": sms_trial_pool.resume,
 }
 
 

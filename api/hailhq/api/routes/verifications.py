@@ -166,6 +166,7 @@ from hailhq.core.schemas import (
 )
 from hailhq.core.secret_cipher import SecretCipher
 from hailhq.core.sms_registration_gate import US_SMS_COUNTRY_CODES
+from hailhq.core.sms_trial import registration_trial_number
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import (
     DateTime,
@@ -4710,6 +4711,13 @@ async def cancel_verification(
         raise HTTPException(
             status_code=409,
             detail="This verification is under review or cannot be cancelled in its current state.",
+        )
+    if await registration_trial_number(db, row) is not None:
+        # The number moved into Hail's trial texting pool: the cancel would
+        # delete its toll-free verification at the carrier.
+        raise HTTPException(
+            status_code=409,
+            detail="This registration covers a Hail trial texting number and cannot be cancelled.",
         )
     provider = registry(row.provider, row.purpose)
     # Billing releases the transaction so its own org lock can be acquired.

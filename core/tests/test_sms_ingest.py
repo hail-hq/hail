@@ -5,11 +5,14 @@ opt-out handling, and webhook fan-out."""
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 
+from hailhq.core.compliance_gate import check_sms_allowed, is_suppressed
 from hailhq.core.models import (
     PhoneNumber,
     Sms,
     SmsEvent,
+    SmsTrialPhone,
     Suppression,
     WebhookDelivery,
     WebhookSubscription,
@@ -557,9 +560,7 @@ async def test_sms_received_payload_names_the_compliance_keyword(async_session) 
         assert event_by_body[body]["compliance_keyword"] == keyword
 
 
-async def test_reply_to_a_trial_texting_number_is_dropped(async_session):
-    """A trial number is a pool number with no workspace: a reply (the trial
-    footer says Hail does not read replies) is stored nowhere."""
+async def _trial_number(session) -> PhoneNumber:
     number = PhoneNumber(
         organization_id=None,
         is_pool=True,
@@ -572,17 +573,79 @@ async def test_reply_to_a_trial_texting_number_is_dropped(async_session):
         provider_resource_id="PN_trial",
         provisioning_state="active",
     )
-    async_session.add(number)
-    await async_session.commit()
-    result = await ingest_inbound_sms(
-        async_session,
+    session.add(number)
+    await session.commit()
+    return number
+
+
+async def _reply(session, body, *, sender="+14155550142", sid=None):
+    return await ingest_inbound_sms(
+        session,
         carrier="twilio",
-        from_e164="+14155550142",
-        to_e164=number.e164,
-        body="thanks",
-        provider_message_sid="SM_trial_reply",
+        from_e164=sender,
+        to_e164="+18005550199",
+        body=body,
+        provider_message_sid=sid or f"SM{uuid.uuid4().hex}",
         opt_out_type=None,
     )
-    assert result.sms_id is None
-    assert result.dropped_reason == "unknown_number"
+
+
+async def _verified_trial_phone(session, phone="+14155550142") -> uuid.UUID:
+    org = uuid.uuid4()
+    session.add(
+        SmsTrialPhone(
+            organization_id=org,
+            phone_e164=phone,
+            status="verified",
+            verified_at=datetime.now(timezone.utc),
+            consent_version="test",
+            consent_at=datetime.now(timezone.utc),
+        )
+    )
+    await session.commit()
+    return org
+
+
+async def test_reply_to_a_trial_texting_number_is_dropped(async_session):
+    """A trial number is a pool number with no workspace: a reply (the trial
+    footer says Hail does not read replies) is stored nowhere."""
+    await _trial_number(async_session)
+    await _verified_trial_phone(async_session)
+    for body in ("thanks", "HELP"):
+        result = await _reply(async_session, body)
+        assert result.sms_id is None
+        assert result.dropped_reason == "unknown_number"
     assert (await async_session.execute(select(Sms))).first() is None
+
+
+async def test_stop_to_a_trial_number_suppresses_the_trial_phone(async_session):
+    """STOP to a trial number opts the phone out for the workspace that
+    verified it, so its trial sends are refused by the consent check; START
+    opts it back in."""
+    await _trial_number(async_session)
+    org = await _verified_trial_phone(async_session)
+    other = await _verified_trial_phone(async_session, phone="+14155550143")
+
+    result = await _reply(async_session, "STOP")
+    await async_session.commit()
+    assert result.sms_id is None and result.dropped_reason == "trial_number_keyword"
+    assert await is_suppressed(async_session, org, "+14155550142", "sms")
+    assert not await is_suppressed(async_session, other, "+14155550142", "sms")
+    row = (await async_session.execute(select(Suppression))).scalar_one()
+    assert row.source == "stop_keyword"
+    gate = await check_sms_allowed(async_session, org, "+14155550142")
+    assert not gate.allowed
+
+    await _reply(async_session, "START")
+    await async_session.commit()
+    assert not await is_suppressed(async_session, org, "+14155550142", "sms")
+    assert (await async_session.execute(select(Sms))).first() is None
+
+
+async def test_stop_to_a_trial_number_from_an_unknown_phone_is_dropped(
+    async_session,
+):
+    await _trial_number(async_session)
+    result = await _reply(async_session, "STOP", sender="+14155550144")
+    assert result.dropped_reason == "unknown_number"
+    assert (await async_session.execute(select(Suppression))).first() is None

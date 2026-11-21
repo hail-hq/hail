@@ -535,7 +535,7 @@ async def seed_sms_trial(
         provider_resource_id="PN_trial",
         provisioning_state="active",
         provisioning_metadata=(
-            {APPROVED_AT_KEY: "2026-11-20T00:00:00+00:00"} if ready else {}
+            {APPROVED_AT_KEY: datetime.now(timezone.utc).isoformat()} if ready else {}
         ),
     )
     session.add(number)

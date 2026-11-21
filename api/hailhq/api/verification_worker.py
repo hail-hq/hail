@@ -62,8 +62,10 @@ class VerificationWorker:
             # Its own step: a carrier error here must not stop the sweep.
             try:
                 trial = await refresh_trial_approvals(session)
-                counts["trial_not_approved"] = trial["not_approved"]
-                counts["trial_no_answer"] = trial["no_answer"]
+                # Logged only when an answer flipped, not on every pass.
+                if trial["changed"]:
+                    for key in ("approved", "not_approved", "no_answer"):
+                        counts[f"trial_{key}"] = trial[key]
             except Exception:
                 await session.rollback()
                 logger.exception("verification worker: trial number check failed")
