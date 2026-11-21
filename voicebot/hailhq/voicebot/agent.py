@@ -104,6 +104,7 @@ from hailhq.voicebot.pipeline import (
 )
 from hailhq.voicebot.recording import start_recording, stop_recording
 from hailhq.voicebot.recovery import ConversationRecovery
+from hailhq.voicebot.speaking_gate import SpeakingGuard
 from hailhq.voicebot.spoken_lines import spoken_lines
 from hailhq.voicebot.telemetry import connect_livekit_tracing
 from hailhq.voicebot.tools import SpeechTracker, build_agent_tools
@@ -2680,6 +2681,29 @@ async def _run_call(
         call_id=call_id,
     )
 
+    # The agent does not listen while its own voice is on the line, so
+    # background talk and its own echo cannot cut a reply (speaking_gate.py).
+    speaking_guard = SpeakingGuard(
+        session,
+        enabled=lambda: (
+            # A phone menu talks over the agent and must stay heard.
+            (agent.phone_menu is None or not agent.phone_menu.active)
+            # Once the phone picks up the agent is muted.
+            and not bridge_state.get("picked_up")
+            and not bridge_state.get("connected")
+        ),
+        # With LiveKit's interruption model on, the model decides what stops
+        # the agent; the gate then closes only on calls with measured echo.
+        always=not settings.hail_adaptive_interruption,
+        on_echo=lambda payload: write_call_event(
+            call_id, "audio_echo_detected", payload
+        ),
+    )
+    try:
+        speaking_guard.attach()
+    except Exception:
+        logger.exception("speaking gate did not attach; continuing call")
+
     # AMD's clients. Its classifier also backs the phone menu check, so it
     # closes only at shutdown, after AMD and the last check end.
     amd_models: AMDModels | None = None
@@ -2690,6 +2714,10 @@ async def _run_call(
         legs_recorded = False
         try:
             await recovery.aclose()
+            try:
+                await asyncio.wait_for(speaking_guard.aclose(), timeout=2)
+            except Exception:
+                logger.exception("speaking gate did not close; continuing")
             # Never close the classifier under a running check: let the
             # menu finish its check first.
             if agent.phone_menu is not None:

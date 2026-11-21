@@ -48,11 +48,19 @@ For the full flow, refer to [Architecture](../architecture.md).
 
 Noise filtering, interruption handling, and call recovery are enabled automatically.
 
-By default one transcribed word from the other party stops the agent. LiveKit's
+By default the agent does not listen while its own voice plays, and listens
+again the moment it stops. Background talk and a short "okay" cannot cut a
+reply off, and the other party speaks between replies. On a line that returns
+the agent's voice late (echo), the worker measures the delay and waits that
+long after each reply. See
+[`speaking_gate.py`](../../../voicebot/hailhq/voicebot/speaking_gate.py).
+
+LiveKit's
 [adaptive interruption model](https://docs.livekit.io/agents/logic/turns/adaptive-interruption-handling/)
-does better: the agent keeps talking over a short "okay" and stops for a real
-interruption. It is off by default, because LiveKit meters it for self-hosted
-workers:
+is the alternative: the agent keeps talking over a short "okay" and stops for a
+real interruption. With it on, the agent listens while it talks, except on
+calls with measured echo. It is off by default, because LiveKit meters it for
+self-hosted workers:
 
 ```bash
 # Worker environment. Turns the model on. Restart the voice worker after
@@ -66,8 +74,8 @@ HAIL_ADAPTIVE_INTERRUPTION=true
   after about a minute.
 - Past the monthly allowance, the free plan stops the model and paid plans
   bill per request.
-- Whenever the model is refused or fails, the call goes on with the default
-  rule. No call fails because of it.
+- Whenever the model is refused or fails, one transcribed word stops the
+  agent for the rest of the call. No call fails because of it.
 
 Current numbers:
 [Quotas and limits](https://docs.livekit.io/deploy/admin/quotas-and-limits/),

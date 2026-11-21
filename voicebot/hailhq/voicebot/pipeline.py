@@ -828,6 +828,8 @@ def interruption_options() -> dict[str, Any]:
       off by default: mode "vad" sends no requests.
       ``HAIL_ADAPTIVE_INTERRUPTION=true`` turns it on. See
       docs/public/self-host/livekit-cloud.md.
+    - With the model off, the agent's input is silent while its voice plays
+      (speaking_gate.py), so these rules act only on speech between replies.
 
     https://docs.livekit.io/agents/logic/turns/adaptive-interruption-handling/
     """

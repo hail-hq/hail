@@ -235,7 +235,9 @@ class Settings(BaseSettings):
 
     # LiveKit's adaptive interruption model on calls (tells a nod from a real
     # interruption). LiveKit meters it per request for self-hosted workers.
-    # Off by default: the free LiveKit plan allows too few requests per minute
+    # Off by default: the agent then does not listen while its own voice plays
+    # (voicebot speaking_gate.py), and the free LiveKit plan allows too few
+    # requests per minute
     # for a whole call, so the model is refused about a minute in. true turns
     # it on; false sends no requests and every call uses the plain one-word
     # rule. Not in .env.example (working default); see
