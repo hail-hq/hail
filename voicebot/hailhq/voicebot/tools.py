@@ -221,29 +221,30 @@ async def build_agent_tools(
     every-call tools when the dispatch has no valid ``organization_id``
     (rolling deploy): no org tools beats wrong-org tools.
     """
-    fallback = (
-        every_call_tools(
+
+    def fallback() -> tuple[list, None]:
+        tools = every_call_tools(
             metadata,
             call_id=call_id,
             hangup=hangup,
             send_dtmf=send_dtmf,
             spoke_since=spoke_since,
-        ),
-        None,
-    )
+        )
+        return tools, None
+
     raw_org = metadata.get("organization_id")
     if raw_org is None:
         logger.warning(
             "dispatch metadata has no organization_id; only every-call tools"
         )
-        return fallback
+        return fallback()
     try:
         organization_id = UUID(str(raw_org))
     except ValueError:
         logger.warning(
             "dispatch metadata has malformed organization_id; only every-call tools"
         )
-        return fallback
+        return fallback()
 
     allowed = metadata.get("tools")  # None ⇒ all available
     if allowed is not None and not isinstance(allowed, list):
@@ -255,7 +256,7 @@ async def build_agent_tools(
             "dispatch metadata 'tools' is not a list (%r); only every-call tools",
             type(allowed).__name__,
         )
-        return fallback
+        return fallback()
     specs: list[ToolSpec] = []
     for s in call_tools():
         # A tool every call keeps ignores the `tools` list.
@@ -298,14 +299,13 @@ async def build_agent_tools(
     passed: set[str] = set()
     try:
         await _check_availability(checked, organization_id, passed)
+        available = [s for s in specs if s.on_every_call or s.name in passed]
+        return _wrap_fitted(available, tctx), api
     except BaseException:
         # The caller gets no client on a failure, so close it here.
         if api is not None:
             await api.aclose()
         raise
-
-    available = [s for s in specs if s.on_every_call or s.name in passed]
-    return _wrap_fitted(available, tctx), api
 
 
 async def _check_availability(

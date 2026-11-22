@@ -410,7 +410,7 @@ IVR_TOOL_LINES: tuple[ToolLine, ...] = (
         # coming.
         "You cannot press keys on this call. Wait for a person. A hold message "
         "is not a reason to leave. If the same menu has played three times "
-        "with no person and nothing new, end the call without speaking.",
+        "with no person and nothing new, end the call.",
     ),
     ToolLine(
         "Press keys, do not speak your choice, the menu cannot hear you. Key "
