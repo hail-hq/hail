@@ -148,7 +148,7 @@ def with_carrier_text(message: str, raw: object) -> str:
     text can quote what the customer filed: it goes to the workspace (the
     console, the API, the owners' email). Hail never logs it, except
     Telnyx's error text at filing and on failed status polls (``_error_log``
-    in ``telnyx_sms.py``, owner decision 2026-10-28)."""
+    in ``telnyx_sms.py``), kept so a refused field can be traced."""
     said = list(dict.fromkeys(sentence(t) for t in carrier_texts(raw)))
     if not said:
         return message

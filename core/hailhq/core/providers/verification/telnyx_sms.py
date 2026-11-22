@@ -1339,19 +1339,17 @@ def _refused(exc: Exception) -> bool:
     # Every text key: the outage check reads the same words that get quoted.
     prose = " ".join(_all_text(error) for error in errors)
     if known_field:
-        # An error on a form field is the customer's unless the text names
-        # Hail's account; there "permission" is a form word, as on Twilio
-        # ("Opt-in permission language missing"). An error off the form
-        # that says "permission" still names Hail's account.
-        off_form = " ".join(
-            _all_text(e)
+        # The same rule as Twilio's Trust Hub check: the customer gets the
+        # refusal when any form-field error is theirs (its own text names
+        # no Hail account problem; "permission" is a form word here). Only
+        # when every form-field error names Hail's account is it an outage.
+        on_form = [
+            e
             for e in errors
-            if (_pointer(e) or "").removeprefix("/body") not in _APPLICATION_POINTERS
-        )
-        return (
-            exc.response.status_code in (400, 422)
-            and not account_problem(prose)
-            and "permission" not in off_form.lower()
+            if (_pointer(e) or "").removeprefix("/body") in _APPLICATION_POINTERS
+        ]
+        return exc.response.status_code in (400, 422) and any(
+            not account_problem(_all_text(e)) for e in on_form
         )
     return application_validation_error(
         exc.response.status_code, prose, known_field=known_field

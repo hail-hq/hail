@@ -1884,7 +1884,7 @@ async def test_brand_refused_later_reads_text_and_fields(reasons, start) -> None
     assert st.reason.startswith(start)
 
 
-async def test_an_off_form_permission_error_stays_an_outage():
+async def test_an_off_form_permission_error_reaches_the_customer_next_to_a_form_error():
     def handler(req):
         return httpx.Response(
             422,
@@ -1896,8 +1896,8 @@ async def test_an_off_form_permission_error_stays_an_outage():
             },
         )
 
-    with pytest.raises(VerificationProviderError):
-        await _draft(_provider(handler), subject="person", fields=PERSON_FIELDS)
+    draft = await _draft(_provider(handler), subject="person", fields=PERSON_FIELDS)
+    assert draft.problems[0].field == "email"
 
 
 async def test_a_form_error_saying_permission_reaches_the_customer():
@@ -1924,7 +1924,7 @@ def test_an_odd_fields_value_does_not_crash():
     assert problems[0].message.endswith("The carrier said: x.")
 
 
-async def test_an_account_error_under_description_stays_an_outage():
+async def test_an_account_error_under_description_reaches_the_customer_next_to_a_form_error():
     def handler(req):
         return httpx.Response(
             422,
@@ -1932,6 +1932,24 @@ async def test_an_account_error_under_description_stays_an_outage():
                 "errors": [
                     {"detail": "Invalid email", "source": {"pointer": "/email"}},
                     {"description": "Unauthorized: profile configuration invalid"},
+                ]
+            },
+        )
+
+    draft = await _draft(_provider(handler), subject="person", fields=PERSON_FIELDS)
+    assert draft.problems[0].field == "email"
+
+
+async def test_form_errors_that_all_name_the_account_stay_an_outage():
+    def handler(req):
+        return httpx.Response(
+            422,
+            json={
+                "errors": [
+                    {
+                        "detail": "Messaging service configuration missing",
+                        "source": {"pointer": "/email"},
+                    }
                 ]
             },
         )
