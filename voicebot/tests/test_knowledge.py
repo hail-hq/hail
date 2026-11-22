@@ -187,6 +187,9 @@ def test_filler_turns_are_not_searched_in_calls() -> None:
         "Muy bien, gracias",
         "Très bien, merci",
         "Tudo bem, obrigado",
+        "Sorry?",
+        "What?",
+        "okay ωράριο",
     ):
         assert not worth_searching(filler, call=True), filler
     for question in (
@@ -194,6 +197,9 @@ def test_filler_turns_are_not_searched_in_calls() -> None:
         "Is it open?",
         "ωράριο λειτουργίας\u037e",
         "ωράριο λειτουργίας;",
+        "okay ωράριο;",
+        "Is it refundable",
+        "I have a leak",
         "Opening hours?",
         "ساعات العمل؟",
         "E204",

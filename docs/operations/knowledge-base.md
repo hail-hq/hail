@@ -35,7 +35,7 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml \
   run --rm api python -m hailhq.core.knowledge.access delete '<org-uuid>'
 ```
 
-If it fails, the workspace is already off and its rows are kept: run the same command again.
+If it fails, run the same command again; it is safe to repeat.
 
 ## Before the first workspace is turned on
 

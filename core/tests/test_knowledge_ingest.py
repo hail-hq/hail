@@ -440,3 +440,37 @@ async def test_failed_bucket_delete_turns_off_and_keeps_rows(async_session, s3) 
     assert (await async_session.get(FileUpload, link_id)).token_hash is None
     # The rows stay for the retry.
     assert await async_session.get(KnowledgeDocument, doc_id) is not None
+
+
+async def test_full_delete_keeps_uploads_made_meanwhile(async_session, s3) -> None:
+    org = uuid.uuid4()
+    old_doc = await add_document(async_session, s3, org, b"Old file.")
+    new_id = uuid.uuid4()
+    new_key = object_key("knowledge_document", org, new_id) + ".b"
+    plain_delete = s3.delete_prefix
+
+    async def delete_and_upload(prefix, *, keep=None):
+        # The workspace is turned on again and a new file lands meanwhile.
+        if new_key not in s3.objects:
+            s3.objects[new_key] = b"New file."
+            async_session.add(
+                FileUpload(
+                    id=new_id,
+                    organization_id=org,
+                    purpose="knowledge_document",
+                    filename="new.md",
+                    content_type="text/markdown",
+                    s3_key=new_key,
+                    size_bytes=9,
+                    uploaded_at=datetime.now(timezone.utc),
+                )
+            )
+            await async_session.commit()
+        return await plain_delete(prefix, keep=keep)
+
+    s3.delete_prefix = delete_and_upload
+    assert await delete_org_knowledge(async_session, org, s3) == 1
+    async_session.expire_all()
+    assert await async_session.get(KnowledgeDocument, old_doc) is None
+    assert await async_session.get(FileUpload, new_id) is not None
+    assert new_key in s3.objects

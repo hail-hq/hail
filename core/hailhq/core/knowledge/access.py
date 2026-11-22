@@ -23,13 +23,12 @@ import asyncio
 import logging
 import sys
 from collections.abc import Awaitable
-from datetime import datetime
 from typing import TypeVar
 from uuid import UUID
 
 from hailhq.core.config import settings
 from hailhq.core.db import key_lock, session_scope
-from hailhq.core.file_uploads import KNOWLEDGE_DOCUMENTS_PREFIX
+from hailhq.core.file_uploads import delete_upload_objects
 from hailhq.core.models import (
     Agent,
     FileUpload,
@@ -132,16 +131,16 @@ async def _end(db: AsyncSession, work: Awaitable[T]) -> T:
     except BaseException:
         try:
             await db.rollback()
-        except BaseException as exc:
+        except Exception as exc:
             logger.warning("knowledge: rollback failed (%s)", type(exc).__name__)
         raise
 
 
-async def _turn_off(db: AsyncSession, organization_id: UUID) -> datetime:
-    """Off and links stopped; returns the database time of the step, so the
-    row delete never takes an upload made after it."""
+async def _turn_off(db: AsyncSession, organization_id: UUID) -> list[tuple[UUID, str]]:
+    """Off and links stopped, under the workspace's knowledge lock. Returns
+    the knowledge uploads that exist now (id, storage key): only these are
+    deleted, so a workspace turned on again meanwhile keeps what it adds."""
     await knowledge_lock(db, organization_id)
-    now = (await db.execute(select(func.statement_timestamp()))).scalar_one()
     await db.execute(
         update(FileUpload)
         .where(
@@ -156,29 +155,37 @@ async def _turn_off(db: AsyncSession, organization_id: UUID) -> datetime:
             OrganizationKnowledge.organization_id == organization_id
         )
     )
-    return now
+    rows = await db.execute(
+        select(FileUpload.id, FileUpload.s3_key).where(
+            FileUpload.organization_id == organization_id,
+            FileUpload.purpose == "knowledge_document",
+        )
+    )
+    return [(r.id, r.s3_key) for r in rows]
 
 
 async def _delete_rows(
-    db: AsyncSession, organization_id: UUID, before: datetime
+    db: AsyncSession, organization_id: UUID, upload_ids: list[UUID]
 ) -> int:
-    """The workspace's knowledge uploads made before ``before`` (their
-    documents and pieces go with them, ON DELETE CASCADE). One turned on
-    again meanwhile keeps what it added since."""
-    uploads = (
-        FileUpload.organization_id == organization_id,
-        FileUpload.purpose == "knowledge_document",
-        FileUpload.created_at <= before,
-    )
+    """Those uploads (their documents and pieces go with them, ON DELETE
+    CASCADE), under the lock; returns the documents deleted."""
+    await knowledge_lock(db, organization_id)
     count = (
         await db.execute(
             select(func.count())
             .select_from(KnowledgeDocument)
-            .join(FileUpload, FileUpload.id == KnowledgeDocument.file_upload_id)
-            .where(*uploads)
+            .where(
+                KnowledgeDocument.organization_id == organization_id,
+                KnowledgeDocument.file_upload_id.in_(upload_ids),
+            )
         )
     ).scalar_one()
-    await db.execute(delete(FileUpload).where(*uploads))
+    await db.execute(
+        delete(FileUpload).where(
+            FileUpload.organization_id == organization_id,
+            FileUpload.id.in_(upload_ids),
+        )
+    )
     return int(count)
 
 
@@ -187,32 +194,33 @@ async def delete_org_knowledge(
     organization_id: UUID,
     s3: S3MailClient | None,
 ) -> int:
-    """Delete a workspace's whole knowledge base: its files from the bucket,
-    its upload rows (their documents and pieces go with them) and its limits
+    """Delete a workspace's knowledge base: its files from the bucket, its
+    upload rows (their documents and pieces go with them) and its limits
     row, which turns it off. The one function for every such delete: today
     an account closing (``org_closures`` route and the ingest worker) and
     Hail by hand (``python -m hailhq.core.knowledge.access delete <org-id>``,
     docs/operations/knowledge-base.md); later a paid plan ending. Returns the
-    documents deleted.
+    documents deleted. Safe to run again after any failure.
 
-    Two short transactions around the bucket delete, so no lock is held
+    Two short transactions around the storage deletes, so no lock is held
     during storage calls:
 
     1. Under the workspace's knowledge lock: unused upload links stop
-       working and the limits row is deleted (the workspace is off: no new
-       link or document can start). Committed. A PUT already reading its
-       body then cannot mark its link, so it deletes its own object.
-    2. The folder is emptied. A failure here raises with the workspace off
-       and its rows kept, so a retry (the closed-account sweep finds the
-       workspace by its uploads, or the command run again) finds them.
-    3. The upload rows made before step 1 (documents and pieces go with
-       them) are deleted.
+       working, the limits row is deleted (no new link or document can
+       start), and the uploads that exist are listed. Committed. A PUT
+       already reading its body then cannot mark its link, so it deletes
+       its own object.
+    2. The listed uploads' objects (every attempt) are deleted. A failure
+       raises with the workspace off and its rows kept, so a retry (the
+       closed-account sweep finds the workspace by its uploads, or the
+       command run again) finds them.
+    3. The listed upload rows are deleted.
     """
-    before = await _end(db, _turn_off(db, organization_id))
+    uploads = await _end(db, _turn_off(db, organization_id))
     if s3 is not None:
-        await s3.delete_prefix(f"{KNOWLEDGE_DOCUMENTS_PREFIX}{organization_id}/")
-    count = await _end(db, _delete_rows(db, organization_id, before))
-    return int(count)
+        for _, key in uploads:
+            await delete_upload_objects(s3, key)
+    return await _end(db, _delete_rows(db, organization_id, [i for i, _ in uploads]))
 
 
 async def _delete_main(organization_id: UUID) -> None:
