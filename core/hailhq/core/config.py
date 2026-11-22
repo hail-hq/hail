@@ -1,3 +1,4 @@
+import re
 from typing import Literal
 from uuid import UUID
 
@@ -17,6 +18,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # through the deploy flag alone.
 SELF_HOSTED_ORG_ID = UUID(int=0)
 
+# HAIL_SIP_INBOUND_SECRET goes into a SIP URI as is (Twilio origination URL),
+# so only URI-safe characters; long enough not to guess.
+SIP_SECRET_PATTERN = re.compile(r"[A-Za-z0-9_-]{20,}")
+
 
 class VoicePreference(BaseModel):
     """Optional editorial preference, still checked against live capabilities."""
@@ -32,6 +37,8 @@ class Settings(BaseSettings):
         env_file=(".env", ".env.local"),
         env_file_encoding="utf-8",
         extra="ignore",
+        # A startup error must not print a secret it rejected.
+        hide_input_in_errors=True,
     )
 
     # Optional backend observability (EU only).
@@ -426,6 +433,17 @@ class Settings(BaseSettings):
     def _recording_retention_preset(cls, value: int) -> int:
         if value not in (7, 30, 365):
             raise ValueError("Recording retention must be 7, 30, or 365 days")
+        return value
+
+    @field_validator("hail_sip_inbound_secret")
+    @classmethod
+    def _sip_secret_fits_a_uri(cls, value: str) -> str:
+        # The message never holds the value (see hide_input_in_errors).
+        if value and not SIP_SECRET_PATTERN.fullmatch(value):
+            raise ValueError(
+                "HAIL_SIP_INBOUND_SECRET must be empty or 20 or more letters, "
+                "digits, - or _"
+            )
         return value
 
     @model_validator(mode="after")

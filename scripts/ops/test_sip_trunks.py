@@ -97,6 +97,7 @@ def trunk(trunk_id, name, numbers=()):
 
 
 SECRET = "s3cr3t-value-for-tests_0123456789abcdef"
+LK = "sip:hail-test.sip.livekit.cloud;transport=tcp"
 
 
 class FakeTwilio:
@@ -122,12 +123,22 @@ class FakeTwilio:
 
 @pytest.fixture(autouse=True)
 def tw(monkeypatch) -> FakeTwilio:
-    fake = FakeTwilio("sip:lk.example.test;transport=tcp")
+    fake = FakeTwilio(LK)
     monkeypatch.setattr(st.twilio, "origination_urls", fake.origination_urls)
     monkeypatch.setattr(
         st.twilio, "set_origination_sip_url", fake.set_origination_sip_url
     )
     return fake
+
+
+@pytest.fixture(autouse=True)
+def no_db(monkeypatch):
+    """apply reads the carriers of the shared trunk's numbers: none known."""
+
+    async def nobody(_numbers):
+        return {}
+
+    monkeypatch.setattr(st, "live_carriers", nobody)
 
 
 @pytest.fixture(autouse=True)
@@ -850,7 +861,7 @@ async def test_twilio_apply_refuses_a_secret_unfit_for_a_uri(monkeypatch) -> Non
 async def test_twilio_apply_needs_an_origination_url(monkeypatch, tw) -> None:
     tw.urls.clear()
     sip = FakeSip(trunk("ST_shared", "shared", ["+14155550100"]))
-    with pytest.raises(st.TrunkError, match="no origination URL"):
+    with pytest.raises(st.TrunkError, match="no origination URL to a LiveKit"):
         await st.apply(sip, DATA, SPECS["twilio"], yes=True)
     assert sip.calls == []
 
@@ -861,8 +872,7 @@ async def test_twilio_dry_run_prints_the_url_plan_without_the_secret(tw) -> None
     assert tw.updates == []
     assert sip.calls == []
     assert (
-        "Twilio origination URL OU0: sip:lk.example.test;transport=tcp -> "
-        "sip:lk.example.test;transport=tcp?X-Hail-Secret=*** "
+        f"Twilio origination URL OU0: {LK} -> {LK}?X-Hail-Secret=*** "
         "(priority 10, weight 20 kept)"
     ) in plan
     assert not any(SECRET in line for line in plan)
@@ -875,9 +885,7 @@ async def test_twilio_apply_creates_the_trunk_with_the_map_and_sets_the_url(
     plan = await st.apply(sip, DATA, SPECS["twilio"], yes=True)
     created = st.by_name(list(sip.trunks.values()), "hail-inbound-twilio")
     assert dict(created.headers_to_attributes) == {"X-Hail-Secret": "hail.sip_secret"}
-    assert tw.updates == [
-        ("OU0", f"sip:lk.example.test;transport=tcp?X-Hail-Secret={SECRET}")
-    ]
+    assert tw.updates == [("OU0", f"{LK}?X-Hail-Secret={SECRET}")]
     assert tw.urls["OU0"].priority == 10 and tw.urls["OU0"].weight == 20
     assert not any(SECRET in line for line in plan)
     # A second run changes no URL.
@@ -938,3 +946,170 @@ async def test_status_says_whether_the_secret_header_is_mapped(monkeypatch) -> N
     assert "secret header mapped yes" in next(
         line for line in lines if line.startswith("hail-inbound-twilio")
     )
+
+
+@pytest.mark.parametrize(
+    ("url", "host"),
+    [
+        (LK, "hail-test.sip.livekit.cloud"),
+        (
+            "sips:user;x=1@Hail-Test.SIP.LiveKit.Cloud:5061;transport=tls?a=b",
+            "hail-test.sip.livekit.cloud",
+        ),
+        ("sip:[2001:db8::1]:5060", "2001:db8::1"),
+        ("sip:x.sip.livekit.cloud.evil.test", "x.sip.livekit.cloud.evil.test"),
+    ],
+)
+async def test_sip_host(url, host) -> None:
+    assert st.sip_host(url) == host
+
+
+async def test_twilio_apply_skips_urls_that_are_not_livekit(tw) -> None:
+    tw.urls["OU1"] = st.twilio.OriginationUrl(
+        "OU1", "sip:x.sip.livekit.cloud.evil.test", 10, 10, True
+    )
+    sip = FakeSip(trunk("ST_shared", "shared", ["+14155550100"]))
+    plan = await st.apply(sip, DATA, SPECS["twilio"], yes=True)
+    assert [sid for sid, _ in tw.updates] == ["OU0"]
+    assert (
+        "Twilio origination URL OU1: sip:x.sip.livekit.cloud.evil.test "
+        "skipped (not LiveKit)"
+    ) in plan
+
+
+async def test_twilio_apply_needs_a_livekit_origination_url(tw) -> None:
+    tw.urls = {
+        "OU0": st.twilio.OriginationUrl("OU0", "sip:pbx.example.test", 1, 1, True)
+    }
+    sip = FakeSip(trunk("ST_shared", "shared", ["+14155550100"]))
+    with pytest.raises(st.TrunkError, match="no origination URL to a LiveKit"):
+        await st.apply(sip, DATA, SPECS["twilio"], yes=True)
+    assert sip.calls == []
+    assert tw.updates == []
+
+
+async def test_twilio_url_lines_print_before_each_write(
+    monkeypatch, tw, capsys
+) -> None:
+    """A failed write halfway still leaves the lines of the URLs before it
+    (and of the one that failed) on the screen. No secret in them."""
+    tw.urls["OU1"] = st.twilio.OriginationUrl("OU1", LK + ";x=2", 10, 20, True)
+    real_set = tw.set_origination_sip_url
+
+    async def fail_second(sid, sip_url):
+        if sid == "OU1":
+            raise st.CarrierRequestError(500)
+        await real_set(sid, sip_url)
+
+    monkeypatch.setattr(st.twilio, "set_origination_sip_url", fail_second)
+    sip = FakeSip(trunk("ST_shared", "shared", ["+14155550100"]))
+    with pytest.raises(st.CarrierRequestError):
+        await st.apply(sip, DATA, SPECS["twilio"], yes=True)
+    out = capsys.readouterr().out
+    assert out.splitlines() == [
+        (
+            f"Twilio origination URL OU0: {LK} -> {LK}?X-Hail-Secret=*** "
+            "(priority 10, weight 20 kept)"
+        ),
+        (
+            f"Twilio origination URL OU1: {LK};x=2 -> {LK};x=2?X-Hail-Secret=*** "
+            "(priority 10, weight 20 kept)"
+        ),
+    ]
+    assert SECRET not in out
+    assert [sid for sid, _ in tw.updates] == ["OU0"]
+
+
+def _twilio_on_shared(monkeypatch, carriers):
+    async def found(numbers):
+        return {n: carriers[n] for n in numbers if n in carriers}
+
+    monkeypatch.setattr(st, "live_carriers", found)
+
+
+@pytest.mark.parametrize("yes", [False, True])
+async def test_twilio_apply_refuses_while_a_twilio_number_is_on_the_shared_trunk(
+    monkeypatch, tw, yes
+) -> None:
+    monkeypatch.setattr(settings, "livekit_twilio_sip_inbound_trunk_id", "ST_tw")
+    _twilio_on_shared(monkeypatch, {"+14155550100": "twilio"})
+    sip = FakeSip(
+        trunk("ST_shared", "shared", ["hail-placeholder-shared", "+14155550100"]),
+        trunk("ST_tw", "hail-inbound-twilio", ["hail-placeholder-twilio"]),
+        rule_trunks=("ST_shared", "ST_tw"),
+    )
+    with pytest.raises(
+        st.TrunkError,
+        match="1 twilio number.s. still on the shared trunk.*run move --carrier twilio first",
+    ):
+        await st.apply(sip, DATA, SPECS["twilio"], yes=yes)
+    assert sip.calls == []
+    assert tw.updates == []
+
+
+async def test_twilio_apply_ignores_other_carriers_on_the_shared_trunk(
+    monkeypatch, tw
+) -> None:
+    monkeypatch.setattr(settings, "livekit_twilio_sip_inbound_trunk_id", "ST_tw")
+    _twilio_on_shared(monkeypatch, {"+14155550100": "telnyx"})
+    sip = FakeSip(
+        trunk("ST_shared", "shared", ["hail-placeholder-shared", "+14155550100"]),
+        trunk("ST_tw", "hail-inbound-twilio", ["hail-placeholder-twilio"]),
+        rule_trunks=("ST_shared", "ST_tw"),
+    )
+    await st.apply(sip, DATA, SPECS["twilio"], yes=True)
+    assert [sid for sid, _ in tw.updates] == ["OU0"]
+
+
+async def test_new_twilio_trunk_is_created_and_says_move_next(monkeypatch, tw) -> None:
+    """move needs the trunk, so a first apply is not refused: it says to
+    move the numbers before the server checks the secret."""
+    _twilio_on_shared(monkeypatch, {"+14155550100": "twilio"})
+    sip = FakeSip(trunk("ST_shared", "shared", ["+14155550100"]))
+    plan = await st.apply(sip, DATA, SPECS["twilio"], yes=False)
+    assert (
+        "then run move --carrier twilio before HAIL_SIP_INBOUND_SECRET is set "
+        "on the server: 1 twilio number(s) are still on the shared trunk"
+    ) in plan
+
+
+async def test_replace_keeps_other_header_maps_and_re_adds_lost_numbers(
+    monkeypatch, capsys
+) -> None:
+    monkeypatch.setattr(settings, "livekit_twilio_sip_inbound_trunk_id", "ST_tw")
+    sip = FakeSip(
+        trunk("ST_shared", "shared", ["hail-placeholder-shared"]),
+        trunk(
+            "ST_tw",
+            "hail-inbound-twilio",
+            ["hail-placeholder-twilio", "+14155550101", "+14155550102"],
+        ),
+        rule_trunks=("ST_shared", "ST_tw"),
+    )
+    sip.trunks["ST_tw"].headers_to_attributes["X-Other"] = "other.attr"
+    sip.trunks["ST_tw"].headers_to_attributes["X-Hail-Secret"] = "stale.attr"
+    real_replace = sip.update_inbound_trunk
+
+    async def lossy_replace(trunk_id, info):
+        result = await real_replace(trunk_id, info)
+        sip.trunks[trunk_id].numbers.remove("+14155550102")
+        return result
+
+    sip.update_inbound_trunk = lossy_replace
+    await st.apply(sip, DATA, SPECS["twilio"], yes=True)
+    tw_trunk = sip.trunks["ST_tw"]
+    assert dict(tw_trunk.headers_to_attributes) == {
+        "X-Other": "other.attr",
+        "X-Hail-Secret": "hail.sip_secret",
+    }
+    assert sorted(tw_trunk.numbers) == sorted(
+        ["hail-placeholder-twilio", "+14155550101", "+14155550102"]
+    )
+    assert (
+        "re-add +14155550102 to hail-inbound-twilio: the replace lost it"
+        in capsys.readouterr().out
+    )
+    # The other map does not make every later run replace the trunk again.
+    sip.calls.clear()
+    await st.apply(sip, DATA, SPECS["twilio"], yes=True)
+    assert not [c for c in sip.calls if c[0] == "replace"]

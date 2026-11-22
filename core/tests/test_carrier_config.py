@@ -1,5 +1,6 @@
 import pytest
 from hailhq.core.config import Settings
+from pydantic import ValidationError
 
 
 @pytest.mark.parametrize("direction", ["outbound", "inbound"])
@@ -39,3 +40,21 @@ def test_shared_inbound_trunk_feeds_every_carrier(monkeypatch):
     assert config.livekit_didww_sip_inbound_trunk_id == "ST_shared"
     monkeypatch.setenv("LIVEKIT_DIDWW_SIP_INBOUND_TRUNK_ID", "ST_dw")
     assert Settings(_env_file=None).livekit_didww_sip_inbound_trunk_id == "ST_dw"
+
+
+@pytest.mark.parametrize("value", ["", "a" * 20, "Ab0_-" * 8])
+def test_sip_secret_accepts_empty_or_uri_safe(monkeypatch, value):
+    monkeypatch.setenv("HAIL_SIP_INBOUND_SECRET", value)
+    assert Settings(_env_file=None).hail_sip_inbound_secret == value
+
+
+@pytest.mark.parametrize(
+    "value", ["short-but-ok", "has a space-near-miss-secret", "amp&er=sand" * 3]
+)
+def test_sip_secret_unfit_for_a_uri_fails_at_startup(monkeypatch, value):
+    """The error names the setting and never prints the value."""
+    monkeypatch.setenv("HAIL_SIP_INBOUND_SECRET", value)
+    with pytest.raises(ValidationError) as exc:
+        Settings(_env_file=None)
+    assert "HAIL_SIP_INBOUND_SECRET must be empty or 20 or more" in str(exc.value)
+    assert value not in str(exc.value)
