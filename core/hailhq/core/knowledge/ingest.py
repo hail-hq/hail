@@ -50,6 +50,7 @@ from hailhq.core.file_uploads import matches_declared_type
 from hailhq.core.isolated_process import run_isolated
 from hailhq.core.knowledge.access import (
     STORAGE_FULL,
+    FolderSweepFailed,
     delete_org_knowledge,
     knowledge_limits,
     knowledge_lock,
@@ -209,6 +210,15 @@ class KnowledgeIngestWorker:
                 logger.info(
                     "knowledge: deleted %d document(s) of closed org %s",
                     deleted,
+                    org_id,
+                )
+            except FolderSweepFailed as exc:
+                # Rows are gone, so nothing here retries it.
+                logger.warning(
+                    "knowledge: closed org %s: %s. Action: run python -m "
+                    "hailhq.core.knowledge.access delete %s",
+                    org_id,
+                    exc,
                     org_id,
                 )
             except Exception as exc:

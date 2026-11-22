@@ -42,7 +42,7 @@ from hailhq.api.routes.internal.auth import verify_internal_request
 from hailhq.api.routes.verifications import forget_kept_registrations
 from hailhq.core.config import settings
 from hailhq.core.db import background_context, get_session, session_scope
-from hailhq.core.knowledge.access import delete_org_knowledge
+from hailhq.core.knowledge.access import FolderSweepFailed, delete_org_knowledge
 from hailhq.core.livekit import LiveKitClient
 from hailhq.core.models import OrgClosure
 from hailhq.core.providers.verification import get_verification_provider
@@ -106,9 +106,19 @@ async def close_org(organization_id: UUID, lk: LiveKitClient | None) -> None:
             if await db.scalar(closed_org_ids(now, organization_id).exists().select()):
                 documents = await delete_org_knowledge(db, organization_id, store)
                 logger.info("org closure: %d knowledge document(s) deleted", documents)
+        except FolderSweepFailed as exc:
+            logger.warning(
+                "org closure: %s. Action: run python -m "
+                "hailhq.core.knowledge.access delete %s",
+                exc,
+                organization_id,
+            )
         except Exception:
             await db.rollback()
-            logger.exception("org closure: could not delete the knowledge base")
+            logger.exception(
+                "org closure: could not delete the knowledge base; the "
+                "knowledge ingest worker retries it"
+            )
 
 
 async def _close_after_response(

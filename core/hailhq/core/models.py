@@ -2012,7 +2012,8 @@ class FileUpload(Base):
       /knowledge/documents`` turns it into a ``KnowledgeDocument`` (and sets
       ``first_used_at``); deleting the upload row deletes the document and
       its pieces. Rows never turned into a document are deleted 24h after
-      upload.
+      upload. A knowledge base delete also sets ``first_used_at`` (so none
+      becomes a document) and removes those rows itself.
     * ``verification_kept``: Hail's own encrypted copy of a file a number
       registration was filed with, for ``verification_id`` and ``slot``,
       kept for a resubmit. Deleted 30 days after submit, or when the

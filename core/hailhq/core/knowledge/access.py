@@ -44,6 +44,7 @@ __all__ = [
     "KNOWLEDGE_OFF",
     "MEMORY_MAX_PIECES",
     "STORAGE_FULL",
+    "FolderSweepFailed",
     "agent_uses_knowledge",
     "delete_org_knowledge",
     "knowledge_bytes",
@@ -119,6 +120,18 @@ async def agent_uses_knowledge(
         )
     ).one_or_none()
     return bool(row is not None and row[0] and row[1] is not None)
+
+
+class FolderSweepFailed(RuntimeError):
+    """The rows are deleted (``documents`` of them); only the final folder
+    sweep failed. Run the delete again to finish it."""
+
+    def __init__(self, documents: int, cause: Exception) -> None:
+        super().__init__(
+            f"deleted {documents} document(s), but the folder sweep failed "
+            f"({type(cause).__name__}); run the delete again"
+        )
+        self.documents = documents
 
 
 async def _end(db: AsyncSession, work: Awaitable[T]) -> T:
@@ -238,11 +251,13 @@ async def delete_org_knowledge(
        customer's text is gone.
     4. Under the lock and only while the workspace is still off, its whole
        folder is emptied (objects no row points to). A failure here raises
-       after the rows are gone; running the delete again sweeps the rest.
+       ``FolderSweepFailed`` after the rows are gone; running the delete
+       again sweeps the rest.
 
     If any step fails, run the delete again before turning the workspace
     on. The closed-account sweep retries steps 1 to 3 by itself (it finds
-    the workspace by its uploads); a failed step 4 is logged for Hail.
+    the workspace by its uploads); a failed step 4 is logged as an action
+    for Hail (run the delete by hand).
 
     With no bucket configured (``s3`` None) no file can exist (every upload
     needs the bucket), so only rows go.
@@ -253,9 +268,10 @@ async def delete_org_knowledge(
             await delete_upload_objects(s3, key)
     count = await _end(db, _delete_rows(db, organization_id, [i for i, _ in uploads]))
     if s3 is not None:
-        # Raises on failure, after the rows are gone: run the delete again
-        # to sweep what stays (objects no row points to).
-        await _end(db, _sweep_folder(db, organization_id, s3))
+        try:
+            await _end(db, _sweep_folder(db, organization_id, s3))
+        except Exception as exc:
+            raise FolderSweepFailed(count, exc) from exc
     return count
 
 
@@ -265,7 +281,10 @@ async def _delete_main(organization_id: UUID) -> None:
         sys.exit("HAIL_MAIL_BUCKET is not set: refusing to delete only the rows")
     store = S3MailClient(bucket=settings.hail_mail_bucket)
     async with session_scope() as db:
-        deleted = await delete_org_knowledge(db, organization_id, store)
+        try:
+            deleted = await delete_org_knowledge(db, organization_id, store)
+        except FolderSweepFailed as exc:
+            sys.exit(str(exc))
     print(f"deleted {deleted} document(s); the knowledge base is off")
 
 

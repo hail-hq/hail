@@ -13,7 +13,8 @@ Three rules, run on every tick:
   ``UNUSED_TTL`` (24h). Used ones are reusable and kept.
 * A knowledge file uploaded and never turned into a document
   (``POST /knowledge/documents`` sets ``first_used_at``) within
-  ``UNUSED_TTL``. A document's file is deleted with the document.
+  ``UNUSED_TTL``. A document's file is deleted with the document; a
+  knowledge base delete marks its uploads used and removes them itself.
 
 Same run_forever/tick shape as OutboundForwardWorker
 (core/hailhq/core/outbound_worker.py), gated in api/hailhq/api/main.py's

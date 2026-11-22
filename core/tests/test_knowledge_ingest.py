@@ -14,7 +14,11 @@ from hailhq.core.file_uploads import object_key
 from hailhq.core.knowledge import index as index_module
 from hailhq.core.knowledge import ingest as ingest_module
 from hailhq.core.knowledge import search as search_module
-from hailhq.core.knowledge.access import agent_uses_knowledge, delete_org_knowledge
+from hailhq.core.knowledge.access import (
+    FolderSweepFailed,
+    agent_uses_knowledge,
+    delete_org_knowledge,
+)
 from hailhq.core.knowledge.index import MemoryIndex, Piece
 from hailhq.core.knowledge.ingest import MAX_ATTEMPTS, KnowledgeIngestWorker
 from hailhq.core.knowledge.search import search_pieces
@@ -513,8 +517,9 @@ async def test_failed_folder_sweep_raises_after_rows_and_reruns(
         return await plain_delete(prefix, keep=keep)
 
     s3.delete_prefix = folder_fails
-    with pytest.raises(ConnectionError):
+    with pytest.raises(FolderSweepFailed) as failed:
         await delete_org_knowledge(async_session, org, s3)
+    assert failed.value.documents == 1
     async_session.expire_all()
     assert await async_session.get(KnowledgeDocument, doc_id) is None
     assert orphan in s3.objects
