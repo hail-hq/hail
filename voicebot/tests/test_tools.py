@@ -266,12 +266,9 @@ async def test_cancel_comes_with_transfer_call_in_a_tools_list(db) -> None:
         meta, call_id=uuid.uuid4(), hangup=None, send_dtmf=None, bridge=AsyncMock()
     )
     try:
-        assert sorted(t.info.name for t in tools) == [
-            "cancel_transfer",
-            "end_call",
-            "hail_settings_help",
-            "transfer_call",
-        ]
+        assert sorted(t.info.name for t in tools) == sorted(
+            [*EVERY_CALL, "transfer_call", "cancel_transfer"]
+        )
     finally:
         if api is not None:
             await api.aclose()

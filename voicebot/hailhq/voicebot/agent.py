@@ -928,7 +928,11 @@ async def build_tools_safely(
         # Every-call tools need no database or API.
         try:
             tools = every_call_tools(
-                metadata, call_id=call_id, hangup=hangup, spoke_since=spoke_since
+                metadata,
+                call_id=call_id,
+                hangup=hangup,
+                send_dtmf=send_dtmf,
+                spoke_since=spoke_since,
             )
         except Exception:
             logger.exception("call_id=%s every-call tools fallback failed", call_id)

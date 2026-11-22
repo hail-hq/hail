@@ -159,7 +159,12 @@ async def _http_tools(
 
 
 def every_call_tools(
-    metadata: dict[str, Any], *, call_id: UUID, hangup, spoke_since=None
+    metadata: dict[str, Any],
+    *,
+    call_id: UUID,
+    hangup,
+    send_dtmf=None,
+    spoke_since=None,
 ) -> list:
     """The tools every call keeps (``ToolSpec.on_every_call``), for a call
     whose other tools could not be built. They need no database or API, so
@@ -174,7 +179,7 @@ def every_call_tools(
         organization_id=organization_id,
         api=None,
         hangup=hangup,
-        send_dtmf=None,
+        send_dtmf=send_dtmf,
         spoke_since=spoke_since,
     )
     return _wrap_fitted([s for s in call_tools() if s.on_every_call], tctx)
@@ -241,7 +246,11 @@ async def build_agent_tools(
         )
         return (
             every_call_tools(
-                metadata, call_id=call_id, hangup=hangup, spoke_since=spoke_since
+                metadata,
+                call_id=call_id,
+                hangup=hangup,
+                send_dtmf=send_dtmf,
+                spoke_since=spoke_since,
             ),
             None,
         )
