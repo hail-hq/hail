@@ -104,6 +104,7 @@ from hailhq.voicebot.pipeline import (
 )
 from hailhq.voicebot.recording import start_recording, stop_recording
 from hailhq.voicebot.recovery import ConversationRecovery
+from hailhq.voicebot.reply_limit import limit_reply
 from hailhq.voicebot.speaking_gate import SpeakingGuard
 from hailhq.voicebot.spoken_lines import spoken_lines
 from hailhq.voicebot.telemetry import connect_livekit_tracing
@@ -295,7 +296,11 @@ class SpeechSanitizingAgent(Agent):
             chat_ctx.add_message(
                 role="system", content=ivr_navigation_instructions(None)
             )
-        return Agent.default.llm_node(self, chat_ctx, tools, model_settings)
+            return Agent.default.llm_node(self, chat_ctx, tools, model_settings)
+        # The other party cannot interrupt a reply, so replies stay short.
+        return limit_reply(
+            Agent.default.llm_node(self, chat_ctx, tools, model_settings)
+        )
 
     async def tts_node(self, text: Any, model_settings: Any) -> Any:
         if self.phone_menu is not None and self.phone_menu.active:
