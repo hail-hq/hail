@@ -154,37 +154,25 @@ async def _turn_off(db: AsyncSession, organization_id: UUID) -> list[tuple[UUID,
             OrganizationKnowledge.organization_id == organization_id
         )
     )
-    rows = await db.execute(
-        select(FileUpload.id, FileUpload.s3_key).where(
-            FileUpload.organization_id == organization_id,
-            FileUpload.purpose == "knowledge_document",
-        )
-    )
-    return [(r.id, r.s3_key) for r in rows]
 
 
-async def _delete_rows(
-    db: AsyncSession, organization_id: UUID, upload_ids: list[UUID]
-) -> int:
-    """Those uploads (their documents and pieces go with them, ON DELETE
-    CASCADE), under the lock; returns the documents deleted."""
+async def _delete_rows(db: AsyncSession, organization_id: UUID) -> int:
+    """Every knowledge upload of the workspace (their documents and pieces go
+    with them, ON DELETE CASCADE), under the lock: the folder is empty now,
+    so no row may stay pointing at it. Returns the documents deleted."""
     await knowledge_lock(db, organization_id)
+    uploads = (
+        FileUpload.organization_id == organization_id,
+        FileUpload.purpose == "knowledge_document",
+    )
     count = (
         await db.execute(
             select(func.count())
             .select_from(KnowledgeDocument)
-            .where(
-                KnowledgeDocument.organization_id == organization_id,
-                KnowledgeDocument.file_upload_id.in_(upload_ids),
-            )
+            .where(KnowledgeDocument.organization_id == organization_id)
         )
     ).scalar_one()
-    await db.execute(
-        delete(FileUpload).where(
-            FileUpload.organization_id == organization_id,
-            FileUpload.id.in_(upload_ids),
-        )
-    )
+    await db.execute(delete(FileUpload).where(*uploads))
     return int(count)
 
 
@@ -205,26 +193,27 @@ async def delete_org_knowledge(
     during storage calls:
 
     1. Under the workspace's knowledge lock: unused upload links stop
-       working, the limits row is deleted (no new link or document can
-       start), and the uploads that exist are listed. Committed. A PUT
+       working and the limits row is deleted (no new link or document can
+       start). Committed. A PUT
        already reading its body then cannot mark its link, so it deletes
        its own object.
     2. The workspace's folder is emptied. A failure raises with the
        workspace off and its rows kept, so a retry (the closed-account
        sweep finds the workspace by its uploads, or the command run again)
        finds them.
-    3. The listed upload rows are deleted.
+    3. Every knowledge upload row of the workspace is deleted, so none
+       points at the emptied folder.
 
-    Do not turn the workspace on again while this runs: its folder is
-    emptied whole. With no bucket configured (``s3`` None) no file can
+    Turning the workspace on again while this runs loses what is added
+    meanwhile too; do not. With no bucket configured (``s3`` None) no file can
     exist (every upload needs the bucket), so only rows go.
     """
-    uploads = await _end(db, _turn_off(db, organization_id))
+    await _end(db, _turn_off(db, organization_id))
     if s3 is not None:
         # The whole folder: also objects whose rows are already gone (a
         # cut-off PUT, a failed sweep delete).
         await s3.delete_prefix(f"{KNOWLEDGE_DOCUMENTS_PREFIX}{organization_id}/")
-    return await _end(db, _delete_rows(db, organization_id, [i for i, _ in uploads]))
+    return await _end(db, _delete_rows(db, organization_id))
 
 
 async def _delete_main(organization_id: UUID) -> None:

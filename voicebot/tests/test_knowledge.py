@@ -196,6 +196,8 @@ def test_filler_turns_are_not_searched_in_calls() -> None:
         "I'm good, thanks",
         "Okay, one moment",
         "Hmm, let me think",
+        "Umm?",
+        "Mhm?",
     ):
         assert not worth_searching(filler, call=True), filler
     for question in (
@@ -207,6 +209,9 @@ def test_filler_turns_are_not_searched_in_calls() -> None:
         "Is it refundable",
         "I have a leak",
         "Price?",
+        "It's leaking",
+        "Wait times",
+        "What price",
         "价格？",
         "ωράριο;",
         "Opening hours?",

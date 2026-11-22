@@ -453,3 +453,35 @@ async def test_full_delete_empties_the_folder(async_session, s3) -> None:
     assert await delete_org_knowledge(async_session, org, s3) == 1
     assert not any(k.startswith(f"knowledge-documents/{org}/") for k in s3.objects)
     assert any(k.startswith(f"knowledge-documents/{other}/") for k in s3.objects)
+
+
+async def test_upload_added_during_a_delete_goes_too(async_session, s3) -> None:
+    org = uuid.uuid4()
+    await add_document(async_session, s3, org, b"Old file.")
+    plain_delete = s3.delete_prefix
+    new_id = uuid.uuid4()
+
+    async def delete_with_a_new_upload(prefix, *, keep=None):
+        new_key = object_key("knowledge_document", org, new_id) + ".b"
+        s3.objects[new_key] = b"New file."
+        async_session.add(
+            FileUpload(
+                id=new_id,
+                organization_id=org,
+                purpose="knowledge_document",
+                filename="new.md",
+                content_type="text/markdown",
+                s3_key=new_key,
+                size_bytes=9,
+                uploaded_at=datetime.now(timezone.utc),
+            )
+        )
+        await async_session.commit()
+        return await plain_delete(prefix, keep=keep)
+
+    s3.delete_prefix = delete_with_a_new_upload
+    await delete_org_knowledge(async_session, org, s3)
+    async_session.expire_all()
+    # Consistent: no row is left pointing at the emptied folder.
+    assert await async_session.get(FileUpload, new_id) is None
+    assert not any(k.startswith(f"knowledge-documents/{org}/") for k in s3.objects)
