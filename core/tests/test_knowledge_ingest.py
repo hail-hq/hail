@@ -18,6 +18,8 @@ from hailhq.core.knowledge.access import (
     FolderSweepFailed,
     agent_uses_knowledge,
     delete_org_knowledge,
+    involves_database,
+    short_cause,
 )
 from hailhq.core.knowledge.index import MemoryIndex, Piece
 from hailhq.core.knowledge.ingest import MAX_ATTEMPTS, KnowledgeIngestWorker
@@ -32,6 +34,7 @@ from hailhq.core.models import (
 )
 from hailhq.core.testing.knowledge import NORTHGATE_MANUAL, FakeEmbedder
 from sqlalchemy import func, select
+from sqlalchemy.exc import OperationalError, StatementError
 
 
 class FakeS3:
@@ -568,3 +571,18 @@ def test_sweep_failure_message_is_short() -> None:
     assert str(one_line).count("y") == 200
     empty = FolderSweepFailed(1, TimeoutError())
     assert "(TimeoutError)" in str(empty)
+
+
+def test_database_errors_never_show_their_text() -> None:
+    db_error = OperationalError("DELETE FROM x WHERE id = :id", {"id": "v"}, None)
+    assert "DELETE" not in short_cause(db_error) and "v" not in short_cause(db_error)
+    assert involves_database(StatementError("bad", "SELECT 1", {}, None))
+    try:
+        try:
+            raise db_error
+        except OperationalError:
+            raise RuntimeError("later") from None
+    except RuntimeError as wrapped:
+        # ``from None`` hides the cause but the context still holds it.
+        assert involves_database(wrapped)
+    assert not involves_database(RuntimeError("plain"))

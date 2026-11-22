@@ -37,7 +37,7 @@ from hailhq.core.models import (
 )
 from hailhq.core.s3_mail import S3MailClient
 from sqlalchemy import delete, func, select, text, update
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = [
@@ -48,6 +48,7 @@ __all__ = [
     "FolderSweepFailed",
     "agent_uses_knowledge",
     "delete_org_knowledge",
+    "involves_database",
     "knowledge_bytes",
     "knowledge_limits",
     "knowledge_lock",
@@ -124,13 +125,29 @@ async def agent_uses_knowledge(
     return bool(row is not None and row[0] and row[1] is not None)
 
 
+def involves_database(exc: BaseException) -> bool:
+    """True when ``exc`` or any error it was raised from or during is a
+    SQLAlchemy error: its traceback could print statements and values."""
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        if isinstance(current, SQLAlchemyError):
+            return True
+        seen.add(id(current))
+        current = current.__cause__ or current.__context__
+    return False
+
+
 def short_cause(exc: BaseException) -> str:
     """ ": <first line of the error, at most 200 characters>", or "" when the
     error has no text."""
-    if isinstance(exc, DBAPIError):
-        # A database message can quote row values: its type and code only.
-        code = getattr(exc.orig, "sqlstate", None)
-        return f": {type(exc.orig).__name__}" + (f" {code}" if code else "")
+    if isinstance(exc, SQLAlchemyError):
+        # A database message can quote statements and values: type and code
+        # only.
+        orig = getattr(exc, "orig", None)
+        code = getattr(orig, "sqlstate", None)
+        name = type(orig).__name__ if orig is not None else ""
+        return (f": {name}" if name else "") + (f" {code}" if code else "")
     try:
         first = (str(exc).strip().splitlines() or [""])[0][:200]
     except Exception:

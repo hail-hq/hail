@@ -107,11 +107,11 @@ async def close_org(organization_id: UUID, lk: LiveKitClient | None) -> None:
                 documents = await delete_org_knowledge(db, organization_id, store)
                 logger.info("org closure: %d knowledge document(s) deleted", documents)
         except FolderSweepFailed as exc:
-            logger.exception(
-                "org closure: %d knowledge document(s) deleted, but the folder "
-                "sweep failed. Action: run the knowledge delete for %s by hand "
-                "(docs/operations/knowledge-base.md)",
-                exc.documents,
+            # No traceback: its cause may be a database error with values.
+            logger.error(
+                "org closure: %s. Action: run the knowledge delete for %s by "
+                "hand (docs/operations/knowledge-base.md)",
+                exc,
                 organization_id,
             )
         except Exception:

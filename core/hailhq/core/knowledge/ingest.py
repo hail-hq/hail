@@ -52,6 +52,7 @@ from hailhq.core.knowledge.access import (
     STORAGE_FULL,
     FolderSweepFailed,
     delete_org_knowledge,
+    involves_database,
     knowledge_limits,
     knowledge_lock,
     short_cause,
@@ -71,7 +72,6 @@ from hailhq.core.models import (
 from hailhq.core.retention import closed_org_ids
 from hailhq.core.s3_mail import S3MailClient
 from sqlalchemy import delete, func, select, text, update
-from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = [
@@ -236,7 +236,7 @@ class KnowledgeIngestWorker:
                         "retrying",
                         org_id,
                     )
-                elif first and not isinstance(exc, DBAPIError):
+                elif first and not involves_database(exc):
                     # The first time, with its traceback (a code bug shows
                     # where); later ticks repeat one short line.
                     logger.exception(
