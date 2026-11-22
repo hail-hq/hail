@@ -72,7 +72,7 @@ _FILLER = frozenset(
         thanks thank-you you very much so please hello hi hey bye goodbye
         that's all it is oh ah um uh uh-huh mm-hmm hmm perfect i see got too
         have a nice day i'm we're you're i've i'll i'd don't sorry pardon
-        excuse me let think moment umm mhm hm eh huh
+        excuse me let think umm mhm hm eh huh
         sì grazie mille prego va bene perfetto ciao
         sí gracias muchas muy bien vale bueno claro adiós hola
         oui non merci beaucoup très bien d'accord bon salut
@@ -83,7 +83,10 @@ _FILLER = frozenset(
 # what?", "¿Qué?"). A turn whose other words are all filler is not
 # searched; in any other turn they count as words ("Wait times").
 _HOLD = frozenset(
-    terms("one second wait really moment what was qué quoi cosa quê como wie")
+    terms(
+        "one second sec wait really moment hold on hang just bear with give "
+        "what was qué quoi cosa quê como wie"
+    )
 )
 # Latin, full-width, Spanish, Arabic, Greek and Armenian marks. Greek
 # writes its question mark as ";" (U+037E normalizes to it), so ";" counts
@@ -101,9 +104,8 @@ def worth_searching(text: str, *, call: bool = False) -> bool:
     """Whether a message is worth a search. Any ID (a word with a digit) is;
     a message of only filler and hold words ("okay, thank you", "I'm fine",
     "Wait, what?", "One second") is not. Otherwise a text or email needs two
-    search words. A call turn needs two non-filler words, or three search
-    words ("It's leaking"), or one word with a question mark ("Price?",
-    "价格？")."""
+    search words. A call turn needs two non-filler words, or three spoken
+    words, or one word with a question mark ("Price?", "价格？")."""
     words = query_terms(text)
     if any(any(c.isdigit() for c in w) for w in words):
         return True
@@ -112,7 +114,8 @@ def worth_searching(text: str, *, call: bool = False) -> bool:
         return False
     if not call:
         return len(words) >= 2
-    return len(meaning) >= 2 or len(words) >= 3 or _asks(text)
+    spoken = [w for w in text.split() if any(c.isalnum() for c in w)]
+    return len(meaning) >= 2 or len(spoken) >= 3 or _asks(text)
 
 
 def last_user_text(chat_ctx: Any) -> str:

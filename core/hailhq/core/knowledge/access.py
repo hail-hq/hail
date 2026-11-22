@@ -149,16 +149,6 @@ async def _turn_off(db: AsyncSession, organization_id: UUID) -> list[tuple[UUID,
         )
         .values(token_hash=None)
     )
-    # An upload not yet a document can no longer become one (409).
-    await db.execute(
-        update(FileUpload)
-        .where(
-            FileUpload.organization_id == organization_id,
-            FileUpload.purpose == "knowledge_document",
-            FileUpload.first_used_at.is_(None),
-        )
-        .values(first_used_at=func.now())
-    )
     await db.execute(
         delete(OrganizationKnowledge).where(
             OrganizationKnowledge.organization_id == organization_id
@@ -174,22 +164,11 @@ async def _turn_off(db: AsyncSession, organization_id: UUID) -> list[tuple[UUID,
 
 
 async def _delete_rows(
-    db: AsyncSession,
-    organization_id: UUID,
-    upload_ids: list[UUID],
-    s3: S3MailClient | None,
+    db: AsyncSession, organization_id: UUID, upload_ids: list[UUID]
 ) -> int:
-    """Under the lock: while the workspace is still off, empty its whole
-    folder (objects no row points to: a cut-off PUT, a failed sweep
-    delete), then delete the listed uploads (their documents and pieces go
-    with them, ON DELETE CASCADE). A failed folder delete rolls back, so
-    the rows stay for a retry. Turned on again meanwhile, only the listed
-    rows go and the folder keeps its new files. Returns the documents
-    deleted. The folder delete holds the lock: this workspace's new links
-    and documents wait for it."""
+    """The listed uploads (their documents and pieces go with them, ON
+    DELETE CASCADE), under the lock; returns the documents deleted."""
     await knowledge_lock(db, organization_id)
-    if s3 is not None and await db.get(OrganizationKnowledge, organization_id) is None:
-        await s3.delete_prefix(f"{KNOWLEDGE_DOCUMENTS_PREFIX}{organization_id}/")
     count = (
         await db.execute(
             select(func.count())
@@ -209,6 +188,18 @@ async def _delete_rows(
     return int(count)
 
 
+async def _sweep_folder(
+    db: AsyncSession, organization_id: UUID, s3: S3MailClient
+) -> None:
+    """Empty the workspace's folder (objects no row points to: a cut-off
+    PUT, a failed sweep delete), under the knowledge lock and only while
+    the workspace is still off, so no new link or document starts
+    meanwhile and a workspace turned on again keeps its new files."""
+    await knowledge_lock(db, organization_id)
+    if await db.get(OrganizationKnowledge, organization_id) is None:
+        await s3.delete_prefix(f"{KNOWLEDGE_DOCUMENTS_PREFIX}{organization_id}/")
+
+
 async def delete_org_knowledge(
     db: AsyncSession,
     organization_id: UUID,
@@ -223,20 +214,22 @@ async def delete_org_knowledge(
     documents deleted. Safe to run again after any failure.
 
     1. Under the workspace's knowledge lock: unused upload links stop
-       working, uploads not yet documents can no longer become ones, the
-       limits row is deleted (no new link or document can start), and the
-       uploads that exist are listed. Committed. A PUT
+       working, the limits row is deleted (no new link or document can
+       start), and the uploads that exist are listed. Committed. A PUT
        already reading its body then cannot mark its link, so it deletes
        its own object.
     2. The listed uploads' objects (every attempt) are deleted, with no
        lock held. A failure raises with the workspace off and its rows
        kept, so a retry (the closed-account sweep finds the workspace by
        its uploads, or the command run again) finds them.
-    3. Under the lock: if the workspace is still off, its whole folder is
-       emptied (objects no row points to); then the listed rows are
-       deleted, in the same transaction, so a failed folder delete keeps
-       them for a retry. Turned on again meanwhile, it keeps everything it
-       added.
+    3. The listed rows are deleted, under the lock. Committed: the
+       customer's text is gone.
+    4. Under the lock and only while the workspace is still off, its whole
+       folder is emptied (objects no row points to). A failure here only
+       logs a warning: what may stay is objects no row points to.
+
+    Do not turn the workspace on again while this runs: an upload listed in
+    step 1 could become a document and be deleted with its upload.
 
     With no bucket configured (``s3`` None) no file can exist (every upload
     needs the bucket), so only rows go.
@@ -245,9 +238,19 @@ async def delete_org_knowledge(
     if s3 is not None:
         for _, key in uploads:
             await delete_upload_objects(s3, key)
-    return await _end(
-        db, _delete_rows(db, organization_id, [i for i, _ in uploads], s3)
-    )
+    count = await _end(db, _delete_rows(db, organization_id, [i for i, _ in uploads]))
+    if s3 is not None:
+        try:
+            await _end(db, _sweep_folder(db, organization_id, s3))
+        except Exception as exc:
+            # The rows (the customer's text) are gone; only objects no row
+            # points to may stay. Logged, never retried by itself.
+            logger.warning(
+                "knowledge: folder sweep for %s failed (%s)",
+                organization_id,
+                type(exc).__name__,
+            )
+    return count
 
 
 async def _delete_main(organization_id: UUID) -> None:
