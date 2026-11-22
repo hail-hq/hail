@@ -35,7 +35,7 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml \
   run --rm api python -m hailhq.core.knowledge.access delete '<org-uuid>'
 ```
 
-If it fails, run the same command again; it is safe to repeat. Do not turn the workspace on again while it runs: what is added meanwhile is deleted too.
+If it fails, run the same command again; it is safe to repeat. A workspace turned on again while it runs keeps what it adds; its folder is swept of files no row points to only while it is off.
 
 ## Before the first workspace is turned on
 
@@ -72,7 +72,7 @@ Measured 2026-11-21 (CPU only, 1 thread):
 | Load                                                        | about 0.5 s                                   | about 1 s               |
 | Agreement with fp32 (cosine)                                | 0.996 min                                     |                         |
 
-Quality on an invented 26-section manual, 25 questions in 7 languages: e5 found the right ~400-token piece 18 times out of 25, `paraphrase-multilingual-MiniLM-L12-v2` 9 to 11 (it reads only the first 128 tokens), so e5 was chosen. Cosine scores of right pieces were 0.73 to 0.92, off-topic best matches 0.72 to 0.81: the floor (0.72) sits below every right piece and only drops clear junk; keyword search carries IDs. A message made only of filler words ("okay, thank you", "Sorry?") is not searched. Otherwise a call turn needs two non-filler words, three search words, or one word with a question mark; a text or email needs two words. Any ID is always searched.
+Quality on an invented 26-section manual, 25 questions in 7 languages: e5 found the right ~400-token piece 18 times out of 25, `paraphrase-multilingual-MiniLM-L12-v2` 9 to 11 (it reads only the first 128 tokens), so e5 was chosen. Cosine scores of right pieces were 0.73 to 0.92, off-topic best matches 0.72 to 0.81: the floor (0.72) sits below every right piece and only drops clear junk; keyword search carries IDs. A message made only of filler words ("okay, thank you", "Sorry?") is not searched. Otherwise a call turn needs two non-filler words, three spoken words, or one word with a question mark; a text or email needs two words. Any ID is always searched.
 
 The int8 file is tuned for CPUs with VNNI. On an x86 CPU without it (AVX2 only), int8 math can saturate. Check the VM once:
 

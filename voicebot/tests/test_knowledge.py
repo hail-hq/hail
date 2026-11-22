@@ -197,6 +197,15 @@ def test_filler_turns_are_not_searched_in_calls() -> None:
         "Hmm, let me think",
         "Umm?",
         "Mhm?",
+        "One second",
+        "Okay, one second",
+        "Wait a second",
+        "Really?",
+        "Oh really?",
+        "Wait, what?",
+        "Okay so what?",
+        "¿Qué?",
+        "I'm busy",
     ):
         assert not worth_searching(filler, call=True), filler
     for question in (
@@ -208,9 +217,9 @@ def test_filler_turns_are_not_searched_in_calls() -> None:
         "Is it refundable",
         "I have a leak",
         "Price?",
-        "It's leaking",
-        "Wait times",
-        "What price",
+        "It's leaking again",
+        "Delivery times",
+        "What price?",
         "价格？",
         "ωράριο;",
         "Opening hours?",

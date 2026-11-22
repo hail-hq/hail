@@ -455,33 +455,44 @@ async def test_full_delete_empties_the_folder(async_session, s3) -> None:
     assert any(k.startswith(f"knowledge-documents/{other}/") for k in s3.objects)
 
 
-async def test_upload_added_during_a_delete_goes_too(async_session, s3) -> None:
+async def test_upload_added_after_turning_on_again_is_kept(async_session, s3) -> None:
+    """Turned on again during a delete, a workspace keeps what it adds: the
+    folder sweep runs only while it is still off."""
     org = uuid.uuid4()
-    await add_document(async_session, s3, org, b"Old file.")
+    old_doc = await add_document(async_session, s3, org, b"Old file.")
+    old_keys = set(s3.objects)
+    orphan = f"knowledge-documents/{org}/{uuid.uuid4()}.x"
+    s3.objects[orphan] = b"left over"
     plain_delete = s3.delete_prefix
     new_id = uuid.uuid4()
+    new_key = object_key("knowledge_document", org, new_id) + ".b"
 
-    async def delete_with_a_new_upload(prefix, *, keep=None):
-        new_key = object_key("knowledge_document", org, new_id) + ".b"
-        s3.objects[new_key] = b"New file."
-        async_session.add(
-            FileUpload(
-                id=new_id,
-                organization_id=org,
-                purpose="knowledge_document",
-                filename="new.md",
-                content_type="text/markdown",
-                s3_key=new_key,
-                size_bytes=9,
-                uploaded_at=datetime.now(timezone.utc),
+    async def delete_and_turn_on(prefix, *, keep=None):
+        result = await plain_delete(prefix, keep=keep)
+        if new_key not in s3.objects:
+            async_session.add(OrganizationKnowledge(organization_id=org))
+            s3.objects[new_key] = b"New file."
+            async_session.add(
+                FileUpload(
+                    id=new_id,
+                    organization_id=org,
+                    purpose="knowledge_document",
+                    filename="new.md",
+                    content_type="text/markdown",
+                    s3_key=new_key,
+                    size_bytes=9,
+                    uploaded_at=datetime.now(timezone.utc),
+                )
             )
-        )
-        await async_session.commit()
-        return await plain_delete(prefix, keep=keep)
+            await async_session.commit()
+        return result
 
-    s3.delete_prefix = delete_with_a_new_upload
-    await delete_org_knowledge(async_session, org, s3)
+    s3.delete_prefix = delete_and_turn_on
+    assert await delete_org_knowledge(async_session, org, s3) == 1
     async_session.expire_all()
-    # Consistent: no row is left pointing at the emptied folder.
-    assert await async_session.get(FileUpload, new_id) is None
-    assert not any(k.startswith(f"knowledge-documents/{org}/") for k in s3.objects)
+    assert await async_session.get(KnowledgeDocument, old_doc) is None
+    assert not old_keys & set(s3.objects)
+    assert await async_session.get(FileUpload, new_id) is not None
+    assert new_key in s3.objects
+    # Not swept while on: the orphan waits for the next delete.
+    assert orphan in s3.objects
