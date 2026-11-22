@@ -496,3 +496,54 @@ async def test_upload_added_after_turning_on_again_is_kept(async_session, s3) ->
     assert new_key in s3.objects
     # Not swept while on: the orphan waits for the next delete.
     assert orphan in s3.objects
+
+
+async def test_failed_folder_sweep_keeps_rows_for_a_retry(async_session, s3) -> None:
+    org = uuid.uuid4()
+    doc_id = await add_document(async_session, s3, org, b"Hello there.")
+    plain_delete = s3.delete_prefix
+
+    async def folder_fails(prefix, *, keep=None):
+        if prefix == f"knowledge-documents/{org}/":
+            raise ConnectionError("bucket down")
+        return await plain_delete(prefix, keep=keep)
+
+    s3.delete_prefix = folder_fails
+    with pytest.raises(ConnectionError):
+        await delete_org_knowledge(async_session, org, s3)
+    async_session.expire_all()
+    doc = await async_session.get(KnowledgeDocument, doc_id)
+    assert doc is not None
+    # A retry finds the workspace by its upload and finishes.
+    s3.delete_prefix = plain_delete
+    assert await delete_org_knowledge(async_session, org, s3) == 1
+
+
+async def test_listed_upload_cannot_become_a_document_mid_delete(
+    async_session, s3
+) -> None:
+    org = uuid.uuid4()
+    async_session.add(OrganizationKnowledge(organization_id=org))
+    upload = FileUpload(
+        organization_id=org,
+        purpose="knowledge_document",
+        filename="f.md",
+        content_type="text/markdown",
+        s3_key=f"knowledge-documents/{org}/u",
+        size_bytes=1,
+        uploaded_at=datetime.now(timezone.utc),
+    )
+    async_session.add(upload)
+    await async_session.commit()
+    seen = {}
+    plain_delete = s3.delete_prefix
+
+    async def check(prefix, *, keep=None):
+        row = await async_session.get(FileUpload, upload.id)
+        await async_session.refresh(row)
+        seen["used"] = row.first_used_at is not None
+        return await plain_delete(prefix, keep=keep)
+
+    s3.delete_prefix = check
+    await delete_org_knowledge(async_session, org, s3)
+    assert seen["used"]

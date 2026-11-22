@@ -72,19 +72,22 @@ _FILLER = frozenset(
         thanks thank-you you very much so please hello hi hey bye goodbye
         that's all it is oh ah um uh uh-huh mm-hmm hmm perfect i see got too
         have a nice day i'm we're you're i've i'll i'd don't sorry pardon
-        excuse me let think one moment second wait really umm mhm hm eh huh
+        excuse me let think moment umm mhm hm eh huh
         sì grazie mille prego va bene perfetto ciao
         sí gracias muchas muy bien vale bueno claro adiós hola
         oui non merci beaucoup très bien d'accord bon salut
         ja nein danke dank vielen schön bitte gut genau tschüss hallo
         sim não obrigado obrigada muito tudo bem tchau olá""")
 )
+# Words that only hold the line or ask for a repeat ("one second", "wait,
+# what?", "¿Qué?"). A turn whose other words are all filler is not
+# searched; in any other turn they count as words ("Wait times").
+_HOLD = frozenset(
+    terms("one second wait really moment what was qué quoi cosa quê como wie")
+)
 # Latin, full-width, Spanish, Arabic, Greek and Armenian marks. Greek
 # writes its question mark as ";" (U+037E normalizes to it), so ";" counts
 # only in Greek text.
-# Words that ask the agent to repeat itself ("What?", "¿Qué?"), never a
-# question about the business: not counted.
-_REPEAT = frozenset(terms("what was qué quoi cosa quê como wie"))
 _QUESTION_MARKS = "?？¿؟\u037e՞"
 
 
@@ -96,20 +99,20 @@ def _asks(text: str) -> bool:
 
 def worth_searching(text: str, *, call: bool = False) -> bool:
     """Whether a message is worth a search. Any ID (a word with a digit) is;
-    a message of only filler words ("okay, thank you", "I'm fine",
-    "Wait, what?") is not. Otherwise a text or email needs two search
-    words. A call turn needs two words that are not filler, or three spoken
-    words, or one word with a question mark ("Price?", "价格？")."""
+    a message of only filler and hold words ("okay, thank you", "I'm fine",
+    "Wait, what?", "One second") is not. Otherwise a text or email needs two
+    search words. A call turn needs two non-filler words, or three search
+    words ("It's leaking"), or one word with a question mark ("Price?",
+    "价格？")."""
     words = query_terms(text)
     if any(any(c.isdigit() for c in w) for w in words):
         return True
-    meaning = [w for w in words if w not in _FILLER and w not in _REPEAT]
-    if not meaning:
+    meaning = [w for w in words if w not in _FILLER]
+    if all(w in _HOLD for w in meaning):
         return False
     if not call:
         return len(words) >= 2
-    spoken = [w for w in text.split() if any(c.isalnum() for c in w)]
-    return len(meaning) >= 2 or len(spoken) >= 3 or _asks(text)
+    return len(meaning) >= 2 or len(words) >= 3 or _asks(text)
 
 
 def last_user_text(chat_ctx: Any) -> str:

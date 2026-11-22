@@ -149,6 +149,16 @@ async def _turn_off(db: AsyncSession, organization_id: UUID) -> list[tuple[UUID,
         )
         .values(token_hash=None)
     )
+    # An upload not yet a document can no longer become one (409).
+    await db.execute(
+        update(FileUpload)
+        .where(
+            FileUpload.organization_id == organization_id,
+            FileUpload.purpose == "knowledge_document",
+            FileUpload.first_used_at.is_(None),
+        )
+        .values(first_used_at=func.now())
+    )
     await db.execute(
         delete(OrganizationKnowledge).where(
             OrganizationKnowledge.organization_id == organization_id
@@ -164,11 +174,22 @@ async def _turn_off(db: AsyncSession, organization_id: UUID) -> list[tuple[UUID,
 
 
 async def _delete_rows(
-    db: AsyncSession, organization_id: UUID, upload_ids: list[UUID]
+    db: AsyncSession,
+    organization_id: UUID,
+    upload_ids: list[UUID],
+    s3: S3MailClient | None,
 ) -> int:
-    """The listed uploads (their documents and pieces go with them, ON
-    DELETE CASCADE), under the lock; returns the documents deleted."""
+    """Under the lock: while the workspace is still off, empty its whole
+    folder (objects no row points to: a cut-off PUT, a failed sweep
+    delete), then delete the listed uploads (their documents and pieces go
+    with them, ON DELETE CASCADE). A failed folder delete rolls back, so
+    the rows stay for a retry. Turned on again meanwhile, only the listed
+    rows go and the folder keeps its new files. Returns the documents
+    deleted. The folder delete holds the lock: this workspace's new links
+    and documents wait for it."""
     await knowledge_lock(db, organization_id)
+    if s3 is not None and await db.get(OrganizationKnowledge, organization_id) is None:
+        await s3.delete_prefix(f"{KNOWLEDGE_DOCUMENTS_PREFIX}{organization_id}/")
     count = (
         await db.execute(
             select(func.count())
@@ -188,20 +209,6 @@ async def _delete_rows(
     return int(count)
 
 
-async def _sweep_folder(
-    db: AsyncSession, organization_id: UUID, s3: S3MailClient
-) -> bool:
-    """Empty the workspace's folder (objects no row points to: a cut-off
-    PUT, a failed sweep delete) only while it is still off, holding the
-    knowledge lock so no new link or document can start meanwhile. Returns
-    whether it ran: a workspace turned on again keeps its new files."""
-    await knowledge_lock(db, organization_id)
-    if await db.get(OrganizationKnowledge, organization_id) is not None:
-        return False
-    await s3.delete_prefix(f"{KNOWLEDGE_DOCUMENTS_PREFIX}{organization_id}/")
-    return True
-
-
 async def delete_org_knowledge(
     db: AsyncSession,
     organization_id: UUID,
@@ -216,18 +223,20 @@ async def delete_org_knowledge(
     documents deleted. Safe to run again after any failure.
 
     1. Under the workspace's knowledge lock: unused upload links stop
-       working, the limits row is deleted (no new link or document can
-       start), and the uploads that exist are listed. Committed. A PUT
+       working, uploads not yet documents can no longer become ones, the
+       limits row is deleted (no new link or document can start), and the
+       uploads that exist are listed. Committed. A PUT
        already reading its body then cannot mark its link, so it deletes
        its own object.
     2. The listed uploads' objects (every attempt) are deleted, with no
        lock held. A failure raises with the workspace off and its rows
        kept, so a retry (the closed-account sweep finds the workspace by
        its uploads, or the command run again) finds them.
-    3. The listed upload rows are deleted, under the lock.
-    4. Under the lock, if the workspace is still off, its whole folder is
-       emptied (objects no row points to). Turned on again meanwhile, it
-       keeps everything it added.
+    3. Under the lock: if the workspace is still off, its whole folder is
+       emptied (objects no row points to); then the listed rows are
+       deleted, in the same transaction, so a failed folder delete keeps
+       them for a retry. Turned on again meanwhile, it keeps everything it
+       added.
 
     With no bucket configured (``s3`` None) no file can exist (every upload
     needs the bucket), so only rows go.
@@ -236,10 +245,9 @@ async def delete_org_knowledge(
     if s3 is not None:
         for _, key in uploads:
             await delete_upload_objects(s3, key)
-    count = await _end(db, _delete_rows(db, organization_id, [i for i, _ in uploads]))
-    if s3 is not None:
-        await _end(db, _sweep_folder(db, organization_id, s3))
-    return count
+    return await _end(
+        db, _delete_rows(db, organization_id, [i for i, _ in uploads], s3)
+    )
 
 
 async def _delete_main(organization_id: UUID) -> None:
