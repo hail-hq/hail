@@ -559,3 +559,10 @@ async def test_listed_upload_cannot_become_a_document_mid_delete(
     await delete_org_knowledge(async_session, org, s3)
     # Marked used before the first storage call.
     assert first == [True]
+
+
+def test_sweep_failure_message_is_short() -> None:
+    long = FolderSweepFailed(2, RuntimeError("AccessDenied\n" + "x" * 500))
+    assert "(RuntimeError: AccessDenied)" in str(long)
+    empty = FolderSweepFailed(1, TimeoutError())
+    assert "(TimeoutError)" in str(empty)

@@ -123,15 +123,19 @@ async def agent_uses_knowledge(
     return bool(row is not None and row[0] and row[1] is not None)
 
 
+def short_cause(exc: BaseException) -> str:
+    """ ": <first line of the error, at most 200 characters>", or "" when the
+    error has no text."""
+    first = (str(exc).strip().splitlines() or [""])[0][:200]
+    return f": {first}" if first else ""
+
+
 class FolderSweepFailed(RuntimeError):
     """The rows are deleted (``documents`` of them); only the final folder
     sweep failed. Run the delete again to finish it."""
 
     def __init__(self, documents: int, cause: Exception) -> None:
-        detail = str(cause)
-        why = type(cause).__name__ + (
-            f": {detail}" if detail and len(detail) <= 200 else ""
-        )
+        why = type(cause).__name__ + short_cause(cause)
         super().__init__(
             f"deleted {documents} document(s), but the folder sweep failed "
             f"({why}); run the delete again (docs/operations/knowledge-base.md)"
@@ -297,7 +301,7 @@ async def _delete_main(organization_id: UUID) -> None:
         except DBAPIError as exc:
             if getattr(exc.orig, "sqlstate", None) != "55P03":
                 raise
-            sys.exit("an upload is busy for a moment; run the same command again")
+            sys.exit("a knowledge row is busy for a moment; run the same command again")
     print(f"deleted {deleted} document(s); the knowledge base is off")
 
 

@@ -54,6 +54,7 @@ from hailhq.core.knowledge.access import (
     delete_org_knowledge,
     knowledge_limits,
     knowledge_lock,
+    short_cause,
     storage_full,
 )
 from hailhq.core.knowledge.decode import MAX_TEXT_BYTES
@@ -227,7 +228,11 @@ class KnowledgeIngestWorker:
                     "knowledge: could not delete closed org %s (%s%s); retrying",
                     org_id,
                     type(exc).__name__,
-                    " 55P03: an upload row is busy" if code == "55P03" else "",
+                    (
+                        ": a knowledge row is busy"
+                        if code == "55P03"
+                        else short_cause(exc)
+                    ),
                 )
 
     async def _fail_spent(self) -> None:
