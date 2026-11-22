@@ -902,7 +902,7 @@ async def build_tools_safely(
     prompt: Callable[[str], Awaitable[None]] | None = None,
 ) -> tuple[list, AgentApiClient | None]:
     """Build this call's agent tools, degrading to the tools every call
-    keeps on any failure (none when the organization_id is invalid).
+    keeps on any failure.
 
     A tool-layer startup failure (e.g. a DB rollback on a dead connection
     inside ``build_agent_tools``) must never kill the call: it degrades
