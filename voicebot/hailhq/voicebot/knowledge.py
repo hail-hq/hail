@@ -61,37 +61,37 @@ REPLY_PIECES = 5
 _QUERY_CHARS = 1000
 
 
-# Words that make up filler turns ("okay, thank you", "no, that's all"):
-# not counted as search words during calls. A few of the most spoken
-# languages; any other turn of three words or more is searched.
+# Words that make up filler turns ("okay, thank you", "no, that's all"). A
+# message made only of these is not searched. A few of the most spoken
+# languages.
 # Written as people say them; folded the way search words are (accents
 # off, lower case, "that's" is "that" and "s").
 _FILLER = frozenset(
     terms("""yes yeah yep no nope ok okay alright right sure fine good great
         thanks thank you very much please hello hi hey bye goodbye that's all
         it is oh ah um uh hmm perfect
-        sì grazie prego va bene perfetto ciao
-        sí gracias vale bueno claro adiós hola
-        oui non merci d'accord bon salut
-        ja nein danke bitte gut genau tschüss hallo
-        sim não obrigado obrigada tchau olá""")
+        sì grazie mille prego va bene perfetto ciao
+        sí gracias muchas vale bueno claro adiós hola
+        oui non merci beaucoup d'accord bon salut
+        ja nein danke vielen bitte gut genau tschüss hallo
+        sim não obrigado obrigada muito tchau olá""")
 )
-_QUESTION_MARKS = "?？¿؟;՞"
+# Latin, full-width, Spanish, Arabic, Greek (U+037E) and Armenian marks.
+_QUESTION_MARKS = "?？¿؟\u037e՞"
 
 
 def worth_searching(text: str, *, call: bool = False) -> bool:
-    """Whether a message is worth a search. Any ID (a word with a digit) is.
-    A text or email is with two search words or more. A call turn skips
-    filler: it is searched with three or more words that are not filler,
-    or two with a question mark ("Opening hours?")."""
+    """Whether a message is worth a search. Any ID (a word with a digit) is;
+    a message of only filler words ("okay, thank you") is not. Otherwise a
+    text or email needs two search words, and a call turn three, or two with
+    a question mark ("Opening hours?", "Is it open?")."""
     words = query_terms(text)
     if any(any(c.isdigit() for c in w) for w in words):
         return True
-    if not call:
+    if all(w in _FILLER for w in words):
+        return False
+    if not call or len(words) >= 3:
         return len(words) >= 2
-    words = [w for w in words if w not in _FILLER]
-    if len(words) >= 3:
-        return True
     return len(words) == 2 and any(q in text for q in _QUESTION_MARKS)
 
 

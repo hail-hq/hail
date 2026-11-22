@@ -413,9 +413,20 @@ async def test_one_file_has_its_own_piece_cap(
     assert doc.status == "failed" and "one file gives at most 2" in doc.error
 
 
-async def test_failed_bucket_delete_keeps_everything(async_session, s3) -> None:
+async def test_failed_bucket_delete_turns_off_and_keeps_rows(async_session, s3) -> None:
     org = uuid.uuid4()
     doc_id = await add_document(async_session, s3, org, b"Hello there.")
+    link = FileUpload(
+        organization_id=org,
+        purpose="knowledge_document",
+        filename="next.md",
+        content_type="text/markdown",
+        s3_key=f"knowledge-documents/{org}/link",
+        token_hash="pending-link",
+    )
+    async_session.add(link)
+    await async_session.commit()
+    link_id = link.id
 
     async def broken(prefix, *, keep=None):
         raise ConnectionError("bucket down")
@@ -423,5 +434,9 @@ async def test_failed_bucket_delete_keeps_everything(async_session, s3) -> None:
     s3.delete_prefix = broken
     with pytest.raises(ConnectionError):
         await delete_org_knowledge(async_session, org, s3)
-    assert await async_session.get(OrganizationKnowledge, org) is not None
+    async_session.expire_all()
+    # Off at once, and the unused link no longer works.
+    assert await async_session.get(OrganizationKnowledge, org) is None
+    assert (await async_session.get(FileUpload, link_id)).token_hash is None
+    # The rows stay for the retry.
     assert await async_session.get(KnowledgeDocument, doc_id) is not None

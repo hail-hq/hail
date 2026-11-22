@@ -119,6 +119,61 @@ async def agent_uses_knowledge(
     return bool(row is not None and row[0] and row[1] is not None)
 
 
+async def _end(db: AsyncSession, work):
+    """Run ``work`` and commit; on any error roll back (logging a failed
+    rollback) and raise the first error."""
+    try:
+        result = await work
+        await db.commit()
+        return result
+    except BaseException:
+        try:
+            await db.rollback()
+        except Exception as exc:
+            logger.warning("knowledge: rollback failed (%s)", type(exc).__name__)
+        raise
+
+
+async def _turn_off(db: AsyncSession, organization_id: UUID) -> None:
+    await knowledge_lock(db, organization_id)
+    await db.execute(
+        update(FileUpload)
+        .where(
+            FileUpload.organization_id == organization_id,
+            FileUpload.purpose == "knowledge_document",
+            FileUpload.token_hash.is_not(None),
+        )
+        .values(token_hash=None)
+    )
+    await db.execute(
+        delete(OrganizationKnowledge).where(
+            OrganizationKnowledge.organization_id == organization_id
+        )
+    )
+
+
+async def _delete_rows(db: AsyncSession, organization_id: UUID) -> int:
+    count = (
+        await db.execute(
+            select(func.count())
+            .select_from(KnowledgeDocument)
+            .where(KnowledgeDocument.organization_id == organization_id)
+        )
+    ).scalar_one()
+    await db.execute(
+        delete(FileUpload).where(
+            FileUpload.organization_id == organization_id,
+            FileUpload.purpose == "knowledge_document",
+        )
+    )
+    # Rows whose upload is gone cannot exist (ON DELETE CASCADE), but pieces
+    # are deleted by workspace too, as a guard.
+    await db.execute(
+        delete(KnowledgePiece).where(KnowledgePiece.organization_id == organization_id)
+    )
+    return int(count)
+
+
 async def delete_org_knowledge(
     db: AsyncSession,
     organization_id: UUID,
@@ -132,56 +187,22 @@ async def delete_org_knowledge(
     docs/operations/knowledge-base.md); later a paid plan ending. Returns the
     documents deleted.
 
-    One transaction under the workspace's knowledge lock: unused upload
-    links stop working and the limits row is deleted first (no new link or
-    document can start), then the folder is emptied, then the rows go and
-    it commits. A PUT already reading its body writes its object, but cannot
-    mark its link (the link is invalid and its row locked until the commit,
-    then gone), so it deletes its own object. A failed bucket delete rolls
-    everything back: the workspace keeps its rows and limits row, and the
-    next try finds it again."""
-    try:
-        await knowledge_lock(db, organization_id)
-        await db.execute(
-            update(FileUpload)
-            .where(
-                FileUpload.organization_id == organization_id,
-                FileUpload.purpose == "knowledge_document",
-                FileUpload.token_hash.is_not(None),
-            )
-            .values(token_hash=None)
-        )
-        await db.execute(
-            delete(OrganizationKnowledge).where(
-                OrganizationKnowledge.organization_id == organization_id
-            )
-        )
-        if s3 is not None:
-            await s3.delete_prefix(f"{KNOWLEDGE_DOCUMENTS_PREFIX}{organization_id}/")
-        count = (
-            await db.execute(
-                select(func.count())
-                .select_from(KnowledgeDocument)
-                .where(KnowledgeDocument.organization_id == organization_id)
-            )
-        ).scalar_one()
-        await db.execute(
-            delete(FileUpload).where(
-                FileUpload.organization_id == organization_id,
-                FileUpload.purpose == "knowledge_document",
-            )
-        )
-        # Rows whose upload is gone cannot exist (ON DELETE CASCADE), but
-        # pieces are deleted by workspace too, as a guard.
-        await db.execute(
-            delete(KnowledgePiece).where(
-                KnowledgePiece.organization_id == organization_id
-            )
-        )
-        await db.commit()
-    except BaseException:
-        await db.rollback()
-        raise
+    Two short transactions around the bucket delete, so no lock is held
+    during storage calls:
+
+    1. Under the workspace's knowledge lock: unused upload links stop
+       working and the limits row is deleted (the workspace is off: no new
+       link or document can start). Committed. A PUT already reading its
+       body then cannot mark its link, so it deletes its own object.
+    2. The folder is emptied. A failure here raises with the workspace off
+       and its rows kept, so a retry (the closed-account sweep finds the
+       workspace by its uploads, or the command run again) finds them.
+    3. The upload rows (documents and pieces go with them) are deleted.
+    """
+    await _end(db, _turn_off(db, organization_id))
+    if s3 is not None:
+        await s3.delete_prefix(f"{KNOWLEDGE_DOCUMENTS_PREFIX}{organization_id}/")
+    count = await _end(db, _delete_rows(db, organization_id))
     return int(count)
 
 

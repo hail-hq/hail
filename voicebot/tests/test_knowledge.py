@@ -179,6 +179,9 @@ def test_filler_turns_are_not_searched_in_calls() -> None:
     ):
         assert not worth_searching(filler, call=True), filler
     for question in (
+        "How much is it?",
+        "Is it open?",
+        "ωράριο λειτουργίας\u037e",
         "Opening hours?",
         "ساعات العمل؟",
         "E204",
@@ -192,6 +195,7 @@ def test_texts_and_email_search_two_words() -> None:
     assert worth_searching("opening hours")
     assert worth_searching("return policy")
     assert not worth_searching("hours")
+    assert not worth_searching("thank you")
 
 
 def test_last_user_text() -> None:

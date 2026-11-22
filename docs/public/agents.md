@@ -273,7 +273,7 @@ Poll `GET /v1/knowledge/documents/{id}` until `status` is `ready` or `failed` (`
 | Markdown | `text/markdown`                                                           | Paragraphs, `#` headings              |
 | CSV      | `text/csv`                                                                | One piece per row: `Header: value; …` |
 
-Early-access limits per workspace: 10 documents, 10 MB per file, 1,000 pieces. A piece is about 300 to 500 words of text, or one CSV row. Ask Hail support for more.
+Early-access limits per workspace: 10 documents, 10 MB per file, 1,000 pieces. One file gives at most 1,500 pieces whatever the workspace limit; split a larger one. A piece is about 300 to 500 words of text, or one CSV row. Ask Hail support for more.
 
 ### What the agent does with it
 
