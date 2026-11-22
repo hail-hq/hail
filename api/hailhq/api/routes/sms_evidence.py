@@ -142,6 +142,13 @@ def evidence_unavailable() -> HTTPException:
     )
 
 
+def _storage_down() -> HTTPException:
+    return HTTPException(
+        status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="storage unavailable; try again",
+    )
+
+
 def evidence_full() -> HTTPException:
     return HTTPException(
         status_code=http_status.HTTP_409_CONFLICT,
@@ -159,10 +166,7 @@ async def ensure_evidence_room(store: S3MailClient, organization_id: UUID) -> No
     try:
         count = await store.count_prefix(folder, up_to=MAX_EVIDENCE_FILES)
     except Exception as exc:
-        raise HTTPException(
-            status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="storage unavailable; try again",
-        ) from exc
+        raise _storage_down() from exc
     if count >= MAX_EVIDENCE_FILES:
         raise evidence_full()
 
@@ -178,19 +182,23 @@ async def keep_evidence(
 
     Parallel uploads can all pass the first count. Count again after the
     save and take this file back (409) when the account went over the cap.
-    Any failure after the save, a cancelled request included, also takes
+    Any failure from the save on, a cancelled request included, also takes
     the file back: the caller never got its link, so nobody could delete it.
+    A storage error is 503.
     """
     folder = evidence_folder(organization_id)
     key = f"{folder}{token}"
-    await store.put_attachment(key, data, content_type)
     try:
+        await store.put_attachment(key, data, content_type)
         over = (
             await store.count_prefix(folder, up_to=MAX_EVIDENCE_FILES + 1)
             > MAX_EVIDENCE_FILES
         )
-    except BaseException:
+    except BaseException as exc:
+        # Deleting a key the save never wrote is harmless.
         await forget_evidence(store, key)
+        if isinstance(exc, Exception):
+            raise _storage_down() from exc
         raise
     if over:
         await forget_evidence(store, key)

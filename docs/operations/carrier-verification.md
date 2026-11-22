@@ -136,9 +136,10 @@ only) removes a file at once; its link then leads to a storage error page. An or
 Verbal consent needs the script and action only; its evidence link is optional.
 
 The consent disclosure check (`_disclosure_gaps` in `sms_form.py`) accepts each policy by its
-web address or by its link words ("Privacy Policy", "Privacy Notice", "Terms", "SMS Terms",
-"Terms of Service", "Privacy Policy and Terms"; not "your privacy", "in terms of" or "Terms apply"), because a real
-checkbox links the words. The web addresses always reach the carrier in their own campaign
+web address or by its link words, because a real checkbox links the words. Accepted:
+"Privacy Policy", "Privacy Notice", "SMS Terms", "Terms of Service", "Terms and Conditions",
+and a bare "Terms" next to the privacy policy ("Privacy Policy and Terms", "Terms and Privacy
+Policy"). Not accepted: "your privacy", "in terms of", "Terms apply". The web addresses always reach the carrier in their own campaign
 fields (`_policy_links` in `twilio_sms.py` and `telnyx_sms.py`). A failed check names only the
 missing parts.
 

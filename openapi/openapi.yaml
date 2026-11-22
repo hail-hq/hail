@@ -843,7 +843,11 @@ paths:
 
         are all 404 with one message: make a new link if the file is not
 
-        stored. A second upload of the same file is harmless.
+        stored. A second upload of the same file is harmless. For `sms_evidence`
+
+        a lost answer cannot be read again: make a new link and send the file
+
+        again. The file stored first stays, and counts toward the 100.
 
         Empty body: 422. A verification document or SMS evidence file whose
 

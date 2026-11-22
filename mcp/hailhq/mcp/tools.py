@@ -2641,10 +2641,9 @@ def register_tools(
         so any file that is not tiny goes this way.
         An email attachment can be up to 25 MB. A verification document must be
         JPG, PNG or PDF, up to 10 MB, and is usable for 1 hour after the upload.
-        SMS evidence must be JPG, PNG or PDF, up to 10 MB, of the given ``content_type``;
-        its upload response has a
-        public ``url`` for an ``*_evidence_url`` field. Carrier reviewers open it
-        without signing in, so remove personal information first.
+        SMS evidence must be a JPG, PNG or PDF of the given ``content_type``, up to 10 MB.
+        Its upload response has a public ``url`` for an ``*_evidence_url`` field.
+        Carrier reviewers open it without signing in, so remove personal information first.
         Returns ``id``, ``upload_url``, ``expires_at`` (15 minutes), ``max_bytes``
         and a ready ``curl`` line with a ``'FILE_PATH'`` placeholder for the
         file's absolute path.

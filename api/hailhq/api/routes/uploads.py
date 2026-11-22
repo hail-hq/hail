@@ -208,8 +208,11 @@ async def create_file_upload(
     org = principal.organization_id
     evidence = body.purpose == EVIDENCE_PURPOSE
     # Refused now, not after the agent sends 10 MB.
-    if evidence and public_evidence_base() is None:
-        raise evidence_unavailable()
+    if evidence:
+        if public_evidence_base() is None:
+            raise evidence_unavailable()
+        # Before the lock: no storage call while it is held.
+        await ensure_evidence_room(s3, org)
     # Two links made at once must not both pass the cap. Not org_lock: that
     # one is held through SMS carrier calls.
     await key_lock(db, f"upload-links:{org}")
@@ -232,10 +235,6 @@ async def create_file_upload(
                 "or wait for them to expire"
             ),
         )
-    if evidence:
-        # After the cheaper cap: a storage list per request only when a
-        # link can be made.
-        await ensure_evidence_room(s3, org)
     token = new_token()
     upload_id = uuid4()
     row = FileUpload(
@@ -383,7 +382,9 @@ async def put_file_upload(
     Storing it may end after the expiry, up to 15 minutes later. Unknown id,
     wrong token, a used link, and a file that could not be stored at the end
     are all 404 with one message: make a new link if the file is not
-    stored. A second upload of the same file is harmless.
+    stored. A second upload of the same file is harmless. For `sms_evidence`
+    a lost answer cannot be read again: make a new link and send the file
+    again. The file stored first stays, and counts toward the 100.
     Empty body: 422. A verification document or SMS evidence file whose
     first bytes are not the declared JPEG, PNG or PDF: 422.
 
@@ -618,17 +619,9 @@ async def _store_evidence(
     token = new_evidence_token()
     key = f"{evidence_folder(organization_id)}{token}"
     digest = (await asyncio.to_thread(hashlib.sha256, payload)).hexdigest()
-    try:
-        # 409 when the account went over the cap meanwhile. It takes its
-        # own file back on any failure after the write.
-        await keep_evidence(s3, organization_id, token, payload, content_type)
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(
-            status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="storage unavailable; try again",
-        ) from exc
+    # 409 when the account went over the cap meanwhile, 503 when storage
+    # fails. It takes its own file back on any failure.
+    await keep_evidence(s3, organization_id, token, payload, content_type)
     try:
         used = (
             await db.execute(
