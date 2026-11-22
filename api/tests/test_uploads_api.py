@@ -220,6 +220,8 @@ async def test_put_stores_the_bytes_and_reports_size_and_sha256(
         "content_type": "image/jpeg",
         "size_bytes": len(_JPEG),
         "sha256": hashlib.sha256(_JPEG).hexdigest(),
+        # Only an sms_evidence upload has a public link.
+        "url": None,
     }
     s3.put_attachment.assert_awaited_once()
     key, body, stored_type = s3.put_attachment.await_args.args

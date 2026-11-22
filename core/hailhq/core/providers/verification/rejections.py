@@ -13,6 +13,7 @@ the rejection email to the workspace owners, and kept in the audit row.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 
 from hailhq.core.providers.verification.base import DETAILS_REJECTED
@@ -102,19 +103,75 @@ def sentence(text: str) -> str:
     return text if text.endswith((".", "!", "?")) else text + "."
 
 
+# The keys a carrier puts its words under, best first.
+TEXT_KEYS = ("description", "detail", "message", "reason", "title")
+# The longest carrier text quoted to the customer; longer text is cut.
+CARRIER_TEXT_MAX = 600
+# A leading field tag in a carrier's text, like "[email] - ".
+# Only an identifier-like tag ("[email]", "[address_sids]") with a "-" or
+# ":" after it. A label with words ("[Sample 2]"), or a tag the sentence
+# goes on from ("[website] is unreachable"), says what to fix, so it stays.
+_FIELD_TAG = re.compile(r"^\s*\[[A-Za-z_][\w.]*\]\s*[-:]\s*")
+# twilio-python's own wrapper around Twilio's message ("Unable to create
+# record: <message>"); not the carrier's words.
+_SDK_PREFIX = re.compile(
+    r"^\s*Unable to (?:create|fetch|update|delete|read|list) (?:record|page)\b"
+    r"(?:\s*:\s*|\s*$)",
+    re.IGNORECASE,
+)
+
+
+def carrier_texts(raw: object) -> list[str]:
+    """The carrier's readable sentences in a refusal. ``raw`` is a string,
+    a dict (its first text key in ``TEXT_KEYS``), or a list of
+    these. A leading field tag (``[email] - ``) and twilio-python's
+    "Unable to create record:" are dropped. Anything else
+    (numbers, codes on their own) gives nothing."""
+    if isinstance(raw, dict):
+        # The first key whose text is still there once cleaned.
+        for key in TEXT_KEYS:
+            if isinstance(raw.get(key), str) and (found := carrier_texts(raw[key])):
+                return found
+        return []
+    if isinstance(raw, (list, tuple)):
+        return [text for item in raw for text in carrier_texts(item)]
+    if not isinstance(raw, str):
+        return []
+    # One line: a carrier's line breaks would break the console and email.
+    text = " ".join(_FIELD_TAG.sub("", _SDK_PREFIX.sub("", raw)).split())
+    # A code on its own ("30701") says nothing to the customer.
+    return [text] if re.search(r"[^\W\d_]", text) else []
+
+
+def with_carrier_text(message: str, raw: object) -> str:
+    """``message`` (Hail's own sentence, with the next step) followed by the
+    carrier's own words, so the customer always sees why. The carrier's
+    text can quote what the customer filed: it goes to the workspace (the
+    console, the API, the owners' email). Hail never logs it, except
+    Telnyx's error text at filing and on failed status polls (``_error_log``
+    in ``telnyx_sms.py``), kept so a refused field can be traced."""
+    said = list(dict.fromkeys(sentence(t) for t in carrier_texts(raw)))
+    if not said:
+        return message
+    quote = " ".join(said)
+    if len(quote) > CARRIER_TEXT_MAX:
+        quote = quote[: CARRIER_TEXT_MAX - 1].rstrip() + "\u2026"
+    return f"{message} The carrier said: {quote}"
+
+
 def customer_reason(
     fixes: Iterable[str],
-    carrier_texts: Iterable[str],
+    said_texts: Iterable[str],
     *,
     fallback: str = DETAILS_REJECTED,
     next_step: str = "start again",
 ) -> str:
     """One reason for the customer. ``fixes`` are Hail's own sentences;
-    ``carrier_texts`` are the carrier's own words for problems Hail has no
+    ``said_texts`` are the carrier's own words for problems Hail has no
     fix for. Duplicates are dropped, order is kept. Nothing at all gives
     ``fallback``. The reason ends with ``next_step``."""
     fixes = list(dict.fromkeys(f.strip() for f in fixes if f and f.strip()))
-    said = list(dict.fromkeys(sentence(t) for t in carrier_texts if t and t.strip()))
+    said = list(dict.fromkeys(sentence(t) for t in said_texts if t and t.strip()))
     if not fixes and not said:
         return fallback
     parts = [*fixes]

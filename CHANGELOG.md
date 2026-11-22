@@ -8,8 +8,23 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 - Webhooks: send a test event to an endpoint before you save it with `POST /v1/webhooks/test`, and see the receiver's answer.
 
+## [0.36.0] (2026-11-22)
+
+An AI agent using the MCP server can now upload a US texting consent
+screenshot and get its public evidence link. The consent disclosure check
+accepts policies named by their link words. Self-hosts drop the old hail-mail
+prefix columns: upgrade to 0.35.0 first.
+
+No component versions are cut alongside this release: the CLI and SDK did not
+change for users. Database migrations run on deploy.
+
+### Added
+
+- MCP: upload a US texting consent screenshot with `create_file_upload` and get its public evidence link.
+
 ### Changed
 
+- US texting registration: the consent disclosure may name "Privacy Policy" and "SMS Terms" instead of their web addresses.
 - Self-host: the database drops the old `local_prefix_user` and `local_prefix_org` columns. Read `local_prefix_workspace` and `local_prefix_name`. The API still accepts the old field names. Upgrade to the 0.35.0 release first (the commit tagged `sdk-v0.25.0`).
 
 ## [0.35.0] (2026-11-21)
@@ -59,6 +74,7 @@ Component versions cut alongside this release:
 - Agents: "email me" on a call reaches only the caller's own saved email.
 - Agents: one phone call sends at most 3 emails, and emails to the caller say they came from a phone call.
 - Agents: the fixed lines of an email to the caller are in the call's language.
+- US texting registration: a rejection now shows the carrier's own reason after Hail's fix, in the console, the API and the email.
 
 ## [0.33.0] (2026-11-19)
 

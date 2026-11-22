@@ -37,7 +37,7 @@ Every tool sets the MCP hints `readOnlyHint`, `destructiveHint`, `idempotentHint
 | `list_sms`                      | List recent SMS messages (cursor-paginated).                                                                                    |
 | `send_email`                    | Send an outbound email (supports `attachment_ids`).                                                                             |
 | `upload_email_attachment`       | Upload a small file (under about 50 KB) as base64, get back a reusable id.                                                      |
-| `create_file_upload`            | A one-time link to upload a file with `curl`, for an email attachment or a verification document.                               |
+| `create_file_upload`            | A one-time link to upload a file with `curl`: an email attachment, a verification document or texting consent evidence.         |
 | `get_email`                     | Fetch one email's full record (body + inbound headers).                                                                         |
 | `list_emails`                   | List emails (`direction="inbound"` for replies).                                                                                |
 | `get_email_raw`                 | Presigned URL for an inbound email's raw MIME.                                                                                  |
@@ -88,6 +88,7 @@ A tool call carries text only, so a file in base64 makes the model write every c
    The link needs no key and works once. The response has `size_bytes` and `sha256`; compare them with the local file (`wc -c`, `shasum -a 256`).
 
 3. Use the `id`: in `send_email`'s `attachment_ids` (`email_attachment`, 25 MB at most), or as `{"slot", "upload_id"}` in the `files` of `check_verification` and `submit_verification` (`verification_document`: JPG, PNG or PDF, 10 MB at most, usable for 1 hour).
+   For `sms_evidence` (a US texting consent screenshot: JPG, PNG or PDF, 10 MB at most), the `curl` response also has `url`, a public link. Put it in the registration's `*_evidence_url` field, for example `website_evidence_url`. Carrier reviewers open it without signing in, so remove personal information first. A workspace keeps at most 100 evidence files.
 
 This needs a client with a shell (Claude Code, Codex, Cursor). Claude.ai web chat has none: there, only `upload_email_attachment` and base64 `files` work, for small files.
 
@@ -152,7 +153,7 @@ Some numbers, for example a UK mobile, need a carrier check of the organization 
 
 9. `get_verification`: `{"verification_id": "<id>"}`. Poll every few minutes to hours, not every few seconds. Review takes business days. Hail sends no email or webhook when it ends.
 10. On `approved`: `quote_numbers` again. The offer is now `ready`. Then `acquire_number` and `route_number` as above. The organization may hold several approved verifications (several people or companies). Each entry in the offer's `verifications` has a `subject_name`: the person's or company's name from the form. When more than one is approved, show the user the names, ask which one, and pass its `id` as `verification_id` to `acquire_number`.
-11. On `rejected`: read `rejection_reason` and ask the user what to fix. For a number registration with `resubmittable: true`, `get_sms_application` shows the kept answers and file names, and `resubmit_verification` files it again with only the changes (Hail keeps them for 30 days after submit, until `kept_until`). Otherwise call `cancel_verification` to dismiss it and submit a new one.
+11. On `rejected`: read `rejection_reason` and ask the user what to fix. If it says the carrier suspended the registration, do not file a new one: a new filing cannot fix a suspension. Ask the user to contact support, as the reason says. For a number registration with `resubmittable: true`, `get_sms_application` shows the kept answers and file names, and `resubmit_verification` files it again with only the changes (Hail keeps them for 30 days after submit, until `kept_until`). Otherwise call `cancel_verification` to dismiss it and submit a new one.
 
 A person's US texting registration may wait on the person. `confirmation: "code"`: ask them for the code the carrier texted and call `confirm_verification` with `{"verification_id": "<id>", "code": "<code>"}`. `confirmation: "reply"`: they answer the carrier's text; nothing to call.
 

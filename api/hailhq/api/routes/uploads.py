@@ -10,7 +10,12 @@ What the file is for decides where it goes and how big it may be: an
 ``email_attachment`` is stored like ``POST /email-attachments`` and its id
 works in ``POST /emails`` ``attachment_ids``; a ``verification_document``
 must be a JPEG, PNG or PDF of at most 10 MB and its id works as the
-``upload.<slot>`` part of ``POST /verifications`` and its ``/check``.
+``upload.<slot>`` part of ``POST /verifications`` and its ``/check``; an
+``sms_evidence`` file follows the rules of ``POST /verifications/sms/evidence``
+(PNG, JPEG or PDF read from its first bytes, 10 MB, 100 files per
+organization, a public https API URL) and the PUT returns its public
+``url``. The PUT that stores evidence deletes the link's row: evidence files
+have no table (``hailhq.core.file_uploads``).
 
 A body over the limit is 413 (a raw PUT, so the HTTP status for a body too
 large; ``POST /email-attachments`` keeps its 422).
@@ -35,9 +40,17 @@ from hailhq.api.ratelimit import (
     GENERAL_RATE_LIMITED_RESPONSES,
     merge_rate_limited_responses,
 )
+from hailhq.api.routes.sms_evidence import (
+    WRONG_TYPE,
+    ensure_evidence_room,
+    evidence_unavailable,
+    forget_evidence,
+    keep_evidence,
+)
 from hailhq.core.config import settings
 from hailhq.core.db import get_session, key_lock
 from hailhq.core.file_uploads import (
+    EVIDENCE_PURPOSE,
     LINK_SWEEP_GRACE,
     LINK_TTL,
     MAX_PENDING_LINKS,
@@ -55,8 +68,15 @@ from hailhq.core.schemas import (
     FileUploadLinkResponse,
     FileUploadResponse,
 )
+from hailhq.core.sms_evidence import (
+    evidence_key,
+    evidence_url,
+    new_evidence_token,
+    public_evidence_base,
+    sniff_evidence_type,
+)
 from hailhq.core.urls import join_url
-from sqlalchemy import Row, func, select, update
+from sqlalchemy import Row, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(
@@ -89,6 +109,14 @@ _org_reads: dict[UUID, int] = {}
 # The longest one body read may take. Never past the link's expiry either.
 MAX_BODY_READ_SECONDS = 600.0
 _UNAVAILABLE = "file uploads are not configured on this server"
+_EVIDENCE_FULL = {
+    409: {
+        "description": (
+            "An `sms_evidence` link for an organization that keeps 100 "
+            "evidence files, the most allowed."
+        )
+    }
+}
 
 _PENDING_CAP_RESPONSES = merge_rate_limited_responses(
     GENERAL_RATE_LIMITED_RESPONSES,
@@ -142,7 +170,15 @@ def _too_large(limit: int) -> HTTPException:
     operation_id="create_file_upload",
     responses={
         **_PENDING_CAP_RESPONSES,
-        503: {"description": "File uploads are not configured on this server."},
+        **_EVIDENCE_FULL,
+        503: {
+            "description": (
+                "File uploads are not configured on this server. For "
+                "`sms_evidence`, also when the server has no public https URL "
+                "carrier reviewers can open, or when storage failed for a "
+                "moment: try again."
+            )
+        },
     },
 )
 async def create_file_upload(
@@ -163,10 +199,21 @@ async def create_file_upload(
 
     The PUT answers with `size_bytes` and `sha256` of what was stored. An
     organization may hold at most 50 unused, unexpired links.
+
+    For `sms_evidence` the PUT also answers with `url`, the public link for
+    an `*_evidence_url` field of a US texting registration. It works like
+    `POST /v1/verifications/sms/evidence`.
     """
     if s3 is None:
         raise _unavailable()
     org = principal.organization_id
+    evidence = body.purpose == EVIDENCE_PURPOSE
+    # Refused now, not after the agent sends 10 MB.
+    if evidence:
+        if public_evidence_base() is None:
+            raise evidence_unavailable()
+        # Before the lock: no storage call while it is held.
+        await ensure_evidence_room(s3, org)
     # Two links made at once must not both pass the cap. Not org_lock: that
     # one is held through SMS carrier calls.
     await key_lock(db, f"upload-links:{org}")
@@ -281,6 +328,7 @@ async def _read_body(request: Request, limit: int) -> bytes:
                 "file is not stored, make a new link and send it again."
             )
         },
+        **_EVIDENCE_FULL,
         408: {
             "description": (
                 "The body did not arrive before the link expired, or within "
@@ -335,9 +383,15 @@ async def put_file_upload(
     Storing it may end after the expiry, up to 15 minutes later. Unknown id,
     wrong token, a used link, and a file that could not be stored at the end
     are all 404 with one message: make a new link if the file is not
-    stored. A second upload of the same file is harmless.
-    Empty body: 422. A verification document whose first bytes are not the
-    declared JPEG, PNG or PDF: 422.
+    stored. A second upload of the same file is harmless. For `sms_evidence`
+    a lost answer cannot be read again: make a new link and send the file
+    again. The file stored first stays, and counts toward the 100.
+    Empty body: 422. A verification document or SMS evidence file whose
+    first bytes are not the declared JPEG, PNG or PDF: 422.
+
+    For `sms_evidence` the answer also has `url`, the public link to put in
+    an `*_evidence_url` field. An organization that already keeps 100
+    evidence files gets 409.
     """
     if s3 is None:
         raise _unavailable()
@@ -363,6 +417,7 @@ async def put_file_upload(
         raise _expired()
     org = row.organization_id
     link = {
+        "organization_id": org,
         "expires": row.link_expires_at,
         "purpose": row.purpose,
         "content_type": row.content_type,
@@ -400,6 +455,7 @@ async def _store(
     upload_id: UUID,
     db_now: datetime,
     token_hash: str,
+    organization_id: UUID,
     expires: datetime,
     purpose: str,
     content_type: str,
@@ -414,7 +470,15 @@ async def _store(
     PUT deletes its own object and answers 404. A failure before the update
     leaves the link usable; the link sweep removes what it left. Expiry is
     checked when the PUT starts (410) and again in the update (the store
-    window), both on the database clock."""
+    window), both on the database clock. SMS evidence has its own path
+    (``_store_evidence``)."""
+    base = None
+    if purpose == EVIDENCE_PURPOSE:
+        base = public_evidence_base()
+        if base is None:
+            raise evidence_unavailable()
+        # Before the body read, so an account at the cap costs no upload.
+        await ensure_evidence_room(s3, organization_id)
     try:
         # Both times from the database clock.
         async with asyncio.timeout(_read_deadline(expires, db_now)):
@@ -433,6 +497,26 @@ async def _store(
         payload, content_type
     ):
         raise unprocessable(f"the file does not look like {content_type}", loc=["body"])
+    if base is not None:
+        # The evidence route's own check: the file must start with the
+        # signature, so the public link never serves another type.
+        kind = sniff_evidence_type(payload)
+        if kind is None:
+            raise unprocessable(WRONG_TYPE, loc=["body"])
+        if kind != content_type:
+            raise unprocessable(
+                f"the file does not look like {content_type}", loc=["body"]
+            )
+        return await _store_evidence(
+            db,
+            s3,
+            upload_id=upload_id,
+            token_hash=token_hash,
+            organization_id=organization_id,
+            base=base,
+            payload=payload,
+            content_type=content_type,
+        )
 
     key = f"{base_key}.{uuid4().hex}"
     stored = await _write_and_mark(
@@ -509,6 +593,69 @@ async def _write_and_mark(
     ).one_or_none()
     await db.commit()
     return stored
+
+
+async def _store_evidence(
+    db: AsyncSession,
+    s3: S3MailClient,
+    *,
+    upload_id: UUID,
+    token_hash: str,
+    organization_id: UUID,
+    base: str,
+    payload: bytes,
+    content_type: str,
+) -> FileUploadResponse:
+    """Store an evidence file at its own new link, then use up the upload
+    link by deleting its row.
+
+    Each PUT writes its own ``sms-evidence/<org>/<token>``, so two PUTs to
+    one link never overwrite each other. These keys do not share the link's
+    prefix, so no sweep finds a leftover: every failure after the write,
+    a cancelled request included, deletes this PUT's object itself. That
+    includes a failed commit whose outcome is unknown: the caller then
+    gets no link, so nobody could delete the file, and the 404 on a retry
+    already says to make a new link. The row goes in the statement that
+    uses the link, so no rule has to sweep used evidence links later."""
+    token = new_evidence_token()
+    key = evidence_key(organization_id, token)
+    digest = (await asyncio.to_thread(hashlib.sha256, payload)).hexdigest()
+    # 409 when the account went over the cap meanwhile, 503 when storage
+    # fails. It takes its own file back on any failure.
+    await keep_evidence(s3, organization_id, token, payload, content_type)
+    try:
+        used = (
+            await db.execute(
+                delete(FileUpload)
+                .where(
+                    FileUpload.id == upload_id,
+                    FileUpload.token_hash == token_hash,
+                    FileUpload.uploaded_at.is_(None),
+                    FileUpload.link_storable(),
+                )
+                .returning(
+                    FileUpload.id,
+                    FileUpload.purpose,
+                    FileUpload.filename,
+                    FileUpload.content_type,
+                )
+            )
+        ).one_or_none()
+        if used is None:
+            raise _not_found()
+        await db.commit()
+    except BaseException:
+        await forget_evidence(s3, key)
+        raise
+    return FileUploadResponse(
+        id=used.id,
+        purpose=used.purpose,
+        filename=used.filename,
+        content_type=used.content_type,
+        size_bytes=len(payload),
+        sha256=digest,
+        url=evidence_url(base, organization_id, token),
+    )
 
 
 async def _delete_earlier_attempts(s3: S3MailClient, upload_id: UUID, key: str) -> None:

@@ -18,6 +18,12 @@ from hailhq.core.file_uploads import (
 )
 from hailhq.core.models import CarrierVerification, FileUpload
 from hailhq.core.s3_mail import S3MailClient
+from hailhq.core.sms_evidence import (
+    MAX_EVIDENCE_BYTES,
+    new_evidence_token,
+    public_evidence_base,
+    sniff_evidence_type,
+)
 from sqlalchemy import select
 
 
@@ -213,3 +219,79 @@ async def test_touch_copies_the_object_onto_itself() -> None:
     assert kwargs["CopySource"] == {"Bucket": "b", "Key": "k"}
     assert kwargs["MetadataDirective"] == "REPLACE"
     assert kwargs["ServerSideEncryption"] == "AES256"
+
+
+def test_sms_evidence_links_follow_the_evidence_rules() -> None:
+    org, upload = uuid4(), uuid4()
+    assert "sms_evidence" in file_uploads.PURPOSES
+    assert file_uploads.max_bytes("sms_evidence") == MAX_EVIDENCE_BYTES
+    key = object_key("sms_evidence", org, upload)
+    assert key == f"sms-evidence/{org}/{upload}"
+    # The link sweep deletes this prefix. A link id is 36 characters and an
+    # evidence token 32, so no real file of the organization starts with it.
+    assert file_uploads.object_prefix(key) == key
+    token = new_evidence_token()
+    assert len(token) == 32 and len(str(upload)) == 36
+    assert not f"sms-evidence/{org}/{token}".startswith(key)
+
+
+async def test_store_upload_refuses_sms_evidence(async_session) -> None:
+    row = FileUpload(
+        organization_id=uuid4(),
+        purpose="sms_evidence",
+        filename="shot.png",
+        content_type="image/png",
+    )
+    with pytest.raises(ValueError):
+        await file_uploads.store_upload(async_session, AsyncMock(), row, b"x")
+
+
+@pytest.mark.parametrize(
+    ("content", "kind"),
+    [
+        (b"\x89PNG\r\n\x1a\n rest", "image/png"),
+        (b"\xff\xd8\xff\xe0 rest", "image/jpeg"),
+        (b"%PDF-1.4", "application/pdf"),
+        # Stricter than verification documents: the header comes first.
+        (b"junk %PDF-1.4", None),
+        (b"<svg></svg>", None),
+        (b"", None),
+    ],
+)
+def test_sniff_evidence_type(content: bytes, kind: str | None) -> None:
+    assert sniff_evidence_type(content) == kind
+
+
+@pytest.mark.parametrize(
+    ("base", "public"),
+    [
+        ("https://api.example.com", True),
+        ("https://203.0.113.7", False),  # documentation range: not global
+        ("https://8.8.8.8", True),
+        ("http://api.example.com", False),
+        ("https://localhost", False),
+        ("https://hail.local", False),
+        ("https://api", False),
+    ],
+)
+def test_public_evidence_base(monkeypatch, base: str, public: bool) -> None:
+    monkeypatch.setattr("hailhq.core.sms_evidence.settings.hail_api_url", base)
+    assert (public_evidence_base() == base) is public
+
+
+async def test_the_database_takes_an_sms_evidence_link(async_session) -> None:
+    org = uuid4()
+    row = FileUpload(
+        organization_id=org,
+        purpose="sms_evidence",
+        filename="shot.png",
+        content_type="image/png",
+        s3_key=object_key("sms_evidence", org, uuid4()),
+    )
+    async_session.add(row)
+    await async_session.commit()
+    assert (
+        await async_session.execute(
+            select(FileUpload.purpose).where(FileUpload.id == row.id)
+        )
+    ).scalar_one() == "sms_evidence"

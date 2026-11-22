@@ -579,6 +579,7 @@ func (e FieldSpecKind) Valid() bool {
 // Defines values for FileUploadCreatePurpose.
 const (
 	FileUploadCreatePurposeEmailAttachment      FileUploadCreatePurpose = "email_attachment"
+	FileUploadCreatePurposeSmsEvidence          FileUploadCreatePurpose = "sms_evidence"
 	FileUploadCreatePurposeVerificationDocument FileUploadCreatePurpose = "verification_document"
 )
 
@@ -586,6 +587,8 @@ const (
 func (e FileUploadCreatePurpose) Valid() bool {
 	switch e {
 	case FileUploadCreatePurposeEmailAttachment:
+		return true
+	case FileUploadCreatePurposeSmsEvidence:
 		return true
 	case FileUploadCreatePurposeVerificationDocument:
 		return true
@@ -597,6 +600,7 @@ func (e FileUploadCreatePurpose) Valid() bool {
 // Defines values for FileUploadLinkResponsePurpose.
 const (
 	FileUploadLinkResponsePurposeEmailAttachment      FileUploadLinkResponsePurpose = "email_attachment"
+	FileUploadLinkResponsePurposeSmsEvidence          FileUploadLinkResponsePurpose = "sms_evidence"
 	FileUploadLinkResponsePurposeVerificationDocument FileUploadLinkResponsePurpose = "verification_document"
 )
 
@@ -604,6 +608,8 @@ const (
 func (e FileUploadLinkResponsePurpose) Valid() bool {
 	switch e {
 	case FileUploadLinkResponsePurposeEmailAttachment:
+		return true
+	case FileUploadLinkResponsePurposeSmsEvidence:
 		return true
 	case FileUploadLinkResponsePurposeVerificationDocument:
 		return true
@@ -615,6 +621,7 @@ func (e FileUploadLinkResponsePurpose) Valid() bool {
 // Defines values for FileUploadResponsePurpose.
 const (
 	EmailAttachment      FileUploadResponsePurpose = "email_attachment"
+	SmsEvidence          FileUploadResponsePurpose = "sms_evidence"
 	VerificationDocument FileUploadResponsePurpose = "verification_document"
 )
 
@@ -622,6 +629,8 @@ const (
 func (e FileUploadResponsePurpose) Valid() bool {
 	switch e {
 	case EmailAttachment:
+		return true
+	case SmsEvidence:
 		return true
 	case VerificationDocument:
 		return true
@@ -2998,17 +3007,17 @@ type FieldSpecKind string
 
 // FileUploadCreate Body of “POST /uploads“: what the file is for, and its name and type.
 type FileUploadCreate struct {
-	// ContentType MIME type, `type/subtype` with no parameters. A `verification_document` takes `image/jpeg`, `image/png` or `application/pdf` only. This type is stored; the PUT request's own `Content-Type` header is not used.
+	// ContentType MIME type, `type/subtype` with no parameters. A `verification_document` or `sms_evidence` takes `image/jpeg`, `image/png` or `application/pdf` only. This type is stored; the PUT request's own `Content-Type` header is not used.
 	ContentType string `json:"content_type"`
 
 	// Filename The file's name, 1 to 255 chars, no control characters.
 	Filename string `json:"filename"`
 
-	// Purpose What the file is for. `email_attachment`: the id works in `POST /v1/emails` `attachment_ids`. `verification_document`: the id works as the `upload.<slot>` part of `POST /v1/verifications` and `POST /v1/verifications/check`.
+	// Purpose What the file is for. `email_attachment`: the id works in `POST /v1/emails` `attachment_ids`. `verification_document`: the id works as the `upload.<slot>` part of `POST /v1/verifications` and `POST /v1/verifications/check`. `sms_evidence`: a US texting consent screenshot; the PUT returns a public `url` for an `*_evidence_url` field, like `POST /v1/verifications/sms/evidence`.
 	Purpose FileUploadCreatePurpose `json:"purpose"`
 }
 
-// FileUploadCreatePurpose What the file is for. `email_attachment`: the id works in `POST /v1/emails` `attachment_ids`. `verification_document`: the id works as the `upload.<slot>` part of `POST /v1/verifications` and `POST /v1/verifications/check`.
+// FileUploadCreatePurpose What the file is for. `email_attachment`: the id works in `POST /v1/emails` `attachment_ids`. `verification_document`: the id works as the `upload.<slot>` part of `POST /v1/verifications` and `POST /v1/verifications/check`. `sms_evidence`: a US texting consent screenshot; the PUT returns a public `url` for an `*_evidence_url` field, like `POST /v1/verifications/sms/evidence`.
 type FileUploadCreatePurpose string
 
 // FileUploadLinkResponse Returned by “POST /uploads“: a one-time link to send the bytes to.
@@ -3057,6 +3066,9 @@ type FileUploadResponse struct {
 
 	// SizeBytes Bytes stored. Compare with the local file.
 	SizeBytes int `json:"size_bytes"`
+
+	// Url For `sms_evidence`: the public link to the file. Put it in an `*_evidence_url` field. Carrier reviewers open it without signing in. Null for other purposes.
+	Url *string `json:"url,omitempty"`
 }
 
 // FileUploadResponsePurpose What the file is for.
