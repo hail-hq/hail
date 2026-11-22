@@ -1469,7 +1469,9 @@ def _response_problems(response: httpx.Response, subject_type) -> list[Problem]:
         else:
             _add_carrier_text(problem, text, lead)
     if not problems:
-        originals = [t for t in map(_original_text, _errors(response)) if t]
+        originals = [
+            t for t in map(_one_line, map(_original_text, _errors(response))) if t
+        ]
         return [
             Problem(
                 field="",
@@ -1565,7 +1567,7 @@ def _general_problem(unmatched: list, subject_type: str) -> Problem:
     """One problem for carrier reasons on no form field: Hail's sentence for
     each detail they name (else the generic one), then their words. ``raw``
     keeps the carrier's own text, so the audit row has what was shown."""
-    originals = [t for t in map(_original_text, unmatched) if t]
+    originals = [t for t in map(_one_line, map(_original_text, unmatched)) if t]
     fixes = _text_fixes([_all_text(item) for item in unmatched], subject_type)
     return Problem(
         field="",
@@ -1581,10 +1583,12 @@ def _brand_fixes(reasons, subject_type) -> list[str]:
     items = reasons if isinstance(reasons, list) else [reasons]
     # The text plus the fields it names, so a bare "Invalid value" on the
     # EIN field still gets the tax number sentence.
+    # A duplicate the reuse sentence covers is left out; any other reason,
+    # an unmapped duplicate too ("Duplicate EIN"), gets its detail fix.
     others = [
         f"{_all_text(r)} {_named_fields(r, subject_type)}"
         for r in items
-        if "duplicate" not in _all_text(r).lower()
+        if not _duplicate_fixes([r], subject_type)
     ]
     fixes = _duplicate_fixes(reasons, subject_type)
     return fixes + [f for f in detail_fixes(others) if f not in fixes]

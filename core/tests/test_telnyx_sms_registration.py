@@ -1868,6 +1868,10 @@ async def test_one_refusal_naming_email_and_ein_gets_both_sentences():
             [{"fields": ["website"], "description": "Invalid value"}],
             "Check the website address.",
         ),
+        (
+            [{"fields": ["ein"], "description": "Duplicate EIN registered"}],
+            "Check the business tax number.",
+        ),
     ],
 )
 async def test_brand_refused_later_reads_text_and_fields(reasons, start) -> None:

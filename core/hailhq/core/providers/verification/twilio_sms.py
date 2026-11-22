@@ -258,7 +258,7 @@ class TwilioSmsRegistrationProvider(SmsRegistrationProvider):
                             Problem(
                                 field="",
                                 message=_safe_message(
-                                    _customer_reasons(exc)
+                                    exc.reasons
                                     if isinstance(exc, _NotCompliant)
                                     else exc.msg
                                 ),
@@ -987,23 +987,15 @@ def _refused_answers(exc: TwilioRestException) -> bool:
     retried: then no answer the customer changes can fix it. So a form
     reason that happens to say "permission" still reaches the customer."""
     if isinstance(exc, _NotCompliant):
-        return any(not account_problem(text) for text in exc.reasons or [""])
+        refused = any(not account_problem(text) for text in exc.reasons or [""])
+        if not refused:
+            # No carrier text in the log: it can quote the customer.
+            logger.warning(
+                "Trust Hub evaluation failed on Hail's account: %d field(s)",
+                len(exc.reasons),
+            )
+        return refused
     return application_validation_error(exc.status, exc.msg)
-
-
-def _customer_reasons(exc: _NotCompliant) -> list[str]:
-    """The failed fields the customer can fix: Hail's own account problems
-    are not theirs to fix, so they are not quoted to them. A hidden account
-    problem is logged for the operator with Twilio's text, which names
-    Hail's own account setup (``account_problem``), not the customer."""
-    hidden = [t for t in exc.reasons if account_problem(t)]
-    if hidden:
-        logger.warning(
-            "Trust Hub evaluation also failed on Hail's account; the customer "
-            "sees only their own fields: %s",
-            "; ".join(hidden),
-        )
-    return [t for t in exc.reasons if not account_problem(t)]
 
 
 def _evaluation_reasons(ev) -> list[str]:

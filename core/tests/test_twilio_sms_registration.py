@@ -920,7 +920,7 @@ async def test_noncompliant_outage_only_when_every_field_names_the_account() -> 
         )
         draft = await _draft(_provider(r))
         assert draft.problems[0].message.startswith("Check the website address.")
-        assert "messaging service" not in draft.problems[0].message.lower()
+        # Every reason is quoted; none is hidden or logged.
     # A single form reason that says "permission" reaches the customer.
     r = _ok_responses()
     r["customer_profiles_evaluations.create"] = SimpleNamespace(
