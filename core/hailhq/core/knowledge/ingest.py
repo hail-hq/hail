@@ -55,7 +55,6 @@ from hailhq.core.knowledge.access import (
     knowledge_limits,
     knowledge_lock,
     log_failure,
-    short_cause,
     storage_full,
 )
 from hailhq.core.knowledge.decode import MAX_TEXT_BYTES
@@ -228,29 +227,23 @@ class KnowledgeIngestWorker:
                 )
             except Exception as exc:
                 code = getattr(getattr(exc, "orig", None), "sqlstate", None)
-                first = org_id not in self._reported
-                self._reported.add(org_id)
                 if code == "55P03":
                     logger.warning(
                         "knowledge: closed org %s: a knowledge row is busy; "
                         "retrying",
                         org_id,
                     )
-                elif first:
-                    # The first time at error level, with the chain's shape
-                    # (types and where they were raised, no messages).
-                    log_failure(
-                        logger,
-                        f"knowledge: could not delete closed org {org_id}; retrying",
-                        exc,
-                    )
-                else:
-                    logger.warning(
-                        "knowledge: could not delete closed org %s (%s%s); retrying",
-                        org_id,
-                        type(exc).__name__,
-                        short_cause(exc),
-                    )
+                    continue
+                # Error level the first time, a warning on later ticks; the
+                # chain's shape only (types and where they were raised).
+                first = org_id not in self._reported
+                self._reported.add(org_id)
+                log_failure(
+                    logger,
+                    f"knowledge: could not delete closed org {org_id}; retrying",
+                    exc,
+                    level=logging.ERROR if first else logging.WARNING,
+                )
 
     async def _fail_spent(self) -> None:
         """Rows that used every try (a crashed worker's lease) or waited past

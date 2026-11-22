@@ -23,6 +23,7 @@ import asyncio
 import logging
 import sys
 from collections.abc import Awaitable
+from pathlib import Path
 from typing import TypeVar
 from uuid import UUID
 
@@ -149,37 +150,57 @@ def involves_database(exc: BaseException) -> bool:
     return False
 
 
-def log_failure(log: logging.Logger, message: str, exc: BaseException) -> None:
-    """Log ``message`` at error level with the failure's shape only: each
-    error in its chain as type and where it was raised (file:line), never
-    a message. Messages here can hold statements, values or text from the
-    customer's file."""
+# The folder holding the ``hailhq`` packages: frames under it are Hail's.
+_HAIL_ROOT = str(Path(__file__).resolve().parents[2])
+
+
+def _where(exc: BaseException) -> str:
+    """ " at <file>:<line>" of the deepest frame in Hail's code, else of the
+    deepest frame (file name only)."""
+    tb, ours, last = exc.__traceback__, None, None
+    while tb is not None:
+        last = tb
+        if tb.tb_frame.f_code.co_filename.startswith(_HAIL_ROOT):
+            ours = tb
+        tb = tb.tb_next
+    frame = ours or last
+    if frame is None:
+        return ""
+    path = frame.tb_frame.f_code.co_filename
+    shown = path[len(_HAIL_ROOT) :].lstrip("/") if ours else path.rsplit("/", 1)[-1]
+    return f" at {shown}:{frame.tb_lineno}"
+
+
+def log_failure(
+    log: logging.Logger,
+    message: str,
+    exc: BaseException,
+    *,
+    level: int = logging.ERROR,
+) -> None:
+    """Log ``message`` with the failure's shape only: each error in its
+    chain (and in an exception group) as type, SQL state and where it was
+    raised, never a message. Messages here can hold statements, values or
+    text from the customer's file."""
     parts = []
     seen: set[int] = set()
-    current: BaseException | None = exc
-    while current is not None and id(current) not in seen:
+    stack: list[BaseException] = [exc]
+    while stack:
+        current = stack.pop(0)
+        if id(current) in seen:
+            continue
         seen.add(id(current))
-        # The deepest frame in Hail's own code, else the deepest at all.
-        tb, ours = current.__traceback__, None
-        last = tb
-        while tb is not None:
-            last = tb
-            if "/hailhq/" in tb.tb_frame.f_code.co_filename:
-                ours = tb
-            tb = tb.tb_next
-        frame = ours or last
-        where = (
-            f" at {frame.tb_frame.f_code.co_filename.rsplit('/hailhq/', 1)[-1]}"
-            f":{frame.tb_lineno}"
-            if frame is not None
-            else ""
-        )
         code = getattr(current, "sqlstate", None) or getattr(
             getattr(current, "orig", None), "sqlstate", None
         )
-        parts.append(f"{type(current).__name__}{f' {code}' if code else ''}{where}")
-        current = current.__cause__ or current.__context__
-    log.error("%s (%s)", message, " <- ".join(parts))
+        parts.append(
+            f"{type(current).__name__}{f' {code}' if code else ''}{_where(current)}"
+        )
+        members = getattr(current, "exceptions", None)
+        if isinstance(members, tuple):
+            stack.extend(m for m in members if isinstance(m, BaseException))
+        stack.extend(e for e in (current.__cause__, current.__context__) if e)
+    log.log(level, "%s (%s)", message, " <- ".join(parts))
 
 
 def short_cause(exc: BaseException) -> str:
