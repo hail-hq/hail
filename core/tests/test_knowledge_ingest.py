@@ -598,8 +598,8 @@ def test_log_failure_shows_shape_never_messages(caplog) -> None:
     try:
         try:
             raise ValueError("text from the customer's file")
-        except ValueError:
-            raise OSError("connection refused") from None
+        except ValueError as err:
+            raise OSError("connection refused") from err
     except OSError as exc:
         with caplog.at_level(logging.ERROR, logger="test.knowledge"):
             log_failure(log, "step failed", exc)

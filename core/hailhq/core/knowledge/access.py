@@ -23,7 +23,6 @@ import asyncio
 import logging
 import sys
 from collections.abc import Awaitable
-from pathlib import Path
 from typing import TypeVar
 from uuid import UUID
 
@@ -150,25 +149,44 @@ def involves_database(exc: BaseException) -> bool:
     return False
 
 
-# The folder holding the ``hailhq`` packages: frames under it are Hail's.
-_HAIL_ROOT = str(Path(__file__).resolve().parents[2])
-
-
 def _where(exc: BaseException) -> str:
-    """ " at <file>:<line>" of the deepest frame in Hail's code, else of the
-    deepest frame (file name only)."""
+    """ " at <file>:<line>" of the deepest frame in Hail's code (a path with
+    a ``hailhq`` folder, shown from there), else of the deepest frame (file
+    name only)."""
     tb, ours, last = exc.__traceback__, None, None
     while tb is not None:
         last = tb
-        if tb.tb_frame.f_code.co_filename.startswith(_HAIL_ROOT):
+        if "/hailhq/" in tb.tb_frame.f_code.co_filename:
             ours = tb
         tb = tb.tb_next
     frame = ours or last
     if frame is None:
         return ""
     path = frame.tb_frame.f_code.co_filename
-    shown = path[len(_HAIL_ROOT) :].lstrip("/") if ours else path.rsplit("/", 1)[-1]
+    shown = (
+        "hailhq/" + path.rsplit("/hailhq/", 1)[-1] if ours else path.rsplit("/", 1)[-1]
+    )
     return f" at {shown}:{frame.tb_lineno}"
+
+
+_MAX_PARTS = 10
+
+
+def _shape(exc: BaseException, seen: set[int]) -> str:
+    code = getattr(exc, "sqlstate", None) or getattr(
+        getattr(exc, "orig", None), "sqlstate", None
+    )
+    text = f"{type(exc).__name__}{f' {code}' if code else ''}{_where(exc)}"
+    members = getattr(exc, "exceptions", None)
+    if isinstance(members, tuple):
+        inner = [
+            _shape(m, seen)
+            for m in members[:_MAX_PARTS]
+            if isinstance(m, BaseException)
+        ]
+        more = len(members) - _MAX_PARTS
+        text += " [" + " | ".join(inner) + (f" | {more} more" if more > 0 else "") + "]"
+    return text
 
 
 def log_failure(
@@ -179,27 +197,20 @@ def log_failure(
     level: int = logging.ERROR,
 ) -> None:
     """Log ``message`` with the failure's shape only: each error in its
-    chain (and in an exception group) as type, SQL state and where it was
-    raised, never a message. Messages here can hold statements, values or
+    chain (exception group members in brackets) as type, SQL state and
+    where it was raised, never a message. At most ten of each. Messages here can hold statements, values or
     text from the customer's file."""
-    parts = []
+    # The chain as Python prints it: each error, then the one it was raised
+    # from (or during, unless that context was suppressed).
+    parts: list[str] = []
     seen: set[int] = set()
-    stack: list[BaseException] = [exc]
-    while stack:
-        current = stack.pop(0)
-        if id(current) in seen:
-            continue
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen and len(parts) < _MAX_PARTS:
         seen.add(id(current))
-        code = getattr(current, "sqlstate", None) or getattr(
-            getattr(current, "orig", None), "sqlstate", None
+        parts.append(_shape(current, seen))
+        current = current.__cause__ or (
+            None if current.__suppress_context__ else current.__context__
         )
-        parts.append(
-            f"{type(current).__name__}{f' {code}' if code else ''}{_where(current)}"
-        )
-        members = getattr(current, "exceptions", None)
-        if isinstance(members, tuple):
-            stack.extend(m for m in members if isinstance(m, BaseException))
-        stack.extend(e for e in (current.__cause__, current.__context__) if e)
     log.log(level, "%s (%s)", message, " <- ".join(parts))
 
 

@@ -150,8 +150,8 @@ class KnowledgeIngestWorker:
         self._embedder = embedder
         self._poll_interval = poll_interval
         self._stop = asyncio.Event()
-        # Closed orgs whose delete failed already: their traceback is logged
-        # once, then one short line per retry.
+        # Closed orgs whose delete failed already: logged at error level
+        # once, then as a warning on each retry.
         self._reported: set[UUID] = set()
 
     def _get_s3(self) -> S3MailClient:
