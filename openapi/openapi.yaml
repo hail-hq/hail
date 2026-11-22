@@ -816,8 +816,9 @@ paths:
             files, the most allowed.
         "503":
           description:
-            File uploads are not configured on this server. For `sms_evidence`,
-            also when the server has no public https URL carrier reviewers can open.
+            "File uploads are not configured on this server. For `sms_evidence`,
+            also when the server has no public https URL carrier reviewers can open,
+            or when storage failed for a moment: try again."
         "422":
           description: Validation Error
           content:
@@ -5207,6 +5208,10 @@ paths:
                 type: integer
         "409":
           description: The account keeps the most files allowed.
+        "503":
+          description:
+            "This server cannot store files for carrier reviewers (no mail bucket
+            or no public https URL), or storage failed for a moment: try again."
         "422":
           description: Validation Error
           content:

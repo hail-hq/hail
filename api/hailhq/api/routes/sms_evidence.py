@@ -15,6 +15,7 @@ after it closes (hailhq.core.retention).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import re
 from functools import lru_cache
@@ -33,8 +34,8 @@ from hailhq.core.s3_mail import S3MailClient
 from hailhq.core.sms_evidence import (
     MAX_EVIDENCE_BYTES,
     MAX_EVIDENCE_FILES,
-    SMS_EVIDENCE_PREFIX,
     evidence_folder,
+    evidence_key,
     evidence_url,
     new_evidence_token,
     public_evidence_base,
@@ -187,22 +188,50 @@ async def keep_evidence(
     A storage error is 503.
     """
     folder = evidence_folder(organization_id)
-    key = f"{folder}{token}"
+    key = evidence_key(organization_id, token)
+    # The write runs in a worker thread that a cancel cannot stop, so it is
+    # its own task: the cleanup waits for it before deleting, or the write
+    # could land after the delete and leave a file nobody has a link to.
+    put = asyncio.ensure_future(store.put_attachment(key, data, content_type))
     try:
-        await store.put_attachment(key, data, content_type)
+        await asyncio.shield(put)
         over = (
             await store.count_prefix(folder, up_to=MAX_EVIDENCE_FILES + 1)
             > MAX_EVIDENCE_FILES
         )
     except BaseException as exc:
         # Deleting a key the save never wrote is harmless.
-        await forget_evidence(store, key)
+        await _forget_after(put, store, key)
         if isinstance(exc, Exception):
             raise _storage_down() from exc
         raise
     if over:
         await forget_evidence(store, key)
         raise evidence_full()
+
+
+# Cleanups still running after their request was cancelled. Held here so
+# the event loop's weak reference does not let them be collected midway.
+_cleanups: set[asyncio.Task[None]] = set()
+
+
+async def _wait_then_forget(
+    put: asyncio.Future[None], store: S3MailClient, key: str
+) -> None:
+    with contextlib.suppress(BaseException):
+        await put
+    await forget_evidence(store, key)
+
+
+async def _forget_after(
+    put: asyncio.Future[None], store: S3MailClient, key: str
+) -> None:
+    """Delete the file once its write has ended, even if this request is
+    cancelled again while it waits."""
+    task = asyncio.ensure_future(_wait_then_forget(put, store, key))
+    _cleanups.add(task)
+    task.add_done_callback(_cleanups.discard)
+    await asyncio.shield(task)
 
 
 async def forget_evidence(store: S3MailClient, key: str) -> None:
@@ -219,7 +248,16 @@ async def forget_evidence(store: S3MailClient, key: str) -> None:
     response_model=EvidenceUploadResponse,
     status_code=http_status.HTTP_201_CREATED,
     operation_id="upload_sms_evidence",
-    responses={409: {"description": "The account keeps the most files allowed."}},
+    responses={
+        409: {"description": "The account keeps the most files allowed."},
+        503: {
+            "description": (
+                "This server cannot store files for carrier reviewers (no mail "
+                "bucket or no public https URL), or storage failed for a moment: "
+                "try again."
+            )
+        },
+    },
     openapi_extra=_UPLOAD_BODY,
 )
 async def upload_sms_evidence(
@@ -276,9 +314,7 @@ async def get_sms_evidence(
         raise HTTPException(status_code=404, detail="Not found")
     # The file is served from storage, never from the API's origin, and the
     # API never streams it. Signing is local: no storage call per view.
-    url = await store.presign_get(
-        f"{SMS_EVIDENCE_PREFIX}{organization_id}/{token}", ttl_seconds=600
-    )
+    url = await store.presign_get(evidence_key(organization_id, token), ttl_seconds=600)
     return RedirectResponse(
         url,
         status_code=http_status.HTTP_302_FOUND,
@@ -314,7 +350,7 @@ async def delete_sms_evidence(
         )
     if organization_id != principal.organization_id or not _TOKEN.fullmatch(token):
         raise HTTPException(status_code=404, detail="Not found")
-    key = f"{SMS_EVIDENCE_PREFIX}{organization_id}/{token}"
+    key = evidence_key(organization_id, token)
     if not await store.count_prefix(key, up_to=1):
         raise HTTPException(status_code=404, detail="Not found")
     await store.delete(key)

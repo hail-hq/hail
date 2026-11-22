@@ -73,12 +73,17 @@ _MESSAGE_DATA_RATES = re.compile(
 # The words must name a policy: "we respect your privacy", "in terms of"
 # or "Terms apply" does not. A bare "Terms" counts next to the privacy
 # policy ("Privacy Policy and Terms", "Terms and Privacy Policy").
-_PRIVACY_WORDS = re.compile(r"\bprivacy\s+(?:policy|notice|statement)\b", re.IGNORECASE)
+_PRIVACY_WORDS = re.compile(
+    r"\bprivacy(?:\s*(?:and|&)\s*\w+)?\s+(?:policy|notice|statement)\b",
+    re.IGNORECASE,
+)
+# A bare "Terms" counts only when it sits next to a privacy policy, so
+# "refund policy and terms apply" does not pass.
 _TERMS_WORDS = re.compile(
-    r"\b(?:sms|messaging|mobile|program)\s+terms\b"
-    r"|\bterms\s+(?:of\s+(?:service|use)|(?:and|&)\s+conditions)\b"
-    r"|\b(?:policy|notice|statement)\s+(?:and|&)\s+terms\b"
-    r"|\bterms\s+(?:and|&)\s+privacy\b",
+    r"\b(?:sms|messaging|mobile|program)\s+(?:terms|t\s*&\s*cs?)\b"
+    r"|\bterms\s*(?:of\s+(?:service|use)|(?:and|&)\s*conditions)\b"
+    r"|\bprivacy\s+(?:policy|notice|statement)\s*(?:and|&)\s*terms\b"
+    r"|\bterms\s*(?:and|&)\s*privacy\b",
     re.IGNORECASE,
 )
 

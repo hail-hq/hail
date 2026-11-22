@@ -928,6 +928,7 @@ def test_compiled_text_carries_both_policy_urls_to_each_carrier():
         ("Privacy Policy", "rules. Terms apply", "SMS terms"),
         ("Privacy Policy", "rules on our terms", "SMS terms"),
         ("Privacy Policy", "rules. By texting terms like HELP", "SMS terms"),
+        ("Privacy Policy", "rules. Our refund policy and terms apply", "SMS terms"),
     ],
 )
 def test_disclosure_words_must_name_a_policy(privacy, terms, missing):
@@ -951,6 +952,25 @@ def test_policy_words_still_need_the_policy_web_addresses():
     fields = error_fields(data)
     assert "terms_url" in fields
     assert "consent_disclosure" not in fields
+
+
+@pytest.mark.parametrize(
+    "privacy,terms",
+    [
+        ("Privacy & Cookie Policy", "SMS Terms"),
+        ("Privacy Policy", "SMS T&Cs"),
+        ("Privacy Policy", "Terms&Conditions"),
+        ("Privacy Policy &", "Terms"),
+    ],
+)
+def test_disclosure_accepts_common_policy_spellings(privacy, terms):
+    data = {
+        **GOOD,
+        "consent_disclosure": LINKED.format(privacy=privacy, terms=terms).replace(
+            "& and", "&"
+        ),
+    }
+    assert "consent_disclosure" not in error_fields(data)
 
 
 def test_disclosure_accepts_terms_named_before_the_privacy_policy():

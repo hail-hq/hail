@@ -3,6 +3,7 @@ public evidence link as ``POST /verifications/sms/evidence``."""
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlsplit
@@ -12,7 +13,7 @@ import httpx
 import pytest
 from hailhq.api.deps import get_s3_mail_optional
 from hailhq.api.main import app
-from hailhq.api.routes.sms_evidence import get_evidence_store
+from hailhq.api.routes.sms_evidence import get_evidence_store, keep_evidence
 from hailhq.core.config import settings
 from hailhq.core.email_attachment_gc import EmailAttachmentGcWorker
 from hailhq.core.file_uploads import LINK_SWEEP_GRACE
@@ -306,3 +307,27 @@ async def test_a_storage_failure_while_counting_is_503(
     resp = await _make_link(client, plain)
     assert resp.status_code == 503
     assert "try again" in resp.json()["detail"]
+
+
+async def test_a_cancel_during_the_write_deletes_the_file_after_it_lands() -> None:
+    # The real write runs in a thread a cancel cannot stop: the cleanup must
+    # wait for it, or the file lands after the delete with no link to it.
+    gate = asyncio.Event()
+
+    class SlowStore(FakeStore):
+        async def put_attachment(self, key, data, content_type, encrypt=False):
+            await gate.wait()
+            self.objects[key] = (data, content_type)
+
+    slow = SlowStore()
+    org = UUID("00000000-0000-0000-0000-0000000000aa")
+    task = asyncio.create_task(keep_evidence(slow, org, "t" * 32, _PNG, "image/png"))
+    await asyncio.sleep(0)
+    task.cancel()
+    await asyncio.sleep(0)
+    gate.set()  # the write finishes after the cancel
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    for _ in range(5):
+        await asyncio.sleep(0)
+    assert slow.objects == {}

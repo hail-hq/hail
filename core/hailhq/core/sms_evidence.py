@@ -77,6 +77,11 @@ def public_evidence_base() -> str | None:
     return settings.hail_api_url
 
 
+def evidence_key(organization_id: UUID, token: str) -> str:
+    """The storage key of one evidence file."""
+    return f"{evidence_folder(organization_id)}{token}"
+
+
 def evidence_url(base: str, organization_id: UUID, token: str) -> str:
     """The public link carrier reviewers open."""
     return join_url(base, f"v1/verifications/sms/evidence/{organization_id}/{token}")
@@ -99,6 +104,7 @@ __all__ = [
     "SMS_EVIDENCE_PREFIX",
     "delete_org_evidence",
     "evidence_folder",
+    "evidence_key",
     "evidence_url",
     "new_evidence_token",
     "public_evidence_base",

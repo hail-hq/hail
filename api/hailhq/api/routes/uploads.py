@@ -69,7 +69,7 @@ from hailhq.core.schemas import (
     FileUploadResponse,
 )
 from hailhq.core.sms_evidence import (
-    evidence_folder,
+    evidence_key,
     evidence_url,
     new_evidence_token,
     public_evidence_base,
@@ -175,7 +175,8 @@ def _too_large(limit: int) -> HTTPException:
             "description": (
                 "File uploads are not configured on this server. For "
                 "`sms_evidence`, also when the server has no public https URL "
-                "carrier reviewers can open."
+                "carrier reviewers can open, or when storage failed for a "
+                "moment: try again."
             )
         },
     },
@@ -617,7 +618,7 @@ async def _store_evidence(
     already says to make a new link. The row goes in the statement that
     uses the link, so no rule has to sweep used evidence links later."""
     token = new_evidence_token()
-    key = f"{evidence_folder(organization_id)}{token}"
+    key = evidence_key(organization_id, token)
     digest = (await asyncio.to_thread(hashlib.sha256, payload)).hexdigest()
     # 409 when the account went over the cap meanwhile, 503 when storage
     # fails. It takes its own file back on any failure.
