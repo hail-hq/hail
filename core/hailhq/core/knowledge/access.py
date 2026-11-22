@@ -172,21 +172,38 @@ def _where(exc: BaseException) -> str:
 _MAX_PARTS = 10
 
 
-def _shape(exc: BaseException, seen: set[int]) -> str:
-    code = getattr(exc, "sqlstate", None) or getattr(
-        getattr(exc, "orig", None), "sqlstate", None
-    )
-    text = f"{type(exc).__name__}{f' {code}' if code else ''}{_where(exc)}"
-    members = getattr(exc, "exceptions", None)
-    if isinstance(members, tuple):
-        inner = [
-            _shape(m, seen)
-            for m in members[:_MAX_PARTS]
-            if isinstance(m, BaseException)
-        ]
-        more = len(members) - _MAX_PARTS
-        text += " [" + " | ".join(inner) + (f" | {more} more" if more > 0 else "") + "]"
-    return text
+def _chain(exc: BaseException, seen: set[int], depth: int = 0) -> str:
+    """The chain from ``exc`` as Python prints it (cause, else context
+    unless suppressed), joined with " <- "; exception group members, each
+    with its own chain, in brackets. At most ten of each, three groups
+    deep; a cycle is never walked twice."""
+    parts: list[str] = []
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        if len(parts) == _MAX_PARTS:
+            parts.append("...")
+            break
+        seen.add(id(current))
+        code = getattr(current, "sqlstate", None) or getattr(
+            getattr(current, "orig", None), "sqlstate", None
+        )
+        text = f"{type(current).__name__}{f' {code}' if code else ''}"
+        text += _where(current)
+        members = getattr(current, "exceptions", None)
+        if isinstance(members, tuple) and members and depth < 3:
+            inner = [
+                _chain(m, seen, depth + 1)
+                for m in members[:_MAX_PARTS]
+                if isinstance(m, BaseException) and id(m) not in seen
+            ]
+            more = len(members) - _MAX_PARTS
+            text += " [" + " | ".join(inner)
+            text += f" | {more} more]" if more > 0 else "]"
+        parts.append(text)
+        current = current.__cause__ or (
+            None if current.__suppress_context__ else current.__context__
+        )
+    return " <- ".join(parts)
 
 
 def log_failure(
@@ -200,18 +217,7 @@ def log_failure(
     chain (exception group members in brackets) as type, SQL state and
     where it was raised, never a message. At most ten of each. Messages here can hold statements, values or
     text from the customer's file."""
-    # The chain as Python prints it: each error, then the one it was raised
-    # from (or during, unless that context was suppressed).
-    parts: list[str] = []
-    seen: set[int] = set()
-    current: BaseException | None = exc
-    while current is not None and id(current) not in seen and len(parts) < _MAX_PARTS:
-        seen.add(id(current))
-        parts.append(_shape(current, seen))
-        current = current.__cause__ or (
-            None if current.__suppress_context__ else current.__context__
-        )
-    log.log(level, "%s (%s)", message, " <- ".join(parts))
+    log.log(level, "%s (%s)", message, _chain(exc, set()))
 
 
 def short_cause(exc: BaseException) -> str:

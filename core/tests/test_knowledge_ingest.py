@@ -606,3 +606,17 @@ def test_log_failure_shows_shape_never_messages(caplog) -> None:
     text = caplog.text
     assert "OSError" in text and "ValueError" in text
     assert "customer" not in text and "refused" not in text
+
+
+def test_log_failure_shows_group_members_and_their_causes(caplog) -> None:
+    log = logging.getLogger("test.knowledge")
+    try:
+        raise KeyError("secret key")
+    except KeyError as err:
+        member = RuntimeError("wrapped")
+        member.__cause__ = err
+    group = getattr(builtins, "ExceptionGroup")("tasks", [member])  # noqa: B009
+    with caplog.at_level(logging.ERROR, logger="test.knowledge"):
+        log_failure(log, "step failed", group)
+    assert "[RuntimeError" in caplog.text and "KeyError" in caplog.text
+    assert "secret" not in caplog.text
