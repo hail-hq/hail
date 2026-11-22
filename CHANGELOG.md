@@ -4,6 +4,16 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+## [0.36.0] (2026-11-22)
+
+An AI agent using the MCP server can now upload a US texting consent
+screenshot and get its public evidence link. The consent disclosure check
+accepts policies named by their link words. Self-hosts drop the old hail-mail
+prefix columns: upgrade to 0.35.0 first.
+
+No component versions are cut alongside this release: the CLI and SDK did not
+change for users. Database migrations run on deploy.
+
 ### Added
 
 - Knowledge base (early access): upload manuals, FAQs and part lists, and agents answer calls, texts and email from them, in any supported language (`/v1/knowledge`, `knowledge` on agents, CLI `hail knowledge`, SDK and MCP).
