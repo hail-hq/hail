@@ -126,7 +126,10 @@ async def agent_uses_knowledge(
 def short_cause(exc: BaseException) -> str:
     """ ": <first line of the error, at most 200 characters>", or "" when the
     error has no text."""
-    first = (str(exc).strip().splitlines() or [""])[0][:200]
+    try:
+        first = (str(exc).strip().splitlines() or [""])[0][:200]
+    except Exception:
+        return ""
     return f": {first}" if first else ""
 
 

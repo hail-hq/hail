@@ -54,7 +54,6 @@ from hailhq.core.knowledge.access import (
     delete_org_knowledge,
     knowledge_limits,
     knowledge_lock,
-    short_cause,
     storage_full,
 )
 from hailhq.core.knowledge.decode import MAX_TEXT_BYTES
@@ -224,16 +223,17 @@ class KnowledgeIngestWorker:
                 )
             except Exception as exc:
                 code = getattr(getattr(exc, "orig", None), "sqlstate", None)
-                logger.warning(
-                    "knowledge: could not delete closed org %s (%s%s); retrying",
-                    org_id,
-                    type(exc).__name__,
-                    (
-                        ": a knowledge row is busy"
-                        if code == "55P03"
-                        else short_cause(exc)
-                    ),
-                )
+                if code == "55P03":
+                    logger.warning(
+                        "knowledge: closed org %s: a knowledge row is busy; "
+                        "retrying",
+                        org_id,
+                    )
+                else:
+                    logger.exception(
+                        "knowledge: could not delete closed org %s; retrying",
+                        org_id,
+                    )
 
     async def _fail_spent(self) -> None:
         """Rows that used every try (a crashed worker's lease) or waited past

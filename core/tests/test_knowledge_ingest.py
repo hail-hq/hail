@@ -564,5 +564,7 @@ async def test_listed_upload_cannot_become_a_document_mid_delete(
 def test_sweep_failure_message_is_short() -> None:
     long = FolderSweepFailed(2, RuntimeError("AccessDenied\n" + "x" * 500))
     assert "(RuntimeError: AccessDenied)" in str(long)
+    one_line = FolderSweepFailed(1, RuntimeError("y" * 500))
+    assert str(one_line).count("y") == 200
     empty = FolderSweepFailed(1, TimeoutError())
     assert "(TimeoutError)" in str(empty)
