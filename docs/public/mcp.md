@@ -37,7 +37,7 @@ Every tool sets the MCP hints `readOnlyHint`, `destructiveHint`, `idempotentHint
 | `list_sms`                      | List recent SMS messages (cursor-paginated).                                                                                    |
 | `send_email`                    | Send an outbound email (supports `attachment_ids`).                                                                             |
 | `upload_email_attachment`       | Upload a small file (under about 50 KB) as base64, get back a reusable id.                                                      |
-| `create_file_upload`            | A one-time link to upload a file with `curl`, for an email attachment or a verification document.                               |
+| `create_file_upload`            | A one-time link to upload a file with `curl`: an email attachment, a verification document or texting consent evidence.         |
 | `get_email`                     | Fetch one email's full record (body + inbound headers).                                                                         |
 | `list_emails`                   | List emails (`direction="inbound"` for replies).                                                                                |
 | `get_email_raw`                 | Presigned URL for an inbound email's raw MIME.                                                                                  |
@@ -88,6 +88,7 @@ A tool call carries text only, so a file in base64 makes the model write every c
    The link needs no key and works once. The response has `size_bytes` and `sha256`; compare them with the local file (`wc -c`, `shasum -a 256`).
 
 3. Use the `id`: in `send_email`'s `attachment_ids` (`email_attachment`, 25 MB at most), or as `{"slot", "upload_id"}` in the `files` of `check_verification` and `submit_verification` (`verification_document`: JPG, PNG or PDF, 10 MB at most, usable for 1 hour).
+   For `sms_evidence` (a US texting consent screenshot: JPG, PNG or PDF, 10 MB at most), the `curl` response also has `url`, a public link. Put it in the registration's `*_evidence_url` field, for example `website_evidence_url`. Carrier reviewers open it without signing in, so remove personal information first. A workspace keeps at most 100 evidence files.
 
 This needs a client with a shell (Claude Code, Codex, Cursor). Claude.ai web chat has none: there, only `upload_email_attachment` and base64 `files` work, for small files.
 

@@ -4,8 +4,13 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- MCP: upload a US texting consent screenshot with `create_file_upload` and get its public evidence link.
+
 ### Changed
 
+- US texting registration: the consent disclosure may name "Privacy Policy" and "SMS Terms" instead of their web addresses.
 - Self-host: the database drops the old `local_prefix_user` and `local_prefix_org` columns. Read `local_prefix_workspace` and `local_prefix_name`. The API still accepts the old field names. Upgrade to the 0.35.0 release first (the commit tagged `sdk-v0.25.0`).
 
 ## [0.35.0] (2026-11-21)

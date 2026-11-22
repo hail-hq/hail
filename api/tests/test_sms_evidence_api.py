@@ -322,3 +322,17 @@ async def test_delete_without_storage_is_503(
     finally:
         app.dependency_overrides.pop(get_evidence_store, None)
     assert resp.status_code == 503
+
+
+async def test_a_storage_failure_after_the_save_is_503_and_keeps_no_file(
+    client: httpx.AsyncClient, org_and_key, store
+) -> None:
+    store.count_prefix.side_effect = [0, RuntimeError("storage down")]
+    resp = await client.post(
+        "/v1/verifications/sms/evidence",
+        files={"file": ("shot.png", PNG, "image/png")},
+        headers=_auth(org_and_key),
+    )
+    assert resp.status_code == 503
+    key = store.put_attachment.await_args.args[0]
+    store.delete.assert_awaited_once_with(key)

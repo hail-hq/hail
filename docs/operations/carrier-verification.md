@@ -118,6 +118,10 @@ must not be uploaded as evidence. URL syntax checks do not establish reachabilit
 Carriers take evidence only as a public link inside the campaign text; the Telnyx campaign API
 has no upload field. A customer with no link uploads a PNG, JPG or PDF (10 MB or less) with
 `POST /v1/verifications/sms/evidence` and puts the returned `url` in the `*_evidence_url` field.
+An MCP agent cannot send that multipart request, so it makes an upload link with purpose
+`sms_evidence` (`POST /v1/uploads`, MCP `create_file_upload`) and sends the bytes with `curl`.
+That PUT follows the same rules (type, size, cap, public URL) and returns the same `url`. The
+PUT deletes the link's `file_uploads` row as it uses it, so no row tracks the file.
 Hail keeps the file in the mail bucket under `sms-evidence/<organization_id>/<token>` and `GET /v1/verifications/sms/evidence/<organization_id>/<token>` (no sign-in) redirects to a
 storage link that works for 10 minutes. The API never streams the file. The
 32-character random token is the only credential. The type comes from the file's first bytes;
@@ -130,6 +134,14 @@ pastes a public link. The public link is exempt from the general rate limit, lik
 only) removes a file at once; its link then leads to a storage error page. An organization keeps at most 100 files; the 101st upload returns
 409 until one is deleted.
 Verbal consent needs the script and action only; its evidence link is optional.
+
+The consent disclosure check (`_disclosure_gaps` in `sms_form.py`) accepts each policy by its
+web address or by its link words, because a real checkbox links the words. Accepted:
+"Privacy Policy", "Privacy Notice", "SMS Terms", "Terms of Service", "Terms and Conditions",
+and a bare "Terms" next to the privacy policy ("Privacy Policy and Terms", "Terms and Privacy
+Policy"). Not accepted: "your privacy", "in terms of", "Terms apply". The web addresses always reach the carrier in their own campaign
+fields (`_policy_links` in `twilio_sms.py` and `telnyx_sms.py`). A failed check names only the
+missing parts.
 
 The application compiler uses the applicant's actual disclosures, recording process, evidence
 and policy links. It never pads a short answer with a consent assertion. Short answers and

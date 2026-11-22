@@ -2008,6 +2008,10 @@ class FileUpload(Base):
       registration is approved or cancelled or the account closes
       (``hailhq.api.routes.verifications.forget_kept_registrations``).
       ``uploaded_at`` is set once the object is written.
+    * ``sms_evidence``: an upload link for a US texting consent screenshot.
+      The row lives only while the link is unused: the PUT that uses it
+      stores the file in the evidence folder (``hailhq.core.sms_evidence``)
+      and deletes the row in the same statement.
 
     An upload link (``POST /uploads``) makes the row first with
     ``uploaded_at`` null and ``token_hash`` set; the ``PUT`` that sends the
@@ -2077,7 +2081,7 @@ class FileUpload(Base):
     __table_args__ = (
         CheckConstraint(
             "purpose IN ('email_attachment', 'verification_document', "
-            "'verification_kept')",
+            "'verification_kept', 'sms_evidence')",
             name="file_uploads_purpose_check",
         ),
         # A kept file always names its verification and slot; no other
