@@ -918,3 +918,19 @@ def test_compiled_text_carries_both_policy_urls_to_each_carrier():
         "privacyPolicyLink": "https://acme.org/privacy",
         "termsAndConditionsLink": "https://acme.org/terms",
     }
+
+
+@pytest.mark.parametrize(
+    "privacy,terms,missing",
+    [
+        ("how we respect your privacy", "SMS Terms", "privacy policy"),
+        ("Privacy Policy", "rules, in terms of frequency,", "SMS terms"),
+    ],
+)
+def test_disclosure_words_must_name_a_policy(privacy, terms, missing):
+    data = {
+        **GOOD,
+        "consent_disclosure": LINKED.format(privacy=privacy, terms=terms),
+    }
+    (message,) = [m for f, m in errors(data) if f == "consent_disclosure"]
+    assert missing in message

@@ -152,7 +152,14 @@ async def ensure_evidence_room(store: S3MailClient, organization_id: UUID) -> No
     """409 when the organization keeps the most files allowed. Called before
     a body is read, so an account at the cap costs no 10 MB read."""
     folder = evidence_folder(organization_id)
-    if await store.count_prefix(folder, up_to=MAX_EVIDENCE_FILES) >= MAX_EVIDENCE_FILES:
+    try:
+        count = await store.count_prefix(folder, up_to=MAX_EVIDENCE_FILES)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="storage unavailable; try again",
+        ) from exc
+    if count >= MAX_EVIDENCE_FILES:
         raise evidence_full()
 
 

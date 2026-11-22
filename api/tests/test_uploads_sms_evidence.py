@@ -292,3 +292,17 @@ async def test_a_storage_failure_keeps_the_link_and_leaves_no_file(
     store.count_prefix = real_count
     ok = await client.put(_path(link["upload_url"]), content=_PNG)
     assert ok.status_code == 200, ok.text
+
+
+async def test_a_storage_failure_while_counting_is_503(
+    client, org_and_key, store
+) -> None:
+    _, _, plain = org_and_key
+
+    async def down(prefix, up_to):
+        raise RuntimeError("storage down")
+
+    store.count_prefix = down
+    resp = await _make_link(client, plain)
+    assert resp.status_code == 503
+    assert "try again" in resp.json()["detail"]

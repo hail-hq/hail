@@ -611,19 +611,23 @@ async def _store_evidence(
     token = new_evidence_token()
     key = f"{evidence_folder(organization_id)}{token}"
     digest = (await asyncio.to_thread(hashlib.sha256, payload)).hexdigest()
+    # Until the commit starts, any failure, a cancelled request included,
+    # takes this PUT's file back: the link still works for a retry. Once
+    # the commit starts, its outcome may be unknown, so the file stays: a
+    # file the account can delete costs less than a lost link and file.
+    committing = False
     try:
-        # 409, with the object already taken back, when the account went
-        # over the cap meanwhile.
-        await keep_evidence(s3, organization_id, token, payload, content_type)
-    except HTTPException:
-        raise
-    except Exception as exc:
-        await _forget_object(s3, upload_id, key)
-        raise HTTPException(
-            status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="storage unavailable; try again",
-        ) from exc
-    try:
+        try:
+            # 409, with the object already taken back, when the account
+            # went over the cap meanwhile.
+            await keep_evidence(s3, organization_id, token, payload, content_type)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="storage unavailable; try again",
+            ) from exc
         used = (
             await db.execute(
                 delete(FileUpload)
@@ -641,14 +645,14 @@ async def _store_evidence(
                 )
             )
         ).one_or_none()
+        if used is None:
+            raise _not_found()
+        committing = True
         await db.commit()
-    except Exception:
-        # The link may still work; the caller sends the file again.
-        await _forget_object(s3, upload_id, key)
+    except BaseException:
+        if not committing:
+            await _forget_object(s3, upload_id, key)
         raise
-    if used is None:
-        await _forget_object(s3, upload_id, key)
-        raise _not_found()
     return FileUploadResponse(
         id=used.id,
         purpose=used.purpose,

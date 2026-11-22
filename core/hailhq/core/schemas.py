@@ -2870,7 +2870,7 @@ class FileUploadCreate(BaseModel):
             and self.content_type not in VERIFICATION_FILE_TYPES
         ):
             raise ValueError(
-                f"a {self.purpose} must be image/jpeg, image/png or " "application/pdf"
+                f"a {self.purpose} must be image/jpeg, image/png or application/pdf"
             )
         return self
 

@@ -105,12 +105,13 @@ from typing import Annotated, Any, Literal, get_args
 import httpx
 from hailhq.core.carrier_offer import SubjectType
 from hailhq.core.file_uploads import (
-    PURPOSES as _UPLOAD_PURPOSES,
-)
-from hailhq.core.file_uploads import (
+    EVIDENCE_PURPOSE,
     VERIFICATION_FILE_TYPES,
     VERIFICATION_MAX_FILE_BYTES,
     matches_declared_type,
+)
+from hailhq.core.file_uploads import (
+    PURPOSES as _UPLOAD_PURPOSES,
 )
 from hailhq.core.file_uploads import Purpose as UploadPurpose
 from hailhq.core.internal_webhook import fetch_organization_name
@@ -1651,7 +1652,7 @@ async def create_file_upload(
             + (
                 " The response's url is the public evidence link: put it in the "
                 "*_evidence_url field of the texting registration."
-                if purpose == "sms_evidence"
+                if purpose == EVIDENCE_PURPOSE
                 else ""
             )
         ),
@@ -2640,7 +2641,8 @@ def register_tools(
         so any file that is not tiny goes this way.
         An email attachment can be up to 25 MB. A verification document must be
         JPG, PNG or PDF, up to 10 MB, and is usable for 1 hour after the upload.
-        SMS evidence must be JPG, PNG or PDF, up to 10 MB; its upload response has a
+        SMS evidence must be JPG, PNG or PDF, up to 10 MB, of the given ``content_type``;
+        its upload response has a
         public ``url`` for an ``*_evidence_url`` field. Carrier reviewers open it
         without signing in, so remove personal information first.
         Returns ``id``, ``upload_url``, ``expires_at`` (15 minutes), ``max_bytes``

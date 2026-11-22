@@ -70,8 +70,10 @@ _MESSAGE_DATA_RATES = re.compile(
 # A real checkbox links the policies by name ("See our Privacy Policy and SMS
 # Terms"), so the disclosure may name them instead of typing the web
 # addresses. The addresses still go to the carrier in their own fields.
-_PRIVACY_WORDS = re.compile(r"\bprivacy\b", re.IGNORECASE)
-_TERMS_WORDS = re.compile(r"\bterms\b", re.IGNORECASE)
+# The words must name a policy: "we respect your privacy" or "in terms of"
+# does not.
+_PRIVACY_WORDS = re.compile(r"\bprivacy\s+(?:policy|notice|statement)\b", re.IGNORECASE)
+_TERMS_WORDS = re.compile(r"\bterms\b(?!\s+of\s+(?!service\b|use\b))", re.IGNORECASE)
 
 
 def _answer(fields: dict[str, str], name: str) -> str:
