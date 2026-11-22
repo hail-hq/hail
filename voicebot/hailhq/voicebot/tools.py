@@ -12,6 +12,7 @@ returns a speakable apology to the LLM.
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import math
 import time
@@ -25,6 +26,7 @@ from hailhq.core.agent_tools.registry import call_tools
 from hailhq.core.agent_tools.spec import SPOKEN_FALLBACK, ToolContext, ToolSpec
 from hailhq.core.config import settings
 from hailhq.core.db import session_scope
+from hailhq.core.prompts import fit_to_tools
 from hailhq.voicebot.attachment_reader import inspect_tool_file
 from livekit.agents.llm import function_tool
 from livekit.agents.voice import RunContext
@@ -175,7 +177,21 @@ def every_call_tools(
         send_dtmf=None,
         spoke_since=spoke_since,
     )
-    return [wrap_tool(s, tctx) for s in call_tools() if s.on_every_call]
+    return _wrap_fitted([s for s in call_tools() if s.on_every_call], tctx)
+
+
+def _wrap_fitted(specs: list[ToolSpec], tctx: ToolContext) -> list:
+    """Wrap ``specs`` with each description fitted to this call's tools: a
+    description that names a tool the call lacks (see ToolLine) would make
+    the model write that name as text."""
+    names = [s.name for s in specs]
+    return [
+        wrap_tool(
+            dataclasses.replace(s, description=fit_to_tools(s.description, names)),
+            tctx,
+        )
+        for s in specs
+    ]
 
 
 async def build_agent_tools(
@@ -272,7 +288,7 @@ async def build_agent_tools(
         raise
 
     available = [s for s in specs if s.on_every_call or s.name in passed]
-    return [wrap_tool(s, tctx) for s in available], api
+    return _wrap_fitted(available, tctx), api
 
 
 async def _check_availability(

@@ -25,7 +25,12 @@ from hailhq.core.agent_tools.spec import BridgeRoute
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.models import Call, CallEvent, PhoneNumber, UsageEvent
 from hailhq.core.pool import CALL_META_FROM_POOL
-from hailhq.core.prompts import PRIVACY_REMINDER, TOOL_LINES, other_party_section
+from hailhq.core.prompts import (
+    PRIVACY_REMINDER,
+    TOOL_LINES,
+    fit_to_tools,
+    other_party_section,
+)
 from hailhq.voicebot.agent import (
     AI_DISCLOSURE_LINE,
     SIP_CALL_STATUS_ACTIVE,
@@ -2537,7 +2542,9 @@ _ALL_TOOL_NAMES = {s.name for s in call_tools()} | {transfer_call.CANCEL_SPEC.na
 
 
 def _hail_prompts(tool_names):
-    """Every Hail-written prompt a call can get, fitted to ``tool_names``."""
+    """Every Hail-written text a call's model reads, fitted to ``tool_names``:
+    the call prompts, the menu prompt, and the descriptions of the call's
+    tools (as the voicebot fits them)."""
     contact = other_party_section("Sam Lee", can_email=True, tool_names=tool_names)
     calls = [
         build_instructions(
@@ -2545,7 +2552,16 @@ def _hail_prompts(tool_names):
         )
         for direction in ("inbound", "outbound")
     ]
-    return [*calls, ivr_navigation_instructions("Press 1.", tool_names)]
+    descriptions = [
+        fit_to_tools(s.description, tool_names)
+        for s in (*call_tools(), transfer_call.CANCEL_SPEC)
+        if tool_names is None or s.name in tool_names
+    ]
+    return [
+        *calls,
+        ivr_navigation_instructions("Press 1.", tool_names),
+        *descriptions,
+    ]
 
 
 @pytest.mark.parametrize("missing", sorted(_ALL_TOOL_NAMES))

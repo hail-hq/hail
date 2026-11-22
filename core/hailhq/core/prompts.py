@@ -581,9 +581,11 @@ class ToolLine:
     any_of: bool = False
 
 
-# Every sentence of the voice prompts (VOICE_PREAMBLE, VOICE_PREAMBLE_INBOUND,
-# _EMAIL_ME_HINT) that names a tool. The menu prompt in voicebot/amd.py has
-# its own table. Tests check each ``text`` is still in its prompt.
+# Every sentence that names a tool in the voice prompts (VOICE_PREAMBLE,
+# VOICE_PREAMBLE_INBOUND, _EMAIL_ME_HINT) and in the call tools' descriptions
+# (the voicebot fits each description to the call's tools). The menu prompt
+# in voicebot/amd.py has its own table. Tests check each ``text`` is still in
+# its prompt or description.
 TOOL_LINES: tuple[ToolLine, ...] = (
     ToolLine(
         "do not say goodbye or use end_call in the turn that asks",
@@ -605,7 +607,7 @@ TOOL_LINES: tuple[ToolLine, ...] = (
         "times with no person and nothing new, end the call.",
     ),
     ToolLine(
-        "\n- Sending a text or email follows the rules in that tool's " "description.",
+        "\n- Sending a text or email follows the rules in that tool's description.",
         frozenset({"send_sms", "send_email"}),
         any_of=True,
     ),
@@ -629,6 +631,17 @@ TOOL_LINES: tuple[ToolLine, ...] = (
     ToolLine(
         " If they only ask you to send something, ask once: by text or by email?",
         frozenset({"send_sms", "send_email"}),
+    ),
+    # Tool descriptions.
+    ToolLine(" (use list_contacts to see who)", frozenset({"list_contacts"})),
+    ToolLine(
+        " Saved contacts are not listed, but send_email can reach them by name.",
+        frozenset({"send_email"}),
+    ),
+    ToolLine(
+        " Reuse attachment IDs and reply_to_email_id with send_email to return "
+        "originals from the selected thread.",
+        frozenset({"send_email"}),
     ),
 )
 
