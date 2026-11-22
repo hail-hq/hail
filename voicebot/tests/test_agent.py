@@ -2574,6 +2574,15 @@ def test_no_prompt_names_a_tool_the_call_lacks(missing):
         assert missing not in text
 
 
+def test_an_empty_tools_list_gets_no_missing_tool_names():
+    """`tools: []` leaves only the every-call tools: many tools are missing
+    at once."""
+    have = {s.name for s in call_tools() if s.on_every_call}
+    for text in _hail_prompts(sorted(have)):
+        for name in _ALL_TOOL_NAMES - have:
+            assert name not in text
+
+
 def test_every_tool_line_is_still_in_its_prompt():
     """A reworded prompt sentence would stop matching its ToolLine, and the
     swap would silently stop working."""

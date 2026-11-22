@@ -14,7 +14,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Fixed
 
-- Calls can always hang up, and prompts never name a tool the call does not have.
+- Calls can always hang up, and call prompts never name a tool the call does not have.
 
 ## [0.37.0] (2026-11-23)
 

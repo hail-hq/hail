@@ -181,13 +181,19 @@ def every_call_tools(
 
 
 def _wrap_fitted(specs: list[ToolSpec], tctx: ToolContext) -> list:
-    """Wrap ``specs`` with each description fitted to this call's tools: a
-    description that names a tool the call lacks (see ToolLine) would make
-    the model write that name as text."""
+    """Wrap ``specs`` with each built-in description fitted to this call's
+    tools: a description that names a tool the call lacks (see ToolLine)
+    would make the model write that name as text. A saved agent's HTTP tool
+    descriptions are the customer's words and stay as written."""
     names = [s.name for s in specs]
+    hail_written = {s.name for s in call_tools()} | {transfer_call.CANCEL_SPEC.name}
     return [
         wrap_tool(
-            dataclasses.replace(s, description=fit_to_tools(s.description, names)),
+            (
+                dataclasses.replace(s, description=fit_to_tools(s.description, names))
+                if s.name in hail_written
+                else s
+            ),
             tctx,
         )
         for s in specs
