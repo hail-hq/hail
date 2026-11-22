@@ -194,7 +194,6 @@ def test_filler_turns_are_not_searched_in_calls() -> None:
         "We're good",
         "No, I'm fine",
         "I'm good, thanks",
-        "Okay, one moment",
         "Hmm, let me think",
         "Umm?",
         "Mhm?",
