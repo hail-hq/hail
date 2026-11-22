@@ -989,10 +989,12 @@ def _refused_answers(exc: TwilioRestException) -> bool:
     reason that happens to say "permission" still reaches the customer."""
     if isinstance(exc, _NotCompliant):
         refused = any(not account_problem(text) for text in exc.reasons or [""])
-        if not refused:
-            # No carrier text in the log: it can quote the customer.
+        on_account = sum(1 for text in exc.reasons if account_problem(text))
+        if on_account:
+            # Counts only, no carrier text: it can quote the customer.
             logger.warning(
-                "Trust Hub evaluation failed on Hail's account: %d field(s)",
+                "Trust Hub evaluation failed on Hail's account: %d of %d field(s)",
+                on_account,
                 len(exc.reasons),
             )
         return refused
