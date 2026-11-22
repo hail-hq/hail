@@ -11,7 +11,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Changed
 
-- Calls: the agent finishes what it is saying before it listens again, so background talk or an echo of its own voice no longer cuts it off. The other party speaks between replies, and each reply is at most two sentences.
+- Calls: the agent finishes what it is saying before it listens again, so background talk or an echo of its own voice no longer cuts it off. A longer reply is spoken about two sentences at a time, with a short pause after each part in which the other party can speak.
 - Calls: when the agent hears speech that does not fit the conversation (a TV, a radio, other people), it says so and asks instead of answering it.
 - Email: hail-mail prefix fields are now `local_prefix_workspace` (before the `+`) and `local_prefix_name` (after it). The old `local_prefix_user` and `local_prefix_org` still work and are deprecated.
 - CLI and SDK: the new prefix names (`--local-prefix-workspace` and `--local-prefix-name` in the CLI, `local_prefix_workspace` and `local_prefix_name` in the SDK) need a Hail server from this release or newer. The old names, used alone, still work with older servers.

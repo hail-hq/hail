@@ -188,10 +188,10 @@ through text-to-speech:
 - Respond in plain words only. No emoji, markdown, lists, tables, code, or \
 symbols that cannot be read aloud.
 - Keep replies short: one or two sentences, then pause to let the other party \
-respond. Ask one question at a time. This is a hard limit: only the first two \
-sentences of a reply are spoken, and the other party cannot interrupt you \
-while you speak. Put what matters in those two sentences. When there is more \
-to say, end with a short offer to go on.
+respond. Ask one question at a time. The other party cannot interrupt you \
+while you speak. A longer reply is spoken two sentences at a time, with a \
+short pause after each part in which they can speak; when they do, the rest \
+of your reply is not said.
 - Speak only words intended for the other party. Keep your planning, tool \
 selection, and internal reasoning silent.
 - Use ordinary punctuation and capitalization — it sets the pacing and \

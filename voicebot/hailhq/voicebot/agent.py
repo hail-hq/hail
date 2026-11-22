@@ -104,8 +104,8 @@ from hailhq.voicebot.pipeline import (
 )
 from hailhq.voicebot.recording import start_recording, stop_recording
 from hailhq.voicebot.recovery import ConversationRecovery
-from hailhq.voicebot.reply_limit import limit_reply
-from hailhq.voicebot.speaking_gate import SpeakingGuard
+from hailhq.voicebot.reply_limit import ReplyContinuation, limit_reply
+from hailhq.voicebot.speaking_gate import TAIL, SpeakingGuard
 from hailhq.voicebot.spoken_lines import spoken_lines
 from hailhq.voicebot.telemetry import connect_livekit_tracing
 from hailhq.voicebot.tools import SpeechTracker, build_agent_tools
@@ -227,6 +227,7 @@ class SpeechSanitizingAgent(Agent):
         self._opening_pending = opening_pending
         self._held_words: list[str] = []
         self.phone_menu: PhoneMenu | None = None
+        self.continuation: ReplyContinuation | None = None
 
     def release_opening(self) -> str | None:
         """Let replies through. Returns what the person said while held."""
@@ -297,9 +298,14 @@ class SpeechSanitizingAgent(Agent):
                 role="system", content=ivr_navigation_instructions(None)
             )
             return Agent.default.llm_node(self, chat_ctx, tools, model_settings)
-        # The other party cannot interrupt a reply, so replies stay short.
+        # The other party cannot interrupt a reply, so it is spoken in short
+        # parts with a pause between them (reply_limit.py).
+        rest = self.continuation
+        if rest is not None:
+            rest.drop()
         return limit_reply(
-            Agent.default.llm_node(self, chat_ctx, tools, model_settings)
+            Agent.default.llm_node(self, chat_ctx, tools, model_settings),
+            on_rest=rest.keep if rest is not None else None,
         )
 
     async def tts_node(self, text: Any, model_settings: Any) -> Any:
@@ -2708,6 +2714,23 @@ async def _run_call(
         speaking_guard.attach()
     except Exception:
         logger.exception("speaking gate did not attach; continuing call")
+
+    def _echo_tail() -> float:
+        playout = getattr(speaking_guard, "playout", None)
+        delay = getattr(playout, "echo_delay", None)
+        return delay + TAIL if delay is not None else 0.0
+
+    agent.continuation = ReplyContinuation(
+        session,
+        can_continue=lambda: (
+            not shutting_down
+            and captured["end_reason"] is None
+            and (agent.phone_menu is None or not agent.phone_menu.active)
+            and not bridge_state.get("picked_up")
+            and not bridge_state.get("connected")
+        ),
+        extra_pause=_echo_tail,
+    )
 
     # AMD's clients. Its classifier also backs the phone menu check, so it
     # closes only at shutdown, after AMD and the last check end.

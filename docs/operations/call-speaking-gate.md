@@ -46,9 +46,12 @@ of them with a radio playing, gave no confirmation.
 
 - The first agent sentence on an echo call can still return before the echo is
   confirmed.
-- The other party cannot stop a reply. So only the first two sentences of each
-  reply are spoken ([`reply_limit.py`](../../voicebot/hailhq/voicebot/reply_limit.py));
-  the voice instructions tell the model, and ask it to offer to go on.
+- The other party cannot stop a reply mid-sentence. So a reply is spoken about
+  two sentences at a time
+  ([`reply_limit.py`](../../voicebot/hailhq/voicebot/reply_limit.py)). After
+  each part the agent is silent for about 1 s. When the other party speaks in
+  that pause, the rest is dropped and their turn is answered. When they stay
+  quiet, the next part is spoken.
 - Detection runs on the worker's event loop, a few 0.5 s windows per half
   second.
 

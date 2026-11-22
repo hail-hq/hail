@@ -1,9 +1,20 @@
-"""Replies are cut after two sentences; tool calls survive the cut."""
+"""A reply is spoken in short parts; the rest follows unless they speak."""
 
+import asyncio
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
-from hailhq.voicebot.reply_limit import MAX_CHARS, ReplyLimiter, limit_reply
+from hailhq.voicebot import reply_limit
+from hailhq.voicebot.reply_limit import (
+    MAX_CHARS,
+    ReplyContinuation,
+    ReplyLimiter,
+    limit_reply,
+    split_reply,
+)
+
+from .test_recovery import Session
 
 LONG = (
     "Sure, an electric car stores energy in a large battery. "
@@ -83,3 +94,89 @@ async def test_plain_text_streams_are_limited_too():
             yield LONG[i : i + 11]
 
     assert "".join([c async for c in limit_reply(stream())]) == TWO
+
+
+REST = (
+    "When you slow down, the motor charges the battery again. "
+    "To refill, you plug it into a charger."
+)
+
+
+async def test_the_rest_of_a_cut_reply_is_handed_over_but_not_after_a_tool_call():
+    async def text():
+        for i in range(0, len(LONG), 11):
+            yield LONG[i : i + 11]
+
+    kept = []
+    assert "".join([c async for c in limit_reply(text(), kept.append)]) == TWO
+    assert [k.strip() for k in kept] == [REST]
+
+    async def with_tool():
+        yield SimpleNamespace(delta=SimpleNamespace(content=LONG, tool_calls=[]))
+        yield SimpleNamespace(delta=SimpleNamespace(content=None, tool_calls=["x"]))
+
+    kept.clear()
+    [c async for c in limit_reply(with_tool(), kept.append)]
+    assert kept == []
+
+
+def test_split_reply_gives_the_next_part_and_what_is_left():
+    assert split_reply(LONG) == (TWO, REST)
+    assert split_reply("Yes.") == ("Yes.", "")
+
+
+@pytest.fixture
+def quick(monkeypatch):
+    monkeypatch.setattr(reply_limit, "PAUSE", 0.01)
+    monkeypatch.setattr(reply_limit, "SETTLE", 0.01)
+
+
+def continuing(can_continue=lambda: True):
+    session = Session()
+    session.user_state = "listening"
+    session.say = Mock()
+    return session, ReplyContinuation(session, can_continue=can_continue)
+
+
+def said(role="assistant", interrupted=False):
+    return {"item": SimpleNamespace(role=role, interrupted=interrupted)}
+
+
+async def test_the_rest_is_spoken_after_a_pause_when_they_stay_quiet(quick):
+    session, rest = continuing()
+    rest.keep(REST + " " + REST)
+    session.emit("conversation_item_added", **said())
+    await asyncio.sleep(0.05)
+    session.say.assert_called_once_with(REST)
+    session.emit("conversation_item_added", **said())  # that part finished
+    await asyncio.sleep(0.05)
+    assert [c.args[0] for c in session.say.call_args_list] == [REST, REST]
+    session.emit("conversation_item_added", **said())
+    await asyncio.sleep(0.05)
+    assert session.say.call_count == 2  # nothing is left
+
+
+@pytest.mark.parametrize("how", ["turn", "words", "interrupted", "not allowed"])
+async def test_the_rest_is_dropped_when_they_speak_or_the_call_moved_on(quick, how):
+    session, rest = continuing(can_continue=lambda: how != "not allowed")
+    rest.keep(REST)
+    session.emit("conversation_item_added", **said(interrupted=how == "interrupted"))
+    if how == "turn":
+        session.emit("conversation_item_added", **said(role="user"))
+    if how == "words":
+        session.emit("user_input_transcribed", transcript="wait")
+    await asyncio.sleep(0.05)
+    session.say.assert_not_called()
+    assert rest.rest == ""
+
+
+async def test_a_sound_without_words_only_delays_the_rest(quick):
+    session, rest = continuing()
+    rest.keep(REST)
+    session.user_state = "speaking"
+    session.emit("conversation_item_added", **said())
+    await asyncio.sleep(0.05)
+    session.say.assert_not_called()
+    session.user_state = "listening"
+    await asyncio.sleep(0.2)
+    session.say.assert_called_once_with(REST)
