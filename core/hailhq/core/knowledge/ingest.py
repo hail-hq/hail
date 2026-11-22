@@ -222,10 +222,12 @@ class KnowledgeIngestWorker:
                     exc.documents,
                 )
             except Exception as exc:
+                code = getattr(getattr(exc, "orig", None), "sqlstate", None)
                 logger.warning(
-                    "knowledge: could not delete closed org %s (%s); retrying",
+                    "knowledge: could not delete closed org %s (%s%s); retrying",
                     org_id,
                     type(exc).__name__,
+                    " 55P03: an upload row is busy" if code == "55P03" else "",
                 )
 
     async def _fail_spent(self) -> None:

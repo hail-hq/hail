@@ -37,6 +37,7 @@ from hailhq.core.models import (
 )
 from hailhq.core.s3_mail import S3MailClient
 from sqlalchemy import delete, func, select, text, update
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = [
@@ -127,10 +128,13 @@ class FolderSweepFailed(RuntimeError):
     sweep failed. Run the delete again to finish it."""
 
     def __init__(self, documents: int, cause: Exception) -> None:
+        detail = str(cause)
+        why = type(cause).__name__ + (
+            f": {detail}" if detail and len(detail) <= 200 else ""
+        )
         super().__init__(
             f"deleted {documents} document(s), but the folder sweep failed "
-            f"({type(cause).__name__}: {cause}); run the delete again "
-            "(docs/operations/knowledge-base.md)"
+            f"({why}); run the delete again (docs/operations/knowledge-base.md)"
         )
         self.documents = documents
 
@@ -290,6 +294,10 @@ async def _delete_main(organization_id: UUID) -> None:
             deleted = await delete_org_knowledge(db, organization_id, store)
         except FolderSweepFailed as exc:
             sys.exit(str(exc))
+        except DBAPIError as exc:
+            if getattr(exc.orig, "sqlstate", None) != "55P03":
+                raise
+            sys.exit("an upload is busy for a moment; run the same command again")
     print(f"deleted {deleted} document(s); the knowledge base is off")
 
 
