@@ -49,7 +49,8 @@ from hailhq.core.schemas import (
     KnowledgeSearchResponse,
     KnowledgeSearchResult,
 )
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -59,14 +60,17 @@ router = APIRouter(
     tags=["knowledge"],
     responses={
         **GENERAL_RATE_LIMITED_RESPONSES,
-        403: {
-            "description": (
-                "The knowledge base is not turned on for this workspace. "
-                "Contact Hail support."
-            )
-        },
     },
 )
+
+_OFF = {
+    403: {
+        "description": (
+            "The knowledge base is not turned on for this workspace. Contact "
+            "Hail support."
+        )
+    }
+}
 
 _NOT_FOUND = "knowledge document not found"
 _DEFAULT_LIMIT = 50
@@ -104,6 +108,7 @@ async def _owned(db: AsyncSession, document_id: UUID, org: UUID) -> KnowledgeDoc
     status_code=http_status.HTTP_201_CREATED,
     operation_id="create_knowledge_document",
     responses={
+        **_OFF,
         404: {"description": "No stored `knowledge_document` upload with this id."},
         409: {
             "description": (
@@ -112,6 +117,12 @@ async def _owned(db: AsyncSession, document_id: UUID, org: UUID) -> KnowledgeDoc
             )
         },
         413: {"description": "The file is larger than the workspace's file limit."},
+        503: {
+            "description": (
+                "Another request or the upload sweep holds this upload; try "
+                "again in a few seconds."
+            )
+        },
     },
 )
 async def create_knowledge_document(
@@ -128,20 +139,34 @@ async def create_knowledge_document(
     scans), DOCX, TXT, Markdown and CSV (one piece per row) are read.
     """
     org = principal.organization_id
-    await knowledge_lock(db, org)
-    limits = await _limits(db, org)
-    upload = (
-        await db.execute(
-            select(FileUpload)
-            .where(
-                FileUpload.id == body.upload_id,
-                FileUpload.organization_id == org,
-                FileUpload.purpose == "knowledge_document",
-                FileUpload.uploaded_at.is_not(None),
+    # Bounded waits: the upload sweep may hold the upload's row lock while it
+    # deletes from storage; this request then fails fast instead of holding
+    # the workspace's knowledge lock for as long.
+    await db.execute(text("SET LOCAL lock_timeout = '5s'"))
+    try:
+        await knowledge_lock(db, org)
+        limits = await _limits(db, org)
+        upload = (
+            await db.execute(
+                select(FileUpload)
+                .where(
+                    FileUpload.id == body.upload_id,
+                    FileUpload.organization_id == org,
+                    FileUpload.purpose == "knowledge_document",
+                    FileUpload.uploaded_at.is_not(None),
+                )
+                .with_for_update()
             )
-            .with_for_update()
-        )
-    ).scalar_one_or_none()
+        ).scalar_one_or_none()
+    except DBAPIError as exc:
+        if getattr(exc.orig, "sqlstate", None) != "55P03":
+            raise
+        await db.rollback()
+        raise HTTPException(
+            status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="this upload is busy; try again in a few seconds",
+            headers={"Retry-After": "5"},
+        ) from exc
     if upload is None:
         raise HTTPException(
             status_code=http_status.HTTP_404_NOT_FOUND,
@@ -212,8 +237,9 @@ async def list_knowledge_documents(
     cursor: str | None = Query(default=None),
     limit: int = Query(default=_DEFAULT_LIMIT, ge=1, le=_MAX_LIMIT),
 ) -> KnowledgeDocumentListResponse:
-    """List the workspace's knowledge documents, newest first."""
-    await _limits(db, principal.organization_id)
+    """List the workspace's knowledge documents, newest first. Works while
+    the knowledge base is off too, so a workspace can see and remove its
+    files."""
     rows, next_cursor = await fetch_cursor_page(
         db,
         select(KnowledgeDocument).where(
@@ -242,8 +268,8 @@ async def get_knowledge_document(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> KnowledgeDocumentResponse:
-    """One knowledge document and its reading status."""
-    await _limits(db, principal.organization_id)
+    """One knowledge document and its reading status. Works while the
+    knowledge base is off too."""
     doc = await _owned(db, document_id, principal.organization_id)
     return KnowledgeDocumentResponse.model_validate(doc)
 
@@ -306,6 +332,7 @@ async def delete_knowledge_document(
     "/search",
     response_model=KnowledgeSearchResponse,
     operation_id="search_knowledge",
+    responses=_OFF,
 )
 async def search_knowledge(
     body: KnowledgeSearchRequest,

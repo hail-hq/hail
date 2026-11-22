@@ -27,7 +27,7 @@ func newKnowledgeCmd(opts *Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "knowledge",
 		Short: "Manage the knowledge base agents answer from",
-		Long: `hail knowledge — documents your agents answer calls, texts and email from.
+		Long: `hail knowledge: documents your agents answer calls, texts and email from.
 
 Add a PDF (with text, not a scan), DOCX, TXT, Markdown or CSV file. Hail
 reads it in the background: 'pending', then 'ready' or 'failed'. Turn an
@@ -44,6 +44,10 @@ Example:
 	cmd.AddCommand(newKnowledgeSearchCmd(opts))
 	return cmd
 }
+
+// knowledgeMaxBytes is the API's ceiling for one knowledge file (25 MB); a
+// workspace's own limit, the link's max_bytes, may be lower.
+const knowledgeMaxBytes = 25 * 1024 * 1024
 
 // knowledgeTypes maps a file extension to the MIME type the API reads.
 var knowledgeTypes = map[string]string{
@@ -82,6 +86,15 @@ func runKnowledgeAdd(ctx context.Context, opts *Options, f *knowledgeAddFlags, p
 		if contentType == "" {
 			return fmt.Errorf("cannot tell the type of %s; pass --content-type", path)
 		}
+	}
+	// Before any request: a file over every workspace's limit would only use
+	// up an upload link.
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", path, err)
+	}
+	if info.Size() > knowledgeMaxBytes {
+		return fmt.Errorf("%s is %d bytes; a knowledge file is at most %d bytes", path, info.Size(), knowledgeMaxBytes)
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {

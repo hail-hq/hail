@@ -70,6 +70,28 @@ data "aws_iam_policy_document" "main" {
     }
   }
 
+  # Knowledge base files (routes/uploads.py, hailhq.core.knowledge.ingest).
+  # Kept while the document lives; deleted with it, by the upload sweep when
+  # never used, and with the account at close.
+  statement {
+    sid       = "KnowledgeDocumentsReadWriteDelete"
+    actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
+    resources = ["${aws_s3_bucket.inbound.arn}/knowledge-documents/*"]
+  }
+
+  # Deleting a document lists its attempt objects; closing an account lists
+  # its folder. Also lets a missing object answer 404, not 403.
+  statement {
+    sid       = "KnowledgeDocumentsList"
+    actions   = ["s3:ListBucket"]
+    resources = [aws_s3_bucket.inbound.arn]
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      values   = ["knowledge-documents/*"]
+    }
+  }
+
   # The retention sweep lists a closed organization's evidence to delete it.
   statement {
     sid       = "SmsEvidenceList"

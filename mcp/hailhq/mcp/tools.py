@@ -4478,7 +4478,8 @@ def register_tools(
         ``get_knowledge_document``. PDF with text (no scans), DOCX, TXT,
         Markdown and CSV (one piece per row) are read.
         The knowledge base is off until Hail support turns it on for the
-        workspace. Returns the document or an error."""
+        workspace (listing, reading and deleting documents still work).
+        Returns the document or an error."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await add_knowledge_document(
@@ -4512,6 +4513,8 @@ def register_tools(
                 return await client.list_knowledge_documents(cursor=cursor, limit=limit)
         except HailAPIError as exc:
             return _format_api_error(exc)
+        except httpx.TransportError:
+            return {"error": _TRANSPORT_ERROR}
         except RuntimeError as exc:
             return {"error": str(exc)}
 

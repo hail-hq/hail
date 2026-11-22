@@ -4850,6 +4850,10 @@ paths:
             of documents, or Hail's knowledge storage is full.
         "413":
           description: The file is larger than the workspace's file limit.
+        "503":
+          description:
+            Another request or the upload sweep holds this upload; try
+            again in a few seconds.
         "422":
           description: Validation Error
           content:
@@ -4860,7 +4864,13 @@ paths:
       tags:
         - knowledge
       summary: List Knowledge Documents
-      description: List the workspace's knowledge documents, newest first.
+      description:
+        "List the workspace's knowledge documents, newest first. Works
+        while
+
+        the knowledge base is off too, so a workspace can see and remove its
+
+        files."
       operationId: list_knowledge_documents
       parameters:
         - name: cursor
@@ -4916,10 +4926,6 @@ paths:
               description: Seconds until the current window resets.
               schema:
                 type: integer
-        "403":
-          description:
-            The knowledge base is not turned on for this workspace. Contact
-            Hail support.
         "422":
           description: Validation Error
           content:
@@ -4931,7 +4937,10 @@ paths:
       tags:
         - knowledge
       summary: Get Knowledge Document
-      description: One knowledge document and its reading status.
+      description:
+        "One knowledge document and its reading status. Works while the
+
+        knowledge base is off too."
       operationId: get_knowledge_document
       parameters:
         - name: document_id
@@ -4977,10 +4986,6 @@ paths:
               description: Seconds until the current window resets.
               schema:
                 type: integer
-        "403":
-          description:
-            The knowledge base is not turned on for this workspace. Contact
-            Hail support.
         "404":
           description: No such document in this workspace.
         "422":
@@ -5041,10 +5046,6 @@ paths:
               description: Seconds until the current window resets.
               schema:
                 type: integer
-        "403":
-          description:
-            The knowledge base is not turned on for this workspace. Contact
-            Hail support.
         "404":
           description: No such document in this workspace.
         "503":

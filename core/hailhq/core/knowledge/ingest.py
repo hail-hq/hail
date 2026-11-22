@@ -69,15 +69,26 @@ from hailhq.core.s3_mail import S3MailClient
 from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-__all__ = ["DECODE_SECONDS", "LEASE", "MAX_ATTEMPTS", "KnowledgeIngestWorker"]
+__all__ = [
+    "DECODE_SECONDS",
+    "LEASE",
+    "MAX_ATTEMPTS",
+    "STALE_AFTER",
+    "KnowledgeIngestWorker",
+]
 
 logger = logging.getLogger(__name__)
 
 MAX_ATTEMPTS = 3
 RETRY_MINUTES = 5
 # Bucket errors that never clear: the object is gone or not ours to read.
-# A 403 is not here: a policy change can cause it, and it clears when fixed.
 _GONE = frozenset({"NoSuchKey", "404", "NotFound"})
+# A 403 uses a try (5, 10, 15 minutes apart): a policy change can cause it
+# and clear, but so can a missing object without list access.
+_DENIED = frozenset({"AccessDenied", "403"})
+# A document still not read this long after it was added fails, whatever
+# held it up (an outage that never counted a try).
+STALE_AFTER = timedelta(days=1)
 _SPENT = "the file could not be processed; delete it and upload it again"
 LEASE = timedelta(minutes=15)
 # Wall-clock limit of one decode. The child also has a 30 s CPU limit.
@@ -200,13 +211,17 @@ class KnowledgeIngestWorker:
                 )
 
     async def _fail_spent(self) -> None:
-        """Rows that used every try (a crashed worker's lease) fail, in one
-        statement."""
+        """Rows that used every try (a crashed worker's lease) or waited past
+        ``STALE_AFTER`` fail, in one statement."""
         async with self._session_factory() as db:
             now = (await db.execute(select(func.now()))).scalar_one()
             await db.execute(
                 update(KnowledgeDocument)
-                .where(_claimable(now), KnowledgeDocument.attempts >= MAX_ATTEMPTS)
+                .where(
+                    _claimable(now),
+                    (KnowledgeDocument.attempts >= MAX_ATTEMPTS)
+                    | (KnowledgeDocument.created_at < now - STALE_AFTER),
+                )
                 .values(
                     status="failed",
                     error=_SPENT,
@@ -330,6 +345,8 @@ class KnowledgeIngestWorker:
             code = str(exc.response.get("Error", {}).get("Code", ""))
             if code in _GONE:
                 raise _Refused("the stored file is gone; upload it again") from exc
+            if code in _DENIED:
+                raise
             raise _Unavailable(f"bucket ({code or 'error'})") from exc
         except (BotoCoreError, OSError) as exc:
             raise _Unavailable(f"bucket ({type(exc).__name__})") from exc

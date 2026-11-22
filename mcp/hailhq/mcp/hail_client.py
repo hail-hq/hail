@@ -398,7 +398,9 @@ class HailClient:
     async def list_knowledge_documents(
         self, *, cursor: str | None = None, limit: int | None = None
     ) -> dict[str, Any]:
-        params = {k: v for k, v in (("cursor", cursor), ("limit", limit)) if v}
+        params = {
+            k: v for k, v in (("cursor", cursor), ("limit", limit)) if v is not None
+        }
         resp = await self._client.get("/knowledge/documents", params=params)
         return KnowledgeDocumentListResponse.model_validate(_decode(resp)).model_dump(
             mode="json"

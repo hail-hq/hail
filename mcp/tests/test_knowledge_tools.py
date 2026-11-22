@@ -112,3 +112,13 @@ async def test_create_agent_passes_knowledge(monkeypatch) -> None:
     )
     assert json.loads(route.calls[0].request.read())["knowledge"] is True
     assert out.structured_content["knowledge"] is True
+
+
+@respx.mock
+async def test_list_survives_a_network_error(monkeypatch) -> None:
+    srv = await _real_server(monkeypatch)
+    respx.get(f"{_BASE_URL}/knowledge/documents").mock(
+        side_effect=httpx.ConnectError("down")
+    )
+    out = await srv.mcp_app.call_tool("list_knowledge_documents", {})
+    assert "error" in out.structured_content

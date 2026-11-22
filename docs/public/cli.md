@@ -183,7 +183,7 @@ hail contacts clear-phone me
 
 ## Knowledge base
 
-Documents agents answer calls, texts and email from ([agents](agents.md#answer-from-your-documents-knowledge-base)). Off until Hail support turns it on for the workspace.
+Documents agents answer calls, texts and email from ([agents](agents.md#answer-from-your-documents-knowledge-base)). Off until Hail support turns it on for the workspace (list, get and delete still work).
 
 ```bash
 hail knowledge add manual.pdf --name "NS-5000 manual"   # upload + add; .pdf .docx .txt .md .csv

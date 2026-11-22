@@ -4,6 +4,10 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- Knowledge base (early access): upload manuals, FAQs and part lists, and agents answer calls, texts and email from them, in any supported language (`/v1/knowledge`, `knowledge` on agents, CLI `hail knowledge`, SDK and MCP).
+
 ### Changed
 
 - Email: hail-mail prefix fields are now `local_prefix_workspace` (before the `+`) and `local_prefix_name` (after it). The old `local_prefix_user` and `local_prefix_org` still work and are deprecated.

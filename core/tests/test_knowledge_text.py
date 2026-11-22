@@ -112,3 +112,21 @@ def test_a_longer_heading_after_a_flush_still_fits() -> None:
     ]
     chunks = chunk_blocks(blocks, _words)
     assert all(_words(c.text) <= 500 for c in chunks), [_words(c.text) for c in chunks]
+
+
+def test_long_heading_is_cut_not_dropped() -> None:
+    blocks = [Block("h" * 5 + " " + " ".join(["head"] * 200), heading=True)]
+    blocks += [Block(" ".join(["word"] * 900))]
+    chunks = chunk_blocks(blocks, _words)
+    assert all(c.text.startswith("hhhhh head") for c in chunks)
+    assert all(_words(c.text) <= 500 for c in chunks)
+
+
+def test_small_limits_never_pass_max_tokens() -> None:
+    blocks = [
+        Block(" ".join(["intro"] * 60)),
+        Block("Heading words here now", heading=True),
+        Block(" ".join(["word"] * 400)),
+    ]
+    chunks = chunk_blocks(blocks, _words, target=80, max_tokens=100, overlap=70)
+    assert chunks and all(_words(c.text) <= 100 for c in chunks)

@@ -240,7 +240,7 @@ hail agents update <agent_id> --knowledge
 hail knowledge search "what does error E-204 mean"
 ```
 
-The knowledge base is in early access. It is off until Hail support turns it on for your workspace; until then every knowledge route answers `403`.
+The knowledge base is in early access. It is off until Hail support turns it on for your workspace; until then adding documents, search and `knowledge: true` on an agent answer `403`. Listing, reading and deleting your documents always work.
 
 ### Add a document with the API
 

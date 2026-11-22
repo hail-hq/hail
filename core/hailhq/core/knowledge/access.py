@@ -121,11 +121,12 @@ async def delete_org_knowledge(
     organization_id: UUID,
     s3: S3MailClient | None,
 ) -> int:
-    """Delete a workspace's knowledge base: its files from the bucket, then
-    the upload rows (their documents and pieces go with them), and its
-    limits row. Used when the account closes. Returns the documents
-    deleted. A failed bucket delete raises before any row goes, so a retry
-    finds everything again."""
+    """Delete a workspace's whole knowledge base: its files from the bucket,
+    then the upload rows (their documents and pieces go with them), and its
+    limits row (so it is off). The one function for every such delete: an
+    account closing (``org_closures`` route and the ingest worker), and a
+    paid plan ending. Returns the documents deleted. A failed bucket delete
+    raises before any row goes, so a retry finds everything again."""
     if s3 is not None:
         await s3.delete_prefix(f"{KNOWLEDGE_DOCUMENTS_PREFIX}{organization_id}/")
     count = (

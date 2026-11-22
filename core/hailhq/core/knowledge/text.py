@@ -50,8 +50,6 @@ OVERLAP_TOKENS = 50
 _MIN_TOKENS_BEFORE_HEADING = 200
 # A heading repeated in front of a piece is cut to this many characters.
 _HEADING_CHARS = 120
-# A part is cut again to fit only into at least this much room.
-_MIN_RECUT_TOKENS = 20
 # Longer words are cut: Postgres refuses a lexeme over 2047 bytes, and no
 # question names such a word anyway.
 _MAX_WORD_CHARS = 100
@@ -214,6 +212,18 @@ def _split_long(text: str, max_tokens: int, count: Callable[[str], int]) -> list
     return parts
 
 
+def _head(text: str, max_tokens: int, count: Callable[[str], int]) -> str:
+    """The start of ``text`` with at most ``max_tokens``."""
+    low, high = 0, len(text)
+    while low < high:
+        mid = (low + high + 1) // 2
+        if count(text[:mid]) <= max_tokens:
+            low = mid
+        else:
+            high = mid - 1
+    return text[:low].strip()
+
+
 def _tail(text: str, max_tokens: int, count: Callable[[str], int]) -> str:
     """The end of ``text`` with at most ``max_tokens``, starting on a word
     where there are spaces."""
@@ -262,11 +272,11 @@ def chunk_blocks(
 
     def set_heading(value: str | None) -> None:
         nonlocal current_heading, heading_cost
+        if value and count_tokens(value) + 1 > max_tokens // 5:
+            # A long heading is cut to a fifth of a piece, by tokens.
+            value = _head(value, max_tokens // 5 - 1, count_tokens)
         cost = count_tokens(value) + 1 if value else 0
-        # A heading that would take much of the piece is not repeated.
-        if cost > max_tokens // 5:
-            value, cost = None, 0
-        current_heading, heading_cost = value, cost
+        current_heading, heading_cost = value or None, cost
 
     def flush(*, keep_overlap: bool) -> None:
         nonlocal current, tokens, carried
@@ -305,9 +315,14 @@ def chunk_blocks(
                 if max_pieces is not None and len(chunks) > max_pieces:
                     return chunks
             room = max_tokens - tokens - heading_cost
-            if size > room >= _MIN_RECUT_TOKENS:
+            if size > room and carried and len(current) <= carried:
+                # Only the overlap is held and the part does not fit with
+                # it: drop the overlap rather than pass the limit.
+                current, carried, tokens = [], 0, 0
+                room = max_tokens - heading_cost
+            if size > room:
                 # A flush brought a longer heading: cut the part to fit.
-                cut = _split_long(part, room, count_tokens)
+                cut = _split_long(part, max(room, 1), count_tokens)
                 if len(cut) > 1:
                     parts.extendleft(reversed(cut))
                     continue

@@ -5,10 +5,11 @@ from __future__ import annotations
 
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import numpy as np
 import pytest
+from botocore.exceptions import ClientError
 from hailhq.core.file_uploads import object_key
 from hailhq.core.knowledge import index as index_module
 from hailhq.core.knowledge import search as search_module
@@ -32,11 +33,18 @@ class FakeS3:
     def __init__(self) -> None:
         self.objects: dict[str, bytes] = {}
         self.fail = False
+        self.error_code: str | None = None
 
     async def fetch_raw(self, key: str, *, max_bytes: int | None = None) -> bytes:
+        # Like S3MailClient.fetch_raw: a ValueError past max_bytes.
         if self.fail:
             raise ConnectionError("bucket down")
-        return self.objects[key][: max_bytes or None]
+        if self.error_code:
+            raise ClientError({"Error": {"Code": self.error_code}}, "GetObject")
+        data = self.objects[key]
+        if max_bytes is not None and len(data) > max_bytes:
+            raise ValueError("Object exceeds the storage read limit")
+        return data
 
     async def delete_prefix(self, prefix: str, *, keep: str | None = None) -> int:
         gone = [k for k in self.objects if k.startswith(prefix) and k != keep]
@@ -217,13 +225,14 @@ async def test_other_errors_use_tries_then_fail(
     )
     org = uuid.uuid4()
     doc_id = await add_document(async_session, s3, org, b"Hello there.")
-    for attempt in range(1, MAX_ATTEMPTS + 1):
+    for attempt in range(1, MAX_ATTEMPTS):
         await worker.tick()
         doc = await async_session.get(KnowledgeDocument, doc_id)
         await async_session.refresh(doc)
         assert doc.status == "pending" and doc.attempts == attempt
         doc.claimed_at = None
         await async_session.commit()
+    # The last try fails the document at once.
     await worker.tick()
     await async_session.refresh(doc)
     assert doc.status == "failed" and "upload it again" in doc.error
@@ -341,3 +350,50 @@ async def test_closed_workspace_with_only_uploads_is_cleaned(
     assert not s3.objects
     assert await async_session.get(FileUpload, upload_id) is None
     assert await async_session.get(OrganizationKnowledge, org) is None
+
+
+async def test_access_denied_uses_tries_then_fails(async_session, worker, s3) -> None:
+    org = uuid.uuid4()
+    doc_id = await add_document(async_session, s3, org, b"Hello there.")
+    s3.error_code = "AccessDenied"
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        await worker.tick()
+        doc = await async_session.get(KnowledgeDocument, doc_id)
+        await async_session.refresh(doc)
+        assert doc.attempts == attempt
+        doc.claimed_at = None
+        await async_session.commit()
+    assert doc.status == "failed"
+
+
+async def test_missing_object_fails_at_once(async_session, worker, s3) -> None:
+    org = uuid.uuid4()
+    doc_id = await add_document(async_session, s3, org, b"Hello there.")
+    s3.error_code = "NoSuchKey"
+    await worker.tick()
+    doc = await async_session.get(KnowledgeDocument, doc_id)
+    await async_session.refresh(doc)
+    assert doc.status == "failed" and "gone" in doc.error
+
+
+@pytest.mark.parametrize("stored", [b"Hello", b"Hello there!!"])
+async def test_stored_size_must_match(async_session, worker, s3, stored) -> None:
+    org = uuid.uuid4()
+    doc_id = await add_document(async_session, s3, org, b"Hello there.")
+    key = next(iter(s3.objects))
+    s3.objects[key] = stored
+    await worker.tick()
+    doc = await async_session.get(KnowledgeDocument, doc_id)
+    await async_session.refresh(doc)
+    assert doc.status == "failed" and "not the one uploaded" in doc.error
+
+
+async def test_stale_pending_document_fails(async_session, worker, s3) -> None:
+    org = uuid.uuid4()
+    doc_id = await add_document(async_session, s3, org, b"Hello there.")
+    doc = await async_session.get(KnowledgeDocument, doc_id)
+    doc.created_at = datetime.now(timezone.utc) - timedelta(days=2)
+    await async_session.commit()
+    await worker.tick()
+    await async_session.refresh(doc)
+    assert doc.status == "failed"

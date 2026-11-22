@@ -114,8 +114,6 @@ async def test_off_workspace_gets_403_everywhere(client, org_and_key, s3) -> Non
     _, _, plain = org_and_key
     assert (await _link(client, plain)).status_code == 403
     for method, path, body in (
-        ("GET", "/v1/knowledge/documents", None),
-        ("GET", f"/v1/knowledge/documents/{uuid4()}", None),
         ("POST", "/v1/knowledge/documents", {"upload_id": str(uuid4())}),
         ("POST", "/v1/knowledge/search", {"query": "warranty"}),
     ):
@@ -128,6 +126,13 @@ async def test_off_workspace_gets_403_everywhere(client, org_and_key, s3) -> Non
         headers=_auth(plain),
     )
     assert resp.status_code == 403
+    # A workspace can always see its own files, to remove them.
+    listed = await client.get("/v1/knowledge/documents", headers=_auth(plain))
+    assert listed.status_code == 200 and listed.json()["items"] == []
+    missing = await client.get(
+        f"/v1/knowledge/documents/{uuid4()}", headers=_auth(plain)
+    )
+    assert missing.status_code == 404
 
 
 async def test_link_takes_the_workspace_file_limit(

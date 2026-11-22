@@ -816,7 +816,8 @@ documents, 10 MB per file, 1,000 pieces) apply; pass columns to change them:
 psql "$DATABASE_URL" -c \
   "INSERT INTO organization_knowledge (organization_id) VALUES ('<org-uuid>');"
 
-# Turn it off (documents stay; agents stop using them; routes answer 403)
+# Turn it off (documents stay; agents stop using them; adding and search
+# answer 403; listing, reading and deleting still work)
 psql "$DATABASE_URL" -c \
   "DELETE FROM organization_knowledge WHERE organization_id = '<org-uuid>';"
 ```
