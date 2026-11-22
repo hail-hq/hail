@@ -71,6 +71,7 @@ from hailhq.core.models import (
 from hailhq.core.retention import closed_org_ids
 from hailhq.core.s3_mail import S3MailClient
 from sqlalchemy import delete, func, select, text, update
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = [
@@ -150,6 +151,9 @@ class KnowledgeIngestWorker:
         self._embedder = embedder
         self._poll_interval = poll_interval
         self._stop = asyncio.Event()
+        # Closed orgs whose delete failed already: their traceback is logged
+        # once, then one short line per retry.
+        self._reported: set[UUID] = set()
 
     def _get_s3(self) -> S3MailClient:
         if self._s3 is None:
@@ -214,28 +218,35 @@ class KnowledgeIngestWorker:
                     org_id,
                 )
             except FolderSweepFailed as exc:
-                # Rows are gone, so nothing here retries it.
-                logger.exception(
-                    "knowledge: closed org %s: %d document(s) deleted, but the "
-                    "folder sweep failed. Action: run the knowledge delete for "
-                    "it by hand (docs/operations/knowledge-base.md)",
+                # Rows are gone, so nothing here retries it. No traceback:
+                # its cause may be a database error carrying parameters.
+                logger.error(
+                    "knowledge: closed org %s: %s. Action: run the knowledge "
+                    "delete for it by hand",
                     org_id,
-                    exc.documents,
+                    exc,
                 )
             except Exception as exc:
                 code = getattr(getattr(exc, "orig", None), "sqlstate", None)
+                first = org_id not in self._reported
+                self._reported.add(org_id)
                 if code == "55P03":
                     logger.warning(
                         "knowledge: closed org %s: a knowledge row is busy; "
                         "retrying",
                         org_id,
                     )
+                elif first and not isinstance(exc, DBAPIError):
+                    # The first time, with its traceback (a code bug shows
+                    # where); later ticks repeat one short line.
+                    logger.exception(
+                        "knowledge: could not delete closed org %s; retrying",
+                        org_id,
+                    )
                 else:
-                    # A warning with the first line only: this repeats every
-                    # tick until it clears, and the full text of a database
-                    # error holds its statement and parameters.
-                    logger.warning(
-                        "knowledge: could not delete closed org %s (%s%s); " "retrying",
+                    logger.log(
+                        logging.ERROR if first else logging.WARNING,
+                        "knowledge: could not delete closed org %s (%s%s); retrying",
                         org_id,
                         type(exc).__name__,
                         short_cause(exc),

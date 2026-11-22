@@ -127,6 +127,10 @@ async def agent_uses_knowledge(
 def short_cause(exc: BaseException) -> str:
     """ ": <first line of the error, at most 200 characters>", or "" when the
     error has no text."""
+    if isinstance(exc, DBAPIError):
+        # A database message can quote row values: its type and code only.
+        code = getattr(exc.orig, "sqlstate", None)
+        return f": {type(exc.orig).__name__}" + (f" {code}" if code else "")
     try:
         first = (str(exc).strip().splitlines() or [""])[0][:200]
     except Exception:
