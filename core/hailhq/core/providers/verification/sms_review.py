@@ -127,7 +127,10 @@ def detail_fixes(texts: list[str]) -> list[str]:
     ("business address", "mailing address")."""
     fixes: list[str] = []
     for one in texts:
-        low = re.sub(r"\bweb address\b", "website", str(one or "").lower())
+        low = str(one or "").lower()
+        # "web address" is the website; an IP address is no postal address.
+        low = re.sub(r"\bweb address\b", "website", low)
+        low = re.sub(r"\bip address\b", "ip", low)
         about_email = re.search(r"\bemail\b", low) is not None
         for words, fix in _DETAIL_FIXES:
             if fix == _ADDRESS_FIX and about_email:

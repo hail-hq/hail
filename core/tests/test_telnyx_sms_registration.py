@@ -2102,6 +2102,15 @@ def test_a_line_break_in_a_reason_is_not_quoted():
     assert "\n" not in problems[0].message
 
 
+def test_a_tag_only_key_falls_to_the_next_key():
+    problems = _reason_problems(
+        [{"fields": ["email"], "description": "[email] - ", "detail": "Bad"}],
+        "person",
+    )
+    assert problems[0].message.endswith("The carrier said: Bad.")
+    assert problems[0].raw == "Bad"
+
+
 def test_raw_keeps_the_carriers_own_text():
     problems = _reason_problems(
         [{"fields": ["email"], "description": "[email] - Email domain invalid"}],

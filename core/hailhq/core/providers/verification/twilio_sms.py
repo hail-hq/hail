@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 
 import requests
@@ -1088,7 +1089,7 @@ def _brand_customer_reason(brand) -> str:
                 (
                     f
                     for words, f in _BRAND_FIXES_BY_TEXT
-                    if any(w in text for w in words)
+                    if any(re.search(rf"\b{re.escape(w)}\b", text) for w in words)
                 ),
                 None,
             )

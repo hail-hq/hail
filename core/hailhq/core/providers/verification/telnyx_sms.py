@@ -33,6 +33,7 @@ from hailhq.core.providers.verification.base import (
 from hailhq.core.providers.verification.forms import display_name, text_length
 from hailhq.core.providers.verification.rejections import (
     TEXT_KEYS,
+    carrier_texts,
     with_carrier_text,
 )
 from hailhq.core.providers.verification.sms_form import (
@@ -1534,11 +1535,12 @@ def _original_text(item: object) -> str | None:
     if isinstance(item, str):
         return item.strip() or None
     if isinstance(item, dict):
+        # The same key the quote uses: the first whose text survives cleanup.
         return next(
             (
                 item[k]
                 for k in TEXT_KEYS
-                if isinstance(item.get(k), str) and item[k].strip()
+                if isinstance(item.get(k), str) and carrier_texts(item[k])
             ),
             None,
         )
