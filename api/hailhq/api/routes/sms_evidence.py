@@ -155,7 +155,9 @@ def evidence_full() -> HTTPException:
         status_code=http_status.HTTP_409_CONFLICT,
         detail=(
             f"This account already keeps {MAX_EVIDENCE_FILES} uploaded files, the "
-            "most allowed. Delete one you no longer use, or contact support."
+            "most allowed. Delete one you no longer use in the console or with "
+            "DELETE /v1/verifications/sms/evidence/{organization_id}/{token}, "
+            "or contact support."
         ),
     )
 

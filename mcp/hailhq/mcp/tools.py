@@ -2627,7 +2627,10 @@ def register_tools(
                 "its ``id`` goes in the ``files`` of ``check_verification`` and "
                 "``submit_verification`` as ``{slot, upload_id}``. "
                 "``sms_evidence``: a US texting consent screenshot; the upload "
-                "response's ``url`` goes in an ``*_evidence_url`` field."
+                "response's ``url`` goes in an ``*_evidence_url`` field. Anyone "
+                "with that link can open the file, and a workspace keeps at "
+                "most 100. Deleting one needs the console or "
+                "``DELETE /v1/verifications/sms/evidence/{organization_id}/{token}``."
             ),
         ],
         filename: Annotated[str, _d("File name, such as ``passport.pdf``.")],

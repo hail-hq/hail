@@ -80,10 +80,11 @@ _PRIVACY_WORDS = re.compile(
 # A bare "Terms" counts only when it sits next to a privacy policy, so
 # "refund policy and terms apply" does not pass.
 _TERMS_WORDS = re.compile(
-    r"\b(?:sms|messaging|mobile|program)\s+(?:terms|t\s*&\s*cs?)\b"
+    r"\b(?:sms|messaging|mobile|program)\s+terms\b"
+    r"|\bt\s*&\s*cs?\b"
     r"|\bterms\s*(?:of\s+(?:service|use)|(?:and|&)\s*conditions)\b"
-    r"|\bprivacy\s+(?:policy|notice|statement)\s*(?:and|&)\s*terms\b"
-    r"|\bterms\s*(?:and|&)\s*privacy\b",
+    r"|\bprivacy\s+(?:policy|notice|statement)\s*(?:and|&|,|\||/)\s*terms\b(?!\s+apply\b)"
+    r"|\bterms\s*(?:and|&|,|\||/)\s*privacy\b",
     re.IGNORECASE,
 )
 

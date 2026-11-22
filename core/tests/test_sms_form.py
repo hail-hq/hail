@@ -929,6 +929,7 @@ def test_compiled_text_carries_both_policy_urls_to_each_carrier():
         ("Privacy Policy", "rules on our terms", "SMS terms"),
         ("Privacy Policy", "rules. By texting terms like HELP", "SMS terms"),
         ("Privacy Policy", "rules. Our refund policy and terms apply", "SMS terms"),
+        ("Privacy Policy and terms apply. See", "rules", "SMS terms"),
     ],
 )
 def test_disclosure_words_must_name_a_policy(privacy, terms, missing):
@@ -961,6 +962,9 @@ def test_policy_words_still_need_the_policy_web_addresses():
         ("Privacy Policy", "SMS T&Cs"),
         ("Privacy Policy", "Terms&Conditions"),
         ("Privacy Policy &", "Terms"),
+        ("T&Cs and", "Privacy Policy"),
+        ("Privacy Policy, Terms and", "rules"),
+        ("Privacy Policy | Terms and", "rules"),
     ],
 )
 def test_disclosure_accepts_common_policy_spellings(privacy, terms):
