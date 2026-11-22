@@ -135,6 +135,12 @@ only) removes a file at once; its link then leads to a storage error page. An or
 409 until one is deleted.
 Verbal consent needs the script and action only; its evidence link is optional.
 
+The consent disclosure check (`_disclosure_gaps` in `sms_form.py`) accepts each policy by its
+web address or by its link words ("privacy" and "terms" as whole words), because a real
+checkbox links the words. The web addresses always reach the carrier in their own campaign
+fields (`_policy_links` in `twilio_sms.py` and `telnyx_sms.py`). A failed check names only the
+missing parts.
+
 The application compiler uses the applicant's actual disclosures, recording process, evidence
 and policy links. It never pads a short answer with a consent assertion. Short answers and
 inconsistent content flags return field errors before a paid filing. Content flags and

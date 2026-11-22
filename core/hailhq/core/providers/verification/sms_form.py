@@ -67,6 +67,11 @@ _MESSAGE_DATA_RATES = re.compile(
     r"\b(?:messages?|msgs?|messaging)\.?\s*(?:and|&|/|\+)\s*data\s+(?:rates?|charges?)\b",
     re.IGNORECASE,
 )
+# A real checkbox links the policies by name ("See our Privacy Policy and SMS
+# Terms"), so the disclosure may name them instead of typing the web
+# addresses. The addresses still go to the carrier in their own fields.
+_PRIVACY_WORDS = re.compile(r"\bprivacy\b", re.IGNORECASE)
+_TERMS_WORDS = re.compile(r"\bterms\b", re.IGNORECASE)
 
 
 def _answer(fields: dict[str, str], name: str) -> str:
@@ -399,7 +404,7 @@ _CAMPAIGN_FIELDS = (
         name="consent_disclosure",
         label="Exact SMS disclosure recipients see or hear",
         max_length=1024,
-        help="Include your public sender name, purposes, frequency, message/data rates, STOP, HELP and policy links. Copy the actual disclosure; fix your enrollment flow before filing if anything is missing.",
+        help='Include your public sender name, purposes, frequency, message/data rates, STOP, HELP, and your privacy policy and SMS terms, by their link words (such as "Privacy Policy" and "SMS Terms") or their web addresses. Copy the actual disclosure; fix your enrollment flow before filing if anything is missing.',
     ),
     FieldSpec(
         name="disclosure_purposes_confirmed",
@@ -890,29 +895,11 @@ def _application_problems(
         issue("text_types", "Add one sample for each kind of text you picked.")
     disclosure = val("consent_disclosure")
     if disclosure:
-        required = [
-            val("message_frequency"),
-            "STOP",
-            "HELP",
-            val("privacy_policy_url"),
-            val("terms_url"),
-        ]
-        program = val("program_name")
-        if (
-            any(
-                part and part.casefold() not in disclosure.casefold()
-                for part in required
-            )
-            or not _MESSAGE_DATA_RATES.search(disclosure)
-            or (program and not _names_sender(program, disclosure))
-        ):
+        missing = _disclosure_gaps(disclosure, val)
+        if missing:
             issue(
                 "consent_disclosure",
-                (
-                    f'The disclosure must include your program name "{program}", your exact frequency wording, message and data rates, STOP, HELP and both policy links. Update the real flow before submitting.'
-                    if program
-                    else "The disclosure must include your program name, your exact frequency wording, message and data rates, STOP, HELP and both policy links. Update the real flow before submitting."
-                ),
+                f"The disclosure is missing {_and_list(missing)}. Update the real flow before submitting.",
             )
     if methods and text_length(_structured_flow(fields)) > _FLOW_MAX:
         issue(
@@ -920,6 +907,42 @@ def _application_problems(
             "The complete consent narrative exceeds 2048 characters. Shorten descriptions while retaining every method, exact disclosure and evidence link; keep full scripts in the linked evidence.",
         )
     return problems
+
+
+def _disclosure_gaps(disclosure: str, val) -> list[str]:
+    """What the disclosure leaves out, in the order a reader looks for it."""
+    text = disclosure.casefold()
+
+    def has(part: str) -> bool:
+        return part.casefold() in text
+
+    def names_policy(url: str, words: re.Pattern[str]) -> bool:
+        # A missing web address is its own field's problem.
+        return not url or has(url) or bool(words.search(disclosure))
+
+    program = val("program_name")
+    frequency = val("message_frequency")
+    missing = []
+    if program and not _names_sender(program, disclosure):
+        missing.append(f'your program name "{program}"')
+    if frequency and not has(frequency):
+        missing.append(f'your exact frequency wording "{frequency}"')
+    if not _MESSAGE_DATA_RATES.search(disclosure):
+        missing.append("message and data rates")
+    missing += [word for word in ("STOP", "HELP") if not has(word)]
+    if not names_policy(val("privacy_policy_url"), _PRIVACY_WORDS):
+        missing.append(
+            'your privacy policy (its link words, like "Privacy Policy", or its web address)'
+        )
+    if not names_policy(val("terms_url"), _TERMS_WORDS):
+        missing.append(
+            'your SMS terms (their link words, like "SMS Terms", or their web address)'
+        )
+    return missing
+
+
+def _and_list(items: list[str]) -> str:
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
 
 
 def _structured_flow(fields: dict[str, str]) -> str:

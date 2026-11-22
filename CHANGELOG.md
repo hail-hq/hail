@@ -10,6 +10,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Changed
 
+- US texting registration: the consent disclosure may name your policies by their link words, such as "Privacy Policy" and "SMS Terms", instead of their web addresses. A disclosure that is not complete now lists only the parts it is missing.
 
 - Self-host: the database drops the old `local_prefix_user` and `local_prefix_org` columns. Read `local_prefix_workspace` and `local_prefix_name`. The API still accepts the old field names. Upgrade to the 0.35.0 release first (the commit tagged `sdk-v0.25.0`).
 

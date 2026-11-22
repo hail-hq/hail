@@ -1,4 +1,7 @@
+from dataclasses import asdict
+
 import pytest
+from hailhq.core.providers.verification import telnyx_sms, twilio_sms
 from hailhq.core.providers.verification.forms import length_problems, text_length
 from hailhq.core.providers.verification.sms_form import (
     campaign_text,
@@ -821,3 +824,97 @@ def test_over_2000_and_persons_are_never_low_volume():
     assert low_volume(person, "person") is False
     assert faster_lane_ok(person, "person") is False
     assert campaign_text(person, "person").use_case == "SOLE_PROPRIETOR"
+
+
+# The consent disclosure names the two policies
+
+
+LINKED = (
+    "Get Acme appointment reminders, once per appointment. Message and data "
+    "rates may apply. Reply STOP to opt out or HELP for help. See our {privacy} "
+    "and {terms}."
+)
+
+
+def test_disclosure_accepts_the_policy_web_addresses():
+    assert "consent_disclosure" not in error_fields(GOOD)
+
+
+@pytest.mark.parametrize(
+    "terms", ["SMS Terms", "Terms", "Terms of Service", "terms and conditions"]
+)
+def test_disclosure_accepts_policies_named_by_their_link_words(terms):
+    # A real checkbox links the words, so a true copy has no web address.
+    data = {
+        **GOOD,
+        "consent_disclosure": LINKED.format(privacy="Privacy Policy", terms=terms),
+    }
+    assert "consent_disclosure" not in error_fields(data)
+
+
+@pytest.mark.parametrize(
+    "privacy,terms,missing,present",
+    [
+        ("Privacy Policy", "rules", "SMS terms", "privacy policy"),
+        ("notice", "SMS Terms", "privacy policy", "SMS terms"),
+    ],
+)
+def test_disclosure_names_the_one_missing_policy(privacy, terms, missing, present):
+    data = {
+        **GOOD,
+        "consent_disclosure": LINKED.format(privacy=privacy, terms=terms),
+    }
+    (message,) = [m for f, m in errors(data) if f == "consent_disclosure"]
+    assert missing in message
+    assert present not in message
+    # Only what is missing, not every part.
+    for part in ("program name", "frequency", "message and data rates", "STOP"):
+        assert part not in message
+
+
+def test_disclosure_word_match_needs_a_whole_word():
+    data = {
+        **GOOD,
+        "consent_disclosure": LINKED.format(
+            privacy="Privacy Policy", terms="what determines your plan"
+        ),
+    }
+    (message,) = [m for f, m in errors(data) if f == "consent_disclosure"]
+    assert "SMS terms" in message
+
+
+def test_disclosure_error_lists_every_missing_part():
+    data = {**GOOD, "consent_disclosure": "Sign up for texts."}
+    (message,) = [m for f, m in errors(data) if f == "consent_disclosure"]
+    assert message.startswith('The disclosure is missing your program name "Acme", ')
+    for part in (
+        '"once per appointment"',
+        "message and data rates",
+        "STOP",
+        "HELP",
+        "privacy policy",
+        "SMS terms",
+    ):
+        assert part in message
+
+
+def test_compiled_text_carries_both_policy_urls_to_each_carrier():
+    data = {
+        **GOOD,
+        "consent_disclosure": LINKED.format(
+            privacy="Privacy Policy", terms="SMS Terms"
+        ),
+    }
+    assert not errors(data)
+    text = asdict(campaign_text(data, "person"))
+    assert text["privacy_policy_url"] == "https://acme.org/privacy"
+    assert text["terms_url"] == "https://acme.org/terms"
+    # Reviewers read these carrier fields, so the disclosure need not repeat them.
+    assert twilio_sms._policy_links(text) == {
+        "privacy_policy_url": "https://acme.org/privacy",
+        "terms_and_conditions_url": "https://acme.org/terms",
+    }
+    assert telnyx_sms._policy_links(text) == {
+        "privacyPolicyLink": "https://acme.org/privacy",
+        "termsAndConditionsLink": "https://acme.org/terms",
+    }
