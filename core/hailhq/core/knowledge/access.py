@@ -22,6 +22,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import sys
+from collections.abc import Awaitable
+from datetime import datetime
+from typing import TypeVar
 from uuid import UUID
 
 from hailhq.core.config import settings
@@ -31,7 +34,6 @@ from hailhq.core.models import (
     Agent,
     FileUpload,
     KnowledgeDocument,
-    KnowledgePiece,
     OrganizationKnowledge,
 )
 from hailhq.core.s3_mail import S3MailClient
@@ -52,6 +54,7 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+T = TypeVar("T")
 
 GLOBAL_MAX_BYTES = 300 * 1024 * 1024
 # A workspace with more pieces than this is searched in SQL during calls
@@ -119,9 +122,9 @@ async def agent_uses_knowledge(
     return bool(row is not None and row[0] and row[1] is not None)
 
 
-async def _end(db: AsyncSession, work):
-    """Run ``work`` and commit; on any error roll back (logging a failed
-    rollback) and raise the first error."""
+async def _end(db: AsyncSession, work: Awaitable[T]) -> T:
+    """Run ``work`` and commit; on any error roll back and raise the first
+    error. A failed rollback is logged and never replaces it."""
     try:
         result = await work
         await db.commit()
@@ -129,13 +132,16 @@ async def _end(db: AsyncSession, work):
     except BaseException:
         try:
             await db.rollback()
-        except Exception as exc:
+        except BaseException as exc:
             logger.warning("knowledge: rollback failed (%s)", type(exc).__name__)
         raise
 
 
-async def _turn_off(db: AsyncSession, organization_id: UUID) -> None:
+async def _turn_off(db: AsyncSession, organization_id: UUID) -> datetime:
+    """Off and links stopped; returns the database time of the step, so the
+    row delete never takes an upload made after it."""
     await knowledge_lock(db, organization_id)
+    now = (await db.execute(select(func.statement_timestamp()))).scalar_one()
     await db.execute(
         update(FileUpload)
         .where(
@@ -150,27 +156,29 @@ async def _turn_off(db: AsyncSession, organization_id: UUID) -> None:
             OrganizationKnowledge.organization_id == organization_id
         )
     )
+    return now
 
 
-async def _delete_rows(db: AsyncSession, organization_id: UUID) -> int:
+async def _delete_rows(
+    db: AsyncSession, organization_id: UUID, before: datetime
+) -> int:
+    """The workspace's knowledge uploads made before ``before`` (their
+    documents and pieces go with them, ON DELETE CASCADE). One turned on
+    again meanwhile keeps what it added since."""
+    uploads = (
+        FileUpload.organization_id == organization_id,
+        FileUpload.purpose == "knowledge_document",
+        FileUpload.created_at <= before,
+    )
     count = (
         await db.execute(
             select(func.count())
             .select_from(KnowledgeDocument)
-            .where(KnowledgeDocument.organization_id == organization_id)
+            .join(FileUpload, FileUpload.id == KnowledgeDocument.file_upload_id)
+            .where(*uploads)
         )
     ).scalar_one()
-    await db.execute(
-        delete(FileUpload).where(
-            FileUpload.organization_id == organization_id,
-            FileUpload.purpose == "knowledge_document",
-        )
-    )
-    # Rows whose upload is gone cannot exist (ON DELETE CASCADE), but pieces
-    # are deleted by workspace too, as a guard.
-    await db.execute(
-        delete(KnowledgePiece).where(KnowledgePiece.organization_id == organization_id)
-    )
+    await db.execute(delete(FileUpload).where(*uploads))
     return int(count)
 
 
@@ -197,12 +205,13 @@ async def delete_org_knowledge(
     2. The folder is emptied. A failure here raises with the workspace off
        and its rows kept, so a retry (the closed-account sweep finds the
        workspace by its uploads, or the command run again) finds them.
-    3. The upload rows (documents and pieces go with them) are deleted.
+    3. The upload rows made before step 1 (documents and pieces go with
+       them) are deleted.
     """
-    await _end(db, _turn_off(db, organization_id))
+    before = await _end(db, _turn_off(db, organization_id))
     if s3 is not None:
         await s3.delete_prefix(f"{KNOWLEDGE_DOCUMENTS_PREFIX}{organization_id}/")
-    count = await _end(db, _delete_rows(db, organization_id))
+    count = await _end(db, _delete_rows(db, organization_id, before))
     return int(count)
 
 

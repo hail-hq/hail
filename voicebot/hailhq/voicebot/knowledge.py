@@ -31,6 +31,7 @@ from typing import Any
 from uuid import UUID
 
 import numpy as np
+import regex
 from hailhq.core.db import session_scope
 from hailhq.core.knowledge.access import MEMORY_MAX_PIECES, agent_uses_knowledge
 from hailhq.core.knowledge.embed import Embedder, get_embedder
@@ -68,31 +69,42 @@ _QUERY_CHARS = 1000
 # off, lower case, "that's" is "that" and "s").
 _FILLER = frozenset(
     terms("""yes yeah yep no nope ok okay alright right sure fine good great
-        thanks thank you very much please hello hi hey bye goodbye that's all
-        it is oh ah um uh hmm perfect
+        thanks thank-you you very much so please hello hi hey bye goodbye
+        that's all it is oh ah um uh uh-huh mm-hmm hmm perfect i see got too
+        have a nice day
         sì grazie mille prego va bene perfetto ciao
-        sí gracias muchas vale bueno claro adiós hola
-        oui non merci beaucoup d'accord bon salut
-        ja nein danke vielen bitte gut genau tschüss hallo
-        sim não obrigado obrigada muito tchau olá""")
+        sí gracias muchas muy bien vale bueno claro adiós hola
+        oui non merci beaucoup très bien d'accord bon salut
+        ja nein danke dank vielen schön bitte gut genau tschüss hallo
+        sim não obrigado obrigada muito tudo bem tchau olá""")
 )
-# Latin, full-width, Spanish, Arabic, Greek (U+037E) and Armenian marks.
+# Latin, full-width, Spanish, Arabic, Greek and Armenian marks. Greek
+# writes its question mark as ";" (U+037E normalizes to it), so ";" counts
+# only in Greek text.
 _QUESTION_MARKS = "?？¿؟\u037e՞"
+_GREEK = regex.compile(r"\p{Greek}")
+
+
+def _asks(text: str) -> bool:
+    return any(q in text for q in _QUESTION_MARKS) or (
+        ";" in text and bool(_GREEK.search(text))
+    )
 
 
 def worth_searching(text: str, *, call: bool = False) -> bool:
     """Whether a message is worth a search. Any ID (a word with a digit) is;
     a message of only filler words ("okay, thank you") is not. Otherwise a
-    text or email needs two search words, and a call turn three, or two with
-    a question mark ("Opening hours?", "Is it open?")."""
+    text or email needs two search words. A call turn needs two words that
+    are not filler, or one with a question mark ("How much is it?")."""
     words = query_terms(text)
     if any(any(c.isdigit() for c in w) for w in words):
         return True
-    if all(w in _FILLER for w in words):
+    meaning = [w for w in words if w not in _FILLER]
+    if not meaning:
         return False
-    if not call or len(words) >= 3:
+    if not call:
         return len(words) >= 2
-    return len(words) == 2 and any(q in text for q in _QUESTION_MARKS)
+    return len(meaning) >= 2 or _asks(text)
 
 
 def last_user_text(chat_ctx: Any) -> str:

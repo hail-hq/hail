@@ -176,19 +176,32 @@ def test_filler_turns_are_not_searched_in_calls() -> None:
         "Sì, grazie mille",
         "Oui merci",
         "yes, please.",
+        "Uh-huh.",
+        "Mm-hmm.",
+        "Thank you so much",
+        "Okay, I see",
+        "Got it, thanks",
+        "You too, bye",
+        "Have a nice day",
+        "Vielen Dank!",
+        "Muy bien, gracias",
+        "Très bien, merci",
+        "Tudo bem, obrigado",
     ):
         assert not worth_searching(filler, call=True), filler
     for question in (
         "How much is it?",
         "Is it open?",
         "ωράριο λειτουργίας\u037e",
+        "ωράριο λειτουργίας;",
         "Opening hours?",
         "ساعات العمل؟",
         "E204",
         "how long is the warranty",
     ):
         assert worth_searching(question, call=True), question
-    assert not worth_searching("opening hours", call=True)
+    assert worth_searching("opening hours", call=True)
+    assert not worth_searching("hours; thanks", call=True)
 
 
 def test_texts_and_email_search_two_words() -> None:
@@ -196,6 +209,7 @@ def test_texts_and_email_search_two_words() -> None:
     assert worth_searching("return policy")
     assert not worth_searching("hours")
     assert not worth_searching("thank you")
+    assert not worth_searching("Vielen Dank!")
 
 
 def test_last_user_text() -> None:

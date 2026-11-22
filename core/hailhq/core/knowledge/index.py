@@ -6,8 +6,8 @@ embeddings, plus BM25 over ``text.terms`` (the same words the SQL search
 uses), merged with reciprocal rank fusion (``fuse``). Both lists keep only
 pieces that clear a floor (``MIN_SIMILARITY``, ``MIN_BM25``). The meaning
 floor drops only clear junk, so most questions bring their best pieces and
-the model is told to use them only when they answer (``prompts``). Short
-filler turns are not searched at all during calls
+the model is told to use them only when they answer (``prompts``). Filler
+messages are not searched at all, in calls, texts or email
 (``hailhq.voicebot.knowledge.worth_searching``).
 
 ``Hit`` and ``fuse`` are shared with the SQL search (``search``).

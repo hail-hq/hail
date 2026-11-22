@@ -35,6 +35,8 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml \
   run --rm api python -m hailhq.core.knowledge.access delete '<org-uuid>'
 ```
 
+If it fails, the workspace is already off and its rows are kept: run the same command again.
+
 ## Before the first workspace is turned on
 
 Apply the Terraform change that grants the API read, write, delete and list on `knowledge-documents/` in the mail bucket, from the repo root of the main checkout after merge:
