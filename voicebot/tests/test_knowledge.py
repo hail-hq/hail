@@ -190,6 +190,12 @@ def test_filler_turns_are_not_searched_in_calls() -> None:
         "Sorry?",
         "What?",
         "okay ωράριο",
+        "I'm okay",
+        "We're good",
+        "No, I'm fine",
+        "I'm good, thanks",
+        "Okay, one moment",
+        "Hmm, let me think",
     ):
         assert not worth_searching(filler, call=True), filler
     for question in (
@@ -200,6 +206,9 @@ def test_filler_turns_are_not_searched_in_calls() -> None:
         "okay ωράριο;",
         "Is it refundable",
         "I have a leak",
+        "Price?",
+        "价格？",
+        "ωράριο;",
         "Opening hours?",
         "ساعات العمل؟",
         "E204",
@@ -207,7 +216,8 @@ def test_filler_turns_are_not_searched_in_calls() -> None:
     ):
         assert worth_searching(question, call=True), question
     assert worth_searching("opening hours", call=True)
-    assert not worth_searching("hours; thanks", call=True)
+    assert not worth_searching("hours thanks", call=True)
+    assert not worth_searching("ωράριο", call=True)
 
 
 def test_texts_and_email_search_two_words() -> None:

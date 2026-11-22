@@ -28,7 +28,7 @@ from uuid import UUID
 
 from hailhq.core.config import settings
 from hailhq.core.db import key_lock, session_scope
-from hailhq.core.file_uploads import delete_upload_objects
+from hailhq.core.file_uploads import KNOWLEDGE_DOCUMENTS_PREFIX
 from hailhq.core.models import (
     Agent,
     FileUpload,
@@ -138,8 +138,7 @@ async def _end(db: AsyncSession, work: Awaitable[T]) -> T:
 
 async def _turn_off(db: AsyncSession, organization_id: UUID) -> list[tuple[UUID, str]]:
     """Off and links stopped, under the workspace's knowledge lock. Returns
-    the knowledge uploads that exist now (id, storage key): only these are
-    deleted, so a workspace turned on again meanwhile keeps what it adds."""
+    the knowledge uploads that exist now (id, storage key)."""
     await knowledge_lock(db, organization_id)
     await db.execute(
         update(FileUpload)
@@ -210,16 +209,21 @@ async def delete_org_knowledge(
        start), and the uploads that exist are listed. Committed. A PUT
        already reading its body then cannot mark its link, so it deletes
        its own object.
-    2. The listed uploads' objects (every attempt) are deleted. A failure
-       raises with the workspace off and its rows kept, so a retry (the
-       closed-account sweep finds the workspace by its uploads, or the
-       command run again) finds them.
+    2. The workspace's folder is emptied. A failure raises with the
+       workspace off and its rows kept, so a retry (the closed-account
+       sweep finds the workspace by its uploads, or the command run again)
+       finds them.
     3. The listed upload rows are deleted.
+
+    Do not turn the workspace on again while this runs: its folder is
+    emptied whole. With no bucket configured (``s3`` None) no file can
+    exist (every upload needs the bucket), so only rows go.
     """
     uploads = await _end(db, _turn_off(db, organization_id))
     if s3 is not None:
-        for _, key in uploads:
-            await delete_upload_objects(s3, key)
+        # The whole folder: also objects whose rows are already gone (a
+        # cut-off PUT, a failed sweep delete).
+        await s3.delete_prefix(f"{KNOWLEDGE_DOCUMENTS_PREFIX}{organization_id}/")
     return await _end(db, _delete_rows(db, organization_id, [i for i, _ in uploads]))
 
 

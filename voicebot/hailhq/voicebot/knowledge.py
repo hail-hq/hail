@@ -71,7 +71,8 @@ _FILLER = frozenset(
     terms("""yes yeah yep no nope ok okay alright right sure fine good great
         thanks thank-you you very much so please hello hi hey bye goodbye
         that's all it is oh ah um uh uh-huh mm-hmm hmm perfect i see got too
-        have a nice day
+        have a nice day i'm we're you're i've i'll i'd don't sorry what pardon
+        really excuse me let think one moment second wait
         sì grazie mille prego va bene perfetto ciao
         sí gracias muchas muy bien vale bueno claro adiós hola
         oui non merci beaucoup très bien d'accord bon salut
@@ -92,10 +93,11 @@ def _asks(text: str) -> bool:
 
 def worth_searching(text: str, *, call: bool = False) -> bool:
     """Whether a message is worth a search. Any ID (a word with a digit) is;
-    a message of only filler words ("okay, thank you") is not. Otherwise a
-    text or email needs two search words. A call turn needs three words, or
-    two that are not filler, or two with a question mark ("Hours, please?");
-    one word alone ("Sorry?") is not searched."""
+    a message of only filler words ("okay, thank you", "I'm fine",
+    "Sorry?") is not. Otherwise a text or email needs two search words. A
+    call turn needs two words that are not filler, or one with a question
+    mark ("Price?", "价格？"), or one in a turn of three spoken words or more
+    ("Is it refundable")."""
     words = query_terms(text)
     if any(any(c.isdigit() for c in w) for w in words):
         return True
@@ -104,7 +106,7 @@ def worth_searching(text: str, *, call: bool = False) -> bool:
         return False
     if not call:
         return len(words) >= 2
-    return len(words) >= 3 or len(meaning) >= 2 or (len(words) == 2 and _asks(text))
+    return len(meaning) >= 2 or _asks(text) or len(text.split()) >= 3
 
 
 def last_user_text(chat_ctx: Any) -> str:

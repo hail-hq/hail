@@ -79,8 +79,8 @@ data "aws_iam_policy_document" "main" {
     resources = ["${aws_s3_bucket.inbound.arn}/knowledge-documents/*"]
   }
 
-  # Deleting a document lists its attempt objects; closing an account lists
-  # its folder.
+  # Deleting a document lists its attempt objects; deleting a workspace's
+  # knowledge base (account closure) lists its folder.
   statement {
     sid       = "KnowledgeDocumentsList"
     actions   = ["s3:ListBucket"]
