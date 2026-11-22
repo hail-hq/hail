@@ -14,6 +14,8 @@ after it closes (hailhq.core.retention).
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import re
 from functools import lru_cache
 from typing import Annotated
@@ -40,6 +42,8 @@ from hailhq.core.sms_evidence import (
 )
 from pydantic import BaseModel, Field
 from starlette.datastructures import UploadFile
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/verifications/sms/evidence",
@@ -174,16 +178,32 @@ async def keep_evidence(
 
     Parallel uploads can all pass the first count. Count again after the
     save and take this file back (409) when the account went over the cap.
+    Any failure after the save, a cancelled request included, also takes
+    the file back: the caller never got its link, so nobody could delete it.
     """
     folder = evidence_folder(organization_id)
     key = f"{folder}{token}"
     await store.put_attachment(key, data, content_type)
-    if (
-        await store.count_prefix(folder, up_to=MAX_EVIDENCE_FILES + 1)
-        > MAX_EVIDENCE_FILES
-    ):
-        await store.delete(key)
+    try:
+        over = (
+            await store.count_prefix(folder, up_to=MAX_EVIDENCE_FILES + 1)
+            > MAX_EVIDENCE_FILES
+        )
+    except BaseException:
+        await forget_evidence(store, key)
+        raise
+    if over:
+        await forget_evidence(store, key)
         raise evidence_full()
+
+
+async def forget_evidence(store: S3MailClient, key: str) -> None:
+    """Delete a file whose link was never handed out. Best effort: a
+    failure only logs. Shielded, so a cancelled request still deletes it."""
+    try:
+        await asyncio.shield(store.delete(key))
+    except Exception:
+        logger.warning("could not delete an unused evidence file", exc_info=True)
 
 
 @router.post(
@@ -300,6 +320,7 @@ __all__ = [
     "ensure_evidence_room",
     "evidence_full",
     "evidence_unavailable",
+    "forget_evidence",
     "get_evidence_store",
     "keep_evidence",
     "router",

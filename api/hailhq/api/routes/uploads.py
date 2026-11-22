@@ -44,6 +44,7 @@ from hailhq.api.routes.sms_evidence import (
     WRONG_TYPE,
     ensure_evidence_room,
     evidence_unavailable,
+    forget_evidence,
     keep_evidence,
 )
 from hailhq.core.config import settings
@@ -205,11 +206,10 @@ async def create_file_upload(
     if s3 is None:
         raise _unavailable()
     org = principal.organization_id
-    if body.purpose == EVIDENCE_PURPOSE:
-        # Refused now, not after the agent sends 10 MB.
-        if public_evidence_base() is None:
-            raise evidence_unavailable()
-        await ensure_evidence_room(s3, org)
+    evidence = body.purpose == EVIDENCE_PURPOSE
+    # Refused now, not after the agent sends 10 MB.
+    if evidence and public_evidence_base() is None:
+        raise evidence_unavailable()
     # Two links made at once must not both pass the cap. Not org_lock: that
     # one is held through SMS carrier calls.
     await key_lock(db, f"upload-links:{org}")
@@ -232,6 +232,10 @@ async def create_file_upload(
                 "or wait for them to expire"
             ),
         )
+    if evidence:
+        # After the cheaper cap: a storage list per request only when a
+        # link can be made.
+        await ensure_evidence_room(s3, org)
     token = new_token()
     upload_id = uuid4()
     row = FileUpload(
@@ -605,29 +609,27 @@ async def _store_evidence(
 
     Each PUT writes its own ``sms-evidence/<org>/<token>``, so two PUTs to
     one link never overwrite each other. These keys do not share the link's
-    prefix, so no sweep finds a leftover: every failure after the write
-    deletes this PUT's object itself. The row goes in the statement that
+    prefix, so no sweep finds a leftover: every failure after the write,
+    a cancelled request included, deletes this PUT's object itself. That
+    includes a failed commit whose outcome is unknown: the caller then
+    gets no link, so nobody could delete the file, and the 404 on a retry
+    already says to make a new link. The row goes in the statement that
     uses the link, so no rule has to sweep used evidence links later."""
     token = new_evidence_token()
     key = f"{evidence_folder(organization_id)}{token}"
     digest = (await asyncio.to_thread(hashlib.sha256, payload)).hexdigest()
-    # Until the commit starts, any failure, a cancelled request included,
-    # takes this PUT's file back: the link still works for a retry. Once
-    # the commit starts, its outcome may be unknown, so the file stays: a
-    # file the account can delete costs less than a lost link and file.
-    committing = False
     try:
-        try:
-            # 409, with the object already taken back, when the account
-            # went over the cap meanwhile.
-            await keep_evidence(s3, organization_id, token, payload, content_type)
-        except HTTPException:
-            raise
-        except Exception as exc:
-            raise HTTPException(
-                status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="storage unavailable; try again",
-            ) from exc
+        # 409 when the account went over the cap meanwhile. It takes its
+        # own file back on any failure after the write.
+        await keep_evidence(s3, organization_id, token, payload, content_type)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="storage unavailable; try again",
+        ) from exc
+    try:
         used = (
             await db.execute(
                 delete(FileUpload)
@@ -647,11 +649,9 @@ async def _store_evidence(
         ).one_or_none()
         if used is None:
             raise _not_found()
-        committing = True
         await db.commit()
     except BaseException:
-        if not committing:
-            await _forget_object(s3, upload_id, key)
+        await forget_evidence(s3, key)
         raise
     return FileUploadResponse(
         id=used.id,
@@ -662,16 +662,6 @@ async def _store_evidence(
         sha256=digest,
         url=evidence_url(base, organization_id, token),
     )
-
-
-async def _forget_object(s3: S3MailClient, upload_id: UUID, key: str) -> None:
-    """Best effort: a failure only logs."""
-    try:
-        await s3.delete(key)
-    except Exception:
-        logger.warning(
-            "upload %s: could not delete an unused object", upload_id, exc_info=True
-        )
 
 
 async def _delete_earlier_attempts(s3: S3MailClient, upload_id: UUID, key: str) -> None:

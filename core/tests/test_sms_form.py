@@ -925,6 +925,8 @@ def test_compiled_text_carries_both_policy_urls_to_each_carrier():
     [
         ("how we respect your privacy", "SMS Terms", "privacy policy"),
         ("Privacy Policy", "rules, in terms of frequency,", "SMS terms"),
+        ("Privacy Policy", "rules. Terms apply", "SMS terms"),
+        ("Privacy Policy", "rules on our terms", "SMS terms"),
     ],
 )
 def test_disclosure_words_must_name_a_policy(privacy, terms, missing):
@@ -934,3 +936,17 @@ def test_disclosure_words_must_name_a_policy(privacy, terms, missing):
     }
     (message,) = [m for f, m in errors(data) if f == "consent_disclosure"]
     assert missing in message
+
+
+def test_policy_words_still_need_the_policy_web_addresses():
+    # The words pass the disclosure, and the addresses go to the carrier.
+    data = {
+        **GOOD,
+        "consent_disclosure": LINKED.format(
+            privacy="Privacy Policy", terms="SMS Terms"
+        ),
+        "terms_url": "",
+    }
+    fields = error_fields(data)
+    assert "terms_url" in fields
+    assert "consent_disclosure" not in fields

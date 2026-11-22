@@ -2098,7 +2098,8 @@ async def test_create_file_upload_refuses_other_types_for_sms_evidence(
         filename="a.svg",
         content_type="image/svg+xml",
     )
-    assert "error" in result
+    # Refused locally, before any request.
+    assert "sms_evidence must be image/jpeg" in result["error"]
 
 
 async def test_the_upload_tool_offers_sms_evidence(tools_by_name) -> None:
