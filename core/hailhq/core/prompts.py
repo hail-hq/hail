@@ -31,7 +31,8 @@ _MENU_KEYS_LINE = (
 )
 _MENU_NO_KEYS_LINE = (
     "- If you reach an automated menu, you cannot press keys on this call. "
-    "Stay quiet and wait for a person."
+    "Stay quiet and wait for a person. If the same menu has played three "
+    "times with no person and nothing new, end the call."
 )
 
 _INBOUND_CLOSING = """\

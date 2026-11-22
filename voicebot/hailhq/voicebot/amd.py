@@ -404,9 +404,13 @@ _IVR_PRESS_LINE = (
     "when you know the requested extension. Never invent a zero/operator option. "
     "If the full menu offers no relevant option, wait for a repeat."
 )
-# No "end the call" here: a hold queue plays recordings for minutes before a
-# person answers. The call's duration limit ends a menu that never does.
-_IVR_NO_KEYS_LINE = "You cannot press keys on this call. Wait for a person."
+# A hold queue plays different recordings for minutes before a person
+# answers: keep waiting. Only the same menu, repeated, means no one is coming.
+_IVR_NO_KEYS_LINE = (
+    "You cannot press keys on this call. Wait for a person. A hold message "
+    "is not a reason to leave. If the same menu has played three times with "
+    "no person and nothing new, end the call without speaking."
+)
 _IVR_KEYS_ONLY_LINE = (
     "Press keys, do not speak your choice, the menu cannot hear you. Key "
     "presses happen only through the send_dtmf tool, never write JSON, code, or "

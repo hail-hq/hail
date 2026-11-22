@@ -1184,3 +1184,4 @@ def test_menu_prompt_names_send_dtmf_only_when_the_call_has_it():
     without = ivr_navigation_instructions("Press 1 for sales.", can_press_keys=False)
     assert "send_dtmf" not in without
     assert "cannot press keys" in without
+    assert "three times" in without
