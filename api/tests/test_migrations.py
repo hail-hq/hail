@@ -250,7 +250,7 @@ def test_provider_message_id_unique_is_outbound_only(empty_db: str) -> None:
 
 def test_hail_mail_head_is_globally_unique(empty_db: str) -> None:
     """After 0070 a partial unique index makes hail_mail heads global —
-    inbound routing matches local_prefix_user with no org scoping, so two
+    inbound routing matches local_prefix_workspace with no org scoping, so two
     orgs holding the same head would let one intercept the other's mail
     (even across base-domain changes)."""
     _run_alembic(empty_db, ["upgrade", "head"])
@@ -261,7 +261,8 @@ def test_hail_mail_head_is_globally_unique(empty_db: str) -> None:
         ), "partial unique index email_domains_hail_mail_head_uq missing"
         assert "UNIQUE" in indexdef
         assert "hail_mail" in indexdef
-        assert "(local_prefix_user)" in indexdef
+        # 0090 moved it from local_prefix_user to local_prefix_workspace.
+        assert "(local_prefix_workspace)" in indexdef
         assert _index_def(conn, "email_domains_hail_mail_prefix_uq") is None
 
 
@@ -450,6 +451,160 @@ def test_0088_copies_and_syncs_the_hail_mail_prefixes(empty_db: str) -> None:
             "WHERE id = %s",
             (before,),
         ).fetchone() == ("acme", "heron")
+    _run_alembic(empty_db, ["upgrade", "head"])
+
+
+def test_0090_drops_the_old_hail_mail_prefix_columns(empty_db: str) -> None:
+    """0090 moves every hail-mail rule to local_prefix_workspace and
+    local_prefix_name, drops the old pair, and downgrade brings it back."""
+    _run_alembic(empty_db, ["upgrade", "0089"])
+    url = _to_libpq_url(to_sync_url(empty_db))
+    org = "11111111-1111-1111-1111-111111111111"
+    other = "22222222-2222-2222-2222-222222222222"
+    third = "33333333-3333-3333-3333-333333333333"
+    insert = (
+        "INSERT INTO email_domains (organization_id, kind, domain, "
+        "verification_status, local_prefix_workspace, local_prefix_name) "
+        "VALUES (%s, 'hail_mail', %s, 'verified', %s, %s) RETURNING id"
+    )
+    with psycopg.connect(url, autocommit=True) as conn:
+        kept = conn.execute(
+            insert, (org, "acme+amber@mail.example.com", "acme", "amber")
+        ).fetchone()[0]
+        conn.execute(
+            "INSERT INTO retired_hail_mail_addresses "
+            "(local_prefix_workspace, local_prefix_name, organization_id) "
+            "VALUES ('globex', 'heron', %s)",
+            (other,),
+        )
+
+    # The upgrade stops when either part of either pair differs on a row.
+    # All user triggers are off while a row is broken, so nothing else moves.
+    for table, column, good, key, value in (
+        ("email_domains", "local_prefix_user", "acme", "id", kept),
+        ("email_domains", "local_prefix_org", "amber", "id", kept),
+        (
+            "retired_hail_mail_addresses",
+            "local_prefix_user",
+            "globex",
+            "organization_id",
+            other,
+        ),
+        (
+            "retired_hail_mail_addresses",
+            "local_prefix_org",
+            "heron",
+            "organization_id",
+            other,
+        ),
+    ):
+        with psycopg.connect(url, autocommit=True) as conn:
+            conn.execute(f"ALTER TABLE {table} DISABLE TRIGGER USER")
+            conn.execute(
+                f"UPDATE {table} SET {column} = 'other' WHERE {key} = %s", (value,)
+            )
+        with pytest.raises(RuntimeError, match="prefix columns differ"):
+            _run_alembic(empty_db, ["upgrade", "0090"])
+        with psycopg.connect(url, autocommit=True) as conn:
+            conn.execute(
+                f"UPDATE {table} SET {column} = %s WHERE {key} = %s", (good, value)
+            )
+            conn.execute(f"ALTER TABLE {table} ENABLE TRIGGER USER")
+
+    _run_alembic(empty_db, ["upgrade", "0090"])
+    with psycopg.connect(url, autocommit=True) as conn:
+        for table in ("email_domains", "retired_hail_mail_addresses"):
+            for column in ("local_prefix_user", "local_prefix_org"):
+                assert _column_data_type(conn, table, column) is None, (table, column)
+        assert "local_prefix_workspace" in _index_def(
+            conn, "email_domains_hail_mail_head_uq"
+        )
+        assert _index_def(conn, "email_domains_hail_mail_workspace_idx") is None
+        assert _index_def(conn, "retired_hail_mail_addresses_workspace_idx") is None
+        assert "local_prefix_workspace" in _constraint_src(
+            conn, "retired_hail_mail_addresses_pkey"
+        )
+        assert "local_prefix_workspace" in _constraint_src(
+            conn, "email_domains_prefix_kind_consistency"
+        )
+        reserved = _constraint_src(conn, "email_domains_workspace_prefix_not_reserved")
+        assert reserved is not None and reserved.endswith("NOT VALID")
+        assert _constraint_src(conn, "email_domains_user_prefix_not_reserved") is None
+        assert (
+            conn.execute(
+                "SELECT count(*) FROM pg_proc "
+                "WHERE proname = 'hail_mail_sync_prefix_columns'"
+            ).fetchone()[0]
+            == 0
+        )
+
+        # The rules hold on the new columns: a taken head, a role name, Hail's
+        # own sender name and a head another org retired are all refused.
+        for head in ("acme", "admin", "noreply", "globex"):
+            with pytest.raises(psycopg.errors.IntegrityError):
+                conn.execute(insert, (third, f"{head}+x@mail.example.com", head, "x"))
+        # A head change retires the old address under the new columns.
+        conn.execute(
+            "UPDATE email_domains SET local_prefix_workspace = 'acme-new', "
+            "domain = 'acme-new+amber@mail.example.com' WHERE id = %s",
+            (kept,),
+        )
+        assert conn.execute(
+            "SELECT local_prefix_workspace, local_prefix_name "
+            "FROM retired_hail_mail_addresses WHERE organization_id = %s",
+            (org,),
+        ).fetchone() == ("acme", "amber")
+        with pytest.raises(psycopg.errors.IntegrityError) as refused:
+            conn.execute(insert, (third, "acme+x@mail.example.com", "acme", "x"))
+        assert "workspace prefix" in str(refused.value)
+        stamped_after_upgrade = conn.execute(
+            "SELECT updated_at FROM email_domains WHERE id = %s", (kept,)
+        ).fetchone()[0]
+
+    _run_alembic(empty_db, ["downgrade", "0089"])
+    with psycopg.connect(url, autocommit=True) as conn:
+        assert conn.execute(
+            "SELECT local_prefix_user, local_prefix_org, local_prefix_workspace, "
+            "local_prefix_name FROM email_domains WHERE id = %s",
+            (kept,),
+        ).fetchone() == ("acme-new", "amber", "acme-new", "amber")
+        # The copy is not an edit, and the updated_at trigger is back on.
+        assert (
+            conn.execute(
+                "SELECT updated_at FROM email_domains WHERE id = %s", (kept,)
+            ).fetchone()[0]
+            == stamped_after_upgrade
+        )
+        assert (
+            conn.execute(
+                "SELECT tgenabled FROM pg_trigger "
+                "WHERE tgname = 'email_domains_updated_at'"
+            ).fetchone()[0]
+            == "O"
+        )
+        retired = conn.execute(
+            "SELECT local_prefix_user, local_prefix_org, local_prefix_workspace, "
+            "local_prefix_name FROM retired_hail_mail_addresses ORDER BY 1"
+        ).fetchall()
+        assert retired == [
+            ("acme", "amber", "acme", "amber"),
+            ("globex", "heron", "globex", "heron"),
+        ]
+        assert "local_prefix_user" in _index_def(
+            conn, "email_domains_hail_mail_head_uq"
+        )
+        assert _index_def(conn, "email_domains_hail_mail_workspace_idx") is not None
+        assert "local_prefix_user" in _constraint_src(
+            conn, "retired_hail_mail_addresses_pkey"
+        )
+        # The sync trigger is back: an old writer fills the new pair.
+        conn.execute(
+            "UPDATE email_domains SET local_prefix_org = 'heron' WHERE id = %s",
+            (kept,),
+        )
+        assert conn.execute(
+            "SELECT local_prefix_name FROM email_domains WHERE id = %s", (kept,)
+        ).fetchone() == ("heron",)
     _run_alembic(empty_db, ["upgrade", "head"])
 
 
@@ -951,8 +1106,8 @@ def test_0054_handover_members(empty_db: str) -> None:
         assert _constraint_exists(conn, "agent_handover_contacts_pkey")
 
 
-def test_0089_knowledge_tables(empty_db: str) -> None:
-    """0089 installs pgvector and the knowledge tables, and widens the
+def test_0092_knowledge_tables(empty_db: str) -> None:
+    """0092 installs pgvector and the knowledge tables, and widens the
     upload purposes."""
     _run_alembic(empty_db, ["upgrade", "head"])
     with psycopg.connect(_to_libpq_url(to_sync_url(empty_db))) as conn:
@@ -967,7 +1122,7 @@ def test_0089_knowledge_tables(empty_db: str) -> None:
         assert "knowledge_document" in (
             _constraint_src(conn, "file_uploads_purpose_check") or ""
         )
-    _run_alembic(empty_db, ["downgrade", "0088"])
+    _run_alembic(empty_db, ["downgrade", "0091"])
     with psycopg.connect(_to_libpq_url(to_sync_url(empty_db))) as conn:
         assert not _table_exists(conn, "knowledge_pieces")
         assert "knowledge_document" not in (
@@ -975,9 +1130,9 @@ def test_0089_knowledge_tables(empty_db: str) -> None:
         )
 
 
-def test_0089_uses_an_extensions_schema(empty_db: str) -> None:
+def test_0092_uses_an_extensions_schema(empty_db: str) -> None:
     """Supabase keeps extensions in an ``extensions`` schema on the search
-    path: 0089 installs pgvector there and its tables still work."""
+    path: 0092 installs pgvector there and its tables still work."""
     url = _to_libpq_url(to_sync_url(empty_db))
     with psycopg.connect(url, autocommit=True) as conn:
         conn.execute("DROP EXTENSION IF EXISTS vector CASCADE")

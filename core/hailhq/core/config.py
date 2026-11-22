@@ -1,4 +1,3 @@
-import re
 from typing import Literal
 from uuid import UUID
 
@@ -126,12 +125,6 @@ class Settings(BaseSettings):
     # that sends SMS. Which destinations accept a sender ID is this carrier's
     # table in core/hailhq/core/sender_id_corridors.py.
     sender_id_sms_carrier: str = "twilio"
-    # US trial texting: E.164 of the toll-free number in Hail's own workspace
-    # that sends trial texts to each workspace's verified phone. Empty = off.
-    hail_sms_trial_number: str = ""
-    # Trial texts send only while this is true (and the number's registration
-    # is approved).
-    hail_sms_trial_sending: bool = False
     # DIDWW: numbers, orders and end-user registration through API v3.
     # Empty key = DIDWW offers are hidden and its verification plug-in is off.
     didww_api_key: str = ""
@@ -428,13 +421,6 @@ class Settings(BaseSettings):
         "You are resubscribed to Hail messages. Reply STOP to unsubscribe, "
         "HELP for help."
     )
-
-    @field_validator("hail_sms_trial_number")
-    @classmethod
-    def _trial_number_e164(cls, value: str) -> str:
-        if value and not re.fullmatch(r"\+[1-9][0-9]{6,14}", value):
-            raise ValueError("HAIL_SMS_TRIAL_NUMBER must be empty or E.164")
-        return value
 
     @field_validator("hail_recording_retention_days")
     @classmethod

@@ -580,6 +580,7 @@ func (e FieldSpecKind) Valid() bool {
 const (
 	FileUploadCreatePurposeEmailAttachment      FileUploadCreatePurpose = "email_attachment"
 	FileUploadCreatePurposeKnowledgeDocument    FileUploadCreatePurpose = "knowledge_document"
+	FileUploadCreatePurposeSmsEvidence          FileUploadCreatePurpose = "sms_evidence"
 	FileUploadCreatePurposeVerificationDocument FileUploadCreatePurpose = "verification_document"
 )
 
@@ -589,6 +590,8 @@ func (e FileUploadCreatePurpose) Valid() bool {
 	case FileUploadCreatePurposeEmailAttachment:
 		return true
 	case FileUploadCreatePurposeKnowledgeDocument:
+		return true
+	case FileUploadCreatePurposeSmsEvidence:
 		return true
 	case FileUploadCreatePurposeVerificationDocument:
 		return true
@@ -601,6 +604,7 @@ func (e FileUploadCreatePurpose) Valid() bool {
 const (
 	FileUploadLinkResponsePurposeEmailAttachment      FileUploadLinkResponsePurpose = "email_attachment"
 	FileUploadLinkResponsePurposeKnowledgeDocument    FileUploadLinkResponsePurpose = "knowledge_document"
+	FileUploadLinkResponsePurposeSmsEvidence          FileUploadLinkResponsePurpose = "sms_evidence"
 	FileUploadLinkResponsePurposeVerificationDocument FileUploadLinkResponsePurpose = "verification_document"
 )
 
@@ -610,6 +614,8 @@ func (e FileUploadLinkResponsePurpose) Valid() bool {
 	case FileUploadLinkResponsePurposeEmailAttachment:
 		return true
 	case FileUploadLinkResponsePurposeKnowledgeDocument:
+		return true
+	case FileUploadLinkResponsePurposeSmsEvidence:
 		return true
 	case FileUploadLinkResponsePurposeVerificationDocument:
 		return true
@@ -622,6 +628,7 @@ func (e FileUploadLinkResponsePurpose) Valid() bool {
 const (
 	EmailAttachment      FileUploadResponsePurpose = "email_attachment"
 	KnowledgeDocument    FileUploadResponsePurpose = "knowledge_document"
+	SmsEvidence          FileUploadResponsePurpose = "sms_evidence"
 	VerificationDocument FileUploadResponsePurpose = "verification_document"
 )
 
@@ -631,6 +638,8 @@ func (e FileUploadResponsePurpose) Valid() bool {
 	case EmailAttachment:
 		return true
 	case KnowledgeDocument:
+		return true
+	case SmsEvidence:
 		return true
 	case VerificationDocument:
 		return true
@@ -3040,17 +3049,17 @@ type FieldSpecKind string
 
 // FileUploadCreate Body of “POST /uploads“: what the file is for, and its name and type.
 type FileUploadCreate struct {
-	// ContentType MIME type, `type/subtype` with no parameters. A `verification_document` takes `image/jpeg`, `image/png` or `application/pdf` only. A `knowledge_document` takes `application/pdf`, `application/vnd.openxmlformats-officedocument.wordprocessingml.document`, `text/plain`, `text/markdown` or `text/csv`. This type is stored; the PUT request's own `Content-Type` header is not used.
+	// ContentType MIME type, `type/subtype` with no parameters. A `verification_document` or `sms_evidence` takes `image/jpeg`, `image/png` or `application/pdf` only. A `knowledge_document` takes `application/pdf`, `application/vnd.openxmlformats-officedocument.wordprocessingml.document`, `text/plain`, `text/markdown` or `text/csv`. This type is stored; the PUT request's own `Content-Type` header is not used.
 	ContentType string `json:"content_type"`
 
 	// Filename The file's name, 1 to 255 chars, no control characters.
 	Filename string `json:"filename"`
 
-	// Purpose What the file is for. `email_attachment`: the id works in `POST /v1/emails` `attachment_ids`. `verification_document`: the id works as the `upload.<slot>` part of `POST /v1/verifications` and `POST /v1/verifications/check`. `knowledge_document`: the id works in `POST /v1/knowledge/documents`; needs the knowledge base turned on for the workspace.
+	// Purpose What the file is for. `email_attachment`: the id works in `POST /v1/emails` `attachment_ids`. `verification_document`: the id works as the `upload.<slot>` part of `POST /v1/verifications` and `POST /v1/verifications/check`. `sms_evidence`: a US texting consent screenshot; the PUT returns a public `url` for an `*_evidence_url` field, like `POST /v1/verifications/sms/evidence`. `knowledge_document`: the id works in `POST /v1/knowledge/documents`; needs the knowledge base turned on for the workspace.
 	Purpose FileUploadCreatePurpose `json:"purpose"`
 }
 
-// FileUploadCreatePurpose What the file is for. `email_attachment`: the id works in `POST /v1/emails` `attachment_ids`. `verification_document`: the id works as the `upload.<slot>` part of `POST /v1/verifications` and `POST /v1/verifications/check`. `knowledge_document`: the id works in `POST /v1/knowledge/documents`; needs the knowledge base turned on for the workspace.
+// FileUploadCreatePurpose What the file is for. `email_attachment`: the id works in `POST /v1/emails` `attachment_ids`. `verification_document`: the id works as the `upload.<slot>` part of `POST /v1/verifications` and `POST /v1/verifications/check`. `sms_evidence`: a US texting consent screenshot; the PUT returns a public `url` for an `*_evidence_url` field, like `POST /v1/verifications/sms/evidence`. `knowledge_document`: the id works in `POST /v1/knowledge/documents`; needs the knowledge base turned on for the workspace.
 type FileUploadCreatePurpose string
 
 // FileUploadLinkResponse Returned by “POST /uploads“: a one-time link to send the bytes to.
@@ -3099,6 +3108,9 @@ type FileUploadResponse struct {
 
 	// SizeBytes Bytes stored. Compare with the local file.
 	SizeBytes int `json:"size_bytes"`
+
+	// Url For `sms_evidence`: the public link to the file. Put it in an `*_evidence_url` field. Carrier reviewers open it without signing in. Null for other purposes.
+	Url *string `json:"url,omitempty"`
 }
 
 // FileUploadResponsePurpose What the file is for.
@@ -4053,7 +4065,7 @@ type SuppressionResponse struct {
 	// Recipient The suppressed recipient — E.164 phone number for voice/sms, lowercased email address for email.
 	Recipient string `json:"recipient"`
 
-	// Source How this entry was created: 'unsubscribe_link' (email unsubscribe link) or 'stop_keyword' (recipient replied STOP by SMS). 'manual' (operator action) and 'bounce' (bounce handler) are reserved; nothing writes them yet.
+	// Source How this entry was created: 'unsubscribe_link' (email unsubscribe link), 'stop_keyword' (recipient replied STOP by SMS) or 'trial_stop_keyword' (your trial phone replied STOP to Hail's trial number). 'manual' (operator action) and 'bounce' (bounce handler) are reserved; nothing writes them yet.
 	Source string `json:"source"`
 }
 

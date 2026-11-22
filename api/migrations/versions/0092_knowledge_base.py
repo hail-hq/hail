@@ -29,8 +29,8 @@ No vector index: every search filters on one organization and scans its
 pieces exactly (``knowledge_pieces_org_idx``), which is exact and costs no
 index storage at the early-access limits.
 
-Revision ID: 0089
-Revises: 0088
+Revision ID: 0092
+Revises: 0091
 """
 
 from __future__ import annotations
@@ -39,8 +39,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision: str = "0089"
-down_revision: str | None = "0088"
+revision: str = "0092"
+down_revision: str | None = "0091"
 branch_labels = None
 depends_on = None
 
@@ -64,7 +64,7 @@ def upgrade() -> None:
         "file_uploads_purpose_check",
         "file_uploads",
         "purpose IN ('email_attachment', 'verification_document', "
-        "'verification_kept', 'knowledge_document')",
+        "'verification_kept', 'sms_evidence', 'knowledge_document')",
     )
     op.add_column(
         "agents",
@@ -195,7 +195,7 @@ def downgrade() -> None:
         "file_uploads_purpose_check",
         "file_uploads",
         "purpose IN ('email_attachment', 'verification_document', "
-        "'verification_kept')",
+        "'verification_kept', 'sms_evidence')",
     )
     # The extension stays: dropping it needs every user of it gone, and it
     # costs nothing unused.

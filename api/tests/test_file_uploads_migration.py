@@ -134,3 +134,32 @@ def test_kept_registration_files_link_to_their_verification(
     with _connect(empty_db) as conn:
         assert not _constraint_exists(conn, "file_uploads_kept_link_check")
     _run_alembic(empty_db, ["upgrade", "head"])
+
+
+def test_sms_evidence_links_are_a_purpose(empty_db: str) -> None:  # noqa: F811
+    """Migration 0091: ``sms_evidence`` upload links; a downgrade drops them."""
+    _run_alembic(empty_db, ["upgrade", "0090"])
+    insert = (
+        "INSERT INTO file_uploads (organization_id, purpose, filename, "
+        "content_type, s3_key) VALUES (%s, 'sms_evidence', 'a.png', "
+        "'image/png', 'k')"
+    )
+    with _connect(empty_db) as conn:
+        try:
+            conn.execute(insert, (uuid.uuid4(),))
+        except psycopg.errors.CheckViolation:
+            pass
+        else:  # pragma: no cover
+            raise AssertionError("sms_evidence was accepted before 0091")
+
+    _run_alembic(empty_db, ["upgrade", "0091"])
+    with _connect(empty_db) as conn:
+        conn.execute(insert, (uuid.uuid4(),))
+
+    _run_alembic(empty_db, ["downgrade", "0090"])
+    with _connect(empty_db) as conn:
+        assert conn.execute(
+            "SELECT count(*) FROM file_uploads WHERE purpose = 'sms_evidence'"
+        ).fetchone() == (0,)
+        assert _constraint_exists(conn, "file_uploads_purpose_check")
+    _run_alembic(empty_db, ["upgrade", "head"])

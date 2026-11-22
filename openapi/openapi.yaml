@@ -769,7 +769,14 @@ paths:
 
         `knowledge_document` needs the knowledge base turned on for the
 
-        workspace (403), and `max_bytes` is the workspace's file limit."
+        workspace (403), and `max_bytes` is the workspace's file limit.
+
+
+        For `sms_evidence` the PUT also answers with `url`, the public link for
+
+        an `*_evidence_url` field of a US texting registration. It works like
+
+        `POST /v1/verifications/sms/evidence`."
       operationId: create_file_upload
       parameters:
         - name: authorization
@@ -820,9 +827,15 @@ paths:
             A `knowledge_document` while the knowledge base is not turned
             on for this workspace.
         "409":
-          description: A `knowledge_document` while Hail's knowledge storage is full.
+          description:
+            An `sms_evidence` link for an organization that keeps 100 evidence
+            files, the most allowed. Or a `knowledge_document` while Hail's knowledge
+            storage is full.
         "503":
-          description: File uploads are not configured on this server.
+          description:
+            "File uploads are not configured on this server. For `sms_evidence`,
+            also when the server has no public https URL carrier reviewers can open,
+            or when storage failed for a moment: try again."
         "422":
           description: Validation Error
           content:
@@ -848,13 +861,24 @@ paths:
 
         are all 404 with one message: make a new link if the file is not
 
-        stored. A second upload of the same file is harmless.
+        stored. A second upload of the same file is harmless. For `sms_evidence`
 
-        Empty body: 422. A verification document whose first bytes are not the
+        a lost answer cannot be read again: make a new link and send the file
 
-        declared JPEG, PNG or PDF, or a knowledge document that is not its
+        again. The file stored first stays, and counts toward the 100.
 
-        declared PDF, DOCX or UTF-8 text: 422."
+        Empty body: 422. A verification document or SMS evidence file whose
+
+        first bytes are not the declared JPEG, PNG or PDF, or a knowledge
+
+        document that is not its declared PDF, DOCX or UTF-8 text: 422.
+
+
+        For `sms_evidence` the answer also has `url`, the public link to put in
+
+        an `*_evidence_url` field. An organization that already keeps 100
+
+        evidence files gets 409."
       operationId: put_file_upload
       parameters:
         - name: upload_id
@@ -918,8 +942,9 @@ paths:
             knowledge base turned on.
         "409":
           description:
-            A `knowledge_document` link while Hail's knowledge storage
-            is full.
+            An `sms_evidence` link for an organization that keeps 100 evidence
+            files, the most allowed. Or a `knowledge_document` link while Hail's knowledge
+            storage is full.
         "413":
           description:
             The file is larger than the link's `max_bytes` (for a `knowledge_document`,
@@ -5556,6 +5581,10 @@ paths:
                 type: integer
         "409":
           description: The account keeps the most files allowed.
+        "503":
+          description:
+            "This server cannot store files for carrier reviewers (no mail
+            bucket or no public https URL), or storage failed for a moment: try again."
         "422":
           description: Validation Error
           content:
@@ -9763,12 +9792,15 @@ components:
           enum:
             - email_attachment
             - verification_document
+            - sms_evidence
             - knowledge_document
           title: Purpose
           description:
             "What the file is for. `email_attachment`: the id works in
             `POST /v1/emails` `attachment_ids`. `verification_document`: the id works
             as the `upload.<slot>` part of `POST /v1/verifications` and `POST /v1/verifications/check`.
+            `sms_evidence`: a US texting consent screenshot; the PUT returns a public
+            `url` for an `*_evidence_url` field, like `POST /v1/verifications/sms/evidence`.
             `knowledge_document`: the id works in `POST /v1/knowledge/documents`;
             needs the knowledge base turned on for the workspace."
         filename:
@@ -9782,8 +9814,8 @@ components:
           title: Content Type
           description:
             MIME type, `type/subtype` with no parameters. A `verification_document`
-            takes `image/jpeg`, `image/png` or `application/pdf` only. A `knowledge_document`
-            takes `application/pdf`, `application/vnd.openxmlformats-officedocument.wordprocessingml.document`,
+            or `sms_evidence` takes `image/jpeg`, `image/png` or `application/pdf`
+            only. A `knowledge_document` takes `application/pdf`, `application/vnd.openxmlformats-officedocument.wordprocessingml.document`,
             `text/plain`, `text/markdown` or `text/csv`. This type is stored; the
             PUT request's own `Content-Type` header is not used.
       type: object
@@ -9807,6 +9839,7 @@ components:
           enum:
             - email_attachment
             - verification_document
+            - sms_evidence
             - knowledge_document
           title: Purpose
           description: What the file is for.
@@ -9860,6 +9893,7 @@ components:
           enum:
             - email_attachment
             - verification_document
+            - sms_evidence
             - knowledge_document
           title: Purpose
           description: What the file is for.
@@ -9879,6 +9913,15 @@ components:
           type: string
           title: Sha256
           description: sha256 of the bytes stored, hex. Compare with the local file.
+        url:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Url
+          description:
+            "For `sms_evidence`: the public link to the file. Put it in
+            an `*_evidence_url` field. Carrier reviewers open it without signing in.
+            Null for other purposes."
       type: object
       required:
         - id
@@ -11949,9 +11992,10 @@ components:
           title: Source
           description:
             "How this entry was created: 'unsubscribe_link' (email unsubscribe
-            link) or 'stop_keyword' (recipient replied STOP by SMS). 'manual'
-            (operator action) and 'bounce' (bounce handler) are reserved; nothing
-            writes them yet."
+            link), 'stop_keyword' (recipient replied STOP by SMS) or 'trial_stop_keyword'
+            (your trial phone replied STOP to Hail's trial number). 'manual' (operator
+            action) and 'bounce' (bounce handler) are reserved; nothing writes them
+            yet."
         created_at:
           type: string
           format: date-time

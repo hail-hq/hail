@@ -27,56 +27,56 @@ Every tool sets the MCP hints `readOnlyHint`, `destructiveHint`, `idempotentHint
 
 `place_call`, `send_sms` and `send_email` need `recipient_consent` set to the JSON boolean `true`. Strings such as `"true"` and numbers such as `1` are refused before any request is sent.
 
-| Tool                            | Does                                                                                                                            |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `place_call`                    | Originate an outbound phone call.                                                                                               |
-| `get_call`                      | Fetch the current state and transcript of one call.                                                                             |
-| `list_calls`                    | List recent calls (cursor-paginated).                                                                                           |
-| `send_sms`                      | Send an outbound SMS (recipient consent is required).                                                                           |
-| `get_sms`                       | Fetch the current state of one SMS.                                                                                             |
-| `list_sms`                      | List recent SMS messages (cursor-paginated).                                                                                    |
-| `send_email`                    | Send an outbound email (supports `attachment_ids`).                                                                             |
-| `upload_email_attachment`       | Upload a small file (under about 50 KB) as base64, get back a reusable id.                                                      |
-| `create_file_upload`            | A one-time link to upload a file with `curl`, for an email attachment, a verification document or a knowledge document.         |
-| `get_email`                     | Fetch one email's full record (body + inbound headers).                                                                         |
-| `list_emails`                   | List emails (`direction="inbound"` for replies).                                                                                |
-| `get_email_raw`                 | Presigned URL for an inbound email's raw MIME.                                                                                  |
-| `get_email_attachment`          | Presigned URL for one inbound attachment.                                                                                       |
-| `get_email_events`              | Page through one email's event history.                                                                                         |
-| `get_email_stats`               | Aggregate email counts for a time window.                                                                                       |
-| `get_events`                    | Page through the event stream.                                                                                                  |
-| `list_email_domains`            | List sending identities + the default `from` address.                                                                           |
-| `whoami`                        | Identify the human behind the session (for `reply_to`).                                                                         |
-| `list_contacts`                 | List the org's contacts (members + manual contacts).                                                                            |
-| `lookup_contact`                | Find one contact by name, email, or phone fragment.                                                                             |
-| `create_contact`                | Add a manual contact.                                                                                                           |
-| `list_agents`                   | List saved agents.                                                                                                              |
-| `get_agent`                     | Fetch one saved agent.                                                                                                          |
-| `create_agent`                  | Save an agent that answers calls and texts.                                                                                     |
-| `update_agent`                  | Change an agent. `clear_fields` removes optional values.                                                                        |
-| `delete_agent`                  | Delete an agent. Destructive. Needs `confirm_name`.                                                                             |
-| `add_knowledge_document`        | Add an uploaded file to the knowledge base agents answer from ([agents](agents.md#answer-from-your-documents-knowledge-base)).  |
-| `list_knowledge_documents`      | List knowledge documents and their status (read-only).                                                                          |
-| `get_knowledge_document`        | Fetch one knowledge document; poll it for `ready` (read-only).                                                                  |
-| `delete_knowledge_document`     | Delete a knowledge document, its file and pieces. Destructive. Needs `confirm_name`.                                            |
-| `search_knowledge`              | Search the knowledge base the way agents do (read-only).                                                                        |
-| `route_number`                  | Choose which agent answers a number.                                                                                            |
-| `route_email_domain`            | Choose which agent answers an email address, and who it answers.                                                                |
-| `quote_numbers`                 | Compare live carrier offers for a new number (read-only).                                                                       |
-| `list_number_regions`           | List the US/CA state codes `quote_numbers` takes as optional `region` (read-only).                                              |
-| `acquire_number`                | Buy a quoted number. Spends money. Needs `confirm_total_cents`.                                                                 |
-| `list_numbers`                  | List the org's numbers (cursor-paginated).                                                                                      |
-| `get_number`                    | Fetch one number.                                                                                                               |
-| `release_number`                | Release a number. Destructive and permanent. Needs `confirm_e164`.                                                              |
-| `get_verification_requirements` | Read what a carrier needs to verify the org for a number type (read-only).                                                      |
-| `check_verification`            | Run every check Hail can run on a verification form. Files nothing (read-only).                                                 |
-| `check_verification_documents`  | Read the files of a verification form: values to fill it, and warnings. Uses daily document reads.                              |
-| `submit_verification`           | Send details and documents to the carrier. Irreversible. Needs `attest_authorized`.                                             |
-| `list_verifications`            | List the org's verifications and their states (read-only).                                                                      |
-| `get_verification`              | Fetch one verification; poll it for `approved` (read-only).                                                                     |
-| `resubmit_verification`         | File a rejected number registration again from the kept answers and files, with fixes. Irreversible. Needs `attest_authorized`. |
-| `cancel_verification`           | Cancel an `awaiting_review` one, dismiss a `rejected` one, or end an approved US SMS registration.                              |
-| `confirm_verification`          | Enter the code the carrier texted a person (`confirmation: "code"`).                                                            |
+| Tool                            | Does                                                                                                                                          |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `place_call`                    | Originate an outbound phone call.                                                                                                             |
+| `get_call`                      | Fetch the current state and transcript of one call.                                                                                           |
+| `list_calls`                    | List recent calls (cursor-paginated).                                                                                                         |
+| `send_sms`                      | Send an outbound SMS (recipient consent is required).                                                                                         |
+| `get_sms`                       | Fetch the current state of one SMS.                                                                                                           |
+| `list_sms`                      | List recent SMS messages (cursor-paginated).                                                                                                  |
+| `send_email`                    | Send an outbound email (supports `attachment_ids`).                                                                                           |
+| `upload_email_attachment`       | Upload a small file (under about 50 KB) as base64, get back a reusable id.                                                                    |
+| `create_file_upload`            | A one-time link to upload a file with `curl`: an email attachment, a verification document, texting consent evidence or a knowledge document. |
+| `get_email`                     | Fetch one email's full record (body + inbound headers).                                                                                       |
+| `list_emails`                   | List emails (`direction="inbound"` for replies).                                                                                              |
+| `get_email_raw`                 | Presigned URL for an inbound email's raw MIME.                                                                                                |
+| `get_email_attachment`          | Presigned URL for one inbound attachment.                                                                                                     |
+| `get_email_events`              | Page through one email's event history.                                                                                                       |
+| `get_email_stats`               | Aggregate email counts for a time window.                                                                                                     |
+| `get_events`                    | Page through the event stream.                                                                                                                |
+| `list_email_domains`            | List sending identities + the default `from` address.                                                                                         |
+| `whoami`                        | Identify the human behind the session (for `reply_to`).                                                                                       |
+| `list_contacts`                 | List the org's contacts (members + manual contacts).                                                                                          |
+| `lookup_contact`                | Find one contact by name, email, or phone fragment.                                                                                           |
+| `create_contact`                | Add a manual contact.                                                                                                                         |
+| `list_agents`                   | List saved agents.                                                                                                                            |
+| `get_agent`                     | Fetch one saved agent.                                                                                                                        |
+| `create_agent`                  | Save an agent that answers calls and texts.                                                                                                   |
+| `update_agent`                  | Change an agent. `clear_fields` removes optional values.                                                                                      |
+| `delete_agent`                  | Delete an agent. Destructive. Needs `confirm_name`.                                                                                           |
+| `add_knowledge_document`        | Add an uploaded file to the knowledge base agents answer from ([agents](agents.md#answer-from-your-documents-knowledge-base)).                |
+| `list_knowledge_documents`      | List knowledge documents and their status (read-only).                                                                                        |
+| `get_knowledge_document`        | Fetch one knowledge document; poll it for `ready` (read-only).                                                                                |
+| `delete_knowledge_document`     | Delete a knowledge document, its file and pieces. Destructive. Needs `confirm_name`.                                                          |
+| `search_knowledge`              | Search the knowledge base the way agents do (read-only).                                                                                      |
+| `route_number`                  | Choose which agent answers a number.                                                                                                          |
+| `route_email_domain`            | Choose which agent answers an email address, and who it answers.                                                                              |
+| `quote_numbers`                 | Compare live carrier offers for a new number (read-only).                                                                                     |
+| `list_number_regions`           | List the US/CA state codes `quote_numbers` takes as optional `region` (read-only).                                                            |
+| `acquire_number`                | Buy a quoted number. Spends money. Needs `confirm_total_cents`.                                                                               |
+| `list_numbers`                  | List the org's numbers (cursor-paginated).                                                                                                    |
+| `get_number`                    | Fetch one number.                                                                                                                             |
+| `release_number`                | Release a number. Destructive and permanent. Needs `confirm_e164`.                                                                            |
+| `get_verification_requirements` | Read what a carrier needs to verify the org for a number type (read-only).                                                                    |
+| `check_verification`            | Run every check Hail can run on a verification form. Files nothing (read-only).                                                               |
+| `check_verification_documents`  | Read the files of a verification form: values to fill it, and warnings. Uses daily document reads.                                            |
+| `submit_verification`           | Send details and documents to the carrier. Irreversible. Needs `attest_authorized`.                                                           |
+| `list_verifications`            | List the org's verifications and their states (read-only).                                                                                    |
+| `get_verification`              | Fetch one verification; poll it for `approved` (read-only).                                                                                   |
+| `resubmit_verification`         | File a rejected number registration again from the kept answers and files, with fixes. Irreversible. Needs `attest_authorized`.               |
+| `cancel_verification`           | Cancel an `awaiting_review` one, dismiss a `rejected` one, or end an approved US SMS registration.                                            |
+| `confirm_verification`          | Enter the code the carrier texted a person (`confirmation: "code"`).                                                                          |
 
 ### Sending a file
 
@@ -93,6 +93,7 @@ A tool call carries text only, so a file in base64 makes the model write every c
    The link needs no key and works once. The response has `size_bytes` and `sha256`; compare them with the local file (`wc -c`, `shasum -a 256`).
 
 3. Use the `id`: in `send_email`'s `attachment_ids` (`email_attachment`, 25 MB at most), or as `{"slot", "upload_id"}` in the `files` of `check_verification` and `submit_verification` (`verification_document`: JPG, PNG or PDF, 10 MB at most, usable for 1 hour).
+   For `sms_evidence` (a US texting consent screenshot: JPG, PNG or PDF, 10 MB at most), the `curl` response also has `url`, a public link. Put it in the registration's `*_evidence_url` field, for example `website_evidence_url`. Carrier reviewers open it without signing in, so remove personal information first. A workspace keeps at most 100 evidence files.
 
 This needs a client with a shell (Claude Code, Codex, Cursor). Claude.ai web chat has none: there, only `upload_email_attachment` and base64 `files` work, for small files.
 

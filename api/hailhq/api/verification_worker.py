@@ -4,7 +4,8 @@ Every ``poll_interval`` seconds: release the numbers and cancel the carrier
 registrations of closed organizations (``hailhq.api.org_close``), submit
 drafts still waiting (the carrier was down or refused at creation), and pull
 the carrier's answer for submitted ones so a customer does not have to open
-the console for the state to move.
+the console for the state to move. Last, ask the carrier whether each US
+trial texting number is still approved (``refresh_trial_approvals``).
 Same run_forever / stop contract as ``AbuseMonitorWorker``.
 """
 
@@ -18,6 +19,7 @@ from hailhq.api.org_close import close_org_carrier_items
 from hailhq.api.routes.calls import get_livekit_optional
 from hailhq.api.routes.verifications import sweep_verifications
 from hailhq.core.providers.verification import get_verification_provider
+from hailhq.core.sms_trial import refresh_trial_approvals
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +59,16 @@ class VerificationWorker:
                 await session.rollback()
                 logger.exception("verification worker: account close step failed")
             counts = await sweep_verifications(session, get_verification_provider)
+            # Its own step: a carrier error here must not stop the sweep.
+            try:
+                trial = await refresh_trial_approvals(session)
+                # Logged only when an answer flipped, not on every pass.
+                if trial["changed"]:
+                    for key in ("approved", "not_approved", "no_answer"):
+                        counts[f"trial_{key}"] = trial[key]
+            except Exception:
+                await session.rollback()
+                logger.exception("verification worker: trial number check failed")
             if any(counts.values()):
                 logger.info("verification worker: %s", counts)
             return counts

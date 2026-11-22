@@ -1,6 +1,6 @@
 """Rules shared by every uploaded file (the ``file_uploads`` table).
 
-Three kinds of file share one table and one mail-bucket layout:
+Four kinds of file share one table and one mail-bucket layout:
 
 * ``email_attachment``: a file to attach to outbound email. Stored under
   ``outbound-attachments/<organization_id>/<id>.<attempt>``; its id works in
@@ -23,6 +23,15 @@ Three kinds of file share one table and one mail-bucket layout:
   ``REGISTRATION_KEPT_FOR`` after submit, or sooner when the registration is
   approved or cancelled or the account closes (the verification worker).
   Hail makes these itself; no client can upload one.
+* ``sms_evidence``: a consent screenshot for a US texting registration,
+  sent through an upload link only. The PUT stores it like
+  ``POST /verifications/sms/evidence`` (``hailhq.core.sms_evidence``), at
+  ``sms-evidence/<organization_id>/<token>``, returns its public ``url``,
+  and deletes the link's row in the same statement that uses the link. The
+  file outlives the row: no table tracks evidence files. The row's own
+  ``s3_key`` (``sms-evidence/<organization_id>/<id>``) never names an
+  object, and no evidence token can start with it (a token is 32
+  characters, an id 36), so the link sweep's prefix delete finds nothing.
 
 An upload link (``POST /uploads``) lets a caller with no Hail credentials
 (an agent's shell) send the bytes once with ``PUT /uploads/<id>?token=...``.
@@ -45,6 +54,7 @@ from uuid import UUID, uuid4
 from hailhq.core.config import settings
 from hailhq.core.email_attachment_limits import MAX_EMAIL_ATTACHMENT_BYTES
 from hailhq.core.s3_mail import S3MailClient
+from hailhq.core.sms_evidence import MAX_EVIDENCE_BYTES, SMS_EVIDENCE_PREFIX
 from sqlalchemy import delete, func, select
 
 if TYPE_CHECKING:
@@ -54,12 +64,17 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # What a client may upload (``POST /uploads``).
-Purpose = Literal["email_attachment", "verification_document", "knowledge_document"]
+Purpose = Literal[
+    "email_attachment", "verification_document", "sms_evidence", "knowledge_document"
+]
 PURPOSES: tuple[str, ...] = (
     "email_attachment",
     "verification_document",
+    "sms_evidence",
     "knowledge_document",
 )
+# Upload-link only: ``POST /email-attachments`` never stores one.
+EVIDENCE_PURPOSE = "sms_evidence"
 # Files Hail keeps itself: never a client upload.
 KEPT_PURPOSE = "verification_kept"
 
@@ -101,6 +116,7 @@ _PREFIXES = {
     "verification_document": "verification-uploads/",
     "knowledge_document": "knowledge-documents/",
     KEPT_PURPOSE: "verification-kept/",
+    EVIDENCE_PURPOSE: SMS_EVIDENCE_PREFIX,
 }
 EMAIL_ATTACHMENTS_PREFIX = _PREFIXES["email_attachment"]
 VERIFICATION_UPLOADS_PREFIX = _PREFIXES["verification_document"]
@@ -122,6 +138,8 @@ def max_bytes(purpose: str) -> int:
     """The size limit of one file of this purpose."""
     if purpose in ("verification_document", KEPT_PURPOSE):
         return VERIFICATION_MAX_FILE_BYTES
+    if purpose == EVIDENCE_PURPOSE:
+        return MAX_EVIDENCE_BYTES
     if purpose == "knowledge_document":
         # The ceiling; a workspace's own limit is checked on top of it.
         return KNOWLEDGE_MAX_FILE_BYTES
@@ -177,7 +195,11 @@ async def store_upload(
     computes its identity, key, size and digest. A failed write stays tracked
     and unused so the existing upload sweep can clean it up.
     """
-    if row.purpose not in PURPOSES or len(payload) > max_bytes(row.purpose):
+    if (
+        row.purpose not in PURPOSES
+        or row.purpose == EVIDENCE_PURPOSE
+        or len(payload) > max_bytes(row.purpose)
+    ):
         raise ValueError("File exceeds its upload limit or has an invalid purpose")
     row.id = row.id or uuid4()
     row.s3_key = object_key(row.purpose, row.organization_id, row.id)
@@ -351,6 +373,7 @@ async def delete_org_verification_uploads(
 __all__ = [
     "DOCX_TYPE",
     "EMAIL_ATTACHMENTS_PREFIX",
+    "EVIDENCE_PURPOSE",
     "KEPT_PURPOSE",
     "KNOWLEDGE_DOCUMENTS_PREFIX",
     "KNOWLEDGE_FILE_TYPES",

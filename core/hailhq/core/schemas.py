@@ -13,6 +13,7 @@ from hailhq.core.contact_ids import normalize_contact_id
 from hailhq.core.file_uploads import (
     KNOWLEDGE_FILE_TYPES,
     VERIFICATION_FILE_TYPES,
+    Purpose,
     valid_content_type,
 )
 from hailhq.core.hail_mail import ROLE_MAILBOXES
@@ -1628,7 +1629,7 @@ class SuppressionResponse(BaseModel):
         description="Why the recipient was suppressed (e.g. an unsubscribe or a bounce)."
     )
     source: str = Field(
-        description="How this entry was created: 'unsubscribe_link' (email unsubscribe link) or 'stop_keyword' (recipient replied STOP by SMS). 'manual' (operator action) and 'bounce' (bounce handler) are reserved; nothing writes them yet."
+        description="How this entry was created: 'unsubscribe_link' (email unsubscribe link), 'stop_keyword' (recipient replied STOP by SMS) or 'trial_stop_keyword' (your trial phone replied STOP to Hail's trial number). 'manual' (operator action) and 'bounce' (bounce handler) are reserved; nothing writes them yet."
     )
     created_at: datetime = Field(
         description="When this entry was created, ISO 8601 timestamp."
@@ -2840,16 +2841,16 @@ class EmailAttachmentUploadResponse(BaseModel):
 class FileUploadCreate(BaseModel):
     """Body of ``POST /uploads``: what the file is for, and its name and type."""
 
-    purpose: Literal[
-        "email_attachment", "verification_document", "knowledge_document"
-    ] = Field(
+    purpose: Purpose = Field(
         description=(
             "What the file is for. `email_attachment`: the id works in "
             "`POST /v1/emails` `attachment_ids`. `verification_document`: the "
             "id works as the `upload.<slot>` part of `POST /v1/verifications` "
-            "and `POST /v1/verifications/check`. `knowledge_document`: the id "
-            "works in `POST /v1/knowledge/documents`; needs the knowledge "
-            "base turned on for the workspace."
+            "and `POST /v1/verifications/check`. `sms_evidence`: a US texting "
+            "consent screenshot; the PUT returns a public `url` for an "
+            "`*_evidence_url` field, like `POST /v1/verifications/sms/evidence`. "
+            "`knowledge_document`: the id works in `POST /v1/knowledge/documents`; "
+            "needs the knowledge base turned on for the workspace."
         )
     )
     filename: str = Field(
@@ -2860,8 +2861,8 @@ class FileUploadCreate(BaseModel):
     content_type: str = Field(
         description=(
             "MIME type, `type/subtype` with no parameters. A "
-            "`verification_document` takes `image/jpeg`, `image/png` or "
-            "`application/pdf` only. A `knowledge_document` takes "
+            "`verification_document` or `sms_evidence` takes `image/jpeg`, "
+            "`image/png` or `application/pdf` only. A `knowledge_document` takes "
             "`application/pdf`, "
             "`application/vnd.openxmlformats-officedocument.wordprocessingml.document`, "
             "`text/plain`, `text/markdown` or `text/csv`. This type is "
@@ -2891,12 +2892,11 @@ class FileUploadCreate(BaseModel):
     @model_validator(mode="after")
     def _verification_types(self) -> "FileUploadCreate":
         if (
-            self.purpose == "verification_document"
+            self.purpose in ("verification_document", "sms_evidence")
             and self.content_type not in VERIFICATION_FILE_TYPES
         ):
             raise ValueError(
-                "a verification_document must be image/jpeg, image/png or "
-                "application/pdf"
+                f"a {self.purpose} must be image/jpeg, image/png or application/pdf"
             )
         if (
             self.purpose == "knowledge_document"
@@ -2913,9 +2913,7 @@ class FileUploadLinkResponse(BaseModel):
     """Returned by ``POST /uploads``: a one-time link to send the bytes to."""
 
     id: UUID = Field(description="The upload's id.")
-    purpose: Literal[
-        "email_attachment", "verification_document", "knowledge_document"
-    ] = Field(description="What the file is for.")
+    purpose: Purpose = Field(description="What the file is for.")
     upload_url: str = Field(
         description=(
             "Send the raw file bytes here with `PUT`. No Authorization "
@@ -2933,14 +2931,20 @@ class FileUploadResponse(BaseModel):
     """Returned by ``PUT /uploads/{id}``: what Hail stored."""
 
     id: UUID = Field(description="The upload's id.")
-    purpose: Literal[
-        "email_attachment", "verification_document", "knowledge_document"
-    ] = Field(description="What the file is for.")
+    purpose: Purpose = Field(description="What the file is for.")
     filename: str = Field(description="The name given when the link was made.")
     content_type: str = Field(description="The type given when the link was made.")
     size_bytes: int = Field(description="Bytes stored. Compare with the local file.")
     sha256: str = Field(
         description="sha256 of the bytes stored, hex. Compare with the local file."
+    )
+    url: str | None = Field(
+        default=None,
+        description=(
+            "For `sms_evidence`: the public link to the file. Put it in an "
+            "`*_evidence_url` field. Carrier reviewers open it without signing "
+            "in. Null for other purposes."
+        ),
     )
 
     model_config = ConfigDict(from_attributes=True)

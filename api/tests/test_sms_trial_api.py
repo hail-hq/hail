@@ -10,15 +10,16 @@ from datetime import datetime, timedelta, timezone
 import httpx
 import pytest
 from hailhq.api import deps
-from hailhq.core.config import settings
 from hailhq.core.models import AuditLog, Sms, SmsTrialPhone, UsageEvent
 from hailhq.core.providers.sms import ProviderSmsResult
+from hailhq.core.sms_ingest import ingest_inbound_sms
 from sqlalchemy import func, select, update
 
 from .conftest import (
     insert_org_and_key,
     seed_sms_trial,
     seed_trial_texts,
+    set_sms_trial,
     verify_trial_phone,
 )
 
@@ -94,8 +95,10 @@ def _result(error_code=None, status="queued"):
     return _send
 
 
-async def test_get_trial_off(client, org_and_key, monkeypatch):
-    monkeypatch.setattr(settings, "hail_sms_trial_number", "")
+async def test_get_trial_off(client, org_and_key, async_session):
+    # A call pool number is not a trial number.
+    await seed_sms_trial(async_session)
+    await set_sms_trial(async_session, marked=False)
     _, _, plain = org_and_key
     resp = await client.get(
         "/v1/sms/trial", headers={"Authorization": f"Bearer {plain}"}
@@ -118,7 +121,7 @@ async def test_get_trial_counts_sent_trial_texts(
     jwt_client, org_and_key, async_session, monkeypatch
 ):
     org_id = org_and_key[0]
-    await seed_sms_trial(async_session, monkeypatch)
+    await seed_sms_trial(async_session)
     await seed_trial_texts(async_session, org_id, 3)
     await seed_trial_texts(async_session, org_id, 2, status="failed")
 
@@ -127,16 +130,8 @@ async def test_get_trial_counts_sent_trial_texts(
     assert body["texts_limit"] == 25
 
 
-async def test_get_trial_configured_not_approved(
-    jwt_client, async_session, monkeypatch, sms_mock
-):
-    number = await seed_sms_trial(async_session, monkeypatch)
-    await async_session.execute(
-        update(type(number))
-        .where(type(number).id == number.id)
-        .values(sms_registration_id=None)
-    )
-    await async_session.commit()
+async def test_get_trial_configured_not_approved(jwt_client, async_session, sms_mock):
+    await seed_sms_trial(async_session, ready=False)
 
     body = (await jwt_client.get("/v1/sms/trial")).json()
     assert body["configured"] is True and body["available"] is False
@@ -147,23 +142,19 @@ async def test_get_trial_configured_not_approved(
     sms_mock.send_sms.assert_not_called()
 
 
-async def test_get_trial_approved_but_sending_off(
-    jwt_client, async_session, monkeypatch, sms_mock
+async def test_get_trial_available_when_any_marked_number_is_ready(
+    jwt_client, async_session
 ):
-    await seed_sms_trial(async_session, monkeypatch)
-    monkeypatch.setattr(settings, "hail_sms_trial_sending", False)
-
+    await seed_sms_trial(async_session, ready=False)
+    await seed_sms_trial(async_session, e164="+18005550198")
     body = (await jwt_client.get("/v1/sms/trial")).json()
-    assert body["configured"] is True and body["available"] is False
-    resp = await jwt_client.post("/v1/sms/trial/phone", json=START)
-    assert resp.status_code == 409, resp.text
-    sms_mock.send_sms.assert_not_called()
+    assert body["configured"] is True and body["available"] is True
 
 
 async def test_get_trial_route_not_captured_by_sms_id(
     jwt_client, async_session, monkeypatch
 ):
-    await seed_sms_trial(async_session, monkeypatch)
+    await seed_sms_trial(async_session)
     for path in ("/v1/sms/trial", "/sms/trial"):
         resp = await jwt_client.get(path)
         assert resp.status_code == 200, (path, resp.text)
@@ -175,7 +166,7 @@ async def test_start_needs_console_session(
 ):
     from hailhq.api.main import app
 
-    await seed_sms_trial(async_session, monkeypatch)
+    await seed_sms_trial(async_session)
     org_id, api_key, plain = org_and_key
     user_id = uuid.UUID(api_key.reference_id)
     auth = {"Authorization": f"Bearer {plain}"}
@@ -207,7 +198,7 @@ async def test_start_texts_a_code_from_the_trial_number(
     jwt_client, org_and_key, async_session, monkeypatch, sms_mock, session_factory
 ):
     org_id = org_and_key[0]
-    await seed_sms_trial(async_session, monkeypatch)
+    await seed_sms_trial(async_session)
 
     resp = await jwt_client.post("/v1/sms/trial/phone", json=START)
     assert resp.status_code == 200, resp.text
@@ -238,7 +229,7 @@ async def test_start_texts_a_code_from_the_trial_number(
 async def test_code_text_is_not_an_sms_row_and_not_billed(
     jwt_client, org_and_key, async_session, monkeypatch, sms_mock, session_factory
 ):
-    await seed_sms_trial(async_session, monkeypatch)
+    await seed_sms_trial(async_session)
     resp = await jwt_client.post("/v1/sms/trial/phone", json=START)
     assert resp.status_code == 200, resp.text
 
@@ -255,7 +246,7 @@ async def test_code_text_is_not_an_sms_row_and_not_billed(
 async def test_start_maps_errors(
     jwt_client, async_session, monkeypatch, sms_mock, case
 ):
-    await seed_sms_trial(async_session, monkeypatch)
+    await seed_sms_trial(async_session)
     body = dict(START)
     if case == "non_us":
         body["phone"] = "+447700900123"
@@ -300,7 +291,7 @@ async def test_start_reports_stop_refusal(
     jwt_client, org_and_key, async_session, monkeypatch, sms_mock, session_factory
 ):
     org_id = org_and_key[0]
-    await seed_sms_trial(async_session, monkeypatch)
+    await seed_sms_trial(async_session)
     sms_mock.send_sms.side_effect = _result(error_code="21610")
 
     resp = await jwt_client.post("/v1/sms/trial/phone", json=START)
@@ -341,7 +332,7 @@ async def test_refused_send_uses_no_budget_and_changes_no_row(
 ):
     """The carrier said no: the code never reached the phone."""
     org_id = org_and_key[0]
-    await seed_sms_trial(async_session, monkeypatch)
+    await seed_sms_trial(async_session)
     assert (await jwt_client.post("/v1/sms/trial/phone", json=START)).status_code == 200
     before = await _row(session_factory, org_id)
 
@@ -369,7 +360,7 @@ async def test_send_error_counts_toward_the_codes_and_keeps_the_code(
     """A raised send (timeout, connection reset) may still have reached the
     phone, so it uses one of the 5 codes and that code still works."""
     org_id = org_and_key[0]
-    await seed_sms_trial(async_session, monkeypatch)
+    await seed_sms_trial(async_session)
     sent: list[str] = []
 
     async def _timeout(**kwargs):
@@ -399,7 +390,7 @@ async def test_start_again_after_verified_sends_nothing(
     jwt_client, org_and_key, async_session, monkeypatch, sms_mock, session_factory
 ):
     org_id = org_and_key[0]
-    await seed_sms_trial(async_session, monkeypatch)
+    await seed_sms_trial(async_session)
     await verify_trial_phone(async_session, org_id, PHONE)
 
     resp = await jwt_client.post("/v1/sms/trial/phone", json=START)
@@ -413,7 +404,7 @@ async def test_confirm_flow(
     jwt_client, org_and_key, async_session, monkeypatch, sms_mock, session_factory
 ):
     org_id = org_and_key[0]
-    await seed_sms_trial(async_session, monkeypatch)
+    await seed_sms_trial(async_session)
 
     resp = await jwt_client.post("/v1/sms/trial/phone/confirm", json={"code": "123456"})
     assert resp.status_code == 422, resp.text
@@ -446,7 +437,7 @@ async def test_confirm_expired_code(
     jwt_client, org_and_key, async_session, monkeypatch, sms_mock, session_factory
 ):
     org_id = org_and_key[0]
-    await seed_sms_trial(async_session, monkeypatch)
+    await seed_sms_trial(async_session)
     assert (await jwt_client.post("/v1/sms/trial/phone", json=START)).status_code == 200
     async with session_factory() as s:
         await s.execute(
@@ -470,7 +461,7 @@ async def test_wrong_code_try_is_committed(
     """A wrong try survives the request: a new session reads the count, so
     a rollback cannot hand out extra tries."""
     org_id = org_and_key[0]
-    await seed_sms_trial(async_session, monkeypatch)
+    await seed_sms_trial(async_session)
     assert (await jwt_client.post("/v1/sms/trial/phone", json=START)).status_code == 200
     wrong = f"{(int(_code(sms_mock)) + 1) % 10**6:06d}"
 
@@ -500,7 +491,7 @@ async def test_confirm_phone_taken_meanwhile(
     jwt_client, org_and_key, async_session, monkeypatch, sms_mock, session_factory
 ):
     org_id = org_and_key[0]
-    await seed_sms_trial(async_session, monkeypatch)
+    await seed_sms_trial(async_session)
     assert (await jwt_client.post("/v1/sms/trial/phone", json=START)).status_code == 200
     other_org, _, _ = await insert_org_and_key(
         async_session, org_name="Other", org_slug="other"
@@ -522,8 +513,7 @@ async def test_errors_never_name_a_carrier(
     jwt_client, org_and_key, async_session, monkeypatch, sms_mock
 ):
     texts = []
-    number = await seed_sms_trial(async_session, monkeypatch)
-    number_id = number.id
+    await seed_sms_trial(async_session)
 
     async def post(path, body):
         texts.append((await jwt_client.post(path, json=body)).text)
@@ -544,12 +534,7 @@ async def test_errors_never_name_a_carrier(
     await post("/v1/sms/trial/phone", START)
     await post("/v1/sms/trial/phone/confirm", {"code": "000000"})
 
-    await async_session.execute(
-        update(type(number))
-        .where(type(number).id == number_id)
-        .values(sms_registration_id=None)
-    )
-    await async_session.commit()
+    await set_sms_trial(async_session, ready=False)
     await post("/v1/sms/trial/phone", START)
 
     assert len(texts) == 9
@@ -566,7 +551,7 @@ async def test_code_goes_to_the_stored_phone(
 
     org_id = org_and_key[0]
     stored = "+14155550143"
-    await seed_sms_trial(async_session, monkeypatch)
+    await seed_sms_trial(async_session)
 
     async def _stores_other(db, organization_id, **kwargs):
         return await start_phone_proof(
@@ -609,7 +594,7 @@ async def test_switching_phone_keeps_trial_texts_until_confirmed(
     texts. Confirming B moves the trial to B."""
     org_id = org_and_key[0]
     new_phone = "+14155550143"
-    await seed_sms_trial(async_session, monkeypatch)
+    await seed_sms_trial(async_session)
     await verify_trial_phone(async_session, org_id, PHONE)
 
     resp = await jwt_client.post(
@@ -649,7 +634,7 @@ async def test_asking_again_for_the_verified_phone_clears_the_pending_one(
     jwt_client, org_and_key, async_session, monkeypatch, sms_mock, session_factory
 ):
     org_id = org_and_key[0]
-    await seed_sms_trial(async_session, monkeypatch)
+    await seed_sms_trial(async_session)
     await verify_trial_phone(async_session, org_id, PHONE)
     switch = await jwt_client.post(
         "/v1/sms/trial/phone", json={**START, "phone": "+14155550143"}
@@ -667,3 +652,59 @@ async def test_asking_again_for_the_verified_phone_clears_the_pending_one(
     row = await _row(session_factory, org_id)
     assert row.pending_phone_e164 is None and row.code_hash is None
     assert (await jwt_client.get("/v1/sms/trial")).json()["pending_phone"] is None
+
+
+async def test_stop_to_the_trial_number_refuses_trial_texts(
+    jwt_client, org_and_key, async_session, sms_mock
+):
+    """After the trial phone replies STOP to a trial number, the consent
+    check refuses its trial texts until it replies START."""
+    org_id = org_and_key[0]
+    await seed_sms_trial(async_session)
+    await verify_trial_phone(async_session, org_id)
+    await ingest_inbound_sms(
+        async_session,
+        carrier="twilio",
+        from_e164=PHONE,
+        to_e164=TRIAL_E164,
+        body="STOP",
+        provider_message_sid="SM_stop",
+        opt_out_type="STOP",
+    )
+    await async_session.commit()
+
+    resp = await jwt_client.post(
+        "/v1/sms",
+        json={"to": PHONE, "body": "hi", "recipient_consent": True},
+    )
+    assert resp.status_code != 201, resp.text
+    sms_mock.send_sms.assert_not_called()
+
+
+async def test_no_code_goes_to_a_phone_that_replied_stop(
+    jwt_client, org_and_key, async_session, sms_mock
+):
+    """A phone waiting for its code replies STOP to the trial number: the
+    next code request is refused with no text sent."""
+    await seed_sms_trial(async_session)
+    resp = await jwt_client.post("/v1/sms/trial/phone", json=START)
+    assert resp.status_code == 200, resp.text
+    await ingest_inbound_sms(
+        async_session,
+        carrier="twilio",
+        from_e164=PHONE,
+        to_e164=TRIAL_E164,
+        body="STOP",
+        provider_message_sid="SM_stop_pending",
+        opt_out_type="STOP",
+    )
+    await async_session.commit()
+    sms_mock.send_sms.reset_mock()
+
+    resp = await jwt_client.post("/v1/sms/trial/phone", json=START)
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"][0]["msg"] == (
+        "This phone replied STOP to Hail. Reply START first."
+    )
+    assert resp.json()["detail"][0]["loc"] == ["body", "phone"]
+    sms_mock.send_sms.assert_not_called()

@@ -9,7 +9,7 @@ Exposes the following tools to the calling agent:
 * ``send_email`` — send an outbound email
 * ``upload_email_attachment`` — upload a small file (base64) to attach to an outbound email
 * ``create_file_upload`` — a one-time link to PUT a file with curl, for an
-  email attachment or a verification document
+  email attachment, a verification document or US texting consent evidence
 * ``get_email`` — fetch the full record of one email
 * ``list_emails`` — page through emails (``direction="inbound"`` for replies)
 * ``get_email_raw`` — presigned URL for an inbound email's raw MIME
@@ -105,12 +105,13 @@ from typing import Annotated, Any, Literal, get_args
 import httpx
 from hailhq.core.carrier_offer import SubjectType
 from hailhq.core.file_uploads import (
-    PURPOSES as _UPLOAD_PURPOSES,
-)
-from hailhq.core.file_uploads import (
+    EVIDENCE_PURPOSE,
     VERIFICATION_FILE_TYPES,
     VERIFICATION_MAX_FILE_BYTES,
     matches_declared_type,
+)
+from hailhq.core.file_uploads import (
+    PURPOSES as _UPLOAD_PURPOSES,
 )
 from hailhq.core.file_uploads import Purpose as UploadPurpose
 from hailhq.core.internal_webhook import fetch_organization_name
@@ -1616,7 +1617,11 @@ async def create_file_upload(
     *, client: HailClient, purpose: str, filename: str, content_type: str
 ) -> dict[str, Any]:
     if purpose not in _UPLOAD_PURPOSES:
-        return {"error": "purpose must be one of: " + ", ".join(_UPLOAD_PURPOSES)}
+        return {
+            "error": "purpose must be "
+            + ", ".join(f"'{p}'" for p in _UPLOAD_PURPOSES[:-1])
+            + f" or '{_UPLOAD_PURPOSES[-1]}'"
+        }
     try:
         link = await client.create_file_upload(
             purpose=purpose, filename=filename, content_type=content_type
@@ -1644,6 +1649,12 @@ async def create_file_upload(
             "The response has size_bytes and sha256: compare them with the "
             "local file (for example `wc -c` and `shasum -a 256`). The link "
             "works once, until expires_at."
+            + (
+                " The response's url is the public evidence link: put it in the "
+                "*_evidence_url field of the texting registration."
+                if purpose == EVIDENCE_PURPOSE
+                else ""
+            )
         ),
     }
 
@@ -2685,6 +2696,11 @@ def register_tools(
                 "``send_email``'s ``attachment_ids``. ``verification_document``: "
                 "its ``id`` goes in the ``files`` of ``check_verification`` and "
                 "``submit_verification`` as ``{slot, upload_id}``. "
+                "``sms_evidence``: a US texting consent screenshot; the upload "
+                "response's ``url`` goes in an ``*_evidence_url`` field. Anyone "
+                "with that link can open the file, and a workspace keeps at "
+                "most 100. Deleting one needs the console or "
+                "``DELETE /v1/verifications/sms/evidence/{organization_id}/{token}``. "
                 "``knowledge_document``: its ``id`` goes in "
                 "``add_knowledge_document``."
             ),
@@ -2700,6 +2716,9 @@ def register_tools(
         so any file that is not tiny goes this way.
         An email attachment can be up to 25 MB. A verification document must be
         JPG, PNG or PDF, up to 10 MB, and is usable for 1 hour after the upload.
+        SMS evidence must be a JPG, PNG or PDF of the given ``content_type``, up to 10 MB.
+        Its upload response has a public ``url`` for an ``*_evidence_url`` field.
+        Carrier reviewers open it without signing in, so remove personal information first.
         A knowledge document is a PDF with text, DOCX, TXT, Markdown or CSV, up
         to the workspace's file limit (``max_bytes``).
         Returns ``id``, ``upload_url``, ``expires_at`` (15 minutes), ``max_bytes``
@@ -3698,6 +3717,8 @@ def register_tools(
         Choice fields accept comma-separated option keys within their ``min_choices`` and ``max_choices``.
         Field ``max_length`` uses UTF-16 code units; an emoji counts as two.
         Selected consent methods can require evidence even when shared fields are optional.
+        No public link for an ``*_evidence_url`` field? Upload the screenshot with
+        ``create_file_upload`` (purpose ``sms_evidence``) and use the ``url`` it returns.
         Document slots with ``needs_input=false`` require no upload.
         An upstream failure returns an error."""
         try:
@@ -4133,6 +4154,7 @@ def register_tools(
 
         The response contains the description, consent flow and samples for user review before submission.
         Answers require actual applicant information and consent evidence.
+        Evidence links can come from ``create_file_upload`` with purpose ``sms_evidence``.
         Field or length errors appear in ``problems``.
         Limits are 100 fields and 64 KiB of combined fields and address.
         A successful preview does not guarantee submission: duplicates, low credit or carrier checks can still prevent it.
@@ -4196,7 +4218,8 @@ def register_tools(
 
         The address must be accurate; saved details can be reused when still correct.
         Identity changes are rejected. This operation does not create a replacement brand.
-        Actual consent evidence is required.
+        Actual consent evidence is required; ``create_file_upload`` with purpose
+        ``sms_evidence`` returns a public evidence link.
         Limits are 100 fields and 64 KiB of combined fields and address. No documents are uploaded.
         A later campaign filing can incur the normal review fee.
         After a timeout, the existing registration can already reflect the correction.
