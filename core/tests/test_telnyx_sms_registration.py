@@ -1880,6 +1880,27 @@ async def test_brand_refused_later_reads_text_and_fields(reasons, start) -> None
     assert st.reason.startswith(start)
 
 
+async def test_a_form_error_saying_permission_reaches_the_customer():
+    def handler(req):
+        return httpx.Response(
+            422,
+            json={
+                "errors": [
+                    {"detail": "Invalid email", "source": {"pointer": "/email"}},
+                    {"description": "Opt-in permission language missing"},
+                ]
+            },
+        )
+
+    draft = await _draft(_provider(handler), subject="person", fields=PERSON_FIELDS)
+    assert [p.field for p in draft.problems] == ["email", ""]
+
+
+def test_an_odd_fields_value_does_not_crash():
+    problems = _reason_problems([{"fields": 1, "description": "x"}], "person")
+    assert problems[0].message.endswith("The carrier said: x.")
+
+
 async def test_an_account_error_under_description_stays_an_outage():
     def handler(req):
         return httpx.Response(

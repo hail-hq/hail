@@ -46,6 +46,7 @@ from hailhq.core.providers.verification.sms_review import (
     LEGACY_APPLICATION,
     LOW_VOLUME_FASTER_LANE,
     LOW_VOLUME_FASTER_LANE_FAILED,
+    account_problem,
     application_validation_error,
     brand_rejected_reason,
     campaign_repair_reason,
@@ -1336,6 +1337,11 @@ def _refused(exc: Exception) -> bool:
     )
     # Every text key: the outage check reads the same words that get quoted.
     prose = " ".join(_all_text(error) for error in errors)
+    if known_field:
+        # An error on a form field is the customer's unless the text names
+        # Hail's account. "permission" is a form word here, as on Twilio
+        # ("Opt-in permission language missing").
+        return exc.response.status_code in (400, 422) and not account_problem(prose)
     return application_validation_error(
         exc.response.status_code, prose, known_field=known_field
     )
@@ -1498,7 +1504,9 @@ def _field_names(reason: dict) -> list[str]:
     fields = reason.get("fields")
     if isinstance(fields, str):
         return [fields]
-    return [f for f in fields or [] if isinstance(f, str)]
+    if not isinstance(fields, (list, tuple)):
+        return []
+    return [f for f in fields if isinstance(f, str)]
 
 
 def _one_line(text: str | None) -> str | None:

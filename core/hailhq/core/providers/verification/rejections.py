@@ -128,15 +128,17 @@ def carrier_texts(raw: object) -> list[str]:
     "Unable to create record:" are dropped. Anything else
     (numbers, codes on their own) gives nothing."""
     if isinstance(raw, dict):
+        # The first key whose text is still there once cleaned.
         for key in TEXT_KEYS:
-            if isinstance(raw.get(key), str) and raw[key].strip():
-                return carrier_texts(raw[key])
+            if isinstance(raw.get(key), str) and (found := carrier_texts(raw[key])):
+                return found
         return []
     if isinstance(raw, (list, tuple)):
         return [text for item in raw for text in carrier_texts(item)]
     if not isinstance(raw, str):
         return []
-    text = _FIELD_TAG.sub("", _SDK_PREFIX.sub("", raw)).strip()
+    # One line: a carrier's line breaks would break the console and email.
+    text = " ".join(_FIELD_TAG.sub("", _SDK_PREFIX.sub("", raw)).split())
     return [text] if text else []
 
 

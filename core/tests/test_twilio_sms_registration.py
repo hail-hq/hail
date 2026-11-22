@@ -829,6 +829,13 @@ def test_sdk_wrapper_is_not_quoted() -> None:
     assert with_carrier_text("Hi.", "Unable to create recordings now") == (
         "Hi. The carrier said: Unable to create recordings now."
     )
+    # Line breaks collapse; a key that cleans to nothing falls to the next.
+    assert with_carrier_text("Hi.", "Opt-in missing.\nSee guide") == (
+        "Hi. The carrier said: Opt-in missing. See guide."
+    )
+    assert with_carrier_text("Hi.", {"description": "[email] - ", "detail": "Bad"}) == (
+        "Hi. The carrier said: Bad."
+    )
     # A tag the sentence goes on from stays.
     assert with_carrier_text("Hi.", "[website] is unreachable") == (
         "Hi. The carrier said: [website] is unreachable."
