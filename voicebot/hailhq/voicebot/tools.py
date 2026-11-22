@@ -1,7 +1,7 @@
 """Adapt the core agent-tool registry to LiveKit function tools.
 
 Per-call filtering: the dispatch metadata's ``tools`` list (None ⇒ all,
-[] ⇒ none but end_call) then each spec's per-org ``is_available`` check. Send tools
+[] ⇒ no built-in tools but end_call; HTTP tools stay on) then each spec's per-org ``is_available`` check. Send tools
 require HAIL_INTERNAL_SECRET (they call the API's internal agent routes);
 without it only local/read-only tools remain.
 
