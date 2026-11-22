@@ -214,12 +214,11 @@ class KnowledgeIngestWorker:
                 )
             except FolderSweepFailed as exc:
                 # Rows are gone, so nothing here retries it.
-                logger.warning(
-                    "knowledge: closed org %s: %s. Action: run python -m "
-                    "hailhq.core.knowledge.access delete %s",
+                logger.exception(
+                    "knowledge: closed org %s: %s. Action: run the knowledge "
+                    "delete for it by hand (docs/operations/knowledge-base.md)",
                     org_id,
                     exc,
-                    org_id,
                 )
             except Exception as exc:
                 logger.warning(

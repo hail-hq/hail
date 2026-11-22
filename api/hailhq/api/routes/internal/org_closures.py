@@ -107,9 +107,9 @@ async def close_org(organization_id: UUID, lk: LiveKitClient | None) -> None:
                 documents = await delete_org_knowledge(db, organization_id, store)
                 logger.info("org closure: %d knowledge document(s) deleted", documents)
         except FolderSweepFailed as exc:
-            logger.warning(
-                "org closure: %s. Action: run python -m "
-                "hailhq.core.knowledge.access delete %s",
+            logger.exception(
+                "org closure: %s. Action: run the knowledge delete for %s by "
+                "hand (docs/operations/knowledge-base.md)",
                 exc,
                 organization_id,
             )
@@ -117,7 +117,8 @@ async def close_org(organization_id: UUID, lk: LiveKitClient | None) -> None:
             await db.rollback()
             logger.exception(
                 "org closure: could not delete the knowledge base; the "
-                "knowledge ingest worker retries it"
+                "knowledge ingest worker retries it when it runs, else run "
+                "the delete by hand (docs/operations/knowledge-base.md)"
             )
 
 

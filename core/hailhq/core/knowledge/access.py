@@ -129,7 +129,8 @@ class FolderSweepFailed(RuntimeError):
     def __init__(self, documents: int, cause: Exception) -> None:
         super().__init__(
             f"deleted {documents} document(s), but the folder sweep failed "
-            f"({type(cause).__name__}); run the delete again"
+            f"({type(cause).__name__}: {cause}); run the delete again "
+            "(docs/operations/knowledge-base.md)"
         )
         self.documents = documents
 
@@ -153,6 +154,10 @@ async def _turn_off(db: AsyncSession, organization_id: UUID) -> list[tuple[UUID,
     """Off and links stopped, under the workspace's knowledge lock. Returns
     the knowledge uploads that exist now (id, storage key)."""
     await knowledge_lock(db, organization_id)
+    # The upload sweep may hold an upload row during a storage delete: wait
+    # a bounded time, then fail (safe to run again) instead of holding the
+    # workspace's lock for as long.
+    await db.execute(text("SET LOCAL lock_timeout = '5s'"))
     await db.execute(
         update(FileUpload)
         .where(
