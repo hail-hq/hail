@@ -3,6 +3,7 @@ Postgres with pgvector."""
 
 from __future__ import annotations
 
+import builtins
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -586,4 +587,5 @@ def test_database_errors_never_show_their_text() -> None:
         # ``from None`` hides the cause but the context still holds it.
         assert involves_database(wrapped)
     assert not involves_database(RuntimeError("plain"))
-    assert involves_database(ExceptionGroup("tasks", [db_error]))
+    group = getattr(builtins, "ExceptionGroup")  # noqa: B009 (3.11+ name)
+    assert involves_database(group("tasks", [db_error]))
