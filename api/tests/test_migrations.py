@@ -1122,9 +1122,23 @@ def test_0092_knowledge_tables(empty_db: str) -> None:
         assert "knowledge_document" in (
             _constraint_src(conn, "file_uploads_purpose_check") or ""
         )
+    with psycopg.connect(_to_libpq_url(to_sync_url(empty_db)), autocommit=True) as conn:
+        # An unused texting evidence link must survive the downgrade.
+        conn.execute(
+            "INSERT INTO file_uploads (organization_id, purpose, filename, "
+            "content_type, s3_key) VALUES (gen_random_uuid(), 'sms_evidence', "
+            "'consent.png', 'image/png', 'sms-evidence/x')"
+        )
     _run_alembic(empty_db, ["downgrade", "0091"])
     with psycopg.connect(_to_libpq_url(to_sync_url(empty_db))) as conn:
         assert not _table_exists(conn, "knowledge_pieces")
+        assert "sms_evidence" in (
+            _constraint_src(conn, "file_uploads_purpose_check") or ""
+        )
+        kept = conn.execute(
+            "SELECT count(*) FROM file_uploads WHERE purpose = 'sms_evidence'"
+        ).fetchone()
+        assert kept == (1,)
         assert "knowledge_document" not in (
             _constraint_src(conn, "file_uploads_purpose_check") or ""
         )

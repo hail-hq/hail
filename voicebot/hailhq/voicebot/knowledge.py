@@ -62,10 +62,15 @@ _QUERY_CHARS = 1000
 
 
 def worth_searching(text: str) -> bool:
-    """False for one-word turns like "yes" or "okay" with no ID in them.
-    "Opening hours?" is searched."""
+    """False for filler turns like "yes", "okay thanks" or "no thanks": a
+    turn is searched with three or more search words, two with a question
+    mark ("Opening hours?"), or any ID (a word with a digit)."""
     words = query_terms(text)
-    return len(words) >= 2 or any(any(c.isdigit() for c in w) for w in words)
+    if any(any(c.isdigit() for c in w) for w in words):
+        return True
+    if len(words) >= 3:
+        return True
+    return len(words) == 2 and any(q in text for q in "?？¿")
 
 
 def last_user_text(chat_ctx: Any) -> str:

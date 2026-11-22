@@ -126,12 +126,23 @@ async def delete_org_knowledge(
 ) -> int:
     """Delete a workspace's whole knowledge base: its files from the bucket,
     then the upload rows (their documents and pieces go with them), and its
-    limits row (so it is off). The one function for every such delete:
+    limits row. The limits row goes first, so the workspace is off before
+    the folder is emptied. The one function for every such delete:
     today an account closing (``org_closures`` route and the ingest
     worker) and Hail by hand (``python -m hailhq.core.knowledge.access
     delete <org-id>``, docs/operations/knowledge-base.md); later a paid plan
     ending. Returns the documents deleted. A failed bucket delete
-    raises before any row goes, so a retry finds everything again."""
+    raises before any upload row goes, so a retry finds everything again
+    (the account-closure retry finds the workspace by its uploads)."""
+    # Off first, under the workspace's lock: new links and documents get
+    # 403 from here on, so no file lands after the folder is emptied.
+    await knowledge_lock(db, organization_id)
+    await db.execute(
+        delete(OrganizationKnowledge).where(
+            OrganizationKnowledge.organization_id == organization_id
+        )
+    )
+    await db.commit()
     if s3 is not None:
         await s3.delete_prefix(f"{KNOWLEDGE_DOCUMENTS_PREFIX}{organization_id}/")
     count = (
@@ -152,21 +163,15 @@ async def delete_org_knowledge(
     await db.execute(
         delete(KnowledgePiece).where(KnowledgePiece.organization_id == organization_id)
     )
-    await db.execute(
-        delete(OrganizationKnowledge).where(
-            OrganizationKnowledge.organization_id == organization_id
-        )
-    )
     await db.commit()
     return int(count)
 
 
 async def _delete_main(organization_id: UUID) -> None:
-    store = (
-        S3MailClient(bucket=settings.hail_mail_bucket)
-        if settings.hail_mail_bucket
-        else None
-    )
+    if not settings.hail_mail_bucket:
+        # The files would stay with nothing pointing to them.
+        sys.exit("HAIL_MAIL_BUCKET is not set: refusing to delete only the rows")
+    store = S3MailClient(bucket=settings.hail_mail_bucket)
     async with session_scope() as db:
         deleted = await delete_org_knowledge(db, organization_id, store)
     print(f"deleted {deleted} document(s); the knowledge base is off")

@@ -4,8 +4,11 @@ A call loads its workspace's pieces once (``hailhq.voicebot.knowledge``) and
 asks this index on every caller turn: cosine similarity over the
 embeddings, plus BM25 over ``text.terms`` (the same words the SQL search
 uses), merged with reciprocal rank fusion (``fuse``). Both lists keep only
-pieces that clear a floor (``MIN_SIMILARITY``, ``MIN_BM25``), so a turn like
-"yes, thanks" brings no pieces at all.
+pieces that clear a floor (``MIN_SIMILARITY``, ``MIN_BM25``). The meaning
+floor drops only clear junk, so most questions bring their best pieces and
+the model is told to use them only when they answer (``prompts``). Short
+filler turns are not searched at all during calls
+(``hailhq.voicebot.knowledge.worth_searching``).
 
 ``Hit`` and ``fuse`` are shared with the SQL search (``search``).
 """
@@ -42,7 +45,8 @@ RRF_K = 60
 # questions, 7 languages): right sections 0.77 to 0.90 (the lowest two in
 # Italian and French), right 400-token pieces from 0.73, off-topic
 # questions' best match 0.72 to 0.81. So the floor sits below every right
-# piece and drops only clear junk; the model judges the rest
+# piece; it drops only clear junk, and most off-topic questions still bring
+# pieces, which the model is told to ignore when they do not answer
 # (docs/operations/knowledge-base.md).
 MIN_SIMILARITY = 0.72
 # BM25 floor: about one fairly rare word in common.

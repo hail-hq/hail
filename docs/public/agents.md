@@ -277,7 +277,7 @@ Early-access limits per workspace: 10 documents, 10 MB per file, 1,000 pieces. A
 
 ### What the agent does with it
 
-- **Calls**: when a call starts, Hail loads the workspace's pieces while the greeting plays. On each caller turn it finds the best 3 pieces and gives them to the model with that turn. A turn like "yes, thanks" brings none.
+- **Calls**: when a call starts, Hail loads the workspace's pieces while the greeting plays. On each caller turn it finds the best 3 pieces and gives them to the model with that turn. Short filler like "yes, thanks" is not searched. The agent is told to use the pieces only when they answer the question.
 - **Texts and email**: each reply gets the best 5 pieces for the message.
 - **Search** works by meaning and by words together. A question in Italian finds an English manual. Part numbers and error codes match however they are spoken or typed: "NS BAT 48 V 100" finds "NS-BAT-48V-100".
 - Document text is treated as reference data, never as instructions to the agent.

@@ -94,6 +94,9 @@ _STALE = "Hail could not read the file in time; delete it and add it again"
 LEASE = timedelta(minutes=15)
 # Wall-clock limit of one decode. The child also has a 30 s CPU limit.
 DECODE_SECONDS = 60.0
+# Most pieces one file may give: it must be read within ``LEASE`` (about
+# 280 s per 1,000 pieces on one CPU thread), whatever the workspace limit.
+MAX_DOCUMENT_PIECES = 3000
 # Pieces written per INSERT.
 _INSERT_BATCH = 100
 
@@ -110,7 +113,8 @@ class _Unavailable(Exception):
 
 
 def _claimable(now: datetime):
-    # 5 minutes, then 10, then 15 between tries.
+    # ``RETRY_MINUTES`` times (tries used + 1): 5 minutes after a wait that
+    # used no try, 10 and 15 after the first and second tries.
     retry_after = func.make_interval(
         0, 0, 0, 0, 0, RETRY_MINUTES * (KnowledgeDocument.attempts + 1)
     )
@@ -213,7 +217,7 @@ class KnowledgeIngestWorker:
 
     async def _fail_spent(self) -> None:
         """Rows that used every try (a crashed worker's lease) or waited past
-        ``STALE_AFTER`` fail, in one statement."""
+        ``STALE_AFTER`` fail."""
         async with self._session_factory() as db:
             now = (await db.execute(select(func.now()))).scalar_one()
             for rule, error in (
@@ -361,11 +365,12 @@ class KnowledgeIngestWorker:
         except EmbedderUnavailable as exc:
             raise _Unavailable("embedding model") from exc
         # Cutting 8 MB of text counts tokens many times: off the event loop.
-        chunks = await asyncio.to_thread(_chunks, decoded, embedder, limits.max_pieces)
+        cap = min(limits.max_pieces, MAX_DOCUMENT_PIECES)
+        chunks = await asyncio.to_thread(_chunks, decoded, embedder, cap)
         if not chunks:
             raise _Refused("the file has no text")
-        if len(chunks) > limits.max_pieces:
-            raise _Refused(_too_many(limits.max_pieces))
+        if len(chunks) > cap:
+            raise _Refused(_too_many(cap))
         vectors = await asyncio.to_thread(
             embedder.embed_passages, [c.text for c in chunks]
         )

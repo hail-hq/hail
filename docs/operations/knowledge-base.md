@@ -19,7 +19,7 @@ psql "${DATABASE_URL/postgresql+psycopg:/postgresql:}" -c \
   "UPDATE organization_knowledge SET max_documents = 50, updated_at = now() WHERE organization_id = '<org-uuid>';"
 ```
 
-Allowed ranges (CHECK constraints): documents 1 to 1,000, file bytes up to 25 MB, pieces up to 100,000. One document must be read within the worker's 15-minute lease: at about 280 s per 1,000 pieces, keep a single file under about 3,000 pieces (the workspace total can be higher). Over 5,000 pieces, calls search in SQL instead of memory.
+Allowed ranges (CHECK constraints): documents 1 to 1,000, file bytes up to 25 MB, pieces up to 100,000. One file gives at most 3,000 pieces whatever the workspace limit: it must be read within the worker's 15-minute lease (about 280 s per 1,000 pieces). The workspace total can be higher. Over 5,000 pieces, calls search in SQL instead of memory.
 
 Turn it off (agents stop using it at once; adding and search answer 403; listing, reading and deleting still work):
 
@@ -28,10 +28,11 @@ psql "${DATABASE_URL/postgresql+psycopg:/postgresql:}" -c \
   "DELETE FROM organization_knowledge WHERE organization_id = '<org-uuid>';"
 ```
 
-Delete everything (files, pieces and the limits row), for example when a plan ends. One function does every full delete (`delete_org_knowledge`; account closure already runs it). By hand, on the VM:
+Delete everything (files, pieces and the limits row), for example when a plan ends. One function does every full delete (`delete_org_knowledge`; account closure already runs it). By hand, on the VM, from the deploy directory (where `docker-compose.prod.yml` is):
 
 ```bash
-docker compose exec api python -m hailhq.core.knowledge.access delete '<org-uuid>'
+docker compose -f docker-compose.yml -f docker-compose.prod.yml \
+  run --rm api python -m hailhq.core.knowledge.access delete '<org-uuid>'
 ```
 
 ## Before the first workspace is turned on

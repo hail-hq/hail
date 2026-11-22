@@ -94,6 +94,7 @@ A tool call carries text only, so a file in base64 makes the model write every c
 
 3. Use the `id`: in `send_email`'s `attachment_ids` (`email_attachment`, 25 MB at most), or as `{"slot", "upload_id"}` in the `files` of `check_verification` and `submit_verification` (`verification_document`: JPG, PNG or PDF, 10 MB at most, usable for 1 hour).
    For `sms_evidence` (a US texting consent screenshot: JPG, PNG or PDF, 10 MB at most), the `curl` response also has `url`, a public link. Put it in the registration's `*_evidence_url` field, for example `website_evidence_url`. Carrier reviewers open it without signing in, so remove personal information first. A workspace keeps at most 100 evidence files.
+   For `knowledge_document` (PDF with text, DOCX, TXT, Markdown or CSV, up to the link's `max_bytes`), pass the `id` to `add_knowledge_document`, then poll `get_knowledge_document` until `ready`.
 
 This needs a client with a shell (Claude Code, Codex, Cursor). Claude.ai web chat has none: there, only `upload_email_attachment` and base64 `files` work, for small files.
 

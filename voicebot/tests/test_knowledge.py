@@ -169,8 +169,11 @@ async def test_turn_before_load_ends_goes_without(async_session) -> None:
 
 def test_short_turns_are_not_searched() -> None:
     assert not worth_searching("yes")
-    assert not worth_searching("okay.")
+    assert not worth_searching("okay thanks")
+    assert not worth_searching("yes, please.")
     assert worth_searching("Opening hours?")
+    assert worth_searching("¿Horario?") is False
+    assert worth_searching("how long is the warranty")
     assert worth_searching("E204")
     assert worth_searching("how long is the warranty")
 
@@ -196,7 +199,7 @@ async def test_reply_knowledge_for_texts_and_email(async_session) -> None:
     assert with_knowledge(messages, None) is messages
 
 
-async def test_llm_node_adds_pieces_to_a_copy_only(async_session) -> None:
+async def test_llm_node_adds_pieces_to_a_copy_only(async_session, monkeypatch) -> None:
     org, agent_id = await seed(async_session)
     knowledge = await loaded(org, agent_id)
     agent = SpeechSanitizingAgent(instructions="Be kind.", knowledge=knowledge)
@@ -207,13 +210,9 @@ async def test_llm_node_adds_pieces_to_a_copy_only(async_session) -> None:
     def fake_default(self, chat_ctx, tools, model_settings):
         seen.append(chat_ctx)
 
-    original = LiveKitAgent.default.llm_node
-    LiveKitAgent.default.llm_node = fake_default
-    try:
-        assert last_user_text(history) == "what does error E 204 mean"
-        await agent.llm_node(history, [], None)
-    finally:
-        LiveKitAgent.default.llm_node = original
+    monkeypatch.setattr(LiveKitAgent.default, "llm_node", fake_default)
+    assert last_user_text(history) == "what does error E 204 mean"
+    await agent.llm_node(history, [], None)
     sent = seen[0]
     assert sent is not history
     assert any("E-204" in (m.text_content or "") for m in sent.items)
