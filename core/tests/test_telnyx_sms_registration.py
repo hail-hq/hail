@@ -1975,6 +1975,21 @@ async def test_a_plain_text_duplicate_after_filing_gets_the_reuse_fix() -> None:
     assert st.reason.startswith("This email is on too many registrations.")
 
 
+def test_a_reused_phone_keeps_the_email_fix_of_another_reason():
+    problems = _reason_problems(
+        [
+            {"fields": [], "description": "Duplicate phone number"},
+            {"fields": [], "description": "Invalid email"},
+        ],
+        "business",
+    )
+    assert problems[-1].message.startswith(
+        "This phone number is on too many registrations. Use another one. "
+        "Check the email address."
+    )
+    assert "Check the phone number." not in problems[-1].message
+
+
 def test_a_reused_email_reason_naming_the_ein_gets_both_fixes():
     problems = _reason_problems(
         [{"fields": [], "description": "Email duplicate reached; EIN does not match"}],

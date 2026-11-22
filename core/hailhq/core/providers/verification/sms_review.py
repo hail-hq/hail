@@ -113,7 +113,7 @@ _DETAIL_FIXES: tuple[tuple[tuple[str, ...], str], ...] = (
 
 # The postal address in a text that is also about the email.
 _POSTAL_IN_EMAIL_TEXT = re.compile(
-    r"\b(?:street|postal|zip)\b"
+    r"\b(?:street|postal|zip|city|region)\b"
     r"|\b(?:business|mailing|physical|home|street|postal|billing) address\b"
 )
 
@@ -130,7 +130,7 @@ def detail_fixes(texts: list[str]) -> list[str]:
         # "e-mail" is the email too.
         low = re.sub(r"\be-mail\b", "email", str(one or "").lower())
         # "web address" is the website; an IP address is no postal address.
-        low = re.sub(r"\bweb address\b", "website", low)
+        low = re.sub(r"\b(?:web|website|url) address\b", "website", low)
         low = re.sub(r"\bip address\b", "ip", low)
         about_email = re.search(r"\bemail\b", low) is not None
         for words, fix in _DETAIL_FIXES:

@@ -1572,12 +1572,18 @@ def _text_fixes(texts: list[str], subject_type: str) -> list[str]:
     sentence for a reused email or phone, the detail sentence for the rest."""
     fixes = [f for t in texts if (f := _duplicate_by_text(t, subject_type))]
     # The detail sentence for every text, a reused one too ("Email duplicate
-    # ...; EIN does not match"), minus the email fix the reuse one covers.
-    details = [
-        f
-        for f in detail_fixes(texts)
-        if not (fixes and f == "Check the email address.")
-    ]
+    # ...; EIN does not match"). In a reused text, the detail its reuse
+    # sentence already covers (the email, the phone) is left out.
+    details: list[str] = []
+    for text in texts:
+        found = detail_fixes([text])
+        if _duplicate_by_text(text, subject_type):
+            found = [
+                f
+                for f in found
+                if f not in ("Check the email address.", "Check the phone number.")
+            ]
+        details += found
     return list(dict.fromkeys(fixes + details))
 
 

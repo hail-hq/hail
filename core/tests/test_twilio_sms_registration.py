@@ -1007,6 +1007,9 @@ def test_one_text_naming_email_and_postal_address_gets_both() -> None:
         assert detail_fixes([text]) == ["Check the email address."]
     assert detail_fixes(["Invalid web address"]) == ["Check the website address."]
     assert detail_fixes(["Invalid IP address"]) == []
+    assert detail_fixes(["Website address is unreachable"]) == [
+        "Check the website address."
+    ]
     assert detail_fixes(["E-mail address is not valid"]) == ["Check the email address."]
 
 
