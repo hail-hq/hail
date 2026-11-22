@@ -1,12 +1,23 @@
-"""Local SMS preflight and fixed, customer-safe repair guidance."""
+"""Local SMS preflight and repair guidance, with the carrier's own words."""
 
 import re
 
 import phonenumbers
+from hailhq.core.config import settings
 from hailhq.core.providers.verification.base import (
+    BRAND_REJECTED,
     CAMPAIGN_REJECTED,
     Address,
     Problem,
+)
+from hailhq.core.providers.verification.rejections import (
+    FIX_AND_START_AGAIN,
+    FIX_THESE_AND_START_AGAIN,
+    START_AGAIN,
+    TEXT_KEYS,
+    carrier_texts,
+    sentence,
+    with_carrier_text,
 )
 from hailhq.core.providers.verification.sms_form import (
     NINE_DIGIT_COUNTRIES,
@@ -89,16 +100,129 @@ def sender_problems(
     return problems
 
 
-def campaign_repair_reason(raw: object) -> str:
-    """Match review topics; never interpolate provider text or personal data.
+# Hail's sentence for each detail a carrier's refusal at filing names.
+_ADDRESS_FIX = "Check the address."
+_DETAIL_FIXES: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("email", "e-mail"), "Check the email address."),
+    (("ein", "tax id", "registration number"), "Check the business tax number."),
+    (("website", "url"), "Check the website address."),
+    (("address", "street", "postal", "zip", "city"), _ADDRESS_FIX),
+    (("phone", "mobile"), "Check the phone number."),
+)
 
-    Codes and descriptions differ across carriers. Ambiguous feedback retains
-    general guidance; raw feedback belongs only in the protected audit record.
+
+# The postal address in a text that is also about the email.
+_POSTAL_IN_EMAIL_TEXT = re.compile(
+    r"\b(?:street|postal|zip|city|region)\b"
+    r"|\b(?:business|mailing|physical|home|street|postal|billing) address\b"
+)
+
+
+def detail_fixes(texts: list[str]) -> list[str]:
+    """Hail's sentence for every detail the carrier's ``texts`` name, each
+    text on its own, without repeats. "web address" is the website. In a
+    text about the email, a bare "address" is the email's ("suspected
+    disposable address", "invalid address syntax"): the postal address
+    fix then needs street, postal, zip or a postal kind of address
+    ("business address", "mailing address")."""
+    fixes: list[str] = []
+    for one in texts:
+        # "e-mail" is the email too.
+        low = re.sub(r"\be-mail\b", "email", str(one or "").lower())
+        # "web address" is the website; an IP address is no postal address.
+        low = re.sub(r"\b(?:web|website|url) address\b", "website", low)
+        low = re.sub(r"\bip address\b", "ip", low)
+        about_email = re.search(r"\bemail\b", low) is not None
+        for words, fix in _DETAIL_FIXES:
+            if fix == _ADDRESS_FIX and about_email:
+                if fix not in fixes and _POSTAL_IN_EMAIL_TEXT.search(low):
+                    fixes.append(fix)
+                continue
+            if fix not in fixes and any(re.search(rf"\b{w}\b", low) for w in words):
+                fixes.append(fix)
+    return fixes
+
+
+# Hail's lead sentence for a refused brand with no fix of Hail's own.
+BRAND_REJECTED_LEAD = "The 10DLC registry rejected the registration."
+
+
+# A suspended brand: a compliance action a new filing cannot fix. Twilio
+# warns that texting the same way from a new brand can close the account.
+BRAND_SUSPENDED_LEAD = "The carrier suspended your US texting registration."
+# The support address is the deployment's own (HAIL_SUPPORT_EMAIL).
+BRAND_SUSPENDED_NEXT = (
+    "Email {support} and we will look into it. Do not file a new registration."
+)
+
+
+def brand_rejected_reason(
+    fixes: list[str], raw: object, *, suspended: bool = False
+) -> str:
+    """Why a brand was refused: Hail's fixes (or its lead sentence), then
+    the carrier's own words, then the next step, worded as
+    ``customer_reason`` words it. No fix and no carrier text gives the
+    generic ``BRAND_REJECTED``. A suspended brand asks the customer to
+    contact Hail instead of filing again."""
+    if suspended:
+        next_step = BRAND_SUSPENDED_NEXT.format(support=settings.hail_support_email)
+        return f"{with_carrier_text(BRAND_SUSPENDED_LEAD, raw)} {next_step}"
+    said = bool(with_carrier_text("", raw))
+    if not fixes and not said:
+        return BRAND_REJECTED
+    if fixes and not said:
+        return f"{' '.join(fixes)} {START_AGAIN}"
+    body = with_carrier_text(" ".join(fixes) or BRAND_REJECTED_LEAD, raw)
+    # Several things to fix: several Hail fixes or several carrier reasons.
+    quoted = {sentence(t) for t in carrier_texts(raw)}
+    several = len(fixes) > 1 or len(quoted) > 1
+    end = FIX_THESE_AND_START_AGAIN if several else FIX_AND_START_AGAIN
+    return f"{body} {end}"
+
+
+def _topic_text(raw: object) -> str:
+    """What the topic match reads in ``raw``: the carrier's text (with its
+    field tag), its error codes, the fields it names (``fields``, ``field``)
+    and the field it points at (``source.pointer``). Nested lists are read
+    too. Never other key names or links."""
+    if isinstance(raw, str):
+        return raw
+    if isinstance(raw, (list, tuple)):
+        return " ".join(_topic_text(item) for item in raw)
+    if not isinstance(raw, dict):
+        return ""
+    parts: list[str] = []
+    for key in (*TEXT_KEYS, "code", "error_code"):
+        value = raw.get(key)
+        # A code can come as a float (30908.0): match it as the whole number.
+        if isinstance(value, float) and value.is_integer():
+            value = int(value)
+        if isinstance(value, (str, int)):
+            parts.append(str(value))
+    for key in ("fields", "field"):
+        if isinstance(raw.get(key), (str, list, tuple)):
+            parts.append(_topic_text(raw[key]))
+    source = raw.get("source")
+    if isinstance(source, dict) and isinstance(source.get("pointer"), str):
+        parts.append(source["pointer"])
+    return " ".join(parts)
+
+
+def campaign_repair_reason(raw: object, *, quote: object = ...) -> str:
+    """Hail's guidance for the review topic ``raw`` names, then the carrier's
+    own words (``with_carrier_text``). Codes and descriptions differ across
+    carriers, so a topic match is a guess: the carrier's text says what was
+    really wrong. ``raw`` is a string, a dict or a list of them; pass the
+    carrier's structure, never ``str()`` of it. The topic match reads only
+    its text, error codes and field pointers (``_topic_text``), never key
+    names or links. ``quote``, when given, is the part of ``raw`` to quote
+    (its text without a bare error code).
     """
+    said = raw if quote is ... else quote
     # Split field names into words first ("MessageSamples", "MESSAGE_SAMPLES"
     # and "subUsecases" hold "message samples" and "usecases"), so the word
     # start match below still finds them.
-    text = re.sub(r"(?<=[a-z])(?=[A-Z])|_", " ", str(raw or "")).lower()
+    text = re.sub(r"(?<=[a-z])(?=[A-Z])|_", " ", _topic_text(raw)).lower()
     rules = (
         (
             ("privacy", "30908"),
@@ -137,9 +261,37 @@ def campaign_repair_reason(raw: object) -> str:
     for words, message in rules:
         # Match at a word start: "terms" must not hit "determines", nor
         # "url" "curl", nor "link" "unlinked".
-        if any(re.search(rf"\b{re.escape(word)}", text) for word in words):
-            return message
-    return CAMPAIGN_REJECTED
+        # A numeric code matches as a whole word: "309081" is not 30908.
+        if any(
+            re.search(rf"\b{re.escape(word)}" + (r"\b" if word.isdigit() else ""), text)
+            for word in words
+        ):
+            return with_carrier_text(message, said)
+    return with_carrier_text(CAMPAIGN_REJECTED, said)
+
+
+# Words that put a carrier refusal on Hail's account, not the customer's
+# answers. Outside a form field "permission" counts too (see
+# application_validation_error); in a form field it is about the
+# customer's opt-in wording ("Opt-in permission language missing").
+ACCOUNT_WORDS = (
+    "credential",
+    "api key",
+    "authentication",
+    "unauthorized",
+    "forbidden",
+    "account suspend",
+    "account inactive",
+    "insufficient balance",
+    "messaging service",
+    "configuration",
+)
+
+
+def account_problem(text: object) -> bool:
+    """True when ``text`` names a problem with Hail's own account."""
+    low = str(text or "").lower()
+    return any(word in low for word in ACCOUNT_WORDS)
 
 
 def application_validation_error(
@@ -155,22 +307,7 @@ def application_validation_error(
     if status not in (400, 422):
         return False
     text = str(raw or "").lower()
-    if any(
-        word in text
-        for word in (
-            "credential",
-            "api key",
-            "authentication",
-            "permission",
-            "unauthorized",
-            "forbidden",
-            "account suspend",
-            "account inactive",
-            "insufficient balance",
-            "messaging service",
-            "configuration",
-        )
-    ):
+    if account_problem(text) or "permission" in text:
         return False
     return known_field or any(
         re.search(rf"\b{re.escape(word)}\b", text)
