@@ -62,10 +62,10 @@ _QUERY_CHARS = 1000
 
 
 def worth_searching(text: str) -> bool:
-    """False for turns like "yes" or "okay thanks": fewer than three search
-    words and no ID among them."""
+    """False for one-word turns like "yes" or "okay" with no ID in them.
+    "Opening hours?" is searched."""
     words = query_terms(text)
-    return len(words) >= 3 or any(any(c.isdigit() for c in w) for w in words)
+    return len(words) >= 2 or any(any(c.isdigit() for c in w) for w in words)
 
 
 def last_user_text(chat_ctx: Any) -> str:

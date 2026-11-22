@@ -19,7 +19,7 @@ psql "${DATABASE_URL/postgresql+psycopg:/postgresql:}" -c \
   "UPDATE organization_knowledge SET max_documents = 50, updated_at = now() WHERE organization_id = '<org-uuid>';"
 ```
 
-Allowed ranges (CHECK constraints): documents 1 to 1,000, file bytes up to 25 MB, pieces up to 100,000.
+Allowed ranges (CHECK constraints): documents 1 to 1,000, file bytes up to 25 MB, pieces up to 100,000. One document must be read within the worker's 15-minute lease: at about 280 s per 1,000 pieces, keep a single file under about 3,000 pieces (the workspace total can be higher). Over 5,000 pieces, calls search in SQL instead of memory.
 
 Turn it off (agents stop using it at once; adding and search answer 403; listing, reading and deleting still work):
 
@@ -39,7 +39,7 @@ Delete everything (files and pieces), for example when a plan ends: call `hailhq
 | Search API, text and email replies    | API, voicebot text worker    | SQL: pgvector cosine + idf over `terms`, fused by rank                                     |
 | Calls                                 | Each call process            | Loads pieces + model during the greeting; top 3 pieces per turn, before the model call     |
 
-Untouched uploads are deleted after 24 hours (upload sweep). A document not ready one day after it was added fails. A workspace with more than 5,000 pieces is searched in SQL during calls instead of in memory.
+The worker polls every 5 s (`HAIL_KNOWLEDGE_POLL_SECONDS`, code default; 0 turns it off). Untouched uploads are deleted after 24 hours (upload sweep). A document not ready one day after it was added fails. A workspace with more than 5,000 pieces is searched in SQL during calls instead of in memory.
 
 ## Model
 
@@ -55,7 +55,7 @@ Measured 2026-11-21 (CPU only, 1 thread):
 | Load                                                        | about 0.5 s                                   | about 1 s               |
 | Agreement with fp32 (cosine)                                | 0.996 min                                     |                         |
 
-Quality on an invented 26-section manual, 25 questions in 7 languages: e5 found the right ~400-token piece 18 times out of 25, `paraphrase-multilingual-MiniLM-L12-v2` 9 to 11 (it reads only the first 128 tokens), so e5 was chosen. Cosine scores of right pieces were 0.73 to 0.92, off-topic best matches 0.72 to 0.81: the floor (0.77) only drops clear junk, and keyword search carries IDs.
+Quality on an invented 26-section manual, 25 questions in 7 languages: e5 found the right ~400-token piece 18 times out of 25, `paraphrase-multilingual-MiniLM-L12-v2` 9 to 11 (it reads only the first 128 tokens), so e5 was chosen. Cosine scores of right pieces were 0.73 to 0.92, off-topic best matches 0.72 to 0.81: the floor (0.72) sits below every right piece and only drops clear junk; keyword search carries IDs. One-word turns with no ID ("yes", "okay") are not searched during calls.
 
 The int8 file is tuned for CPUs with VNNI. On an x86 CPU without it (AVX2 only), int8 math can saturate. Check the VM once:
 

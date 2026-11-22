@@ -38,11 +38,13 @@ CANDIDATES = 20
 # Reciprocal rank fusion constant (Cormack et al. 2009).
 RRF_K = 60
 # Cosine floor for a piece found by meaning only. E5 scores even unrelated
-# text high: measured on an invented manual, right pieces 0.73 to 0.92
-# (median 0.81), off-topic questions' best match 0.72 to 0.81. No floor
-# splits the two; this one drops clear junk and the model judges the rest
+# text high. Measured with the shipped model on an invented manual (25
+# questions, 7 languages): right sections 0.77 to 0.90 (the lowest two in
+# Italian and French), right 400-token pieces from 0.73, off-topic
+# questions' best match 0.72 to 0.81. So the floor sits below every right
+# piece and drops only clear junk; the model judges the rest
 # (docs/operations/knowledge-base.md).
-MIN_SIMILARITY = 0.77
+MIN_SIMILARITY = 0.72
 # BM25 floor: about one fairly rare word in common.
 MIN_BM25 = 1.5
 # The idf counts at least this many pieces, so a workspace with a handful of

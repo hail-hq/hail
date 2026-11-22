@@ -17,6 +17,7 @@ from hailhq.core.models import (
 )
 from hailhq.core.testing.knowledge import FakeEmbedder
 from hailhq.voicebot import knowledge as module
+from hailhq.voicebot.agent import SpeechSanitizingAgent
 from hailhq.voicebot.knowledge import (
     CallKnowledge,
     last_user_text,
@@ -24,6 +25,8 @@ from hailhq.voicebot.knowledge import (
     with_knowledge,
     worth_searching,
 )
+from livekit.agents import Agent as LiveKitAgent
+from livekit.agents.llm import ChatContext
 from sqlalchemy import text
 
 
@@ -112,7 +115,6 @@ async def test_call_never_loads_another_workspace(async_session) -> None:
     assert not knowledge.ready
     knowledge = await loaded(org, agent_id)
     assert knowledge._index is not None
-    assert [p.organization_id for p in []] == []
     texts = [p.text for p in knowledge._index.pieces]
     assert texts and all("Opening hours" not in t for t in texts)
 
@@ -167,8 +169,9 @@ async def test_turn_before_load_ends_goes_without(async_session) -> None:
 
 def test_short_turns_are_not_searched() -> None:
     assert not worth_searching("yes")
-    assert not worth_searching("okay thanks")
-    assert worth_searching("E 204")
+    assert not worth_searching("okay.")
+    assert worth_searching("Opening hours?")
+    assert worth_searching("E204")
     assert worth_searching("how long is the warranty")
 
 
@@ -191,3 +194,27 @@ async def test_reply_knowledge_for_texts_and_email(async_session) -> None:
     out = with_knowledge(messages, section)
     assert [m["role"] for m in out] == ["system", "system", "user"]
     assert with_knowledge(messages, None) is messages
+
+
+async def test_llm_node_adds_pieces_to_a_copy_only(async_session) -> None:
+    org, agent_id = await seed(async_session)
+    knowledge = await loaded(org, agent_id)
+    agent = SpeechSanitizingAgent(instructions="Be kind.", knowledge=knowledge)
+    history = ChatContext.empty()
+    history.add_message(role="user", content="what does error E 204 mean")
+    seen = []
+
+    def fake_default(self, chat_ctx, tools, model_settings):
+        seen.append(chat_ctx)
+
+    original = LiveKitAgent.default.llm_node
+    LiveKitAgent.default.llm_node = fake_default
+    try:
+        assert last_user_text(history) == "what does error E 204 mean"
+        await agent.llm_node(history, [], None)
+    finally:
+        LiveKitAgent.default.llm_node = original
+    sent = seen[0]
+    assert sent is not history
+    assert any("E-204" in (m.text_content or "") for m in sent.items)
+    assert len(history.items) == 1
