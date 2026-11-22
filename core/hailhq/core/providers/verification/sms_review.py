@@ -103,7 +103,7 @@ def sender_problems(
 # Hail's sentence for each detail a carrier's refusal at filing names.
 _ADDRESS_FIX = "Check the address."
 _DETAIL_FIXES: tuple[tuple[tuple[str, ...], str], ...] = (
-    (("email",), "Check the email address."),
+    (("email", "e-mail"), "Check the email address."),
     (("ein", "tax id", "registration number"), "Check the business tax number."),
     (("website", "url"), "Check the website address."),
     (("address", "street", "postal", "zip"), _ADDRESS_FIX),
@@ -127,7 +127,8 @@ def detail_fixes(texts: list[str]) -> list[str]:
     ("business address", "mailing address")."""
     fixes: list[str] = []
     for one in texts:
-        low = str(one or "").lower()
+        # "e-mail" is the email too.
+        low = re.sub(r"\be-mail\b", "email", str(one or "").lower())
         # "web address" is the website; an IP address is no postal address.
         low = re.sub(r"\bweb address\b", "website", low)
         low = re.sub(r"\bip address\b", "ip", low)

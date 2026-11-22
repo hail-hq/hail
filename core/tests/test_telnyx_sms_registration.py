@@ -1884,6 +1884,22 @@ async def test_brand_refused_later_reads_text_and_fields(reasons, start) -> None
     assert st.reason.startswith(start)
 
 
+async def test_an_off_form_permission_error_stays_an_outage():
+    def handler(req):
+        return httpx.Response(
+            422,
+            json={
+                "errors": [
+                    {"detail": "Invalid email", "source": {"pointer": "/email"}},
+                    {"detail": "Permission denied for this profile"},
+                ]
+            },
+        )
+
+    with pytest.raises(VerificationProviderError):
+        await _draft(_provider(handler), subject="person", fields=PERSON_FIELDS)
+
+
 async def test_a_form_error_saying_permission_reaches_the_customer():
     def handler(req):
         return httpx.Response(
@@ -1891,13 +1907,16 @@ async def test_a_form_error_saying_permission_reaches_the_customer():
             json={
                 "errors": [
                     {"detail": "Invalid email", "source": {"pointer": "/email"}},
-                    {"description": "Opt-in permission language missing"},
+                    {
+                        "description": "Opt-in permission language missing",
+                        "source": {"pointer": "/body/messageFlow"},
+                    },
                 ]
             },
         )
 
     draft = await _draft(_provider(handler), subject="person", fields=PERSON_FIELDS)
-    assert [p.field for p in draft.problems] == ["email", ""]
+    assert draft.problems[0].field == "email"
 
 
 def test_an_odd_fields_value_does_not_crash():

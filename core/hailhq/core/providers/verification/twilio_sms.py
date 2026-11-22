@@ -1093,11 +1093,10 @@ def _brand_customer_reason(brand) -> str:
                 ),
                 None,
             )
-        if fix is None:
-            # Nothing documented: the detail the text names, as on Telnyx.
-            fix = next(iter(detail_fixes([text])), None)
-        if fix and fix not in fixes:
-            fixes.append(fix)
+        # Nothing documented: every detail the text names, as on Telnyx.
+        for one in [fix] if fix else detail_fixes([text]):
+            if one not in fixes:
+                fixes.append(one)
     # Twilio's "General Error" placeholder says nothing: never quote it.
     errors = [e for e in errors if not _placeholder(e.get("description"))]
     said: object = errors

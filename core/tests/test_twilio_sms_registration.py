@@ -823,6 +823,10 @@ def test_sdk_wrapper_is_not_quoted() -> None:
         "Hi. The carrier said: Bad EIN."
     )
     assert with_carrier_text("Hi.", "Unable to create record") == "Hi."
+    # Without the colon it is the carrier's sentence, kept whole.
+    assert with_carrier_text("Hi.", "Unable to create record because X") == (
+        "Hi. The carrier said: Unable to create record because X."
+    )
     assert with_carrier_text("Hi.", "Unable to fetch page: Bad EIN") == (
         "Hi. The carrier said: Bad EIN."
     )
@@ -1003,6 +1007,7 @@ def test_one_text_naming_email_and_postal_address_gets_both() -> None:
         assert detail_fixes([text]) == ["Check the email address."]
     assert detail_fixes(["Invalid web address"]) == ["Check the website address."]
     assert detail_fixes(["Invalid IP address"]) == []
+    assert detail_fixes(["E-mail address is not valid"]) == ["Check the email address."]
 
 
 async def test_email_and_street_errors_get_both_sentences() -> None:
@@ -1190,6 +1195,10 @@ async def test_failed_brand_with_documented_code_uses_its_fix() -> None:
 async def test_failed_brand_names_the_detail_when_nothing_is_documented() -> None:
     st = await _brand_status(_failed_brand((30794, "Website unreachable")))
     assert st.reason.startswith("Check the website address. The carrier said:")
+    st = await _brand_status(_failed_brand((30794, "EIN and website do not match")))
+    assert st.reason.startswith(
+        "Check the business tax number. Check the website address."
+    )
 
 
 async def test_failed_brand_with_unknown_reason_quotes_twilio() -> None:

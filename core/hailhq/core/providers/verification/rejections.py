@@ -116,7 +116,7 @@ _FIELD_TAG = re.compile(r"^\s*\[[A-Za-z_][\w.]*\]\s*[-:]\s*")
 # record: <message>"); not the carrier's words.
 _SDK_PREFIX = re.compile(
     r"^\s*Unable to (?:create|fetch|update|delete|read|list) (?:record|page)\b"
-    r"\s*:?\s*",
+    r"(?:\s*:\s*|\s*$)",
     re.IGNORECASE,
 )
 

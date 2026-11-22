@@ -1340,9 +1340,19 @@ def _refused(exc: Exception) -> bool:
     prose = " ".join(_all_text(error) for error in errors)
     if known_field:
         # An error on a form field is the customer's unless the text names
-        # Hail's account. "permission" is a form word here, as on Twilio
-        # ("Opt-in permission language missing").
-        return exc.response.status_code in (400, 422) and not account_problem(prose)
+        # Hail's account; there "permission" is a form word, as on Twilio
+        # ("Opt-in permission language missing"). An error off the form
+        # that says "permission" still names Hail's account.
+        off_form = " ".join(
+            _all_text(e)
+            for e in errors
+            if (_pointer(e) or "").removeprefix("/body") not in _APPLICATION_POINTERS
+        )
+        return (
+            exc.response.status_code in (400, 422)
+            and not account_problem(prose)
+            and "permission" not in off_form.lower()
+        )
     return application_validation_error(
         exc.response.status_code, prose, known_field=known_field
     )
