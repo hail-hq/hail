@@ -28,7 +28,21 @@ psql "${DATABASE_URL/postgresql+psycopg:/postgresql:}" -c \
   "DELETE FROM organization_knowledge WHERE organization_id = '<org-uuid>';"
 ```
 
-Delete everything (files and pieces), for example when a plan ends: call `hailhq.core.knowledge.access.delete_org_knowledge` (one function for every full delete; account closure already runs it).
+Delete everything (files, pieces and the limits row), for example when a plan ends. One function does every full delete (`delete_org_knowledge`; account closure already runs it). By hand, on the VM:
+
+```bash
+docker compose exec api python -m hailhq.core.knowledge.access delete '<org-uuid>'
+```
+
+## Before the first workspace is turned on
+
+Apply the Terraform change that grants the API read, write, delete and list on `knowledge-documents/` in the mail bucket, from the repo root of the main checkout after merge:
+
+```bash
+cd infra && terragrunt apply
+```
+
+Without it, uploads answer 503 and stored files are refused with 403, which fails their documents after 3 tries.
 
 ## What runs where
 

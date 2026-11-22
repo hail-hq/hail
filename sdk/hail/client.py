@@ -1033,15 +1033,12 @@ class _KnowledgeResource:
         return KnowledgeDocumentListResponse.model_validate(data)
 
     async def get_document(self, document_id: str | UUID) -> KnowledgeDocumentResponse:
-        # Parsed, so an id from user input can never reach another path.
-        doc_id = UUID(str(document_id))
-        data = await self._http.request("GET", f"/knowledge/documents/{doc_id}")
+        data = await self._http.request("GET", f"/knowledge/documents/{document_id}")
         return KnowledgeDocumentResponse.model_validate(data)
 
     async def delete_document(self, document_id: str | UUID) -> None:
         """Delete a document, its stored file and its pieces."""
-        doc_id = UUID(str(document_id))
-        await self._http.request("DELETE", f"/knowledge/documents/{doc_id}")
+        await self._http.request("DELETE", f"/knowledge/documents/{document_id}")
 
     async def search(self, query: str, *, limit: int = 5) -> KnowledgeSearchResponse:
         """The best pieces for ``query`` (any language), the way agents

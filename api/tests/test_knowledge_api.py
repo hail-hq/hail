@@ -110,7 +110,9 @@ async def _piece(session, org, doc_id, body: str, ordinal: int = 0) -> None:
     await session.commit()
 
 
-async def test_off_workspace_gets_403_everywhere(client, org_and_key, s3) -> None:
+async def test_off_workspace_gets_403_on_add_and_search(
+    client, org_and_key, s3
+) -> None:
     _, _, plain = org_and_key
     assert (await _link(client, plain)).status_code == 403
     for method, path, body in (
@@ -303,3 +305,22 @@ async def test_agent_knowledge_switch(client, async_session, org_and_key) -> Non
         f"/v1/agents/{agent_id}", json={"knowledge": True}, headers=_auth(plain)
     )
     assert resp.status_code == 403
+
+
+async def test_busy_upload_answers_503(
+    client, async_session, session_factory, org_and_key, s3
+) -> None:
+    org, _, plain = org_and_key
+    await _turn_on(async_session, org)
+    upload = await _stored_upload(async_session, org)
+    async with session_factory() as holder:
+        await holder.execute(
+            select(FileUpload).where(FileUpload.id == upload.id).with_for_update()
+        )
+        resp = await client.post(
+            "/v1/knowledge/documents",
+            json={"upload_id": str(upload.id)},
+            headers=_auth(plain),
+        )
+        await holder.rollback()
+    assert resp.status_code == 503 and resp.headers["Retry-After"] == "5"

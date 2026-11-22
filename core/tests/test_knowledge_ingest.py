@@ -396,4 +396,4 @@ async def test_stale_pending_document_fails(async_session, worker, s3) -> None:
     await async_session.commit()
     await worker.tick()
     await async_session.refresh(doc)
-    assert doc.status == "failed"
+    assert doc.status == "failed" and "in time" in doc.error

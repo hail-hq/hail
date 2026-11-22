@@ -83,13 +83,14 @@ MAX_ATTEMPTS = 3
 RETRY_MINUTES = 5
 # Bucket errors that never clear: the object is gone or not ours to read.
 _GONE = frozenset({"NoSuchKey", "404", "NotFound"})
-# A 403 uses a try (5, 10, 15 minutes apart): a policy change can cause it
-# and clear, but so can a missing object without list access.
+# A 403 uses a try (the next ones 10 and 15 minutes later): a policy change
+# can cause it and clear, and so can a missing object without list access.
 _DENIED = frozenset({"AccessDenied", "403"})
 # A document still not read this long after it was added fails, whatever
 # held it up (an outage that never counted a try).
 STALE_AFTER = timedelta(days=1)
 _SPENT = "the file could not be processed; delete it and upload it again"
+_STALE = "Hail could not read the file in time; delete it and add it again"
 LEASE = timedelta(minutes=15)
 # Wall-clock limit of one decode. The child also has a 30 s CPU limit.
 DECODE_SECONDS = 60.0
@@ -215,20 +216,20 @@ class KnowledgeIngestWorker:
         ``STALE_AFTER`` fail, in one statement."""
         async with self._session_factory() as db:
             now = (await db.execute(select(func.now()))).scalar_one()
-            await db.execute(
-                update(KnowledgeDocument)
-                .where(
-                    _claimable(now),
-                    (KnowledgeDocument.attempts >= MAX_ATTEMPTS)
-                    | (KnowledgeDocument.created_at < now - STALE_AFTER),
+            for rule, error in (
+                (KnowledgeDocument.attempts >= MAX_ATTEMPTS, _SPENT),
+                (KnowledgeDocument.created_at < now - STALE_AFTER, _STALE),
+            ):
+                await db.execute(
+                    update(KnowledgeDocument)
+                    .where(_claimable(now), rule)
+                    .values(
+                        status="failed",
+                        error=error,
+                        claimed_at=None,
+                        updated_at=func.now(),
+                    )
                 )
-                .values(
-                    status="failed",
-                    error=_SPENT,
-                    claimed_at=None,
-                    updated_at=func.now(),
-                )
-            )
             await db.commit()
 
     async def _claim(self) -> tuple[UUID, int] | None:

@@ -19,10 +19,13 @@ workspace), so two requests at once never both pass the last free slot.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import sys
 from uuid import UUID
 
-from hailhq.core.db import key_lock
+from hailhq.core.config import settings
+from hailhq.core.db import key_lock, session_scope
 from hailhq.core.file_uploads import KNOWLEDGE_DOCUMENTS_PREFIX
 from hailhq.core.models import (
     Agent,
@@ -123,9 +126,11 @@ async def delete_org_knowledge(
 ) -> int:
     """Delete a workspace's whole knowledge base: its files from the bucket,
     then the upload rows (their documents and pieces go with them), and its
-    limits row (so it is off). The one function for every such delete: an
-    account closing (``org_closures`` route and the ingest worker), and a
-    paid plan ending. Returns the documents deleted. A failed bucket delete
+    limits row (so it is off). The one function for every such delete:
+    today an account closing (``org_closures`` route and the ingest
+    worker) and Hail by hand (``python -m hailhq.core.knowledge.access
+    delete <org-id>``, docs/operations/knowledge-base.md); later a paid plan
+    ending. Returns the documents deleted. A failed bucket delete
     raises before any row goes, so a retry finds everything again."""
     if s3 is not None:
         await s3.delete_prefix(f"{KNOWLEDGE_DOCUMENTS_PREFIX}{organization_id}/")
@@ -154,3 +159,20 @@ async def delete_org_knowledge(
     )
     await db.commit()
     return int(count)
+
+
+async def _delete_main(organization_id: UUID) -> None:
+    store = (
+        S3MailClient(bucket=settings.hail_mail_bucket)
+        if settings.hail_mail_bucket
+        else None
+    )
+    async with session_scope() as db:
+        deleted = await delete_org_knowledge(db, organization_id, store)
+    print(f"deleted {deleted} document(s); the knowledge base is off")
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 3 or sys.argv[1] != "delete":
+        sys.exit("usage: python -m hailhq.core.knowledge.access delete <org-id>")
+    asyncio.run(_delete_main(UUID(sys.argv[2])))

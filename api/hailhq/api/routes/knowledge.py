@@ -139,13 +139,13 @@ async def create_knowledge_document(
     scans), DOCX, TXT, Markdown and CSV (one piece per row) are read.
     """
     org = principal.organization_id
-    # Bounded waits: the upload sweep may hold the upload's row lock while it
-    # deletes from storage; this request then fails fast instead of holding
-    # the workspace's knowledge lock for as long.
+    await knowledge_lock(db, org)
+    limits = await _limits(db, org)
+    # A bounded wait on the upload's row only: the upload sweep may hold it
+    # while it deletes from storage; this request then answers 503 at once
+    # instead of holding the workspace's knowledge lock that long.
     await db.execute(text("SET LOCAL lock_timeout = '5s'"))
     try:
-        await knowledge_lock(db, org)
-        limits = await _limits(db, org)
         upload = (
             await db.execute(
                 select(FileUpload)
@@ -167,6 +167,7 @@ async def create_knowledge_document(
             detail="this upload is busy; try again in a few seconds",
             headers={"Retry-After": "5"},
         ) from exc
+    await db.execute(text("SET LOCAL lock_timeout TO DEFAULT"))
     if upload is None:
         raise HTTPException(
             status_code=http_status.HTTP_404_NOT_FOUND,

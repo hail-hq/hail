@@ -80,7 +80,7 @@ data "aws_iam_policy_document" "main" {
   }
 
   # Deleting a document lists its attempt objects; closing an account lists
-  # its folder. Also lets a missing object answer 404, not 403.
+  # its folder.
   statement {
     sid       = "KnowledgeDocumentsList"
     actions   = ["s3:ListBucket"]
