@@ -669,7 +669,7 @@ class SmsTrialResponse(BaseModel):
         )
     )
     texts_used: int = Field(description="Trial texts this workspace has sent.")
-    texts_limit: int = Field(description="Trial texts a workspace can send, ever.")
+    texts_limit: int = Field(description="All the trial texts the workspace gets.")
     texts_left: int = Field(description="Trial texts this workspace can still send.")
 
 

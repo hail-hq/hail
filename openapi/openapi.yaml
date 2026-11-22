@@ -11258,7 +11258,7 @@ components:
         texts_limit:
           type: integer
           title: Texts Limit
-          description: Trial texts a workspace can send, ever.
+          description: All the trial texts the workspace gets.
         texts_left:
           type: integer
           title: Texts Left

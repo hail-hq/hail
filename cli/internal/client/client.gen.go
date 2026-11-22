@@ -3852,7 +3852,7 @@ type SmsTrialResponse struct {
 	// TextsLeft Trial texts this workspace can still send.
 	TextsLeft int `json:"texts_left"`
 
-	// TextsLimit Trial texts a workspace can send, ever.
+	// TextsLimit All the trial texts the workspace gets.
 	TextsLimit int `json:"texts_limit"`
 
 	// TextsUsed Trial texts this workspace has sent.
