@@ -167,15 +167,31 @@ async def test_turn_before_load_ends_goes_without(async_session) -> None:
     await knowledge._task
 
 
-def test_short_turns_are_not_searched() -> None:
-    assert not worth_searching("yes")
-    assert not worth_searching("okay thanks")
-    assert not worth_searching("yes, please.")
-    assert worth_searching("Opening hours?")
-    assert worth_searching("¿Horario?") is False
-    assert worth_searching("how long is the warranty")
-    assert worth_searching("E204")
-    assert worth_searching("how long is the warranty")
+def test_filler_turns_are_not_searched_in_calls() -> None:
+    for filler in (
+        "yes",
+        "okay thanks",
+        "okay, thank you",
+        "no, that's all",
+        "Sì, grazie mille",
+        "Oui merci",
+        "yes, please.",
+    ):
+        assert not worth_searching(filler, call=True), filler
+    for question in (
+        "Opening hours?",
+        "ساعات العمل؟",
+        "E204",
+        "how long is the warranty",
+    ):
+        assert worth_searching(question, call=True), question
+    assert not worth_searching("opening hours", call=True)
+
+
+def test_texts_and_email_search_two_words() -> None:
+    assert worth_searching("opening hours")
+    assert worth_searching("return policy")
+    assert not worth_searching("hours")
 
 
 def test_last_user_text() -> None:

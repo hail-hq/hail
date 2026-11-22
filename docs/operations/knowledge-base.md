@@ -19,7 +19,7 @@ psql "${DATABASE_URL/postgresql+psycopg:/postgresql:}" -c \
   "UPDATE organization_knowledge SET max_documents = 50, updated_at = now() WHERE organization_id = '<org-uuid>';"
 ```
 
-Allowed ranges (CHECK constraints): documents 1 to 1,000, file bytes up to 25 MB, pieces up to 100,000. One file gives at most 3,000 pieces whatever the workspace limit: it must be read within the worker's 15-minute lease (about 280 s per 1,000 pieces). The workspace total can be higher. Over 5,000 pieces, calls search in SQL instead of memory.
+Allowed ranges (CHECK constraints): documents 1 to 1,000, file bytes up to 25 MB, pieces up to 100,000. One file gives at most 1,500 pieces whatever the workspace limit: it must be read within the worker's 15-minute lease (about 280 s per 1,000 pieces with int8, 410 s with fp32). The workspace total can be higher. Over 5,000 pieces, calls search in SQL instead of memory.
 
 Turn it off (agents stop using it at once; adding and search answer 403; listing, reading and deleting still work):
 
@@ -70,7 +70,7 @@ Measured 2026-11-21 (CPU only, 1 thread):
 | Load                                                        | about 0.5 s                                   | about 1 s               |
 | Agreement with fp32 (cosine)                                | 0.996 min                                     |                         |
 
-Quality on an invented 26-section manual, 25 questions in 7 languages: e5 found the right ~400-token piece 18 times out of 25, `paraphrase-multilingual-MiniLM-L12-v2` 9 to 11 (it reads only the first 128 tokens), so e5 was chosen. Cosine scores of right pieces were 0.73 to 0.92, off-topic best matches 0.72 to 0.81: the floor (0.72) sits below every right piece and only drops clear junk; keyword search carries IDs. One-word turns with no ID ("yes", "okay") are not searched during calls.
+Quality on an invented 26-section manual, 25 questions in 7 languages: e5 found the right ~400-token piece 18 times out of 25, `paraphrase-multilingual-MiniLM-L12-v2` 9 to 11 (it reads only the first 128 tokens), so e5 was chosen. Cosine scores of right pieces were 0.73 to 0.92, off-topic best matches 0.72 to 0.81: the floor (0.72) sits below every right piece and only drops clear junk; keyword search carries IDs. A call turn is searched with three or more words that are not filler ("okay, thank you" is not), two with a question mark, or any ID; a text or email with two words or more.
 
 The int8 file is tuned for CPUs with VNNI. On an x86 CPU without it (AVX2 only), int8 math can saturate. Check the VM once:
 

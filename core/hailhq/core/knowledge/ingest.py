@@ -94,9 +94,10 @@ _STALE = "Hail could not read the file in time; delete it and add it again"
 LEASE = timedelta(minutes=15)
 # Wall-clock limit of one decode. The child also has a 30 s CPU limit.
 DECODE_SECONDS = 60.0
-# Most pieces one file may give: it must be read within ``LEASE`` (about
-# 280 s per 1,000 pieces on one CPU thread), whatever the workspace limit.
-MAX_DOCUMENT_PIECES = 3000
+# Most pieces one file may give, whatever the workspace limit: it must be
+# read well within ``LEASE``. About 280 s per 1,000 pieces with the shipped
+# int8 model and 410 s with fp32, plus up to 60 s of decoding.
+MAX_DOCUMENT_PIECES = 1500
 # Pieces written per INSERT.
 _INSERT_BATCH = 100
 
@@ -370,6 +371,11 @@ class KnowledgeIngestWorker:
         if not chunks:
             raise _Refused("the file has no text")
         if len(chunks) > cap:
+            if cap < limits.max_pieces:
+                raise _Refused(
+                    f"one file gives at most {cap} pieces; split it into "
+                    "smaller files"
+                )
             raise _Refused(_too_many(cap))
         vectors = await asyncio.to_thread(
             embedder.embed_passages, [c.text for c in chunks]

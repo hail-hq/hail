@@ -12,6 +12,7 @@ import pytest
 from botocore.exceptions import ClientError
 from hailhq.core.file_uploads import object_key
 from hailhq.core.knowledge import index as index_module
+from hailhq.core.knowledge import ingest as ingest_module
 from hailhq.core.knowledge import search as search_module
 from hailhq.core.knowledge.access import agent_uses_knowledge, delete_org_knowledge
 from hailhq.core.knowledge.index import MemoryIndex, Piece
@@ -397,3 +398,30 @@ async def test_stale_pending_document_fails(async_session, worker, s3) -> None:
     await worker.tick()
     await async_session.refresh(doc)
     assert doc.status == "failed" and "in time" in doc.error
+
+
+async def test_one_file_has_its_own_piece_cap(
+    async_session, worker, s3, monkeypatch
+) -> None:
+    monkeypatch.setattr(ingest_module, "MAX_DOCUMENT_PIECES", 2)
+    org = uuid.uuid4()
+    rows = "Part\n" + "\n".join(f"P-{i}" for i in range(5))
+    doc_id = await add_document(async_session, s3, org, rows.encode(), "text/csv")
+    await worker.tick()
+    doc = await async_session.get(KnowledgeDocument, doc_id)
+    await async_session.refresh(doc)
+    assert doc.status == "failed" and "one file gives at most 2" in doc.error
+
+
+async def test_failed_bucket_delete_keeps_everything(async_session, s3) -> None:
+    org = uuid.uuid4()
+    doc_id = await add_document(async_session, s3, org, b"Hello there.")
+
+    async def broken(prefix, *, keep=None):
+        raise ConnectionError("bucket down")
+
+    s3.delete_prefix = broken
+    with pytest.raises(ConnectionError):
+        await delete_org_knowledge(async_session, org, s3)
+    assert await async_session.get(OrganizationKnowledge, org) is not None
+    assert await async_session.get(KnowledgeDocument, doc_id) is not None

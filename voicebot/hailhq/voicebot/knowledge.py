@@ -36,7 +36,7 @@ from hailhq.core.knowledge.access import MEMORY_MAX_PIECES, agent_uses_knowledge
 from hailhq.core.knowledge.embed import Embedder, get_embedder
 from hailhq.core.knowledge.index import Hit, MemoryIndex, Piece
 from hailhq.core.knowledge.search import search_pieces
-from hailhq.core.knowledge.text import query_terms
+from hailhq.core.knowledge.text import query_terms, terms
 from hailhq.core.models import KnowledgeDocument, KnowledgePiece
 from hailhq.core.prompts import knowledge_section
 from sqlalchemy import Text, cast, func, select
@@ -61,16 +61,38 @@ REPLY_PIECES = 5
 _QUERY_CHARS = 1000
 
 
-def worth_searching(text: str) -> bool:
-    """False for filler turns like "yes", "okay thanks" or "no thanks": a
-    turn is searched with three or more search words, two with a question
-    mark ("Opening hours?"), or any ID (a word with a digit)."""
+# Words that make up filler turns ("okay, thank you", "no, that's all"):
+# not counted as search words during calls. A few of the most spoken
+# languages; any other turn of three words or more is searched.
+# Written as people say them; folded the way search words are (accents
+# off, lower case, "that's" is "that" and "s").
+_FILLER = frozenset(
+    terms("""yes yeah yep no nope ok okay alright right sure fine good great
+        thanks thank you very much please hello hi hey bye goodbye that's all
+        it is oh ah um uh hmm perfect
+        sì grazie prego va bene perfetto ciao
+        sí gracias vale bueno claro adiós hola
+        oui non merci d'accord bon salut
+        ja nein danke bitte gut genau tschüss hallo
+        sim não obrigado obrigada tchau olá""")
+)
+_QUESTION_MARKS = "?？¿؟;՞"
+
+
+def worth_searching(text: str, *, call: bool = False) -> bool:
+    """Whether a message is worth a search. Any ID (a word with a digit) is.
+    A text or email is with two search words or more. A call turn skips
+    filler: it is searched with three or more words that are not filler,
+    or two with a question mark ("Opening hours?")."""
     words = query_terms(text)
     if any(any(c.isdigit() for c in w) for w in words):
         return True
+    if not call:
+        return len(words) >= 2
+    words = [w for w in words if w not in _FILLER]
     if len(words) >= 3:
         return True
-    return len(words) == 2 and any(q in text for q in "?？¿")
+    return len(words) == 2 and any(q in text for q in _QUESTION_MARKS)
 
 
 def last_user_text(chat_ctx: Any) -> str:
@@ -177,7 +199,7 @@ class CallKnowledge:
     async def context_for(self, text: str) -> str | None:
         """The reference block for the caller's ``text``, or None: not
         loaded yet, nothing worth searching, nothing found, or an error."""
-        if not self.ready or not text or not worth_searching(text):
+        if not self.ready or not text or not worth_searching(text, call=True):
             return None
         if self._last is not None and self._last[0] == text:
             # The same turn again (a tool round, or the preemptive reply

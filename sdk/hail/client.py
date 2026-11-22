@@ -1033,13 +1033,15 @@ class _KnowledgeResource:
         return KnowledgeDocumentListResponse.model_validate(data)
 
     async def get_document(self, document_id: str | UUID) -> KnowledgeDocumentResponse:
+        """One document. Raises ``ValueError`` for an id that is not a UUID."""
         # Parsed, so an id from user input can never reach another path.
         doc_id = UUID(str(document_id))
         data = await self._http.request("GET", f"/knowledge/documents/{doc_id}")
         return KnowledgeDocumentResponse.model_validate(data)
 
     async def delete_document(self, document_id: str | UUID) -> None:
-        """Delete a document, its stored file and its pieces."""
+        """Delete a document, its stored file and its pieces. Raises
+        ``ValueError`` for an id that is not a UUID."""
         doc_id = UUID(str(document_id))
         await self._http.request("DELETE", f"/knowledge/documents/{doc_id}")
 
