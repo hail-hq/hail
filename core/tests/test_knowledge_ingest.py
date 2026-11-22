@@ -4,6 +4,7 @@ Postgres with pgvector."""
 from __future__ import annotations
 
 import builtins
+import logging
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -20,6 +21,7 @@ from hailhq.core.knowledge.access import (
     agent_uses_knowledge,
     delete_org_knowledge,
     involves_database,
+    log_failure,
     short_cause,
 )
 from hailhq.core.knowledge.index import MemoryIndex, Piece
@@ -589,3 +591,18 @@ def test_database_errors_never_show_their_text() -> None:
     assert not involves_database(RuntimeError("plain"))
     group = getattr(builtins, "ExceptionGroup")  # noqa: B009 (3.11+ name)
     assert involves_database(group("tasks", [db_error]))
+
+
+def test_log_failure_shows_shape_never_messages(caplog) -> None:
+    log = logging.getLogger("test.knowledge")
+    try:
+        try:
+            raise ValueError("text from the customer's file")
+        except ValueError:
+            raise OSError("connection refused") from None
+    except OSError as exc:
+        with caplog.at_level(logging.ERROR, logger="test.knowledge"):
+            log_failure(log, "step failed", exc)
+    text = caplog.text
+    assert "OSError" in text and "ValueError" in text
+    assert "customer" not in text and "refused" not in text

@@ -119,7 +119,10 @@ async def close_org(organization_id: UUID, lk: LiveKitClient | None) -> None:
                 organization_id,
             )
         except Exception as exc:
-            await db.rollback()
+            try:
+                await db.rollback()
+            except Exception:
+                logger.warning("org closure: rollback after the knowledge step failed")
             log_failure(
                 logger,
                 "org closure: could not delete the knowledge base; the "

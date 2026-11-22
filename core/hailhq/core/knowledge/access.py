@@ -137,7 +137,9 @@ def involves_database(exc: BaseException) -> bool:
         if id(current) in seen:
             continue
         seen.add(id(current))
-        if isinstance(current, SQLAlchemyError):
+        if isinstance(current, SQLAlchemyError) or type(current).__module__.startswith(
+            ("asyncpg", "psycopg")
+        ):
             return True
         # An exception group (Python 3.11+) prints every member.
         members = getattr(current, "exceptions", None)
@@ -148,13 +150,27 @@ def involves_database(exc: BaseException) -> bool:
 
 
 def log_failure(log: logging.Logger, message: str, exc: BaseException) -> None:
-    """Log ``message`` and ``exc`` at error level: with its traceback, or,
-    when a database error is involved, with its type and code only (no
-    statement or values)."""
-    if involves_database(exc):
-        log.error("%s (%s%s)", message, type(exc).__name__, short_cause(exc))
-    else:
-        log.error("%s", message, exc_info=exc)
+    """Log ``message`` at error level with the failure's shape only: each
+    error in its chain as type and where it was raised (file:line), never
+    a message. Messages here can hold statements, values or text from the
+    customer's file."""
+    parts = []
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        tb = current.__traceback__
+        while tb is not None and tb.tb_next is not None:
+            tb = tb.tb_next
+        where = (
+            f" at {tb.tb_frame.f_code.co_filename.rsplit('/', 1)[-1]}:{tb.tb_lineno}"
+            if tb is not None
+            else ""
+        )
+        code = getattr(getattr(current, "orig", None), "sqlstate", None)
+        parts.append(f"{type(current).__name__}{f' {code}' if code else ''}{where}")
+        current = current.__cause__ or current.__context__
+    log.error("%s (%s)", message, " <- ".join(parts))
 
 
 def short_cause(exc: BaseException) -> str:
@@ -167,6 +183,8 @@ def short_cause(exc: BaseException) -> str:
         code = getattr(orig, "sqlstate", None)
         name = type(orig).__name__ if orig is not None else ""
         return (f": {name}" if name else "") + (f" {code}" if code else "")
+    if involves_database(exc):
+        return ""
     try:
         first = (str(exc).strip().splitlines() or [""])[0][:200]
     except Exception:
