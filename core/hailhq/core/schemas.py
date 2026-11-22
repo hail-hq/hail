@@ -321,8 +321,8 @@ class CallCreate(ConsentAttestationMixin):
         description=(
             "Agent tools to allow on this call. Omitted: every tool the "
             "organization's configured channels support (new channels appear "
-            "automatically). Empty list: only the tools every call keeps, such "
-            "as end_call (a saved agent's HTTP tools stay on). "
+            "automatically). Empty list: only the tools every call keeps "
+            "(end_call and send_dtmf); a saved agent's HTTP tools stay on. "
             "Tool names are validated "
             "against the server's registry."
         ),
@@ -1386,8 +1386,8 @@ class AgentCreate(BaseModel):
         default=None,
         description=(
             "Agent tools to allow. Omitted: every tool the organization's "
-            "channels support. Empty list: only the tools every call keeps, "
-            "such as end_call. HTTP tools stay on."
+            "channels support. Empty list: only the tools every call keeps "
+            "(end_call and send_dtmf). HTTP tools stay on."
         ),
     )
     max_duration_seconds: int | None = Field(
@@ -1487,7 +1487,7 @@ class AgentUpdate(BaseModel):
         default=None,
         description=(
             "New allowed tools; null allows every tool. Calls always keep "
-            "some tools, such as end_call."
+            "end_call and send_dtmf."
         ),
     )
     max_duration_seconds: int | None = Field(

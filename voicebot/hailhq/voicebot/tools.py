@@ -167,13 +167,12 @@ def every_call_tools(
     spoke_since=None,
 ) -> list:
     """The tools every call keeps (``ToolSpec.on_every_call``), for a call
-    whose other tools could not be built. They need no database or API, so
-    a call can still hang up when those fail. Empty when the dispatch has no
-    valid ``organization_id``."""
+    whose other tools could not be built. They need no database, API or
+    organization, so a call can still hang up when those fail."""
     try:
-        organization_id = UUID(str(metadata.get("organization_id")))
+        organization_id: UUID | None = UUID(str(metadata.get("organization_id")))
     except ValueError:
-        return []
+        organization_id = None
     tctx = ToolContext(
         call_id=call_id,
         organization_id=organization_id,
@@ -218,21 +217,33 @@ async def build_agent_tools(
 ) -> tuple[list, AgentApiClient | None]:
     """Build this call's LiveKit tools. Returns (tools, api_client).
 
-    The caller must ``aclose()`` the client at shutdown. Returns no tools
-    when the dispatch predates the ``organization_id`` field (rolling
-    deploy): no tools beats wrong-org tools.
+    The caller must ``aclose()`` the client at shutdown. Returns only the
+    every-call tools when the dispatch has no valid ``organization_id``
+    (rolling deploy): no org tools beats wrong-org tools.
     """
+    fallback = (
+        every_call_tools(
+            metadata,
+            call_id=call_id,
+            hangup=hangup,
+            send_dtmf=send_dtmf,
+            spoke_since=spoke_since,
+        ),
+        None,
+    )
     raw_org = metadata.get("organization_id")
     if raw_org is None:
-        logger.warning("dispatch metadata has no organization_id; agent tools disabled")
-        return [], None
+        logger.warning(
+            "dispatch metadata has no organization_id; only every-call tools"
+        )
+        return fallback
     try:
         organization_id = UUID(str(raw_org))
     except ValueError:
         logger.warning(
-            "dispatch metadata has malformed organization_id; agent tools disabled"
+            "dispatch metadata has malformed organization_id; only every-call tools"
         )
-        return [], None
+        return fallback
 
     allowed = metadata.get("tools")  # None ⇒ all available
     if allowed is not None and not isinstance(allowed, list):
@@ -244,16 +255,7 @@ async def build_agent_tools(
             "dispatch metadata 'tools' is not a list (%r); only every-call tools",
             type(allowed).__name__,
         )
-        return (
-            every_call_tools(
-                metadata,
-                call_id=call_id,
-                hangup=hangup,
-                send_dtmf=send_dtmf,
-                spoke_since=spoke_since,
-            ),
-            None,
-        )
+        return fallback
     specs: list[ToolSpec] = []
     for s in call_tools():
         # A tool every call keeps ignores the `tools` list.

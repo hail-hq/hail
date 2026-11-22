@@ -100,22 +100,23 @@ async def test_a_tools_list_keeps_every_call_tools(db):
             await api.aclose()
 
 
-async def test_missing_organization_id_disables_tools():
+async def test_missing_organization_id_keeps_only_every_call_tools():
+    """No org tools without an org, but the call can still hang up."""
     tools, api = await build_agent_tools(
         {}, call_id=uuid.uuid4(), hangup=None, send_dtmf=None
     )
-    assert tools == []
+    assert [t.info.name for t in tools] == EVERY_CALL
     assert api is None
 
 
-async def test_malformed_organization_id_disables_tools():
+async def test_malformed_organization_id_keeps_only_every_call_tools():
     tools, api = await build_agent_tools(
         {"organization_id": "not-a-uuid"},
         call_id=uuid.uuid4(),
         hangup=None,
         send_dtmf=None,
     )
-    assert tools == []
+    assert [t.info.name for t in tools] == EVERY_CALL
     assert api is None
 
 

@@ -5282,8 +5282,8 @@ paths:
           description: The account keeps the most files allowed.
         "503":
           description:
-            "This server cannot store files for carrier reviewers (no mail bucket
-            or no public https URL), or storage failed for a moment: try again."
+            "This server cannot store files for carrier reviewers (no mail
+            bucket or no public https URL), or storage failed for a moment: try again."
         "422":
           description: Validation Error
           content:
@@ -6712,8 +6712,8 @@ components:
           title: Tools
           description:
             "Agent tools to allow. Omitted: every tool the organization's
-            channels support. Empty list: only the tools every call keeps, such as
-            end_call. HTTP tools stay on."
+            channels support. Empty list: only the tools every call keeps (end_call
+            and send_dtmf). HTTP tools stay on."
         max_duration_seconds:
           anyOf:
             - type: integer
@@ -7003,7 +7003,7 @@ components:
           title: Tools
           description:
             New allowed tools; null allows every tool. Calls always keep
-            some tools, such as end_call.
+            end_call and send_dtmf.
         max_duration_seconds:
           anyOf:
             - type: integer
@@ -7214,9 +7214,9 @@ components:
           description:
             "Agent tools to allow on this call. Omitted: every tool the
             organization's configured channels support (new channels appear automatically).
-            Empty list: only the tools every call keeps, such as end_call (a saved
-            agent's HTTP tools stay on). Tool names are validated against the server's
-            registry."
+            Empty list: only the tools every call keeps (end_call and send_dtmf);
+            a saved agent's HTTP tools stay on. Tool names are validated against
+            the server's registry."
         agent_id:
           anyOf:
             - type: string

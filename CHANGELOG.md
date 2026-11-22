@@ -10,7 +10,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Changed
 
-- Some tools stay on every call, such as `end_call`, so a bring-your-own model must support tool calling.
+- `end_call` and `send_dtmf` stay on every call, so a bring-your-own model must support tool calling.
 
 ### Fixed
 

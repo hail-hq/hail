@@ -73,7 +73,9 @@ class ToolContext:
     """
 
     call_id: uuid.UUID | None
-    organization_id: uuid.UUID
+    # None only for the every-call tools of a call whose dispatch has no
+    # valid organization: those tools never read it.
+    organization_id: uuid.UUID | None
     api: AgentApiClient | None
     hangup: Callable[[], Awaitable[None]] | None
     send_dtmf: Callable[[str], Awaitable[None]] | None

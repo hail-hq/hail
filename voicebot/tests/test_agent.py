@@ -1533,7 +1533,7 @@ async def test_build_tools_safely_degrades_on_failure(
 
     `build_tools_safely` is the entrypoint's guard around `build_agent_tools`:
     any exception (e.g. a DB rollback on a dead connection) degrades to
-    the tools every call keeps, or `([], None)` without a valid organization.
+    the tools every call keeps.
     """
     from hailhq.voicebot import agent as agent_mod
 
@@ -1559,7 +1559,10 @@ async def test_build_tools_safely_degrades_on_failure(
     # Must not raise.
     tools, api = await build_tools_safely({}, call_id, _hangup, _send_dtmf)
 
-    assert tools == []
+    # Without an organization the call still keeps its every-call tools.
+    assert [t.info.name for t in tools] == [
+        s.name for s in call_tools() if s.on_every_call
+    ]
     assert api is None
 
     # With a valid organization the call keeps its every-call tools.
