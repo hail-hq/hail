@@ -46,10 +46,10 @@ import hashlib
 import time
 from typing import Any
 
+from fastapi import HTTPException
 from hailhq.api.route_prefixes import INTERNAL_PREFIX as _INTERNAL_PREFIX
 from hailhq.api.route_prefixes import V1_PREFIX as _V1_PREFIX
 from hailhq.core.config import settings
-from fastapi import HTTPException
 from limits import RateLimitItem, parse
 from slowapi import Limiter
 from slowapi.util import get_remote_address
