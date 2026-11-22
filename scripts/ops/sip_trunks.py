@@ -20,6 +20,11 @@ Every command except ``status`` prints its plan and changes nothing until
   (read and checked before any change, dry run too; its current host, port,
   transport and digest user are printed first, so they can be restored by
   hand).
+  For Twilio it also maps the ``X-Hail-Secret`` header to a participant
+  attribute on the LiveKit trunk (``headers_to_attributes``), then adds
+  ``?X-Hail-Secret=<HAIL_SIP_INBOUND_SECRET>`` to each origination URL of
+  ``TWILIO_SIP_TRUNK_SID`` (read first, dry run too; host, transport,
+  priority and weight kept; the secret is never printed).
   Prints the trunk id for ``LIVEKIT_<CARRIER>_SIP_INBOUND_TRUNK_ID``. On the
   shared trunk it only adds the shared placeholder. It adds numbers only
   (Hail manages them).
@@ -42,14 +47,16 @@ import argparse
 import asyncio
 import ipaddress
 import json
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 from hailhq.core.config import settings
 from hailhq.core.db import dispose_engine, session_scope
+from hailhq.core.inbound_calls import SIP_SECRET_ATTRIBUTE, SIP_SECRET_HEADER
 from hailhq.core.models import PhoneNumber
-from hailhq.core.providers.voice import didww
+from hailhq.core.providers.voice import didww, twilio
 from hailhq.core.providers.voice.base import CarrierNotConfigured, CarrierRequestError
 from livekit import api
 from livekit.protocol.models import ListUpdate
@@ -71,6 +78,7 @@ class Spec:
     placeholder: str
     allowed_addresses: list[str]
     auth_username: str
+    headers_to_attributes: dict[str, str]
 
 
 def load(path: Path = SETTINGS) -> tuple[dict, dict[str, Spec]]:
@@ -82,6 +90,7 @@ def load(path: Path = SETTINGS) -> tuple[dict, dict[str, Spec]]:
             placeholder=t["placeholder"],
             allowed_addresses=list(t.get("allowed_addresses") or []),
             auth_username=t.get("auth_username", ""),
+            headers_to_attributes=dict(t.get("headers_to_attributes") or {}),
         )
         for carrier, t in data["trunks"].items()
     }
@@ -109,6 +118,62 @@ def password_for(spec: Spec) -> str:
     if not settings.didww_sip_inbound_password:
         raise TrunkError("DIDWW_SIP_INBOUND_PASSWORD is empty in .env")
     return settings.didww_sip_inbound_password
+
+
+def secret_for(spec: Spec) -> str:
+    """HAIL_SIP_INBOUND_SECRET for a trunk that maps the secret header."""
+    if not spec.headers_to_attributes:
+        return ""
+    if spec.carrier != "twilio":
+        raise TrunkError(f"{spec.carrier}: only Twilio sends {SIP_SECRET_HEADER}")
+    secret = settings.hail_sip_inbound_secret
+    if not secret:
+        raise TrunkError("HAIL_SIP_INBOUND_SECRET is empty in .env")
+    if not re.fullmatch(r"[A-Za-z0-9_-]{20,}", secret):
+        # It goes into a SIP URI as is.
+        raise TrunkError(
+            "HAIL_SIP_INBOUND_SECRET must be 20 or more letters, digits, - or _"
+        )
+    return secret
+
+
+def with_header(sip_url: str, name: str, value: str) -> str:
+    """``sip_url`` with the SIP URI header ``name=value`` (after ``?``),
+    replacing one of that name. Everything before ``?`` stays."""
+    base, _, query = sip_url.partition("?")
+    kept = [
+        h for h in query.split("&") if h and h.split("=", 1)[0].lower() != name.lower()
+    ]
+    return base + "?" + "&".join([*kept, f"{name}={value}"])
+
+
+def masked(sip_url: str) -> str:
+    """``sip_url`` with the secret header's value hidden."""
+    return re.sub(
+        rf"([?&]{re.escape(SIP_SECRET_HEADER)}=)[^&]*",
+        r"\1***",
+        sip_url,
+        flags=re.IGNORECASE,
+    )
+
+
+def header_map_text(spec: Spec) -> str:
+    return "".join(
+        f"map header {h} to attribute {a}, "
+        for h, a in spec.headers_to_attributes.items()
+    )
+
+
+async def set_headers_to_attributes(sip, trunk_id: str, spec: Spec) -> None:
+    """The field update has no ``headers_to_attributes``: replace the whole
+    trunk with a copy read just before."""
+    replace = api.SIPInboundTrunkInfo()
+    replace.CopyFrom(await trunk_by_id(sip, trunk_id))
+    replace.headers_to_attributes.clear()
+    replace.headers_to_attributes.update(spec.headers_to_attributes)
+    result = await sip.update_inbound_trunk(trunk_id, replace)
+    if result.sip_trunk_id != trunk_id:
+        raise TrunkError(f"LiveKit answered {result.sip_trunk_id} for {trunk_id}")
 
 
 async def trunks(sip) -> list:
@@ -141,6 +206,7 @@ async def apply(sip, data: dict, spec: Spec, yes: bool) -> list[str]:
     """Plan, and with ``yes`` do. Returns the plan lines."""
     # Every check runs before the first change, dry run or not.
     password = password_for(spec)
+    secret = secret_for(spec)
     if password and not settings.didww_voice_in_trunk_id:
         raise TrunkError("DIDWW_VOICE_IN_TRUNK_ID is empty in .env")
     if spec.carrier != "didww" and not spec.allowed_addresses:
@@ -161,6 +227,10 @@ async def apply(sip, data: dict, spec: Spec, yes: bool) -> list[str]:
         if password
         else None
     )
+    # Twilio, read only: the origination URLs to add the secret header to.
+    origination = await twilio.origination_urls() if secret else []
+    if secret and not origination:
+        raise TrunkError("TWILIO_SIP_TRUNK_SID has no origination URL")
     if didww_sip is not None:
         # Printed at once, before any write: a failed write below would
         # lose the plan, and these are what to restore by hand.
@@ -210,7 +280,7 @@ async def apply(sip, data: dict, spec: Spec, yes: bool) -> list[str]:
         plan.append(
             f"create trunk {spec.name}: {len(spec.allowed_addresses)} allowed "
             f"addresses, digest auth {'on' if password else 'off'}, "
-            f"placeholder {spec.placeholder}"
+            f"{header_map_text(spec)}placeholder {spec.placeholder}"
         )
         trunk_id = ""
         if yes:
@@ -222,6 +292,7 @@ async def apply(sip, data: dict, spec: Spec, yes: bool) -> list[str]:
                         allowed_addresses=spec.allowed_addresses,
                         auth_username=spec.auth_username if password else "",
                         auth_password=password,
+                        headers_to_attributes=spec.headers_to_attributes,
                     )
                 )
             )
@@ -235,6 +306,19 @@ async def apply(sip, data: dict, spec: Spec, yes: bool) -> list[str]:
             if spec.allowed_addresses
             else f"{len(existing.allowed_addresses)} kept (the JSON lists none)"
         )
+        if spec.headers_to_attributes and (
+            dict(existing.headers_to_attributes) != spec.headers_to_attributes
+        ):
+            # Before the field update, which then sets the auth fields again.
+            # A number Hail adds to or removes from this trunk during the
+            # replace is undone.
+            plan.append(
+                f"replace trunk {spec.name} to "
+                f"{header_map_text(spec).removesuffix(', ')} (a number routed "
+                "in that same second is lost: compare status before and after)"
+            )
+            if yes:
+                await set_headers_to_attributes(sip, trunk_id, spec)
         plan.append(
             f"update trunk {spec.name} ({trunk_id}): allowed addresses "
             f"{addresses}, "
@@ -257,6 +341,21 @@ async def apply(sip, data: dict, spec: Spec, yes: bool) -> list[str]:
             await sip.update_dispatch_rule_fields(
                 rule.sip_dispatch_rule_id, trunk_ids=ListUpdate(add=[trunk_id])
             )
+    # Last, once LiveKit maps the header. Hail checks it only once
+    # HAIL_SIP_INBOUND_SECRET is set on the VM.
+    for url in origination:
+        new_url = with_header(url.sip_url, SIP_SECRET_HEADER, secret)
+        if new_url == url.sip_url:
+            plan.append(
+                f"Twilio origination URL {url.sid} already sends {SIP_SECRET_HEADER}"
+            )
+            continue
+        plan.append(
+            f"Twilio origination URL {url.sid}: {masked(url.sip_url)} -> "
+            f"{masked(new_url)} (priority {url.priority}, weight {url.weight} kept)"
+        )
+        if yes:
+            await twilio.set_origination_sip_url(url.sid, new_url)
     if yes:
         plan.append(f"set in .env: {env_key(spec.carrier)}={trunk_id}")
     return plan
@@ -558,11 +657,13 @@ async def status(sip, data: dict, specs: dict[str, Spec]) -> list[str]:
             and _networks(t.allowed_addresses) == _networks(spec.allowed_addresses)
             else f"{len(t.allowed_addresses)}"
         )
+        mapped = t.headers_to_attributes.get(SIP_SECRET_HEADER) == SIP_SECRET_ATTRIBUTE
         lines.append(
             f"{t.name} ({role}): "
             f"{len([n for n in t.numbers if n not in placeholders])} number(s), "
             f"allowed addresses {addresses}, "
             f"digest auth {'on' if t.auth_username else 'off'}, "
+            f"secret header mapped {'yes' if mapped else 'no'}, "
             f"in dispatch rule {'yes' if not rule.trunk_ids or t.sip_trunk_id in rule.trunk_ids else 'no'}"
         )
     return lines

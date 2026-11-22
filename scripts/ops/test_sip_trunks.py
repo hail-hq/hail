@@ -70,6 +70,14 @@ class FakeSip:
         self.calls.append(("update", trunk_id))
         return trunk
 
+    async def update_inbound_trunk(self, trunk_id, trunk):
+        replaced = api.SIPInboundTrunkInfo()
+        replaced.CopyFrom(trunk)
+        replaced.sip_trunk_id = trunk_id
+        self.trunks[trunk_id] = replaced
+        self.calls.append(("replace", trunk_id))
+        return replaced
+
     async def update_dispatch_rule_fields(self, rule_id, *, trunk_ids):
         for t in trunk_ids.add:
             self.rule.trunk_ids.append(t)
@@ -88,8 +96,43 @@ def trunk(trunk_id, name, numbers=()):
     )
 
 
+SECRET = "s3cr3t-value-for-tests_0123456789abcdef"
+
+
+class FakeTwilio:
+    """The Elastic SIP trunk's origination URLs."""
+
+    def __init__(self, *urls):
+        self.urls = {
+            f"OU{i}": st.twilio.OriginationUrl(f"OU{i}", url, 10, 20, True)
+            for i, url in enumerate(urls)
+        }
+        self.updates: list[tuple[str, str]] = []
+
+    async def origination_urls(self):
+        return list(self.urls.values())
+
+    async def set_origination_sip_url(self, sid, sip_url):
+        old = self.urls[sid]
+        self.urls[sid] = st.twilio.OriginationUrl(
+            sid, sip_url, old.priority, old.weight, old.enabled
+        )
+        self.updates.append((sid, sip_url))
+
+
+@pytest.fixture(autouse=True)
+def tw(monkeypatch) -> FakeTwilio:
+    fake = FakeTwilio("sip:lk.example.test;transport=tcp")
+    monkeypatch.setattr(st.twilio, "origination_urls", fake.origination_urls)
+    monkeypatch.setattr(
+        st.twilio, "set_origination_sip_url", fake.set_origination_sip_url
+    )
+    return fake
+
+
 @pytest.fixture(autouse=True)
 def env(monkeypatch):
+    monkeypatch.setattr(settings, "hail_sip_inbound_secret", SECRET)
     monkeypatch.setattr(settings, "livekit_sip_inbound_trunk_id", "ST_shared")
     for c in st.CARRIERS:
         monkeypatch.setattr(settings, f"livekit_{c}_sip_inbound_trunk_id", "ST_shared")
@@ -750,3 +793,148 @@ async def test_move_skips_a_number_unrouted_after_the_plan(monkeypatch) -> None:
     )
     assert list(sip.trunks["ST_tx"].numbers) == ["hail-placeholder-telnyx"]
     assert "skipped +14155550100: it is not routed now" in plan
+
+
+async def test_the_json_maps_the_header_core_reads() -> None:
+    from hailhq.core.inbound_calls import SIP_SECRET_ATTRIBUTE, SIP_SECRET_HEADER
+
+    assert SPECS["twilio"].headers_to_attributes == {
+        SIP_SECRET_HEADER: SIP_SECRET_ATTRIBUTE
+    }
+    assert not SPECS["telnyx"].headers_to_attributes
+    assert not SPECS["didww"].headers_to_attributes
+
+
+@pytest.mark.parametrize(
+    ("url", "want"),
+    [
+        ("sip:lk.example.test", "sip:lk.example.test?X-Hail-Secret=v"),
+        (
+            "sip:lk.example.test:5061;transport=tls",
+            "sip:lk.example.test:5061;transport=tls?X-Hail-Secret=v",
+        ),
+        (
+            "sip:lk.example.test;transport=tcp?X-Other=1&x-hail-secret=old",
+            "sip:lk.example.test;transport=tcp?X-Other=1&X-Hail-Secret=v",
+        ),
+    ],
+)
+async def test_with_header_keeps_the_rest_and_replaces_an_old_value(url, want) -> None:
+    assert st.with_header(url, "X-Hail-Secret", "v") == want
+
+
+async def test_masked_hides_only_the_secret() -> None:
+    url = f"sip:lk.example.test;transport=tcp?X-Other=1&X-Hail-Secret={SECRET}"
+    assert (
+        st.masked(url)
+        == "sip:lk.example.test;transport=tcp?X-Other=1&X-Hail-Secret=***"
+    )
+
+
+async def test_twilio_apply_needs_the_secret(monkeypatch, tw) -> None:
+    monkeypatch.setattr(settings, "hail_sip_inbound_secret", "")
+    sip = FakeSip(trunk("ST_shared", "shared", ["+14155550100"]))
+    with pytest.raises(st.TrunkError, match="HAIL_SIP_INBOUND_SECRET is empty"):
+        await st.apply(sip, DATA, SPECS["twilio"], yes=True)
+    assert sip.calls == []
+    assert tw.updates == []
+
+
+async def test_twilio_apply_refuses_a_secret_unfit_for_a_uri(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "hail_sip_inbound_secret", "a b&c" * 10)
+    sip = FakeSip(trunk("ST_shared", "shared", ["+14155550100"]))
+    with pytest.raises(st.TrunkError, match="letters, digits"):
+        await st.apply(sip, DATA, SPECS["twilio"], yes=False)
+
+
+async def test_twilio_apply_needs_an_origination_url(monkeypatch, tw) -> None:
+    tw.urls.clear()
+    sip = FakeSip(trunk("ST_shared", "shared", ["+14155550100"]))
+    with pytest.raises(st.TrunkError, match="no origination URL"):
+        await st.apply(sip, DATA, SPECS["twilio"], yes=True)
+    assert sip.calls == []
+
+
+async def test_twilio_dry_run_prints_the_url_plan_without_the_secret(tw) -> None:
+    sip = FakeSip(trunk("ST_shared", "shared", ["+14155550100"]))
+    plan = await st.apply(sip, DATA, SPECS["twilio"], yes=False)
+    assert tw.updates == []
+    assert sip.calls == []
+    assert (
+        "Twilio origination URL OU0: sip:lk.example.test;transport=tcp -> "
+        "sip:lk.example.test;transport=tcp?X-Hail-Secret=*** "
+        "(priority 10, weight 20 kept)"
+    ) in plan
+    assert not any(SECRET in line for line in plan)
+
+
+async def test_twilio_apply_creates_the_trunk_with_the_map_and_sets_the_url(
+    tw,
+) -> None:
+    sip = FakeSip(trunk("ST_shared", "shared", ["+14155550100"]))
+    plan = await st.apply(sip, DATA, SPECS["twilio"], yes=True)
+    created = st.by_name(list(sip.trunks.values()), "hail-inbound-twilio")
+    assert dict(created.headers_to_attributes) == {"X-Hail-Secret": "hail.sip_secret"}
+    assert tw.updates == [
+        ("OU0", f"sip:lk.example.test;transport=tcp?X-Hail-Secret={SECRET}")
+    ]
+    assert tw.urls["OU0"].priority == 10 and tw.urls["OU0"].weight == 20
+    assert not any(SECRET in line for line in plan)
+    # A second run changes no URL.
+    plan = await st.apply(sip, DATA, SPECS["twilio"], yes=True)
+    assert len(tw.updates) == 1
+    assert "Twilio origination URL OU0 already sends X-Hail-Secret" in plan
+
+
+async def test_twilio_apply_maps_the_header_on_an_existing_trunk_once(
+    monkeypatch,
+) -> None:
+    """The field update has no header map: the trunk is replaced with a copy
+    that keeps its numbers and addresses, and only when the map differs."""
+    monkeypatch.setattr(settings, "livekit_twilio_sip_inbound_trunk_id", "ST_tw")
+    sip = FakeSip(
+        trunk("ST_shared", "shared", ["hail-placeholder-shared"]),
+        trunk("ST_tw", "hail-inbound-twilio", ["hail-placeholder-twilio", "+1"]),
+        rule_trunks=("ST_shared", "ST_tw"),
+    )
+    sip.trunks["ST_tw"].allowed_addresses.append("54.172.60.0/30")
+    plan = await st.apply(sip, DATA, SPECS["twilio"], yes=True)
+    tw_trunk = sip.trunks["ST_tw"]
+    assert dict(tw_trunk.headers_to_attributes) == {"X-Hail-Secret": "hail.sip_secret"}
+    assert list(tw_trunk.numbers) == ["hail-placeholder-twilio", "+1"]
+    assert sorted(tw_trunk.allowed_addresses) == sorted(
+        SPECS["twilio"].allowed_addresses
+    )
+    replaces = [c for c in sip.calls if c[0] == "replace"]
+    assert replaces == [("replace", "ST_tw")]
+    # The replace runs before the field update.
+    assert sip.calls.index(("replace", "ST_tw")) < sip.calls.index(("update", "ST_tw"))
+    assert any(line.startswith("replace trunk hail-inbound-twilio") for line in plan)
+    await st.apply(sip, DATA, SPECS["twilio"], yes=True)
+    assert [c for c in sip.calls if c[0] == "replace"] == [("replace", "ST_tw")]
+
+
+async def test_telnyx_apply_touches_no_twilio_url(monkeypatch, tw) -> None:
+    monkeypatch.setattr(settings, "hail_sip_inbound_secret", "")
+    sip = FakeSip(trunk("ST_shared", "shared", ["+14155550100"]))
+    await st.apply(sip, DATA, SPECS["telnyx"], yes=True)
+    created = st.by_name(list(sip.trunks.values()), "hail-inbound-telnyx")
+    assert not created.headers_to_attributes
+    assert tw.updates == []
+
+
+async def test_status_says_whether_the_secret_header_is_mapped(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "livekit_twilio_sip_inbound_trunk_id", "ST_tw")
+    sip = FakeSip(
+        trunk("ST_shared", "shared", ["hail-placeholder-shared"]),
+        trunk("ST_tw", "hail-inbound-twilio", ["hail-placeholder-twilio"]),
+    )
+    lines = await st.status(sip, DATA, SPECS)
+    assert "secret header mapped no" in next(
+        line for line in lines if line.startswith("hail-inbound-twilio")
+    )
+    sip.trunks["ST_tw"].headers_to_attributes["X-Hail-Secret"] = "hail.sip_secret"
+    lines = await st.status(sip, DATA, SPECS)
+    assert "secret header mapped yes" in next(
+        line for line in lines if line.startswith("hail-inbound-twilio")
+    )

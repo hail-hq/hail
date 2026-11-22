@@ -113,6 +113,12 @@ class Settings(BaseSettings):
     # attached to it when they route calls to an agent. Empty = Twilio
     # numbers cannot take calls.
     twilio_sip_trunk_sid: str = ""
+    # Shared secret Twilio sends on every call to LiveKit, as the X-Hail-Secret
+    # SIP header in the trunk's origination URI. LiveKit maps it to a
+    # participant attribute; a Twilio call without it is refused
+    # (inbound_calls.py). Set on both sides by scripts/ops/sip_trunks.py.
+    # Empty = no check (self-host default).
+    hail_sip_inbound_secret: str = ""
     # Hail's approved primary customer profile (Trust Hub, business identity
     # "ISV Reseller or Partner"). Customers' 10DLC profiles are assigned to it.
     twilio_primary_profile_sid: str = ""

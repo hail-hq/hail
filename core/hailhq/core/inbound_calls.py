@@ -6,8 +6,9 @@ voicebot reads the SIP participant's attributes and calls
 :func:`open_inbound_call`, which decides who answers:
 
 * unknown or pool number: dropped, no row (same as inbound SMS);
-* known number on the wrong trunk, or without voice: ``Call`` failed with
-  ``end_reason = carrier_route_failed`` (logged at WARNING);
+* known number on the wrong trunk, or without voice, or a Twilio call
+  without the shared secret (``HAIL_SIP_INBOUND_SECRET``): ``Call`` failed
+  with ``end_reason = carrier_route_failed`` (logged at WARNING);
 * no live voice agent: ``Call`` failed with ``end_reason = no_agent``;
 * no credits or voice suspended: ``Call`` failed with ``insufficient_funds``
   (or ``user_rejected`` when the channel is suspended);
@@ -21,8 +22,9 @@ Mirrors ``sms_ingest.ingest_inbound_sms`` for the resolution rules and
 from __future__ import annotations
 
 import asyncio
+import hmac
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
@@ -51,7 +53,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["Accepted", "Rejected", "SipAttributes", "open_inbound_call"]
+__all__ = [
+    "SIP_SECRET_ATTRIBUTE",
+    "SIP_SECRET_HEADER",
+    "Accepted",
+    "Rejected",
+    "SipAttributes",
+    "open_inbound_call",
+]
+
+# Twilio sends HAIL_SIP_INBOUND_SECRET in this header (set in the Elastic SIP
+# trunk's origination URI); the LiveKit Twilio trunk maps it to this
+# participant attribute (headers_to_attributes in
+# infra/livekit/inbound-trunks.json). Both set by scripts/ops/sip_trunks.py.
+SIP_SECRET_HEADER = "X-Hail-Secret"
+SIP_SECRET_ATTRIBUTE = "hail.sip_secret"
+# Carriers whose calls must carry the secret. Telnyx has no documented way to
+# add a fixed header to its inbound INVITEs; DIDWW uses digest auth.
+SIP_SECRET_CARRIERS = frozenset({"twilio"})
 
 
 @dataclass(frozen=True)
@@ -63,6 +82,8 @@ class SipAttributes:
     trunk_id: str  # sip.trunkID
     room_name: str
     provider_call_sid: str | None  # sip.callIDFull
+    # The SIP_SECRET_ATTRIBUTE attribute. Never printed.
+    sip_secret: str = field(default="", repr=False)
 
 
 @dataclass(frozen=True)
@@ -184,6 +205,10 @@ async def open_inbound_call(
         return await _refuse(
             db, number, attrs, None, CallEndReason.CARRIER_ROUTE_FAILED
         )
+    if not _secret_ok(number.provider, attrs):
+        return await _refuse(
+            db, number, attrs, None, CallEndReason.CARRIER_ROUTE_FAILED
+        )
 
     # The caller is already connected and hearing silence: look the name up
     # while the checks and the Call row are written, as POST /calls does.
@@ -193,6 +218,42 @@ async def open_inbound_call(
         return await _answer_or_refuse(db, number, org_id, attrs, org_name)
     finally:
         org_name.cancel()  # no-op once it has finished (refusals never await it)
+
+
+def _secret_ok(carrier: str | None, attrs: SipAttributes) -> bool:
+    """True unless the carrier must send the shared secret and did not.
+
+    Anyone can send an INVITE to the LiveKit SIP host, and LiveKit Cloud does
+    not check a trunk's allowed addresses on every project. Twilio cannot do
+    digest auth, so it sends a fixed header instead
+    (docs/operations/inbound-trunk-lockdown.md). Logs never hold the secret.
+    """
+    if carrier not in SIP_SECRET_CARRIERS:
+        return True
+    sent = attrs.sip_secret
+    # Logged with the setting empty too: the rollout's test call checks that
+    # the header arrives before Hail starts to refuse calls without it.
+    logger.info(
+        "inbound %s call to %s: %s header %s",
+        carrier,
+        attrs.dialed,
+        SIP_SECRET_HEADER,
+        "present" if sent else "missing",
+    )
+    secret = settings.hail_sip_inbound_secret
+    if not secret:
+        return True
+    # Bytes: compare_digest raises TypeError on a non-ASCII str.
+    if sent and hmac.compare_digest(sent.encode(), secret.encode()):
+        return True
+    logger.warning(
+        "inbound call to %s refused: %s header %s (carrier=%s)",
+        attrs.dialed,
+        SIP_SECRET_HEADER,
+        "wrong" if sent else "missing",
+        carrier,
+    )
+    return False
 
 
 async def _organization_name(org_id: UUID) -> str | None:

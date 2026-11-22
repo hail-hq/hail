@@ -400,3 +400,70 @@ async def test_another_carriers_trunk_is_refused_while_numbers_move(
         async_session, _attrs(trunk_id="ST_in_tx")
     )
     assert isinstance(outcome, inbound_calls.Rejected)
+
+
+SECRET = "s3cr3t-value-for-tests_0123456789abcdef"
+
+
+async def test_twilio_call_with_the_secret_is_answered(
+    async_session, monkeypatch
+) -> None:
+    monkeypatch.setattr(settings, "hail_sip_inbound_secret", SECRET)
+    await _seed(async_session)
+    outcome = await inbound_calls.open_inbound_call(
+        async_session, _attrs(sip_secret=SECRET)
+    )
+    assert isinstance(outcome, inbound_calls.Accepted)
+
+
+@pytest.mark.parametrize("sent", ["", "wrong", SECRET[:-1], "é" * 40])
+async def test_twilio_call_without_the_secret_is_refused(
+    async_session, monkeypatch, caplog, sent
+) -> None:
+    monkeypatch.setattr(settings, "hail_sip_inbound_secret", SECRET)
+    await _seed(async_session)
+    with caplog.at_level("INFO", logger="hailhq.core.inbound_calls"):
+        outcome = await inbound_calls.open_inbound_call(
+            async_session, _attrs(sip_secret=sent)
+        )
+    assert isinstance(outcome, inbound_calls.Rejected)
+    assert outcome.reason == "carrier_route_failed"
+    call = (await async_session.execute(select(Call))).scalar_one()
+    assert call.status == "failed"
+    assert call.end_reason == "carrier_route_failed"
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    why = "wrong" if sent else "missing"
+    assert warnings == [
+        f"inbound call to {DIALED} refused: X-Hail-Secret header {why} (carrier=twilio)"
+    ]
+    assert not any(SECRET in r.getMessage() for r in caplog.records)
+    assert SECRET not in repr(_attrs(sip_secret=SECRET))
+
+
+async def test_empty_setting_checks_no_secret(
+    async_session, monkeypatch, caplog
+) -> None:
+    """Self-host default: no secret, no check. The header is still logged as
+    present or missing, which the rollout's first test call reads."""
+    monkeypatch.setattr(settings, "hail_sip_inbound_secret", "")
+    await _seed(async_session)
+    with caplog.at_level("INFO", logger="hailhq.core.inbound_calls"):
+        outcome = await inbound_calls.open_inbound_call(async_session, _attrs())
+    assert isinstance(outcome, inbound_calls.Accepted)
+    assert f"inbound twilio call to {DIALED}: X-Hail-Secret header missing" in [
+        r.getMessage() for r in caplog.records
+    ]
+
+
+@pytest.mark.parametrize("carrier", ["telnyx", "didww"])
+async def test_other_carriers_need_no_secret(
+    async_session, monkeypatch, carrier
+) -> None:
+    monkeypatch.setattr(settings, "hail_sip_inbound_secret", SECRET)
+    monkeypatch.setattr(settings, "livekit_didww_sip_inbound_trunk_id", "ST_in_dw")
+    trunk = {"telnyx": "ST_in_tx", "didww": "ST_in_dw"}[carrier]
+    await _seed(async_session, provider=carrier)
+    outcome = await inbound_calls.open_inbound_call(
+        async_session, _attrs(trunk_id=trunk)
+    )
+    assert isinstance(outcome, inbound_calls.Accepted)
