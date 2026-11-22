@@ -139,7 +139,8 @@ def carrier_texts(raw: object) -> list[str]:
         return []
     # One line: a carrier's line breaks would break the console and email.
     text = " ".join(_FIELD_TAG.sub("", _SDK_PREFIX.sub("", raw)).split())
-    return [text] if text else []
+    # A code on its own ("30701") says nothing to the customer.
+    return [text] if re.search(r"[^\W\d_]", text) else []
 
 
 def with_carrier_text(message: str, raw: object) -> str:

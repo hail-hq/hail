@@ -1571,16 +1571,17 @@ def _text_fixes(texts: list[str], subject_type: str) -> list[str]:
     fixes = [f for t in texts if (f := _duplicate_by_text(t, subject_type))]
     # The detail sentence for every text, a reused one too ("Email duplicate
     # ...; EIN does not match"). In a reused text, the detail its reuse
-    # sentence already covers (the email, the phone) is left out.
+    # sentence already covers (the email or the phone, not both) is left out.
     details: list[str] = []
     for text in texts:
         found = detail_fixes([text])
-        if _duplicate_by_text(text, subject_type):
-            found = [
-                f
-                for f in found
-                if f not in ("Check the email address.", "Check the phone number.")
-            ]
+        if reuse := _duplicate_by_text(text, subject_type):
+            covered = (
+                "Check the email address."
+                if "email" in reuse
+                else "Check the phone number."
+            )
+            found = [f for f in found if f != covered]
         details += found
     return list(dict.fromkeys(fixes + details))
 
@@ -1637,11 +1638,16 @@ def _duplicate_by_text(text: str, subject_type: str) -> str | None:
     if "duplicate" not in low:
         return None
     names = _FORM_FIELDS.get(subject_type, {})
-    if re.search(r"\bemail\b", low):
-        return _DUPLICATE.get(names.get("email", ""))
-    if re.search(r"\b(?:mobile|phone)\b", low):
-        return _DUPLICATE.get(names.get("phone", ""))
-    return None
+    # The detail nearest a "duplicate": "Duplicate phone number; email
+    # domain invalid" reuses the phone, not the email. A tie is the email.
+    dupes = [m.start() for m in re.finditer("duplicate", low)]
+    best: tuple[int, str] | None = None
+    for pattern, name in ((r"\bemail\b", "email"), (r"\b(?:mobile|phone)\b", "phone")):
+        for m in re.finditer(pattern, low):
+            gap = min(abs(m.start() - d) for d in dupes)
+            if best is None or gap < best[0]:
+                best = (gap, name)
+    return _DUPLICATE.get(names.get(best[1], "")) if best else None
 
 
 def _duplicate_fixes(reasons, subject_type) -> list[str]:

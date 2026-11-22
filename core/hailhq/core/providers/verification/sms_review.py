@@ -106,7 +106,7 @@ _DETAIL_FIXES: tuple[tuple[tuple[str, ...], str], ...] = (
     (("email", "e-mail"), "Check the email address."),
     (("ein", "tax id", "registration number"), "Check the business tax number."),
     (("website", "url"), "Check the website address."),
-    (("address", "street", "postal", "zip"), _ADDRESS_FIX),
+    (("address", "street", "postal", "zip", "city"), _ADDRESS_FIX),
     (("phone", "mobile"), "Check the phone number."),
 )
 

@@ -823,6 +823,8 @@ def test_sdk_wrapper_is_not_quoted() -> None:
         "Hi. The carrier said: Bad EIN."
     )
     assert with_carrier_text("Hi.", "Unable to create record") == "Hi."
+    # A code on its own says nothing to the customer.
+    assert with_carrier_text("Hi.", "30701") == "Hi."
     # Without the colon it is the carrier's sentence, kept whole.
     assert with_carrier_text("Hi.", "Unable to create record because X") == (
         "Hi. The carrier said: Unable to create record because X."
@@ -1007,6 +1009,7 @@ def test_one_text_naming_email_and_postal_address_gets_both() -> None:
         assert detail_fixes([text]) == ["Check the email address."]
     assert detail_fixes(["Invalid web address"]) == ["Check the website address."]
     assert detail_fixes(["Invalid IP address"]) == []
+    assert detail_fixes(["Invalid city"]) == ["Check the address."]
     assert detail_fixes(["Website address is unreachable"]) == [
         "Check the website address."
     ]
