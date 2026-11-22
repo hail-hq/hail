@@ -993,7 +993,15 @@ def _refused_answers(exc: TwilioRestException) -> bool:
 
 def _customer_reasons(exc: _NotCompliant) -> list[str]:
     """The failed fields the customer can fix: Hail's own account problems
-    are not theirs to fix, so they are not quoted to them."""
+    are not theirs to fix, so they are not quoted to them. A hidden account
+    problem is logged for the operator (a count only, no carrier text)."""
+    hidden = sum(1 for t in exc.reasons if account_problem(t))
+    if hidden:
+        logger.warning(
+            "Trust Hub evaluation also failed on %d account field(s); "
+            "the customer sees only their own",
+            hidden,
+        )
     return [t for t in exc.reasons if not account_problem(t)]
 
 

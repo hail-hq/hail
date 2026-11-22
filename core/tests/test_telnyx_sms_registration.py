@@ -18,6 +18,7 @@ from hailhq.core.providers.verification.sms_review import (
 )
 from hailhq.core.providers.verification.telnyx_sms import (
     TelnyxSmsRegistrationProvider,
+    _duplicate_by_text,
     _reason_problems,
 )
 
@@ -1859,6 +1860,14 @@ async def test_one_refusal_naming_email_and_ein_gets_both_sentences():
             [{"fields": ["ein"], "description": "Invalid value"}],
             "Check the business tax number.",
         ),
+        (
+            [{"fields": ["postalCode"], "description": "Invalid value"}],
+            "Check the address.",
+        ),
+        (
+            [{"fields": ["website"], "description": "Invalid value"}],
+            "Check the website address.",
+        ),
     ],
 )
 async def test_brand_refused_later_reads_text_and_fields(reasons, start) -> None:
@@ -1896,6 +1905,15 @@ async def test_an_off_form_duplicate_error_alone_gets_the_reuse_fix():
     draft = await _draft(_provider(handler), subject="person", fields=PERSON_FIELDS)
     assert draft.problems[0].message.startswith(
         "This email is on too many registrations."
+    )
+
+
+def test_a_duplicate_phone_for_a_person_names_the_mobile_number():
+    assert _duplicate_by_text("Phone duplicate reached", "person") == (
+        "This mobile number is on too many registrations. Use another one."
+    )
+    assert _duplicate_by_text("Phone duplicate reached", "business") == (
+        "This phone number is on too many registrations. Use another one."
     )
 
 

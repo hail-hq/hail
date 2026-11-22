@@ -1467,12 +1467,12 @@ def _response_problems(response: httpx.Response, subject_type) -> list[Problem]:
         return [
             Problem(
                 field="",
-                message=_safe_message(response),
+                message=_safe_message(response, subject_type),
                 raw="; ".join(originals) or None,
             )
         ]
     if with_carrier_text("", unmatched):
-        problems.append(_general_problem(unmatched))
+        problems.append(_general_problem(unmatched, subject_type))
     return problems
 
 
@@ -1545,20 +1545,20 @@ def _all_text(item: object) -> str:
     return ""
 
 
-def _text_fixes(texts: list[str]) -> list[str]:
+def _text_fixes(texts: list[str], subject_type: str) -> list[str]:
     """Hail's sentences for carrier texts on no form field: the reuse
     sentence for a reused email or phone, the detail sentence for the rest."""
-    fixes = [f for f in map(_duplicate_by_text, texts) if f]
-    others = [t for t in texts if not _duplicate_by_text(t)]
+    fixes = [f for t in texts if (f := _duplicate_by_text(t, subject_type))]
+    others = [t for t in texts if not _duplicate_by_text(t, subject_type)]
     return list(dict.fromkeys(fixes + detail_fixes(others)))
 
 
-def _general_problem(unmatched: list) -> Problem:
+def _general_problem(unmatched: list, subject_type: str) -> Problem:
     """One problem for carrier reasons on no form field: Hail's sentence for
     each detail they name (else the generic one), then their words. ``raw``
     keeps the carrier's own text, so the audit row has what was shown."""
     originals = [t for t in map(_original_text, unmatched) if t]
-    fixes = _text_fixes([_all_text(item) for item in unmatched])
+    fixes = _text_fixes([_all_text(item) for item in unmatched], subject_type)
     return Problem(
         field="",
         message=with_carrier_text(" ".join(fixes) or SMS_REFUSED, unmatched),
@@ -1574,7 +1574,7 @@ def _brand_fixes(reasons, subject_type) -> list[str]:
     # The text plus the fields it names, so a bare "Invalid value" on the
     # EIN field still gets the tax number sentence.
     others = [
-        f"{_all_text(r)} {_named_fields(r)}"
+        f"{_all_text(r)} {_named_fields(r, subject_type)}"
         for r in items
         if "duplicate" not in _all_text(r).lower()
     ]
@@ -1582,25 +1582,31 @@ def _brand_fixes(reasons, subject_type) -> list[str]:
     return fixes + [f for f in detail_fixes(others) if f not in fixes]
 
 
-def _named_fields(reason: object) -> str:
-    """The field names a reason lists, as words ("mobile phone number")."""
+def _named_fields(reason: object, subject_type: str) -> str:
+    """The form fields a reason lists, as words: Telnyx's name mapped to
+    Hail's form field ("postalCode" is "address postal code"), else split
+    at camelCase, dots and underscores."""
     if not isinstance(reason, dict):
         return ""
-    return " ".join(re.sub(r"[._]", " ", n) for n in _field_names(reason))
+    names = _FORM_FIELDS.get(subject_type, {})
+    return " ".join(
+        re.sub(r"(?<=[a-z])(?=[A-Z])|[._]", " ", names.get(n, n)).lower()
+        for n in _field_names(reason)
+    )
 
 
-def _duplicate_by_text(text: str) -> str | None:
+def _duplicate_by_text(text: str, subject_type: str) -> str | None:
     """The reuse sentence for a duplicate reason that names no form field,
-    read from its words."""
+    read from its words, for the form this filing used (a person's mobile
+    number, a company's representative phone)."""
     low = text.lower()
     if "duplicate" not in low:
         return None
+    names = _FORM_FIELDS.get(subject_type, {})
     if re.search(r"\bemail\b", low):
-        return _DUPLICATE["email"]
-    if re.search(r"\bmobile\b", low):
-        return _DUPLICATE["mobile_phone_number"]
-    if re.search(r"\bphone\b", low):
-        return _DUPLICATE["rep_phone"]
+        return _DUPLICATE.get(names.get("email", ""))
+    if re.search(r"\b(?:mobile|phone)\b", low):
+        return _DUPLICATE.get(names.get("phone", ""))
     return None
 
 
@@ -1613,14 +1619,16 @@ def _duplicate_fixes(reasons, subject_type) -> list[str]:
     for reason in items:
         if not isinstance(reason, dict):
             # A plain text reason names no field: read it by its words.
-            fix = _duplicate_by_text(_all_text(reason))
+            fix = _duplicate_by_text(_all_text(reason), subject_type)
             if fix and fix not in fixes:
                 fixes.append(fix)
             continue
         if "duplicate" not in _all_text(reason).lower():
             continue
         found = [_DUPLICATE.get(names.get(n) or "") for n in _field_names(reason)]
-        found = [f for f in found if f] or [_duplicate_by_text(_all_text(reason))]
+        found = [f for f in found if f] or [
+            _duplicate_by_text(_all_text(reason), subject_type)
+        ]
         for fix in found:
             if fix and fix not in fixes:
                 fixes.append(fix)
@@ -1672,13 +1680,13 @@ def _reason_problems(reasons, subject_type) -> list[Problem]:
             # reason is lost.
             unmatched.append(reason)
     if not problems or with_carrier_text("", unmatched):
-        problems.append(_general_problem(unmatched))
+        problems.append(_general_problem(unmatched, subject_type))
     return problems
 
 
-def _safe_message(response: httpx.Response) -> str:
+def _safe_message(response: httpx.Response, subject_type: str) -> str:
     """Hail's sentence for each detail Telnyx names (``_text_fixes``: a
     reused email or phone gets the reuse sentence), then Telnyx's words."""
     errors = _errors(response)
-    fixes = _text_fixes([_all_text(e) for e in errors])
+    fixes = _text_fixes([_all_text(e) for e in errors], subject_type)
     return with_carrier_text(" ".join(fixes) or SMS_REFUSED, errors)

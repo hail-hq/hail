@@ -5080,7 +5080,7 @@ async def admin_approve(
             status_code=http_status.HTTP_409_CONFLICT,
             # Superadmin only: the carrier's own words help the review.
             detail="the carrier no longer accepts this draft: "
-            + "; ".join(p.raw or p.message for p in problems),
+            + "; ".join((p.raw or p.message).replace("\n", "; ") for p in problems),
         )
     try:
         submitted = await _submit_row(
@@ -5097,7 +5097,7 @@ async def admin_approve(
             status_code=http_status.HTTP_409_CONFLICT,
             # Superadmin only: the carrier's own words help the review.
             detail="the carrier refused the submission: "
-            + "; ".join(p.raw or p.message for p in exc.problems),
+            + "; ".join((p.raw or p.message).replace("\n", "; ") for p in exc.problems),
         ) from exc
     if not submitted and row.state == "awaiting_review":
         raise _carrier_unavailable()
