@@ -2804,8 +2804,9 @@ async def _file(
                 prepared.sub,
                 prepared.subject_name,
                 draft.billed_refs,
-                # The messages alone: the form shows each field's problem.
-                "; ".join(p.message for p in draft.problems),
+                # The messages alone (each a full sentence, so a space between
+                # them): the form shows each field's problem.
+                " ".join(p.message for p in draft.problems),
                 prepared.requirements.version,
             )
         raise _problems_422(

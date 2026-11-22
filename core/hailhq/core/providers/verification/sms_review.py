@@ -276,8 +276,6 @@ ACCOUNT_WORDS = (
     "account inactive",
     "insufficient balance",
     "messaging service",
-    "messaging profile",
-    "not authorized",
     "configuration",
 )
 
