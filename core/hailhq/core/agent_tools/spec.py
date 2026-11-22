@@ -110,6 +110,11 @@ class ToolSpec:
     # Said on a call while the tool runs (customer HTTP tools). The voicebot
     # speaks it without waiting for it to finish.
     wait_message: str | None = None
+    # True for a tool every call keeps, whatever its `tools` list says (a
+    # call must always be able to hang up). Such a tool needs no database
+    # or API: the voicebot skips its availability check and still adds it
+    # when building the other tools fails.
+    on_every_call: bool = False
 
 
 __all__ = [

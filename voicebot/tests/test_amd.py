@@ -1177,11 +1177,9 @@ async def test_amd_result_event_written_when_detection_failed(
     }
 
 
-def test_menu_prompt_names_send_dtmf_only_when_the_call_has_it():
-    """A prompt that names a missing tool makes the model write the name as
-    text, and the voice reads it into the menu."""
-    assert "send_dtmf" in ivr_navigation_instructions("Press 1 for sales.")
-    without = ivr_navigation_instructions("Press 1 for sales.", can_press_keys=False)
-    assert "send_dtmf" not in without
+def test_menu_prompt_without_keys_waits_then_ends_on_repeats():
+    """A call that cannot press keys waits through hold messages, and ends
+    only when the same menu repeats."""
+    without = ivr_navigation_instructions("Press 1 for sales.", ["end_call"])
     assert "cannot press keys" in without
     assert "three times" in without

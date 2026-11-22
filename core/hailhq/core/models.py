@@ -531,8 +531,7 @@ class Agent(Base):
         JSONB, server_default=text("'{}'::jsonb"), nullable=False
     )
     # NULL = every tool the workspace supports; [] = no built-in tools (HTTP
-    # tools stay on). Calls always keep end_call
-    # (voicebot/hailhq/voicebot/tools.py).
+    # tools stay on). Tools with ToolSpec.on_every_call stay on every call.
     tools: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
     # NULL = the workspace limit.
     max_duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)

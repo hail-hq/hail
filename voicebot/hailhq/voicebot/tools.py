@@ -1,7 +1,8 @@
 """Adapt the core agent-tool registry to LiveKit function tools.
 
 Per-call filtering: the dispatch metadata's ``tools`` list (None ⇒ all,
-[] ⇒ no built-in tools but end_call; HTTP tools stay on) then each spec's per-org ``is_available`` check. Send tools
+[] ⇒ only the tools every call keeps; HTTP tools stay on) then each spec's
+per-org ``is_available`` check. Send tools
 require HAIL_INTERNAL_SECRET (they call the API's internal agent routes);
 without it only local/read-only tools remain.
 
@@ -17,10 +18,10 @@ import time
 from typing import Any
 from uuid import UUID
 
-from hailhq.core.agent_tools import end_call, hail_help, transfer_call
+from hailhq.core.agent_tools import transfer_call
 from hailhq.core.agent_tools.client import AgentApiClient
 from hailhq.core.agent_tools.http_tool import Conversation, load_http_tool_specs
-from hailhq.core.agent_tools.registry import all_tools
+from hailhq.core.agent_tools.registry import call_tools
 from hailhq.core.agent_tools.spec import SPOKEN_FALLBACK, ToolContext, ToolSpec
 from hailhq.core.config import settings
 from hailhq.core.db import session_scope
@@ -155,12 +156,13 @@ async def _http_tools(
     )
 
 
-def end_call_only(
+def every_call_tools(
     metadata: dict[str, Any], *, call_id: UUID, hangup, spoke_since=None
 ) -> list:
-    """Just end_call, for a call whose other tools could not be built. It
-    needs no database or API, so a call can still hang up when those fail.
-    Empty when the dispatch has no valid ``organization_id``."""
+    """The tools every call keeps (``ToolSpec.on_every_call``), for a call
+    whose other tools could not be built. They need no database or API, so
+    a call can still hang up when those fail. Empty when the dispatch has no
+    valid ``organization_id``."""
     try:
         organization_id = UUID(str(metadata.get("organization_id")))
     except ValueError:
@@ -173,7 +175,7 @@ def end_call_only(
         send_dtmf=None,
         spoke_since=spoke_since,
     )
-    return [wrap_tool(end_call.SPEC, tctx)]
+    return [wrap_tool(s, tctx) for s in call_tools() if s.on_every_call]
 
 
 async def build_agent_tools(
@@ -212,21 +214,19 @@ async def build_agent_tools(
         # matching on a string instead of list membership. Fail closed,
         # matching the malformed-organization_id posture above.
         logger.warning(
-            "dispatch metadata 'tools' is not a list (%r); only end_call enabled",
+            "dispatch metadata 'tools' is not a list (%r); only every-call tools",
             type(allowed).__name__,
         )
         return (
-            end_call_only(
+            every_call_tools(
                 metadata, call_id=call_id, hangup=hangup, spoke_since=spoke_since
             ),
             None,
         )
     specs: list[ToolSpec] = []
-    for s in all_tools():
-        # Every call can hang up: a list without end_call (or `tools: []`)
-        # still gets it. Without it the call stays open after the goodbye,
-        # and a prompt that names it makes the model write "end_call" aloud.
-        if allowed is not None and s.name not in allowed and s is not end_call.SPEC:
+    for s in call_tools():
+        # A tool every call keeps ignores the `tools` list.
+        if allowed is not None and s.name not in allowed and not s.on_every_call:
             continue
         if s.bind is not None:
             # Per-call tools (transfer_call) shape themselves from the
@@ -240,18 +240,12 @@ async def build_agent_tools(
             # Its dial runs in the background: cancel_transfer stops the ring.
             # It comes with transfer_call, so a `tools` list never names it.
             specs.append(transfer_call.CANCEL_SPEC)
-    # The settings guide is loaded by tool, not carried in the prompt. No
-    # `tools` list names it, so every call gets it here, as cancel_transfer is.
-    # `tools: []` drops it too; any non-empty list (even `["end_call"]`,
-    # which the console sends when every other tool is off) keeps it.
-    if allowed != []:
-        specs.append(hail_help.SPEC)
     # The agent's own HTTP tools are not built-ins: a `tools` list does not
     # name them, and they stay on with `tools: []`.
     specs.extend(await _http_tools(metadata, call_id, organization_id))
-    # end_call is always available and needs no database or API: a call with
-    # only end_call (`tools: []`) opens neither.
-    checked = [s for s in specs if s is not end_call.SPEC]
+    # Every-call tools need no database or API: a call with only those
+    # (`tools: []`) opens neither.
+    checked = [s for s in specs if not s.on_every_call]
     api: AgentApiClient | None = None
     if checked and settings.hail_internal_secret:
         api = AgentApiClient(settings.hail_api_url, settings.hail_internal_secret)
@@ -277,7 +271,7 @@ async def build_agent_tools(
             await api.aclose()
         raise
 
-    available = [s for s in specs if s is end_call.SPEC or s.name in passed]
+    available = [s for s in specs if s.on_every_call or s.name in passed]
     return [wrap_tool(s, tctx) for s in available], api
 
 
@@ -301,4 +295,4 @@ async def _check_availability(
                     await session.rollback()
 
 
-__all__ = ["SPOKEN_TOOL_FAILURE", "build_agent_tools", "end_call_only", "wrap_tool"]
+__all__ = ["SPOKEN_TOOL_FAILURE", "build_agent_tools", "every_call_tools", "wrap_tool"]

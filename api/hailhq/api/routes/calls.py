@@ -422,8 +422,8 @@ async def create_call(
         raise await cache_failure(idem, exc) from None
 
     # Tool allowlist gate, reject unknown tool names before any Call row is
-    # created. `None` (omitted) means "all tools"; `[]` means "no tools but
-    # end_call" and is passed through as-is below.
+    # created. `None` (omitted) means "all tools"; `[]` means "only the
+    # tools every call keeps" and is passed through as-is below.
     if body.tools is not None:
         known = {t.name for t in all_tools()}
         unknown = sorted(set(body.tools) - known)

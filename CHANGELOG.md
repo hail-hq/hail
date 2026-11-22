@@ -10,11 +10,11 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Changed
 
-- Every call keeps `end_call`, so a bring-your-own model must support tool calling.
+- Some tools stay on every call, such as `end_call`, so a bring-your-own model must support tool calling.
 
 ### Fixed
 
-- Calls can always hang up, even when `tools` is empty or leaves out `end_call`.
+- Calls can always hang up, and prompts never name a tool the call does not have.
 
 ## [0.37.0] (2026-11-23)
 

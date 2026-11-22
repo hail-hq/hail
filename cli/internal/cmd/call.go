@@ -79,7 +79,7 @@ Example (minimal):
 	cmd.Flags().StringVar(&f.language, "language", "", "Spoken language for the call, lowercase ISO 639-1 (e.g. da); one of the 39 supported codes, see docs/languages.md; default English")
 	cmd.Flags().BoolVar(&f.aiDisclosure, "ai-disclosure", true, "Speak the AI self-disclosure line first on the call; --ai-disclosure=false skips it (your responsibility — disclosure laws may require it)")
 	cmd.Flags().BoolVar(&f.recordingEnabled, "recording", false, "Best-effort recording; requires workspace permission and selects the disclosed combined call rate")
-	cmd.Flags().StringSliceVar(&f.tools, "tools", nil, "Agent tools to allow (comma-separated or repeated); omit for all available, 'none' to disable all but end_call")
+	cmd.Flags().StringSliceVar(&f.tools, "tools", nil, "Agent tools to allow (comma-separated or repeated); omit for all available, 'none' to keep only the tools every call needs")
 	cmd.Flags().StringVar(&f.idempotencyKey, "idempotency-key", "", "Defaults to a fresh UUID")
 	f.registerConsentFlags(cmd, "call")
 	markOneOfRequired(cmd, "mode", "prompt", "llm-url", "llm-key", "llm-model")
@@ -120,7 +120,7 @@ func runCall(cmd *cobra.Command, opts *Options, f *callFlags, toNumber string) e
 		body.AiDisclosure = &f.aiDisclosure
 	}
 	if cmd.Flags().Changed("tools") {
-		// [] disables every agent tool but end_call; the sentinel word "none" maps to []
+		// [] keeps only the tools every call needs; the sentinel word "none" maps to []
 		// because cobra cannot express an empty list on the command line.
 		tools := f.tools
 		if len(tools) == 1 && tools[0] == "none" {

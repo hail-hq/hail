@@ -196,9 +196,10 @@ Notes that follow from the capture, not from the spec:
 
   Restrict which tools a call may use with `--tools` / the `tools` field.
 
-- **Your model must support tool calling.** Every request carries at
-  least `end_call`, even when the call sets `tools: []`. Hail hangs up
-  only when the model calls `end_call`. A model without tool calling
+- **Your model must support tool calling.** Some tools stay on every
+  call, even when it sets `tools: []`, so every request carries a `tools`
+  field. One of them is `end_call`: Hail hangs up only when the model
+  calls it. A model without tool calling
   cannot end the call: it says goodbye, may say the tool's name aloud,
   and the line stays open (and billed) until the other person hangs up
   or the call hits its time limit. An endpoint that rejects requests with

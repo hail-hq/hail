@@ -61,16 +61,20 @@ reply before closing. The `end_call` description and voice framing share
 these rules; this is model guidance, not a new runtime permission check.
 Existing duration limits and interruption handling still apply.
 
-Every call has `end_call`, even when its `tools` list is empty or leaves it
-out. The voice prompt names a tool, or asks for what it does, only when the
-call has it. Settings help needs `hail_settings_help`, the "email me" hint
-needs `send_email`, the "by text or by email?" question needs `send_sms`,
-and the phone-menu key lines (call prompt and menu prompt) need
-`send_dtmf`. Each swap matches the exact sentence in `prompts.py` or
-`amd.py`, so edit a sentence and its replacement together. A prompt that names a missing tool makes the model write the
-name as text, and the voice reads it aloud. `voicebot/tests/test_agent.py`
-checks the call prompt for every built-in tool; `test_amd.py` and
-`test_ivr.py` check the menu prompts with and without `send_dtmf`.
+A tool spec with `on_every_call=True` stays on every call, whatever the
+`tools` list says, and is kept when building the other tools fails. Today
+that is `end_call` and the settings guide. Such a tool must need no
+database or API.
+
+A prompt sentence that names a tool, or relies on one, is a `ToolLine`:
+`TOOL_LINES` in `core/hailhq/core/prompts.py` for the call prompt, and
+`IVR_TOOL_LINES` in `voicebot/hailhq/voicebot/amd.py` for the phone-menu
+prompt. On a call without the tool, `fit_to_tools` swaps the sentence for
+its `without` text. A new tool sentence needs one new entry, never new
+code. A prompt that names a missing tool makes the model write the name as
+text, and the voice reads it aloud. `voicebot/tests/test_agent.py` checks
+every prompt against every tool, and checks that each entry still matches
+its prompt.
 
 The opt-in synthetic model checks use the configured Bedrock conversation
 model. With AWS credentials, `ANTHROPIC_MODEL`, and

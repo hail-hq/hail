@@ -136,7 +136,7 @@ func (f *agentFlags) bind(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&f.language, "language", "", "Spoken language, ISO 639-1 (e.g. fr)")
 	cmd.Flags().IntVar(&f.maxMinutes, "max-minutes", 0, "Soft cap per call, 1..60 minutes (0 = workspace limit)")
 	cmd.Flags().IntVar(&f.handoverMinutes, "handover-max-minutes", 0, "Call limit after a handover contact answers, 1..60 minutes (0 = default, 30)")
-	cmd.Flags().StringSliceVar(&f.tools, "tools", nil, "Allowed tools, comma-separated ('' = none; calls always keep end_call; omitted = all; on update, --all-tools resets to all)")
+	cmd.Flags().StringSliceVar(&f.tools, "tools", nil, "Allowed tools, comma-separated ('' = none but the tools every call keeps; omitted = all; on update, --all-tools resets to all)")
 	cmd.Flags().BoolVar(&f.noSms, "no-sms", false, "Do not answer texts")
 	cmd.Flags().BoolVar(&f.noEmail, "no-email", false, "Do not answer email")
 	cmd.Flags().BoolVar(&f.noCalls, "no-calls", false, "Do not answer calls")
@@ -249,8 +249,8 @@ func (f *agentFlags) body(cmd *cobra.Command, create bool, voice map[string]any)
 		}
 	}
 	if changed("tools") {
-		// pflag hands `--tools ''` over as an empty, non-nil slice: no tools
-		// but end_call, which calls always keep.
+		// pflag hands `--tools ''` over as an empty, non-nil slice: only the
+		// tools every call keeps.
 		b["tools"] = f.tools
 	}
 	if changed("handover") {

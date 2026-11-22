@@ -19,14 +19,13 @@ from uuid import UUID
 
 import pytest
 from cryptography.fernet import InvalidToken
-from hailhq.core.agent_tools import hail_help, transfer_call
-from hailhq.core.agent_tools.registry import all_tools
+from hailhq.core.agent_tools import transfer_call
+from hailhq.core.agent_tools.registry import call_tools
 from hailhq.core.agent_tools.spec import BridgeRoute
 from hailhq.core.call_end_reasons import CallEndReason
-from hailhq.core.directory import DirectoryEntry
 from hailhq.core.models import Call, CallEvent, PhoneNumber, UsageEvent
 from hailhq.core.pool import CALL_META_FROM_POOL
-from hailhq.core.prompts import PRIVACY_REMINDER
+from hailhq.core.prompts import PRIVACY_REMINDER, TOOL_LINES, other_party_section
 from hailhq.voicebot.agent import (
     AI_DISCLOSURE_LINE,
     SIP_CALL_STATUS_ACTIVE,
@@ -37,7 +36,6 @@ from hailhq.voicebot.agent import (
     attach_event_handlers,
     build_instructions,
     build_tools_safely,
-    contact_section,
     disconnect_reason_to_status,
     entrypoint,
     handle_sip_disconnect,
@@ -54,6 +52,7 @@ from hailhq.voicebot.agent import (
     speak_greeting,
     speech_text,
 )
+from hailhq.voicebot.amd import IVR_TOOL_LINES, ivr_navigation_instructions
 from hailhq.voicebot.spoken_lines import SPOKEN_LINES
 from livekit import rtc
 from livekit.agents import Agent, AgentSession
@@ -1529,7 +1528,7 @@ async def test_build_tools_safely_degrades_on_failure(
 
     `build_tools_safely` is the entrypoint's guard around `build_agent_tools`:
     any exception (e.g. a DB rollback on a dead connection) degrades to
-    end_call only, or `([], None)` without a valid organization.
+    the tools every call keeps, or `([], None)` without a valid organization.
     """
     from hailhq.voicebot import agent as agent_mod
 
@@ -1558,10 +1557,12 @@ async def test_build_tools_safely_degrades_on_failure(
     assert tools == []
     assert api is None
 
-    # With a valid organization the call keeps end_call, so it can hang up.
+    # With a valid organization the call keeps its every-call tools.
     meta = {"organization_id": "11111111-2222-3333-4444-555555555555"}
     tools, api = await build_tools_safely(meta, call_id, _hangup, _send_dtmf)
-    assert [t.info.name for t in tools] == ["end_call"]
+    assert [t.info.name for t in tools] == [
+        s.name for s in call_tools() if s.on_every_call
+    ]
     assert api is None
 
 
@@ -2530,60 +2531,36 @@ def test_greeting_with_ai_line_in_other_languages(message, spoken):
     assert greeting_with_ai_line(message, "AI line.") == spoken
 
 
-# Every tool a call can have: the registry, the settings guide, and the
-# transfer pair (cancel_transfer is not in the registry).
-_ALL_TOOL_NAMES = {s.name for s in all_tools()} | {
-    hail_help.SPEC.name,
-    transfer_call.CANCEL_SPEC.name,
-}
+# Every tool name a call can have: the built-ins and cancel_transfer, which
+# comes with transfer_call.
+_ALL_TOOL_NAMES = {s.name for s in call_tools()} | {transfer_call.CANCEL_SPEC.name}
 
 
-@pytest.mark.parametrize("direction", ["inbound", "outbound"])
-@pytest.mark.parametrize(
-    "tool_names",
-    [
-        [],  # tools failed to build
-        ["end_call"],  # `tools: []`
-        ["end_call", "send_sms", "list_contacts"],
-        ["end_call", "send_email", "hail_settings_help"],
-        ["end_call", "send_dtmf"],
-    ],
-)
-def test_prompt_names_only_the_calls_tools(direction, tool_names):
+def _hail_prompts(tool_names):
+    """Every Hail-written prompt a call can get, fitted to ``tool_names``."""
+    contact = other_party_section("Sam Lee", can_email=True, tool_names=tool_names)
+    calls = [
+        build_instructions(
+            "Book a table.", direction, other_party=contact, tool_names=tool_names
+        )
+        for direction in ("inbound", "outbound")
+    ]
+    return [*calls, ivr_navigation_instructions("Press 1.", tool_names)]
+
+
+@pytest.mark.parametrize("missing", sorted(_ALL_TOOL_NAMES))
+def test_no_prompt_names_a_tool_the_call_lacks(missing):
     """A prompt that names a missing tool makes the model write the name as
-    text, and the voice reads it aloud ("Take care. end_call")."""
-    known = DirectoryEntry(
-        name="Sam Lee", has_email=True, has_phone=True, source="contact"
-    )
-    out = build_instructions(
-        "Book a table.",
-        direction,
-        other_party=contact_section(known, tool_names),
-        tool_names=tool_names,
-    )
-    named = {name for name in _ALL_TOOL_NAMES if name in out}
-    assert named <= set(tool_names)
-    # It does not ask for what a missing tool does either.
-    if "send_dtmf" not in tool_names:
-        assert "press the keys" not in out
-    if "send_sms" not in tool_names:
-        assert "by text or" not in out
-    if "send_sms" not in tool_names and "send_email" not in tool_names:
-        assert "Sending a text or email" not in out
+    text, and the voice reads it aloud. Checked for every tool, so a new tool
+    or prompt sentence is covered without a new test."""
+    have = sorted(_ALL_TOOL_NAMES - {missing})
+    for text in _hail_prompts(have):
+        assert missing not in text
 
 
-def test_prompt_with_every_tool_names_its_helpers():
-    """The check above is not empty: with the tools, the prompt names them."""
-    known = DirectoryEntry(
-        name="Sam Lee", has_email=True, has_phone=True, source="contact"
-    )
-    names = sorted(_ALL_TOOL_NAMES)
-    out = build_instructions(
-        "Book a table.",
-        "outbound",
-        other_party=contact_section(known, names),
-        tool_names=names,
-    )
-    assert {"end_call", "send_email", "hail_settings_help"} <= {
-        name for name in _ALL_TOOL_NAMES if name in out
-    }
+def test_every_tool_line_is_still_in_its_prompt():
+    """A reworded prompt sentence would stop matching its ToolLine, and the
+    swap would silently stop working."""
+    full = "\n".join(_hail_prompts(None))
+    for line in (*TOOL_LINES, *IVR_TOOL_LINES):
+        assert line.text.replace("{name}", "Sam Lee") in full, line.text

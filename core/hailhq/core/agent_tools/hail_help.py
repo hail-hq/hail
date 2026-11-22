@@ -36,4 +36,5 @@ SPEC = ToolSpec(
     risk_tier="read_only",
     is_available=_always,
     execute=_execute,
+    on_every_call=True,
 )

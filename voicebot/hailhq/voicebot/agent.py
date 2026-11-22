@@ -36,7 +36,7 @@ from uuid import UUID
 from cryptography.fernet import InvalidToken
 from google.protobuf.duration_pb2 import Duration
 from hailhq.core import threads
-from hailhq.core.agent_tools import send_email, send_sms, transfer_call
+from hailhq.core.agent_tools import transfer_call
 from hailhq.core.agent_tools.client import AgentApiClient
 from hailhq.core.agent_tools.send_dtmf import DTMF_CODES
 from hailhq.core.agent_tools.spec import BridgeOutcome, BridgeRoute
@@ -111,7 +111,7 @@ from hailhq.voicebot.recording import start_recording, stop_recording
 from hailhq.voicebot.recovery import ConversationRecovery
 from hailhq.voicebot.spoken_lines import spoken_lines
 from hailhq.voicebot.telemetry import connect_livekit_tracing
-from hailhq.voicebot.tools import SpeechTracker, build_agent_tools, end_call_only
+from hailhq.voicebot.tools import SpeechTracker, build_agent_tools, every_call_tools
 from livekit import rtc
 from livekit.agents import Agent, JobContext, JobProcess, StopResponse
 from livekit.agents.llm import LLM, LLMError
@@ -296,12 +296,9 @@ class SpeechSanitizingAgent(Agent):
             if self.phone_menu.checking or not self.phone_menu.can_navigate:
                 return None
             chat_ctx = chat_ctx.copy()
-            names = {t.info.name for t in tools or [] if hasattr(t, "info")}
+            names = [t.info.name for t in tools or [] if hasattr(t, "info")]
             chat_ctx.add_message(
-                role="system",
-                content=ivr_navigation_instructions(
-                    None, can_press_keys=DTMF_TOOL_NAME in names
-                ),
+                role="system", content=ivr_navigation_instructions(None, names)
             )
         return Agent.default.llm_node(self, chat_ctx, tools, model_settings)
 
@@ -333,19 +330,6 @@ def build_instructions(
     tail = "\n\n".join(part for part in (other_party, clock, spoken) if part) or None
     return build_voice_instructions(
         system_prompt, direction, other_party=tail, tool_names=tool_names
-    )
-
-
-def contact_section(
-    known: DirectoryEntry | None, tool_names: Collection[str]
-) -> str | None:
-    """Who is on the line (see :func:`hailhq.core.prompts.other_party_section`).
-    The send_email hint needs the send_email tool and an email on file."""
-    if known is None:
-        return None
-    can_email = known.has_email and send_email.SPEC.name in tool_names
-    return other_party_section(
-        known.name, can_email=can_email, can_text=send_sms.SPEC.name in tool_names
     )
 
 
@@ -917,13 +901,13 @@ async def build_tools_safely(
     cancel_bridge: Callable[[], Awaitable[bool]] | None = None,
     prompt: Callable[[str], Awaitable[None]] | None = None,
 ) -> tuple[list, AgentApiClient | None]:
-    """Build this call's agent tools, degrading to end_call only on any
-    failure (none when the organization_id is invalid).
+    """Build this call's agent tools, degrading to the tools every call
+    keeps on any failure (none when the organization_id is invalid).
 
     A tool-layer startup failure (e.g. a DB rollback on a dead connection
     inside ``build_agent_tools``) must never kill the call: it degrades
     rather than let the exception escape ``entrypoint()`` and abort the
-    session. end_call stays so the call can still hang up.
+    session. The every-call tools stay, so the call can still hang up.
     """
     try:
         return await build_agent_tools(
@@ -938,16 +922,16 @@ async def build_tools_safely(
         )
     except Exception:
         logger.exception(
-            "call_id=%s build_agent_tools failed; continuing with end_call only",
+            "call_id=%s build_agent_tools failed; continuing with every-call tools",
             call_id,
         )
-        # The call can still hang up: end_call needs no database or API.
+        # Every-call tools need no database or API.
         try:
-            tools = end_call_only(
+            tools = every_call_tools(
                 metadata, call_id=call_id, hangup=hangup, spoke_since=spoke_since
             )
         except Exception:
-            logger.exception("call_id=%s end_call fallback failed", call_id)
+            logger.exception("call_id=%s every-call tools fallback failed", call_id)
             tools = []
         return tools, None
 
@@ -2599,7 +2583,14 @@ async def _run_call(
             metadata.get("system_prompt"),
             metadata.get("direction"),
             language=language,
-            other_party=contact_section(known, tool_names),
+            # send_email reaches members and contacts that have an email.
+            other_party=(
+                other_party_section(
+                    known.name, can_email=known.has_email, tool_names=tool_names
+                )
+                if known is not None
+                else None
+            ),
             clock=_call_clock(metadata, inbound),
             tool_names=tool_names,
         ),
@@ -2898,9 +2889,7 @@ async def _run_call(
             language=language,
         )
         session.generate_reply(
-            instructions=ivr_navigation_instructions(
-                amd_result.transcript, can_press_keys=DTMF_TOOL_NAME in tool_names
-            )
+            instructions=ivr_navigation_instructions(amd_result.transcript, tool_names)
         )
     else:
         # AMD holds the greeting for up to its detection window, and the

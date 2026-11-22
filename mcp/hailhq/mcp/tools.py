@@ -2267,8 +2267,8 @@ _AGENT_VOICE_ID = _d(
 )
 _AGENT_TOOLS = _d(
     "Names of the tools the agent may use during a call or reply. "
-    "Omitted: every tool the workspace's channels support. An empty list: no "
-    "built-in tools except end_call, so calls can still hang up. HTTP tools stay on."
+    "Omitted: every tool the workspace's channels support. An empty list: only "
+    "the tools every call keeps, such as end_call. HTTP tools stay on."
     " Hail adds call transfer when handover contacts are configured."
 )
 _AGENT_MAX_DURATION = _d(
@@ -2409,8 +2409,8 @@ def register_tools(
             list[str] | None,
             _d(
                 "Names of the agent tools allowed on this call. An empty list: "
-                "no built-in tools except end_call, so the call can still hang "
-                "up. A saved agent's HTTP tools stay on. Omitted: every tool the "
+                "only the tools every call keeps, such as end_call. A saved "
+                "agent's HTTP tools stay on. Omitted: every tool the "
                 "workspace's channels support."
             ),
         ] = None,

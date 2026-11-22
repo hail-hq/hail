@@ -7,7 +7,8 @@ through customer APIs or the console. See docs/operations/agent-prompts.md.
 from __future__ import annotations
 
 import logging
-from collections.abc import Collection
+from collections.abc import Collection, Iterable
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -16,24 +17,6 @@ import phonenumbers
 from phonenumbers import timezone as phone_timezones
 
 logger = logging.getLogger(__name__)
-
-# The call prompt's line about send tools, dropped when the call has neither.
-_SEND_RULES_LINE = (
-    "\n- Sending a text or email follows the rules in that tool's description."
-)
-
-# The call prompt's phone-menu rule, and its replacement on a call without
-# the send_dtmf tool: the model must not try to press keys it cannot press.
-_MENU_KEYS_LINE = (
-    "- If you reach an automated menu, press the keys it asks for instead of "
-    "speaking — a menu cannot hear you. Choose the option that advances the "
-    "call, or the one for a human operator when none fits."
-)
-_MENU_NO_KEYS_LINE = (
-    "- If you reach an automated menu, you cannot press keys on this call. "
-    "Stay quiet and wait for a person. If the same menu has played three "
-    "times with no person and nothing new, end the call."
-)
 
 _INBOUND_CLOSING = """\
 - Never hang up on your own right after an answer. First ask if there is \
@@ -68,14 +51,17 @@ __all__ = [
     "TEAM_EMAIL_LABEL",
     "TEXT_PREAMBLE",
     "THREAD_TOOL_HINT_TEXT",
+    "TOOL_LINES",
     "VOICE_CONFIGURATION_HELP",
     "VOICE_PREAMBLE",
     "VOICE_PREAMBLE_INBOUND",
     "SenderTrust",
+    "ToolLine",
     "build_email_instructions",
     "build_text_instructions",
     "build_voice_instructions",
     "clock_section",
+    "fit_to_tools",
     "number_with_one_zone",
     "other_party_section",
     "safe_clock_section",
@@ -95,22 +81,6 @@ PLATFORM_PRIVACY = (
     "or claim that Hail built the underlying voice technology."
 )
 
-# The sentence of SETTINGS_HELP_STUB that names the settings tool, and its
-# replacement on a call without that tool (`tools: []`). A prompt that names a
-# tool the call lacks makes the model write the name as text, and the voice
-# reads it aloud.
-_SETTINGS_TOOL_LINE = (
-    "When asked, use "
-    "the hail_settings_help tool before you answer (never say its name aloud), "
-    "and never guess a menu or a voice name. You cannot see or change settings during this call. If the "
-    "tool is missing or fails, say you cannot look that up right now."
-)
-_SETTINGS_NO_TOOL_LINE = (
-    "When asked, say you cannot look that up during this call, and never "
-    "guess a menu or a voice name. You cannot see or change settings during "
-    "this call."
-)
-
 # In every call's prompt, inbound and outbound. The full guide below is returned
 # by the hail_settings_help tool, so calls that never ask about settings do not
 # carry it.
@@ -120,7 +90,10 @@ SETTINGS_HELP_STUB = (
     "do not promise to announce it on every call. Disclosure requirements "
     "vary by location and call type. Always identify honestly as AI if asked. "
     "Only discuss Hail settings when asked about the voice, greeting, behavior, "
-    "or configuration. Otherwise stay with the call's purpose. " + _SETTINGS_TOOL_LINE
+    "or configuration. Otherwise stay with the call's purpose. When asked, use "
+    "the hail_settings_help tool before you answer (never say its name aloud), "
+    "and never guess a menu or a voice name. You cannot see or change settings during this call. If the "
+    "tool is missing or fails, say you cannot look that up right now."
 )
 
 # Returned by the hail_settings_help tool (core/hailhq/core/agent_tools/hail_help.py).
@@ -261,7 +234,9 @@ safe step first.
 Never call the other party by a name they did not clearly give you as their \
 own, and never repeat odd or unclear words back. If you did not understand \
 them, ask them to say it again.
-{menu}
+- If you reach an automated menu, press the keys it asks for instead of \
+speaking — a menu cannot hear you. Choose the option that advances the call, \
+or the one for a human operator when none fits.
 - Give information in small steps.
 - Briefly summarize the outcome when you finish a topic or end the call.
 {closing}
@@ -284,7 +259,7 @@ harmful or outside the purpose of the call.
 suggest speaking with a qualified professional.
 - Protect privacy: share only what the call requires.""".replace(
         "{closing}", _OUTBOUND_CLOSING
-    ).replace("{menu}", _MENU_KEYS_LINE)
+    )
     + f"\n\n{PLATFORM_PRIVACY}\n\n{SETTINGS_HELP_STUB}"
 )
 
@@ -396,9 +371,26 @@ THREAD_TOOL_HINT_TEXT = (
 )
 
 
-def other_party_section(name: str, *, can_email: bool, can_text: bool = True) -> str:
+# The "email me" hint of other_party_section. {name} is filled in after the
+# hint is fitted to the call's tools (see fit_to_tools).
+_EMAIL_ME_HINT = (
+    ' When they want an email sent to themselves ("me", "my'
+    ' email"), call send_email with recipient_name "me": never ask'
+    " who to email or use their name for it. If they told you a"
+    ' different name, they are not "{name}": do not use "me", say'
+    " you can only email addresses on file."
+    " If they only ask you to send something, ask once: by text or by"
+    " email?"
+)
+
+
+def other_party_section(
+    name: str, *, can_email: bool, tool_names: Collection[str] | None = None
+) -> str:
     """Who is on the line, when their number matched a contact. Without it
-    the model asks "who should I email?" when the caller says "email me"."""
+    the model asks "who should I email?" when the caller says "email me".
+    ``can_email``: the contact has an email on file. ``tool_names`` as in
+    :func:`fit_to_tools`."""
     line = (
         f'The person on this call is "{name}", one of your contacts. Someone'
         " else can use the same phone: if the person clearly tells you their"
@@ -406,18 +398,7 @@ def other_party_section(name: str, *, can_email: bool, can_text: bool = True) ->
         " mishearing, not a name: never call them by it."
     )
     if can_email:
-        line += (
-            ' When they want an email sent to themselves ("me", "my'
-            ' email"), call send_email with recipient_name "me": never ask'
-            " who to email or use their name for it. If they told you a"
-            f' different name, they are not "{name}": do not use "me", say'
-            " you can only email addresses on file."
-        )
-        if can_text:
-            line += (
-                " If they only ask you to send something, ask once: by text or"
-                " by email?"
-            )
+        line += fit_to_tools(_EMAIL_ME_HINT, tool_names).replace("{name}", name)
     return f"{OTHER_PARTY_HEADING}\n\n{line}"
 
 
@@ -584,6 +565,92 @@ def safe_clock_section(**kwargs: Any) -> str | None:
         return None
 
 
+@dataclass(frozen=True)
+class ToolLine:
+    """A sentence of a Hail prompt that names a tool or relies on one.
+
+    On a call without the tools in ``needs`` (all of them, or any one when
+    ``any_of``), :func:`fit_to_tools` replaces ``text`` with ``without``. A
+    prompt that names a missing tool makes the model write the name as text,
+    and the voice reads it aloud. A new tool sentence needs one entry here,
+    never new code."""
+
+    text: str
+    needs: frozenset[str]
+    without: str = ""
+    any_of: bool = False
+
+
+# Every sentence of the voice prompts (VOICE_PREAMBLE, VOICE_PREAMBLE_INBOUND,
+# _EMAIL_ME_HINT) that names a tool. The menu prompt in voicebot/amd.py has
+# its own table. Tests check each ``text`` is still in its prompt.
+TOOL_LINES: tuple[ToolLine, ...] = (
+    ToolLine(
+        "do not say goodbye or use end_call in the turn that asks",
+        frozenset({"end_call"}),
+        "do not say goodbye or hang up in the turn that asks",
+    ),
+    ToolLine(
+        "thank them, say goodbye, and use end_call.",
+        frozenset({"end_call"}),
+        "thank them, say goodbye, and hang up.",
+    ),
+    ToolLine(
+        "- If you reach an automated menu, press the keys it asks for instead "
+        "of speaking — a menu cannot hear you. Choose the option that advances "
+        "the call, or the one for a human operator when none fits.",
+        frozenset({"send_dtmf"}),
+        "- If you reach an automated menu, you cannot press keys on this call. "
+        "Stay quiet and wait for a person. If the same menu has played three "
+        "times with no person and nothing new, end the call.",
+    ),
+    ToolLine(
+        "\n- Sending a text or email follows the rules in that tool's " "description.",
+        frozenset({"send_sms", "send_email"}),
+        any_of=True,
+    ),
+    ToolLine(
+        "When asked, use the hail_settings_help tool before you answer (never "
+        "say its name aloud), and never guess a menu or a voice name. You "
+        "cannot see or change settings during this call. If the tool is "
+        "missing or fails, say you cannot look that up right now.",
+        frozenset({"hail_settings_help"}),
+        "When asked, say you cannot look that up during this call, and never "
+        "guess a menu or a voice name. You cannot see or change settings "
+        "during this call.",
+    ),
+    ToolLine(
+        ' When they want an email sent to themselves ("me", "my email"), call '
+        'send_email with recipient_name "me": never ask who to email or use '
+        "their name for it. If they told you a different name, they are not "
+        '"{name}": do not use "me", say you can only email addresses on file.',
+        frozenset({"send_email"}),
+    ),
+    ToolLine(
+        " If they only ask you to send something, ask once: by text or by email?",
+        frozenset({"send_sms", "send_email"}),
+    ),
+)
+
+
+def fit_to_tools(
+    text: str,
+    tool_names: Collection[str] | None,
+    lines: Iterable[ToolLine] = TOOL_LINES,
+) -> str:
+    """``text`` with each tool sentence the call cannot use replaced (see
+    :class:`ToolLine`). ``tool_names`` are the call's tools; None means every
+    tool, and returns ``text`` unchanged."""
+    if tool_names is None:
+        return text
+    have = set(tool_names)
+    for line in lines:
+        ok = bool(line.needs & have) if line.any_of else line.needs <= have
+        if not ok:
+            text = text.replace(line.text, line.without)
+    return text
+
+
 def build_voice_instructions(
     system_prompt: str | None,
     direction: str | None = None,
@@ -596,27 +663,10 @@ def build_voice_instructions(
     (:data:`VOICE_PREAMBLE_INBOUND` when ``direction`` is ``"inbound"``);
     with no instructions it alone is the instruction set. Mode-agnostic: the
     same for the fallback chain and a BYO endpoint. ``other_party`` (see
-    :func:`other_party_section`) goes last.
-
-    ``tool_names`` are the call's tools; None means every tool. The prompt
-    never names or asks for a tool the call lacks: the model would write the
-    name as text, and the voice would read it aloud."""
-
-    def has(name: str) -> bool:
-        return tool_names is None or name in tool_names
-
+    :func:`other_party_section`) goes last. ``tool_names`` as in
+    :func:`fit_to_tools`."""
     preamble = VOICE_PREAMBLE_INBOUND if direction == "inbound" else VOICE_PREAMBLE
-    if not has("hail_settings_help"):
-        preamble = preamble.replace(_SETTINGS_TOOL_LINE, _SETTINGS_NO_TOOL_LINE)
-    if not has("end_call"):
-        # Tools failed to build (the call then has none): say "hang up".
-        preamble = preamble.replace("or use end_call in", "or hang up in").replace(
-            "and use end_call.", "and hang up."
-        )
-    if not has("send_dtmf"):
-        preamble = preamble.replace(_MENU_KEYS_LINE, _MENU_NO_KEYS_LINE)
-    if not has("send_sms") and not has("send_email"):
-        preamble = preamble.replace(_SEND_RULES_LINE, "")
+    preamble = fit_to_tools(preamble, tool_names)
     caller = (system_prompt or "").strip()
     out = preamble if not caller else f"{preamble}\n\n{VOICE_HEADING}\n\n{caller}"
     if other_party:
