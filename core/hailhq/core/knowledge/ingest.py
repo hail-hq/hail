@@ -52,7 +52,6 @@ from hailhq.core.knowledge.access import (
     STORAGE_FULL,
     FolderSweepFailed,
     delete_org_knowledge,
-    involves_database,
     knowledge_limits,
     knowledge_lock,
     log_failure,
@@ -237,16 +236,16 @@ class KnowledgeIngestWorker:
                         "retrying",
                         org_id,
                     )
-                elif first and not involves_database(exc):
-                    # The first time, with its traceback (a code bug shows
-                    # where); later ticks repeat one short line.
-                    logger.exception(
-                        "knowledge: could not delete closed org %s; retrying",
-                        org_id,
+                elif first:
+                    # The first time at error level, with the chain's shape
+                    # (types and where they were raised, no messages).
+                    log_failure(
+                        logger,
+                        f"knowledge: could not delete closed org {org_id}; retrying",
+                        exc,
                     )
                 else:
-                    logger.log(
-                        logging.ERROR if first else logging.WARNING,
+                    logger.warning(
                         "knowledge: could not delete closed org %s (%s%s); retrying",
                         org_id,
                         type(exc).__name__,

@@ -159,15 +159,24 @@ def log_failure(log: logging.Logger, message: str, exc: BaseException) -> None:
     current: BaseException | None = exc
     while current is not None and id(current) not in seen:
         seen.add(id(current))
-        tb = current.__traceback__
-        while tb is not None and tb.tb_next is not None:
+        # The deepest frame in Hail's own code, else the deepest at all.
+        tb, ours = current.__traceback__, None
+        last = tb
+        while tb is not None:
+            last = tb
+            if "/hailhq/" in tb.tb_frame.f_code.co_filename:
+                ours = tb
             tb = tb.tb_next
+        frame = ours or last
         where = (
-            f" at {tb.tb_frame.f_code.co_filename.rsplit('/', 1)[-1]}:{tb.tb_lineno}"
-            if tb is not None
+            f" at {frame.tb_frame.f_code.co_filename.rsplit('/hailhq/', 1)[-1]}"
+            f":{frame.tb_lineno}"
+            if frame is not None
             else ""
         )
-        code = getattr(getattr(current, "orig", None), "sqlstate", None)
+        code = getattr(current, "sqlstate", None) or getattr(
+            getattr(current, "orig", None), "sqlstate", None
+        )
         parts.append(f"{type(current).__name__}{f' {code}' if code else ''}{where}")
         current = current.__cause__ or current.__context__
     log.error("%s (%s)", message, " <- ".join(parts))
