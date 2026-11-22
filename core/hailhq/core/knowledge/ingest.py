@@ -54,6 +54,7 @@ from hailhq.core.knowledge.access import (
     delete_org_knowledge,
     knowledge_limits,
     knowledge_lock,
+    short_cause,
     storage_full,
 )
 from hailhq.core.knowledge.decode import MAX_TEXT_BYTES
@@ -230,9 +231,14 @@ class KnowledgeIngestWorker:
                         org_id,
                     )
                 else:
-                    logger.exception(
-                        "knowledge: could not delete closed org %s; retrying",
+                    # A warning with the first line only: this repeats every
+                    # tick until it clears, and the full text of a database
+                    # error holds its statement and parameters.
+                    logger.warning(
+                        "knowledge: could not delete closed org %s (%s%s); " "retrying",
                         org_id,
+                        type(exc).__name__,
+                        short_cause(exc),
                     )
 
     async def _fail_spent(self) -> None:

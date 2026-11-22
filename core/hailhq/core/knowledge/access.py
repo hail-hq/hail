@@ -51,6 +51,7 @@ __all__ = [
     "knowledge_bytes",
     "knowledge_limits",
     "knowledge_lock",
+    "short_cause",
     "storage_full",
 ]
 
