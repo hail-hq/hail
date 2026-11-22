@@ -193,8 +193,12 @@ def _topic_text(raw: object) -> str:
         return ""
     parts: list[str] = []
     for key in (*TEXT_KEYS, "code", "error_code"):
-        if isinstance(raw.get(key), (str, int)):
-            parts.append(str(raw[key]))
+        value = raw.get(key)
+        # A code can come as a float (30908.0): match it as the whole number.
+        if isinstance(value, float) and value.is_integer():
+            value = int(value)
+        if isinstance(value, (str, int)):
+            parts.append(str(value))
     for key in ("fields", "field"):
         if isinstance(raw.get(key), (str, list, tuple)):
             parts.append(_topic_text(raw[key]))

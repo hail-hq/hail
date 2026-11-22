@@ -1571,8 +1571,14 @@ def _text_fixes(texts: list[str], subject_type: str) -> list[str]:
     """Hail's sentences for carrier texts on no form field: the reuse
     sentence for a reused email or phone, the detail sentence for the rest."""
     fixes = [f for t in texts if (f := _duplicate_by_text(t, subject_type))]
-    others = [t for t in texts if not _duplicate_by_text(t, subject_type)]
-    return list(dict.fromkeys(fixes + detail_fixes(others)))
+    # The detail sentence for every text, a reused one too ("Email duplicate
+    # ...; EIN does not match"), minus the email fix the reuse one covers.
+    details = [
+        f
+        for f in detail_fixes(texts)
+        if not (fixes and f == "Check the email address.")
+    ]
+    return list(dict.fromkeys(fixes + details))
 
 
 def _general_problem(unmatched: list, subject_type: str) -> Problem:

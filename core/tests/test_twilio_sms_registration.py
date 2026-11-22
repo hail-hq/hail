@@ -1309,6 +1309,22 @@ async def test_failed_campaign_does_not_quote_the_general_error_placeholder() ->
         }
     )
     assert st.reason == CAMPAIGN_REJECTED
+    # The placeholder's code still picks the topic, sent as a float too.
+    r["us_app_to_person.fetch"] = SimpleNamespace(
+        sid="QE1",
+        campaign_status="FAILED",
+        errors=[{"error_code": 30908.0, "description": "General Error"}],
+    )
+    st = await _provider(r).status(
+        {
+            "brand_sid": "BN1",
+            "messaging_service_sid": "MG1",
+            "campaign_sid": "QE1",
+            "subject_type": "business",
+            "campaign": {},
+        }
+    )
+    assert st.reason.startswith("Review your privacy policy")
     # The placeholder's code still picks the topic.
     r["us_app_to_person.fetch"] = SimpleNamespace(
         sid="QE1",
