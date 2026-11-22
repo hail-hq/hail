@@ -52,6 +52,7 @@ __all__ = [
     "knowledge_bytes",
     "knowledge_limits",
     "knowledge_lock",
+    "log_failure",
     "short_cause",
     "storage_full",
 ]
@@ -126,16 +127,34 @@ async def agent_uses_knowledge(
 
 
 def involves_database(exc: BaseException) -> bool:
-    """True when ``exc`` or any error it was raised from or during is a
-    SQLAlchemy error: its traceback could print statements and values."""
+    """True when ``exc``, any error it was raised from or during, or any
+    error in an exception group is a SQLAlchemy error: its traceback could
+    print statements and values."""
     seen: set[int] = set()
-    current: BaseException | None = exc
-    while current is not None and id(current) not in seen:
+    stack: list[BaseException] = [exc]
+    while stack:
+        current = stack.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
         if isinstance(current, SQLAlchemyError):
             return True
-        seen.add(id(current))
-        current = current.__cause__ or current.__context__
+        # An exception group (Python 3.11+) prints every member.
+        members = getattr(current, "exceptions", None)
+        if isinstance(members, tuple):
+            stack.extend(m for m in members if isinstance(m, BaseException))
+        stack.extend(e for e in (current.__cause__, current.__context__) if e)
     return False
+
+
+def log_failure(log: logging.Logger, message: str, exc: BaseException) -> None:
+    """Log ``message`` and ``exc`` at error level: with its traceback, or,
+    when a database error is involved, with its type and code only (no
+    statement or values)."""
+    if involves_database(exc):
+        log.error("%s (%s%s)", message, type(exc).__name__, short_cause(exc))
+    else:
+        log.error("%s", message, exc_info=exc)
 
 
 def short_cause(exc: BaseException) -> str:

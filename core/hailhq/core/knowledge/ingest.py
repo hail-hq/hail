@@ -55,6 +55,7 @@ from hailhq.core.knowledge.access import (
     involves_database,
     knowledge_limits,
     knowledge_lock,
+    log_failure,
     short_cause,
     storage_full,
 )
@@ -164,8 +165,8 @@ class KnowledgeIngestWorker:
         while not self._stop.is_set():
             try:
                 await self.tick()
-            except Exception:  # pragma: no cover - defensive; logged + retried
-                logger.exception("knowledge ingest tick failed")
+            except Exception as exc:  # pragma: no cover - defensive; retried
+                log_failure(logger, "knowledge ingest tick failed", exc)
             try:
                 await asyncio.wait_for(self._stop.wait(), timeout=self._poll_interval)
             except asyncio.TimeoutError:

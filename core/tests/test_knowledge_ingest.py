@@ -586,3 +586,4 @@ def test_database_errors_never_show_their_text() -> None:
         # ``from None`` hides the cause but the context still holds it.
         assert involves_database(wrapped)
     assert not involves_database(RuntimeError("plain"))
+    assert involves_database(ExceptionGroup("tasks", [db_error]))
