@@ -498,9 +498,13 @@ async def test_upload_added_after_turning_on_again_is_kept(async_session, s3) ->
     assert orphan in s3.objects
 
 
-async def test_failed_folder_sweep_still_deletes_rows(async_session, s3) -> None:
+async def test_failed_folder_sweep_raises_after_rows_and_reruns(
+    async_session, s3
+) -> None:
     org = uuid.uuid4()
     doc_id = await add_document(async_session, s3, org, b"Hello there.")
+    orphan = f"knowledge-documents/{org}/{uuid.uuid4()}.x"
+    s3.objects[orphan] = b"left over"
     plain_delete = s3.delete_prefix
 
     async def folder_fails(prefix, *, keep=None):
@@ -509,6 +513,44 @@ async def test_failed_folder_sweep_still_deletes_rows(async_session, s3) -> None
         return await plain_delete(prefix, keep=keep)
 
     s3.delete_prefix = folder_fails
-    assert await delete_org_knowledge(async_session, org, s3) == 1
+    with pytest.raises(ConnectionError):
+        await delete_org_knowledge(async_session, org, s3)
     async_session.expire_all()
     assert await async_session.get(KnowledgeDocument, doc_id) is None
+    assert orphan in s3.objects
+    # Run again: the sweep finishes.
+    s3.delete_prefix = plain_delete
+    assert await delete_org_knowledge(async_session, org, s3) == 0
+    assert orphan not in s3.objects
+
+
+async def test_listed_upload_cannot_become_a_document_mid_delete(
+    async_session, s3
+) -> None:
+    org = uuid.uuid4()
+    async_session.add(OrganizationKnowledge(organization_id=org))
+    upload = FileUpload(
+        organization_id=org,
+        purpose="knowledge_document",
+        filename="f.md",
+        content_type="text/markdown",
+        s3_key=f"knowledge-documents/{org}/u",
+        size_bytes=1,
+        uploaded_at=datetime.now(timezone.utc),
+    )
+    async_session.add(upload)
+    await async_session.commit()
+    first = []
+    plain_delete = s3.delete_prefix
+
+    async def check(prefix, *, keep=None):
+        if not first:
+            row = await async_session.get(FileUpload, upload.id)
+            await async_session.refresh(row)
+            first.append(row.first_used_at is not None)
+        return await plain_delete(prefix, keep=keep)
+
+    s3.delete_prefix = check
+    await delete_org_knowledge(async_session, org, s3)
+    # Marked used before the first storage call.
+    assert first == [True]

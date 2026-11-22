@@ -149,6 +149,17 @@ async def _turn_off(db: AsyncSession, organization_id: UUID) -> list[tuple[UUID,
         )
         .values(token_hash=None)
     )
+    # Its files go in step 2: no upload may become a document from now on
+    # (409). If the delete stops, running it again removes these rows.
+    await db.execute(
+        update(FileUpload)
+        .where(
+            FileUpload.organization_id == organization_id,
+            FileUpload.purpose == "knowledge_document",
+            FileUpload.first_used_at.is_(None),
+        )
+        .values(first_used_at=func.now())
+    )
     await db.execute(
         delete(OrganizationKnowledge).where(
             OrganizationKnowledge.organization_id == organization_id
@@ -214,8 +225,9 @@ async def delete_org_knowledge(
     documents deleted. Safe to run again after any failure.
 
     1. Under the workspace's knowledge lock: unused upload links stop
-       working, the limits row is deleted (no new link or document can
-       start), and the uploads that exist are listed. Committed. A PUT
+       working, uploads not yet documents can no longer become ones (409),
+       the limits row is deleted (no new link or document can start), and
+       the uploads that exist are listed. Committed. A PUT
        already reading its body then cannot mark its link, so it deletes
        its own object.
     2. The listed uploads' objects (every attempt) are deleted, with no
@@ -225,11 +237,12 @@ async def delete_org_knowledge(
     3. The listed rows are deleted, under the lock. Committed: the
        customer's text is gone.
     4. Under the lock and only while the workspace is still off, its whole
-       folder is emptied (objects no row points to). A failure here only
-       logs a warning: what may stay is objects no row points to.
+       folder is emptied (objects no row points to). A failure here raises
+       after the rows are gone; running the delete again sweeps the rest.
 
-    Do not turn the workspace on again while this runs: an upload listed in
-    step 1 could become a document and be deleted with its upload.
+    If any step fails, run the delete again before turning the workspace
+    on. The closed-account sweep retries steps 1 to 3 by itself (it finds
+    the workspace by its uploads); a failed step 4 is logged for Hail.
 
     With no bucket configured (``s3`` None) no file can exist (every upload
     needs the bucket), so only rows go.
@@ -240,16 +253,9 @@ async def delete_org_knowledge(
             await delete_upload_objects(s3, key)
     count = await _end(db, _delete_rows(db, organization_id, [i for i, _ in uploads]))
     if s3 is not None:
-        try:
-            await _end(db, _sweep_folder(db, organization_id, s3))
-        except Exception as exc:
-            # The rows (the customer's text) are gone; only objects no row
-            # points to may stay. Logged, never retried by itself.
-            logger.warning(
-                "knowledge: folder sweep for %s failed (%s)",
-                organization_id,
-                type(exc).__name__,
-            )
+        # Raises on failure, after the rows are gone: run the delete again
+        # to sweep what stays (objects no row points to).
+        await _end(db, _sweep_folder(db, organization_id, s3))
     return count
 
 

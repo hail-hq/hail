@@ -26,7 +26,9 @@ deleted while it is read is simply skipped at step 6.
 
 Each tick also deletes the knowledge base of closed accounts
 (``access.delete_org_knowledge``): documents, uploads never made into a
-document, and the limits row. So a failure at close is retried here.
+document, and the limits row. A failure at close is retried here while the
+workspace still has uploads or its limits row; a failed final folder sweep
+(objects no row points to) is logged and needs the delete run by hand.
 
 Same run_forever/tick/stop shape as ``OutboundForwardWorker``, started from
 the API's lifespan when the mail bucket is configured. Nothing here logs

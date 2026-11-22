@@ -13,7 +13,7 @@ then deletes the registration answers
 number registration kept for a resubmit
 (``hailhq.api.routes.verifications.forget_kept_registrations``), and the
 knowledge base (``hailhq.core.knowledge.access.delete_org_knowledge``; the
-knowledge ingest worker retries it). The carrier
+knowledge ingest worker retries it while rows remain). The carrier
 calls can take longer than the caller waits, so they run after the
 response. The verification worker runs both for every closed org on each
 pass, so a failure here is retried there, and a closure row with no call is
