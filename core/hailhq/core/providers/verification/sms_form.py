@@ -306,7 +306,9 @@ _OPTIONAL_METHOD_FIELDS = frozenset({"verbal_evidence_url"})
 _EVIDENCE_HELP = (
     "A public link to a screenshot of where recipients agree, with personal "
     "information removed. Carrier reviewers open it without signing in. No link? "
-    "Upload the file with POST /verifications/sms/evidence and use the url it returns."
+    "Upload the file with POST /verifications/sms/evidence, or with the MCP tool "
+    "create_file_upload (purpose sms_evidence) and its curl line, and use the url "
+    "it returns."
 )
 _METHOD_LABELS = {
     "url": "Exact enrollment page URL",

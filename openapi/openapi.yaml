@@ -757,7 +757,14 @@ paths:
 
         The PUT answers with `size_bytes` and `sha256` of what was stored. An
 
-        organization may hold at most 50 unused, unexpired links."
+        organization may hold at most 50 unused, unexpired links.
+
+
+        For `sms_evidence` the PUT also answers with `url`, the public link for
+
+        an `*_evidence_url` field of a US texting registration. It works like
+
+        `POST /v1/verifications/sms/evidence`."
       operationId: create_file_upload
       parameters:
         - name: authorization
@@ -803,8 +810,14 @@ paths:
               description: Seconds until the current window resets.
               schema:
                 type: integer
+        "409":
+          description:
+            An `sms_evidence` link for an organization that keeps 100 evidence
+            files, the most allowed.
         "503":
-          description: File uploads are not configured on this server.
+          description:
+            File uploads are not configured on this server. For `sms_evidence`,
+            also when the server has no public https URL carrier reviewers can open.
         "422":
           description: Validation Error
           content:
@@ -832,9 +845,16 @@ paths:
 
         stored. A second upload of the same file is harmless.
 
-        Empty body: 422. A verification document whose first bytes are not the
+        Empty body: 422. A verification document or SMS evidence file whose
 
-        declared JPEG, PNG or PDF: 422."
+        first bytes are not the declared JPEG, PNG or PDF: 422.
+
+
+        For `sms_evidence` the answer also has `url`, the public link to put in
+
+        an `*_evidence_url` field. An organization that already keeps 100
+
+        evidence files gets 409."
       operationId: put_file_upload
       parameters:
         - name: upload_id
@@ -886,6 +906,10 @@ paths:
             file could not be stored at the end: another PUT used the link first,
             the link was removed, or storing ended more than 15 minutes after the
             expiry. If your file is not stored, make a new link and send it again."
+        "409":
+          description:
+            An `sms_evidence` link for an organization that keeps 100 evidence
+            files, the most allowed.
         "408":
           description:
             The body did not arrive before the link expired, or within
@@ -9364,11 +9388,14 @@ components:
           enum:
             - email_attachment
             - verification_document
+            - sms_evidence
           title: Purpose
           description:
             "What the file is for. `email_attachment`: the id works in
             `POST /v1/emails` `attachment_ids`. `verification_document`: the id works
-            as the `upload.<slot>` part of `POST /v1/verifications` and `POST /v1/verifications/check`."
+            as the `upload.<slot>` part of `POST /v1/verifications` and `POST /v1/verifications/check`.
+            `sms_evidence`: a US texting consent screenshot; the PUT returns a public
+            `url` for an `*_evidence_url` field, like `POST /v1/verifications/sms/evidence`."
         filename:
           type: string
           maxLength: 255
@@ -9380,8 +9407,9 @@ components:
           title: Content Type
           description:
             MIME type, `type/subtype` with no parameters. A `verification_document`
-            takes `image/jpeg`, `image/png` or `application/pdf` only. This type is
-            stored; the PUT request's own `Content-Type` header is not used.
+            or `sms_evidence` takes `image/jpeg`, `image/png` or `application/pdf`
+            only. This type is stored; the PUT request's own `Content-Type` header
+            is not used.
       type: object
       required:
         - purpose
@@ -9403,6 +9431,7 @@ components:
           enum:
             - email_attachment
             - verification_document
+            - sms_evidence
           title: Purpose
           description: What the file is for.
         upload_url:
@@ -9455,6 +9484,7 @@ components:
           enum:
             - email_attachment
             - verification_document
+            - sms_evidence
           title: Purpose
           description: What the file is for.
         filename:
@@ -9473,6 +9503,15 @@ components:
           type: string
           title: Sha256
           description: sha256 of the bytes stored, hex. Compare with the local file.
+        url:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Url
+          description:
+            "For `sms_evidence`: the public link to the file. Put it in
+            an `*_evidence_url` field. Carrier reviewers open it without signing in.
+            Null for other purposes."
       type: object
       required:
         - id

@@ -9,7 +9,7 @@ Exposes the following tools to the calling agent:
 * ``send_email`` — send an outbound email
 * ``upload_email_attachment`` — upload a small file (base64) to attach to an outbound email
 * ``create_file_upload`` — a one-time link to PUT a file with curl, for an
-  email attachment or a verification document
+  email attachment, a verification document or US texting consent evidence
 * ``get_email`` — fetch the full record of one email
 * ``list_emails`` — page through emails (``direction="inbound"`` for replies)
 * ``get_email_raw`` — presigned URL for an inbound email's raw MIME
@@ -1617,7 +1617,9 @@ async def create_file_upload(
 ) -> dict[str, Any]:
     if purpose not in _UPLOAD_PURPOSES:
         return {
-            "error": "purpose must be 'email_attachment' or 'verification_document'"
+            "error": "purpose must be "
+            + ", ".join(f"'{p}'" for p in _UPLOAD_PURPOSES[:-1])
+            + f" or '{_UPLOAD_PURPOSES[-1]}'"
         }
     try:
         link = await client.create_file_upload(
@@ -1646,6 +1648,12 @@ async def create_file_upload(
             "The response has size_bytes and sha256: compare them with the "
             "local file (for example `wc -c` and `shasum -a 256`). The link "
             "works once, until expires_at."
+            + (
+                " The response's url is the public evidence link: put it in the "
+                "*_evidence_url field of the texting registration."
+                if purpose == "sms_evidence"
+                else ""
+            )
         ),
     }
 
@@ -2616,7 +2624,9 @@ def register_tools(
                 "What the file is for. ``email_attachment``: its ``id`` goes in "
                 "``send_email``'s ``attachment_ids``. ``verification_document``: "
                 "its ``id`` goes in the ``files`` of ``check_verification`` and "
-                "``submit_verification`` as ``{slot, upload_id}``."
+                "``submit_verification`` as ``{slot, upload_id}``. "
+                "``sms_evidence``: a US texting consent screenshot; the upload "
+                "response's ``url`` goes in an ``*_evidence_url`` field."
             ),
         ],
         filename: Annotated[str, _d("File name, such as ``passport.pdf``.")],
@@ -2630,6 +2640,9 @@ def register_tools(
         so any file that is not tiny goes this way.
         An email attachment can be up to 25 MB. A verification document must be
         JPG, PNG or PDF, up to 10 MB, and is usable for 1 hour after the upload.
+        SMS evidence must be JPG, PNG or PDF, up to 10 MB; its upload response has a
+        public ``url`` for an ``*_evidence_url`` field. Carrier reviewers open it
+        without signing in, so remove personal information first.
         Returns ``id``, ``upload_url``, ``expires_at`` (15 minutes), ``max_bytes``
         and a ready ``curl`` line with a ``'FILE_PATH'`` placeholder for the
         file's absolute path.
@@ -3623,6 +3636,8 @@ def register_tools(
         Choice fields accept comma-separated option keys within their ``min_choices`` and ``max_choices``.
         Field ``max_length`` uses UTF-16 code units; an emoji counts as two.
         Selected consent methods can require evidence even when shared fields are optional.
+        No public link for an ``*_evidence_url`` field? Upload the screenshot with
+        ``create_file_upload`` (purpose ``sms_evidence``) and use the ``url`` it returns.
         Document slots with ``needs_input=false`` require no upload.
         An upstream failure returns an error."""
         try:
@@ -4058,6 +4073,7 @@ def register_tools(
 
         The response contains the description, consent flow and samples for user review before submission.
         Answers require actual applicant information and consent evidence.
+        Evidence links can come from ``create_file_upload`` with purpose ``sms_evidence``.
         Field or length errors appear in ``problems``.
         Limits are 100 fields and 64 KiB of combined fields and address.
         A successful preview does not guarantee submission: duplicates, low credit or carrier checks can still prevent it.
@@ -4121,7 +4137,8 @@ def register_tools(
 
         The address must be accurate; saved details can be reused when still correct.
         Identity changes are rejected. This operation does not create a replacement brand.
-        Actual consent evidence is required.
+        Actual consent evidence is required; ``create_file_upload`` with purpose
+        ``sms_evidence`` returns a public evidence link.
         Limits are 100 fields and 64 KiB of combined fields and address. No documents are uploaded.
         A later campaign filing can incur the normal review fee.
         After a timeout, the existing registration can already reflect the correction.

@@ -4,7 +4,12 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- MCP: upload a US texting consent screenshot with `create_file_upload` (purpose `sms_evidence`). The upload returns the public link for the `*_evidence_url` field.
+
 ### Changed
+
 
 - Self-host: the database drops the old `local_prefix_user` and `local_prefix_org` columns. Read `local_prefix_workspace` and `local_prefix_name`. The API still accepts the old field names. Upgrade to the 0.35.0 release first (the commit tagged `sdk-v0.25.0`).
 

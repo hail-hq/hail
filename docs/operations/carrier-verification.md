@@ -118,6 +118,10 @@ must not be uploaded as evidence. URL syntax checks do not establish reachabilit
 Carriers take evidence only as a public link inside the campaign text; the Telnyx campaign API
 has no upload field. A customer with no link uploads a PNG, JPG or PDF (10 MB or less) with
 `POST /v1/verifications/sms/evidence` and puts the returned `url` in the `*_evidence_url` field.
+An MCP agent cannot send that multipart request, so it makes an upload link with purpose
+`sms_evidence` (`POST /v1/uploads`, MCP `create_file_upload`) and sends the bytes with `curl`.
+That PUT follows the same rules (type, size, cap, public URL) and returns the same `url`. The
+PUT deletes the link's `file_uploads` row as it uses it, so no row tracks the file.
 Hail keeps the file in the mail bucket under `sms-evidence/<organization_id>/<token>` and `GET /v1/verifications/sms/evidence/<organization_id>/<token>` (no sign-in) redirects to a
 storage link that works for 10 minutes. The API never streams the file. The
 32-character random token is the only credential. The type comes from the file's first bytes;
