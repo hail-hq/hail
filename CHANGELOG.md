@@ -8,6 +8,10 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 - Webhooks: send a test event to an endpoint before you save it with `POST /v1/webhooks/test`, and see the receiver's answer.
 
+### Changed
+
+- Self-host: the database drops the old `local_prefix_user` and `local_prefix_org` columns. Read `local_prefix_workspace` and `local_prefix_name`. The API still accepts the old field names. Upgrade to the 0.35.0 release first (the commit tagged `sdk-v0.25.0`).
+
 ## [0.35.0] (2026-11-21)
 
 Hail-mail address fields have clearer names: `local_prefix_workspace` is the
