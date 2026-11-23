@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from collections.abc import AsyncIterator
+from pathlib import Path
 from urllib.parse import urljoin, urlsplit
 
 import httpx
@@ -45,12 +46,14 @@ from hailhq.mcp.auth import AuthMode, PassThroughVerifier, select_auth_mode
 from hailhq.mcp.discovery_auth import DiscoveryAuthMiddleware
 from hailhq.mcp.hail_client import HailClient
 from hailhq.mcp.metadata import server_metadata
+from hailhq.mcp.setup_page import SetupPageMiddleware
 from hailhq.mcp.tools import TaggedMCPServer, register_tools
 from pydantic import AnyHttpUrl
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.requests import Request
 from starlette.responses import (
+    FileResponse,
     JSONResponse,
     PlainTextResponse,
     RedirectResponse,
@@ -155,6 +158,14 @@ def _build_app() -> tuple[MCPServer, HailClient | None, Starlette]:
     async def healthz(_request: Request) -> Response:
         return JSONResponse({"status": "ok"})
 
+    registry_manifest = Path(__file__).with_name("server.json")
+    if not registry_manifest.is_file():
+        # Editable installs read the same file directly from the checkout.
+        registry_manifest = Path(__file__).resolve().parents[2] / "server.json"
+
+    async def mcp_manifest(_request: Request) -> Response:
+        return FileResponse(registry_manifest, media_type="application/json")
+
     async def manifest_icon(types: set[str]) -> Response:
         """Redirect to the first manifest icon of one of ``types``."""
         if not manifest_url:
@@ -210,13 +221,24 @@ def _build_app() -> tuple[MCPServer, HailClient | None, Starlette]:
     # parent app's middleware stack so 401-with-WWW-Authenticate fires
     # before any route resolution.
     #
-    # DiscoveryAuthMiddleware goes first in the list (= outermost = runs
-    # first on the way in), ahead of MCPServer's own auth middleware, so it
+    # DiscoveryAuthMiddleware runs ahead of MCPServer's auth middleware, so it
     # can inject a synthetic bearer for the capability-discovery
     # methods before AuthenticationMiddleware reads the headers.
+    middleware = [Middleware(DiscoveryAuthMiddleware), *http_app.user_middleware]
+    if mode is AuthMode.OAUTH_RS and settings.hail_base_url:
+        middleware.insert(
+            0,
+            Middleware(
+                SetupPageMiddleware,
+                endpoint_url=resource_url,
+                guide_url=join_url(settings.hail_base_url, "mcp"),
+            ),
+        )
+
     app = Starlette(
         routes=[
             Route("/healthz", healthz, methods=["GET"]),
+            Route("/.well-known/mcp.json", mcp_manifest, methods=["GET"]),
             Route("/favicon.ico", favicon, methods=["GET"]),
             Route("/icon.svg", vector_icon, methods=["GET"]),
             Route(
@@ -226,7 +248,7 @@ def _build_app() -> tuple[MCPServer, HailClient | None, Starlette]:
             ),
             *http_app.routes,
         ],
-        middleware=[Middleware(DiscoveryAuthMiddleware), *http_app.user_middleware],
+        middleware=middleware,
         lifespan=lifespan,
     )
     if _telemetry:
