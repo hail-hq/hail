@@ -376,8 +376,10 @@ class DocumentInput(BaseModel):
     file: UploadedFile | None = None
 
 
-# Hail's own wording for a carrier refusal. The carrier's text goes in
-# ``Problem.raw`` / ``ProviderStatus.raw_reason`` for the operator.
+# Hail's own wording for a carrier refusal. The carrier's full text goes in
+# ``Problem.raw`` / ``ProviderStatus.raw_reason`` for the operator. For US
+# texting, the customer's message quotes it after Hail's sentence
+# (``with_carrier_text``), so never log ``Problem.message`` either.
 NOT_ACCEPTED = (
     "The carrier did not accept the details. Check your entries and try again."
 )
@@ -405,9 +407,10 @@ class Problem(BaseModel):
     """A per-field problem the customer can fix. ``field`` is a neutral name
     (a field name, a slot name, or ``address``), or ``""`` for a general one.
 
-    ``message`` is Hail's own wording and is shown to the customer. ``raw`` is
-    the carrier's own text, if any. It is never logged and never sent to the
-    customer: a background refusal keeps it in the audit row, a superadmin
+    ``message`` is shown to the customer: Hail's own wording and, for US
+    texting, the carrier's own words after it (``with_carrier_text`` in
+    ``rejections.py``). ``raw`` is the carrier's own text, if any. It is never
+    logged: a background refusal keeps it in the audit row, a superadmin
     approve shows it to the superadmin, and a refusal at creation drops it."""
 
     field: str
@@ -439,8 +442,9 @@ class ProviderStatus(BaseModel):
     # never log it.
     reason: str | None = None
     # The carrier's own text for a rejection. Kept in the audit log; never
-    # logged. ``reason`` may quote it when Hail has no fix of its own
-    # (see rejections.py).
+    # logged. For US texting ``reason`` always quotes it after Hail's fix
+    # (``with_carrier_text``); for a number verification, when Hail has no
+    # fix of its own (see rejections.py).
     raw_reason: str | None = None
 
 

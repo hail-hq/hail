@@ -811,7 +811,7 @@ positives, tune `HAIL_SMS_ABUSE_MAX_OPT_OUT_RATE` up.
 ## Knowledge base
 
 Off for every workspace until you add its limits row. The defaults (10
-documents, 10 MB per file, 1,000 pieces) apply; pass columns to change them:
+documents, 20 MB per file, 1,000 pieces) apply; pass columns to change them:
 
 ```bash
 # Turn it on for one workspace

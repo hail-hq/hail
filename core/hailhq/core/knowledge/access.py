@@ -2,7 +2,7 @@
 
 Nothing is free: the knowledge base is off for every workspace until Hail
 adds its ``organization_knowledge`` row (docs/operations/knowledge-base.md).
-The row's limits default to early access: 10 documents, 10 MB per file,
+The row's limits default to early access: 10 documents, 20 MB per file,
 1,000 pieces. A workspace with no row gets 403 ``KNOWLEDGE_OFF`` from every
 knowledge route, its uploads of ``knowledge_document`` files are refused,
 and its agents answer without the knowledge base even when

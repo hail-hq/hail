@@ -3846,7 +3846,7 @@ type SmsCreate struct {
 	// ConsentSource Where/how consent was obtained (e.g. 'signup form', 'prior customer relationship'). Required (non-empty) when message_type is 'marketing'.
 	ConsentSource *string `json:"consent_source,omitempty"`
 
-	// From Sender phone number, E.164 format. Must be an active number owned by the organization with the SMS capability. Omitted: destinations where the sender-ID carrier delivers a dynamic alphanumeric sender ID unchanged (about 110 countries: most of Europe, Africa, the Middle East, Asia-Pacific and the Caribbean; one table per carrier in core/hailhq/core/sender_id_corridors.py) use the organization's sender ID, or the platform default 'HAIL' when none is set; Australia (+61) may always use 'HAIL', depending on the carrier. Every other destination, including the US and Canada, uses the organization's oldest active SMS-capable number; if none exists the request fails with 422. SMS never uses the shared pool. Trial texts (up to 25, only to the workspace's verified trial phone): with no from, Hail uses one when the workspace's own number cannot text that US phone; set from to the trial number to use one directly.
+	// From Sender phone number, E.164 format. Must be an active number owned by the organization with the SMS capability. Omitted: destinations where the sender-ID carrier delivers a dynamic alphanumeric sender ID unchanged (about 110 countries: most of Europe, Africa, the Middle East, Asia-Pacific and the Caribbean; one table per carrier in core/hailhq/core/sender_id_corridors.py) use the organization's sender ID, or the platform default 'HAIL' when none is set; Australia (+61) may always use 'HAIL', depending on the carrier. Every other destination, including the US and Canada, uses the organization's oldest active SMS-capable number; if none exists the request fails with 422. SMS never uses the shared pool. Trial texts (only to the workspace's verified trial phone): with no from, Hail uses one when the workspace's own number cannot text that US phone; set from to the trial number to use one directly.
 	From *string `json:"from,omitempty"`
 
 	// MessageType 'marketing' additionally requires a non-empty consent_source. Use 'informational' for transactional/service communications.
@@ -3981,7 +3981,7 @@ type SmsTrialResponse struct {
 	// TextsLeft Trial texts this workspace can still send.
 	TextsLeft int `json:"texts_left"`
 
-	// TextsLimit Trial texts a workspace can send, ever.
+	// TextsLimit All the trial texts the workspace gets.
 	TextsLimit int `json:"texts_limit"`
 
 	// TextsUsed Trial texts this workspace has sent.

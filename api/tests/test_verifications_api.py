@@ -22,6 +22,9 @@ from hailhq.api.funds import BILLING_URL
 from hailhq.api.main import app
 from hailhq.api.routes import verifications as verifications_routes
 from hailhq.api.routes.verifications import (
+    _SMS_REASON_MAX,
+    _billed_reason,
+    _cap_reason,
     get_verification_registry,
 )
 from hailhq.api.superadmin import require_superadmin
@@ -7938,6 +7941,24 @@ async def test_incomplete_legacy_provider_address_returns_support_guidance(
     assert response.status_code == 404 and "support" in response.json()["detail"]
 
 
+def test_a_billed_refusal_reason_is_cut_by_purpose() -> None:
+    reason = "z" * 3000
+    assert len(_billed_reason(reason, "sms")) == _SMS_REASON_MAX
+    assert _billed_reason(reason, "number") == "z" * 500
+
+
+def test_a_long_sms_reason_from_a_poll_is_capped() -> None:
+    row = CarrierVerification(
+        state="submitted",
+        purpose="sms",
+        updated_at=datetime.now(timezone.utc),
+        provider_refs={},
+    )
+    status = ProviderStatus(state="rejected", reason="y" * 5000, raw_reason="x")
+    assert verifications_routes._apply_status(row, status) is True
+    assert len(row.rejection_reason) <= _SMS_REASON_MAX
+
+
 def test_a_hold_found_while_submitting_keeps_its_repair_guidance() -> None:
     from datetime import datetime, timezone
 
@@ -8764,3 +8785,13 @@ async def test_an_amendment_at_a_carrier_with_no_low_volume_filing_stays_vetted(
     stored = await _stored_refs(async_session, vid)
     assert stored["campaign"]["use_case"] != "LOW_VOLUME"
     assert "low_volume" not in stored
+
+
+def test_the_sms_reason_cap_marks_the_cut() -> None:
+    reason = "x" * 3000 + ". Fix these and start again."
+    capped = _cap_reason(reason, "sms")
+    assert len(capped) <= _SMS_REASON_MAX
+    assert capped.endswith("x…")
+    assert _cap_reason("short.", "sms") == "short."
+    # Number verifications keep their reason whole.
+    assert _cap_reason(reason, "number") == reason

@@ -2593,7 +2593,7 @@ class OrganizationKnowledge(Base):
         Integer, server_default=text("10"), nullable=False
     )
     max_file_bytes: Mapped[int] = mapped_column(
-        Integer, server_default=text("10485760"), nullable=False
+        Integer, server_default=text("20971520"), nullable=False
     )
     max_pieces: Mapped[int] = mapped_column(
         Integer, server_default=text("1000"), nullable=False

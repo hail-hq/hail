@@ -81,7 +81,7 @@ def upgrade() -> None:
         sa.Column(
             "max_file_bytes",
             sa.Integer(),
-            server_default=sa.text("10485760"),
+            server_default=sa.text("20971520"),
             nullable=False,
         ),
         sa.Column(

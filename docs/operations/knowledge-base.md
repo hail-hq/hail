@@ -12,12 +12,14 @@ psql "${DATABASE_URL/postgresql+psycopg:/postgresql:}" -c \
   "INSERT INTO organization_knowledge (organization_id) VALUES ('<org-uuid>');"
 ```
 
-The defaults are the early-access limits: 10 documents, 10 MB per file (`10485760`), 1,000 pieces. Raise one:
+The defaults are the early-access limits: 10 documents, 20 MB per file (`20971520`), 1,000 pieces. Raise one:
 
 ```bash
 psql "${DATABASE_URL/postgresql+psycopg:/postgresql:}" -c \
   "UPDATE organization_knowledge SET max_documents = 50, updated_at = now() WHERE organization_id = '<org-uuid>';"
 ```
+
+Planned: when paid plans ship, the limits move from a document count to total size (Pro 100 MB, Business 1 GB, 20 MB per file). The table holds no total size yet; the per-file default is already 20 MB.
 
 Allowed ranges (CHECK constraints): documents 1 to 1,000, file bytes up to 25 MB, pieces up to 100,000. One file gives at most 1,500 pieces whatever the workspace limit: it must be read within the worker's 15-minute lease (about 280 s per 1,000 pieces with int8, 410 s with fp32). The workspace total can be higher. Over 5,000 pieces, calls search in SQL instead of memory.
 
