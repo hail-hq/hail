@@ -18,6 +18,9 @@ sys.modules["sip_trunks"] = st
 spec.loader.exec_module(st)
 
 DATA, SPECS = st.load()
+# Before the autouse no_db fixture replaces them.
+REAL_LIVE_CARRIERS = st.live_carriers
+REAL_LIVE_NUMBER_CARRIERS = st.live_number_carriers
 # The repo root has no pytest config (core sets asyncio_mode there).
 pytestmark = pytest.mark.asyncio
 
@@ -133,17 +136,19 @@ def tw(monkeypatch) -> FakeTwilio:
 
 @pytest.fixture(autouse=True)
 def no_db(monkeypatch):
-    """apply reads the carriers of the shared trunk's numbers: none known."""
+    """apply and move read the carriers of the trunks' numbers: none known."""
 
     async def nobody(_numbers):
         return {}
 
     monkeypatch.setattr(st, "live_carriers", nobody)
+    monkeypatch.setattr(st, "live_number_carriers", nobody)
 
 
 @pytest.fixture(autouse=True)
 def env(monkeypatch):
     monkeypatch.setattr(settings, "hail_sip_inbound_secret", SECRET)
+    monkeypatch.setattr(settings, "twilio_sip_trunk_sid", "TK_test")
     monkeypatch.setattr(settings, "livekit_sip_inbound_trunk_id", "ST_shared")
     for c in st.CARRIERS:
         monkeypatch.setattr(settings, f"livekit_{c}_sip_inbound_trunk_id", "ST_shared")
@@ -1093,15 +1098,19 @@ async def test_twilio_url_lines_print_before_each_write(
 
 
 def _twilio_on_shared(monkeypatch, carriers):
+    """``carriers``: e164 -> carrier of a live row, routed or not."""
+
     async def found(numbers):
         return {n: carriers[n] for n in numbers if n in carriers}
 
-    monkeypatch.setattr(st, "live_carriers", found)
+    monkeypatch.setattr(st, "live_number_carriers", found)
 
 
 SKIP_ON_SHARED = (
     "secret header: skipped, 1 twilio number(s) still on the shared trunk, "
-    "which does not map X-Hail-Secret: run move --carrier twilio, then apply again"
+    "which does not map X-Hail-Secret: run move --carrier twilio (a number "
+    "not routed for inbound calls: move --carrier twilio --number <it> "
+    "--drop-unknown takes it off), then apply again"
 )
 
 
@@ -1144,7 +1153,8 @@ async def test_new_twilio_trunk_is_created_and_says_move_next(monkeypatch, tw) -
         "secret header: skipped, 1 twilio number(s) still on the shared trunk, "
         "which does not map X-Hail-Secret: set "
         "LIVEKIT_TWILIO_SIP_INBOUND_TRUNK_ID in .env, run move --carrier "
-        "twilio, then apply again"
+        "twilio (a number not routed for inbound calls: move --carrier twilio "
+        "--number <it> --drop-unknown takes it off), then apply again"
     ) in plan
     created = st.by_name(list(sip.trunks.values()), "hail-inbound-twilio")
     assert not created.headers_to_attributes
@@ -1191,3 +1201,204 @@ async def test_replace_keeps_other_header_maps_and_re_adds_lost_numbers(
     sip.calls.clear()
     await st.apply(sip, DATA, SPECS["twilio"], yes=True)
     assert not [c for c in sip.calls if c[0] == "replace"]
+
+
+@pytest.mark.parametrize(
+    ("url", "want"),
+    [
+        (
+            f"sip:lk.example.test?x-hail-secret={SECRET}&X-Other=1",
+            "sip:lk.example.test?x-hail-secret=***&X-Other=1",
+        ),
+        # Every repeat, any case, spaces around the name (as with_header reads).
+        (
+            (
+                f"sip:lk.example.test?X-HAIL-SECRET={SECRET}&X-Other=1"
+                f"& X-Hail-Secret ={SECRET}"
+            ),
+            "sip:lk.example.test?X-HAIL-SECRET=***&X-Other=1& X-Hail-Secret =***",
+        ),
+        ("sip:lk.example.test;x=1", "sip:lk.example.test;x=1"),
+        (
+            "sip:lk.example.test?X-Hail-Secret-Not=1",
+            "sip:lk.example.test?X-Hail-Secret-Not=1",
+        ),
+    ],
+)
+async def test_masked_hides_every_secret_header_with_reads_name_rules(
+    url, want
+) -> None:
+    assert st.masked(url) == want
+    assert SECRET not in st.masked(url)
+
+
+@pytest.mark.parametrize("yes", [False, True])
+async def test_twilio_move_back_waits_for_the_secret_rollback(monkeypatch, yes) -> None:
+    """The shared trunk does not map the header: with the secret set, Hail
+    would refuse every call to a number moved back. Nothing is read or
+    changed, dry run too."""
+    monkeypatch.setattr(settings, "livekit_twilio_sip_inbound_trunk_id", "ST_tw")
+    sip = FakeSip(
+        trunk("ST_shared", "shared", ["hail-placeholder-shared"]),
+        trunk("ST_tw", "hail-inbound-twilio", ["hail-placeholder-twilio", "+1"]),
+    )
+    with pytest.raises(st.TrunkError, match="do the Secret header rollback first"):
+        await st.move(sip, DATA, SPECS["twilio"], back=True, yes=yes)
+    assert sip.calls == []
+    monkeypatch.setattr(settings, "hail_sip_inbound_secret", "")
+    await st.move(sip, DATA, SPECS["twilio"], back=True, yes=True)
+    assert "+1" in sip.trunks["ST_shared"].numbers
+
+
+async def test_unrouted_twilio_number_on_the_shared_trunk_is_counted_and_listed(
+    monkeypatch, tw
+) -> None:
+    """live_carriers (routed only) knows no number; the live Twilio row with
+    no inbound route still counts. Taking it off as the hint says lets the
+    next apply set the header."""
+    _twilio_on_shared(monkeypatch, {"+14155550100": "twilio"})
+    sip = _locked_twilio_trunk(monkeypatch)
+    plan = await st.apply(sip, DATA, SPECS["twilio"], yes=True)
+    assert SKIP_ON_SHARED in plan
+    assert plan[plan.index(SKIP_ON_SHARED) + 1] == "  +14155550100"
+    _assert_addresses_only(sip, tw)
+
+    # The hint: move --number <it> --drop-unknown (move reads routed rows).
+    async def not_routed(_numbers):
+        return {}
+
+    await st.move(
+        sip,
+        DATA,
+        SPECS["twilio"],
+        back=False,
+        yes=True,
+        carriers_of=not_routed,
+        drop_unknown=True,
+        only=["+14155550100"],
+    )
+    assert "+14155550100" not in sip.trunks["ST_shared"].numbers
+    plan = await st.apply(sip, DATA, SPECS["twilio"], yes=True)
+    assert not any(line.startswith("secret header: skipped") for line in plan)
+    assert [sid for sid, _ in tw.updates] == ["OU0"]
+
+
+async def test_live_number_carriers_reads_unrouted_rows_too(monkeypatch) -> None:
+    seen: list[str] = []
+
+    class FakeDb:
+        async def execute(self, stmt):
+            seen.append(str(stmt))
+            return SimpleNamespace(all=lambda: [("+1", "twilio")])
+
+    class Scope:
+        async def __aenter__(self):
+            return FakeDb()
+
+        async def __aexit__(self, *_exc):
+            return False
+
+    monkeypatch.setattr(st, "session_scope", Scope)
+    assert await REAL_LIVE_NUMBER_CARRIERS(["+1"]) == {"+1": "twilio"}
+    assert await REAL_LIVE_CARRIERS(["+1"]) == {"+1": "twilio"}
+    unrouted, routed = seen
+    assert "provisioning_state NOT IN" in unrouted
+    assert "inbound_registered_at" not in unrouted
+    assert "inbound_registered_at IS NOT NULL" in routed
+
+
+@pytest.mark.parametrize(
+    ("problem", "reason"),
+    [
+        ("no_sid", "TWILIO_SIP_TRUNK_SID is empty"),
+        (
+            "not_configured",
+            (
+                "could not read the Twilio origination URLs "
+                "(TWILIO_SIP_TRUNK_SID is not set)"
+            ),
+        ),
+        (
+            "request_error",
+            (
+                "could not read the Twilio origination URLs (Carrier request "
+                "failed with HTTP 401)"
+            ),
+        ),
+    ],
+)
+async def test_failed_origination_read_skips_only_the_header_steps(
+    monkeypatch, tw, problem, reason
+) -> None:
+    if problem == "no_sid":
+        monkeypatch.setattr(settings, "twilio_sip_trunk_sid", "")
+    else:
+        error = (
+            st.CarrierNotConfigured("TWILIO_SIP_TRUNK_SID is not set")
+            if problem == "not_configured"
+            else st.CarrierRequestError(401)
+        )
+
+        async def fail():
+            raise error
+
+        monkeypatch.setattr(st.twilio, "origination_urls", fail)
+    sip = _locked_twilio_trunk(monkeypatch)
+    plan = await st.apply(sip, DATA, SPECS["twilio"], yes=True)
+    assert f"secret header: skipped, {reason}" in plan
+    _assert_addresses_only(sip, tw)
+
+
+async def test_replace_that_changes_another_field_stops_after_re_adding(
+    monkeypatch, capsys, tw
+) -> None:
+    """Numbers come back first; then the changed fields are printed (the
+    password by name only) and the run stops for a fix by hand."""
+    monkeypatch.setattr(settings, "livekit_twilio_sip_inbound_trunk_id", "ST_tw")
+    sip = FakeSip(
+        trunk("ST_shared", "shared", ["hail-placeholder-shared"]),
+        trunk(
+            "ST_tw", "hail-inbound-twilio", ["hail-placeholder-twilio", "+14155550101"]
+        ),
+        rule_trunks=("ST_shared", "ST_tw"),
+    )
+    tw_trunk = sip.trunks["ST_tw"]
+    tw_trunk.allowed_addresses.extend(["54.172.60.0/30", "54.244.51.0/30"])
+    tw_trunk.auth_username = "kept-user"
+    tw_trunk.auth_password = "kept-password"
+    real_replace = sip.update_inbound_trunk
+
+    async def lossy_replace(trunk_id, info):
+        result = await real_replace(trunk_id, info)
+        t = sip.trunks[trunk_id]
+        t.numbers.remove("+14155550101")
+        del t.allowed_addresses[:]
+        t.auth_username = ""
+        t.auth_password = ""
+        return result
+
+    sip.update_inbound_trunk = lossy_replace
+    with pytest.raises(st.TrunkError, match=r"changed 3 field\(s\) of hail-inbound"):
+        await st.apply(sip, DATA, SPECS["twilio"], yes=True)
+    assert "+14155550101" in sip.trunks["ST_tw"].numbers
+    out = capsys.readouterr().out.splitlines()
+    assert out[0] == "re-add +14155550101 to hail-inbound-twilio: the replace lost it"
+    assert out[1:] == [
+        (
+            "hail-inbound-twilio: the replace changed allowed_addresses: "
+            "['54.172.60.0/30', '54.244.51.0/30'] -> []"
+        ),
+        "hail-inbound-twilio: the replace changed auth_username: 'kept-user' -> ''",
+        "hail-inbound-twilio: the replace changed auth_password (value hidden)",
+    ]
+    # Stopped before the field update and the Twilio URLs.
+    assert list(sip.trunks["ST_tw"].allowed_addresses) == []
+    assert tw.updates == []
+
+
+async def test_trunk_changes_ignores_address_order() -> None:
+    a = api.SIPInboundTrunkInfo(allowed_addresses=["1.1.1.1/32", "2.2.2.2/32"])
+    b = api.SIPInboundTrunkInfo(allowed_addresses=["2.2.2.2/32", "1.1.1.1/32"])
+    assert st.trunk_changes(a, b) == []
+    b.headers_to_attributes["X-A"] = "a"
+    assert st.trunk_changes(a, b) == ["headers_to_attributes: {} -> {'X-A': 'a'}"]
