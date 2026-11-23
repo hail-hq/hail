@@ -26,9 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import json
 from collections.abc import AsyncIterator
-from pathlib import Path
 from urllib.parse import urljoin, urlsplit
 
 import httpx
@@ -41,12 +39,12 @@ from hailhq.core.telemetry import (
     request_span_attributes,
 )
 from hailhq.core.telemetry_identity import IdentityMiddleware
-from hailhq.core.urls import join_url, url_variants
+from hailhq.core.urls import join_url
 from hailhq.mcp.analytics import instrument_analytics
 from hailhq.mcp.auth import AuthMode, PassThroughVerifier, select_auth_mode
 from hailhq.mcp.discovery_auth import DiscoveryAuthMiddleware
 from hailhq.mcp.hail_client import HailClient
-from hailhq.mcp.metadata import server_metadata
+from hailhq.mcp.metadata import registry_manifest_for, server_metadata
 from hailhq.mcp.setup_page import SetupPageMiddleware
 from hailhq.mcp.tools import TaggedMCPServer, register_tools
 from pydantic import AnyHttpUrl
@@ -54,7 +52,6 @@ from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.requests import Request
 from starlette.responses import (
-    FileResponse,
     JSONResponse,
     PlainTextResponse,
     RedirectResponse,
@@ -159,21 +156,17 @@ def _build_app() -> tuple[MCPServer, HailClient | None, Starlette]:
     async def healthz(_request: Request) -> Response:
         return JSONResponse({"status": "ok"})
 
-    registry_manifest = Path(__file__).with_name("server.json")
-    if not registry_manifest.is_file():
-        # Editable installs read the same file directly from the checkout.
-        registry_manifest = Path(__file__).resolve().parents[2] / "server.json"
-
-    async def mcp_manifest(_request: Request) -> Response:
-        return FileResponse(registry_manifest, media_type="application/json")
-
     registry_routes = []
-    if mode is AuthMode.OAUTH_RS and registry_manifest.is_file():
-        manifest = json.loads(registry_manifest.read_bytes())
-        if any(
-            remote["url"] in url_variants(resource_url)
-            for remote in manifest["remotes"]
-        ):
+    if mode is AuthMode.OAUTH_RS:
+        manifest = registry_manifest_for(resource_url)
+        if manifest is not None:
+            registry_response = Response(manifest, media_type="application/json")
+
+            async def mcp_manifest(request: Request) -> Response:
+                if request.method == "HEAD":
+                    return Response(headers=registry_response.headers)
+                return registry_response
+
             registry_routes.append(
                 Route("/.well-known/mcp.json", mcp_manifest, methods=["GET"])
             )

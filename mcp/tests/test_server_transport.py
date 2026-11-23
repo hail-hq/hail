@@ -130,6 +130,23 @@ async def test_mcp_manifest_is_only_served_for_the_registered_oauth_endpoint(
     assert response.status_code == 404
 
 
+@pytest.mark.asyncio
+async def test_invalid_registry_manifest_does_not_break_mcp_startup(monkeypatch):
+    read_bytes = Path.read_bytes
+
+    def read_invalid_manifest(path):
+        if path.name == "server.json":
+            return b'{"remotes":'
+        return read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", read_invalid_manifest)
+    srv = _boot(monkeypatch, oauth=True)
+    transport = httpx.ASGITransport(app=srv.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+        assert (await c.get("/healthz")).status_code == 200
+        assert (await c.get("/.well-known/mcp.json")).status_code == 404
+
+
 _MCP_ACCEPT = "application/json, text/event-stream"
 
 
