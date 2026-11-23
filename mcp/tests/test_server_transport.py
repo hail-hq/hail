@@ -457,9 +457,10 @@ async def test_oauth_rs_unauth_tools_list_succeeds(monkeypatch):
             )
     assert resp.status_code == 200
     body = _parse_mcp_body(resp)
-    tool_names = {t["name"] for t in body["result"]["tools"]}
-    assert "place_call" in tool_names
-    assert "whoami" in tool_names
+    tools = {tool["name"]: tool for tool in body["result"]["tools"]}
+    assert "place_call" in tools
+    identity = tools["whoami"]["outputSchema"]["anyOf"][0]["properties"]
+    assert identity["organization_id"]["type"] == "string"
 
 
 @pytest.mark.asyncio
