@@ -25,6 +25,8 @@ The server exposes 43 tools. Schemas (args, validation, return shapes) are the s
 
 Every tool sets the MCP hints `readOnlyHint`, `destructiveHint`, `idempotentHint` and `openWorldHint`, so clients can ask for approval before a write. `release_number`, `delete_agent`, `acquire_number`, `submit_verification`, `resubmit_verification` and `cancel_verification` are marked destructive. The first three also need a confirmation argument (`confirm_e164`, `confirm_name`, `confirm_total_cents`). `submit_verification` and `resubmit_verification` need `attest_authorized: true`.
 
+`route_number`, `route_email_domain` and `update_agent` are also marked destructive because they replace active routing or agent settings and can stop replies. Hosts may ask for approval before these updates; the tools do not require a separate confirmation argument. Phone routing has `openWorldHint: true` because registering or unregistering inbound voice can change carrier and LiveKit routing.
+
 `place_call`, `send_sms` and `send_email` need `recipient_consent` set to the JSON boolean `true`. Strings such as `"true"` and numbers such as `1` are refused before any request is sent.
 
 | Tool                            | Does                                                                                                                            |

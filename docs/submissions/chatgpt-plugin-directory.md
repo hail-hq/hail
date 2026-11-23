@@ -67,7 +67,8 @@ Other items:
 - MCP findings checked on 2026-11-16: `route_number` and `update_agent` were
   flagged for `destructiveHint: false`. Both overwrite active configuration and
   can stop subsequent replies. `route_email_domain` has the same risk.
-- Phone routing also changes carrier and LiveKit configuration, so its
+- Phone routing can change carrier and LiveKit configuration when registering or
+  unregistering inbound voice, so its
   `openWorldHint` is true. Agent updates and email routing change saved Hail
   settings; they do not themselves place a call or send a message.
 - The notices saying `place_call`, `create_agent`, `confirm_verification` and

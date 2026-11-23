@@ -2412,7 +2412,7 @@ def register_tools(
         With ``from_`` omitted, Hail uses the oldest active workspace number with
         voice capability, or a shared pool number when none is available.
         A dedicated number is not required. Shared pool numbers cannot be selected
-        explicitly; an exhausted pool returns 503 without starting a call.
+        explicitly; an exhausted pool returns an ``error`` result without starting a call.
         At least one of ``system_prompt``, ``llm`` or ``agent_id`` is required.
         US artificial-voice calls (47 CFR 64.1200(b)(1)) require the AI disclosure.
         Hail does not verify the lawful basis or the recipient's consent.
@@ -3248,7 +3248,8 @@ def register_tools(
     ) -> dict[str, Any]:
         """Set the saved agents that answer a number's calls and texts.
 
-        Replaces the selected routing settings and changes carrier and LiveKit routing.
+        Replaces the selected routing settings. Registering or unregistering inbound
+        voice can change carrier and LiveKit routing; text-only changes do not.
         Clearing the voice route stops AI call answers; clearing the text route stops
         agent replies to texts. Restoring a route does not recover missed interactions.
         Omitted settings retain their current values.
