@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import importlib
 import json
+from pathlib import Path
 
 import httpx
 import pytest
@@ -53,6 +54,139 @@ async def test_oauth_rs_unauth_returns_401_with_resource_metadata(monkeypatch):
     assert "Bearer" in www
     assert "resource_metadata=" in www
     assert "https://mcp.hail.so/.well-known/oauth-protected-resource" in www
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "accept",
+    [
+        "text/html,application/xhtml+xml,*/*;q=0.8",
+        "text/html, text/event-stream;q=0",
+        "*/*;q=0.5",
+        "*/*",
+    ],
+)
+async def test_oauth_rs_root_offers_browser_setup(monkeypatch, accept):
+    srv = _boot(monkeypatch, oauth=True)
+    transport = httpx.ASGITransport(app=srv.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+        response = await c.get("/", headers={"Accept": accept})
+        head = await c.head("/", headers={"Accept": accept})
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert response.headers["cache-control"] == "no-store"
+    assert "Accept" in response.headers["vary"].split(", ")
+    assert "<h1>Connect to Hail MCP</h1>" in response.text
+    assert "https://mcp.hail.so/" in response.text
+    assert 'href="https://brand.test/site/mcp"' in response.text
+    assert head.status_code == 200
+    assert head.headers["content-length"] == response.headers["content-length"]
+    assert head.content == b""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("path", "headers"),
+    [
+        ("/", {"Accept": "text/event-stream"}),
+        ("/", {"Accept": "application/json"}),
+        ("/", {"Accept": "application/json, */*"}),
+        ("/", {"Accept": "text/html;q=0, */*;q=1"}),
+        ("/", {"Accept": "*/*;q=0"}),
+        ("/", {"Accept": "text/html;q=broken"}),
+        ("/", {"Accept": "text/html, text/event-stream"}),
+        ("/", {"Mcp-Session-Id": "test-session"}),
+        ("/", {"MCP-Protocol-Version": "2025-11-25"}),
+        ("/mcp", {"Accept": "text/html"}),
+    ],
+)
+async def test_oauth_rs_mcp_get_still_requires_auth(monkeypatch, path, headers):
+    srv = _boot(monkeypatch, oauth=True)
+    transport = httpx.ASGITransport(app=srv.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+        response = await c.get(path, headers=headers)
+
+    assert response.status_code == 401
+    assert "resource_metadata=" in response.headers["www-authenticate"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("method", "headers"), [("GET", {"Accept": "text/html"}), ("HEAD", {})]
+)
+async def test_custom_oauth_host_keeps_root_authorization_challenge(
+    monkeypatch, method, headers
+):
+    srv = _boot(monkeypatch, oauth=True, mcp_resource_url="https://self-host.test")
+    transport = httpx.ASGITransport(app=srv.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+        response = await c.request(method, "/", headers=headers)
+
+    assert response.status_code == 401
+    assert "https://self-host.test/.well-known/oauth-protected-resource" in (
+        response.headers["www-authenticate"]
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("resource", ["https://mcp.hail.so", "https://mcp.hail.so/"])
+async def test_public_mcp_manifest_matches_registry(monkeypatch, resource):
+    srv = _boot(monkeypatch, oauth=True, mcp_resource_url=resource)
+    transport = httpx.ASGITransport(app=srv.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+        response = await c.get("/.well-known/mcp.json")
+        head = await c.head("/.well-known/mcp.json")
+
+    registry = Path(__file__).resolve().parents[1] / "server.json"
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/json"
+    assert response.content == registry.read_bytes()
+    assert head.status_code == 200
+    assert head.headers["content-length"] == response.headers["content-length"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("oauth", "resource"),
+    [(False, ""), (False, "https://mcp.hail.so"), (True, "https://self-host.test/")],
+)
+async def test_mcp_manifest_is_only_served_for_the_registered_oauth_endpoint(
+    monkeypatch, oauth, resource
+):
+    srv = _boot(monkeypatch, oauth=oauth, mcp_resource_url=resource)
+    transport = httpx.ASGITransport(app=srv.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+        response = await c.get("/.well-known/mcp.json")
+
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "invalid_manifest",
+    [b'{"remotes":', b'{"remotes":' + b"[" * 10_000 + b"]" * 10_000 + b"}"],
+    ids=["truncated", "too-deep"],
+)
+async def test_registry_recovers_without_restarting_mcp(monkeypatch, invalid_manifest):
+    read_bytes = Path.read_bytes
+
+    def read_invalid_manifest(path):
+        if path.name == "server.json":
+            return invalid_manifest
+        return read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", read_invalid_manifest)
+    srv = _boot(monkeypatch, oauth=True)
+    transport = httpx.ASGITransport(app=srv.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+        assert (await c.get("/healthz")).status_code == 200
+        unavailable = await c.get("/.well-known/mcp.json")
+        assert unavailable.status_code == 404
+        assert unavailable.headers["cache-control"] == "no-store"
+        assert (await c.get("/", headers={"Accept": "text/html"})).status_code == 200
+        monkeypatch.setattr(Path, "read_bytes", read_bytes)
+        assert (await c.get("/.well-known/mcp.json")).status_code == 200
 
 
 _MCP_ACCEPT = "application/json, text/event-stream"
