@@ -143,9 +143,12 @@ async def test_hard_deadline_closes_room_and_finalizes_trial_without_client_time
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("stall_failure_write", [False, True])
 async def test_worker_failure_wins_over_browser_stop_during_room_cleanup(
-    async_session, monkeypatch
+    async_session, monkeypatch, stall_failure_write
 ):
+    import asyncio
+    from contextlib import asynccontextmanager
     from unittest.mock import Mock
 
     from hailhq.core.browser_voice import finish_browser_call
@@ -165,7 +168,8 @@ async def test_worker_failure_wins_over_browser_stop_during_room_cleanup(
     async_session.add(call)
     await async_session.commit()
 
-    # The real browser calls /stop as soon as teardown disconnects its room.
+    # Deleting the room disconnects the browser; dropping only the worker's
+    # local RTC connection first must not wait on a database transaction.
     async def browser_stop():
         async with browser.session_scope() as db:
             await finish_browser_call(db, call.id)
@@ -180,7 +184,7 @@ async def test_worker_failure_wins_over_browser_stop_during_room_cleanup(
     )
     room = SimpleNamespace(
         on=Mock(return_value=lambda callback: callback),
-        disconnect=AsyncMock(side_effect=browser_stop),
+        disconnect=AsyncMock(),
         local_participant=SimpleNamespace(
             set_attributes=AsyncMock(), publish_data=AsyncMock()
         ),
@@ -194,18 +198,45 @@ async def test_worker_failure_wins_over_browser_stop_during_room_cleanup(
         wait_for_participant=AsyncMock(
             return_value=SimpleNamespace(identity="visitor")
         ),
-        delete_room=AsyncMock(),
+        delete_room=AsyncMock(side_effect=browser_stop),
         shutdown=Mock(),
     )
     monkeypatch.setattr(browser, "resolve_org_configs", AsyncMock(return_value={}))
     monkeypatch.setattr(browser, "build_session", lambda *a, **kw: session)
     monkeypatch.setattr(browser, "build_browser_tools", lambda *a: ([], None))
-    await browser.run_browser_session(ctx, call.id, attach_handlers=lambda *a: set())
+    original_scope = browser.session_scope
+    scope_count = 0
+    media_cut_before_failure_write = []
+    failure_write_started = asyncio.Event()
+    release_failure_write = asyncio.Event()
+
+    @asynccontextmanager
+    async def observed_scope():
+        nonlocal scope_count
+        scope_count += 1
+        if scope_count == 3:
+            media_cut_before_failure_write.append(room.disconnect.await_count == 1)
+            if stall_failure_write:
+                failure_write_started.set()
+                await release_failure_write.wait()
+        async with original_scope() as db:
+            yield db
+
+    monkeypatch.setattr(browser, "session_scope", observed_scope)
+    task = asyncio.create_task(
+        browser.run_browser_session(ctx, call.id, attach_handlers=lambda *a: set())
+    )
+    if stall_failure_write:
+        await asyncio.wait_for(failure_write_started.wait(), timeout=1)
+        assert room.disconnect.await_count == 1
+        release_failure_write.set()
+    await task
     await callbacks[0]()
     await async_session.refresh(call)
     assert call.answered_at is not None
     assert call.status == "failed"
     assert call.end_reason == "agent_error"
+    assert media_cut_before_failure_write == [True]
 
 
 def test_transcript_does_not_expose_system_instructions_or_tool_results():
