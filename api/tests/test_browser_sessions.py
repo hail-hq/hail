@@ -297,7 +297,7 @@ async def test_stop_is_idempotent_and_releases_unstarted_reservations(
     control = {"organization_id": body["organization_id"], "id": started.json()["id"]}
     stopped = await post(client, monkeypatch, "/stop", control)
     assert stopped.status_code == 200, stopped.text
-    assert stopped.json()["status"] == "completed"
+    assert stopped.json()["status"] == "canceled"
     assert stopped.json()["used_ms"] == 0
     assert (await post(client, monkeypatch, "/stop", control)).status_code == 200
     next_call = await post(
@@ -305,6 +305,32 @@ async def test_stop_is_idempotent_and_releases_unstarted_reservations(
     )
     assert next_call.status_code == 200
     assert next_call.json()["seconds"] == 300
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failed", [False, True])
+async def test_unanswered_browser_finalization_never_reports_completed(
+    async_session, failed
+):
+    call = Call(
+        organization_id=uuid.uuid4(),
+        transport="browser",
+        direction="inbound",
+        provider="browser",
+        voice_config={},
+        max_duration_seconds=60,
+        metadata_={"browser_trial": True},
+        status="queued",
+    )
+    async_session.add(call)
+    await async_session.commit()
+    await finish_browser_call(async_session, call.id, failed=failed)
+    await async_session.commit()
+    await async_session.refresh(call)
+    assert call.status == ("failed" if failed else "canceled")
+    assert call.end_reason == ("agent_error" if failed else "normal_hangup")
+    assert call.answered_at is None
+    assert call.metadata_["browser_used_ms"] == 0
 
 
 @pytest.mark.asyncio

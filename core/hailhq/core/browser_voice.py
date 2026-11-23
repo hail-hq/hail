@@ -247,7 +247,15 @@ async def finish_browser_call(
     if waive_paid_charge:
         meta["browser_charge_waived"] = True
     call.metadata_ = meta
-    call.status = "failed" if failed else "completed"
+    # A stop or shutdown can win the race with participant/model setup.
+    # Only a session that reached media readiness completed a conversation.
+    call.status = (
+        "failed"
+        if failed
+        else "completed"
+        if call.answered_at is not None
+        else "canceled"
+    )
     call.end_reason = "agent_error" if failed else "normal_hangup"
     call.ended_at = now
 
