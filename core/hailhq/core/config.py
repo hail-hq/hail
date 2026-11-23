@@ -468,6 +468,24 @@ class Settings(BaseSettings):
         )
         return self
 
+    @model_validator(mode="after")
+    def _sip_secret_needs_the_twilio_trunk(self) -> "Settings":
+        """Runs after ``_trunk_fallbacks``. Only the Twilio trunk maps the
+        secret header: with the secret set and Twilio on the shared trunk (or
+        on none), every Twilio call would be refused."""
+        twilio_trunk = self.livekit_twilio_sip_inbound_trunk_id
+        if self.hail_sip_inbound_secret and (
+            not twilio_trunk or twilio_trunk == self.livekit_sip_inbound_trunk_id
+        ):
+            raise ValueError(
+                "HAIL_SIP_INBOUND_SECRET needs LIVEKIT_TWILIO_SIP_INBOUND_TRUNK_ID "
+                "set to the Twilio trunk, not empty or the shared "
+                "LIVEKIT_SIP_INBOUND_TRUNK_ID: only that trunk passes the "
+                "X-Hail-Secret header on. Empty HAIL_SIP_INBOUND_SECRET or run "
+                "scripts/ops/sip_trunks.py apply and move --carrier twilio first"
+            )
+        return self
+
     @computed_field  # type: ignore[prop-decorator]
     @property
     def hail_mail_bucket(self) -> str:
