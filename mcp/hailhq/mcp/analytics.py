@@ -76,7 +76,8 @@ _KEPT_PROPERTIES = frozenset(
 # Shown on every tool's optional llm_model input. Hail's description rules
 # apply: it states what the field is and gives no instruction.
 _MODEL_DESCRIPTION = (
-    "Model ID of the calling agent. Optional. Recorded for analytics only."
+    "The calling agent's provider model ID, as shown in the client's model "
+    "configuration when available. Recorded for analytics."
 )
 # The agent types llm_model, so it is free text. Keep it only when it looks
 # like a model ID (has a letter, no spaces or @), never an email or a number.
