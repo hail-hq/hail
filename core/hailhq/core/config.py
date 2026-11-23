@@ -19,7 +19,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 SELF_HOSTED_ORG_ID = UUID(int=0)
 
 # HAIL_SIP_INBOUND_SECRET goes into a SIP URI as is (Twilio origination URL),
-# so only URI-safe characters; long enough not to guess.
+# so only URI-safe characters; long enough not to guess. Checked where it is
+# used (inbound_calls.py, scripts/ops/sip_trunks.py), never at startup.
 SIP_SECRET_PATTERN = re.compile(r"[A-Za-z0-9_-]{20,}")
 
 
@@ -37,7 +38,7 @@ class Settings(BaseSettings):
         env_file=(".env", ".env.local"),
         env_file_encoding="utf-8",
         extra="ignore",
-        # A startup error must not print a secret it rejected.
+        # A startup error must never print a secret value.
         hide_input_in_errors=True,
     )
 
@@ -124,7 +125,9 @@ class Settings(BaseSettings):
     # SIP header in the trunk's origination URI. LiveKit maps it to a
     # participant attribute; a Twilio call without it is refused
     # (inbound_calls.py). Set on both sides by scripts/ops/sip_trunks.py.
-    # Empty = no check (self-host default).
+    # Empty = no check (self-host default). Never stops startup: a value
+    # that does not match SIP_SECRET_PATTERN, or no Twilio trunk of its own,
+    # turns the check off with an ERROR log (inbound_calls.py).
     hail_sip_inbound_secret: str = ""
     # Hail's approved primary customer profile (Trust Hub, business identity
     # "ISV Reseller or Partner"). Customers' 10DLC profiles are assigned to it.
@@ -435,17 +438,6 @@ class Settings(BaseSettings):
             raise ValueError("Recording retention must be 7, 30, or 365 days")
         return value
 
-    @field_validator("hail_sip_inbound_secret")
-    @classmethod
-    def _sip_secret_fits_a_uri(cls, value: str) -> str:
-        # The message never holds the value (see hide_input_in_errors).
-        if value and not SIP_SECRET_PATTERN.fullmatch(value):
-            raise ValueError(
-                "HAIL_SIP_INBOUND_SECRET must be empty or 20 or more letters, "
-                "digits, - or _"
-            )
-        return value
-
     @model_validator(mode="after")
     def _trunk_fallbacks(self) -> "Settings":
         """Outbound: the explicit Twilio name wins over the legacy alias; a
@@ -466,24 +458,6 @@ class Settings(BaseSettings):
         self.livekit_didww_sip_inbound_trunk_id = (
             self.livekit_didww_sip_inbound_trunk_id or shared
         )
-        return self
-
-    @model_validator(mode="after")
-    def _sip_secret_needs_the_twilio_trunk(self) -> "Settings":
-        """Runs after ``_trunk_fallbacks``. Only the Twilio trunk maps the
-        secret header: with the secret set and Twilio on the shared trunk (or
-        on none), every Twilio call would be refused."""
-        twilio_trunk = self.livekit_twilio_sip_inbound_trunk_id
-        if self.hail_sip_inbound_secret and (
-            not twilio_trunk or twilio_trunk == self.livekit_sip_inbound_trunk_id
-        ):
-            raise ValueError(
-                "HAIL_SIP_INBOUND_SECRET needs LIVEKIT_TWILIO_SIP_INBOUND_TRUNK_ID "
-                "set to the Twilio trunk, not empty or the shared "
-                "LIVEKIT_SIP_INBOUND_TRUNK_ID: only that trunk passes the "
-                "X-Hail-Secret header on. Empty HAIL_SIP_INBOUND_SECRET or run "
-                "scripts/ops/sip_trunks.py apply and move --carrier twilio first"
-            )
         return self
 
     @computed_field  # type: ignore[prop-decorator]

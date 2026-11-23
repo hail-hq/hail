@@ -462,34 +462,98 @@ async def test_secret_is_checked_before_the_trunk_and_voice_refusals(
     assert (await async_session.execute(select(Call))).scalars().all() == []
 
 
+@pytest.fixture(autouse=True)
+def fresh_secret_logs(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The once-per-process log state starts empty in every test."""
+    monkeypatch.setattr(inbound_calls, "_secret_off_logged", False)
+    monkeypatch.setattr(inbound_calls, "_shared_hint_logged", set())
+
+
+SHARED_HINT = (
+    f"inbound call to {DIALED}: Twilio number still on the shared trunk; move "
+    "it (scripts/ops/sip_trunks.py move --carrier twilio)"
+)
+
+
 async def test_twilio_number_on_the_shared_trunk_says_move_it(
     async_session, monkeypatch, caplog
 ) -> None:
-    """The shared trunk does not map the header: the call is refused, and the
-    log says the number must move to the Twilio trunk."""
+    """The shared trunk does not map the header: the call is refused, and
+    after the failed compare the log says (once per number, at INFO) that
+    the number must move to the Twilio trunk."""
     monkeypatch.setattr(settings, "hail_sip_inbound_secret", SECRET)
     monkeypatch.setattr(settings, "livekit_sip_inbound_trunk_id", "ST_shared")
     await _seed(async_session)
-    with caplog.at_level("WARNING", logger="hailhq.core.inbound_calls"):
-        outcome = await inbound_calls.open_inbound_call(
-            async_session, _attrs(trunk_id="ST_shared")
-        )
-    assert isinstance(outcome, inbound_calls.Rejected)
-    assert outcome.reason == "bad_secret"
-    # A real call here carries no secret either, so it cannot be told from a
-    # forged one: no row, only the ops warning.
-    assert outcome.call_id is None
+    with caplog.at_level("INFO", logger="hailhq.core.inbound_calls"):
+        for _ in range(2):
+            outcome = await inbound_calls.open_inbound_call(
+                async_session, _attrs(trunk_id="ST_shared")
+            )
+            assert isinstance(outcome, inbound_calls.Rejected)
+            assert outcome.reason == "bad_secret"
+            # A real call here carries no secret either, so it cannot be told
+            # from a forged one: no row, only the ops hint.
+            assert outcome.call_id is None
     assert (await async_session.execute(select(Call))).scalars().all() == []
     assert await _deliveries(async_session, "call.failed") == []
-    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
-    assert (
-        f"inbound call to {DIALED}: Twilio number still on the shared trunk; move "
-        "it (scripts/ops/sip_trunks.py move --carrier twilio)"
-    ) in warnings
-    assert (
-        f"inbound call to {DIALED} refused: X-Hail-Secret header missing "
-        "(carrier=twilio)"
-    ) in warnings
+    messages = [(r.levelname, r.getMessage()) for r in caplog.records]
+    refused = (
+        "WARNING",
+        (
+            f"inbound call to {DIALED} refused: X-Hail-Secret header missing "
+            "(carrier=twilio)"
+        ),
+    )
+    assert messages.count(("INFO", SHARED_HINT)) == 1
+    assert messages.count(refused) == 2
+    # The hint follows the failed compare.
+    assert messages.index(refused) < messages.index(("INFO", SHARED_HINT))
+
+
+async def test_valid_secret_on_the_shared_trunk_gives_no_move_hint(
+    async_session, monkeypatch, caplog
+) -> None:
+    monkeypatch.setattr(settings, "hail_sip_inbound_secret", SECRET)
+    monkeypatch.setattr(settings, "livekit_sip_inbound_trunk_id", "ST_shared")
+    await _seed(async_session)
+    with caplog.at_level("INFO", logger="hailhq.core.inbound_calls"):
+        outcome = await inbound_calls.open_inbound_call(
+            async_session, _attrs(trunk_id="ST_shared", sip_secret=SECRET)
+        )
+    assert isinstance(outcome, inbound_calls.Accepted)
+    assert SHARED_HINT not in [r.getMessage() for r in caplog.records]
+
+
+@pytest.mark.parametrize(
+    ("shared", "twilio", "secret", "why"),
+    [
+        ("", "", SECRET, "is set but no Twilio inbound trunk"),
+        ("ST_in_tw", "ST_in_tw", SECRET, "is set but no Twilio inbound trunk"),
+        ("", "ST_in_tw", "short&bad", "is not 20 or more letters, digits, - or _"),
+    ],
+    ids=["no_twilio_trunk", "twilio_is_shared", "malformed"],
+)
+async def test_secret_that_cannot_work_turns_the_check_off(
+    async_session, monkeypatch, caplog, shared, twilio, secret, why
+) -> None:
+    """Never a startup failure: the check is off, with one ERROR per
+    process, and calls go on as without the secret."""
+    monkeypatch.setattr(settings, "hail_sip_inbound_secret", secret)
+    monkeypatch.setattr(settings, "livekit_sip_inbound_trunk_id", shared)
+    monkeypatch.setattr(settings, "livekit_twilio_sip_inbound_trunk_id", twilio)
+    await _seed(async_session)
+    with caplog.at_level("INFO", logger="hailhq.core.inbound_calls"):
+        for i in range(2):
+            outcome = await inbound_calls.open_inbound_call(
+                async_session,
+                _attrs(room_name=f"hail-in-{i}", provider_call_sid=f"sip-call-{i}"),
+            )
+            # The secret refuses nothing (the trunk check may, with no
+            # Twilio trunk at all).
+            assert getattr(outcome, "reason", None) != "bad_secret"
+    errors = [r.getMessage() for r in caplog.records if r.levelname == "ERROR"]
+    assert errors == [f"HAIL_SIP_INBOUND_SECRET {why}: secret check off"]
+    assert not any(secret in r.getMessage() for r in caplog.records)
 
 
 async def test_empty_setting_checks_no_secret(
