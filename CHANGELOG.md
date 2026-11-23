@@ -4,6 +4,19 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+## [0.37.0] (2026-11-23)
+
+A refused US texting registration now says why: Hail's fix first, then the
+carrier's own words. Trial texting help points to the console Overview.
+
+Component versions cut alongside this release:
+**`cli-v0.34.0`** (Homebrew + GitHub Releases). No database migrations.
+
+### Changed
+
+- US texting registration: a rejection now shows the carrier's own reason after Hail's fix, in the console, the API and the email.
+- Trial texting: the CLI help, the MCP tool and the API point to the console's Overview > Test a text.
+
 ## [0.36.0] (2026-11-22)
 
 An AI agent using the MCP server can now upload a US texting consent
@@ -70,7 +83,6 @@ Component versions cut alongside this release:
 - Agents: "email me" on a call reaches only the caller's own saved email.
 - Agents: one phone call sends at most 3 emails, and emails to the caller say they came from a phone call.
 - Agents: the fixed lines of an email to the caller are in the call's language.
-- US texting registration: a rejection now shows the carrier's own reason after Hail's fix, in the console, the API and the email.
 
 ## [0.33.0] (2026-11-19)
 
