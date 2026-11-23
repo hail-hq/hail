@@ -229,6 +229,7 @@ async def test_worker_failure_wins_over_browser_stop_during_room_cleanup(
     if stall_failure_write:
         await asyncio.wait_for(failure_write_started.wait(), timeout=1)
         assert room.disconnect.await_count == 1
+        await asyncio.sleep(2.15)
         release_failure_write.set()
     await task
     await callbacks[0]()
