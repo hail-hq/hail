@@ -95,7 +95,8 @@ def registry_manifest_for(resource_url: str) -> bytes | None:
             remote["url"] in resource_urls for remote in json.loads(content)["remotes"]
         )
     except (OSError, ValueError, KeyError, TypeError, RecursionError):
-        logging.getLogger(__name__).warning(
+        # A public probe can retry, so keep per-request failures at debug level.
+        logging.getLogger(__name__).debug(
             "Could not load the MCP registry manifest", exc_info=True
         )
         return None

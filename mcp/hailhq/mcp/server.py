@@ -165,7 +165,7 @@ def _build_app() -> tuple[MCPServer, HailClient | None, Starlette]:
             # here so optional discovery can recover without a service restart.
             manifest = registry_manifest_for(resource_url)
             if manifest is None:
-                return Response(status_code=404)
+                return Response(status_code=404, headers={"Cache-Control": "no-store"})
             response = Response(manifest, media_type="application/json")
             if request.method == "HEAD":
                 return Response(headers=response.headers)

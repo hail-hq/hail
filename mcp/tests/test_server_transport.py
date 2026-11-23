@@ -181,7 +181,9 @@ async def test_registry_recovers_without_restarting_mcp(monkeypatch, invalid_man
     transport = httpx.ASGITransport(app=srv.app)
     async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
         assert (await c.get("/healthz")).status_code == 200
-        assert (await c.get("/.well-known/mcp.json")).status_code == 404
+        unavailable = await c.get("/.well-known/mcp.json")
+        assert unavailable.status_code == 404
+        assert unavailable.headers["cache-control"] == "no-store"
         assert (await c.get("/", headers={"Accept": "text/html"})).status_code == 200
         monkeypatch.setattr(Path, "read_bytes", read_bytes)
         assert (await c.get("/.well-known/mcp.json")).status_code == 200
