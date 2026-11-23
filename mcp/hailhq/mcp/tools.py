@@ -2384,8 +2384,9 @@ def register_tools(
             _d(
                 "Spoken language override, using a supported lowercase ISO 639-1 "
                 "code such as ``es``. When omitted, the call uses the saved agent's "
-                "language if configured, otherwise the speech providers default "
-                "to English. An unsupported code returns an error before dialing."
+                "language, then the workspace's text-to-speech language if "
+                "configured, then English. An unsupported code returns an error "
+                "before dialing."
             ),
         ] = None,
         ai_disclosure: Annotated[
