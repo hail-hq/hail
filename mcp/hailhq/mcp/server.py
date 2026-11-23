@@ -39,7 +39,7 @@ from hailhq.core.telemetry import (
     request_span_attributes,
 )
 from hailhq.core.telemetry_identity import IdentityMiddleware
-from hailhq.core.urls import join_url
+from hailhq.core.urls import join_url, url_variants
 from hailhq.mcp.analytics import instrument_analytics
 from hailhq.mcp.auth import AuthMode, PassThroughVerifier, select_auth_mode
 from hailhq.mcp.discovery_auth import DiscoveryAuthMiddleware
@@ -67,6 +67,7 @@ from mcp.types import Icon
 # method, e.g. "tools/call place_call"), so there is no MCP instrumentation
 # to install; logfire.instrument_mcp() is a no-op with it.
 _telemetry = configure_telemetry("hail-mcp")
+_PUBLIC_MCP_URL = "https://mcp.hail.so"
 
 
 def _build_app() -> tuple[MCPServer, HailClient | None, Starlette]:
@@ -158,18 +159,21 @@ def _build_app() -> tuple[MCPServer, HailClient | None, Starlette]:
 
     registry_routes = []
     if mode is AuthMode.OAUTH_RS:
-        manifest = registry_manifest_for(resource_url)
-        if manifest is not None:
-            registry_response = Response(manifest, media_type="application/json")
 
-            async def mcp_manifest(request: Request) -> Response:
-                if request.method == "HEAD":
-                    return Response(headers=registry_response.headers)
-                return registry_response
+        def mcp_manifest(request: Request) -> Response:
+            # This synchronous handler runs off the event loop. Read the file
+            # here so optional discovery can recover without a service restart.
+            manifest = registry_manifest_for(resource_url)
+            if manifest is None:
+                return Response(status_code=404)
+            response = Response(manifest, media_type="application/json")
+            if request.method == "HEAD":
+                return Response(headers=response.headers)
+            return response
 
-            registry_routes.append(
-                Route("/.well-known/mcp.json", mcp_manifest, methods=["GET"])
-            )
+        registry_routes.append(
+            Route("/.well-known/mcp.json", mcp_manifest, methods=["GET"])
+        )
 
     async def manifest_icon(types: set[str]) -> Response:
         """Redirect to the first manifest icon of one of ``types``."""
@@ -231,7 +235,11 @@ def _build_app() -> tuple[MCPServer, HailClient | None, Starlette]:
     # methods before AuthenticationMiddleware reads the headers.
     middleware = [Middleware(DiscoveryAuthMiddleware), *http_app.user_middleware]
     guide_url = website_url()
-    if mode is AuthMode.OAUTH_RS and guide_url:
+    if (
+        mode is AuthMode.OAUTH_RS
+        and guide_url
+        and resource_url in url_variants(_PUBLIC_MCP_URL)
+    ):
         middleware.insert(
             0,
             Middleware(

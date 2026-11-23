@@ -32,7 +32,7 @@ def _allows_setup(headers: Headers) -> bool:
 
     # An SSE-capable request belongs to Streamable HTTP, including mixed Accept
     # headers. A wildcard is a browser/probe fallback only on its own.
-    if "text/event-stream" in media_ranges:
+    if any(0 < quality <= 1 for quality in media_ranges.get("text/event-stream", [])):
         return False
     if "text/html" in media_ranges:
         return any(0 < quality <= 1 for quality in media_ranges["text/html"])
