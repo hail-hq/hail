@@ -334,6 +334,66 @@ async def test_unanswered_browser_finalization_never_reports_completed(
 
 
 @pytest.mark.asyncio
+async def test_late_worker_failure_corrects_completed_outcome_without_rebilling(
+    async_session,
+):
+    from hailhq.core.models import UsageEvent
+
+    call = Call(
+        organization_id=uuid.uuid4(),
+        transport="browser",
+        direction="inbound",
+        provider="browser",
+        voice_config={},
+        max_duration_seconds=60,
+        answered_at=datetime.now(timezone.utc) - timedelta(seconds=30),
+        metadata_={
+            "browser_trial": False,
+            "browser_rate_cents": "10",
+            "browser_reserved_cents": "10",
+        },
+        status="in_progress",
+    )
+    async_session.add(call)
+    await async_session.commit()
+    await finish_browser_call(async_session, call.id)
+    await async_session.commit()
+    original_ended_at = call.ended_at
+    original_usage = call.metadata_["browser_used_ms"]
+    await finish_browser_call(async_session, call.id, failed=True)
+    await finish_browser_call(async_session, call.id, failed=True)
+    await async_session.commit()
+    await async_session.refresh(call)
+    assert call.status == "failed"
+    assert call.end_reason == "agent_error"
+    assert call.ended_at == original_ended_at
+    assert call.metadata_["browser_used_ms"] == original_usage
+    refunds = (
+        (
+            await async_session.execute(
+                select(AccountCredit).where(
+                    AccountCredit.organization_id == call.organization_id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    usage = (
+        (
+            await async_session.execute(
+                select(UsageEvent).where(
+                    UsageEvent.organization_id == call.organization_id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(refunds) == len(usage) == 1
+
+
+@pytest.mark.asyncio
 async def test_worker_crash_releases_paid_hold_without_charging_unknown_duration(
     client, async_session, monkeypatch
 ):

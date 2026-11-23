@@ -191,6 +191,33 @@ async def run_browser_session(
                     logger.exception(
                         "browser media disconnect failed call_id=%s", call_id
                     )
+                failure_write = None
+                if failed:
+
+                    async def mark_failure():
+                        try:
+                            async with asyncio.timeout(3):
+                                async with session_scope() as db:
+                                    call = await db.get(
+                                        Call, call_id, with_for_update=True
+                                    )
+                                    if (
+                                        call is not None
+                                        and call.status not in TERMINAL_CALL_STATUSES
+                                    ):
+                                        call.metadata_ = {
+                                            **call.metadata_,
+                                            "browser_failed": True,
+                                        }
+                                        await db.commit()
+                        except Exception:
+                            logger.exception(
+                                "browser failure marker failed call_id=%s", call_id
+                            )
+
+                    # Save intent alongside cleanup, after the local audio cut.
+                    # Final settlement can correct a stop that wins this race.
+                    failure_write = asyncio.create_task(mark_failure())
                 if session is not None:
                     try:
                         await asyncio.wait_for(session.aclose(), timeout=3)
@@ -210,26 +237,8 @@ async def run_browser_session(
                         logger.exception(
                             "browser messaging cleanup failed call_id=%s", call_id
                         )
-                if failed:
-                    # Media and model cleanup come first, so database latency
-                    # cannot extend the audio deadline. Save the failure before
-                    # shared-room deletion makes the browser call /stop.
-                    try:
-                        async with session_scope() as db:
-                            call = await db.get(Call, call_id, with_for_update=True)
-                            if (
-                                call is not None
-                                and call.status not in TERMINAL_CALL_STATUSES
-                            ):
-                                call.metadata_ = {
-                                    **call.metadata_,
-                                    "browser_failed": True,
-                                }
-                                await db.commit()
-                    except Exception:
-                        logger.exception(
-                            "browser failure marker failed call_id=%s", call_id
-                        )
+                if failure_write is not None:
+                    await failure_write
                 for attempt in range(2):
                     try:
                         await asyncio.wait_for(ctx.delete_room(), timeout=2)

@@ -198,6 +198,12 @@ async def finish_browser_call(
 
     await release_pool_reservation(db, call_id=call.id)
     if call.status in TERMINAL_CALL_STATUSES:
+        # The browser's /stop may settle while a failing worker is cleaning
+        # up. Correct only its outcome; never settle money or usage twice.
+        if failed and call.status == "completed":
+            call.status = "failed"
+            call.end_reason = "agent_error"
+            call.metadata_ = {**call.metadata_, "browser_failed": True}
         return
     if started_at is not None and call.answered_at is None:
         call.started_at = call.answered_at = started_at

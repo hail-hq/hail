@@ -143,9 +143,10 @@ async def test_hard_deadline_closes_room_and_finalizes_trial_without_client_time
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("stall_failure_write", [False, True])
+@pytest.mark.parametrize("failure_write_delay", [0, 2.15, 3.25])
+@pytest.mark.parametrize("stop_during", ["room_delete", "model_close"])
 async def test_worker_failure_wins_over_browser_stop_during_room_cleanup(
-    async_session, monkeypatch, stall_failure_write
+    async_session, monkeypatch, failure_write_delay, stop_during
 ):
     import asyncio
     from contextlib import asynccontextmanager
@@ -171,14 +172,16 @@ async def test_worker_failure_wins_over_browser_stop_during_room_cleanup(
     # Deleting the room disconnects the browser; dropping only the worker's
     # local RTC connection first must not wait on a database transaction.
     async def browser_stop():
-        async with browser.session_scope() as db:
+        async with original_scope() as db:
             await finish_browser_call(db, call.id)
             await db.commit()
 
     session = SimpleNamespace(
         on=Mock(return_value=lambda callback: callback),
         start=AsyncMock(),
-        aclose=AsyncMock(),
+        aclose=AsyncMock(
+            side_effect=browser_stop if stop_during == "model_close" else None
+        ),
         history=SimpleNamespace(to_dict=lambda: {"items": []}),
         generate_reply=Mock(side_effect=RuntimeError("model failed after readiness")),
     )
@@ -198,7 +201,9 @@ async def test_worker_failure_wins_over_browser_stop_during_room_cleanup(
         wait_for_participant=AsyncMock(
             return_value=SimpleNamespace(identity="visitor")
         ),
-        delete_room=AsyncMock(side_effect=browser_stop),
+        delete_room=AsyncMock(
+            side_effect=browser_stop if stop_during == "room_delete" else None
+        ),
         shutdown=Mock(),
     )
     monkeypatch.setattr(browser, "resolve_org_configs", AsyncMock(return_value={}))
@@ -216,7 +221,7 @@ async def test_worker_failure_wins_over_browser_stop_during_room_cleanup(
         scope_count += 1
         if scope_count == 3:
             media_cut_before_failure_write.append(room.disconnect.await_count == 1)
-            if stall_failure_write:
+            if failure_write_delay:
                 failure_write_started.set()
                 await release_failure_write.wait()
         async with original_scope() as db:
@@ -226,10 +231,12 @@ async def test_worker_failure_wins_over_browser_stop_during_room_cleanup(
     task = asyncio.create_task(
         browser.run_browser_session(ctx, call.id, attach_handlers=lambda *a: set())
     )
-    if stall_failure_write:
+    if failure_write_delay:
         await asyncio.wait_for(failure_write_started.wait(), timeout=1)
         assert room.disconnect.await_count == 1
-        await asyncio.sleep(2.15)
+        await asyncio.sleep(failure_write_delay)
+        if failure_write_delay > 3:
+            assert ctx.delete_room.await_count == 1
         release_failure_write.set()
     await task
     await callbacks[0]()
