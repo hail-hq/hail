@@ -110,6 +110,26 @@ _PREVIEW["additionalProperties"] = False
 _AGENT = _result(_model(api.AgentResponse))
 _NUMBER = _result(_model(api.PhoneNumberResponse))
 _CONTACTS = _result(_model(api.ContactListResponse))
+_MANUAL_CONTACT = _model(api.ContactEntry)
+_MANUAL_CONTACT["description"] = "A manually saved workspace contact."
+_MANUAL_CONTACT["properties"].update(
+    {
+        "id": {"type": "string", "description": "The contact's ID."},
+        "kind": {"type": "string", "const": "manual"},
+        "role": {
+            "type": "null",
+            "description": "Manual contacts have no workspace role.",
+        },
+    }
+)
+_QUOTES = _model(NumberQuotesResponse)
+# This tool never sends subject_type, so the API omits subject-specific paperwork.
+_QUOTES["$defs"]["QuoteOffer"]["properties"]["paperwork"] = {
+    "type": "null",
+    "description": "Always null for this tool. Applicant-specific paperwork is "
+    "available from get_verification_requirements for the chosen offer.",
+}
+_QUOTES["$defs"].pop("PaperworkItem")
 
 OUTPUT_SCHEMAS = {
     "place_call": _result(_model(api.CallResponse, extra=_RETRY_KEY)),
@@ -140,7 +160,7 @@ OUTPUT_SCHEMAS = {
     "create_agent": _AGENT,
     "route_number": _NUMBER,
     "route_email_domain": _result(_model(api.EmailDomainResponse)),
-    "quote_numbers": _result(_model(NumberQuotesResponse)),
+    "quote_numbers": _result(_QUOTES),
     "acquire_number": _result(
         _model(api.PhoneNumberResponse, extra=_RETRY_KEY), error_fields=_RETRY_KEY
     ),
@@ -176,5 +196,5 @@ OUTPUT_SCHEMAS = {
     "lookup_contact": _CONTACTS,
     "list_email_domains": _result(_model(api.EmailDomainListResponse)),
     "whoami": _result(_model(api.WhoamiResponse)),
-    "create_contact": _result(_model(api.ContactEntry)),
+    "create_contact": _result(_MANUAL_CONTACT),
 }

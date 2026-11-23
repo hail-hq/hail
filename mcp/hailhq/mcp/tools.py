@@ -2252,14 +2252,14 @@ _AGENT_DISCLOSURE_LINE = _d(
     "Custom AI disclosure line replacing the workspace line. ``{org}`` expands "
     "to the organization name."
 )
-_AGENT_LANGUAGE = _d("Language the agent speaks on calls.")
+_AGENT_LANGUAGE = _d("Spoken language on calls, such as ``es`` for Spanish.")
 _AGENT_VOICE_ID = _d(
     "Text-to-speech voice ID from the voice provider that serves the call, "
-    "such as an ElevenLabs voice ID. Omitted: the workspace's default voice."
+    "such as an ElevenLabs voice ID."
 )
 _AGENT_TOOLS = _d(
-    "Names of the tools the agent may use during a call or reply. "
-    "Omitted: every tool the workspace's channels support. An empty list: none."
+    "Names of allowed built-in tools for calls or replies. An empty list "
+    "selects none. Hail adds call transfer when handover contacts are configured."
 )
 _AGENT_MAX_DURATION = _d(
     "Longest a call with this agent may last, in seconds, counted from "
@@ -2491,7 +2491,9 @@ def register_tools(
             str | None,
             _d(
                 "Sender address. It must match a verified identity from "
-                "``list_email_domains``; on a custom domain any local part works."
+                "``list_email_domains``; on a custom domain any local part works. "
+                "When omitted, Hail resolves the sender from the workspace's "
+                "sending identities."
             ),
         ] = None,
         from_name: Annotated[
@@ -3110,8 +3112,8 @@ def register_tools(
 
         A call-specific response includes the current ``call_status``.
         Terminal call states are completed, failed, busy, no_answer and canceled.
-        This is a snapshot for checking progress. A workspace-wide response
-        has no call status."""
+        This is a snapshot for checking progress. ``call_status`` is null for
+        workspace-wide results and for non-call resource filters."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await get_events(
@@ -3184,6 +3186,11 @@ def register_tools(
         The saved instructions and enabled channels apply when a number or email address
         routes to this agent. Saving the agent does not change existing routing.
         The call agent can hand over to listed contacts without seeing their phone numbers.
+
+        Omitted voice and language settings use provider defaults, including English
+        for language. Without a tool list, the workspace's channels determine the
+        available tools. The workspace call limit applies unless overridden, and the
+        handover limit defaults to 30 minutes from the contact answering.
         """
         fields: dict[str, Any] = {
             "name": name,
@@ -3843,7 +3850,7 @@ def register_tools(
         owned number's ID. The named applicant must authorize the filing.
         The user must review and approve SMS campaign text before submission.
 
-        For a number offer available for automatic purchase, the balance must cover
+        For billed workspaces, an offer available for automatic purchase requires credit for
         the setup fee plus first month. Hail reserves that amount during review and
         applies it to a purchase using this registration. Hail releases the hold
         after rejection, cancellation or 30 days without purchase following approval.
@@ -4350,7 +4357,7 @@ def register_tools(
 
         Replaces active settings, including instructions and the whole handover list.
         Pausing the agent or disabling a channel stops new replies on that channel.
-        Omitted fields retain their values. Repeating the same update gives the same result.
+        Omitted fields retain their values.
         Updating language or voice alone preserves the other setting.
         ``clear_fields`` resets the named settings and cannot be combined with a new
         value for the same field. Clearing the greeting lets the inbound caller speak
@@ -4446,7 +4453,7 @@ def register_tools(
             Field(
                 ge=1,
                 le=500,
-                description="Maximum matching contacts to include in this reply.",
+                description="Maximum matching contacts to include in this reply. Omitted: 100.",
             ),
         ] = None,
     ) -> dict[str, Any]:
@@ -4507,7 +4514,7 @@ def register_tools(
             Field(
                 ge=1,
                 le=200,
-                description="Maximum sending identities to include on this page.",
+                description="Maximum sending identities to include on this page. Omitted: 50.",
             ),
         ] = None,
     ) -> dict[str, Any]:

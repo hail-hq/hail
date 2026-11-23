@@ -39,3 +39,19 @@ async def test_output_schema_covers_real_result_variants(
     validator = Draft202012Validator(tools_by_name[tool].output_schema)
     assert validator.is_valid(result)
     assert not validator.is_valid({**result, **invalid})
+
+
+async def test_create_contact_output_is_always_a_manual_contact(tools_by_name):
+    schema = tools_by_name["create_contact"].output_schema
+    validator = Draft202012Validator(schema)
+    contact = {
+        "id": "a6854b9f-c11c-43f1-8f65-13dde784fb2a",
+        "kind": "manual",
+        "name": "Test contact",
+        "email": "contact@example.test",
+        "phone_e164": None,
+        "role": None,
+    }
+    assert validator.is_valid(contact)
+    assert not validator.is_valid({**contact, "kind": "member"})
+    assert not validator.is_valid({**contact, "role": "owner"})
