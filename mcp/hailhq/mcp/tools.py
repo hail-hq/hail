@@ -2126,8 +2126,8 @@ _VERIFICATION_FILES_LIST = Annotated[
                                 "type": "string",
                                 "contentEncoding": "base64",
                                 "description": (
-                                    "The document's contents for an inline submission "
-                                    "instead of a separate upload."
+                                    "The complete file for this document slot when "
+                                    "supplied inline instead of by upload ID."
                                 ),
                             },
                         },
@@ -3187,8 +3187,9 @@ def register_tools(
         routes to this agent. Saving the agent does not change existing routing.
         The call agent can hand over to listed contacts without seeing their phone numbers.
 
-        If omitted, the voice uses the configured workspace or deployment default,
-        and the spoken language uses the speech providers' defaults (English).
+        Without a voice override, the built-in providers use the deployment's
+        configured voice. A workspace provider uses its configured voice or its
+        own default. An omitted language uses the speech providers' defaults (English).
         Without a tool list, the workspace's channels determine the available tools.
         The workspace call limit applies unless overridden, and the handover limit
         defaults to 30 minutes from the contact answering.
