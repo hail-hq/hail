@@ -2356,7 +2356,8 @@ def register_tools(
             str | None,
             _d(
                 "Caller ID: an E.164 workspace number with voice, from ``list_numbers``. "
-                "Omitted: an active workspace number, else one from the shared pool."
+                "Omitted: the oldest active workspace number with voice, else a shared "
+                "pool number. A dedicated number is not required."
             ),
         ] = None,
         first_message: Annotated[
@@ -2408,6 +2409,10 @@ def register_tools(
     ) -> dict[str, Any]:
         """Start an outbound AI phone call.
 
+        With ``from_`` omitted, Hail uses the oldest active workspace number with
+        voice capability, or a shared pool number when none is available.
+        A dedicated number is not required. Shared pool numbers cannot be selected
+        explicitly; an exhausted pool returns an ``error`` result without starting a call.
         At least one of ``system_prompt``, ``llm`` or ``agent_id`` is required.
         US artificial-voice calls (47 CFR 64.1200(b)(1)) require the AI disclosure.
         Hail does not verify the lawful basis or the recipient's consent.
@@ -3214,9 +3219,9 @@ def register_tools(
         annotations=ToolAnnotations(
             title="Route a number to an agent",
             readOnlyHint=False,
-            destructiveHint=False,
+            destructiveHint=True,
             idempotentHint=True,
-            openWorldHint=False,
+            openWorldHint=True,
         ),
     )
     async def route_number_tool(
@@ -3243,6 +3248,10 @@ def register_tools(
     ) -> dict[str, Any]:
         """Set the saved agents that answer a number's calls and texts.
 
+        Replaces the selected routing settings. Registering or unregistering inbound
+        voice can change carrier and LiveKit routing; text-only changes leave it unchanged.
+        Clearing the voice route stops AI call answers; clearing the text route stops
+        agent replies to texts. Restoring a route does not recover missed interactions.
         Omitted settings retain their current values.
         Returns the updated number record or an error."""
         try:
@@ -3264,7 +3273,7 @@ def register_tools(
         annotations=ToolAnnotations(
             title="Route an email address to an agent",
             readOnlyHint=False,
-            destructiveHint=False,
+            destructiveHint=True,
             idempotentHint=True,
             openWorldHint=False,
         ),
@@ -3296,6 +3305,8 @@ def register_tools(
     ) -> dict[str, Any]:
         """Choose which agent answers mail to an address, and who it answers.
 
+        Replaces the selected email routing settings. Clearing the agent stops
+        automatic replies; restoring it does not replay mail received in between.
         Setting ``email_agent_id`` together with ``clear_agent=True`` is an error.
         With ``email_agent_scope="anyone"``, a stranger can make the agent use its
         allowed tools. Mail without a passing DMARC result gets no reply.
@@ -4267,7 +4278,7 @@ def register_tools(
         annotations=ToolAnnotations(
             title="Update an agent",
             readOnlyHint=False,
-            destructiveHint=False,
+            destructiveHint=True,
             idempotentHint=True,
             openWorldHint=False,
         ),
@@ -4317,6 +4328,8 @@ def register_tools(
     ) -> dict[str, Any]:
         """Update selected fields on a saved workspace agent.
 
+        Replaces active settings, including instructions and the whole handover list.
+        Pausing the agent or disabling a channel stops new replies on that channel.
         Omitted fields retain their values. Repeating the same update gives the same result.
         Changing only language or voice preserves the other value.
         A field cannot be both set and cleared in the same request.
