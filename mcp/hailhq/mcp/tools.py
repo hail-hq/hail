@@ -2492,8 +2492,8 @@ def register_tools(
             _d(
                 "Sender address. It must match a verified identity from "
                 "``list_email_domains``; on a custom domain any local part works. "
-                "When omitted, Hail resolves the sender from the workspace's "
-                "sending identities."
+                "When omitted, Hail uses the default sender if available. "
+                "Several eligible custom domains require an explicit address."
             ),
         ] = None,
         from_name: Annotated[
@@ -3187,10 +3187,11 @@ def register_tools(
         routes to this agent. Saving the agent does not change existing routing.
         The call agent can hand over to listed contacts without seeing their phone numbers.
 
-        Omitted voice and language settings use provider defaults, including English
-        for language. Without a tool list, the workspace's channels determine the
-        available tools. The workspace call limit applies unless overridden, and the
-        handover limit defaults to 30 minutes from the contact answering.
+        If omitted, the voice uses the configured workspace or deployment default,
+        and the spoken language uses the speech providers' defaults (English).
+        Without a tool list, the workspace's channels determine the available tools.
+        The workspace call limit applies unless overridden, and the handover limit
+        defaults to 30 minutes from the contact answering.
         """
         fields: dict[str, Any] = {
             "name": name,
