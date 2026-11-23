@@ -360,8 +360,8 @@ async def test_late_worker_failure_corrects_completed_outcome_without_rebilling(
     await async_session.commit()
     original_ended_at = call.ended_at
     original_usage = call.metadata_["browser_used_ms"]
-    await finish_browser_call(async_session, call.id, failed=True)
-    await finish_browser_call(async_session, call.id, failed=True)
+    await finish_browser_call(async_session, call.id, worker_failed=True)
+    await finish_browser_call(async_session, call.id, worker_failed=True)
     await async_session.commit()
     await async_session.refresh(call)
     assert call.status == "failed"
@@ -391,6 +391,30 @@ async def test_late_worker_failure_corrects_completed_outcome_without_rebilling(
         .all()
     )
     assert len(refunds) == len(usage) == 1
+
+
+@pytest.mark.asyncio
+async def test_stale_sweeper_failure_keeps_a_call_that_already_completed(async_session):
+    call = Call(
+        organization_id=uuid.uuid4(),
+        transport="browser",
+        direction="inbound",
+        provider="browser",
+        voice_config={},
+        max_duration_seconds=60,
+        metadata_={"browser_trial": True, "browser_used_ms": 1000},
+        status="completed",
+        end_reason="normal_hangup",
+    )
+    async_session.add(call)
+    await async_session.commit()
+    await finish_browser_call(
+        async_session, call.id, failed=True, waive_paid_charge=True
+    )
+    await async_session.commit()
+    await async_session.refresh(call)
+    assert call.status == "completed"
+    assert call.end_reason == "normal_hangup"
 
 
 @pytest.mark.asyncio

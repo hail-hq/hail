@@ -238,7 +238,9 @@ async def run_browser_session(
                             "browser messaging cleanup failed call_id=%s", call_id
                         )
                 if failure_write is not None:
-                    await failure_write
+                    # Driver cancellation/rollback can outlive its timeout.
+                    # Waiting for it must not hold up shared-room deletion.
+                    await asyncio.wait({failure_write}, timeout=3)
                 for attempt in range(2):
                     try:
                         await asyncio.wait_for(ctx.delete_room(), timeout=2)
@@ -258,6 +260,7 @@ async def run_browser_session(
                         db,
                         call_id,
                         failed=failed,
+                        worker_failed=failed,
                         ended_at=media_ended_at,
                         started_at=media_started_at,
                     )

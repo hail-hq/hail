@@ -179,11 +179,13 @@ async def finish_browser_call(
     call_id: UUID,
     *,
     failed: bool = False,
+    worker_failed: bool = False,
     ended_at: datetime | None = None,
     started_at: datetime | None = None,
     waive_paid_charge: bool = False,
 ) -> None:
     """Lock and finalize once, including refunds. Caller commits the transaction."""
+    failed = failed or worker_failed
     call = (
         await db.execute(
             select(Call)
@@ -200,7 +202,7 @@ async def finish_browser_call(
     if call.status in TERMINAL_CALL_STATUSES:
         # The browser's /stop may settle while a failing worker is cleaning
         # up. Correct only its outcome; never settle money or usage twice.
-        if failed and call.status == "completed":
+        if worker_failed and call.status == "completed":
             call.status = "failed"
             call.end_reason = "agent_error"
             call.metadata_ = {**call.metadata_, "browser_failed": True}
