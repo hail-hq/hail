@@ -447,63 +447,49 @@ async def test_twilio_call_without_the_secret_is_refused(
     [("ST_in_tw", ["sms"]), ("ST_in_tx", ["voice", "sms"])],
     ids=["no_voice", "wrong_trunk"],
 )
-async def test_trunk_and_voice_refusals_come_before_the_secret(
+async def test_secret_is_checked_before_the_trunk_and_voice_refusals(
     async_session, monkeypatch, trunk_id, capabilities
 ) -> None:
-    """A misrouted call keeps its visible failed row, secret or not."""
+    """A forged call to a Twilio number that would be refused anyway writes
+    no failed row either: the secret check runs first."""
     monkeypatch.setattr(settings, "hail_sip_inbound_secret", SECRET)
     await _seed(async_session, capabilities=capabilities)
     outcome = await inbound_calls.open_inbound_call(
         async_session, _attrs(trunk_id=trunk_id)
     )
     assert isinstance(outcome, inbound_calls.Rejected)
-    assert outcome.reason == "carrier_route_failed"
-    calls = (await async_session.execute(select(Call))).scalars().all()
-    assert [c.end_reason for c in calls] == ["carrier_route_failed"]
+    assert outcome.reason == "bad_secret"
+    assert (await async_session.execute(select(Call))).scalars().all() == []
 
 
-@pytest.mark.parametrize("sent", ["", "wrong"])
 async def test_twilio_number_on_the_shared_trunk_says_move_it(
-    async_session, monkeypatch, caplog, sent
+    async_session, monkeypatch, caplog
 ) -> None:
-    """The shared trunk does not map the header: a routing problem, not a
-    forged call. The customer sees a failed call; the log says to move the
-    number to the Twilio trunk."""
+    """The shared trunk does not map the header: the call is refused, and the
+    log says the number must move to the Twilio trunk."""
     monkeypatch.setattr(settings, "hail_sip_inbound_secret", SECRET)
     monkeypatch.setattr(settings, "livekit_sip_inbound_trunk_id", "ST_shared")
     await _seed(async_session)
-    with caplog.at_level("INFO", logger="hailhq.core.inbound_calls"):
+    with caplog.at_level("WARNING", logger="hailhq.core.inbound_calls"):
         outcome = await inbound_calls.open_inbound_call(
-            async_session, _attrs(trunk_id="ST_shared", sip_secret=sent)
+            async_session, _attrs(trunk_id="ST_shared")
         )
     assert isinstance(outcome, inbound_calls.Rejected)
-    assert outcome.reason == "carrier_route_failed"
-    assert outcome.call_id is not None
-    calls = (await async_session.execute(select(Call))).scalars().all()
-    assert [(c.id, c.status, c.end_reason) for c in calls] == [
-        (outcome.call_id, "failed", "carrier_route_failed")
-    ]
-    assert len(await _deliveries(async_session, "call.failed")) == 1
+    assert outcome.reason == "bad_secret"
+    # A real call here carries no secret either, so it cannot be told from a
+    # forged one: no row, only the ops warning.
+    assert outcome.call_id is None
+    assert (await async_session.execute(select(Call))).scalars().all() == []
+    assert await _deliveries(async_session, "call.failed") == []
     warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
-    assert warnings == [
-        (
-            f"inbound call to {DIALED}: Twilio number still on the shared trunk; "
-            "move it (scripts/ops/sip_trunks.py move --carrier twilio)"
-        )
-    ]
-    assert not any(SECRET in r.getMessage() for r in caplog.records)
-
-
-async def test_twilio_number_on_the_shared_trunk_with_the_secret_is_answered(
-    async_session, monkeypatch
-) -> None:
-    monkeypatch.setattr(settings, "hail_sip_inbound_secret", SECRET)
-    monkeypatch.setattr(settings, "livekit_sip_inbound_trunk_id", "ST_shared")
-    await _seed(async_session)
-    outcome = await inbound_calls.open_inbound_call(
-        async_session, _attrs(trunk_id="ST_shared", sip_secret=SECRET)
-    )
-    assert isinstance(outcome, inbound_calls.Accepted)
+    assert (
+        f"inbound call to {DIALED}: Twilio number still on the shared trunk; move "
+        "it (scripts/ops/sip_trunks.py move --carrier twilio)"
+    ) in warnings
+    assert (
+        f"inbound call to {DIALED} refused: X-Hail-Secret header missing "
+        "(carrier=twilio)"
+    ) in warnings
 
 
 async def test_empty_setting_checks_no_secret(
@@ -533,3 +519,18 @@ async def test_other_carriers_need_no_secret(
         async_session, _attrs(trunk_id=trunk)
     )
     assert isinstance(outcome, inbound_calls.Accepted)
+
+
+async def test_wrong_trunk_keeps_its_failed_row_after_a_valid_secret(
+    async_session, monkeypatch
+) -> None:
+    """Real misrouting (valid secret, wrong trunk) stays visible."""
+    monkeypatch.setattr(settings, "hail_sip_inbound_secret", SECRET)
+    await _seed(async_session)
+    outcome = await inbound_calls.open_inbound_call(
+        async_session, _attrs(trunk_id="ST_in_tx", sip_secret=SECRET)
+    )
+    assert isinstance(outcome, inbound_calls.Rejected)
+    assert outcome.reason == "carrier_route_failed"
+    calls = (await async_session.execute(select(Call))).scalars().all()
+    assert [c.end_reason for c in calls] == ["carrier_route_failed"]

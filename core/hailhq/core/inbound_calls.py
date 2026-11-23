@@ -6,14 +6,14 @@ voicebot reads the SIP participant's attributes and calls
 :func:`open_inbound_call`, which decides who answers:
 
 * unknown or pool number: dropped, no row (same as inbound SMS);
+* a Twilio call without the shared secret (``HAIL_SIP_INBOUND_SECRET``) or
+  with a wrong one, on any trunk: dropped, no row and no webhook (logged at
+  WARNING), so a forged call never fills a customer's call log. Checked
+  before the trunk: a real call on the shared trunk carries no secret
+  either, so it cannot be told from a forged one (only a warning to move
+  the number);
 * known number on the wrong trunk, or without voice: ``Call`` failed with
   ``end_reason = carrier_route_failed`` (logged at WARNING);
-* a Twilio call without the shared secret (``HAIL_SIP_INBOUND_SECRET``) or
-  with a wrong one, on the Twilio trunk: dropped, no row and no webhook
-  (logged at WARNING), so a forged call never fills a customer's call log.
-  On the shared trunk, which does not pass the header on, it is a routing
-  problem the customer should see: ``Call`` failed with
-  ``carrier_route_failed`` and a warning to move the number;
 * no live voice agent: ``Call`` failed with ``end_reason = no_agent``;
 * no credits or voice suspended: ``Call`` failed with ``insufficient_funds``
   (or ``user_rejected`` when the channel is suspended);
@@ -168,6 +168,12 @@ async def open_inbound_call(
     if number is None or number.organization_id is None:
         logger.info("inbound call to unknown/pool number %s dropped", attrs.dialed)
         return Rejected("unknown_number")
+    if not _secret_ok(number.provider, attrs):
+        # Maybe forged, on any trunk: no Call row, no event, no webhook. A
+        # failed row would let a forger write calls (any caller ID) into a
+        # customer's log. Only after a valid secret does the trunk check
+        # below keep a visible failed row for real misrouting.
+        return Rejected("bad_secret")
     # The INVITE must arrive on the LiveKit inbound trunk configured for the
     # number's carrier: its own trunk when its key is set, else the shared
     # one. While the shared trunk exists it is accepted too, so numbers can
@@ -210,29 +216,6 @@ async def open_inbound_call(
         return await _refuse(
             db, number, attrs, None, CallEndReason.CARRIER_ROUTE_FAILED
         )
-    # After the trunk check: a misrouted call keeps its failed row.
-    bad = _secret_problem(number.provider, attrs)
-    if bad and shared and attrs.trunk_id == shared:
-        # Only the Twilio trunk maps the header: every call here fails, and
-        # the customer must see the missed call.
-        logger.warning(
-            "inbound call to %s: Twilio number still on the shared trunk; move "
-            "it (scripts/ops/sip_trunks.py move --carrier twilio)",
-            attrs.dialed,
-        )
-        return await _refuse(
-            db, number, attrs, None, CallEndReason.CARRIER_ROUTE_FAILED
-        )
-    if bad:
-        logger.warning(
-            "inbound call to %s refused: %s header %s (carrier=%s)",
-            attrs.dialed,
-            SIP_SECRET_HEADER,
-            bad,
-            number.provider,
-        )
-        # Maybe forged: no Call row, no event, no webhook.
-        return Rejected("bad_secret")
 
     # The caller is already connected and hearing silence: look the name up
     # while the checks and the Call row are written, as POST /calls does.
@@ -244,9 +227,8 @@ async def open_inbound_call(
         org_name.cancel()  # no-op once it has finished (refusals never await it)
 
 
-def _secret_problem(carrier: str | None, attrs: SipAttributes) -> str:
-    """``"missing"`` or ``"wrong"`` when the carrier must send the shared
-    secret and did not; ``""`` otherwise.
+def _secret_ok(carrier: str | None, attrs: SipAttributes) -> bool:
+    """True unless the carrier must send the shared secret and did not.
 
     Anyone can send an INVITE to the LiveKit SIP host. LiveKit Cloud checks a
     trunk's allowed addresses only once that check is enabled for the
@@ -255,7 +237,7 @@ def _secret_problem(carrier: str | None, attrs: SipAttributes) -> str:
     never hold the secret.
     """
     if carrier not in SIP_SECRET_CARRIERS:
-        return ""
+        return True
     sent = attrs.sip_secret
     # Logged with the setting empty too: the rollout's test call checks that
     # the header arrives before Hail starts to refuse calls without it.
@@ -268,11 +250,26 @@ def _secret_problem(carrier: str | None, attrs: SipAttributes) -> str:
     )
     secret = settings.hail_sip_inbound_secret
     if not secret:
-        return ""
+        return True
+    shared = settings.livekit_sip_inbound_trunk_id
+    if shared and attrs.trunk_id == shared:
+        # Only the Twilio trunk maps the header: every call here is refused.
+        logger.warning(
+            "inbound call to %s: Twilio number still on the shared trunk; move "
+            "it (scripts/ops/sip_trunks.py move --carrier twilio)",
+            attrs.dialed,
+        )
     # Bytes: compare_digest raises TypeError on a non-ASCII str.
     if sent and hmac.compare_digest(sent.encode(), secret.encode()):
-        return ""
-    return "wrong" if sent else "missing"
+        return True
+    logger.warning(
+        "inbound call to %s refused: %s header %s (carrier=%s)",
+        attrs.dialed,
+        SIP_SECRET_HEADER,
+        "wrong" if sent else "missing",
+        carrier,
+    )
+    return False
 
 
 async def _organization_name(org_id: UUID) -> str | None:
