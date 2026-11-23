@@ -123,7 +123,7 @@ Run `move` right after the restart anyway: a number routed to an agent between t
 
 ## Rollback
 
-- One carrier, before `retire-shared`. Calls to moved numbers keep working: the shared trunk is accepted throughout. A number routed between steps 1 and 2 is refused after the restart until step 3, so run step 3 right after the restart.
+- One carrier, before `retire-shared`. Calls to moved numbers keep working: the shared trunk is accepted throughout. A number routed between steps 1 and 2 is refused after the restart until step 3, so run step 3 right after the restart. For Twilio with `HAIL_SIP_INBOUND_SECRET` set, do the [Secret header rollback](#secret-header-rollback) first: the shared trunk does not pass the header on, so Hail drops every call to a Twilio number on it.
   1. Move its numbers back:
 
      ```bash
