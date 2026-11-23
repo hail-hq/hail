@@ -19,6 +19,7 @@ import pytest
 import respx
 from hailhq.mcp import tools
 from hailhq.mcp.hail_client import HailClient
+from jsonschema import Draft202012Validator
 
 _BASE_URL = "http://hail-test"
 _API_KEY = "test-key"
@@ -1192,13 +1193,18 @@ def _email_stats(sent: int = 2) -> dict:
 
 
 @respx.mock
-async def test_get_email_stats_passthrough(client: HailClient) -> None:
+async def test_get_email_stats_passthrough(client: HailClient, tools_by_name) -> None:
     respx.get(f"{_BASE_URL}/emails/stats").mock(
         return_value=httpx.Response(200, json=_email_stats(sent=2))
     )
     result = await tools.get_email_stats(client=client)
     assert "error" not in result, result
     assert result["totals"]["sent"] == 2
+    validator = Draft202012Validator(tools_by_name["get_email_stats"].output_schema)
+    assert validator.is_valid(result)
+    wrong_keys = dict(result)
+    wrong_keys["from_ts"] = wrong_keys.pop("from")
+    assert not validator.is_valid(wrong_keys)
 
 
 @respx.mock
@@ -1643,7 +1649,9 @@ def _quotes_response() -> dict:
 
 
 @respx.mock
-async def test_quote_numbers_posts_body_and_returns_offers(client: HailClient) -> None:
+async def test_quote_numbers_posts_body_and_returns_offers(
+    client: HailClient, tools_by_name
+) -> None:
     captured: dict = {}
 
     def _handler(request: httpx.Request) -> httpx.Response:
@@ -1669,6 +1677,12 @@ async def test_quote_numbers_posts_body_and_returns_offers(client: HailClient) -
     assert "address_id" not in result["offers"][0]
     assert "unavailable_providers" not in result
     assert result["recommended_quote_id"] == result["offers"][0]["quote_id"]
+    assert result["offers"][0]["paperwork"] is None
+    validator = Draft202012Validator(tools_by_name["quote_numbers"].output_schema)
+    assert validator.is_valid(result)
+    assert not validator.is_valid(
+        {**result, "offers": [{**result["offers"][0], "paperwork": []}]}
+    )
 
 
 @respx.mock
