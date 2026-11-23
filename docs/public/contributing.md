@@ -60,6 +60,13 @@ via `raise HTTPException(...)` does **not** appear in the spec unless the
 route decorator declares it (for example `responses={429: {...}}`). Add it
 there, then regenerate.
 
+## Updating MCP documentation
+
+From the repo root, run `uv run --package hailhq-mcp --extra dev pytest mcp/tests` before opening or updating the PR. When a change affects MCP clients, update the affected documentation in the same PR.
+
+- For tool additions, removals, or behavior changes, check the tool description, input descriptions, output schema, and behavior annotations against the implementation. Verify what clients receive through `tools/list` and check output schemas against actual structured results.
+- Update the [MCP guide](./mcp.md) wherever the tool catalog, examples, workflows, warnings, or client setup change. Link to the published tool schemas for exact field definitions and constraints.
+
 ## Commit style
 
 [Conventional Commits](https://www.conventionalcommits.org):
