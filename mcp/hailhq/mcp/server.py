@@ -1,9 +1,8 @@
 """Hail MCP server — Streamable HTTP only, mode-dispatched at boot.
 
 The deployable artifact is ``app``. MCPServer serves Streamable HTTP at
-``/`` (root — the service runs on a dedicated MCP subdomain so the
-endpoint is the bare host URL). ``/healthz`` is mounted on the same
-Starlette parent app so the compose healthcheck stays a one-line probe.
+``/`` on Hail's dedicated subdomain and at ``/mcp`` for hosts that expect
+that path. The Starlette parent app also serves ``/healthz`` for Compose.
 ``/.well-known/openai-apps-challenge`` serves the OpenAI app ownership token.
 ``/favicon.ico`` and ``/icon.svg`` redirect to the website's current raster
 and vector icons; the ``initialize`` result advertises both.
@@ -138,6 +137,15 @@ def _build_app() -> tuple[MCPServer, HailClient | None, Starlette]:
     # all memory; past it, new sessions get 503. Idle sessions close after the
     # SDK's 30-minute timeout.
     http_app = mcp_app.streamable_http_app(streamable_http_path="/", host="0.0.0.0")
+    # Both paths use the SDK's same auth wrapper and session manager.
+    transport_route = next(
+        route
+        for route in http_app.routes
+        if isinstance(route, Route) and route.path == "/"
+    )
+    http_app.add_route(
+        "/mcp", transport_route.endpoint, methods=transport_route.methods
+    )
     # After streamable_http_app() on purpose: instrument() would otherwise add
     # PostHog's session-minting middleware, which buffers request bodies and
     # sets Mcp-Session-Id on initialize responses the transport left without

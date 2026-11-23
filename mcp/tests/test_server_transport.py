@@ -184,13 +184,16 @@ async def test_self_host_without_website_has_no_external_branding(monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("oauth", [False, True])
-async def test_initialize_advertises_icons_website_and_instructions(monkeypatch, oauth):
+@pytest.mark.parametrize("path", ["/", "/mcp"])
+async def test_initialize_advertises_icons_website_and_instructions(
+    monkeypatch, oauth, path
+):
     srv = _boot(monkeypatch, oauth=oauth, mcp_resource_url="https://mcp.brand.test/")
     async with srv.app.router.lifespan_context(srv.app):
         transport = httpx.ASGITransport(app=srv.app)
         async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
             response = await c.post(
-                "/",
+                path,
                 headers={"Accept": _MCP_ACCEPT},
                 json={
                     "jsonrpc": "2.0",
@@ -326,7 +329,8 @@ async def test_oauth_rs_unauth_tools_list_succeeds(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_oauth_rs_unauth_tools_call_still_401s(monkeypatch):
+@pytest.mark.parametrize("path", ["/", "/mcp"])
+async def test_oauth_rs_unauth_tools_call_still_401s(monkeypatch, path):
     """tools/call is not in the discovery safelist and must still require
     auth. No lifespan needed here: like the pre-existing ping/401 test,
     auth is rejected before the request ever reaches MCPServer's
@@ -335,7 +339,7 @@ async def test_oauth_rs_unauth_tools_call_still_401s(monkeypatch):
     transport = httpx.ASGITransport(app=srv.app)
     async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
         resp = await c.post(
-            "/",
+            path,
             headers={"Accept": _MCP_ACCEPT},
             json={
                 "jsonrpc": "2.0",
@@ -854,7 +858,10 @@ async def test_oauth_rs_unauth_initialized_notification_unknown_session_no_sessi
 
 
 @pytest.mark.asyncio
-async def test_oauth_rs_sdk_client_connects_anonymously_and_lists_tools(monkeypatch):
+@pytest.mark.parametrize("url", ["http://t/", "http://t/mcp"])
+async def test_oauth_rs_sdk_client_connects_anonymously_and_lists_tools(
+    monkeypatch, url
+):
     """The real mcp SDK client (initialize + notifications/initialized +
     tools/list) works with no bearer token."""
     import httpx2
@@ -868,7 +875,7 @@ async def test_oauth_rs_sdk_client_connects_anonymously_and_lists_tools(monkeypa
     async with (
         srv.app.router.lifespan_context(srv.app),
         client,
-        streamable_http_client("http://t/", http_client=client) as (read, write),
+        streamable_http_client(url, http_client=client) as (read, write),
         ClientSession(read, write) as session,
     ):
         await session.initialize()
