@@ -10,6 +10,37 @@ from mcp.server.streamable_http import MCP_SESSION_ID_HEADER
 from mcp.shared.inbound import MCP_PROTOCOL_VERSION_HEADER
 
 
+def _allows_setup(headers: Headers) -> bool:
+    accept = headers.getlist("accept")
+    if not accept:
+        return True
+
+    media_ranges: dict[str, list[float]] = {}
+    for header in accept:
+        for value in header.split(","):
+            media_type, *parameters = value.lower().split(";")
+            quality = 1.0
+            for parameter in parameters:
+                name, _, weight = parameter.strip().partition("=")
+                if name.strip() == "q":
+                    try:
+                        quality = float(weight)
+                    except ValueError:
+                        quality = 0.0
+                    break
+            media_ranges.setdefault(media_type.strip(), []).append(quality)
+
+    # An SSE-capable request belongs to Streamable HTTP, including mixed Accept
+    # headers. A wildcard is a browser/probe fallback only on its own.
+    if "text/event-stream" in media_ranges:
+        return False
+    if "text/html" in media_ranges:
+        return any(0 < quality <= 1 for quality in media_ranges["text/html"])
+    return set(media_ranges) == {"*/*"} and any(
+        0 < quality <= 1 for quality in media_ranges["*/*"]
+    )
+
+
 class SetupPageMiddleware:
     def __init__(self, app: ASGIApp, endpoint_url: str, guide_url: str) -> None:
         self.app = app
@@ -37,7 +68,10 @@ class SetupPageMiddleware:
 </body>
 </html>
 """,
-            headers={"Cache-Control": "no-store"},
+            headers={
+                "Cache-Control": "no-store",
+                "Vary": "Accept, Authorization, Mcp-Session-Id, MCP-Protocol-Version",
+            },
         )
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
@@ -47,19 +81,11 @@ class SetupPageMiddleware:
             and scope["method"] in {"GET", "HEAD"}
         ):
             headers = Headers(scope=scope)
-            # Streamable HTTP GET requests accept SSE. Session and protocol
-            # headers also identify MCP clients using this same URL.
-            accept = {
-                value.partition(";")[0].strip().lower()
-                for header in headers.getlist("accept")
-                for value in header.split(",")
-            }
             if (
                 "authorization" not in headers
                 and MCP_SESSION_ID_HEADER not in headers
                 and MCP_PROTOCOL_VERSION_HEADER not in headers
-                and "text/event-stream" not in accept
-                and (not accept or accept == {"*/*"} or "text/html" in accept)
+                and _allows_setup(headers)
             ):
                 response: Response = self.page
                 if scope["method"] == "HEAD":

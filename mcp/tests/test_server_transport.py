@@ -57,7 +57,9 @@ async def test_oauth_rs_unauth_returns_401_with_resource_metadata(monkeypatch):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("accept", ["text/html,application/xhtml+xml,*/*;q=0.8", "*/*"])
+@pytest.mark.parametrize(
+    "accept", ["text/html,application/xhtml+xml,*/*;q=0.8", "*/*;q=0.5", "*/*"]
+)
 async def test_oauth_rs_root_offers_browser_setup(monkeypatch, accept):
     srv = _boot(monkeypatch, oauth=True)
     transport = httpx.ASGITransport(app=srv.app)
@@ -68,6 +70,7 @@ async def test_oauth_rs_root_offers_browser_setup(monkeypatch, accept):
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
     assert response.headers["cache-control"] == "no-store"
+    assert "Accept" in response.headers["vary"].split(", ")
     assert "<h1>Connect to Hail MCP</h1>" in response.text
     assert "https://mcp.hail.so/" in response.text
     assert 'href="https://brand.test/site/mcp"' in response.text
@@ -82,6 +85,11 @@ async def test_oauth_rs_root_offers_browser_setup(monkeypatch, accept):
     [
         ("/", {"Accept": "text/event-stream"}),
         ("/", {"Accept": "application/json"}),
+        ("/", {"Accept": "application/json, */*"}),
+        ("/", {"Accept": "text/html;q=0, */*;q=1"}),
+        ("/", {"Accept": "*/*;q=0"}),
+        ("/", {"Accept": "text/html;q=broken"}),
+        ("/", {"Accept": "text/html, text/event-stream"}),
         ("/", {"Mcp-Session-Id": "test-session"}),
         ("/", {"MCP-Protocol-Version": "2025-11-25"}),
         ("/mcp", {"Accept": "text/html"}),

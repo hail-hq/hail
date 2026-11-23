@@ -44,7 +44,7 @@ from hailhq.mcp.analytics import instrument_analytics
 from hailhq.mcp.auth import AuthMode, PassThroughVerifier, select_auth_mode
 from hailhq.mcp.discovery_auth import DiscoveryAuthMiddleware
 from hailhq.mcp.hail_client import HailClient
-from hailhq.mcp.metadata import registry_manifest_for, server_metadata
+from hailhq.mcp.metadata import registry_manifest_for, server_metadata, website_url
 from hailhq.mcp.setup_page import SetupPageMiddleware
 from hailhq.mcp.tools import TaggedMCPServer, register_tools
 from pydantic import AnyHttpUrl
@@ -230,13 +230,14 @@ def _build_app() -> tuple[MCPServer, HailClient | None, Starlette]:
     # can inject a synthetic bearer for the capability-discovery
     # methods before AuthenticationMiddleware reads the headers.
     middleware = [Middleware(DiscoveryAuthMiddleware), *http_app.user_middleware]
-    if mode is AuthMode.OAUTH_RS and settings.hail_base_url:
+    guide_url = website_url()
+    if mode is AuthMode.OAUTH_RS and guide_url:
         middleware.insert(
             0,
             Middleware(
                 SetupPageMiddleware,
                 endpoint_url=resource_url,
-                guide_url=join_url(settings.hail_base_url, "mcp"),
+                guide_url=guide_url,
             ),
         )
 
