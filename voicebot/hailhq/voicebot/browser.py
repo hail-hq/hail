@@ -169,6 +169,7 @@ async def run_browser_session(
     messaging_api = None
     finish_lock = asyncio.Lock()
     finished = False
+    worker_failure = False
     deadline = None
     setup_deadline = None
     finalization = None
@@ -176,7 +177,7 @@ async def run_browser_session(
     event_tasks = set()
 
     async def finish(*, failed=False):
-        nonlocal finished
+        nonlocal finished, worker_failure
         async with finish_lock:
             if finished:
                 return
@@ -222,6 +223,7 @@ async def run_browser_session(
                     try:
                         await asyncio.wait_for(session.aclose(), timeout=3)
                     except Exception:
+                        worker_failure = True
                         logger.exception(
                             "browser model cleanup failed call_id=%s", call_id
                         )
@@ -259,8 +261,9 @@ async def run_browser_session(
                     await finish_browser_call(
                         db,
                         call_id,
-                        failed=failed,
-                        worker_failed=failed,
+                        failed=worker_failure,
+                        worker_failed=worker_failure,
+                        worker_finished=session is not None,
                         ended_at=media_ended_at,
                         started_at=media_started_at,
                     )
@@ -269,7 +272,8 @@ async def run_browser_session(
                 ctx.shutdown(reason="browser_ended")
 
     def begin_finish(*, failed=False):
-        nonlocal finalization
+        nonlocal finalization, worker_failure
+        worker_failure = worker_failure or failed
         if finalization is None:
             finalization = asyncio.create_task(finish(failed=failed))
         return finalization
@@ -351,8 +355,9 @@ async def run_browser_session(
 
         @session.on("close")
         def closed(event):
-            if not finished:
-                schedule_finish(failed=getattr(event, "reason", None) == "error")
+            # The SDK can emit its error after a participant disconnect has
+            # already started cleanup. Cleanup state must not hide that error.
+            schedule_finish(failed=getattr(event, "reason", None) == "error")
 
         # Starting the session and model construction are also bounded. The
         # live deadline is armed before greeting, and never controlled by JS.

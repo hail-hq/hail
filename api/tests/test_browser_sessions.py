@@ -334,9 +334,12 @@ async def test_unanswered_browser_finalization_never_reports_completed(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("worker_failed", [False, True])
 async def test_late_worker_failure_corrects_completed_outcome_without_rebilling(
     async_session,
+    worker_failed,
 ):
+    from hailhq.api.routes.internal.browser_sessions import view
     from hailhq.core.models import UsageEvent
 
     call = Call(
@@ -358,14 +361,20 @@ async def test_late_worker_failure_corrects_completed_outcome_without_rebilling(
     await async_session.commit()
     await finish_browser_call(async_session, call.id)
     await async_session.commit()
+    assert view(call).get("outcome_final") is False
     original_ended_at = call.ended_at
     original_usage = call.metadata_["browser_used_ms"]
-    await finish_browser_call(async_session, call.id, worker_failed=True)
-    await finish_browser_call(async_session, call.id, worker_failed=True)
+    await finish_browser_call(
+        async_session, call.id, worker_failed=worker_failed, worker_finished=True
+    )
+    await finish_browser_call(
+        async_session, call.id, worker_failed=worker_failed, worker_finished=True
+    )
     await async_session.commit()
     await async_session.refresh(call)
-    assert call.status == "failed"
-    assert call.end_reason == "agent_error"
+    assert call.status == ("failed" if worker_failed else "completed")
+    assert call.end_reason == ("agent_error" if worker_failed else "normal_hangup")
+    assert view(call).get("outcome_final") is True
     assert call.ended_at == original_ended_at
     assert call.metadata_["browser_used_ms"] == original_usage
     refunds = (

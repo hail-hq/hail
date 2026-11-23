@@ -180,12 +180,14 @@ async def finish_browser_call(
     *,
     failed: bool = False,
     worker_failed: bool = False,
+    worker_finished: bool = False,
     ended_at: datetime | None = None,
     started_at: datetime | None = None,
     waive_paid_charge: bool = False,
 ) -> None:
     """Lock and finalize once, including refunds. Caller commits the transaction."""
     failed = failed or worker_failed
+    worker_finished = worker_finished or worker_failed
     call = (
         await db.execute(
             select(Call)
@@ -206,6 +208,8 @@ async def finish_browser_call(
             call.status = "failed"
             call.end_reason = "agent_error"
             call.metadata_ = {**call.metadata_, "browser_failed": True}
+        if worker_finished:
+            call.metadata_ = {**call.metadata_, "browser_worker_finished": True}
         return
     if started_at is not None and call.answered_at is None:
         call.started_at = call.answered_at = started_at
@@ -219,6 +223,8 @@ async def finish_browser_call(
         else 0
     )
     meta = dict(call.metadata_)
+    if worker_finished:
+        meta["browser_worker_finished"] = True
     failed = failed or meta.get("browser_failed") is True
     meta["browser_used_ms"] = duration
     if not meta.get("browser_trial"):
