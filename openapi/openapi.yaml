@@ -3717,7 +3717,7 @@ paths:
 
         Shows whether trial texting is set up and can send now, the workspace's
 
-        trial phone and its status, and how many of the 25 trial texts are left."
+        trial phone and its status, and how many trial texts are left."
       operationId: get_sms_trial_v1_sms_trial_get
       parameters:
         - name: authorization
@@ -3780,7 +3780,7 @@ paths:
 
         workspace or a phone gets at most 5 codes in 24 hours. Code texts are
 
-        free and do not count toward the 25 trial texts. Console sessions only."
+        free and do not count as trial texts. Console sessions only."
       operationId: start_sms_trial_phone_v1_sms_trial_phone_post
       parameters:
         - name: authorization
@@ -3920,10 +3920,10 @@ paths:
         \ otherwise Hail\npicks an alphanumeric sender ID where the destination corridor\
         \ allows\nit, or requires a dedicated SMS-capable number otherwise. Requires\n\
         recipient_consent=true on the request body; Hail does not verify\nlawful basis\
-        \ to contact the recipient, the caller warrants it.\n\nTrial texts (up to\
-        \ 25, only to the workspace's verified trial phone):\nwith no from, Hail uses\
-        \ one when the workspace's own number cannot text\nthat US phone; set from\
-        \ to the trial number to use one directly."
+        \ to contact the recipient, the caller warrants it.\n\nTrial texts (only to\
+        \ the workspace's verified trial phone):\nwith no from, Hail uses one when\
+        \ the workspace's own number cannot text\nthat US phone; set from to the trial\
+        \ number to use one directly."
       operationId: create_sms_v1_sms_post
       parameters:
         - name: authorization
@@ -10983,10 +10983,10 @@ components:
             none is set; Australia (+61) may always use 'HAIL', depending on the
             carrier. Every other destination, including the US and Canada, uses the
             organization's oldest active SMS-capable number; if none exists the request
-            fails with 422. SMS never uses the shared pool. Trial texts (up to 25,
-            only to the workspace's verified trial phone): with no from, Hail uses
-            one when the workspace's own number cannot text that US phone; set from
-            to the trial number to use one directly."
+            fails with 422. SMS never uses the shared pool. Trial texts (only to the
+            workspace's verified trial phone): with no from, Hail uses one when the
+            workspace's own number cannot text that US phone; set from to the trial
+            number to use one directly."
         body:
           type: string
           maxLength: 1600
@@ -11258,7 +11258,7 @@ components:
         texts_limit:
           type: integer
           title: Texts Limit
-          description: Trial texts a workspace can send, ever.
+          description: All the trial texts the workspace gets.
         texts_left:
           type: integer
           title: Texts Left

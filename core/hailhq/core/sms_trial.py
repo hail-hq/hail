@@ -52,7 +52,7 @@ TOLLFREE_APPROVAL_CARRIERS = frozenset({"twilio"})
 TRIAL_PREFIX = "[Hail trial] "
 TRIAL_FOOTER = "\nHail does not read replies."
 TRIAL_HINT = (
-    "To test now, verify your own mobile under Numbers > Trial texting, "
+    "To test now, verify your own mobile under Overview > Test a text, "
     "then send to it without from."
 )
 CODE_TTL = timedelta(minutes=10)

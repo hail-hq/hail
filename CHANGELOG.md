@@ -77,7 +77,7 @@ Component versions cut alongside this release:
 Agents can call your own API with HTTP tools, answer email, and know the
 date and time. Calls return their transcript and a summary. Number
 verification can read documents before filing and resubmit after a rejection.
-A workspace can send up to 25 trial texts to its own verified US phone.
+A workspace can send trial texts to its own verified US phone.
 
 Component versions cut alongside this release:
 **`cli-v0.32.0`** (Homebrew + GitHub Releases) and **`sdk-v0.23.0`** (PyPI).
@@ -90,7 +90,7 @@ The MCP registry entry moves to 0.2.0. Database migrations run on deploy.
 - Call agents know the date, time and time zone at the start of each call.
 - Text and email reply agents know the date, time and time zone too.
 - Calls: `GET /v1/calls/{id}` returns the call's transcript, and the new `call.summarized` webhook sends the transcript and a short summary after each call.
-- US trial texting: a workspace can send up to 25 texts, ever, to its own verified phone from a Hail number, with no US registration needed. Set it up in the console under Numbers.
+- US trial texting: a workspace can send trial texts to its own verified phone from a Hail number, with no US registration needed. Set it up in the console under Numbers.
 - Rejected number registrations can be fixed and sent again for 30 days with `POST /v1/verifications/{id}/resubmit` (MCP: `resubmit_verification`).
 - `sms.received` webhooks and `received` SMS events have a new `compliance_keyword` field: `STOP`, `START` or `HELP` when the text is one of those keywords, otherwise `null`.
 - [Hail for Vercel Chat SDK](https://github.com/hail-hq/chat-sdk-adapter/releases/tag/v0.1.0): the published [`@hail-hq/chat-sdk-adapter`](https://www.npmjs.com/package/@hail-hq/chat-sdk-adapter) connects SMS webhooks and replies to Chat SDK. Hail maintains the adapter; its Vercel vendor-official listing requires separate acceptance.

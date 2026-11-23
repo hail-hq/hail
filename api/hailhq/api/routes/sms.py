@@ -8,7 +8,7 @@ No pool fallback: SMS requires a dedicated PhoneNumber on the org (see
 Decision 6 of the SMS design spec) — inbound replies need unambiguous
 number-to-org routing, which a shared pool number can't provide.
 
-One exception: up to 25 trial texts from Hail's trial number to the
+One exception: trial texts from Hail's trial number to the
 workspace's verified trial phone. With no ``from`` a trial text is used only
 when the workspace's own number cannot text that US phone; a ``from`` equal
 to the trial number uses one directly.
@@ -269,7 +269,7 @@ async def create_sms(
     recipient_consent=true on the request body; Hail does not verify
     lawful basis to contact the recipient, the caller warrants it.
 
-    Trial texts (up to 25, only to the workspace's verified trial phone):
+    Trial texts (only to the workspace's verified trial phone):
     with no from, Hail uses one when the workspace's own number cannot text
     that US phone; set from to the trial number to use one directly.
     """
