@@ -3249,7 +3249,7 @@ def register_tools(
         """Set the saved agents that answer a number's calls and texts.
 
         Replaces the selected routing settings. Registering or unregistering inbound
-        voice can change carrier and LiveKit routing; text-only changes do not.
+        voice can change carrier and LiveKit routing; text-only changes leave it unchanged.
         Clearing the voice route stops AI call answers; clearing the text route stops
         agent replies to texts. Restoring a route does not recover missed interactions.
         Omitted settings retain their current values.
