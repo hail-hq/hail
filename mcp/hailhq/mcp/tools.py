@@ -3760,8 +3760,8 @@ def register_tools(
             str | None,
             _UUID_OR_NULL,
             _d(
-                "The offer whose requirements determine which document slots and "
-                "fields are read. Its ``quote_id`` comes from ``quote_numbers``."
+                "Required for reading documents. This is the ``quote_id`` from "
+                "``quote_numbers`` for the offer used to get the form requirements."
             ),
         ] = None,
         subject_type: Annotated[
