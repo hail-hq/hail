@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 from collections.abc import AsyncIterator
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
@@ -40,7 +41,7 @@ from hailhq.core.telemetry import (
     request_span_attributes,
 )
 from hailhq.core.telemetry_identity import IdentityMiddleware
-from hailhq.core.urls import join_url
+from hailhq.core.urls import join_url, url_variants
 from hailhq.mcp.analytics import instrument_analytics
 from hailhq.mcp.auth import AuthMode, PassThroughVerifier, select_auth_mode
 from hailhq.mcp.discovery_auth import DiscoveryAuthMiddleware
@@ -166,6 +167,17 @@ def _build_app() -> tuple[MCPServer, HailClient | None, Starlette]:
     async def mcp_manifest(_request: Request) -> Response:
         return FileResponse(registry_manifest, media_type="application/json")
 
+    registry_routes = []
+    if mode is AuthMode.OAUTH_RS and registry_manifest.is_file():
+        manifest = json.loads(registry_manifest.read_bytes())
+        if any(
+            remote["url"] in url_variants(resource_url)
+            for remote in manifest["remotes"]
+        ):
+            registry_routes.append(
+                Route("/.well-known/mcp.json", mcp_manifest, methods=["GET"])
+            )
+
     async def manifest_icon(types: set[str]) -> Response:
         """Redirect to the first manifest icon of one of ``types``."""
         if not manifest_url:
@@ -238,7 +250,7 @@ def _build_app() -> tuple[MCPServer, HailClient | None, Starlette]:
     app = Starlette(
         routes=[
             Route("/healthz", healthz, methods=["GET"]),
-            Route("/.well-known/mcp.json", mcp_manifest, methods=["GET"]),
+            *registry_routes,
             Route("/favicon.ico", favicon, methods=["GET"]),
             Route("/icon.svg", vector_icon, methods=["GET"]),
             Route(

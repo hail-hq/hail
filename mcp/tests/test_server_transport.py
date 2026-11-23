@@ -98,8 +98,9 @@ async def test_oauth_rs_mcp_get_still_requires_auth(monkeypatch, path, headers):
 
 
 @pytest.mark.asyncio
-async def test_public_mcp_manifest_matches_registry(monkeypatch):
-    srv = _boot(monkeypatch, oauth=True)
+@pytest.mark.parametrize("resource", ["https://mcp.hail.so", "https://mcp.hail.so/"])
+async def test_public_mcp_manifest_matches_registry(monkeypatch, resource):
+    srv = _boot(monkeypatch, oauth=True, mcp_resource_url=resource)
     transport = httpx.ASGITransport(app=srv.app)
     async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
         response = await c.get("/.well-known/mcp.json")
@@ -111,6 +112,22 @@ async def test_public_mcp_manifest_matches_registry(monkeypatch):
     assert response.content == registry.read_bytes()
     assert head.status_code == 200
     assert head.headers["content-length"] == response.headers["content-length"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("oauth", "resource"),
+    [(False, ""), (False, "https://mcp.hail.so"), (True, "https://self-host.test/")],
+)
+async def test_mcp_manifest_is_only_served_for_the_registered_oauth_endpoint(
+    monkeypatch, oauth, resource
+):
+    srv = _boot(monkeypatch, oauth=oauth, mcp_resource_url=resource)
+    transport = httpx.ASGITransport(app=srv.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+        response = await c.get("/.well-known/mcp.json")
+
+    assert response.status_code == 404
 
 
 _MCP_ACCEPT = "application/json, text/event-stream"
