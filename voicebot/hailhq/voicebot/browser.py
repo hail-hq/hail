@@ -185,6 +185,26 @@ async def run_browser_session(
             # Cut our local media path even when the remote room API fails.
             # Every cleanup is independent; none can bypass worker shutdown.
             try:
+                if failed:
+                    # A browser reacts to room teardown by calling /stop.
+                    # Save the failure first, without releasing the active
+                    # reservation until media teardown has finished.
+                    try:
+                        async with session_scope() as db:
+                            call = await db.get(Call, call_id, with_for_update=True)
+                            if (
+                                call is not None
+                                and call.status not in TERMINAL_CALL_STATUSES
+                            ):
+                                call.metadata_ = {
+                                    **call.metadata_,
+                                    "browser_failed": True,
+                                }
+                                await db.commit()
+                    except Exception:
+                        logger.exception(
+                            "browser failure marker failed call_id=%s", call_id
+                        )
                 try:
                     await asyncio.wait_for(ctx.room.disconnect(), timeout=2)
                 except Exception:

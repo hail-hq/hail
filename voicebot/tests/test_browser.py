@@ -142,6 +142,72 @@ async def test_hard_deadline_closes_room_and_finalizes_trial_without_client_time
     await ctx.callback()
 
 
+@pytest.mark.asyncio
+async def test_worker_failure_wins_over_browser_stop_during_room_cleanup(
+    async_session, monkeypatch
+):
+    from unittest.mock import Mock
+
+    from hailhq.core.browser_voice import finish_browser_call
+    from hailhq.core.models import Call
+    from hailhq.voicebot import browser
+
+    call = Call(
+        organization_id=uuid.uuid4(),
+        transport="browser",
+        direction="inbound",
+        provider="browser",
+        voice_config={},
+        max_duration_seconds=60,
+        metadata_={"browser_trial": True},
+        status="queued",
+    )
+    async_session.add(call)
+    await async_session.commit()
+
+    # The real browser calls /stop as soon as teardown disconnects its room.
+    async def browser_stop():
+        async with browser.session_scope() as db:
+            await finish_browser_call(db, call.id)
+            await db.commit()
+
+    session = SimpleNamespace(
+        on=Mock(return_value=lambda callback: callback),
+        start=AsyncMock(),
+        aclose=AsyncMock(),
+        history=SimpleNamespace(to_dict=lambda: {"items": []}),
+        generate_reply=Mock(side_effect=RuntimeError("model failed after readiness")),
+    )
+    room = SimpleNamespace(
+        on=Mock(return_value=lambda callback: callback),
+        disconnect=AsyncMock(side_effect=browser_stop),
+        local_participant=SimpleNamespace(
+            set_attributes=AsyncMock(), publish_data=AsyncMock()
+        ),
+    )
+    callbacks = []
+    ctx = SimpleNamespace(
+        room=room,
+        proc=SimpleNamespace(userdata={"vad": None}),
+        add_shutdown_callback=callbacks.append,
+        connect=AsyncMock(),
+        wait_for_participant=AsyncMock(
+            return_value=SimpleNamespace(identity="visitor")
+        ),
+        delete_room=AsyncMock(),
+        shutdown=Mock(),
+    )
+    monkeypatch.setattr(browser, "resolve_org_configs", AsyncMock(return_value={}))
+    monkeypatch.setattr(browser, "build_session", lambda *a, **kw: session)
+    monkeypatch.setattr(browser, "build_browser_tools", lambda *a: ([], None))
+    await browser.run_browser_session(ctx, call.id, attach_handlers=lambda *a: set())
+    await callbacks[0]()
+    await async_session.refresh(call)
+    assert call.answered_at is not None
+    assert call.status == "failed"
+    assert call.end_reason == "agent_error"
+
+
 def test_transcript_does_not_expose_system_instructions_or_tool_results():
     from hailhq.voicebot.browser import public_transcript
 

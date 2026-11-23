@@ -211,6 +211,7 @@ async def finish_browser_call(
         else 0
     )
     meta = dict(call.metadata_)
+    failed = failed or meta.get("browser_failed") is True
     meta["browser_used_ms"] = duration
     if not meta.get("browser_trial"):
         reserved = Decimal(meta["browser_reserved_cents"])
@@ -249,13 +250,12 @@ async def finish_browser_call(
     call.metadata_ = meta
     # A stop or shutdown can win the race with participant/model setup.
     # Only a session that reached media readiness completed a conversation.
-    call.status = (
-        "failed"
-        if failed
-        else "completed"
-        if call.answered_at is not None
-        else "canceled"
-    )
+    if failed:
+        call.status = "failed"
+    elif call.answered_at is None:
+        call.status = "canceled"
+    else:
+        call.status = "completed"
     call.end_reason = "agent_error" if failed else "normal_hangup"
     call.ended_at = now
 
