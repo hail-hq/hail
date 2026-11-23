@@ -2069,6 +2069,12 @@ _FROM_NAME_SCHEMA = WithJsonSchema(
     {"anyOf": EmailCreate.model_json_schema()["properties"]["from_name"]["anyOf"]}
 )
 _ADDRESS_SCHEMA = {k: v for k, v in Address.model_json_schema().items() if k != "title"}
+_ADDRESS_SCHEMA["properties"]["city"].update(
+    description="City or town as it appears in the applicant's mailing address."
+)
+_ADDRESS_SCHEMA["properties"]["region"].update(
+    description="State, province, or equivalent administrative area in the applicant's address."
+)
 _ADDRESS_OR_NULL = Annotated[
     Any, WithJsonSchema({"anyOf": [_ADDRESS_SCHEMA, {"type": "null"}]})
 ]
@@ -2120,14 +2126,17 @@ _VERIFICATION_FILES_LIST = Annotated[
                             "content_type": {
                                 "type": "string",
                                 "enum": list(VERIFICATION_FILE_TYPES),
-                                "description": "File format used to read the document.",
+                                "description": (
+                                    "Media type of the actual document. Hail checks "
+                                    "it against the file bytes."
+                                ),
                             },
                             "content_base64": {
                                 "type": "string",
                                 "contentEncoding": "base64",
                                 "description": (
-                                    "The complete file for this document slot when "
-                                    "supplied inline instead of by upload ID."
+                                    "Bytes of the complete document for this slot, "
+                                    "supplied directly in the tool call."
                                 ),
                             },
                         },
@@ -2150,8 +2159,8 @@ _IDEMPOTENCY_KEY = _d(
     "is generated and returned."
 )
 _RECIPIENT_CONSENT = _d(
-    "Attestation that the recipient lawfully agreed to be contacted, as the "
-    "user confirmed it. Hail does not check it; only ``true`` is accepted."
+    "Confirmation from the user that the recipient lawfully agreed to be "
+    "contacted. Hail requires ``true`` and does not independently verify consent."
 )
 _CONSENT_SOURCE = _d(
     "Where or how consent was obtained, such as ``signup form``. "
@@ -2222,18 +2231,18 @@ _DOCUMENT_CHECK_DOCUMENTS = _d(
     "and one read fills all of them."
 )
 _VERIFICATION_FILES = _d(
-    "The document files, one per slot named in ``documents``. Use an upload: "
-    "the ``id`` from ``create_file_upload`` with purpose "
-    "``verification_document``, within an hour of uploading. A very small "
-    "file can go inline as base64 instead. Each file is at most 10 MiB."
+    "One file per slot being filled, keyed by the matching slot in ``documents``. "
+    "Upload IDs come from ``create_file_upload`` with purpose "
+    "``verification_document`` and last one hour. The inline form suits small files. "
+    "Each file is at most 10 MiB."
 )
 _VERIFICATION_ADDRESS = _d(
     "The applicant's address. Give it when the requirements include one; "
     "otherwise leave it out."
 )
 _ATTEST_AUTHORIZED = _d(
-    "Attestation that the named person or business authorized this filing and "
-    "supplied its details and files. Only ``true`` sends anything."
+    "Confirms that the applicant supplied the details and files and authorized "
+    "this filing. Hail sends the filing only when this is ``true``."
 )
 _AGENT_NAME = _d("Agent display name.")
 _AGENT_PROMPT = _d(
@@ -2245,8 +2254,7 @@ _AGENT_FIRST_MESSAGE = _d(
 )
 _AGENT_AI_DISCLOSURE = _d("Speak the AI disclosure line first on every call.")
 _AGENT_RECORDING = _d(
-    "Recording for this agent's calls. ``true`` or ``false`` overrides the "
-    "workspace setting."
+    "Recording preference for this agent's calls, overriding the workspace setting."
 )
 _AGENT_DISCLOSURE_LINE = _d(
     "Custom AI disclosure line replacing the workspace line. ``{org}`` expands "
@@ -2374,12 +2382,14 @@ def register_tools(
         language: Annotated[
             str | None,
             _d(
-                "Spoken language as a supported lowercase ISO 639-1 code, such as "
-                "``es``. Omitted: English. An unsupported code returns 422."
+                "Spoken language override, using a supported lowercase ISO 639-1 "
+                "code such as ``es``. When omitted, the call uses the saved agent's "
+                "language if configured, otherwise the speech providers default "
+                "to English. An unsupported code returns an error before dialing."
             ),
         ] = None,
         ai_disclosure: Annotated[
-            bool, _d("Speak an AI notice at the start of the call. ``false`` skips it.")
+            bool, _d("Whether the agent speaks an AI notice at the start of the call.")
         ] = True,
         recording_enabled: Annotated[
             bool | None,
@@ -2388,7 +2398,7 @@ def register_tools(
         metadata: Annotated[
             dict[str, Any] | None,
             _d(
-                "Free-form JSON object stored on the call record. Keys starting "
+                "Extra data stored on the call record. Keys starting "
                 "with ``recording_`` are reserved."
             ),
         ] = None,
@@ -2524,7 +2534,7 @@ def register_tools(
         ] = None,
         metadata: Annotated[
             dict[str, Any] | None,
-            _d("Free-form JSON object stored on the email record."),
+            _d("Extra data stored on the email record."),
         ] = None,
         idempotency_key: Annotated[str | None, _IDEMPOTENCY_KEY] = None,
         consent_source: Annotated[str | None, _CONSENT_SOURCE] = None,
@@ -2761,7 +2771,7 @@ def register_tools(
         ] = None,
         metadata: Annotated[
             dict[str, Any] | None,
-            _d("Free-form JSON object stored on the message record."),
+            _d("Extra data stored on the message record."),
         ] = None,
         idempotency_key: Annotated[str | None, _IDEMPOTENCY_KEY] = None,
         consent_source: Annotated[str | None, _CONSENT_SOURCE] = None,
@@ -3776,7 +3786,14 @@ def register_tools(
         subject_type: Annotated[
             str | None, _SUBJECT_TYPE_OR_NULL, _SUBJECT_TYPE_REQUIRED
         ] = None,
-        address: Annotated[_PARTIAL_ADDRESS_OR_NULL, _VERIFICATION_ADDRESS] = None,
+        address: Annotated[
+            _PARTIAL_ADDRESS_OR_NULL,
+            _d(
+                "Known parts of the applicant's address when the form requires one. "
+                "The document check can suggest missing values and flag a "
+                "mismatch in the name on the address."
+            ),
+        ] = None,
     ) -> dict[str, Any]:
         """Read the files of a number verification form, before the form is filled or submitted.
 
