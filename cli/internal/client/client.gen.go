@@ -1773,7 +1773,7 @@ type AgentCreate struct {
 	// EmailEnabled Answer email on addresses that route email to this agent.
 	EmailEnabled *bool `json:"email_enabled,omitempty"`
 
-	// FirstMessage Opening line spoken after the AI line. Omitted: the agent waits for the other side to speak first.
+	// FirstMessage Opening line spoken after the AI line. Omitted: on a call the agent answers, it speaks the AI line when it is on, then waits for the caller; on a call it places, its model usually writes a short opening after pickup.
 	FirstMessage *string `json:"first_message,omitempty"`
 
 	// HandoverContacts People the agent may hand a live call to, in order. The agent never sees their numbers.
@@ -1834,7 +1834,7 @@ type AgentResponse struct {
 	// EmailEnabled Whether the agent answers email.
 	EmailEnabled *bool `json:"email_enabled,omitempty"`
 
-	// FirstMessage Opening line, or null to wait.
+	// FirstMessage Opening line, or null: on calls it answers, the agent waits for the caller after the AI line; on calls it places, its model usually writes an opening.
 	FirstMessage *string `json:"first_message"`
 
 	// HandoverContacts People the agent may hand a live call to.
@@ -1902,7 +1902,7 @@ type AgentUpdate struct {
 	// EmailEnabled Whether the agent answers email.
 	EmailEnabled *bool `json:"email_enabled,omitempty"`
 
-	// FirstMessage New opening line; null makes the agent wait for the other side.
+	// FirstMessage New opening line; null removes it. Then, on calls it answers, the agent waits for the caller after the AI line; on calls it places, its model usually writes an opening.
 	FirstMessage *string `json:"first_message,omitempty"`
 
 	// HandoverContacts New handover list; replaces the old one. [] removes all; null leaves it.
@@ -1965,7 +1965,7 @@ type CallCreate struct {
 	// ConsentSource Where/how consent was obtained (e.g. 'signup form', 'prior customer relationship'). Required (non-empty) when message_type is 'marketing'.
 	ConsentSource *string `json:"consent_source,omitempty"`
 
-	// FirstMessage Opening line the agent speaks first. Omitted: the agent waits for the callee to speak first.
+	// FirstMessage Opening line, spoken after the AI disclosure line when it is on. Omitted: the saved agent's first_message when agent_id is set; otherwise the agent's model usually writes a short opening after pickup.
 	FirstMessage *string `json:"first_message,omitempty"`
 
 	// From Caller-id phone number, E.164 format. Must be a number owned by the organization with the voice capability. Omitted: an active org-owned number is used if one exists, else a number is claimed from the shared pool.
@@ -1977,7 +1977,7 @@ type CallCreate struct {
 	// MessageType 'marketing' additionally requires a non-empty consent_source. Use 'informational' for transactional/service communications.
 	MessageType *CallCreateMessageType `json:"message_type,omitempty"`
 
-	// Metadata Free-form JSON object attached to the call and echoed back on reads. Not interpreted by Hail. Keys starting with 'recording_' and the key 'failure_code' are reserved and rejected.
+	// Metadata Free-form JSON object stored with the call. Not interpreted by Hail, and not returned by GET /v1/calls/{call_id}. Keys starting with 'recording_' and the key 'failure_code' are reserved and rejected.
 	Metadata *map[string]interface{} `json:"metadata,omitempty"`
 
 	// RecipientConsent Attestation that you have obtained the lawful consent required to contact this recipient. Hail does not verify consent itself — you are responsible for a lawful basis under TCPA/ePrivacy/PECR/CAN-SPAM/GDPR as applicable. Rejected (422) if not true.
@@ -3723,7 +3723,7 @@ type SmsCreate struct {
 	// MessageType 'marketing' additionally requires a non-empty consent_source. Use 'informational' for transactional/service communications.
 	MessageType *SmsCreateMessageType `json:"message_type,omitempty"`
 
-	// Metadata Free-form JSON object attached to the message and echoed back on reads. Not interpreted by Hail. The key 'sms_trial' is reserved and rejected.
+	// Metadata Free-form JSON object stored with the message. Not interpreted by Hail, and not returned by GET /v1/sms/{sms_id}. The key 'sms_trial' is reserved and rejected.
 	Metadata *map[string]interface{} `json:"metadata,omitempty"`
 
 	// RecipientConsent Attestation that you have obtained the lawful consent required to contact this recipient. Hail does not verify consent itself — you are responsible for a lawful basis under TCPA/ePrivacy/PECR/CAN-SPAM/GDPR as applicable. Rejected (422) if not true.
@@ -4262,7 +4262,7 @@ type VerificationResponseStep string
 
 // VoiceConfig defines model for VoiceConfig.
 type VoiceConfig struct {
-	// Language Spoken language for the call as a lowercase ISO 639-1 code (e.g. 'da'). One of the 39 supported codes — see docs/languages.md. Applied to STT, TTS, and turn detection. Omitted: the providers' defaults (English).
+	// Language Spoken language for the call as a lowercase ISO 639-1 code (e.g. 'da'). One of the 39 supported codes: see https://hail.so/docs/languages. Applied to STT, TTS, and turn detection. Omitted: the language of the workspace's text-to-speech provider, then English. A call with agent_id and no voice_config uses the agent's language.
 	Language *VoiceConfigLanguage `json:"language,omitempty"`
 
 	// Tts Text-to-speech provider. Currently only 'cartesia'.
@@ -4278,7 +4278,7 @@ type VoiceConfig struct {
 	VoiceId *string `json:"voice_id,omitempty"`
 }
 
-// VoiceConfigLanguage Spoken language for the call as a lowercase ISO 639-1 code (e.g. 'da'). One of the 39 supported codes — see docs/languages.md. Applied to STT, TTS, and turn detection. Omitted: the providers' defaults (English).
+// VoiceConfigLanguage Spoken language for the call as a lowercase ISO 639-1 code (e.g. 'da'). One of the 39 supported codes: see https://hail.so/docs/languages. Applied to STT, TTS, and turn detection. Omitted: the language of the workspace's text-to-speech provider, then English. A call with agent_id and no voice_config uses the agent's language.
 type VoiceConfigLanguage string
 
 // WebhookDeliveryListResponse defines model for WebhookDeliveryListResponse.

@@ -2249,8 +2249,8 @@ _AGENT_PROMPT = _d(
     "Instructions that define the agent's behavior on calls, texts and email replies."
 )
 _AGENT_FIRST_MESSAGE = _d(
-    "Greeting spoken after the AI disclosure. Without one, an inbound agent "
-    "waits for the caller."
+    "Greeting spoken after the AI disclosure. Without one, the agent waits for "
+    "the caller on calls it answers, and usually writes an opening on calls it places."
 )
 _AGENT_AI_DISCLOSURE = _d("Speak the AI disclosure line first on every call.")
 _AGENT_RECORDING = _d(
@@ -2379,8 +2379,9 @@ def register_tools(
         first_message: Annotated[
             str | None,
             _d(
-                "Line spoken on pickup. Without it, the agent reacts to the "
-                "answer or silence."
+                "Line spoken on pickup. Without it, a saved agent's (agent_id) "
+                "first_message is used; otherwise the agent usually writes a "
+                "short opening, or replies if the other side speaks first."
             ),
         ] = None,
         language: Annotated[
@@ -3207,7 +3208,8 @@ def register_tools(
 
         Without a voice override, the built-in providers use the deployment's
         configured voice. A workspace provider uses its configured voice or its
-        own default. An omitted language uses the speech providers' defaults (English).
+        own default. An omitted language uses the workspace text-to-speech language,
+        then English.
         Without a tool list, the workspace's channels determine the available tools.
         The workspace call limit applies unless overridden, and the handover limit
         defaults to 30 minutes from the contact answering.

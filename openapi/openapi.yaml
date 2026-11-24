@@ -5282,8 +5282,8 @@ paths:
           description: The account keeps the most files allowed.
         "503":
           description:
-            "This server cannot store files for carrier reviewers (no mail bucket
-            or no public https URL), or storage failed for a moment: try again."
+            "This server cannot store files for carrier reviewers (no mail
+            bucket or no public https URL), or storage failed for a moment: try again."
         "422":
           description: Validation Error
           content:
@@ -6671,8 +6671,10 @@ components:
             - type: "null"
           title: First Message
           description:
-            "Opening line spoken after the AI line. Omitted: the agent
-            waits for the other side to speak first."
+            "Opening line spoken after the AI line. Omitted: on a call
+            the agent answers, it speaks the AI line when it is on, then waits for
+            the caller; on a call it places, its model usually writes a short opening
+            after pickup."
         recording_enabled:
           anyOf:
             - type: boolean
@@ -6826,7 +6828,10 @@ components:
             - type: string
             - type: "null"
           title: First Message
-          description: Opening line, or null to wait.
+          description:
+            "Opening line, or null: on calls it answers, the agent waits
+            for the caller after the AI line; on calls it places, its model usually
+            writes an opening."
         recording_enabled:
           anyOf:
             - type: boolean
@@ -6965,7 +6970,10 @@ components:
               maxLength: 1000
             - type: "null"
           title: First Message
-          description: New opening line; null makes the agent wait for the other side.
+          description:
+            New opening line; null removes it. Then, on calls it answers,
+            the agent waits for the caller after the AI line; on calls it places,
+            its model usually writes an opening.
         recording_enabled:
           anyOf:
             - type: boolean
@@ -7167,8 +7175,9 @@ components:
             - type: "null"
           title: First Message
           description:
-            "Opening line the agent speaks first. Omitted: the agent waits
-            for the callee to speak first."
+            "Opening line, spoken after the AI disclosure line when it
+            is on. Omitted: the saved agent's first_message when agent_id is set;
+            otherwise the agent's model usually writes a short opening after pickup."
         recording_enabled:
           anyOf:
             - type: boolean
@@ -7201,9 +7210,9 @@ components:
           type: object
           title: Metadata
           description:
-            Free-form JSON object attached to the call and echoed back
-            on reads. Not interpreted by Hail. Keys starting with 'recording_' and
-            the key 'failure_code' are reserved and rejected.
+            Free-form JSON object stored with the call. Not interpreted
+            by Hail, and not returned by GET /v1/calls/{call_id}. Keys starting with
+            'recording_' and the key 'failure_code' are reserved and rejected.
         tools:
           anyOf:
             - items:
@@ -11075,9 +11084,9 @@ components:
           type: object
           title: Metadata
           description:
-            Free-form JSON object attached to the message and echoed back
-            on reads. Not interpreted by Hail. The key 'sms_trial' is reserved and
-            rejected.
+            Free-form JSON object stored with the message. Not interpreted
+            by Hail, and not returned by GET /v1/sms/{sms_id}. The key 'sms_trial'
+            is reserved and rejected.
       additionalProperties: false
       type: object
       required:
@@ -12274,10 +12283,11 @@ components:
             - type: "null"
           title: Language
           description:
-            "Spoken language for the call as a lowercase ISO 639-1 code\
-            \ (e.g. 'da'). One of the 39 supported codes \u2014 see docs/languages.md.\
-            \ Applied to STT, TTS, and turn detection. Omitted: the providers' defaults\
-            \ (English)."
+            "Spoken language for the call as a lowercase ISO 639-1 code
+            (e.g. 'da'). One of the 39 supported codes: see https://hail.so/docs/languages.
+            Applied to STT, TTS, and turn detection. Omitted: the language of the
+            workspace's text-to-speech provider, then English. A call with agent_id
+            and no voice_config uses the agent's language."
       additionalProperties: false
       type: object
       title: VoiceConfig
