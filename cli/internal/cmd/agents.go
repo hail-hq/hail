@@ -129,7 +129,7 @@ type agentFlags struct {
 func (f *agentFlags) bind(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&f.prompt, "prompt", "", "Task instructions (system prompt)")
 	cmd.Flags().StringVar(&f.promptFile, "prompt-file", "", "Read the instructions from a file ('-' for stdin)")
-	cmd.Flags().StringVar(&f.firstMessage, "first-message", "", "Opening line after the AI line ('' = wait for the other side)")
+	cmd.Flags().StringVar(&f.firstMessage, "first-message", "", "Opening line after the AI line ('' = none: waits on calls it answers, writes an opening on calls it places)")
 	cmd.Flags().StringVar(&f.aiLine, "ai-line", "", "AI line template; {org} becomes the organization name ('' = workspace line)")
 	cmd.Flags().BoolVar(&f.noAILine, "no-ai-line", false, "Do not speak the AI line (you verified it is not required)")
 	cmd.Flags().StringVar(&f.voiceID, "voice", "", "TTS voice id")
@@ -582,7 +582,7 @@ func printAgent(opts *Options, a *client.AgentResponse, banner bool) error {
 	if a.FirstMessage != nil && *a.FirstMessage != "" {
 		fmt.Fprintf(opts.Stdout, "  First message: %s\n", *a.FirstMessage)
 	} else {
-		fmt.Fprintf(opts.Stdout, "  First message: (waits for the other side)\n")
+		fmt.Fprintf(opts.Stdout, "  First message: (none: waits on calls it answers, writes an opening on calls it places)\n")
 	}
 	fmt.Fprintf(opts.Stdout, "  Calls:         %s\n", yesNo(a.VoiceEnabled))
 	fmt.Fprintf(opts.Stdout, "  Texts:         %s\n", yesNo(a.SmsEnabled))

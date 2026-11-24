@@ -76,7 +76,7 @@ Example (minimal):
 	cmd.Flags().StringVar(&f.llmModel, "llm-model", "", "Model name — one of --prompt/--llm-* required (mode B)")
 	cmd.Flags().StringVar(&f.from, "from", "", "Override the from-number (default: first active number on the org)")
 	cmd.Flags().StringVar(&f.firstMessage, "first-message", "", "Spoken on pickup before listening")
-	cmd.Flags().StringVar(&f.language, "language", "", "Spoken language for the call, lowercase ISO 639-1 (e.g. da); one of the 39 supported codes, see https://hail.so/docs/languages; default: the agent's language, then the workspace TTS language, then English")
+	cmd.Flags().StringVar(&f.language, "language", "", "Spoken language for the call, lowercase ISO 639-1 (e.g. da); one of the 39 supported codes, see https://hail.so/docs/languages; default: the workspace TTS language, then English")
 	cmd.Flags().BoolVar(&f.aiDisclosure, "ai-disclosure", true, "Speak the AI self-disclosure line first on the call; --ai-disclosure=false skips it (your responsibility — disclosure laws may require it)")
 	cmd.Flags().BoolVar(&f.recordingEnabled, "recording", false, "Best-effort recording; requires workspace permission and selects the disclosed combined call rate")
 	cmd.Flags().StringSliceVar(&f.tools, "tools", nil, "Agent tools to allow (comma-separated or repeated); omit for all available, 'none' to disable all")

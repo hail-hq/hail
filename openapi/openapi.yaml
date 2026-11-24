@@ -6601,7 +6601,7 @@ components:
           description:
             "Opening line spoken after the AI line. Omitted: on a call
             the agent answers, it waits for the caller to speak first; on a call it
-            places, its model writes a short opening after pickup."
+            places, its model usually writes a short opening after pickup."
         recording_enabled:
           anyOf:
             - type: boolean
@@ -6754,7 +6754,9 @@ components:
             - type: string
             - type: "null"
           title: First Message
-          description: Opening line, or null to wait.
+          description:
+            "Opening line, or null: the agent waits on calls it answers,
+            and its model usually writes an opening on calls it places."
         recording_enabled:
           anyOf:
             - type: boolean
@@ -6893,7 +6895,10 @@ components:
               maxLength: 1000
             - type: "null"
           title: First Message
-          description: New opening line; null makes the agent wait for the other side.
+          description:
+            New opening line; null removes it. Then the agent waits on
+            calls it answers, and its model usually writes an opening on calls it
+            places.
         recording_enabled:
           anyOf:
             - type: boolean
@@ -7094,7 +7099,9 @@ components:
           title: First Message
           description:
             "Opening line the agent speaks first, after the AI disclosure
-            line. Omitted: the agent's model writes a short opening after pickup."
+            line when it is on. Omitted: the saved agent's first_message when agent_id
+            is set; otherwise the agent's model usually writes a short opening after
+            pickup."
         recording_enabled:
           anyOf:
             - type: boolean

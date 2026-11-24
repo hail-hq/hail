@@ -265,8 +265,9 @@ class CallCreate(ConsentAttestationMixin):
         default=None,
         description=(
             "Opening line the agent speaks first, after the AI disclosure "
-            "line. Omitted: the agent's model writes a short opening after "
-            "pickup."
+            "line when it is on. Omitted: the saved agent's first_message "
+            "when agent_id is set; otherwise the agent's model usually writes "
+            "a short opening after pickup."
         ),
     )
     recording_enabled: bool | None = Field(
@@ -1355,7 +1356,7 @@ class AgentCreate(BaseModel):
     first_message: str | None = Field(
         default=None,
         max_length=1000,
-        description="Opening line spoken after the AI line. Omitted: on a call the agent answers, it waits for the caller to speak first; on a call it places, its model writes a short opening after pickup.",
+        description="Opening line spoken after the AI line. Omitted: on a call the agent answers, it waits for the caller to speak first; on a call it places, its model usually writes a short opening after pickup.",
     )
     recording_enabled: bool | None = Field(
         default=None,
@@ -1463,7 +1464,7 @@ class AgentUpdate(BaseModel):
     first_message: str | None = Field(
         default=None,
         max_length=1000,
-        description="New opening line; null makes the agent wait for the other side.",
+        description="New opening line; null removes it. Then the agent waits on calls it answers, and its model usually writes an opening on calls it places.",
     )
     recording_enabled: bool | None = Field(
         default=None,
@@ -1543,7 +1544,7 @@ class AgentResponse(BaseModel):
     organization_id: UUID = Field(description="Organization that owns this agent.")
     name: str = Field(description="Display name, unique per organization.")
     system_prompt: str = Field(description="Task instructions.")
-    first_message: str | None = Field(description="Opening line, or null to wait.")
+    first_message: str | None = Field(description="Opening line, or null: the agent waits on calls it answers, and its model usually writes an opening on calls it places.")
     recording_enabled: bool | None = Field(
         default=None,
         description="Null inherits the workspace recording choice; true or false sets recording for this agent's calls, whatever the workspace setting.",

@@ -1773,7 +1773,7 @@ type AgentCreate struct {
 	// EmailEnabled Answer email on addresses that route email to this agent.
 	EmailEnabled *bool `json:"email_enabled,omitempty"`
 
-	// FirstMessage Opening line spoken after the AI line. Omitted: on a call the agent answers, it waits for the caller to speak first; on a call it places, its model writes a short opening after pickup.
+	// FirstMessage Opening line spoken after the AI line. Omitted: on a call the agent answers, it waits for the caller to speak first; on a call it places, its model usually writes a short opening after pickup.
 	FirstMessage *string `json:"first_message,omitempty"`
 
 	// HandoverContacts People the agent may hand a live call to, in order. The agent never sees their numbers.
@@ -1834,7 +1834,7 @@ type AgentResponse struct {
 	// EmailEnabled Whether the agent answers email.
 	EmailEnabled *bool `json:"email_enabled,omitempty"`
 
-	// FirstMessage Opening line, or null to wait.
+	// FirstMessage Opening line, or null: the agent waits on calls it answers, and its model usually writes an opening on calls it places.
 	FirstMessage *string `json:"first_message"`
 
 	// HandoverContacts People the agent may hand a live call to.
@@ -1902,7 +1902,7 @@ type AgentUpdate struct {
 	// EmailEnabled Whether the agent answers email.
 	EmailEnabled *bool `json:"email_enabled,omitempty"`
 
-	// FirstMessage New opening line; null makes the agent wait for the other side.
+	// FirstMessage New opening line; null removes it. Then the agent waits on calls it answers, and its model usually writes an opening on calls it places.
 	FirstMessage *string `json:"first_message,omitempty"`
 
 	// HandoverContacts New handover list; replaces the old one. [] removes all; null leaves it.
@@ -1965,7 +1965,7 @@ type CallCreate struct {
 	// ConsentSource Where/how consent was obtained (e.g. 'signup form', 'prior customer relationship'). Required (non-empty) when message_type is 'marketing'.
 	ConsentSource *string `json:"consent_source,omitempty"`
 
-	// FirstMessage Opening line the agent speaks first, after the AI disclosure line. Omitted: the agent's model writes a short opening after pickup.
+	// FirstMessage Opening line the agent speaks first, after the AI disclosure line when it is on. Omitted: the saved agent's first_message when agent_id is set; otherwise the agent's model usually writes a short opening after pickup.
 	FirstMessage *string `json:"first_message,omitempty"`
 
 	// From Caller-id phone number, E.164 format. Must be a number owned by the organization with the voice capability. Omitted: an active org-owned number is used if one exists, else a number is claimed from the shared pool.

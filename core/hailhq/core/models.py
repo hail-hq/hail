@@ -518,7 +518,8 @@ class Agent(Base):
     )
     name: Mapped[str] = mapped_column(Text, nullable=False)
     system_prompt: Mapped[str] = mapped_column(Text, nullable=False)
-    # NULL = the agent waits for the other side to speak first.
+    # NULL = the agent waits on calls it answers; on calls it places, its
+    # model usually writes a short opening.
     first_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     recording_enabled: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     ai_disclosure: Mapped[bool] = mapped_column(
