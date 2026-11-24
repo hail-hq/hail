@@ -101,6 +101,7 @@ from hailhq.voicebot.pipeline import (
     decrypt_llm_metadata,
     resolve_org_configs,
     stt_takes_keyterms,
+    use_conversation_turn_wait,
 )
 from hailhq.voicebot.recording import start_recording, stop_recording
 from hailhq.voicebot.recovery import ConversationRecovery
@@ -1094,6 +1095,8 @@ async def speak_greeting(
         eou_task = getattr(recognition, "_end_of_turn_task", None)
         if eou_task is not None:
             eou_task.cancel()
+    # From the greeting on, the agent talks with a person: answer sooner.
+    use_conversation_turn_wait(session)
     try:
         if first_message:
             interruptible = True

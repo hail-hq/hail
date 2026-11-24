@@ -50,6 +50,7 @@ from hailhq.voicebot.agent import (
     speak_greeting,
     speech_text,
 )
+from hailhq.voicebot.pipeline import MAX_TURN_END_WAIT, use_conversation_turn_wait
 from hailhq.voicebot.spoken_lines import SPOKEN_LINES
 from livekit import rtc
 from livekit.agents import Agent, AgentSession
@@ -2513,3 +2514,22 @@ def test_greeting_with_ai_line_in_other_languages(message, spoken):
     from hailhq.voicebot.agent import greeting_with_ai_line
 
     assert greeting_with_ai_line(message, "AI line.") == spoken
+
+
+async def test_the_greeting_switches_the_session_to_the_shorter_turn_wait() -> None:
+    session = FakeAnnouncingSession()
+    waits: list[dict] = []
+    session.update_options = lambda **kwargs: waits.append(kwargs)
+
+    await speak_greeting(session, {"first_message": "Hello."})
+
+    assert waits == [{"endpointing_opts": {"max_delay": MAX_TURN_END_WAIT}}]
+    assert session.say_calls  # set before the greeting is spoken
+
+
+def test_a_failing_wait_change_never_costs_the_call() -> None:
+    def broken(**_kwargs):
+        raise RuntimeError("session closed")
+
+    use_conversation_turn_wait(SimpleNamespace(update_options=broken))
+    use_conversation_turn_wait(object())  # a session without the method
