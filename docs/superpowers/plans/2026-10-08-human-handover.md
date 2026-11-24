@@ -1561,7 +1561,7 @@ cd ../cli && make codegen && go build ./... && go test ./...
 
 ### Task 9: Console data and form state (hail-website)
 
-Work in a new worktree: `git -C ~/playground/hail-website worktree add -b feat/human-handover .claude/worktrees/human-handover origin/master`. `node_modules`: symlink `../../../node_modules` like earlier worktrees.
+Work in a new worktree: `git -C <hail-website root> worktree add -b feat/human-handover .claude/worktrees/human-handover origin/master`. `node_modules`: symlink `../../../node_modules` like earlier worktrees.
 
 **Files:**
 - Modify: `lib/agent-queries.ts`, `app/console/agents/actions.ts`, `app/console/agents/agent-form.ts`, `app/console/agents/AgentSheet.tsx` (`fromAgent` only), `app/console/agents/new/page.tsx`, `app/console/agents/[id]/page.tsx`
@@ -1684,7 +1684,7 @@ UI requirements (from the spec):
 
 - [ ] **Step 5: Full check** — `pnpm vitest run && pnpm tsc --noEmit && pnpm lint`.
 
-- [ ] **Step 6: Commit** `git add -A && git commit -m "feat(console): hand over step and call drawer line"`, push, open PR in `r13i/hail-website` linking the hail PR. Merge order: hail PR first (migration 0053 + API field), then console.
+- [ ] **Step 6: Commit** `git add -A && git commit -m "feat(console): hand over step and call drawer line"`, push, open PR in the hail-website repo linking the hail PR. Merge order: hail PR first (migration 0053 + API field), then console.
 
 ---
 

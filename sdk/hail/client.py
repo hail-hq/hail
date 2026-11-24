@@ -151,7 +151,7 @@ class _CallsResource:
             body["consent_obtained_at"] = consent_obtained_at.isoformat()
         if message_type is not None:
             body["message_type"] = message_type
-        # tools=[] is meaningful (disable all agent tools), so include the
+        # tools=[] is meaningful (only the tools every call keeps), so include the
         # key for [] too — only omit when the caller left it None.
         if tools is not None:
             body["tools"] = tools

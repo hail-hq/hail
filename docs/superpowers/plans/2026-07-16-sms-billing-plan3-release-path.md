@@ -11,8 +11,8 @@
 ## Global Constraints
 
 - Two repos, branch `feat/sms-console-ui` in each:
-  - hail: `/Users/r/playground/hail/.claude/worktrees/sms-console-ui`
-  - hail-website: `/Users/r/playground/hail-website/.claude/worktrees/sms-console-ui`
+  - hail: a worktree of this repo (`.claude/worktrees/sms-console-ui`)
+  - hail-website: a worktree of the hail-website repo (`.claude/worktrees/sms-console-ui`)
 - **Depends on Plan 2** — the rater's `released_at IS NULL` clause is what makes release stop billing.
 - hail invariant (repo CLAUDE.md): **regenerate `openapi/openapi.yaml` in the same PR as any route change.** `openapi-check.yml` CI fails otherwise.
 - Release uses the **voice** provider (`get_voice_provider`) — `release_number` lives on `VoiceProvider`, not `SmsProvider`.

@@ -119,7 +119,7 @@ def test_missing_section_fails():
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd /Users/r/playground/hail && uv run pytest docs/submissions/test_validate_submission.py -v`
+Run: `cd <repo root> && uv run pytest docs/submissions/test_validate_submission.py -v`
 Expected: `ModuleNotFoundError: No module named 'validate_submission'` (or collection error) — the module doesn't exist yet.
 
 - [ ] **Step 3: Write the implementation**
@@ -202,7 +202,7 @@ if __name__ == "__main__":
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cd /Users/r/playground/hail && uv run pytest docs/submissions/test_validate_submission.py -v`
+Run: `cd <repo root> && uv run pytest docs/submissions/test_validate_submission.py -v`
 Expected: all 6 tests PASS.
 
 - [ ] **Step 5: Leave uncommitted**
@@ -266,7 +266,7 @@ status: drafted
 
 - [ ] **Step 2: Verify the template validates**
 
-Run: `cd /Users/r/playground/hail && uv run python3 docs/submissions/validate_submission.py docs/submissions/_TEMPLATE.md`
+Run: `cd <repo root> && uv run python3 docs/submissions/validate_submission.py docs/submissions/_TEMPLATE.md`
 Expected: `OK docs/submissions/_TEMPLATE.md: Example Target Name (score=0, status=drafted)`
 
 - [ ] **Step 3: Write the README index skeleton**
@@ -284,7 +284,7 @@ Ranked by relevance/impact score, highest first. Update the **Status** column as
 
 - [ ] **Step 4: Verify the README skeleton**
 
-Run: `grep -c '| Rank | Target | Category | Score | Status | File |' /Users/r/playground/hail/docs/submissions/README.md`
+Run: `grep -c '| Rank | Target | Category | Score | Status | File |' docs/submissions/README.md`
 Expected: `1`
 
 - [ ] **Step 5: Leave uncommitted**
@@ -441,7 +441,7 @@ return shortlist;
 
 - [ ] **Step 2: Verify the script is syntactically valid**
 
-Run: `node --check /Users/r/playground/hail/.claude/workflows/hail-registry-research.js`
+Run: `node --check .claude/workflows/hail-registry-research.js`
 Expected: no output, exit code 0.
 
 - [ ] **Step 3: Leave uncommitted**
@@ -613,7 +613,7 @@ return { files, readme };
 
 - [ ] **Step 2: Verify the script is syntactically valid**
 
-Run: `node --check /Users/r/playground/hail/.claude/workflows/hail-registry-drafting.js`
+Run: `node --check .claude/workflows/hail-registry-drafting.js`
 Expected: no output, exit code 0.
 
 - [ ] **Step 3: Leave uncommitted**
@@ -640,7 +640,7 @@ Call the `Workflow` tool with `{ scriptPath: ".claude/workflows/hail-registry-dr
 
 - [ ] **Step 2: Write each returned file**
 
-For every entry in the workflow's returned `files` array, use the `Write` tool to create `files[i].filepath` (relative to `/Users/r/playground/hail/`) with content `files[i].content`.
+For every entry in the workflow's returned `files` array, use the `Write` tool to create `files[i].filepath` (relative to the repo root) with content `files[i].content`.
 
 - [ ] **Step 3: Write the populated README index**
 
@@ -651,7 +651,7 @@ Use the `Write` tool to overwrite `docs/submissions/README.md` with the workflow
 Run:
 
 ```bash
-cd /Users/r/playground/hail
+cd <repo root>
 for f in docs/submissions/*.md; do
   base="$(basename "$f")"
   [ "$base" = "README.md" ] && continue

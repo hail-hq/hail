@@ -13,8 +13,8 @@
 ## Global Constraints
 
 - The user chose lean plans: each task names files, interfaces, tests and commands. The worker writes the test first (TDD), then the code.
-- `hail` work happens only in `/Users/r/playground/hail/.claude/worktrees/email-unbranded-domains-guided` (branch `feat/email-unbranded-domains-guided`).
-- `hail-website` work happens only in `/Users/r/playground/hail-website/.claude/worktrees/console-email-domains-tracking` (branch `feat/console-email-domains-tracking`, base `origin/master`).
+- `hail` work happens only in a worktree of this repo, `.claude/worktrees/email-unbranded-domains-guided` (branch `feat/email-unbranded-domains-guided`).
+- `hail-website` work happens only in a worktree of the hail-website repo, `.claude/worktrees/console-email-domains-tracking` (branch `feat/console-email-domains-tracking`, base `origin/master`).
 - Commit after each task. Conventional Commits. **No `Co-Authored-By` or any AI trailer.** No push, no PR, no merge, no tag — the controller does those.
 - Python env: run `uv sync --all-packages --all-extras` at the repo root only. Never `uv sync` inside a sub-package.
 - No new dependencies. No new env vars. No scope beyond the spec.

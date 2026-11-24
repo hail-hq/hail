@@ -39,8 +39,8 @@ and evidence: [`../superpowers/specs/2026-07-15-nango-connector-design.md`](../s
 
 ## Steps to submit
 
-1. Work in the existing fork `r13i/nango` (`/Users/r/playground/nango`, currently
-   `master`). Branch off per gitflow, e.g. `feat/add-hail-provider`.
+1. Work in a fork of `NangoHQ/nango`, on
+   `master`. Branch off per gitflow, e.g. `feat/add-hail-provider`.
 2. Add both blocks from **Content** to `packages/providers/providers.yaml`,
    placed **alphabetically** (after `gusto`).
 3. Write the three docs pages (see Content):
@@ -204,9 +204,8 @@ Field notes:
   entry rather than adding friction here.
 - `verification.endpoints`: a **fallback chain**, not a coverage list —
   `credentialsTest` (`packages/server/lib/hooks/hooks.ts:468`) returns on the
-  first 2xx. Listing three is insurance for when scope enforcement ships
-  (`mcp/hailhq/mcp/server.py:54`, "deferred to Phase 2"); today no route
-  enforces scopes, so `/calls` always answers.
+  first 2xx. Listing three is insurance for when route-level scope
+  enforcement ships (Phase 2).
 - `registration_params`: **mandatory.** Nango's DCR body
   (`packages/shared/lib/clients/mcp.client.ts:33-38`) omits `grant_types`
   unless `registration_params` supplies it, and Hail then registers the client

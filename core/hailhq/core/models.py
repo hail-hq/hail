@@ -530,7 +530,8 @@ class Agent(Base):
     voice_config: Mapped[dict] = mapped_column(
         JSONB, server_default=text("'{}'::jsonb"), nullable=False
     )
-    # NULL = every tool the workspace supports; [] = none.
+    # NULL = every tool the workspace supports; [] = no built-in tools (HTTP
+    # tools stay on). Tools with ToolSpec.on_every_call stay on every call.
     tools: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
     # NULL = the workspace limit.
     max_duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)

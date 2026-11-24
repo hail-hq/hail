@@ -95,7 +95,7 @@ These boundaries were confirmed with the requester. **Read this before starting*
 - [ ] **Step 1: Create a working branch**
 
 ```bash
-cd /Users/r/playground/hail
+cd <repo root>
 git checkout -b fix/inbound-email-review
 ```
 
@@ -111,10 +111,10 @@ cd api && uv run alembic upgrade head
 Run each suite and note pass/fail counts (some will fail — those failures are what this plan fixes):
 
 ```bash
-cd /Users/r/playground/hail/core && uv run pytest -q
-cd /Users/r/playground/hail/api  && uv run pytest -q
-cd /Users/r/playground/hail/sdk  && uv run pytest -q
-cd /Users/r/playground/hail/cli  && go test ./...
+cd <repo root>/core && uv run pytest -q
+cd <repo root>/api  && uv run pytest -q
+cd <repo root>/sdk  && uv run pytest -q
+cd <repo root>/cli  && go test ./...
 ```
 
 Expected: core/api/sdk mostly pass; the bugs this plan fixes are largely _latent_ (not covered by existing tests), so a green baseline here is normal — the new tests we add are what expose them.
@@ -161,7 +161,7 @@ def test_provider_message_id_unique_is_outbound_only(alembic_runner, alembic_eng
 - [ ] **Step 2: Run it — expect FAIL**
 
 ```bash
-cd /Users/r/playground/hail/api && uv run pytest tests/test_migrations.py::test_provider_message_id_unique_is_outbound_only -v
+cd <repo root>/api && uv run pytest tests/test_migrations.py::test_provider_message_id_unique_is_outbound_only -v
 ```
 
 Expected: FAIL (revision `0009` does not exist).
@@ -252,7 +252,7 @@ Then add to the `Email` model's `__table_args__` tuple (find the existing `__tab
 - [ ] **Step 5: Run migration test — expect PASS**
 
 ```bash
-cd /Users/r/playground/hail/api && uv run alembic downgrade base && uv run alembic upgrade head
+cd <repo root>/api && uv run alembic downgrade base && uv run alembic upgrade head
 uv run pytest tests/test_migrations.py -v
 ```
 
@@ -327,7 +327,7 @@ async def test_persist_one_survives_unique_violation(db_session, inbound_domain)
 - [ ] **Step 2: Run it — expect PASS or FAIL depending on current SELECT**
 
 ```bash
-cd /Users/r/playground/hail/core && uv run pytest tests/test_email_ingest.py::test_persist_one_survives_unique_violation -v
+cd <repo root>/core && uv run pytest tests/test_email_ingest.py::test_persist_one_survives_unique_violation -v
 ```
 
 Expected: this specific assertion likely PASSES today via the SELECT short-circuit. Its purpose is regression protection; the real fix is Step 3 + the route test in Task 3.
@@ -376,7 +376,7 @@ In `email_ingest.py` lines ~5-8, the docstring already claims the index "backsto
 - [ ] **Step 5: Run the ingest suite — expect PASS**
 
 ```bash
-cd /Users/r/playground/hail/core && uv run pytest tests/test_email_ingest.py -v
+cd <repo root>/core && uv run pytest tests/test_email_ingest.py -v
 ```
 
 Expected: PASS.
@@ -438,7 +438,7 @@ async def test_two_orgs_same_message_id_persists_both(client, db_session, settin
 - [ ] **Step 2: Run it — expect PASS (proves Task 1 fixed C1)**
 
 ```bash
-cd /Users/r/playground/hail/api && uv run pytest tests/test_internal_ses_events_multi_org.py -v
+cd <repo root>/api && uv run pytest tests/test_internal_ses_events_multi_org.py -v
 ```
 
 Expected: PASS. If you run this against the pre-Task-1 schema it FAILs with a 500 `duplicate key … emails_provider_message_id_key` — confirming the regression is real.
@@ -500,7 +500,7 @@ async def test_delivered_body_has_full_envelope(db_session, make_delivery):
 - [ ] **Step 2: Run it — expect FAIL**
 
 ```bash
-cd /Users/r/playground/hail/core && uv run pytest tests/test_webhook_worker.py::test_delivered_body_has_full_envelope -v
+cd <repo root>/core && uv run pytest tests/test_webhook_worker.py::test_delivered_body_has_full_envelope -v
 ```
 
 Expected: FAIL — `set(env)` is missing `id` and `created_at`.
@@ -557,7 +557,7 @@ def _payload(
 - [ ] **Step 5: Run worker + fanout suites — expect PASS**
 
 ```bash
-cd /Users/r/playground/hail/core && uv run pytest tests/test_webhook_worker.py tests/test_webhook_fanout.py -v
+cd <repo root>/core && uv run pytest tests/test_webhook_worker.py tests/test_webhook_fanout.py -v
 ```
 
 Expected: PASS. If `test_webhook_fanout.py` asserted the old 4-key payload shape, update those assertions to the new 2-key shape.
@@ -596,7 +596,7 @@ git commit -m "fix(webhooks): emit spec-conformant event envelope with id and cr
 License: `cryptography` is Apache-2.0 / BSD — compatible with AGPLv3 (CLAUDE.md license-check satisfied). Then refresh the lock:
 
 ```bash
-cd /Users/r/playground/hail/core && uv lock
+cd <repo root>/core && uv lock
 ```
 
 - [ ] **Step 2: Write the failing cipher test**
@@ -633,7 +633,7 @@ def test_missing_key_raises():
 - [ ] **Step 3: Run it — expect FAIL (module missing)**
 
 ```bash
-cd /Users/r/playground/hail/core && uv run pytest tests/test_secret_cipher.py -v
+cd <repo root>/core && uv run pytest tests/test_secret_cipher.py -v
 ```
 
 Expected: FAIL — `ModuleNotFoundError: hailhq.core.secret_cipher`.
@@ -708,7 +708,7 @@ HAIL_WEBHOOK_SECRET_KEY=
 - [ ] **Step 7: Run cipher test — expect PASS**
 
 ```bash
-cd /Users/r/playground/hail/core && uv run pytest tests/test_secret_cipher.py -v
+cd <repo root>/core && uv run pytest tests/test_secret_cipher.py -v
 ```
 
 Expected: PASS.
@@ -751,7 +751,7 @@ to:
 In `api/migrations/versions/0007_email_inbound_schema.py`, find every `webhook_secret_hash` occurrence (column add, any CHECK constraint text, and the downgrade) and rename to `webhook_secret_encrypted`. The CHECK constraint `(webhook_url IS NULL) = (webhook_secret_hash IS NULL)` becomes `(webhook_url IS NULL) = (webhook_secret_encrypted IS NULL)`.
 
 ```bash
-cd /Users/r/playground/hail && grep -n "webhook_secret_hash" api/migrations/versions/0007_email_inbound_schema.py
+cd <repo root> && grep -n "webhook_secret_hash" api/migrations/versions/0007_email_inbound_schema.py
 ```
 
 Replace each occurrence with `webhook_secret_encrypted`.
@@ -767,7 +767,7 @@ In `core/hailhq/core/models.py`:
 - [ ] **Step 4: Reset the local DB so the edited revisions replay**
 
 ```bash
-cd /Users/r/playground/hail/api && uv run alembic downgrade base && uv run alembic upgrade head
+cd <repo root>/api && uv run alembic downgrade base && uv run alembic upgrade head
 ```
 
 Verify the new column names exist:
@@ -783,7 +783,7 @@ Expected: `secret_encrypted` and `webhook_secret_encrypted` present; no `*_hash`
 - [ ] **Step 5: Run migration test — expect PASS**
 
 ```bash
-cd /Users/r/playground/hail/api && uv run pytest tests/test_migrations.py -v
+cd <repo root>/api && uv run pytest tests/test_migrations.py -v
 ```
 
 Expected: PASS (round-trip clean).
@@ -954,7 +954,7 @@ git rm api/hailhq/api/webhook_secrets.py
 Then grep for any lingering importers:
 
 ```bash
-cd /Users/r/playground/hail && grep -rn "webhook_secrets" api/ core/ | grep -v "secret_encrypted"
+cd <repo root> && grep -rn "webhook_secrets" api/ core/ | grep -v "secret_encrypted"
 ```
 
 Expected: no results (all importers removed in Steps 1-4). Fix any that remain.
@@ -967,8 +967,8 @@ Expected: no results (all importers removed in Steps 1-4). Fix any that remain.
 - [ ] **Step 7: Run the affected suites — expect PASS**
 
 ```bash
-cd /Users/r/playground/hail/core && uv run pytest tests/test_webhook_worker.py -v
-cd /Users/r/playground/hail/api  && uv run pytest tests/test_webhooks_api.py tests/test_email_domains_inbound_patch.py -v
+cd <repo root>/core && uv run pytest tests/test_webhook_worker.py -v
+cd <repo root>/api  && uv run pytest tests/test_webhooks_api.py tests/test_email_domains_inbound_patch.py -v
 ```
 
 Expected: PASS.
@@ -1024,7 +1024,7 @@ async def test_create_rejects_private_target(client, auth_headers):
 - [ ] **Step 2: Run — expect FAIL (currently 200/201)**
 
 ```bash
-cd /Users/r/playground/hail/api && uv run pytest tests/test_webhooks_api.py -k "rejects" -v
+cd <repo root>/api && uv run pytest tests/test_webhooks_api.py -k "rejects" -v
 ```
 
 Expected: FAIL.
@@ -1076,7 +1076,7 @@ In `api/hailhq/api/routes/email_domains.py`, in the PATCH handler where `body.we
 - [ ] **Step 6: Run — expect PASS**
 
 ```bash
-cd /Users/r/playground/hail/api && uv run pytest tests/test_webhooks_api.py tests/test_email_domains_inbound_patch.py -v
+cd <repo root>/api && uv run pytest tests/test_webhooks_api.py tests/test_email_domains_inbound_patch.py -v
 ```
 
 Expected: PASS. (If `hail_webhook_allow_private_networks` defaults True in the test fixture, set it False for these two tests.)
@@ -1152,7 +1152,7 @@ def test_nested_rfc822_is_attachment_not_parent_body(fixture_bytes):
 - [ ] **Step 3: Run — expect FAIL**
 
 ```bash
-cd /Users/r/playground/hail/core && uv run pytest tests/test_email_mime.py::test_nested_rfc822_is_attachment_not_parent_body -v
+cd <repo root>/core && uv run pytest tests/test_email_mime.py::test_nested_rfc822_is_attachment_not_parent_body -v
 ```
 
 Expected: FAIL — inner body leaks into parent, no `message/rfc822` attachment captured.
@@ -1224,7 +1224,7 @@ def _walk_bodies(
 - [ ] **Step 5: Run — expect PASS**
 
 ```bash
-cd /Users/r/playground/hail/core && uv run pytest tests/test_email_mime.py -v
+cd <repo root>/core && uv run pytest tests/test_email_mime.py -v
 ```
 
 Expected: PASS (including the pre-existing `simple`/`multipart_attachment`/`threaded` tests — verify no regression).
@@ -1275,7 +1275,7 @@ def test_unknown_charset_does_not_raise(fixture_bytes):
 - [ ] **Step 3: Run — expect FAIL (raises LookupError)**
 
 ```bash
-cd /Users/r/playground/hail/core && uv run pytest tests/test_email_mime.py::test_unknown_charset_does_not_raise -v
+cd <repo root>/core && uv run pytest tests/test_email_mime.py::test_unknown_charset_does_not_raise -v
 ```
 
 Expected: FAIL with `LookupError: unknown encoding`.
@@ -1301,7 +1301,7 @@ def _safe_text(part: Message) -> str:
 - [ ] **Step 5: Run — expect PASS**
 
 ```bash
-cd /Users/r/playground/hail/core && uv run pytest tests/test_email_mime.py -v
+cd <repo root>/core && uv run pytest tests/test_email_mime.py -v
 ```
 
 Expected: PASS.
@@ -1357,7 +1357,7 @@ async def test_cap_is_scoped_per_domain(db_session, two_domains_same_org):
 - [ ] **Step 2: Run — expect FAIL (signature lacks email_domain_id)**
 
 ```bash
-cd /Users/r/playground/hail/core && uv run pytest tests/test_forward_limiter.py::test_cap_is_scoped_per_domain -v
+cd <repo root>/core && uv run pytest tests/test_forward_limiter.py::test_cap_is_scoped_per_domain -v
 ```
 
 Expected: FAIL (`can_forward()` got an unexpected keyword argument `email_domain_id`).
@@ -1408,7 +1408,7 @@ In `core/hailhq/core/email_ingest.py` (line ~197), pass the domain id:
 - [ ] **Step 5: Run — expect PASS**
 
 ```bash
-cd /Users/r/playground/hail/core && uv run pytest tests/test_forward_limiter.py tests/test_email_ingest.py -v
+cd <repo root>/core && uv run pytest tests/test_forward_limiter.py tests/test_email_ingest.py -v
 ```
 
 Expected: PASS (the docstring at the top of `forward_limiter.py` is now accurate — no edit needed, but verify it reads "per-domain").
@@ -1433,7 +1433,7 @@ git commit -m "fix(email): scope forward rate cap to the inbound domain"
 - [ ] **Step 1: Inspect the current `detect_loop`/`LoopDetected`**
 
 ```bash
-cd /Users/r/playground/hail && grep -n "class LoopDetected\|def detect_loop\|raise LoopDetected\|max_hops\|base_domain" core/hailhq/core/email_routing.py
+cd <repo root> && grep -n "class LoopDetected\|def detect_loop\|raise LoopDetected\|max_hops\|base_domain" core/hailhq/core/email_routing.py
 ```
 
 Note the two raise sites (hop-cap vs. base-domain match).
@@ -1464,7 +1464,7 @@ def test_loop_detected_carries_cause():
 - [ ] **Step 3: Run — expect FAIL (no `.cause`)**
 
 ```bash
-cd /Users/r/playground/hail/core && uv run pytest tests/test_email_routing.py::test_loop_detected_carries_cause -v
+cd <repo root>/core && uv run pytest tests/test_email_routing.py::test_loop_detected_carries_cause -v
 ```
 
 Expected: FAIL — `LoopDetected` has no attribute `cause`.
@@ -1509,7 +1509,7 @@ Add to `core/tests/test_email_ingest.py` (or the forwarding test module) a case 
 - [ ] **Step 7: Run — expect PASS**
 
 ```bash
-cd /Users/r/playground/hail/core && uv run pytest tests/test_email_routing.py tests/test_email_ingest.py -v
+cd <repo root>/core && uv run pytest tests/test_email_routing.py tests/test_email_ingest.py -v
 ```
 
 Expected: PASS.
@@ -1542,7 +1542,7 @@ In `core/tests/test_email_ingest.py`, in the fan-out test that already exercises
 - [ ] **Step 2: Run — expect FAIL (double slash or current shape)**
 
 ```bash
-cd /Users/r/playground/hail/core && uv run pytest tests/test_email_ingest.py -k "url" -v
+cd <repo root>/core && uv run pytest tests/test_email_ingest.py -k "url" -v
 ```
 
 - [ ] **Step 3: Use `join_url` in email_ingest.py**
@@ -1582,8 +1582,8 @@ Add `from hailhq.core.urls import canonical_url`. (`join_url` downstream tolerat
 - [ ] **Step 5: Run — expect PASS**
 
 ```bash
-cd /Users/r/playground/hail/core && uv run pytest tests/test_email_ingest.py -v
-cd /Users/r/playground/hail/api  && uv run pytest tests/test_internal_ses_events.py tests/test_internal_ses_events_multi_org.py -v
+cd <repo root>/core && uv run pytest tests/test_email_ingest.py -v
+cd <repo root>/api  && uv run pytest tests/test_internal_ses_events.py tests/test_internal_ses_events_multi_org.py -v
 ```
 
 Expected: PASS.
@@ -1627,7 +1627,7 @@ async def test_get_email_populates_raw_url_and_attachments(client, auth_headers,
 - [ ] **Step 2: Run — expect FAIL (raw_url None, attachments [])**
 
 ```bash
-cd /Users/r/playground/hail/api && uv run pytest tests/test_emails_inbound_reads.py -k "populates" -v
+cd <repo root>/api && uv run pytest tests/test_emails_inbound_reads.py -k "populates" -v
 ```
 
 - [ ] **Step 3: Populate in `get_email`**
@@ -1660,7 +1660,7 @@ Add `request: Request` to the handler signature (import `from fastapi import Req
 - [ ] **Step 4: Run — expect PASS**
 
 ```bash
-cd /Users/r/playground/hail/api && uv run pytest tests/test_emails_inbound_reads.py tests/test_emails_api.py -v
+cd <repo root>/api && uv run pytest tests/test_emails_inbound_reads.py tests/test_emails_api.py -v
 ```
 
 Expected: PASS.
@@ -1712,7 +1712,7 @@ async def test_org_inbound_cap_skips_fanout_but_persists(db_session, inbound_dom
 - [ ] **Step 2: Run — expect FAIL**
 
 ```bash
-cd /Users/r/playground/hail/core && uv run pytest tests/test_email_ingest.py -k "org_inbound_cap" -v
+cd <repo root>/core && uv run pytest tests/test_email_ingest.py -k "org_inbound_cap" -v
 ```
 
 - [ ] **Step 3: Add the cap parameter + check**
@@ -1762,8 +1762,8 @@ In `api/hailhq/api/routes/internal/ses_events.py`, add to the `ingest_inbound(..
 - [ ] **Step 5: Run — expect PASS**
 
 ```bash
-cd /Users/r/playground/hail/core && uv run pytest tests/test_email_ingest.py -v
-cd /Users/r/playground/hail/api  && uv run pytest tests/test_internal_ses_events.py -v
+cd <repo root>/core && uv run pytest tests/test_email_ingest.py -v
+cd <repo root>/api  && uv run pytest tests/test_internal_ses_events.py -v
 ```
 
 Expected: PASS.
@@ -1813,7 +1813,7 @@ func TestWebhooksCommandRegistered(t *testing.T) {
 - [ ] **Step 2: Run — expect FAIL**
 
 ```bash
-cd /Users/r/playground/hail/cli && go test ./internal/cmd/ -run TestWebhooksCommandRegistered -v
+cd <repo root>/cli && go test ./internal/cmd/ -run TestWebhooksCommandRegistered -v
 ```
 
 Expected: FAIL — "webhooks is not registered."
@@ -1829,7 +1829,7 @@ In `cli/internal/cmd/root.go`, after line 136 (`root.AddCommand(newAuthCmd(opts)
 - [ ] **Step 4: Run — expect PASS, and verify in the help**
 
 ```bash
-cd /Users/r/playground/hail/cli && go test ./internal/cmd/ -run TestWebhooksCommandRegistered -v
+cd <repo root>/cli && go test ./internal/cmd/ -run TestWebhooksCommandRegistered -v
 go run . --help | grep webhooks
 ```
 
@@ -1869,7 +1869,7 @@ def test_patch_returns_webhook_secret(email_domains_client, mock_patch_response)
 - [ ] **Step 2: Run — expect FAIL (attribute missing / dropped)**
 
 ```bash
-cd /Users/r/playground/hail/sdk && uv run pytest tests/test_email_domains.py -k "webhook_secret" -v
+cd <repo root>/sdk && uv run pytest tests/test_email_domains.py -k "webhook_secret" -v
 ```
 
 - [ ] **Step 3: Add inbound fields to the SDK models**
@@ -1919,7 +1919,7 @@ Export `EmailAttachmentResponse` from `sdk/hail/__init__.py` if the SDK re-expor
 - [ ] **Step 4: Run — expect PASS**
 
 ```bash
-cd /Users/r/playground/hail/sdk && uv run pytest tests/ -v
+cd <repo root>/sdk && uv run pytest tests/ -v
 ```
 
 Expected: PASS.
@@ -1947,7 +1947,7 @@ git commit -m "fix(sdk): expose inbound email-domain and email fields incl. webh
 - [ ] **Step 1: Audit the doc references**
 
 ```bash
-cd /Users/r/playground/hail && grep -rn "hail email list\|hail webhooks\|secret cache\|§10.6\|rotates the affected\|first delivery fails" docs/setup/aws-ses.md docs/architecture.md
+cd <repo root> && grep -rn "hail email list\|hail webhooks\|secret cache\|§10.6\|rotates the affected\|first delivery fails" docs/setup/aws-ses.md docs/architecture.md
 ```
 
 - [ ] **Step 2: Replace `hail email list --direction inbound` examples**
@@ -1965,7 +1965,7 @@ Replace the "in-process cache; first delivery fails until the tenant rotates aft
 - [ ] **Step 5: Sanity-check the docs build/links**
 
 ```bash
-cd /Users/r/playground/hail && grep -rn "webhook_secret_hash\|secret_hash\|in-process cache" docs/
+cd <repo root> && grep -rn "webhook_secret_hash\|secret_hash\|in-process cache" docs/
 ```
 
 Expected: no stale references.
@@ -1994,7 +1994,7 @@ git commit -m "docs(email): reconcile inbound/webhooks docs with shipped surface
 Use the repo's existing generation path (check `docs/operations.md` or a Makefile target for the canonical command; it dumps `app.openapi()`). Typically:
 
 ```bash
-cd /Users/r/playground/hail/api && uv run python -c "import json, yaml; from hailhq.api.main import app; print(yaml.safe_dump(app.openapi(), sort_keys=False))" > ../openapi/openapi.yaml
+cd <repo root>/api && uv run python -c "import json, yaml; from hailhq.api.main import app; print(yaml.safe_dump(app.openapi(), sort_keys=False))" > ../openapi/openapi.yaml
 ```
 
 > Use the project's actual generator if one exists — match it rather than hand-rolling, so formatting stays stable.
@@ -2002,7 +2002,7 @@ cd /Users/r/playground/hail/api && uv run python -c "import json, yaml; from hai
 - [ ] **Step 2: Diff the spec — confirm only intended changes**
 
 ```bash
-cd /Users/r/playground/hail && git diff openapi/openapi.yaml | head -120
+cd <repo root> && git diff openapi/openapi.yaml | head -120
 ```
 
 Expected: changes limited to validation/response additions and any field updates from this plan; no unexpected route loss.
@@ -2010,11 +2010,11 @@ Expected: changes limited to validation/response additions and any field updates
 - [ ] **Step 3: Run the full test matrix + linters**
 
 ```bash
-cd /Users/r/playground/hail/core && uv run pytest -q && uv run ruff check . && uv run black --check . && uv run mypy .
-cd /Users/r/playground/hail/api  && uv run pytest -q && uv run ruff check . && uv run black --check . && uv run mypy .
-cd /Users/r/playground/hail/sdk  && uv run pytest -q
-cd /Users/r/playground/hail/cli  && go test ./... && gofmt -l .
-cd /Users/r/playground/hail/mcp  && uv run pytest -q
+cd <repo root>/core && uv run pytest -q && uv run ruff check . && uv run black --check . && uv run mypy .
+cd <repo root>/api  && uv run pytest -q && uv run ruff check . && uv run black --check . && uv run mypy .
+cd <repo root>/sdk  && uv run pytest -q
+cd <repo root>/cli  && go test ./... && gofmt -l .
+cd <repo root>/mcp  && uv run pytest -q
 ```
 
 Expected: all green; `gofmt -l .` prints nothing; `ruff`/`black`/`mypy` clean.

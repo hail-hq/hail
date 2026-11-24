@@ -8,6 +8,7 @@ import uuid
 from unittest.mock import AsyncMock
 
 import hailhq.voicebot.tools as tools_mod
+import pytest
 from hailhq.core.agent_tools import http_tool
 from hailhq.core.config import settings
 from hailhq.core.models import Agent, AgentHttpTool
@@ -17,6 +18,9 @@ from hailhq.voicebot.tools import (
     _make_handler,
     build_agent_tools,
 )
+
+# The tools every call keeps, in build order.
+EVERY_CALL = ["end_call", "send_dtmf", "hail_settings_help"]
 
 
 class FakeRunContext:
@@ -62,44 +66,85 @@ def _tctx():
     )
 
 
-async def test_empty_opt_out_leaves_no_tools():
+async def test_empty_opt_out_keeps_only_every_call_tools():
+    """`tools: []` turns off every tool but the ones every call keeps
+    (ToolSpec.on_every_call): a call can always hang up."""
     tools, api = await build_agent_tools(
         {"organization_id": str(uuid.uuid4()), "tools": []},
         call_id=uuid.uuid4(),
         hangup=None,
         send_dtmf=None,
     )
-    assert tools == []
-    assert api is None
+    try:
+        assert [t.info.name for t in tools] == EVERY_CALL
+    finally:
+        if api is not None:
+            await api.aclose()
 
 
-async def test_missing_organization_id_disables_tools():
+async def test_a_tools_list_keeps_every_call_tools(db):
+    tools, api = await build_agent_tools(
+        {
+            "organization_id": str(uuid.uuid4()),
+            "tools": ["send_email", "send_sms", "list_contacts"],
+        },
+        call_id=uuid.uuid4(),
+        hangup=None,
+        send_dtmf=None,
+    )
+    try:
+        assert set(EVERY_CALL) <= {t.info.name for t in tools}
+    finally:
+        if api is not None:
+            await api.aclose()
+
+
+async def test_missing_organization_id_keeps_only_every_call_tools():
+    """No org tools without an org, but the call can still hang up."""
     tools, api = await build_agent_tools(
         {}, call_id=uuid.uuid4(), hangup=None, send_dtmf=None
     )
-    assert tools == []
+    assert [t.info.name for t in tools] == EVERY_CALL
     assert api is None
 
 
-async def test_malformed_organization_id_disables_tools():
+async def test_malformed_organization_id_keeps_only_every_call_tools():
     tools, api = await build_agent_tools(
         {"organization_id": "not-a-uuid"},
         call_id=uuid.uuid4(),
         hangup=None,
         send_dtmf=None,
     )
-    assert tools == []
+    assert [t.info.name for t in tools] == EVERY_CALL
     assert api is None
 
 
-async def test_malformed_tools_field_disables_tools():
+async def test_malformed_tools_field_keeps_only_every_call_tools():
     tools, api = await build_agent_tools(
         {"organization_id": str(uuid.uuid4()), "tools": "send_sms"},
         call_id=uuid.uuid4(),
         hangup=None,
         send_dtmf=None,
     )
-    assert tools == []
+    assert [t.info.name for t in tools] == EVERY_CALL
+    assert api is None
+
+
+async def test_every_call_tools_open_no_database(monkeypatch):
+    """`tools: []` needs no availability check, so a slow database does not
+    delay the call."""
+
+    def no_db():
+        raise AssertionError("session_scope opened")
+
+    monkeypatch.setattr(tools_mod, "session_scope", no_db)
+    tools, api = await build_agent_tools(
+        {"organization_id": str(uuid.uuid4()), "tools": []},
+        call_id=uuid.uuid4(),
+        hangup=None,
+        send_dtmf=None,
+    )
+    assert [t.info.name for t in tools] == EVERY_CALL
     assert api is None
 
 
@@ -155,7 +200,7 @@ async def test_availability_failure_does_not_poison_session(db, monkeypatch):
         _spec(name="broken_tool", is_available=broken_avail),
         _spec(name="healthy_tool", is_available=healthy_avail),
     )
-    monkeypatch.setattr(tools_mod, "all_tools", lambda: specs)
+    monkeypatch.setattr(tools_mod, "call_tools", lambda: specs)
 
     tools, api = await build_agent_tools(
         {"organization_id": str(uuid.uuid4())},
@@ -164,10 +209,7 @@ async def test_availability_failure_does_not_poison_session(db, monkeypatch):
         send_dtmf=None,
     )
     try:
-        assert [get_raw_function_info(t).name for t in tools] == [
-            "healthy_tool",
-            "hail_settings_help",
-        ]
+        assert [get_raw_function_info(t).name for t in tools] == ["healthy_tool"]
     finally:
         if api is not None:
             await api.aclose()
@@ -224,11 +266,9 @@ async def test_cancel_comes_with_transfer_call_in_a_tools_list(db) -> None:
         meta, call_id=uuid.uuid4(), hangup=None, send_dtmf=None, bridge=AsyncMock()
     )
     try:
-        assert sorted(t.info.name for t in tools) == [
-            "cancel_transfer",
-            "hail_settings_help",
-            "transfer_call",
-        ]
+        assert sorted(t.info.name for t in tools) == sorted(
+            [*EVERY_CALL, "transfer_call", "cancel_transfer"]
+        )
     finally:
         if api is not None:
             await api.aclose()
@@ -355,8 +395,8 @@ async def test_http_tools_load_for_the_calls_agent(db, session_factory, monkeypa
         meta, call_id=uuid.uuid4(), hangup=None, send_dtmf=None
     )
     try:
-        assert [t.info.name for t in tools] == ["lookup_order"]
-        assert tools[0].info.raw_schema["description"] == "Find an order."
+        assert [t.info.name for t in tools] == [*EVERY_CALL, "lookup_order"]
+        assert tools[-1].info.raw_schema["description"] == "Find an order."
     finally:
         if api is not None:
             await api.aclose()
@@ -371,10 +411,14 @@ async def test_http_tools_of_another_org_are_not_loaded(
         "agent_id": str(agent_id),
         "tools": [],
     }
-    tools, _api = await build_agent_tools(
+    tools, api = await build_agent_tools(
         meta, call_id=uuid.uuid4(), hangup=None, send_dtmf=None
     )
-    assert tools == []
+    try:
+        assert [t.info.name for t in tools] == EVERY_CALL
+    finally:
+        if api is not None:
+            await api.aclose()
 
 
 async def test_http_tool_load_failure_keeps_built_in_tools(db, monkeypatch):
@@ -420,3 +464,30 @@ async def test_wait_message_is_said_without_waiting():
     assert await _make_handler(spec, _tctx())({}, rc) == "shipped"
     assert order == ["say:One moment.", "request"]
     assert rc.waited is False
+
+
+async def test_failed_availability_check_closes_the_api_client(monkeypatch):
+    """The caller gets no client when the build fails, so the build closes it."""
+    closed = []
+
+    class FakeClient:
+        def __init__(self, *_args):
+            pass
+
+        async def aclose(self):
+            closed.append(True)
+
+    def db_down():
+        raise RuntimeError("database down")
+
+    monkeypatch.setattr(tools_mod, "AgentApiClient", FakeClient)
+    monkeypatch.setattr(tools_mod, "session_scope", db_down)
+    monkeypatch.setattr(settings, "hail_internal_secret", "secret", raising=False)
+    with pytest.raises(RuntimeError):
+        await build_agent_tools(
+            {"organization_id": str(uuid.uuid4()), "tools": ["send_sms"]},
+            call_id=uuid.uuid4(),
+            hangup=None,
+            send_dtmf=None,
+        )
+    assert closed == [True]

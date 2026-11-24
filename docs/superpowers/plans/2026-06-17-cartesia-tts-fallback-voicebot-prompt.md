@@ -729,7 +729,7 @@ Expected: all PASS.
 - [ ] **Lint/format gates (match CI):**
 
 ```bash
-cd /Users/r/playground/hail
+cd <repo root>
 uv run ruff check core voicebot sdk api
 uv run black --check core voicebot sdk api
 ```

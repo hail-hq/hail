@@ -198,3 +198,76 @@ def test_answer_then_reset_is_still_accepted() -> None:
     thread.join(3)
     assert code == 1
     assert verdict.startswith("ACCEPTED: 200")
+
+
+def test_ring_waits_and_reports_a_dropped_call() -> None:
+    """--ring sends no CANCEL at the first ring; a final 486 means the call
+    was dropped before anyone answered."""
+
+    def ring_then_drop(conn, inv):
+        conn.sendall(_response(inv, 180, "Ringing"))
+        conn.settimeout(0.3)
+        try:
+            early = conn.recv(65536)
+        except TimeoutError:
+            early = b""
+        # Recorded so the CANCEL check below sees it: an assert in this
+        # thread does not fail the test.
+        if early:
+            seen.append(early)
+        conn.settimeout(2)
+        conn.sendall(_response(inv, 486, "Rejected"))
+
+    seen: list[bytes] = []
+    port, recorded, thread = serve(ring_then_drop)
+    code, verdict = probe.probe("127.0.0.1", port, NUMBER, timeout=2, ring=True)
+    thread.join(3)
+    assert code == 0
+    assert verdict == "DROPPED: 180 Ringing, then 486 Rejected"
+    sent = b"".join(seen + recorded[1:])
+    assert b"CANCEL " not in sent
+    assert b"ACK " in sent
+
+
+def test_ring_answered_call_fails_and_is_hung_up() -> None:
+    def ring_then_answer(conn, inv):
+        conn.sendall(_response(inv, 180, "Ringing") + _response(inv, 200, "OK"))
+
+    port, seen, thread = serve(ring_then_answer)
+    code, verdict = probe.probe("127.0.0.1", port, NUMBER, timeout=2, ring=True)
+    thread.join(3)
+    assert code == 1
+    assert verdict.startswith("ACCEPTED: 200 OK")
+    assert b"BYE sip:room@127.0.0.1" in b"".join(seen[1:])
+
+
+def test_ring_without_final_answer_says_nothing_and_cancels() -> None:
+    port, seen, thread = serve(
+        lambda conn, inv: conn.sendall(_response(inv, 180, "Ringing"))
+    )
+    code, verdict = probe.probe("127.0.0.1", port, NUMBER, timeout=0.5, ring=True)
+    thread.join(3)
+    assert code == 2
+    assert verdict.startswith("INCONCLUSIVE: 180 Ringing, then no final answer")
+    assert b"CANCEL " in b"".join(seen[1:])
+
+
+def test_ring_still_passes_a_trunk_refusal() -> None:
+    port, _seen, thread = serve(
+        lambda conn, inv: conn.sendall(_response(inv, 404, "No trunk found"))
+    )
+    code, verdict = probe.probe("127.0.0.1", port, NUMBER, timeout=2, ring=True)
+    thread.join(3)
+    assert code == 0
+    assert verdict == "REFUSED: 404 No trunk found"
+
+
+def test_ring_then_closed_connection_is_inconclusive() -> None:
+    """--ring: a ring, then a closed connection, is not proof of an answer."""
+    port, _seen, thread = serve(
+        lambda conn, inv: conn.sendall(_response(inv, 180, "Ringing")) or conn.close()
+    )
+    code, verdict = probe.probe("127.0.0.1", port, NUMBER, timeout=2, ring=True)
+    thread.join(3)
+    assert code == 2
+    assert verdict.startswith("INCONCLUSIVE: the connection failed")

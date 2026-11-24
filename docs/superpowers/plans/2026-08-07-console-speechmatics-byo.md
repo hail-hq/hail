@@ -12,8 +12,8 @@
 
 ## Global Constraints
 
-- hail work on branch `feat/stt-operating-point` off `main` (repo `/Users/r/playground/hail`).
-- hail-website work in a **git worktree** off `master` (repo `/Users/r/hail-website` has uncommitted unrelated work on `feat/competitive-pricing-page` — do not touch the main checkout). Branch `feat/console-speechmatics-stt`. Create via `git -C /Users/r/hail-website worktree add /Users/r/hail-website-wt-speechmatics -b feat/console-speechmatics-stt origin/master`.
+- hail work on branch `feat/stt-operating-point` off `main` (this repo).
+- hail-website work in a **git worktree** off `master` (the hail-website main checkout has uncommitted unrelated work on `feat/competitive-pricing-page` — do not touch the main checkout). Branch `feat/console-speechmatics-stt`. Create via `git -C <hail-website root> worktree add <hail-website worktree> -b feat/console-speechmatics-stt origin/master`.
 - Conventional Commits. NEVER any Co-Authored-By / AI-attribution trailer.
 - hail: `uv run pytest <pkg>/tests -q` from repo root; `uv run ruff check --fix` + `uvx black` before commits. hail-website: `pnpm test` (vitest), `pnpm lint` if present (check package.json scripts).
 - Ship PR 2a before merging PR 2b's operating-point UI (a console PUT carrying `operating_point` 422s against today's backend). PR 2b's provider-select-only parts work against today's backend but ship together with the field for one review cycle.
@@ -151,7 +151,7 @@ git add -A core/ voicebot/ openapi/ && git commit -m "feat(voicebot): honor spee
 
 ### Task B1: hail-website — provider list + drawer UI
 
-**Files (all under the worktree `/Users/r/hail-website-wt-speechmatics/app/console/calls/providers/`):**
+**Files (all under the hail-website worktree, `app/console/calls/providers/`):**
 
 - Modify: `drawer-state.ts:6-10`, `params.ts:24-26`, `ProvidersClient.tsx` (lines below)
 - Test: `__tests__/drawer-state.test.ts`, `__tests__/params.test.ts`
@@ -194,7 +194,7 @@ it("stt speechmatics keeps operating_point; deepgram drops it", () => {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd /Users/r/hail-website-wt-speechmatics && pnpm install && pnpm test`
+Run: `cd <hail-website worktree> && pnpm install && pnpm test`
 Expected: the two edited specs FAIL; rest green.
 
 - [ ] **Step 3: Implement**

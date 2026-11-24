@@ -26,7 +26,6 @@ from datetime import datetime, timezone
 from typing import Annotated
 from uuid import UUID, uuid4
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi import status as http_status
 from hailhq.api.audit import actor_of, write_audit_log
@@ -37,7 +36,7 @@ from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES, enforce_route_l
 from hailhq.core.config import settings
 from hailhq.core.db import get_session
 from hailhq.core.http_post import (
-    PrivateNetworkBlockedError,
+    describe_send_error,
     httpx_post,
     validate_webhook_target,
 )
@@ -247,26 +246,6 @@ _TEST_TIMEOUT_SECONDS = 10.0
 _TEST_LIMIT_PER_MINUTE = 20
 
 
-def _test_error(exc: Exception) -> str:
-    """A fixed category, never the exception text: it can name internal hosts."""
-    if isinstance(exc, httpx.ConnectTimeout):
-        return "Could not connect to your endpoint in time."
-    if isinstance(exc, (httpx.TimeoutException, TimeoutError)):
-        return f"No answer within {_TEST_TIMEOUT_SECONDS:.0f} seconds."
-    if isinstance(exc, PrivateNetworkBlockedError):
-        return "target_url is not allowed: it does not resolve to a public address."
-    if isinstance(exc, httpx.ConnectError):
-        reason = str(exc).upper()
-        if "CERTIFICATE" in reason:
-            return "The TLS certificate check failed."
-        if "SSL" in reason or "TLS" in reason:
-            return "The TLS handshake failed."
-        return "Could not connect to your endpoint."
-    if isinstance(exc, httpx.RemoteProtocolError):
-        return "Your endpoint closed the connection without a valid answer."
-    return "Could not reach your endpoint."
-
-
 @router.post("/test", response_model=WebhookTestResponse)
 async def test_subscription(
     request: Request,
@@ -335,10 +314,12 @@ async def test_subscription(
     status: int | None = None
     text: str | None = None
     error: str | None = None
+    deadline = asyncio.timeout(_TEST_TIMEOUT_SECONDS)
     try:
-        # One deadline for the whole request: httpx times each phase alone.
-        status, text = await asyncio.wait_for(
-            httpx_post(
+        # One deadline for the send, its address lookup included:
+        # httpx_post's own deadline is twice its timeout and starts after DNS.
+        async with deadline:
+            status, text = await httpx_post(
                 body.target_url,
                 payload,
                 headers,
@@ -346,11 +327,14 @@ async def test_subscription(
                 timeout_seconds=_TEST_TIMEOUT_SECONDS,
                 # UTF-8 uses up to 4 bytes a character.
                 max_body_bytes=RESPONSE_BODY_CAP * 4,
-            ),
-            _TEST_TIMEOUT_SECONDS,
-        )
+            )
     except Exception as exc:  # the answer is the receiver's problem to show
-        error = _test_error(exc)
+        if deadline.expired():
+            # It can end a connect or a slow answer, and the cancel can come
+            # out as another error: name the time, not a phase.
+            error = f"The test took longer than {_TEST_TIMEOUT_SECONDS:g} seconds."
+        else:
+            error = describe_send_error(exc)
     duration_ms = round((time.monotonic() - started) * 1000)
     text = redact_credentials(text, authorization or "")
     return WebhookTestResponse(

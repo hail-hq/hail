@@ -428,7 +428,7 @@ edit its body after GoReleaser publishes.
   - External SDK: `hail` — published as `hail-sdk` on PyPI, imports as `import hail`. Standalone — does **not** depend on any `hailhq.*` package.
 - **Provider model IDs**: live only in `.env.example`; `Settings` fields default to empty strings. Do not set `Settings.<provider>_model = "literal"` — that is wrong.
 - **Tag prefix grammar**: `<package>-v<semver>` for component releases (`sdk-v…`, `cli-v…`). Bare `v<semver>` is not a tag anyone creates by hand — GoReleaser mints it from `cli-v<semver>`.
-- **No Opero references** in any committed file.
+- **No references to the operating company** in any committed file.
 
 ## Footguns (every one of these has bitten us)
 

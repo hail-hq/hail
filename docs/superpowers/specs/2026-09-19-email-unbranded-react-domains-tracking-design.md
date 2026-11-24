@@ -51,7 +51,7 @@ Response `EmailDomainDnsCheck`:
     "dns_url": "https://dash.cloudflare.com/?to=/:account/:zone/dns/records",
     "note": "Set Proxy status to DNS only for every CNAME."
   },
-  "zone": "wdstck.co",
+  "zone": "example.com",
   "records": [
     {
       "type": "CNAME",
@@ -65,7 +65,7 @@ Response `EmailDomainDnsCheck`:
     "present": false,
     "suggested": {
       "type": "TXT",
-      "name": "_dmarc.wdstck.co",
+      "name": "_dmarc.example.com",
       "value": "v=DMARC1; p=none;",
       "priority": null
     }

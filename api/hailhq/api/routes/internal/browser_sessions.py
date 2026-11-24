@@ -112,6 +112,14 @@ def view(call: Call, caps=None) -> dict:
         "id": str(call.id),
         "room": call.livekit_room,
         "status": call.status,
+        # /stop can settle billing before the SDK finishes closing. Only the
+        # worker can confirm success. A cancel can still become a failure when
+        # the worker errored during setup, so it also waits for the worker.
+        "outcome_final": call.status in TERMINAL_CALL_STATUSES
+        and (
+            call.status not in ("completed", "canceled")
+            or call.metadata_.get("browser_worker_finished") is True
+        ),
         "trial": bool(call.metadata_.get("browser_trial")),
         "seconds": call.max_duration_seconds,
         "used_ms": call.metadata_.get("browser_used_ms"),

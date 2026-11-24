@@ -12,9 +12,9 @@
 
 ## Global Constraints
 
-- Branch `feat/agent-readiness-api-mcp` off `main`, already created in the repo root at `/Users/r/playground/hail` (not a worktree — no other in-progress work on `main` to isolate from, per the repo's own precedent in `docs/superpowers/plans/2026-08-07-console-speechmatics-byo.md`).
+- Branch `feat/agent-readiness-api-mcp` off `main`, already created in the repo root (not a worktree — no other in-progress work on `main` to isolate from, per the repo's own precedent in `docs/superpowers/plans/2026-08-07-console-speechmatics-byo.md`).
 - Conventional Commits. **Never** a `Co-Authored-By` / AI-attribution trailer.
-- Test: `cd /Users/r/playground/hail/api && uv run pytest -q` (and `cd core && uv run pytest -q` for `core/` changes). Lint/format before every commit: `uv run ruff check --fix .` then `uvx black .` (run from the relevant package directory — `api/` or `core/` or `mcp/`).
+- Test: `cd <repo root>/api && uv run pytest -q` (and `cd core && uv run pytest -q` for `core/` changes). Lint/format before every commit: `uv run ruff check --fix .` then `uvx black .` (run from the relevant package directory — `api/` or `core/` or `mcp/`).
 - **OpenAPI is source of truth for the CLI** (repo invariant, `CLAUDE.md`). After Tasks 1, 3, and 4 (anything that changes a route signature, description, or schema field), regenerate `openapi/openapi.yaml` in the same commit — see Task 6 for the exact regen command. Do not hand-edit the YAML.
 - Do not touch the 6 `internal/*` routers (`api/hailhq/api/routes/internal/*.py`) in any task — they are `include_in_schema=False`, not part of the public/customer API surface this plan targets, and are called by internal services, not customer API keys.
 - Do not touch `core/hailhq/core/agent_caps.py` or the agent self-signup velocity caps — that is a different, already-shipped mechanism (per-channel send-count ceiling for agent-origin orgs). This plan's rate limiter is a _general_ request-rate limiter across all customer-facing routes, unrelated to and additive with the existing caps.

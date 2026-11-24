@@ -12,8 +12,8 @@
 
 **Repos / worktrees:**
 
-- API: `/Users/r/playground/hail-superadmin`, branch `feat/superadmin` (from `origin/main`). Tasks 1–5.
-- Website: `/Users/r/playground/hail-website-superadmin`, branch `feat/superadmin` (from `origin/feat/console-verification`, PR r13i/hail-website#94, which must merge first). Tasks 6–11. `node_modules` is a symlink to the main checkout.
+- API: a worktree of this repo, branch `feat/superadmin` (from `origin/main`). Tasks 1–5.
+- Website: a worktree of the hail-website repo, branch `feat/superadmin` (from `origin/feat/console-verification`, hail-website PR 94, which must merge first). Tasks 6–11. `node_modules` is a symlink to the main checkout.
 
 ## Global Constraints
 
@@ -438,7 +438,7 @@ Migration SQL file as above. Check the plugin's own schema name matches (`lastLo
 
 - Modify: `lib/auth.ts:742-750` (`getCurrentSession`, `requireSession`), `:732-736` (`getActiveOrgIdForSession`)
 - Modify: `lib/require-org-admin.ts`
-- Modify: `lib/require-superadmin.ts` (from #94)
+- Modify: `lib/require-superadmin.ts` (from hail-website PR 94)
 - Test: `lib/__tests__/require-org-admin.test.ts`, `lib/__tests__/require-superadmin.test.ts`
 
 **Interfaces:**
@@ -837,4 +837,4 @@ it("shows the Hail support banner with a way back", () => {
 - Docs: `docs/superpowers/specs/2026-09-25-superadmin-design.md` is in the hail repo; add a short "Superadmin" section to the website README's console notes if one exists (grep `## Console`).
 
 - [ ] Full checks: `npx vitest run`, `npx eslint app lib`, `npx tsc --noEmit` (pre-existing test-file errors excluded).
-- [ ] `git push -u origin feat/superadmin`; `gh pr create -R r13i/hail-website --base feat/console-verification` (or `master` once #94 is merged) with: who qualifies, that no member rows are created, the switcher, "needs hail-hq/hail superadmin PR deployed first", and the 2FA follow-up.
+- [ ] `git push -u origin feat/superadmin`; `gh pr create --base feat/console-verification` (or `master` once hail-website PR 94 is merged) with: who qualifies, that no member rows are created, the switcher, "needs hail-hq/hail superadmin PR deployed first".

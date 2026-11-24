@@ -13,7 +13,6 @@ agent:
 - Apply and move: [`scripts/ops/sip_trunks.py`](../../scripts/ops/sip_trunks.py) (LiveKit API). Every command is a dry run until `--yes`.
 - Weekly IP check: [`sip-allowlist-check`](../../.github/workflows/sip-allowlist-check.yml), Monday 09:30 UTC ([order](../../costs/README.md#weekly-jobs-in-order)).
 - Negative test: [`scripts/ops/sip_invite_probe.py`](../../scripts/ops/sip_invite_probe.py).
-- Limit of the IP lock: Twilio and Telnyx send every customer's calls from the same signaling IPs. Another customer of that carrier can point their own SIP trunk at our LiveKit SIP host and reach a Hail number on that carrier. The lock stops every other address. DIDWW's password does not have this limit, and neither does the [Twilio secret header](#twilio-secret-header).
 - Exception to "infrastructure is Terraform only" (owner decision): LiveKit SIP trunks have no Terraform provider, so a committed JSON file plus this script define them.
 
 How LiveKit picks a trunk ([`sip.go`](https://github.com/livekit/protocol/blob/main/sip/sip.go)):
@@ -161,7 +160,7 @@ LiveKit Cloud checks `allowed_addresses` only once LiveKit enables that check fo
 
 - Twilio: each origination URL of `TWILIO_SIP_TRUNK_SID` to a LiveKit SIP host (`*.sip.livekit.cloud`) ends in `?X-Hail-Secret=<HAIL_SIP_INBOUND_SECRET>`. Other URLs are left as they are (`skipped (not LiveKit)` in the plan). A skipped URL that reaches LiveKit by IP or CNAME sends no header, so Hail refuses its calls once the secret is on the VM: point it at the `*.sip.livekit.cloud` host. Twilio sends an `X-` header added to the origination URI on every call ([Origination URI X-headers](https://www.twilio.com/docs/sip-trunking#originationuri-x-headers)).
 - LiveKit: the Twilio trunk's `headers_to_attributes` maps `X-Hail-Secret` to the participant attribute `hail.sip_secret` ([`SIPInboundTrunkInfo`](https://docs.livekit.io/reference/telephony/sip-api/#sipinboundtrunkinfo)).
-- Hail: with `HAIL_SIP_INBOUND_SECRET` set, a call to a Twilio number is dropped unless the attribute equals the secret ([`inbound_calls.py`](../../core/hailhq/core/inbound_calls.py)). Empty = no check. Telnyx and DIDWW calls are not checked.
+- Hail: with `HAIL_SIP_INBOUND_SECRET` set, a call to a Twilio number is dropped unless the attribute equals the secret ([`inbound_calls.py`](../../core/hailhq/core/inbound_calls.py)). Empty = no check. The check applies to calls on the Twilio trunk only; each other carrier uses the lock in the table above.
   - This check runs before the trunk check. Only a call with a valid secret reaches the trunk check, which keeps a failed call row for real misrouting.
   - A refused call may be forged, on any trunk, so Hail writes no call row and sends no webhook. A failed row would let a forger put calls with any caller ID into a customer's call log.
   - It logs a warning `X-Hail-Secret header missing` or `wrong`. If the call arrived on the shared trunk, it also logs `Twilio number still on the shared trunk; move it` at INFO, once per number per voicebot process.
@@ -179,7 +178,7 @@ LiveKit Cloud checks `allowed_addresses` only once LiveKit enables that check fo
   - After the replace it reads the trunk again and adds back, one at a time, any number of the copy it lost (`re-add ...`). A number LiveKit refuses prints `could not re-add <number>` and stops with an error: add it by hand (`lk sip inbound update --numbers`).
   - If any other field differs from the copy (allowed addresses, digest user and the rest), it prints `the replace changed <field>: <before> -> <now>` and stops with an error: restore those fields by hand (`lk sip inbound update`), then run `apply` again.
   - A number routed in that same second is not in the copy and is lost: compare the number count in `status` before and after.
-- The header travels in plain text between Twilio and LiveKit unless the origination URI uses `transport=tls` (LiveKit Cloud accepts TLS). The transport is not changed here.
+- Use `transport=tls` on the origination URI, so the header is encrypted between Twilio and LiveKit. `apply` keeps the transport it finds. With `transport=tcp` the header travels in plain text: change the URI in the Twilio console (**Elastic SIP Trunking → Manage → Trunks → the trunk → Origination**), then call a Twilio number to check.
 
 ### Secret header rollout
 
@@ -216,11 +215,20 @@ Run from the repo root of the main checkout. Values marked _(chat)_ are not writ
    ```
 
 6. Call the same number again. The agent must answer.
-7. Run the probe from a laptop at that number (the same command as the [Rollout](#rollout) section above, step 7.5). It still prints `ACCEPTED` (exit 1): LiveKit rings before Hail sees the call, and the probe cancels at the first ring. The probe cannot see Hail refuse the call. The pass check is a dropped call:
+7. Run the probe from a laptop at that number, with `--ring`. Without it, the probe hangs up at the first ring, before the voicebot checks the header, and proves nothing.
+
+   ```bash
+   python3 scripts/ops/sip_invite_probe.py \
+     --ring \
+     --host <project>.sip.livekit.cloud \
+     --number +<E.164 number on the Twilio trunk>
+   ```
+
+   It must print `DROPPED:`, a ring (`180 Ringing` or another 18x), then a final code (exit 0). Example: `DROPPED: 180 Ringing, then 486 Rejected`. `DROPPED` alone proves nothing: LiveKit also ends a call nobody answers, after its ringing timeout, for example when the voicebot is down. The pass needs both:
    - Logfire shows the warning `inbound call to +<number> refused: X-Hail-Secret header missing (carrier=twilio)`;
    - the workspace's call log shows NO new call from `+12025550100`.
 
-   If the warning does not show, the probe may have hung up before the voicebot saw the call: run it again. If a new call row shows, Hail did not drop the call: roll back ([Secret header rollback](#secret-header-rollback)).
+   `ACCEPTED: 200 OK (hung up)` (exit 1), or a new call row, means Hail did not drop the call: roll back ([Secret header rollback](#secret-header-rollback)). `INCONCLUSIVE` (exit 2) proves nothing: run it again. `REFUSED` (exit 0) means the trunk's IP lock refused the laptop before the voicebot saw the call: the header check cannot be tested from this address.
 
 ### Secret header rollback
 
