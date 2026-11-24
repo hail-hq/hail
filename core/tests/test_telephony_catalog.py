@@ -398,3 +398,7 @@ def test_telnyx_gb_national_is_business_only(tmp_path, monkeypatch):
         assert telephony_catalog.by_request_row("GB", "local", "telnyx") is None
     finally:
         telephony_catalog._load.cache_clear()
+
+
+def test_pbx_has_no_sms_route():
+    assert telephony_catalog._sms_route_exists("pbx") is False

@@ -8,7 +8,7 @@ import httpx
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from hailhq.core.carrier_offer import Approval
-from hailhq.core.carrier_routing import carrier, sms_route, voice_route
+from hailhq.core.carrier_routing import carrier, sms_route
 from hailhq.core.config import settings
 from hailhq.core.number_offers import CarrierOffer, rank_offers
 from hailhq.core.providers.sms.status_map import map_telnyx_message_status
@@ -41,13 +41,16 @@ def test_voice_route_never_uses_twilio_trunk_for_telnyx(monkeypatch):
     monkeypatch.setattr(settings, "livekit_twilio_sip_outbound_trunk_id", "ST_twilio")
     monkeypatch.setattr(settings, "livekit_telnyx_sip_outbound_trunk_id", "ST_telnyx")
     monkeypatch.setattr(settings, "telnyx_sip_username", "hail-sip")
-    assert voice_route("telnyx") == ("ST_telnyx", {"X-Telnyx-Username": "hail-sip"})
-    assert voice_route("twilio") == ("ST_twilio", {})
+    assert carrier("telnyx").voice_route() == (
+        "ST_telnyx",
+        {"X-Telnyx-Username": "hail-sip"},
+    )
+    assert carrier("twilio").voice_route() == ("ST_twilio", {})
     monkeypatch.setattr(settings, "telnyx_sip_username", "")
     with pytest.raises(ValueError):
-        voice_route("telnyx")
+        carrier("telnyx").voice_route()
     with pytest.raises(ValueError):
-        voice_route("unknown")
+        carrier("unknown").voice_route()
 
 
 def offer(provider="telnyx", monthly=100, setup=0, readiness="ready"):

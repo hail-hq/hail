@@ -2139,7 +2139,9 @@ async def _sms_mobile_problems(
             select(PhoneNumber.id)
             .where(
                 PhoneNumber.e164 == mobile,
-                PhoneNumber.provisioning_state != "released",
+                # A connected number before its ownership check proves
+                # nothing: it must not block the person's own mobile.
+                PhoneNumber.provisioning_state.not_in(("released", "unverified")),
             )
             .limit(1)
         )

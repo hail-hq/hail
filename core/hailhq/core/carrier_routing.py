@@ -23,6 +23,7 @@ import requests
 from didww.exceptions import DidwwApiError, DidwwClientError
 from hailhq.core.carrier_offer import Approval, CarrierOffer
 from hailhq.core.config import settings
+from hailhq.core.models import PhoneNumber
 from hailhq.core.providers.sms import twilio as twilio_sms
 from hailhq.core.providers.sms.base import SmsProvider
 from hailhq.core.providers.sms.telnyx import TelnyxSmsProvider
@@ -33,11 +34,14 @@ from hailhq.core.providers.voice.base import (
     LegCosts,
 )
 from hailhq.core.schemas import NumberType
+from hailhq.core.sip_connections import connection_of
+from sqlalchemy.ext.asyncio import AsyncSession
 from twilio.base.exceptions import TwilioRestException
 
 TWILIO = "twilio"
 TELNYX = "telnyx"
 DIDWW = "didww"
+PBX = "pbx"
 
 # LiveKit outbound SIP trunk id plus the SIP headers that trunk needs.
 VoiceRoute = tuple[str, dict[str, str]]
@@ -244,8 +248,14 @@ def carrier(provider: str) -> Carrier:
         raise ValueError(f"Unsupported number carrier: {provider!r}") from None
 
 
-def voice_route(provider: str) -> VoiceRoute:
-    return carrier(provider).voice_route()
+async def voice_route(db: AsyncSession, number: PhoneNumber) -> VoiceRoute:
+    """The LiveKit outbound trunk (and SIP headers) that dials from ``number``."""
+    if number.provider != PBX:
+        return carrier(number.provider).voice_route()
+    conn = await connection_of(db, number)
+    if conn.livekit_outbound_trunk_id is None:
+        raise ValueError("this phone system has no address for calls out")
+    return conn.livekit_outbound_trunk_id, {}
 
 
 def sms_route(provider: str) -> SmsProvider:
@@ -264,8 +274,14 @@ def sms_status_path(provider: str) -> str:
     return path
 
 
-def inbound_trunk(provider: str) -> str:
-    return carrier(provider).inbound_trunk()
+async def inbound_trunk(db: AsyncSession, number: PhoneNumber) -> str:
+    """The LiveKit inbound trunk an INVITE for ``number`` must arrive on."""
+    if number.provider != PBX:
+        return carrier(number.provider).inbound_trunk()
+    conn = await connection_of(db, number)
+    if conn.livekit_inbound_trunk_id is None:
+        raise ValueError("this phone system has no inbound trunk")
+    return conn.livekit_inbound_trunk_id
 
 
 # What a failed carrier request means for a delete (``failure_kind``):

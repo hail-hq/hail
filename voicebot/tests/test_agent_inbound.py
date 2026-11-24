@@ -7,18 +7,24 @@ import json
 import uuid
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from hailhq.core.inbound_calls import (
     SIP_SECRET_ATTRIBUTE,
     Accepted,
+    CheckArrived,
     Rejected,
     SipAttributes,
 )
 from hailhq.core.models import Agent, Call, PhoneNumber, Sms
 from hailhq.voicebot import agent as agent_mod
-from hailhq.voicebot.agent import parse_metadata
+from hailhq.voicebot.agent import (
+    collect_check_digits,
+    open_inbound_from_room,
+    parse_metadata,
+)
+from hailhq.voicebot.spoken_lines import SPOKEN_LINES
 from livekit import rtc
 
 
@@ -259,7 +265,28 @@ async def test_numbers_without_plus_are_normalised(
     }
     await agent_mod.open_inbound_from_room(_Ctx(_SipParticipant(attrs)))  # type: ignore[arg-type]
     assert seen[0].dialed == "+351300509184"
-    assert seen[0].caller == "+33612345678"
+    # The caller goes to core raw; core normalises it per number type.
+    assert seen[0].caller == "33612345678"
+
+
+async def test_sip_attributes_pass_raw_caller_and_plus_dialed(
+    monkeypatch: pytest.MonkeyPatch, no_db
+) -> None:
+    seen: list[SipAttributes] = []
+
+    async def fake_open(_db, attrs):
+        seen.append(attrs)
+        return Rejected("unknown_number")
+
+    monkeypatch.setattr(agent_mod, "open_inbound_call", fake_open)
+    attrs = {
+        **_ATTRS,
+        "sip.phoneNumber": " 101 ",
+        "sip.trunkPhoneNumber": "14155550100",
+    }
+    await agent_mod.open_inbound_from_room(_Ctx(_SipParticipant(attrs)))  # type: ignore[arg-type]
+    assert seen[0].caller == "101"
+    assert seen[0].dialed == "+14155550100"
 
 
 async def test_caller_who_left_before_the_agent_joined_closes_the_row(
@@ -442,3 +469,151 @@ def test_the_prompt_loader_for_history_is_gone() -> None:
         "has_history_tool",
     ):
         assert not hasattr(agent_mod, name), name
+
+
+# Ownership check, inbound side.
+
+
+class _Room(rtc.EventEmitter):
+    name = "hail-in-check"
+
+
+def dtmf(digit: str) -> rtc.SipDTMF:
+    return rtc.SipDTMF(code=0, digit=digit)
+
+
+@pytest.fixture()
+def fake_room() -> _Room:
+    return _Room()
+
+
+@pytest.fixture()
+def check_ctx(monkeypatch: pytest.MonkeyPatch, fake_room, no_db):
+    """A fake ``JobContext`` whose ``open_inbound_call`` returns ``CheckArrived``
+    and whose caller sends the code ``482913``."""
+    arrived = CheckArrived(uuid.uuid4(), uuid.uuid4())
+    monkeypatch.setattr(agent_mod, "open_inbound_call", AsyncMock(return_value=arrived))
+    monkeypatch.setattr(
+        agent_mod, "collect_check_digits", AsyncMock(return_value="482913")
+    )
+    ctx = MagicMock()
+    ctx.room = fake_room
+    ctx.wait_for_participant = AsyncMock(return_value=_SipParticipant(_ATTRS))
+    ctx.delete_room = AsyncMock()
+    ctx.arrived = arrived
+    return ctx
+
+
+@pytest.fixture()
+def session(monkeypatch: pytest.MonkeyPatch):
+    sess = MagicMock()
+    sess.start = AsyncMock()
+    sess.say = AsyncMock()
+    sess.aclose = AsyncMock()
+    monkeypatch.setattr(agent_mod, "AgentSession", MagicMock(return_value=sess))
+    monkeypatch.setattr(agent_mod, "build_tts", MagicMock(return_value=object()))
+    return sess
+
+
+@pytest.fixture()
+def finish_check_mock(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
+    mock = AsyncMock()
+    monkeypatch.setattr(agent_mod, "finish_check", mock)
+    return mock
+
+
+async def test_collect_check_digits_returns_first_six(fake_room):
+    task = asyncio.create_task(collect_check_digits(fake_room, seconds=1))
+    await asyncio.sleep(0)  # let the collector start listening
+    for digit in "1482913":
+        fake_room.emit("sip_dtmf_received", dtmf(digit))
+    assert await task == "148291"
+
+
+async def test_collect_check_digits_times_out_with_what_it_has(fake_room):
+    task = asyncio.create_task(collect_check_digits(fake_room, seconds=0.05))
+    await asyncio.sleep(0)
+    fake_room.emit("sip_dtmf_received", dtmf("4"))
+    assert await task == "4"
+
+
+async def test_collect_check_digits_stops_listening(fake_room):
+    task = asyncio.create_task(collect_check_digits(fake_room, seconds=0.05))
+    await asyncio.sleep(0)
+    fake_room.emit("sip_dtmf_received", dtmf("4"))
+    assert await task == "4"
+    assert not fake_room._events.get("sip_dtmf_received")
+
+
+async def test_check_passed_plays_line_then_deletes_room(
+    check_ctx, session, finish_check_mock
+):
+    finish_check_mock.return_value = True
+    assert await open_inbound_from_room(check_ctx) is None
+    _db, arrived, digits = finish_check_mock.await_args.args
+    assert (arrived, digits) == (check_ctx.arrived, "482913")
+    session.start.assert_awaited_once()
+    assert session.start.await_args.kwargs["record"] is False
+    session.say.assert_awaited_once_with(
+        SPOKEN_LINES["en"].pbx_check, allow_interruptions=False
+    )
+    session.aclose.assert_awaited_once()
+    check_ctx.delete_room.assert_awaited_once()
+    check_ctx.shutdown.assert_called_once_with(reason="pbx_check")
+
+
+async def test_check_line_speaks_the_given_language(check_ctx, session):
+    await agent_mod.play_check_line(check_ctx, language="fr")
+    session.say.assert_awaited_once_with(
+        SPOKEN_LINES["fr"].pbx_check, allow_interruptions=False
+    )
+    assert agent_mod.build_tts.call_args.kwargs == {"language": "fr"}
+
+
+async def test_check_line_without_language_is_english(check_ctx, session):
+    await agent_mod.play_check_line(check_ctx)
+    session.say.assert_awaited_once_with(
+        SPOKEN_LINES["en"].pbx_check, allow_interruptions=False
+    )
+
+
+async def test_check_failed_skips_line_and_deletes_room(
+    check_ctx, session, finish_check_mock
+):
+    finish_check_mock.return_value = False
+    assert await open_inbound_from_room(check_ctx) is None
+    session.say.assert_not_awaited()
+    check_ctx.delete_room.assert_awaited_once()
+    check_ctx.shutdown.assert_called_once_with(reason="pbx_check")
+
+
+async def test_check_line_failure_still_deletes_room(
+    check_ctx, session, finish_check_mock
+):
+    finish_check_mock.return_value = True
+    session.say.side_effect = RuntimeError("tts down")
+    assert await open_inbound_from_room(check_ctx) is None
+    check_ctx.delete_room.assert_awaited_once()
+    check_ctx.shutdown.assert_called_once_with(reason="pbx_check")
+
+
+async def test_check_line_gives_up_after_its_time_limit(
+    check_ctx, session, finish_check_mock, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(agent_mod, "PBX_CHECK_LINE_SECONDS", 0.05)
+    finish_check_mock.return_value = True
+
+    async def hang(*_a, **_kw):
+        await asyncio.sleep(3600)
+
+    session.say.side_effect = hang
+    assert await asyncio.wait_for(open_inbound_from_room(check_ctx), 2) is None
+    check_ctx.delete_room.assert_awaited_once()
+
+
+async def test_check_error_still_deletes_room(check_ctx, session, finish_check_mock):
+    finish_check_mock.side_effect = RuntimeError("db down")
+    assert await open_inbound_from_room(check_ctx) is None
+    session.say.assert_not_awaited()
+    check_ctx.delete_room.assert_awaited_once()
+    check_ctx.shutdown.assert_called_once_with(reason="pbx_check")

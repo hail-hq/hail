@@ -5,17 +5,20 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
 from hailhq.api.org_close import close_org_carrier_items
 from hailhq.api.routes.verifications import sweep_verifications
 from hailhq.core.config import SELF_HOSTED_ORG_ID
+from hailhq.core.livekit import LiveKitClient
 from hailhq.core.models import (
     AccountCredit,
     CarrierVerification,
     OrgClosure,
     PhoneNumber,
+    SipConnection,
 )
 from hailhq.core.providers.verification.base import DiscardRefused
 from hailhq.core.providers.verification.telnyx_sms import (
@@ -766,6 +769,122 @@ async def test_a_refused_brand_delete_with_the_real_telnyx_plugin(
     assert row.state == "approved"
     assert row.provider_refs["close_refused"]["status"] == answer
     assert row.provider_refs["brand_id"] == "B1"
+
+
+@pytest.fixture()
+def lk():
+    return AsyncMock(spec=LiveKitClient)
+
+
+async def _pbx_connection(session, org, states=("active",)):
+    conn = SipConnection(
+        organization_id=org,
+        label="Main office",
+        inbound_username=f"hail-{uuid.uuid4().hex[:12]}",
+        encrypted_inbound_password="token",
+        default_region="US",
+        pbx_host="pbx.example.com",
+        livekit_inbound_trunk_id="ST_in_pbx",
+        livekit_outbound_trunk_id="ST_out_pbx",
+    )
+    session.add(conn)
+    await session.flush()
+    numbers = []
+    for state in states:
+        number = PhoneNumber(
+            organization_id=org,
+            e164=f"+1415{uuid.uuid4().int % 10**7:07d}",
+            country_code="US",
+            number_type="local",
+            capabilities=["voice"],
+            provider="pbx",
+            sip_connection_id=conn.id,
+            provisioning_state=state,
+        )
+        session.add(number)
+        numbers.append(number)
+    await session.commit()
+    return conn, numbers
+
+
+async def test_close_removes_connected_numbers_and_connection(
+    async_session, voice_provider_mock, verifier, lk
+) -> None:
+    org = uuid.uuid4()
+    await _close(async_session, org)
+    conn, numbers = await _pbx_connection(async_session, org, ("active", "unverified"))
+
+    counts = await _run(async_session, verifier, lk)
+
+    assert counts.released == 2 and counts.failed == counts.refused == 0
+    for number in numbers:
+        await async_session.refresh(number)
+        assert number.provisioning_state == "released"
+        assert "release_refused" not in (number.provisioning_metadata or {})
+    await async_session.refresh(conn)
+    assert conn.deleted_at is not None
+    assert {c.args[0] for c in lk.delete_sip_trunk.await_args_list} == {
+        "ST_in_pbx",
+        "ST_out_pbx",
+    }
+    assert lk.remove_inbound_number.await_count == 2
+    voice_provider_mock.release_number.assert_not_awaited()
+
+    again = await _run(async_session, verifier, lk)
+    assert not any(again.as_dict().values())
+
+
+async def test_close_without_livekit_retries_pbx_later(async_session, verifier) -> None:
+    org = uuid.uuid4()
+    await _close(async_session, org)
+    conn, (number,) = await _pbx_connection(async_session, org)
+
+    counts = await _run(async_session, verifier, None)
+
+    assert counts.failed == 1 and counts.released == 0 and counts.refused == 0
+    await async_session.refresh(number)
+    await async_session.refresh(conn)
+    assert number.provisioning_state == "active"
+    assert "release_refused" not in (number.provisioning_metadata or {})
+    assert conn.deleted_at is None
+
+
+async def test_close_livekit_error_on_pbx_is_retried_not_refused(
+    async_session, verifier, lk
+) -> None:
+    org = uuid.uuid4()
+    await _close(async_session, org)
+    conn, (number,) = await _pbx_connection(async_session, org)
+    lk.remove_inbound_number.side_effect = RuntimeError("down")
+
+    counts = await _run(async_session, verifier, lk)
+
+    assert counts.failed == 1 and counts.refused == 0
+    await async_session.refresh(number)
+    await async_session.refresh(conn)
+    assert number.provisioning_state == "active"
+    assert "release_refused" not in (number.provisioning_metadata or {})
+    assert conn.deleted_at is None
+
+    lk.remove_inbound_number.side_effect = None
+    counts = await _run(async_session, verifier, lk)
+    assert counts.failed == 0
+    await async_session.refresh(number)
+    await async_session.refresh(conn)
+    assert number.provisioning_state == "released" and conn.deleted_at is not None
+
+
+async def test_close_leaves_other_orgs_connections(async_session, verifier, lk) -> None:
+    org, other = uuid.uuid4(), uuid.uuid4()
+    await _close(async_session, org)
+    kept, (kept_number,) = await _pbx_connection(async_session, other)
+
+    await _run(async_session, verifier, lk)
+
+    await async_session.refresh(kept)
+    await async_session.refresh(kept_number)
+    assert kept.deleted_at is None and kept_number.provisioning_state == "active"
+    lk.delete_sip_trunk.assert_not_awaited()
 
 
 async def test_close_keeps_the_registration_of_a_trial_texting_number(

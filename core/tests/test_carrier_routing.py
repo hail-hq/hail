@@ -8,6 +8,7 @@ from hailhq.core import carrier_routing, number_offers
 from hailhq.core.carrier_offer import CarrierOffer
 from hailhq.core.carrier_routing import CARRIERS, DIDWW, TELNYX, TWILIO, carrier
 from hailhq.core.config import settings
+from hailhq.core.models import PhoneNumber, SipConnection
 from hailhq.core.providers.voice import CarrierNotConfigured
 
 
@@ -20,12 +21,12 @@ def trunks(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_each_carrier_uses_its_own_trunk() -> None:
-    assert carrier_routing.voice_route("twilio") == ("ST_twilio", {})
-    assert carrier_routing.voice_route("telnyx") == (
+    assert carrier("twilio").voice_route() == ("ST_twilio", {})
+    assert carrier("telnyx").voice_route() == (
         "ST_telnyx",
         {"X-Telnyx-Username": "hail-sip"},
     )
-    assert carrier_routing.voice_route("didww") == ("ST_didww", {})
+    assert carrier("didww").voice_route() == ("ST_didww", {})
 
 
 @pytest.mark.parametrize(
@@ -42,12 +43,12 @@ def test_missing_trunk_is_an_error(
 ) -> None:
     monkeypatch.setattr(settings, setting, "")
     with pytest.raises(ValueError, match=setting.upper()):
-        carrier_routing.voice_route(provider)
+        carrier(provider).voice_route()
 
 
 def test_unknown_carrier_is_an_error() -> None:
     with pytest.raises(ValueError, match="Unsupported"):
-        carrier_routing.voice_route("vonage")
+        carrier("vonage").voice_route()
 
 
 def test_didww_sells_no_sms_through_hail() -> None:
@@ -64,17 +65,17 @@ def test_inbound_trunk_is_shared_unless_overridden(monkeypatch) -> None:
     # attributes at load time; the registry reads the folded values.
     for name in ("twilio", "telnyx", "didww"):
         monkeypatch.setattr(settings, f"livekit_{name}_sip_inbound_trunk_id", "ST_in")
-    assert carrier_routing.inbound_trunk("twilio") == "ST_in"
-    assert carrier_routing.inbound_trunk("telnyx") == "ST_in"
-    assert carrier_routing.inbound_trunk("didww") == "ST_in"
+    assert carrier("twilio").inbound_trunk() == "ST_in"
+    assert carrier("telnyx").inbound_trunk() == "ST_in"
+    assert carrier("didww").inbound_trunk() == "ST_in"
     monkeypatch.setattr(settings, "livekit_didww_sip_inbound_trunk_id", "ST_in_dw")
-    assert carrier_routing.inbound_trunk("didww") == "ST_in_dw"
+    assert carrier("didww").inbound_trunk() == "ST_in_dw"
 
 
 def test_missing_inbound_trunk_names_the_shared_key(monkeypatch) -> None:
     monkeypatch.setattr(settings, "livekit_twilio_sip_inbound_trunk_id", "")
     with pytest.raises(ValueError, match="LIVEKIT_SIP_INBOUND_TRUNK_ID"):
-        carrier_routing.inbound_trunk("twilio")
+        carrier("twilio").inbound_trunk()
 
 
 def test_every_carrier_has_inbound_hooks() -> None:
@@ -411,3 +412,87 @@ async def test_counted_discard() -> None:
     with pytest.raises(VerificationProviderError) as outage:
         await counted_discard(fails(TimeoutError()))
     assert not isinstance(outage.value, DiscardRefused)
+
+
+ORG = uuid4()
+
+
+async def _pbx_number(session, **conn_over):
+    fields = {
+        "organization_id": ORG,
+        "label": "Main office",
+        "inbound_username": f"hail-{uuid4().hex[:12]}",
+        "encrypted_inbound_password": "token",
+        "default_region": "US",
+    }
+    fields.update(conn_over)
+    conn = SipConnection(**fields)
+    session.add(conn)
+    await session.flush()
+    number = PhoneNumber(
+        organization_id=ORG,
+        e164="+14155550100",
+        country_code="US",
+        number_type="local",
+        capabilities=["voice"],
+        provider="pbx",
+        sip_connection_id=conn.id,
+    )
+    session.add(number)
+    await session.commit()
+    return number
+
+
+def _carrier_number(provider: str) -> PhoneNumber:
+    return PhoneNumber(
+        organization_id=ORG,
+        e164="+14155550101",
+        country_code="US",
+        number_type="local",
+        provider=provider,
+    )
+
+
+async def test_voice_route_pbx_uses_connection_outbound_trunk(async_session) -> None:
+    number = await _pbx_number(async_session, livekit_outbound_trunk_id="ST_out_pbx")
+    assert await carrier_routing.voice_route(async_session, number) == (
+        "ST_out_pbx",
+        {},
+    )
+
+
+async def test_voice_route_pbx_without_host_raises(async_session) -> None:
+    number = await _pbx_number(
+        async_session, pbx_host=None, livekit_outbound_trunk_id=None
+    )
+    with pytest.raises(ValueError, match="no address for calls out"):
+        await carrier_routing.voice_route(async_session, number)
+
+
+async def test_voice_route_carrier_unchanged(async_session, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "livekit_didww_sip_outbound_trunk_id", "ST_dw")
+    route = await carrier_routing.voice_route(async_session, _carrier_number("didww"))
+    assert route == ("ST_dw", {})
+
+
+async def test_inbound_trunk_pbx_uses_connection_trunk(async_session) -> None:
+    number = await _pbx_number(async_session, livekit_inbound_trunk_id="ST_in_pbx")
+    assert await carrier_routing.inbound_trunk(async_session, number) == "ST_in_pbx"
+
+
+async def test_inbound_trunk_pbx_without_trunk_raises(async_session) -> None:
+    number = await _pbx_number(async_session, livekit_inbound_trunk_id=None)
+    with pytest.raises(ValueError):
+        await carrier_routing.inbound_trunk(async_session, number)
+
+
+async def test_inbound_trunk_carrier_unchanged(async_session, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "livekit_twilio_sip_inbound_trunk_id", "ST_in")
+    assert (
+        await carrier_routing.inbound_trunk(async_session, _carrier_number("twilio"))
+        == "ST_in"
+    )
+
+
+def test_pbx_is_not_a_carrier() -> None:
+    assert carrier_routing.PBX not in CARRIERS

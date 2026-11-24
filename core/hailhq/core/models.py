@@ -121,7 +121,7 @@ class User(Base):
 
 
 class Contact(Base):
-    """Manual org contact — phone and/or email (CHECK enforces at least one).
+    """Manual org contact: phone, email and/or a PBX extension (CHECK enforces at least one).
 
     organization_id carries no FK: organizations lives in the website DB (see
     the module docstring convention on OrganizationMember / migration 0001).
@@ -138,6 +138,8 @@ class Contact(Base):
     name: Mapped[str] = mapped_column(Text, nullable=False)
     phone_e164: Mapped[str | None] = mapped_column(Text, nullable=True)
     email: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # A number inside a customer's PBX: digits, ``*`` or ``#``, 1 to 6.
+    extension: Mapped[str | None] = mapped_column(Text, nullable=True)
     # created_by intentionally has no FK — users is website-owned (see 0001/0029);
     # keys and rows may outlive their creator.
     created_by: Mapped[uuid.UUID | None] = mapped_column(
@@ -152,8 +154,11 @@ class Contact(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "phone_e164 IS NOT NULL OR email IS NOT NULL",
-            name="contacts_phone_or_email",
+            "phone_e164 IS NOT NULL OR email IS NOT NULL OR extension IS NOT NULL",
+            name="contacts_phone_email_or_extension",
+        ),
+        CheckConstraint(
+            "extension ~ '^[0-9*#]{1,6}$'", name="contacts_extension_format"
         ),
         Index(
             "contacts_org_phone_key",
@@ -770,6 +775,13 @@ class PhoneNumber(Base):
     # Set while the number is on its carrier's LiveKit inbound trunk and
     # attached for inbound at the carrier (hailhq.core.inbound_routing).
     inbound_registered_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
+    # Set exactly when ``provider = 'pbx'``: the customer's PBX connection
+    # this number arrives through.
+    sip_connection_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("sip_connections.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
 
     @classmethod
     def answered_by(cls, agent_id: uuid.UUID):
@@ -782,8 +794,17 @@ class PhoneNumber(Base):
             name="phone_numbers_number_type_check",
         ),
         CheckConstraint(
-            "provisioning_state IN ('pending','active','failed','released')",
+            "provisioning_state IN ('pending','active','failed','released','unverified')",
             name="phone_numbers_state_check",
+        ),
+        CheckConstraint(
+            "(provider = 'pbx') = (sip_connection_id IS NOT NULL)",
+            name="phone_numbers_pbx_connection_check",
+        ),
+        Index(
+            "phone_numbers_sip_connection_idx",
+            "sip_connection_id",
+            postgresql_where=text("sip_connection_id IS NOT NULL"),
         ),
         CheckConstraint(
             "(is_pool = TRUE AND organization_id IS NULL)"
@@ -840,6 +861,72 @@ class PhoneNumber(Base):
         purchase used, from the stored offer."""
         offer = (self.provisioning_metadata or {}).get("offer") or {}
         return offer.get("subject_name")
+
+
+class SipConnection(Base):
+    """A customer's phone system (PBX) connected to Hail.
+
+    Holds the credentials Hail's inbound trunk asks the PBX for, and where
+    Hail dials the PBX for outbound calls and handovers. Both passwords are
+    Fernet tokens under ``HAIL_PROVIDER_SECRET_KEY`` (``str``, as
+    ``OrgProviderConfig.encrypted_api_key``). ``organization_id`` carries no
+    FK: organizations lives in the website DB.
+    """
+
+    __tablename__ = "sip_connections"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
+    label: Mapped[str] = mapped_column(Text, nullable=False)
+    inbound_username: Mapped[str] = mapped_column(Text, nullable=False)
+    # None once the connection is deleted.
+    encrypted_inbound_password: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # NULL: answer only, Hail never dials this PBX.
+    pbx_host: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pbx_port: Mapped[int] = mapped_column(
+        Integer, server_default=text("5060"), nullable=False
+    )
+    pbx_transport: Mapped[str] = mapped_column(
+        Text, server_default="auto", nullable=False
+    )
+    pbx_username: Mapped[str | None] = mapped_column(Text, nullable=True)
+    encrypted_pbx_password: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # ISO country, to read national caller numbers.
+    default_region: Mapped[str] = mapped_column(Text, nullable=False)
+    livekit_inbound_trunk_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    livekit_outbound_trunk_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), onupdate=func.now(), nullable=False
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "char_length(label) BETWEEN 1 AND 80", name="sip_connections_label_len"
+        ),
+        CheckConstraint(
+            "pbx_transport IN ('auto','udp','tcp','tls')",
+            name="sip_connections_transport_check",
+        ),
+        CheckConstraint(
+            "pbx_port BETWEEN 1 AND 65535", name="sip_connections_port_check"
+        ),
+        UniqueConstraint(
+            "inbound_username", name="sip_connections_inbound_username_key"
+        ),
+        Index(
+            "sip_connections_org_idx",
+            "organization_id",
+            postgresql_where=text("deleted_at IS NULL"),
+        ),
+    )
 
 
 class Call(Base):
@@ -1066,7 +1153,8 @@ class CallLeg(Base):
             "direction IN ('inbound','outbound')", name="call_legs_direction_check"
         ),
         CheckConstraint(
-            "provider IN ('twilio','telnyx','didww')", name="call_legs_provider_check"
+            "provider IN ('twilio','telnyx','didww','pbx')",
+            name="call_legs_provider_check",
         ),
         CheckConstraint(
             "cost_status IN ('pending','found','missing')",

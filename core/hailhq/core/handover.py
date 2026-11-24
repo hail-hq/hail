@@ -47,6 +47,17 @@ HANDOVER_SMS_REASON_CHARS = 120
 # What a caller could steer the reason into to phish the contact: links, bare
 # or spelled-out domains, emails and phone numbers. File names stay.
 _FULLWIDTH_DOTS = str.maketrans({"\u3002": ".", "\uff0e": ".", "\uff61": "."})
+# A phone-system extension: 1 to 6 digits, ``*`` or ``#``, the same length
+# the inbound side keeps as an extension caller. Longer would let a dial
+# prefix plus an outside number skip the checks a phone number gets.
+PBX_EXTENSION = re.compile(r"[0-9*#]{1,6}")
+
+
+def pbx_extension(value: str | None) -> str | None:
+    """``value`` when it is a valid extension, else None."""
+    return value if value and PBX_EXTENSION.fullmatch(value) else None
+
+
 _FILE_EXTENSIONS = frozenset(
     {"pdf", "doc", "docx", "xls", "xlsx", "csv", "txt", "jpg", "jpeg", "png", "heic"}
 )
@@ -152,6 +163,8 @@ class HandoverPerson:
     phone_e164: str | None
     # Where the handover email goes: a contact's email, a member's login.
     email: str | None = None
+    # A phone-system extension, dialed only on a connected (pbx) call.
+    extension: str | None = None
 
 
 class HandoverInvalid(ValueError):
@@ -238,7 +251,9 @@ async def resolve_people(
                 )
             )
         ).scalars():
-            out[str(c.id)] = HandoverPerson(str(c.id), c.name, c.phone_e164)
+            out[str(c.id)] = HandoverPerson(
+                str(c.id), c.name, c.phone_e164, c.email, c.extension
+            )
     for person in (await _member_people(db, org_id, user_ids)).values():
         out[person.contact_id] = person
     return out
@@ -276,7 +291,11 @@ async def validate_handover(
         if item.contact_id in unchanged:
             continue
         if not person.phone_e164:
-            raise HandoverInvalid(f"{person.name} has no phone number", index)
+            if pbx_extension(person.extension):
+                continue  # dialed inside the customer's phone system
+            raise HandoverInvalid(
+                f"{person.name} has no phone number or extension", index
+            )
         country = country_of(person.phone_e164)
         if country is None or not sells_in(country):
             raise HandoverInvalid(
@@ -373,8 +392,17 @@ async def load_handover(
     out."""
     if not agent_ids:
         return {}
-    rows: list[tuple[AgentHandoverContact, str, str, str | None, str | None]] = [
-        (link, str(contact.id), contact.name, contact.phone_e164, contact.email)
+    rows: list[
+        tuple[AgentHandoverContact, str, str, str | None, str | None, str | None]
+    ] = [
+        (
+            link,
+            str(contact.id),
+            contact.name,
+            contact.phone_e164,
+            contact.email,
+            contact.extension,
+        )
         for link, contact in (
             await db.execute(
                 select(AgentHandoverContact, Contact)
@@ -399,18 +427,19 @@ async def load_handover(
     ).first() is not None
     if has_member_links:
         rows += [
-            (link, contact_wire_id("member", link.user_id), name, phone, email)
+            (link, contact_wire_id("member", link.user_id), name, phone, email, None)
             for link, name, phone, email in await _member_links(db, agent_ids)
         ]
     rows.sort(key=lambda r: (str(r[0].agent_id), r[0].position))
     out: dict[UUID, list[dict]] = {}
-    for link, wire, name, phone, email in rows:
+    for link, wire, name, phone, email, extension in rows:
         out.setdefault(link.agent_id, []).append(
             {
                 "contact_id": wire,
                 "name": name,
                 "phone_e164": phone,
                 "email": email,
+                "extension": extension,
                 "note": link.note,
             }
         )
@@ -418,24 +447,31 @@ async def load_handover(
 
 
 async def handover_targets(
-    db: AsyncSession, agent_id: UUID | None, on_call_e164: str | None = None
+    db: AsyncSession,
+    agent_id: UUID | None,
+    on_call_e164: str | None = None,
+    *,
+    via_pbx: bool = False,
 ) -> list[dict]:
     """Dispatch-metadata shape. No numbers. Labels unique per call, across
     contacts and members. A person whose number is ``on_call_e164`` (the
-    other party on the call) is flagged ``on_call``."""
+    other party on the call) is flagged ``on_call``. On a connected call
+    (``via_pbx``) a contact with only an extension is offered too, and an
+    extension on the line is flagged."""
     if agent_id is None:
         return []
     rows = (await load_handover(db, [agent_id])).get(agent_id, [])
     seen: dict[str, int] = {}
     targets = []
     for row in rows:
-        if not row["phone_e164"]:
+        extension = pbx_extension(row["extension"]) if via_pbx else None
+        if not row["phone_e164"] and not extension:
             continue
         name = row["name"]
         seen[name] = seen.get(name, 0) + 1
         label = name if seen[name] == 1 else f"{name} ({seen[name]})"
         target = {"contact_id": row["contact_id"], "label": label, "note": row["note"]}
-        if on_call_e164 and row["phone_e164"] == on_call_e164:
+        if on_call_e164 and on_call_e164 in (row["phone_e164"], extension):
             target["on_call"] = True
         targets.append(target)
     return targets

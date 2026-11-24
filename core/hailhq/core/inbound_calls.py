@@ -6,13 +6,20 @@ voicebot reads the SIP participant's attributes and calls
 :func:`open_inbound_call`, which decides who answers:
 
 * unknown or pool number: dropped, no row (same as inbound SMS);
+* an ``unverified`` connected number with an ownership check in flight:
+  :class:`CheckArrived` on the connection's trunk, else refused; either way
+  a ``pbx_check`` event on the check call and no row for this leg. The
+  number turns ``active`` only in :func:`finish_check`, when the code the
+  check call sent arrives as key presses;
 * a Twilio call without the shared secret (``HAIL_SIP_INBOUND_SECRET``) or
   with a wrong one, on any trunk: dropped, no row and no webhook (logged at
   WARNING), so a forged call never fills a customer's call log. Checked
   before the trunk: a real call on the shared trunk carries no secret
   either, so it cannot be told from a forged one (only a hint to move the
   number). A malformed secret, or no Twilio trunk of its own, turns the
-  check off with an ERROR log: it never stops a service;
+  check off with an ERROR log: it never stops a service. A connected
+  (``pbx``) number needs no header: LiveKit checks the digest login of its
+  connection's own inbound trunk, the only trunk its calls are accepted on;
 * known number on the wrong trunk, or without voice: ``Call`` failed with
   ``end_reason = carrier_route_failed`` (logged at WARNING);
 * no live voice agent: ``Call`` failed with ``end_reason = no_agent``;
@@ -30,17 +37,17 @@ from __future__ import annotations
 import asyncio
 import hmac
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
 from hailhq.core.billing import CALL_META_BILLED, has_funds
 from hailhq.core.call_end_reasons import CallEndReason
-from hailhq.core.carrier_routing import inbound_trunk
+from hailhq.core.carrier_routing import PBX, inbound_trunk
 from hailhq.core.compliance_gate import check_channel_suspended
 from hailhq.core.config import SELF_HOSTED_ORG_ID, SIP_SECRET_PATTERN, settings
-from hailhq.core.db import session_scope
+from hailhq.core.db import org_lock, session_scope
 from hailhq.core.handover import handover_limit, handover_targets
 from hailhq.core.internal_webhook import fetch_organization_name
 from hailhq.core.models import (
@@ -52,6 +59,16 @@ from hailhq.core.models import (
     PhoneNumber,
 )
 from hailhq.core.recordings import recording_call_metadata
+from hailhq.core.sip_connections import (
+    CHECK_CODE_META,
+    CHECK_EVENT_KIND,
+    carrier_caller,
+    check_call,
+    check_code_matches,
+    check_in_flight,
+    connection_of,
+    normalize_caller,
+)
 from hailhq.core.sms_ingest import active_dedicated_number
 from hailhq.core.webhook_fanout import call_event_data, fanout_call_event
 from sqlalchemy import select
@@ -63,8 +80,10 @@ __all__ = [
     "SIP_SECRET_ATTRIBUTE",
     "SIP_SECRET_HEADER",
     "Accepted",
+    "CheckArrived",
     "Rejected",
     "SipAttributes",
+    "finish_check",
     "open_inbound_call",
 ]
 
@@ -88,7 +107,7 @@ class SipAttributes:
     """What LiveKit exposes on the SIP participant at join."""
 
     dialed: str  # sip.trunkPhoneNumber: the org number
-    caller: str  # sip.phoneNumber
+    caller: str  # sip.phoneNumber, raw; ``open_inbound_call`` normalizes it
     trunk_id: str  # sip.trunkID
     room_name: str
     provider_call_sid: str | None  # sip.callIDFull
@@ -111,6 +130,16 @@ class Rejected:
 
     reason: str
     call_id: UUID | None = None
+
+
+@dataclass(frozen=True)
+class CheckArrived:
+    """An ownership check call reached the connection's trunk. No Call row
+    for this leg; the check call row (outbound) carries the result. The
+    voicebot still has to receive the code before the number turns active."""
+
+    number_id: UUID
+    check_call_id: UUID
 
 
 async def _refuse(
@@ -165,12 +194,30 @@ async def _refuse(
     return Rejected(end_reason.value, call.id)
 
 
+async def _caller_of(db: AsyncSession, number: PhoneNumber, raw: str) -> str:
+    """A PBX caller is normalized with its connection's region; a carrier
+    caller only gets a leading ``+``."""
+    if number.provider == "pbx":
+        try:
+            conn = await connection_of(db, number)
+        except ValueError:
+            # The trunk check refuses this call. An extension stays as given.
+            raw = raw.strip()
+            if raw.isascii() and raw.isdigit() and len(raw) <= 6:
+                return raw
+            return carrier_caller(raw)
+        return normalize_caller(raw, conn.default_region)
+    return carrier_caller(raw)
+
+
 async def open_inbound_call(
     db: AsyncSession, attrs: SipAttributes
-) -> Accepted | Rejected:
+) -> Accepted | Rejected | CheckArrived:
     """Decide who answers and write the ``Call`` row. Commits."""
     number = await active_dedicated_number(db, attrs.dialed)
-    if number is None or number.organization_id is None:
+    if number is None:
+        return await _check_arrival(db, attrs)
+    if number.organization_id is None:
         logger.info("inbound call to unknown/pool number %s dropped", attrs.dialed)
         return Rejected("unknown_number")
     if not _secret_ok(number.provider, attrs):
@@ -179,6 +226,7 @@ async def open_inbound_call(
         # customer's log. Only after a valid secret does the trunk check
         # below keep a visible failed row for real misrouting.
         return Rejected("bad_secret")
+    attrs = replace(attrs, caller=await _caller_of(db, number, attrs.caller))
     # The INVITE must arrive on the LiveKit inbound trunk configured for the
     # number's carrier: its own trunk when its key is set, else the shared
     # one. While the shared trunk exists it is accepted too, so numbers can
@@ -186,13 +234,24 @@ async def open_inbound_call(
     # number on one trunk only). Each trunk keeps a placeholder entry,
     # because a trunk with no numbers matches every dialed number.
     try:
-        expected_trunk = inbound_trunk(number.provider)
+        expected_trunk = await inbound_trunk(db, number)
     except ValueError:
         expected_trunk = None
     shared = settings.livekit_sip_inbound_trunk_id
-    # The shared trunk counts only for a carrier Hail can route.
-    accepted = {expected_trunk, shared} - {None, ""} if expected_trunk else set()
-    if shared and attrs.trunk_id == shared and expected_trunk not in (None, shared):
+    if number.provider == PBX:
+        # A connected number: only its connection's own trunk, whose digest
+        # login authenticates the customer's phone system. Never the shared
+        # or a carrier trunk.
+        accepted = {expected_trunk} - {None, ""}
+    else:
+        # The shared trunk counts only for a carrier Hail can route.
+        accepted = {expected_trunk, shared} - {None, ""} if expected_trunk else set()
+    if (
+        number.provider != PBX
+        and shared
+        and attrs.trunk_id == shared
+        and expected_trunk not in (None, shared)
+    ):
         # Expected only for a number not moved yet. After the move, a call
         # here means the shared trunk matched a moved number: check that it
         # still lists its placeholder (sip_trunks.py status).
@@ -230,6 +289,121 @@ async def open_inbound_call(
         return await _answer_or_refuse(db, number, org_id, attrs, org_name)
     finally:
         org_name.cancel()  # no-op once it has finished (refusals never await it)
+
+
+async def _check_event(db: AsyncSession, check_call_id: UUID, outcome: str) -> None:
+    db.add(
+        CallEvent(
+            call_id=check_call_id, kind=CHECK_EVENT_KIND, payload={"outcome": outcome}
+        )
+    )
+    await db.commit()
+
+
+async def _check_arrival(
+    db: AsyncSession, attrs: SipAttributes
+) -> CheckArrived | Rejected:
+    """An INVITE for a number with no ``active`` row: Hail's own ownership
+    check call, or nothing. Arrival alone never activates the number: the
+    customer's own trunk can send an INVITE for any number."""
+    number = (
+        await db.execute(
+            select(PhoneNumber).where(
+                PhoneNumber.e164 == attrs.dialed,
+                PhoneNumber.provider == PBX,
+                PhoneNumber.provisioning_state == "unverified",
+            )
+        )
+    ).scalar_one_or_none()
+    check = (
+        await check_in_flight(db, number.id, datetime.now(timezone.utc))
+        if number is not None
+        else None
+    )
+    if number is None or check is None:
+        logger.info("inbound call to unknown/pool number %s dropped", attrs.dialed)
+        return Rejected("unknown_number")
+    try:
+        expected_trunk = await inbound_trunk(db, number)
+    except ValueError:
+        expected_trunk = None
+    if attrs.trunk_id and attrs.trunk_id == expected_trunk:
+        await _check_event(db, check.id, "arrived")
+        logger.info(
+            "ownership check call %s arrived for number %s", check.id, number.id
+        )
+        return CheckArrived(number.id, check.id)
+    await _check_event(db, check.id, "not_authenticated")
+    logger.warning(
+        "ownership check call %s for number %s arrived on trunk=%s expected=%s",
+        check.id,
+        number.id,
+        attrs.trunk_id,
+        expected_trunk,
+    )
+    return Rejected("pbx_check_wrong_trunk")
+
+
+async def finish_check(
+    db: AsyncSession, arrived: CheckArrived, digits: str, *, now: datetime | None = None
+) -> bool:
+    """Count the key presses the check leg received. The right code turns
+    the number ``active``; anything else records ``code_not_received``.
+
+    Only for a real check call of this number (``check_call``), under the
+    org lock (the stale cleanup takes it too), and only once per check call: a second INVITE during the same check is not a second guess,
+    and a number removed meanwhile never turns active. Commits; returns
+    whether the code matched. Never logs the digits."""
+    now = now or datetime.now(timezone.utc)
+    number = await db.get(PhoneNumber, arrived.number_id)
+    if number is None or number.organization_id is None:
+        await db.commit()  # nothing written; ends the read transaction
+        return False
+    await org_lock(db, number.organization_id)
+    await db.refresh(number)
+    check = await check_call(db, arrived.check_call_id, number.id)
+    meta = (check.metadata_ or {}) if check is not None else {}
+    counted = (
+        await db.scalar(
+            select(CallEvent.id)
+            .where(
+                CallEvent.call_id == arrived.check_call_id,
+                CallEvent.kind == CHECK_EVENT_KIND,
+                CallEvent.payload["outcome"].astext.in_(
+                    ("passed", "code_not_received")
+                ),
+            )
+            .limit(1)
+        )
+        if check is not None
+        else None
+    )
+    if (
+        check is None
+        or counted is not None
+        or number.provider != PBX
+        or number.provisioning_state != "unverified"
+    ):
+        logger.warning(
+            "ownership check call %s for number %s not counted (state=%s)",
+            arrived.check_call_id,
+            number.id,
+            number.provisioning_state,
+        )
+        await db.commit()  # nothing written; ends the transaction and the lock
+        return False
+    passed = check_code_matches(digits, meta.get(CHECK_CODE_META))
+    if passed:
+        number.provisioning_state = "active"
+        number.acquired_at = now
+    await _check_event(db, check.id, "passed" if passed else "code_not_received")
+    logger.info(
+        "ownership check call %s for number %s: %s",
+        check.id,
+        number.id,
+        "passed" if passed else "code_not_received",
+    )
+    return passed
 
 
 def _secret_ok(carrier: str | None, attrs: SipAttributes) -> bool:
@@ -321,6 +495,18 @@ async def _organization_name(org_id: UUID) -> str | None:
     return await fetch_organization_name(str(org_id))
 
 
+async def _can_hand_over(db: AsyncSession, number: PhoneNumber) -> bool:
+    """False for a connected number whose phone system only answers: with no
+    outbound trunk, every handover leg would fail, so none is offered."""
+    if number.provider != PBX:
+        return True
+    try:
+        conn = await connection_of(db, number)
+    except ValueError:
+        return False
+    return conn.livekit_outbound_trunk_id is not None
+
+
 async def _answer_or_refuse(
     db: AsyncSession,
     number: PhoneNumber,
@@ -398,6 +584,13 @@ async def _answer_or_refuse(
         attrs.caller,
         agent.id,
     )
+    targets = (
+        await handover_targets(
+            db, agent.id, attrs.caller, via_pbx=number.provider == PBX
+        )
+        if await _can_hand_over(db, number)
+        else []
+    )
     return Accepted(
         {
             "call_id": call.id,
@@ -414,7 +607,7 @@ async def _answer_or_refuse(
             "ai_disclosure": agent.ai_disclosure,
             "ai_disclosure_line": disclosure_line,
             "tools": agent.tools,
-            "handover_targets": await handover_targets(db, agent.id, attrs.caller),
+            "handover_targets": targets,
             "handover_max_duration_seconds": handover_limit(agent),
             "org_name": await org_name,
         }

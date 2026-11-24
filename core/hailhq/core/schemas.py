@@ -225,6 +225,9 @@ class ConsentAttestationMixin(BaseModel):
 
 # Call.metadata keys Hail writes for recording state; POST /calls rejects them.
 RESERVED_CALL_METADATA_PREFIX = "recording_"
+# Call.metadata keys of an ownership check call (hailhq.core.sip_connections);
+# POST /calls rejects them too.
+PBX_CHECK_METADATA_PREFIX = "pbx_check_"
 
 
 class CallCreate(ConsentAttestationMixin):
@@ -305,12 +308,16 @@ class CallCreate(ConsentAttestationMixin):
     def _metadata_has_no_reserved_keys(cls, v: dict) -> dict:
         # Recording state (egress id, object key, status) lives under these
         # keys and is read back as Hail-owned by the voicebot, DSAR erasure
-        # and retention. A caller must not be able to plant them.
+        # and retention. Ownership check calls are found by theirs. A caller
+        # must not be able to plant them.
         bad = sorted(
             k
             for k in v
             if isinstance(k, str)
-            and (k.startswith(RESERVED_CALL_METADATA_PREFIX) or k == "failure_code")
+            and (
+                k.startswith((RESERVED_CALL_METADATA_PREFIX, PBX_CHECK_METADATA_PREFIX))
+                or k == "failure_code"
+            )
         )
         if bad:
             raise ValueError(f"metadata keys are reserved: {', '.join(bad)}")

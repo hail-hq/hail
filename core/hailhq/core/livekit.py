@@ -32,6 +32,22 @@ from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapProp
 
 VOICE_READY_ATTRIBUTE = "hail.voice.ready"
 
+# A connection's inbound trunk lists this placeholder as its only number. LiveKit
+# treats an empty ``numbers`` list as "any number", so it must never be removed.
+PBX_TRUNK_PREFIX = "pbx-"
+
+_PBX_TRANSPORTS = {
+    "auto": api.SIPTransport.SIP_TRANSPORT_AUTO,
+    "udp": api.SIPTransport.SIP_TRANSPORT_UDP,
+    "tcp": api.SIPTransport.SIP_TRANSPORT_TCP,
+    "tls": api.SIPTransport.SIP_TRANSPORT_TLS,
+}
+
+
+def pbx_placeholder(connection_id: UUID) -> str:
+    """The only number on a connection's inbound trunk: ``pbx-<connection id>``."""
+    return f"{PBX_TRUNK_PREFIX}{connection_id}"
+
 
 class WorkerGaveUp(Exception):
     """The worker finalized the call and left before signalling readiness."""
@@ -61,18 +77,24 @@ class LiveKitClient:
         api_key: str | None = None,
         api_secret: str | None = None,
     ) -> None:
-        self._lkapi = api.LiveKitAPI(
+        self._args = (
             url or settings.livekit_url,
             api_key or settings.livekit_api_key,
             api_secret or settings.livekit_api_secret,
         )
+        self._lkapi = api.LiveKitAPI(*self._args)
+        # Made on first use: a client that never replays a request to
+        # another LiveKit region (see ``create_sip_participant``).
+        self._lkapi_once: api.LiveKitAPI | None = None
 
     async def aclose(self) -> None:
-        """Close the underlying aiohttp session.
+        """Close the underlying aiohttp sessions.
 
         Safe to call multiple times; ``LiveKitAPI.aclose`` is idempotent.
         """
         await self._lkapi.aclose()
+        if self._lkapi_once is not None:
+            await self._lkapi_once.aclose()
 
     async def list_egress(self, egress_id: str) -> list[api.EgressInfo]:
         """Current state of one Egress, or ``[]`` when LiveKit no longer has it."""
@@ -143,6 +165,9 @@ class LiveKitClient:
         sip_trunk_id: str,
         participant_identity: str,
         headers: dict[str, str] | None = None,
+        wait_until_answered: bool = False,
+        ringing_timeout_seconds: int | None = None,
+        failover: bool = True,
     ) -> api.SIPParticipantInfo:
         """Place an outbound SIP call into ``room_name`` via LiveKit.
 
@@ -154,18 +179,29 @@ class LiveKitClient:
 
         LiveKit's SIP service issues the INVITE through the trunk pointed to
         by ``sip_trunk_id`` (which in v1 is a Twilio Elastic SIP Trunk).
+
+        ``failover=False`` sends the request once, never to another region:
+        an error then belongs to that one attempt (the SDK otherwise replays
+        a request after a timeout or a 5xx and raises only the last error).
         """
-        return await self._lkapi.sip.create_sip_participant(
-            api.CreateSIPParticipantRequest(
-                sip_trunk_id=sip_trunk_id,
-                sip_call_to=to_e164,
-                sip_number=from_e164,
-                room_name=room_name,
-                participant_identity=participant_identity,
-                participant_name=participant_identity,
-                headers=headers or {},
-            )
+        request = api.CreateSIPParticipantRequest(
+            sip_trunk_id=sip_trunk_id,
+            sip_call_to=to_e164,
+            sip_number=from_e164,
+            room_name=room_name,
+            participant_identity=participant_identity,
+            participant_name=participant_identity,
+            headers=headers or {},
+            wait_until_answered=wait_until_answered,
         )
+        if ringing_timeout_seconds is not None:
+            request.ringing_timeout.seconds = ringing_timeout_seconds
+        lkapi = self._lkapi
+        if not failover:
+            if self._lkapi_once is None:
+                self._lkapi_once = api.LiveKitAPI(*self._args, failover=False)
+            lkapi = self._lkapi_once
+        return await lkapi.sip.create_sip_participant(request)
 
     async def wait_for_agent_ready(
         self,
@@ -210,7 +246,110 @@ class LiveKitClient:
         )
 
     async def remove_inbound_number(self, trunk_id: str, e164: str) -> None:
-        """Drop ``e164`` from an inbound trunk; a number not listed is a no-op."""
+        """Drop ``e164`` from an inbound trunk; a number not listed is a no-op.
+
+        Refuses a connection placeholder: an empty list makes the trunk a wildcard.
+        """
+        if e164.startswith(PBX_TRUNK_PREFIX):
+            raise ValueError("a connection trunk placeholder cannot be removed")
         await self._lkapi.sip.update_inbound_trunk_fields(
             trunk_id, numbers=ListUpdate(remove=[e164])
         )
+
+    async def create_pbx_inbound_trunk(
+        self, connection_id: UUID, username: str, password: str
+    ) -> str:
+        """Create a connection's inbound trunk, listing only its placeholder."""
+        placeholder = pbx_placeholder(connection_id)
+        info = await self._lkapi.sip.create_inbound_trunk(
+            api.CreateSIPInboundTrunkRequest(
+                trunk=api.SIPInboundTrunkInfo(
+                    name=placeholder,
+                    numbers=[placeholder],
+                    auth_username=username,
+                    auth_password=password,
+                )
+            )
+        )
+        return info.sip_trunk_id
+
+    async def set_pbx_inbound_credentials(
+        self, trunk_id: str, username: str, password: str
+    ) -> None:
+        """Change only the auth fields; ``numbers`` is never sent."""
+        await self._lkapi.sip.update_inbound_trunk_fields(
+            trunk_id, auth_username=username, auth_password=password
+        )
+
+    async def create_pbx_outbound_trunk(
+        self,
+        connection_id: UUID,
+        host: str,
+        port: int,
+        transport: str,
+        username: str | None,
+        password: str | None,
+    ) -> str:
+        """Create a connection's outbound trunk to the customer's phone system.
+
+        ``numbers=["*"]`` lets a dial use any caller ID (``sip_number``).
+        """
+        info = await self._lkapi.sip.create_outbound_trunk(
+            api.CreateSIPOutboundTrunkRequest(
+                trunk=api.SIPOutboundTrunkInfo(
+                    name=f"{pbx_placeholder(connection_id)}-out",
+                    address=f"{host}:{port}",
+                    transport=_PBX_TRANSPORTS[transport],
+                    numbers=["*"],
+                    auth_username=username or "",
+                    auth_password=password or "",
+                )
+            )
+        )
+        return info.sip_trunk_id
+
+    async def update_pbx_outbound_trunk(
+        self,
+        trunk_id: str,
+        host: str,
+        port: int,
+        transport: str,
+        username: str | None,
+        password: str | None,
+    ) -> None:
+        """Point an outbound trunk at a new address, transport and auth."""
+        await self._lkapi.sip.update_outbound_trunk_fields(
+            trunk_id,
+            address=f"{host}:{port}",
+            transport=_PBX_TRANSPORTS[transport],
+            auth_username=username or "",
+            auth_password=password or "",
+        )
+
+    async def clear_dispatch_rule_trunks(
+        self, rule_name: str
+    ) -> tuple[str, list[str]] | None:
+        """Make the named dispatch rule match any inbound trunk (empty
+        ``trunk_ids``). Returns the rule id and its trunk list, or ``None``
+        when no rule has that name."""
+        listed = await self._lkapi.sip.list_dispatch_rule(
+            api.ListSIPDispatchRuleRequest()
+        )
+        info = next((r for r in listed.items if r.name == rule_name), None)
+        if info is None:
+            return None
+        info.ClearField("trunk_ids")
+        updated = await self._lkapi.sip.update_dispatch_rule(
+            info.sip_dispatch_rule_id, info
+        )
+        return updated.sip_dispatch_rule_id, list(updated.trunk_ids)
+
+    async def delete_sip_trunk(self, trunk_id: str) -> None:
+        """Delete a trunk; a trunk that is already gone (404) counts as done."""
+        try:
+            await self._lkapi.sip.delete_trunk(
+                api.DeleteSIPTrunkRequest(sip_trunk_id=trunk_id)
+            )
+        except api.TwirpError as exc:
+            if exc.status != 404:
+                raise

@@ -32,7 +32,7 @@ from hailhq.api.idempotency import (
     idempotency_dep,
     replay_cached,
 )
-from hailhq.api.numbers import resolve_org_number
+from hailhq.api.numbers import AnswerOnlyNumber, resolve_org_number
 from hailhq.api.pagination import fetch_cursor_page
 from hailhq.api.ratelimit import (
     GENERAL_RATE_LIMITED_RESPONSES,
@@ -51,7 +51,7 @@ from hailhq.core.call_allowance import (
 )
 from hailhq.core.call_analysis import call_transcript
 from hailhq.core.call_end_reasons import CallEndReason
-from hailhq.core.carrier_routing import voice_route
+from hailhq.core.carrier_routing import PBX, voice_route
 from hailhq.core.compliance_gate import check_call_allowed
 from hailhq.core.config import settings
 from hailhq.core.db import get_session, org_lock
@@ -520,9 +520,20 @@ async def create_call(
     #    pool. Pool numbers are never explicitly addressable; naming one would
     #    let a caller grab a number that isn't theirs.
     pool_number: PhoneNumber | None = None
-    from_number = await resolve_org_number(
-        db, principal.organization_id, body.from_, capability="voice"
-    )
+    try:
+        from_number = await resolve_org_number(
+            db, principal.organization_id, body.from_, capability="voice"
+        )
+    except AnswerOnlyNumber:
+        raise await cache_failure(
+            idem,
+            unprocessable(
+                f"phone number {body.from_} is on a phone system that only "
+                "answers calls; add the phone system's address to place calls "
+                "from it",
+                loc=["body", "from"],
+            ),
+        ) from None
     if from_number is None:
         if body.from_ is not None:
             raise await cache_failure(
@@ -686,7 +697,7 @@ async def create_call(
     try:
         # Resolve the carrier route first: a carrier with no trunk configured
         # must fail before any LiveKit room exists.
-        trunk_id, sip_headers = voice_route(call.provider)
+        trunk_id, sip_headers = await voice_route(db, from_number)
         setup_stage = "room_create"
         room_name = await lk.create_room(call.id)
         setup_stage = "agent_dispatch"
@@ -729,7 +740,10 @@ async def create_call(
                 "ai_disclosure_line": ai_disclosure_line,
                 "tools": body.tools,
                 "handover_targets": await handover_targets(
-                    db, agent.id if agent else None, call.to_e164
+                    db,
+                    agent.id if agent else None,
+                    call.to_e164,
+                    via_pbx=from_number.provider == PBX,
                 ),
                 "handover_max_duration_seconds": handover_limit(agent),
                 "org_name": await org_name_task,

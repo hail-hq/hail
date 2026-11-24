@@ -21,6 +21,7 @@ from hailhq.core.models import (
     WebhookSubscription,
 )
 from hailhq.core.reconcile import sweep_stale_calls
+from hailhq.core.sip_connections import CHECK_CALL_META
 from sqlalchemy import select, update
 
 
@@ -32,6 +33,7 @@ async def _make_call(
     requested_at: datetime | None = None,
     max_duration_seconds: int | None = 300,
     end_reason: str | None = None,
+    metadata: dict | None = None,
 ) -> Call:
     pn = PhoneNumber(
         organization_id=uuid.uuid4(),
@@ -54,6 +56,7 @@ async def _make_call(
         status=status,
         max_duration_seconds=max_duration_seconds,
         end_reason=end_reason,
+        metadata_=metadata or {},
     )
     session.add(call)
     await session.commit()
@@ -334,6 +337,56 @@ async def test_sweep_closes_unanswered_handover_past_max_duration(async_session)
     await async_session.commit()
 
     assert call.id in swept
+
+
+@pytest.mark.asyncio
+async def test_sweep_closes_a_check_call_without_a_webhook(async_session):
+    """An ownership check call is Hail's own: closed, but no customer webhook.
+    A normal stuck call in the same pass still gets call.failed."""
+    now = datetime.now(timezone.utc)
+    check = await _make_call(
+        async_session,
+        status="ringing",
+        requested_at=now - timedelta(seconds=600),
+        max_duration_seconds=90,
+        metadata={CHECK_CALL_META: str(uuid.uuid4())},
+    )
+    normal = await _make_call(
+        async_session,
+        status="dialing",
+        started_at=now - timedelta(seconds=600),
+        max_duration_seconds=300,
+    )
+    for org in (check.organization_id, normal.organization_id):
+        async_session.add(
+            WebhookSubscription(
+                organization_id=org,
+                target_url="https://example.com/firehose",
+                secret_encrypted="hash",
+                event_types=["call.failed"],
+            )
+        )
+    await async_session.commit()
+
+    swept = await sweep_stale_calls(async_session, grace_seconds=120)
+    await async_session.commit()
+
+    assert set(swept) == {check.id, normal.id}
+    await async_session.refresh(check)
+    assert (check.status, check.end_reason) == ("failed", "sweeper_timeout")
+    assert len(await _state_change_events(async_session, check.id)) == 1
+    rows = (
+        (
+            await async_session.execute(
+                select(WebhookDelivery).where(
+                    WebhookDelivery.event_type == "call.failed"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert [r.payload["data"]["id"] for r in rows] == [str(normal.id)]
 
 
 @pytest.mark.asyncio

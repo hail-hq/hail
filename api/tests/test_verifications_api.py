@@ -37,6 +37,7 @@ from hailhq.core.models import (
     CarrierVerification,
     OrgClosure,
     PhoneNumber,
+    SipConnection,
 )
 from hailhq.core.providers.verification import (
     DocumentOption,
@@ -8795,3 +8796,40 @@ def test_the_sms_reason_cap_marks_the_cut() -> None:
     assert _cap_reason("short.", "sms") == "short."
     # Number verifications keep their reason whole.
     assert _cap_reason(reason, "number") == reason
+
+
+@pytest.mark.parametrize(
+    ("state", "refused"), [("active", True), ("unverified", False)]
+)
+async def test_mobile_held_only_by_an_unproven_claim_is_allowed(
+    async_session, state, refused
+):
+    """A connected number before its ownership check proves nothing, so it
+    does not make someone's own mobile "a Hail number"."""
+    org = uuid.uuid4()
+    conn = SipConnection(
+        organization_id=org,
+        label="Main office",
+        inbound_username="hail-" + uuid.uuid4().hex[:12],
+        encrypted_inbound_password="token",
+        default_region="US",
+    )
+    async_session.add(conn)
+    await async_session.flush()
+    async_session.add(
+        PhoneNumber(
+            organization_id=org,
+            e164="+14155550123",
+            country_code="US",
+            number_type="mobile",
+            capabilities=["voice"],
+            provider="pbx",
+            sip_connection_id=conn.id,
+            provisioning_state=state,
+        )
+    )
+    await async_session.commit()
+    problems = await verifications_routes._sms_mobile_problems(
+        async_session, "person", {"mobile_phone_number": "+14155550123"}
+    )
+    assert bool(problems) is refused

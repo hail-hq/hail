@@ -12,7 +12,7 @@ from typing import Literal
 from uuid import UUID
 
 from hailhq.core.db import org_lock
-from hailhq.core.models import Agent, PhoneNumber
+from hailhq.core.models import Agent, PhoneNumber, SipConnection
 from hailhq.core.sms_registration_gate import (
     approved_registration_ids,
     is_us,
@@ -22,7 +22,12 @@ from hailhq.core.sms_registration_gate import (
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-__all__ = ["resolve_org_number", "resolve_sms_number"]
+__all__ = ["AnswerOnlyNumber", "resolve_org_number", "resolve_sms_number"]
+
+
+class AnswerOnlyNumber(ValueError):
+    """The named ``from`` is a connected number whose phone system only
+    answers: Hail has no address to place calls through it."""
 
 
 async def resolve_org_number(
@@ -37,7 +42,9 @@ async def resolve_org_number(
     ``capability`` (e.g. ``"sms"``) additionally requires the number's
     ``capabilities`` array to carry it — a number can legitimately be
     voice-only. Returns ``None`` when nothing matches; the caller owns the
-    failure path (calls fall back to the shared pool, SMS 422s).
+    failure path (calls fall back to the shared pool, SMS 422s). A connected
+    number is returned only when named explicitly; one with no outbound trunk
+    raises :class:`AnswerOnlyNumber`.
     """
     stmt = select(PhoneNumber).where(
         PhoneNumber.organization_id == organization_id,
@@ -46,9 +53,26 @@ async def resolve_org_number(
     if capability is not None:
         stmt = stmt.where(PhoneNumber.capabilities.any(capability))
     if explicit_e164 is not None:
-        stmt = stmt.where(PhoneNumber.e164 == explicit_e164)
-    else:
-        stmt = stmt.order_by(PhoneNumber.created_at.asc()).limit(1)
+        number = (
+            await db.execute(stmt.where(PhoneNumber.e164 == explicit_e164))
+        ).scalar_one_or_none()
+        if number is not None and number.provider == "pbx":
+            conn = (
+                await db.get(SipConnection, number.sip_connection_id)
+                if number.sip_connection_id
+                else None
+            )
+            if conn is None or conn.livekit_outbound_trunk_id is None:
+                raise AnswerOnlyNumber(explicit_e164)
+        return number
+    # A connected number (pbx) is the caller ID only when ``from`` names it:
+    # the default is a carrier number, else the caller falls back (calls use
+    # the shared pool).
+    stmt = (
+        stmt.where(PhoneNumber.provider != "pbx")
+        .order_by(PhoneNumber.created_at.asc())
+        .limit(1)
+    )
     return (await db.execute(stmt)).scalar_one_or_none()
 
 
