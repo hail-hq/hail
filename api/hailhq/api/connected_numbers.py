@@ -17,6 +17,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Final, Literal
 from uuid import UUID, uuid4
 
+import aiohttp
 import phonenumbers
 from hailhq.core.billing import CALL_META_BILLED, has_funds
 from hailhq.core.call_end_reasons import CallEndReason
@@ -668,6 +669,8 @@ CHECK_POLL_SECONDS = 0.25
 # can still arrive before the deadline.
 _CHECK_FINAL = ("passed", "code_not_received")
 # Twirp codes of a dial request LiveKit refused before sending any INVITE.
+# A connect failure to LiveKit (``aiohttp.ClientConnectorError``) sends
+# nothing either.
 _PRE_DIAL_CODES = frozenset(
     {
         "invalid_argument",
@@ -677,6 +680,7 @@ _PRE_DIAL_CODES = frozenset(
         "permission_denied",
         "not_found",
         "failed_precondition",
+        "resource_exhausted",
     }
 )
 # Hail-side failures: not a check the customer used up. A dial LiveKit
@@ -845,8 +849,12 @@ async def check_connected_number(
                 exc.sip_status_code,
             )
         except Exception as exc:
-            if isinstance(exc, ServerError) and exc.code in _PRE_DIAL_CODES:
-                raise  # refused before any INVITE: a setup failure
+            if isinstance(exc, aiohttp.ClientConnectorError) or (
+                isinstance(exc, ServerError) and exc.code in _PRE_DIAL_CODES
+            ):
+                # LiveKit refused the request, or Hail never reached LiveKit:
+                # no INVITE was sent, so a setup failure.
+                raise
             # A timeout or an unknown error: the number may have rung, so the
             # check counts. The type only: an error text may hold the code.
             logger.warning(

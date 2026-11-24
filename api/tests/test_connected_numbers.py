@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
+import aiohttp
 import pytest
 from hailhq.api import connected_numbers
 from hailhq.api.connected_numbers import (
@@ -1416,17 +1417,27 @@ async def test_checks_today_skips_only_hail_setup_failures(
     )
 
 
+def _connect_failed() -> aiohttp.ClientConnectorError:
+    key = SimpleNamespace(host="livekit.example.com", port=443, ssl=True)
+    return aiohttp.ClientConnectorError(key, OSError(61, "Connection refused"))
+
+
+_PRE_DIAL = ("invalid_argument", "unauthenticated", "permission_denied")
+_PRE_DIAL += ("not_found", "resource_exhausted")
+
+
 @pytest.mark.parametrize(
-    "code", ["invalid_argument", "unauthenticated", "permission_denied", "not_found"]
+    "error",
+    [*(ServerError(c, "refused", status=400) for c in _PRE_DIAL), _connect_failed()],
+    ids=[*_PRE_DIAL, "connect_failed"],
 )
 async def test_check_dial_refused_before_the_invite_is_a_setup_failure(
-    async_session, check_lk, pbx_number, pool_number, code
+    async_session, check_lk, pbx_number, pool_number, error
 ):
-    """LiveKit refused the dial request itself (no SIP status): no INVITE was
-    sent, so it is Hail's failure and not a check the customer used up."""
-    check_lk.create_sip_participant.side_effect = ServerError(
-        code, "refused", status=400
-    )
+    """LiveKit refused the dial request itself (no SIP status), or Hail could
+    not connect to LiveKit: no INVITE was sent, so it is Hail's failure and
+    not a check the customer used up."""
+    check_lk.create_sip_participant.side_effect = error
     with pytest.raises(ConnectedNumberError) as e:
         await check_connected_number(async_session, check_lk, pbx_number)
     assert e.value.code == "livekit_failed"
@@ -1443,11 +1454,11 @@ async def test_check_dial_refused_before_the_invite_is_a_setup_failure(
     "error",
     [
         TimeoutError(),
-        ConnectionError("reset"),
+        ConnectionResetError("reset mid-request"),
         ServerError("deadline_exceeded", "slow", status=504),
         ServerError("internal", "boom", status=500),
     ],
-    ids=["timeout", "connection", "deadline", "internal"],
+    ids=["timeout", "connection_reset", "deadline", "internal"],
 )
 async def test_check_dial_outcome_unknown_still_counts(
     async_session, check_lk, pbx_number, pool_number, error
