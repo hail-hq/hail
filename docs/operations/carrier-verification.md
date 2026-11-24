@@ -62,7 +62,7 @@ Rows created before `subject_name` existed have none. `python -m hailhq.core.ver
 It commits row by row and logs counts and row ids only, never a name. A carrier that is not configured, a record that is gone, or a lookup that fails leaves the row null; run it again later to retry. A live row whose name would duplicate another live row of the same kind stays null (counted as `duplicate`). Run it once after the deploy that adds the column, on the production VM:
 
 ```bash
-cd <repo checkout on the server>
+# Run from the repo checkout on the server.
 docker compose -f docker-compose.yml -f docker-compose.prod.yml \
   run --rm api python -m hailhq.core.verification_names
 ```

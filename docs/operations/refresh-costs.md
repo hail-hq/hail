@@ -296,7 +296,7 @@ Do the steps below in sequence. Each provider gets one focused dispatch.
 ### Step 0 — Pre-flight
 
 ```bash
-cd <repo root>   # or wherever the repo lives
+# Run from the repo root.
 git status --short costs/      # must be empty
 pnpm costs:validate            # baseline must pass (fall back to direct check-jsonschema if needed)
 ```
