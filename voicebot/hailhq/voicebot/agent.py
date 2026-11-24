@@ -1050,10 +1050,11 @@ FIRST_LINE_FIT_SECONDS = 10.0
 # lands inside a sentence, a word or a name.
 MAX_GREETING_WORDS = 3
 MAX_GREETING_CHARS = 30
-# A greeting written without spaces ("早上好", "Здравствуйте") is one token,
-# so its width is capped instead of its word count. A wide (CJK) character
-# counts twice: it carries more than a letter.
-MAX_GREETING_TOKEN_WIDTH = 18
+# A greeting written without spaces is one token, so its length is capped
+# instead of its word count: 16 letters ("Здравствуйте") or 5 wide (CJK)
+# characters ("早上好", "こんにちは"), which carry more than a letter.
+MAX_GREETING_TOKEN_CHARS = 16
+MAX_GREETING_WIDE_CHARS = 5
 # Only the start of the line goes to the model: a greeting is at the start.
 FIRST_LINE_SAMPLE_CHARS = 120
 # The model's answer when the line does not open with a greeting.
@@ -1066,8 +1067,30 @@ _GREETING_OPENS = frozenset("¡¿\"'«“‘「『")
 _GREETING_CLOSES = frozenset("\"'»”’」』")
 
 
-def _width(text: str) -> int:
-    return sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in text)
+# Languages whose dotted "i" capitalizes to "İ", not "I".
+_DOTTED_I_LANGUAGES = frozenset({"tr", "az"})
+
+
+def sentence_start(text: str, language: str | None = None) -> str:
+    """``text`` with its first letter capitalized when its first word is all
+    lowercase, after any opening mark ("¿es" becomes "¿Es"). Only that one
+    letter changes: "iPhone" and "macOS" stay, and Turkish "iyi" becomes
+    "İyi". The rest of a cut line follows the AI notice's full stop."""
+    start = 0
+    while start < len(text) and text[start] in _GREETING_OPENS:
+        start += 1
+    word = re.match(r"\w+", text[start:])
+    if word is None or not word.group(0).islower():
+        return text
+    first = text[start]
+    upper = "İ" if first == "i" and language in _DOTTED_I_LANGUAGES else first.upper()
+    if len(upper) != 1:
+        return text
+    return text[:start] + upper + text[start + 1 :]
+
+
+def _wide_chars(text: str) -> int:
+    return sum(unicodedata.east_asian_width(c) in "WF" for c in text)
 
 
 def cut_greeting(first_message: str, greeting: str) -> str:
@@ -1085,7 +1108,8 @@ def cut_greeting(first_message: str, greeting: str) -> str:
         not greeting
         or len(greeting) > MAX_GREETING_CHARS
         or len(tokens) > MAX_GREETING_WORDS
-        or (len(tokens) == 1 and _width(greeting) > MAX_GREETING_TOKEN_WIDTH)
+        or (len(tokens) == 1 and len(greeting) > MAX_GREETING_TOKEN_CHARS)
+        or _wide_chars(greeting) > MAX_GREETING_WIDE_CHARS
         or re.search(r"\d", greeting)
         or "<" in greeting
         or any(c in _GREETING_ENDS for c in greeting)
@@ -1317,6 +1341,9 @@ async def speak_greeting(
                 interruptible = False
             else:
                 # An empty line: the first line was only a greeting.
+                # A cut line starts a new sentence after the notice.
+                if line != first_message:
+                    line = sentence_start(line, language)
                 greeting = f"{disclosure} {line}".strip()
             await session.say(greeting, allow_interruptions=interruptible)
             return

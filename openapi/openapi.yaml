@@ -6674,9 +6674,9 @@ components:
             'Opening line spoken after the AI line. On outbound calls with
             the built-in AI line, a greeting at its start that a sentence mark ends
             ("Hi,") is usually dropped, since the AI line already greets; the rest
-            is said as written. Calls on your own model, inbound calls, and calls
-            with a custom AI line or no AI line say it whole. Omitted: the agent waits
-            for the other side to speak first.'
+            is said as written, starting with a capital letter. Calls on your own
+            model, inbound calls, and calls with a custom AI line or no AI line say
+            it whole. Omitted: the agent waits for the other side to speak first.'
         recording_enabled:
           anyOf:
             - type: boolean
@@ -6973,8 +6973,9 @@ components:
             New opening line; null makes the agent wait for the other side.
             On outbound calls with the built-in AI line, a greeting at its start that
             a sentence mark ends ("Hi,") is usually dropped, since the AI line already
-            greets; the rest is said as written. Calls on your own model, inbound
-            calls, and calls with a custom AI line or no AI line say it whole.
+            greets; the rest is said as written, starting with a capital letter. Calls
+            on your own model, inbound calls, and calls with a custom AI line or no
+            AI line say it whole.
         recording_enabled:
           anyOf:
             - type: boolean
@@ -7178,9 +7179,10 @@ components:
           description:
             'Opening line the agent speaks first. With the built-in AI
             line, a greeting at its start that a sentence mark ends ("Hi,") is usually
-            dropped, since the AI line already greets; the rest is said as written.
-            Calls on your own model, and calls with a custom AI line or no AI line,
-            say it whole. Omitted: the agent waits for the callee to speak first.'
+            dropped, since the AI line already greets; the rest is said as written,
+            starting with a capital letter. Calls on your own model, and calls with
+            a custom AI line or no AI line, say it whole. Omitted: the agent waits
+            for the callee to speak first.'
         recording_enabled:
           anyOf:
             - type: boolean

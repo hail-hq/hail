@@ -56,6 +56,7 @@ from hailhq.voicebot.agent import (
     on_call_end,
     opening_instructions,
     parse_metadata,
+    sentence_start,
     soft_cap_announce_and_hangup,
     speak_greeting,
     speech_text,
@@ -1101,6 +1102,38 @@ async def test_speak_greeting_says_the_fitted_line_after_the_disclosure() -> Non
     ]
 
 
+@pytest.mark.parametrize(
+    ("text", "language", "expected"),
+    [
+        ("calling about your order.", None, "Calling about your order."),
+        ("¿es un buen momento?", "es", "¿Es un buen momento?"),
+        ("iyi günler.", "tr", "İyi günler."),
+        ("iyi günler.", "en", "Iyi günler."),
+        ("iPhone repair here.", None, "iPhone repair here."),
+        ("macOS users wanted.", None, "macOS users wanted."),
+        ("我们是关于您明天的预约。", "zh", "我们是关于您明天的预约。"),
+    ],
+)
+def test_sentence_start_capitalizes_one_letter(text, language, expected):
+    assert sentence_start(text, language) == expected
+
+
+async def test_speak_greeting_capitalizes_only_a_cut_line() -> None:
+    session = FakeAnnouncingSession()
+    fitted = asyncio.get_running_loop().create_future()
+    fitted.set_result("calling about your order.")
+    await speak_greeting(
+        session, {"first_message": "Hi, calling about your order."}, first_line=fitted
+    )
+    assert session.say_calls == [
+        (f"{AI_DISCLOSURE_LINE} Calling about your order.", True)
+    ]
+
+    session = FakeAnnouncingSession()
+    await speak_greeting(session, {"first_message": "hey there."})
+    assert session.say_calls == [(f"{AI_DISCLOSURE_LINE} hey there.", True)]
+
+
 async def test_speak_greeting_never_waits_and_cancels_a_late_fit() -> None:
     """A fit not ready at pickup leaves the line as written, with no wait,
     and the fit is cancelled so its answer is not paid for in vain."""
@@ -1137,8 +1170,15 @@ async def test_speak_greeting_never_waits_and_cancels_a_late_fit() -> None:
         # Marks that are content stay: only sentence marks go with the hello.
         ("Hi, #1 rated clinic calling.", "Hi", "#1 rated clinic calling."),
         ("Hi, -20% on your next visit.", "Hi", "-20% on your next visit."),
-        # A greeting written without spaces is capped by width.
-        ("おはようございます、Samさん。", "おはようございます", "Samさん。"),
+        # A greeting written without spaces is capped: 16 letters or 5 wide
+        # characters.
+        ("こんにちは、Samさん。", "こんにちは", "Samさん。"),
+        # More than 5 wide characters: a self-introduction, not a greeting.
+        (
+            "您好我是小李，关于您的预约。",
+            "您好我是小李",
+            "您好我是小李，关于您的预约。",
+        ),
         (
             "您好我是北方牙科的小李，关于您明天的预约。",
             "您好我是北方牙科的小李",
