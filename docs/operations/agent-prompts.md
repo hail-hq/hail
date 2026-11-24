@@ -47,26 +47,22 @@ Live behavior needs a separately authorized test call or a synthetic model evalu
 
 ## Opening line
 
-On outbound calls, Hail says the AI notice word for word. The agent's model
-then says the greeting (`first_message`, "Greeting" in the console) as one
-greeting with it. It keeps the line word for word, except a hello the
-notice already said. The instruction is
-`first_message_instructions` in `voicebot/hailhq/voicebot/agent.py`; it
-quotes the notice and the line as JSON strings.
+On outbound calls, Hail says the AI notice word for word. Then, the same way
+the generated opening runs for calls without a greeting, the agent's model
+says the greeting (`first_message`, "Greeting" in the console) as one
+greeting with the notice. It keeps the line word for word, except a hello
+word the notice already said. The instruction is `first_message_instructions`
+in `voicebot/hailhq/voicebot/agent.py`; it quotes the notice and the line as
+JSON strings, and the turn cannot call tools.
 
-- If the model turn fails, ends with no words, or has not started speaking
-  within 3 seconds (`FIRST_MESSAGE_START_SECONDS`), the line is said as
-  written.
+- If that turn fails or ends with no words, and nobody interrupted it, the
+  line is said as written.
+- If the person talks over the notice or the greeting, the turn loop answers
+  them, as it does for any opening.
 - Exact wording is not guaranteed: the model writes the turn.
-- On the phone-menu path, when a person was heard, the two are joined as
-  written: the turn loop is already answering that person.
-- Replies stay held until the greeting turn ends, and that turn cannot call
-  tools. If the person talks over the notice, the line is said as written.
-- Inbound calls keep the literal greeting: replies are not held for the
-  opening there.
-- Calls on a customer's own model keep the literal greeting: their endpoint
-  may ignore the instruction.
-- Words the person says during the greeting are answered right after it.
+- Kept literal: inbound calls, the phone-menu path when a person was heard,
+  calls without an AI notice, and calls on a customer's own model (workspace
+  or per call), whose endpoint may ignore the instruction.
 
 ## Closing calls
 

@@ -38,7 +38,6 @@ from hailhq.voicebot.agent import (
     SIP_CALL_STATUS_ATTRIBUTE,
     SOFT_CAP_END_REASON,
     VOICE_PREAMBLE,
-    SpeechSanitizingAgent,
     _sanitize_tts_stream,
     attach_event_handlers,
     build_instructions,
@@ -64,7 +63,6 @@ from hailhq.voicebot.amd import IVR_TOOL_LINES, ivr_navigation_instructions
 from hailhq.voicebot.spoken_lines import SPOKEN_LINES
 from livekit import rtc
 from livekit.agents import Agent, AgentSession
-from livekit.agents.llm import ChatContext
 from livekit.api import SipCallError
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -83,7 +81,6 @@ CALL_ID = UUID("22222222-3333-4444-5555-666666666666")
 @pytest.fixture(autouse=True)
 def _short_handover_settle(monkeypatch):
     """The bridge waits HANDOVER_SETTLE_SECONDS after the contact speaks."""
-    from hailhq.voicebot import agent as agent_mod
 
     monkeypatch.setattr(agent_mod, "HANDOVER_SETTLE_SECONDS", 0.05)
 
@@ -304,7 +301,6 @@ async def test_entrypoint_org_config_load_failure_finalizes_cleanly(
     a HAIL_PROVIDER_SECRET_KEY rotation invalidating stored ciphertext) must
     fail fast as provider_key_error (finalizing the Call row via on_call_end)
     and must NOT propagate raw out of entrypoint() and leak the number."""
-    from hailhq.voicebot import agent as agent_mod
 
     org_id = UUID("11111111-2222-3333-4444-555555555555")
     call_id = await _make_call_row(async_session)
@@ -1146,8 +1142,9 @@ def test_first_message_instructions_quote_the_notice_and_the_line() -> None:
 
 
 class _DoneHandle:
-    def __init__(self, error=None, words=""):
+    def __init__(self, error=None, words="", interrupted=False):
         self._error = error
+        self.interrupted = interrupted
         self.chat_items = (
             [SimpleNamespace(role="assistant", text_content=words)] if words else []
         )
@@ -1160,28 +1157,9 @@ class _DoneHandle:
         return self._error
 
 
-async def test_greeting_turn_is_text_only_and_passes_the_hold() -> None:
-    """The greeting turn cannot call tools, and it is the one turn the held
-    opening lets through; a reply to the person is still held."""
-    agent = SpeechSanitizingAgent(instructions="test", opening_pending=True)
-    session = FakeAnnouncingSession()
-    await speak_greeting(
-        session, {"first_message": "Hi, about your order."}, agent=agent
-    )
-    assert session.generate_reply_options == [{"tool_choice": "none"}]
-
-    turn = ChatContext()
-    turn.add_message(role="system", content=session.generate_reply_calls[0])
-    assert agent._is_opening_turn(turn)
-    other = ChatContext()
-    other.add_message(role="user", content="Hello?")
-    assert not agent._is_opening_turn(other)
-    assert await agent.llm_node(other, [], None) is None
-
-
-async def test_an_interrupted_notice_is_followed_by_the_line_as_written() -> None:
+async def test_an_interrupted_notice_hands_over_to_the_turn_loop() -> None:
     """If the person talks over the AI notice, the model is not told it
-    played: the line is said as written."""
+    played, and the turn loop answers them."""
     session = FakeAnnouncingSession()
 
     class Cut:
@@ -1200,29 +1178,27 @@ async def test_an_interrupted_notice_is_followed_by_the_line_as_written() -> Non
         return Cut()
 
     session.say = say
-    await speak_greeting(
-        session,
-        {"first_message": "Hi, about your order."},
-        on_opened=lambda: "Who is this?",
-    )
-    assert session.say_calls == [
-        (AI_DISCLOSURE_LINE, True),
-        ("Hi, about your order.", True),
-    ]
-    # What they said over the notice is answered after the line.
-    assert session.generate_reply_calls == [None]
+    await speak_greeting(session, {"first_message": "Hi, about your order."})
+    # As when a joined greeting is cut off: the turn loop answers them.
+    assert session.say_calls == [(AI_DISCLOSURE_LINE, True)]
+    assert session.generate_reply_calls == []
 
 
 @pytest.mark.parametrize(
-    ("words", "fallback"),
+    ("error", "words", "interrupted", "fallback"),
     [
-        ("", True),  # an error, an interruption or an empty turn: no words
-        ("Calling about", False),  # words spoken: never restart the greeting
+        (RuntimeError("model down"), "", False, True),
+        (None, "", False, True),  # no words
+        (None, "Calling about your order.", False, False),
+        (RuntimeError("tts down"), "Calling about", False, False),  # no restart
+        (None, "", True, False),  # the person spoke: the turn loop answers them
     ],
 )
-async def test_failed_greeting_turn_says_the_line_as_written(words, fallback):
+async def test_failed_greeting_turn_says_the_line_as_written(
+    error, words, interrupted, fallback
+):
     session = FakeAnnouncingSession()
-    handle = _DoneHandle(None, words)
+    handle = _DoneHandle(error, words, interrupted)
     session.generate_reply = lambda **_kw: handle
     released = []
     await speak_greeting(
@@ -1230,94 +1206,20 @@ async def test_failed_greeting_turn_says_the_line_as_written(words, fallback):
         {"first_message": "Hi, about your order."},
         on_opened=lambda: released.append(True),
     )
-    # Replies stay held while the greeting turn runs.
-    assert released == []
-
+    # Released after the notice, as the generated opening is.
+    assert released == [True]
     for callback in handle.callbacks:
         callback(handle)
-    for _ in range(3):
-        await asyncio.sleep(0)
     expected = [(AI_DISCLOSURE_LINE, True)]
     if fallback:
         expected.append(("Hi, about your order.", True))
     assert session.say_calls == expected
-    assert released == [True]
 
 
-async def test_words_held_during_the_greeting_get_an_answer() -> None:
+async def test_greeting_turn_is_text_only() -> None:
     session = FakeAnnouncingSession()
-    handle = _DoneHandle(None, "Calling about your order.")
-    replies = []
-
-    def generate_reply(**kwargs):
-        replies.append(kwargs)
-        return handle
-
-    session.generate_reply = generate_reply
-    await speak_greeting(
-        session,
-        {"first_message": "Hi, about your order."},
-        on_opened=lambda: "Who is this?",
-    )
-    for callback in handle.callbacks:
-        callback(handle)
-    for _ in range(3):
-        await asyncio.sleep(0)
-    # The greeting turn, then a plain reply to the held words.
-    assert len(replies) == 2
-    assert replies[1] == {}
-
-
-async def test_words_held_before_the_greeting_are_not_answered_twice() -> None:
-    """The greeting turn sees words held before it; only words held while it
-    runs get a reply after it."""
-    agent = SpeechSanitizingAgent(instructions="test", opening_pending=True)
-    agent._held_words.append("Hello?")
-    session = FakeAnnouncingSession()
-    handle = _DoneHandle(None, "Calling about your order.")
-    replies = []
-
-    def generate_reply(**kwargs):
-        replies.append(kwargs)
-        return handle
-
-    session.generate_reply = generate_reply
-    await speak_greeting(
-        session,
-        {"first_message": "Hi, about your order."},
-        agent=agent,
-        on_opened=agent.release_opening,
-    )
-    for callback in handle.callbacks:
-        callback(handle)
-    for _ in range(3):
-        await asyncio.sleep(0)
-    assert len(replies) == 1  # the greeting turn only
-
-
-async def test_a_slow_greeting_turn_is_stopped_and_the_line_said(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(agent_mod, "FIRST_MESSAGE_START_SECONDS", 0.05)
-    session = FakeAnnouncingSession()
-
-    class Slow(_DoneHandle):
-        stopped = False
-
-        def done(self):
-            return self.stopped
-
-        def interrupt(self, force=False):
-            self.stopped = True
-            for callback in self.callbacks:
-                callback(self)
-
-    handle = Slow(None, "")
-    session.generate_reply = lambda **_kw: handle
     await speak_greeting(session, {"first_message": "Hi, about your order."})
-    await asyncio.sleep(0.3)
-    assert handle.stopped
-    assert session.say_calls[-1] == ("Hi, about your order.", True)
+    assert session.generate_reply_options == [{"tool_choice": "none"}]
 
 
 async def test_own_model_calls_keep_the_literal_greeting() -> None:
@@ -1746,7 +1648,6 @@ async def test_build_tools_safely_degrades_on_failure(
     any exception (e.g. a DB rollback on a dead connection) degrades to
     the tools every call keeps.
     """
-    from hailhq.voicebot import agent as agent_mod
 
     async def _boom(
         _metadata: dict,
@@ -1786,7 +1687,6 @@ async def test_build_tools_safely_passes_through_on_success(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The happy path is a pure passthrough of `build_agent_tools`' result."""
-    from hailhq.voicebot import agent as agent_mod
 
     sentinel_tools = [object()]
     sentinel_api = object()
@@ -2272,7 +2172,6 @@ async def test_slow_answer_post_does_not_delay_the_mute() -> None:
 
 
 async def test_shutdown_waits_briefly_for_answer_post(monkeypatch) -> None:
-    from hailhq.voicebot import agent as agent_mod
     from hailhq.voicebot.agent import finish_answer_post
 
     monkeypatch.setattr(agent_mod, "ANSWER_POST_SHUTDOWN_WAIT_SECONDS", 0.05)
@@ -2321,7 +2220,6 @@ async def test_other_party_finds_the_caller(monkeypatch):
     from contextlib import asynccontextmanager
 
     from hailhq.core.directory import DirectoryEntry
-    from hailhq.voicebot import agent as agent_mod
 
     class Result:
         def one_or_none(self):
@@ -2353,7 +2251,6 @@ async def test_other_party_finds_the_caller(monkeypatch):
 async def test_other_party_is_none_on_any_failure(monkeypatch):
     from contextlib import asynccontextmanager
 
-    from hailhq.voicebot import agent as agent_mod
 
     @asynccontextmanager
     async def refused():
