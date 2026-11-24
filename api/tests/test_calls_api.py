@@ -28,7 +28,7 @@ from hailhq.core.models import (
     WebhookSubscription,
 )
 from hailhq.core.pool import CALL_META_FROM_POOL
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .conftest import insert_org_and_key
@@ -2157,3 +2157,60 @@ async def test_outbound_call_from_pbx_number_dials_connection_trunk(
     assert kwargs["sip_trunk_id"] == "ST_out_pbx"
     assert not kwargs.get("headers")
     assert legs_seen[0][0]["carrier"] == "pbx"
+
+
+async def test_outbound_call_from_answer_only_pbx_number_is_refused(
+    client: httpx.AsyncClient,
+    async_session: AsyncSession,
+    org_and_key: tuple[str, ApiKey, str],
+    livekit_mock: AsyncMock,
+    monkeypatch,
+) -> None:
+    """A phone system with no address for calls out cannot place a call: the
+    API says so before it writes a Call or holds credit."""
+    org_id, _, plain = org_and_key
+    conn = SipConnection(
+        organization_id=org_id,
+        label="Main office",
+        inbound_username="hail-aabbccddee01",
+        encrypted_inbound_password="token",
+        default_region="US",
+        livekit_outbound_trunk_id=None,
+    )
+    async_session.add(conn)
+    await async_session.flush()
+    async_session.add(
+        PhoneNumber(
+            organization_id=org_id,
+            e164="+14155550100",
+            country_code="US",
+            number_type="local",
+            capabilities=["voice"],
+            provider="pbx",
+            provisioning_state="active",
+            sip_connection_id=conn.id,
+        )
+    )
+    await async_session.commit()
+    quote = AsyncMock()
+    monkeypatch.setattr(settings, "hail_internal_secret", "test-internal-secret")
+    monkeypatch.setattr("hailhq.api.routes.calls.quote_call_price", quote)
+    monkeypatch.setattr("hailhq.api.routes.calls.quotes_enabled", lambda: True)
+
+    r = await client.post(
+        "/calls",
+        json={
+            "from": "+14155550100",
+            "to": "+14155550199",
+            "system_prompt": "hi",
+            "recipient_consent": True,
+        },
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+
+    assert r.status_code == 422, r.text
+    assert "only answers calls" in r.text
+    assert r.json()["detail"][0]["loc"] == ["body", "from"]
+    quote.assert_not_awaited()
+    livekit_mock.create_room.assert_not_awaited()
+    assert await async_session.scalar(select(func.count()).select_from(Call)) == 0

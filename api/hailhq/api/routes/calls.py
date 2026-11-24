@@ -32,7 +32,7 @@ from hailhq.api.idempotency import (
     idempotency_dep,
     replay_cached,
 )
-from hailhq.api.numbers import resolve_org_number
+from hailhq.api.numbers import AnswerOnlyNumber, resolve_org_number
 from hailhq.api.pagination import fetch_cursor_page
 from hailhq.api.ratelimit import (
     GENERAL_RATE_LIMITED_RESPONSES,
@@ -520,9 +520,20 @@ async def create_call(
     #    pool. Pool numbers are never explicitly addressable; naming one would
     #    let a caller grab a number that isn't theirs.
     pool_number: PhoneNumber | None = None
-    from_number = await resolve_org_number(
-        db, principal.organization_id, body.from_, capability="voice"
-    )
+    try:
+        from_number = await resolve_org_number(
+            db, principal.organization_id, body.from_, capability="voice"
+        )
+    except AnswerOnlyNumber:
+        raise await cache_failure(
+            idem,
+            unprocessable(
+                f"phone number {body.from_} is on a phone system that only "
+                "answers calls; add the phone system's address to place calls "
+                "from it",
+                loc=["body", "from"],
+            ),
+        ) from None
     if from_number is None:
         if body.from_ is not None:
             raise await cache_failure(
