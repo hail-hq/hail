@@ -4,6 +4,10 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- Webhooks: send a test event to an endpoint before you save it with `POST /v1/webhooks/test`, and see the receiver's answer.
+
 ### Changed
 
 - Calls: the agent answers sooner once a person is on the line. It waits at most 1.2 seconds, down from 2.5, when it is unsure they have finished speaking (languages with semantic turn detection; phone calls and browser test calls).

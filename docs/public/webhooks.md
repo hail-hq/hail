@@ -379,6 +379,37 @@ The `event_types` enum and request/response schemas are in
 The CLI has no `webhooks` command group — for the full endpoint list, refer to
 [the CLI reference](./cli.md#webhooks).
 
+## Test an endpoint
+
+Send one `webhook.test` event before you save a subscription, and see your
+receiver's answer:
+
+```bash
+curl https://api.hail.so/v1/webhooks/test \
+  -H "Authorization: Bearer $HAIL_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"target_url":"https://receiver.example.com/hooks","authorization":"Bearer YOUR_RECEIVER_KEY"}'
+```
+
+```json
+{
+  "ok": true,
+  "status_code": 200,
+  "duration_ms": 182,
+  "response_body": "ok",
+  "error": null,
+  "signed": false
+}
+```
+
+It sends the same headers as a delivery, with `X-Hail-Event: webhook.test`.
+Nothing is stored or retried, and a failed test does not count toward
+auto-disable. A new endpoint has no signing secret yet, so its test carries no
+`X-Hail-Signature`. Pass `subscription_id` to test a saved subscription: its
+secret signs the test, and an omitted `authorization` sends the saved header to
+the saved URL. Schemas: `WebhookTestRequest` and `WebhookTestResponse` in
+[`openapi/openapi.yaml`](https://github.com/hail-hq/hail/blob/main/openapi/openapi.yaml).
+
 ## Chat SDK
 
 The published [Hail adapter](https://www.npmjs.com/package/@hail-hq/chat-sdk-adapter) connects SMS to a [Vercel Chat SDK](https://chat-sdk.dev) bot. Hail also supports email and phone calls through its APIs; this adapter currently exposes SMS.

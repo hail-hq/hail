@@ -5,7 +5,7 @@ agent:
 
 | Carrier | Lock                                                                        | Source                                                                                         |
 | ------- | --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| Twilio  | `allowed_addresses`: Twilio's regional SIP signaling ranges                 | [Twilio IP addresses](https://www.twilio.com/docs/sip-trunking/ip-addresses) (no machine file) |
+| Twilio  | `allowed_addresses`, plus the [secret header](#twilio-secret-header)        | [Twilio IP addresses](https://www.twilio.com/docs/sip-trunking/ip-addresses) (no machine file) |
 | Telnyx  | `allowed_addresses`: each region's `primary`, `secondary`, `allowlistCidrs` | [voice.json](https://sip.telnyx.com/voice.json), `signaling` (not `uac`, that is SIP Attach)   |
 | DIDWW   | digest `auth_username` / `auth_password`                                    | `DIDWW_SIP_INBOUND_PASSWORD`, set on both the LiveKit trunk and `DIDWW_VOICE_IN_TRUNK_ID`      |
 
@@ -13,7 +13,7 @@ agent:
 - Apply and move: [`scripts/ops/sip_trunks.py`](../../scripts/ops/sip_trunks.py) (LiveKit API). Every command is a dry run until `--yes`.
 - Weekly IP check: [`sip-allowlist-check`](../../.github/workflows/sip-allowlist-check.yml), Monday 09:30 UTC ([order](../../costs/README.md#weekly-jobs-in-order)).
 - Negative test: [`scripts/ops/sip_invite_probe.py`](../../scripts/ops/sip_invite_probe.py).
-- Limit of the IP lock: Twilio and Telnyx send every customer's calls from the same signaling IPs. Another customer of that carrier can point their own SIP trunk at our LiveKit SIP host and reach a Hail number on that carrier. The lock stops every other address. DIDWW's password does not have this limit.
+- Limit of the IP lock: Twilio and Telnyx send every customer's calls from the same signaling IPs. Another customer of that carrier can point their own SIP trunk at our LiveKit SIP host and reach a Hail number on that carrier. The lock stops every other address. DIDWW's password does not have this limit, and neither does the [Twilio secret header](#twilio-secret-header).
 - Exception to "infrastructure is Terraform only" (owner decision): LiveKit SIP trunks have no Terraform provider, so a committed JSON file plus this script define them.
 
 How LiveKit picks a trunk ([`sip.go`](https://github.com/livekit/protocol/blob/main/sip/sip.go)):
@@ -123,7 +123,7 @@ Run `move` right after the restart anyway: a number routed to an agent between t
 
 ## Rollback
 
-- One carrier, before `retire-shared`. Calls to moved numbers keep working: the shared trunk is accepted throughout. A number routed between steps 1 and 2 is refused after the restart until step 3, so run step 3 right after the restart.
+- One carrier, before `retire-shared`. Calls to moved numbers keep working: the shared trunk is accepted throughout. A number routed between steps 1 and 2 is refused after the restart until step 3, so run step 3 right after the restart. For Twilio with `HAIL_SIP_INBOUND_SECRET` set, do the [Secret header rollback](#secret-header-rollback) first: the shared trunk does not pass the header on, so Hail drops every call to a Twilio number on it (no call row). `move --carrier twilio --back` refuses while the key is set.
   1. Move its numbers back:
 
      ```bash
@@ -154,3 +154,81 @@ The issue "SIP allow-list: carrier IPs changed" lists what differs. Calls from a
 4. A `note: source version changed` line (no alert on its own): when convenient, update `source.version` in a PR.
 5. `could not fetch` or a new layout: fix the parser in [`check_sip_allowlist.py`](../../scripts/ops/check_sip_allowlist.py). Run it by hand with `uv run python scripts/ops/check_sip_allowlist.py` (the macOS python.org `python3` may fail with `CERTIFICATE_VERIFY_FAILED`).
 6. Close the issue once **Actions → sip-allowlist-check → Run workflow** is green.
+
+## Twilio secret header
+
+LiveKit Cloud checks `allowed_addresses` only once LiveKit enables that check for the project ([LiveKit Cloud §4](../public/self-host/livekit-cloud.md#4-inbound-calls)). Twilio cannot answer a digest challenge, so its calls carry a shared secret instead:
+
+- Twilio: each origination URL of `TWILIO_SIP_TRUNK_SID` to a LiveKit SIP host (`*.sip.livekit.cloud`) ends in `?X-Hail-Secret=<HAIL_SIP_INBOUND_SECRET>`. Other URLs are left as they are (`skipped (not LiveKit)` in the plan). A skipped URL that reaches LiveKit by IP or CNAME sends no header, so Hail refuses its calls once the secret is on the VM: point it at the `*.sip.livekit.cloud` host. Twilio sends an `X-` header added to the origination URI on every call ([Origination URI X-headers](https://www.twilio.com/docs/sip-trunking#originationuri-x-headers)).
+- LiveKit: the Twilio trunk's `headers_to_attributes` maps `X-Hail-Secret` to the participant attribute `hail.sip_secret` ([`SIPInboundTrunkInfo`](https://docs.livekit.io/reference/telephony/sip-api/#sipinboundtrunkinfo)).
+- Hail: with `HAIL_SIP_INBOUND_SECRET` set, a call to a Twilio number is dropped unless the attribute equals the secret ([`inbound_calls.py`](../../core/hailhq/core/inbound_calls.py)). Empty = no check. Telnyx and DIDWW calls are not checked.
+  - This check runs before the trunk check. Only a call with a valid secret reaches the trunk check, which keeps a failed call row for real misrouting.
+  - A refused call may be forged, on any trunk, so Hail writes no call row and sends no webhook. A failed row would let a forger put calls with any caller ID into a customer's call log.
+  - It logs a warning `X-Hail-Secret header missing` or `wrong`. If the call arrived on the shared trunk, it also logs `Twilio number still on the shared trunk; move it` at INFO, once per number per voicebot process.
+  - The value must be 20 or more letters, digits, `-` or `_`, and `LIVEKIT_TWILIO_SIP_INBOUND_TRUNK_ID` must name the Twilio trunk (not empty, not the shared trunk). Otherwise the check is off and the voicebot logs an ERROR (`HAIL_SIP_INBOUND_SECRET is set but no Twilio inbound trunk: secret check off`, or `is not 20 or more letters, digits, - or _`). No service stops at startup over it.
+- The secret is not hidden inside LiveKit: anyone with access to the LiveKit project can read it as the `hail.sip_secret` participant attribute of a Twilio call. To rotate it: do the [Secret header rollback](#secret-header-rollback), then repeat [Secret header rollout](#secret-header-rollout) steps 3 to 7, with `--rotate` added to both `apply` commands in step 3.
+- `apply --carrier twilio` sets the LiveKit map and the Twilio URLs. It skips both, with the plan line `secret header: skipped, <reason>`, when:
+  - the key is empty, or not 20 or more letters, digits, `-` or `_`;
+  - a live Twilio number is still on the shared trunk, routed for inbound calls or not (the plan lists them; run `move --carrier twilio`, or `move --carrier twilio --number <it> --drop-unknown` for one not routed, then `apply` again);
+  - `TWILIO_SIP_TRUNK_SID` is empty or its origination URLs cannot be read;
+  - no origination URL goes to LiveKit;
+  - an origination URL already sends a different secret, and `--rotate` is not given.
+
+  The allowed addresses are applied either way, so the weekly IP fix never waits for the secret.
+- LiveKit's field update cannot set the map, so the first `apply` replaces the whole trunk with a copy read just before. Header maps other than `X-Hail-Secret` stay.
+  - After the replace it reads the trunk again and adds back, one at a time, any number of the copy it lost (`re-add ...`). A number LiveKit refuses prints `could not re-add <number>` and stops with an error: add it by hand (`lk sip inbound update --numbers`).
+  - If any other field differs from the copy (allowed addresses, digest user and the rest), it prints `the replace changed <field>: <before> -> <now>` and stops with an error: restore those fields by hand (`lk sip inbound update`), then run `apply` again.
+  - A number routed in that same second is not in the copy and is lost: compare the number count in `status` before and after.
+- The header travels in plain text between Twilio and LiveKit unless the origination URI uses `transport=tls` (LiveKit Cloud accepts TLS). The transport is not changed here.
+
+### Secret header rollout
+
+Run from the repo root of the main checkout. Values marked _(chat)_ are not written here.
+
+1. Before you start: no Twilio number may be left on the shared trunk, because only the Twilio trunk maps the header. `uv run python scripts/ops/sip_trunks.py move --carrier twilio` must print `move 0 twilio number(s)`. Otherwise move them first (the [Rollout](#rollout) section above, step 7). Until they are moved, `apply` skips the header steps and lists the Twilio numbers left on the shared trunk, routed or not.
+2. Merge the PR. The deploy changes no call: `HAIL_SIP_INBOUND_SECRET` stays empty in the main checkout `.env` and on the VM until step 3.
+3. Generate the secret into the main checkout `.env`, then set both sides. The value is written here, and not before, so that an unrelated copy of `.env` to the VM cannot turn the check on before Twilio sends the header. The commands never print the value. Read the dry run first: the secret shows as `***`.
+
+   ```bash
+   git checkout main
+   git pull
+   uv sync --all-packages --all-extras
+   grep -c '^HAIL_SIP_INBOUND_SECRET=$' .env
+   SECRET="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+   sed -i '' -E "s/^HAIL_SIP_INBOUND_SECRET=.*/HAIL_SIP_INBOUND_SECRET=${SECRET}/" .env
+   unset SECRET
+   grep -c '^HAIL_SIP_INBOUND_SECRET=..*' .env
+   uv run python scripts/ops/sip_trunks.py status
+   uv run python scripts/ops/sip_trunks.py apply --carrier twilio
+   uv run python scripts/ops/sip_trunks.py apply --carrier twilio --yes
+   uv run python scripts/ops/sip_trunks.py status
+   ```
+
+   Both `grep -c` lines must print `1` (empty before, set after). `sed -i ''` is the macOS form; on Linux use `sed -i`. The `apply` output must not contain `secret header: skipped`. The Twilio trunk line must say `secret header mapped yes`, with the same number count as before.
+
+4. Call an owner Twilio number _(chat)_ from a phone. The agent answers: Hail does not check yet. The operator (agent) checks Logfire for `X-Hail-Secret header present` on that call (the voicebot log `inbound twilio call to +<number>: X-Hail-Secret header present`). If it says `missing`, LiveKit does not map the header: stop here.
+
+5. Copy the main checkout `.env` to the VM `.env` _(chat)_. Then run the Deploy workflow, so `api` and `voicebot` start with the key, and wait until it is green:
+
+   ```bash
+   gh workflow run deploy.yml --ref main
+   gh run list --workflow deploy.yml --limit 1
+   ```
+
+6. Call the same number again. The agent must answer.
+7. Run the probe from a laptop at that number (the same command as the [Rollout](#rollout) section above, step 7.5). It still prints `ACCEPTED` (exit 1): LiveKit rings before Hail sees the call, and the probe cancels at the first ring. The probe cannot see Hail refuse the call. The pass check is a dropped call:
+   - Logfire shows the warning `inbound call to +<number> refused: X-Hail-Secret header missing (carrier=twilio)`;
+   - the workspace's call log shows NO new call from `+12025550100`.
+
+   If the warning does not show, the probe may have hung up before the voicebot saw the call: run it again. If a new call row shows, Hail did not drop the call: roll back ([Secret header rollback](#secret-header-rollback)).
+
+### Secret header rollback
+
+Empty the value in the main checkout `.env`, copy it to the VM `.env`, and run the Deploy workflow as in [Secret header rollout](#secret-header-rollout) step 5. Twilio may keep sending the header; nothing reads it.
+
+```bash
+sed -i '' -E 's/^HAIL_SIP_INBOUND_SECRET=.*/HAIL_SIP_INBOUND_SECRET=/' .env
+grep -c '^HAIL_SIP_INBOUND_SECRET=$' .env
+```
+
+To change the secret, roll back first, then repeat [Secret header rollout](#secret-header-rollout) steps 3 to 7 (step 3 generates the new value). Add `--rotate` to both `apply` commands in step 3: without it, `apply` keeps the old secret in the Twilio URLs. In the other order, every Twilio call is refused between `apply` and the end of the deploy.
