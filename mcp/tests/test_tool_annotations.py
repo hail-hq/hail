@@ -56,6 +56,10 @@ _READ_ONLY_OPEN_WORLD = {
 # Destructive tools. acquire_number spends money, so clients ask a human.
 # submit_verification cannot be undone; cancel_verification discards a draft.
 _DESTRUCTIVE = {
+    # Replace active settings or routing and can stop subsequent replies.
+    "route_number",
+    "route_email_domain",
+    "update_agent",
     "release_number",
     "delete_knowledge_document",
     "delete_agent",
@@ -68,6 +72,8 @@ _DESTRUCTIVE = {
 
 # Tools that reach people or carriers outside Hail.
 _OPEN_WORLD_WRITES = {
+    # Registers or unregisters inbound routing with the carrier and LiveKit.
+    "route_number",
     "place_call",
     "send_sms",
     "send_email",

@@ -39,6 +39,7 @@ Go CLI module path is `github.com/hail-hq/hail/cli`. npm packages are published 
 ## Invariants
 
 - **OpenAPI is source of truth for the CLI.** After any API route change, regenerate `openapi/openapi.yaml` in the same PR.
+- **MCP docs ship with MCP changes.** Follow the [MCP documentation checklist](docs/public/contributing.md#updating-mcp-documentation) when changing the server or its tools.
 - **Secrets live only in `.env` / `.env.local`.** Only `.env.example` is committed. Adding a new env var? Update `.env.example` in the same commit, under the right provider section.
 - **`.env` mirrors `.env.example` line for line.** Same keys, same order, same comments; only the values differ. A branch that adds keys writes them, with real values, into the main checkout `.env` so it is deployment-ready at merge. Never add a key or comment to `.env` that its `.env.example` does not have.
 - **Provider adapters go in `core/hailhq/core/providers/<channel>/<name>.py`.** `api/` and `voicebot/` must not import provider SDKs directly; they go through `core`.

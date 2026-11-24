@@ -64,6 +64,25 @@ Other items:
 
 ## Notes
 
+- MCP findings checked on 2026-11-16: `route_number` and `update_agent` were
+  flagged for `destructiveHint: false`. Both overwrite active configuration and
+  can stop subsequent replies. `route_email_domain` has the same risk.
+- Phone routing can change carrier and LiveKit configuration when registering or
+  unregistering inbound voice, so its
+  `openWorldHint` is true. Agent updates and email routing change saved Hail
+  settings; they do not themselves place a call or send a message.
+- The notices saying `place_call`, `create_agent`, `confirm_verification` and
+  `update_agent` need further review are not specific code defects. Agent creation
+  does not route a number. Verification confirmation advances an existing filing
+  and does not guarantee approval. These effects remain explicit in the tool
+  contracts; OpenAI decides whether further review is needed after a fresh scan.
+- Source changes do not update the hosted MCP server. After the owner merges and
+  explicitly deploys the changes, run **MCPs → Rescan Hail** in the existing
+  submission and inspect the new findings. Passing local tests is not scan approval.
+- The launch video at <https://youtu.be/WN-H6tLO4yg> is an illustrated product
+  introduction. A reviewer walkthrough should show the actual plugin test cases;
+  OpenAI specifies no minimum length or production style. A plain screen recording
+  can supply this evidence without another polished launch video.
 - The docs give no video length or format, and no review time.
 - To appeal a rejection, reply to the rejection email. Include the plugin ID when you contact support.
 - After publication, OpenAI scans the MCP server every day.

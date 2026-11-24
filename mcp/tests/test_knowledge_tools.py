@@ -7,6 +7,7 @@ from uuid import uuid4
 
 import httpx
 import respx
+from jsonschema import Draft202012Validator
 
 from tests.test_update_agent_handover import _BASE_URL, _agent, _real_server
 
@@ -122,3 +123,15 @@ async def test_list_survives_a_network_error(monkeypatch) -> None:
     )
     out = await srv.mcp_app.call_tool("list_knowledge_documents", {})
     assert "error" in out.structured_content
+
+
+async def test_knowledge_tools_publish_output_schemas(monkeypatch) -> None:
+    srv = await _real_server(monkeypatch)
+    tools = {t.name: t for t in await srv.mcp_app.list_tools()}
+    doc = Draft202012Validator(tools["get_knowledge_document"].output_schema)
+    assert doc.is_valid(_DOC)
+    assert not doc.is_valid({**_DOC, "status": "lost"})
+    gone = Draft202012Validator(tools["delete_knowledge_document"].output_schema)
+    assert gone.is_valid({"deleted": True, "document_id": _DOC_ID, "name": "m"})
+    found = Draft202012Validator(tools["search_knowledge"].output_schema)
+    assert found.is_valid({"results": [], "note": "data"})

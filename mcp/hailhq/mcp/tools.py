@@ -141,11 +141,12 @@ from hailhq.mcp.hail_client import (
     InvalidPathIdError,
     PreviewShapeError,
 )
+from hailhq.mcp.output_schemas import OUTPUT_SCHEMAS
 from pydantic import BaseModel, Field, StrictBool, ValidationError, WithJsonSchema
 
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
-from mcp.types import ToolAnnotations
+from mcp.types import Tool, ToolAnnotations
 
 # --------------------------------------------------------------------------- #
 # Error mapping — turns HailAPIError into a stable agent-facing message.
@@ -1921,6 +1922,13 @@ class TaggedMCPServer(MCPServer):
         kwargs.setdefault("subscriptions", False)
         super().__init__(*args, **kwargs)
 
+    async def list_tools(self) -> list[Tool]:
+        tools = await super().list_tools()
+        for tool in tools:
+            if tool.output_schema is not None and tool.name in OUTPUT_SCHEMAS:
+                tool.output_schema = OUTPUT_SCHEMAS[tool.name]
+        return tools
+
     async def call_tool(self, name, arguments, context=None):
         tag_context(channel="mcp", tool=name)
         try:
@@ -2090,10 +2098,7 @@ def _rules(model: type[BaseModel], field: str) -> tuple[Any, ...]:
 
 # Page sizes the API accepts: the ``limit`` Query bounds of each list route.
 # tests/test_schema_matches_api.py compares them with openapi/openapi.yaml.
-_PAGE_SIZE = (
-    "How many items one page holds. ``next_cursor`` in the response points to "
-    "the next page."
-)
+_PAGE_SIZE = "Maximum records returned on this page."
 _LIMIT_200 = Field(ge=1, le=200, description=_PAGE_SIZE)
 _LIMIT_1000 = Field(ge=1, le=1000, description=_PAGE_SIZE)
 
@@ -2129,6 +2134,12 @@ _FROM_NAME_SCHEMA = WithJsonSchema(
     {"anyOf": EmailCreate.model_json_schema()["properties"]["from_name"]["anyOf"]}
 )
 _ADDRESS_SCHEMA = {k: v for k, v in Address.model_json_schema().items() if k != "title"}
+_ADDRESS_SCHEMA["properties"]["city"].update(
+    description="City or town as it appears in the applicant's mailing address."
+)
+_ADDRESS_SCHEMA["properties"]["region"].update(
+    description="State, province, or equivalent administrative area in the applicant's address."
+)
 _ADDRESS_OR_NULL = Annotated[
     Any, WithJsonSchema({"anyOf": [_ADDRESS_SCHEMA, {"type": "null"}]})
 ]
@@ -2147,7 +2158,7 @@ _PARTIAL_ADDRESS_OR_NULL = Annotated[
 _SLOT_FIELD = {
     "type": "string",
     "pattern": f"^{_SLOT_NAME.pattern}$",
-    "description": "The document slot this file fills: a key in ``documents``.",
+    "description": "The key in ``documents`` that identifies what this file proves.",
 }
 _VERIFICATION_FILES_LIST = Annotated[
     Any,
@@ -2180,12 +2191,18 @@ _VERIFICATION_FILES_LIST = Annotated[
                             "content_type": {
                                 "type": "string",
                                 "enum": list(VERIFICATION_FILE_TYPES),
-                                "description": "The file's format.",
+                                "description": (
+                                    "Media type of the actual document. Hail checks "
+                                    "it against the file bytes."
+                                ),
                             },
                             "content_base64": {
                                 "type": "string",
                                 "contentEncoding": "base64",
-                                "description": "The whole file, base64-encoded.",
+                                "description": (
+                                    "Bytes of the complete document for this slot, "
+                                    "supplied directly in the tool call."
+                                ),
                             },
                         },
                         "required": ["slot", "content_type", "content_base64"],
@@ -2207,8 +2224,8 @@ _IDEMPOTENCY_KEY = _d(
     "is generated and returned."
 )
 _RECIPIENT_CONSENT = _d(
-    "Attestation that the recipient lawfully agreed to be contacted, as the "
-    "user confirmed it. Hail does not check it; only ``true`` is accepted."
+    "Confirmation from the user that the recipient lawfully agreed to be "
+    "contacted. Hail requires ``true`` and does not independently verify consent."
 )
 _CONSENT_SOURCE = _d(
     "Where or how consent was obtained, such as ``signup form``. "
@@ -2218,7 +2235,8 @@ _CONSENT_OBTAINED_AT = _d(
     "When consent was obtained, as an ISO 8601 timestamp, if known."
 )
 _MESSAGE_TYPE = _d(
-    "``informational`` for transactional or service messages, or ``marketing``."
+    "Purpose of the communication for consent checks. Transactional or service "
+    "messages are ``informational``; promotional messages are ``marketing``."
 )
 _PHONE_TO = _d("Recipient phone number in E.164 format, such as ``+14155551234``.")
 _FILTER_TO = _d("Only items sent to this E.164 phone number.")
@@ -2264,7 +2282,7 @@ _SUBJECT_TYPE_REQUIRED = _d(
     "without it, nothing is sent."
 )
 _VERIFICATION_FIELDS = _d(
-    "Applicant answers keyed by the field names in "
+    "Applicant answers as text, keyed by the field names in "
     "``get_verification_requirements``. Choice fields take comma-separated option keys."
 )
 _VERIFICATION_DOCUMENTS = _d(
@@ -2278,18 +2296,18 @@ _DOCUMENT_CHECK_DOCUMENTS = _d(
     "and one read fills all of them."
 )
 _VERIFICATION_FILES = _d(
-    "The document files, one per slot named in ``documents``. Use an upload: "
-    "the ``id`` from ``create_file_upload`` with purpose "
-    "``verification_document``, within an hour of uploading. A very small "
-    "file can go inline as base64 instead. Each file is at most 10 MiB."
+    "One file per slot being filled, keyed by the matching slot in ``documents``. "
+    "Upload IDs come from ``create_file_upload`` with purpose "
+    "``verification_document`` and last one hour. The inline form suits small files. "
+    "Each file is at most 10 MiB."
 )
 _VERIFICATION_ADDRESS = _d(
     "The applicant's address. Give it when the requirements include one; "
     "otherwise leave it out."
 )
 _ATTEST_AUTHORIZED = _d(
-    "Attestation that the named person or business authorized this filing and "
-    "supplied its details and files. Only ``true`` sends anything."
+    "Confirms that the applicant supplied the details and files and authorized "
+    "this filing. Hail sends the filing only when this is ``true``."
 )
 _AGENT_NAME = _d("Agent display name.")
 _AGENT_PROMPT = _d(
@@ -2301,33 +2319,28 @@ _AGENT_FIRST_MESSAGE = _d(
 )
 _AGENT_AI_DISCLOSURE = _d("Speak the AI disclosure line first on every call.")
 _AGENT_RECORDING = _d(
-    "Recording for this agent's calls. ``true`` or ``false`` overrides the "
-    "workspace setting."
+    "Recording preference for this agent's calls, overriding the workspace setting."
 )
 _AGENT_DISCLOSURE_LINE = _d(
     "Custom AI disclosure line replacing the workspace line. ``{org}`` expands "
     "to the organization name."
 )
-_AGENT_LANGUAGE = _d(
-    "Language the agent speaks, as an ISO 639-1 code such as ``es``. "
-    "Omitted: English."
-)
+_AGENT_LANGUAGE = _d("Spoken language on calls, such as ``es`` for Spanish.")
 _AGENT_VOICE_ID = _d(
     "Text-to-speech voice ID from the voice provider that serves the call, "
-    "such as an ElevenLabs voice ID. Omitted: the workspace's default voice."
+    "such as an ElevenLabs voice ID."
 )
 _AGENT_TOOLS = _d(
-    "Names of the tools the agent may use during a call or reply. "
-    "Omitted: every tool the workspace's channels support. An empty list: none."
+    "Names of allowed built-in tools for calls or replies. An empty list "
+    "selects none. Hail adds call transfer when handover contacts are configured."
 )
 _AGENT_MAX_DURATION = _d(
     "Longest a call with this agent may last, in seconds, counted from "
-    "pickup. At the limit the agent says goodbye and hangs up. "
-    "Omitted: the workspace's call limit."
+    "pickup. At the limit the agent says goodbye and hangs up."
 )
 _AGENT_HANDOVER_MAX = _d(
     "Longest a call may last after a handover contact answers, in seconds, "
-    "counted from that answer. Omitted: 1800 (30 minutes)."
+    "counted from that answer."
 )
 _AGENT_VOICE_ENABLED = _d(
     "Whether this agent answers calls on numbers whose calls route to it."
@@ -2426,7 +2439,7 @@ def register_tools(
             str | None,
             _d(
                 "Caller ID: an E.164 workspace number with voice, from ``list_numbers``. "
-                "Omitted: an active workspace number, else one from the shared pool."
+                "This selects a dedicated voice number instead of automatic caller-ID selection."
             ),
         ] = None,
         first_message: Annotated[
@@ -2439,12 +2452,15 @@ def register_tools(
         language: Annotated[
             str | None,
             _d(
-                "Spoken language as a supported lowercase ISO 639-1 code, such as "
-                "``es``. Omitted: English. An unsupported code returns 422."
+                "Spoken language override, using a supported lowercase ISO 639-1 "
+                "code such as ``es``. When omitted, the call uses the saved agent's "
+                "language, then the workspace's text-to-speech language if "
+                "configured, then English. An unsupported code returns an error "
+                "before dialing."
             ),
         ] = None,
         ai_disclosure: Annotated[
-            bool, _d("Speak an AI notice at the start of the call. ``false`` skips it.")
+            bool, _d("Whether the agent speaks an AI notice at the start of the call.")
         ] = True,
         recording_enabled: Annotated[
             bool | None,
@@ -2453,7 +2469,7 @@ def register_tools(
         metadata: Annotated[
             dict[str, Any] | None,
             _d(
-                "Free-form JSON object stored on the call record. Keys starting "
+                "Extra data stored on the call record. Keys starting "
                 "with ``recording_`` are reserved."
             ),
         ] = None,
@@ -2478,7 +2494,12 @@ def register_tools(
     ) -> dict[str, Any]:
         """Start an outbound AI phone call.
 
-        At least one of ``system_prompt``, ``llm`` or ``agent_id`` is required.
+        With ``from_`` omitted, Hail uses the oldest active workspace number with
+        voice capability, or a shared pool number when none is available.
+        A dedicated number is not required. Shared pool numbers cannot be selected
+        explicitly; an exhausted pool returns an ``error`` result without starting a call.
+        The call uses instructions from ``system_prompt`` or a saved ``agent_id``,
+        or a model endpoint supplied in ``llm``. At least one is required.
         US artificial-voice calls (47 CFR 64.1200(b)(1)) require the AI disclosure.
         Hail does not verify the lawful basis or the recipient's consent.
         A 4xx response returns no ``idempotency_key``.
@@ -2552,7 +2573,8 @@ def register_tools(
             _d(
                 "Sender address. It must match a verified identity from "
                 "``list_email_domains``; on a custom domain any local part works. "
-                "Omitted: the workspace default sender."
+                "When omitted, Hail uses the default sender if available. "
+                "Several eligible custom domains require an explicit address."
             ),
         ] = None,
         from_name: Annotated[
@@ -2583,7 +2605,7 @@ def register_tools(
         ] = None,
         metadata: Annotated[
             dict[str, Any] | None,
-            _d("Free-form JSON object stored on the email record."),
+            _d("Extra data stored on the email record."),
         ] = None,
         idempotency_key: Annotated[str | None, _IDEMPOTENCY_KEY] = None,
         consent_source: Annotated[str | None, _CONSENT_SOURCE] = None,
@@ -2787,7 +2809,8 @@ def register_tools(
     ) -> dict[str, Any]:
         """List recent workspace calls, newest first.
 
-        Returns ``items`` and ``next_cursor``."""
+        The list contains call summaries. ``get_call`` reads the full call and transcript.
+        """
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await list_calls(
@@ -2823,7 +2846,7 @@ def register_tools(
         ] = None,
         metadata: Annotated[
             dict[str, Any] | None,
-            _d("Free-form JSON object stored on the message record."),
+            _d("Extra data stored on the message record."),
         ] = None,
         idempotency_key: Annotated[str | None, _IDEMPOTENCY_KEY] = None,
         consent_source: Annotated[str | None, _CONSENT_SOURCE] = None,
@@ -2838,9 +2861,11 @@ def register_tools(
         US long-code texting to US recipients requires ready A2P 10DLC registration and an attached number.
         Trial texts (only to the workspace's own verified phone, set up in the console: Overview > Test a text): without from_, Hail uses one when the workspace's own number cannot text that US phone; set from_ to the trial number to use one directly. Each starts with "[Hail trial]".
 
-        Hail does not verify consent.
+        The message purpose determines the consent checks. Marketing requires a consent source.
+        Hail does not independently verify the recipient's consent.
 
-        Returns the SMS ID, status, sender, destination, segment count and retry key, or an error.
+        The result includes the delivery status and retry key. A failed carrier attempt can
+        appear as a message record with status ``failed``.
         """
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
@@ -2906,9 +2931,9 @@ def register_tools(
         ] = None,
         to: Annotated[str | None, _FILTER_TO] = None,
     ) -> dict[str, Any]:
-        """List recent workspace text messages.
+        """List recent workspace text messages and their delivery states.
 
-        Returns ``items`` and ``next_cursor``."""
+        A message ID in the results identifies the same record in ``get_sms``."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await list_sms(
@@ -2975,8 +3000,8 @@ def register_tools(
     ) -> dict[str, Any]:
         """List workspace email summaries, newest first.
 
-        Summaries contain IDs and metadata, without message bodies.
-        Returns ``items`` and ``next_cursor``, or an error."""
+        Summaries contain IDs and metadata. ``get_email`` reads the body of a
+        specific message."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await list_emails(
@@ -3079,8 +3104,8 @@ def register_tools(
 
         Events include sent, delivered, delivery_delayed, bounced, complained,
         rejected, opened and clicked, with ``payload`` and ``occurred_at``.
-        Open and click events require an HTML email body.
-        Returns ``items`` and ``next_cursor``, or an error."""
+        Open and click tracking requires an HTML email body. Delivery events
+        are also available for plain-text email."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await get_email_events(
@@ -3172,8 +3197,8 @@ def register_tools(
 
         A call-specific response includes the current ``call_status``.
         Terminal call states are completed, failed, busy, no_answer and canceled.
-        The response is a snapshot, not a streaming subscription.
-        Returns ``items``, ``next_cursor`` and optional ``call_status``, or an error."""
+        This is a snapshot for checking progress. ``call_status`` is null for
+        workspace-wide results and for non-call resource filters."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await get_events(
@@ -3244,9 +3269,17 @@ def register_tools(
     ) -> dict[str, Any]:
         """Save an agent for calls, texts, and email replies.
 
-        A handover contact's phone number is hidden from the call agent.
-        Saving an agent does not change any phone number's routing.
-        Returns the saved agent record or an error."""
+        The saved instructions and enabled channels apply when a number or email address
+        routes to this agent. Saving the agent does not change existing routing.
+        The call agent can hand over to listed contacts without seeing their phone numbers.
+
+        Without a voice override, the built-in providers use the deployment's
+        configured voice. A workspace provider uses its configured voice or its
+        own default. An omitted language uses the speech providers' defaults (English).
+        Without a tool list, the workspace's channels determine the available tools.
+        The workspace call limit applies unless overridden, and the handover limit
+        defaults to 30 minutes from the contact answering.
+        """
         fields: dict[str, Any] = {
             "name": name,
             "system_prompt": system_prompt,
@@ -3291,9 +3324,9 @@ def register_tools(
         annotations=ToolAnnotations(
             title="Route a number to an agent",
             readOnlyHint=False,
-            destructiveHint=False,
+            destructiveHint=True,
             idempotentHint=True,
-            openWorldHint=False,
+            openWorldHint=True,
         ),
     )
     async def route_number_tool(
@@ -3320,6 +3353,10 @@ def register_tools(
     ) -> dict[str, Any]:
         """Set the saved agents that answer a number's calls and texts.
 
+        Replaces the selected routing settings. Registering or unregistering inbound
+        voice can change carrier and LiveKit routing; text-only changes leave it unchanged.
+        Clearing the voice route stops AI call answers; clearing the text route stops
+        agent replies to texts. Restoring a route does not recover missed interactions.
         Omitted settings retain their current values.
         Returns the updated number record or an error."""
         try:
@@ -3341,7 +3378,7 @@ def register_tools(
         annotations=ToolAnnotations(
             title="Route an email address to an agent",
             readOnlyHint=False,
-            destructiveHint=False,
+            destructiveHint=True,
             idempotentHint=True,
             openWorldHint=False,
         ),
@@ -3373,6 +3410,8 @@ def register_tools(
     ) -> dict[str, Any]:
         """Choose which agent answers mail to an address, and who it answers.
 
+        Replaces the selected email routing settings. Clearing the agent stops
+        automatic replies; restoring it does not replay mail received in between.
         Setting ``email_agent_id`` together with ``clear_agent=True`` is an error.
         With ``email_agent_scope="anyone"``, a stranger can make the agent use its
         allowed tools. Mail without a passing DMARC result gets no reply.
@@ -3412,8 +3451,8 @@ def register_tools(
             list[Capability] | None,
             *_rules(NumberQuoteRequest, "capabilities"),
             _d(
-                "What every offered number must do: calls (``voice``), texts "
-                "(``sms``) or both. Omitted: both."
+                "Channels each offer must support. Omitting the filter searches for "
+                "numbers that support both calls and texts."
             ),
         ] = None,
         number_type: Annotated[
@@ -3580,8 +3619,8 @@ def register_tools(
     ) -> dict[str, Any]:
         """List dedicated workspace phone numbers, newest first.
 
-        Items include ID, E.164 number, country, type, capabilities, provisioning state and assigned agents.
-        Returns ``items`` and ``next_cursor``, or an error."""
+        The records show capabilities, provisioning state and assigned agents,
+        so they can be used to select an existing number for sending or routing."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await list_numbers(client=client, limit=limit, cursor=cursor)
@@ -3700,7 +3739,7 @@ def register_tools(
         number_id: Annotated[str | None, _VERIFICATION_NUMBER_ID] = None,
         purpose: Annotated[str, _PURPOSE_SCHEMA, _VERIFICATION_PURPOSE] = "number",
     ) -> dict[str, Any]:
-        """Read a carrier's current registration fields, documents, address rules and fees.
+        """Read a carrier's current registration fields, documents and address requirements.
 
         The response's ``subject_types`` lists the applicant types the carrier accepts.
         US local SMS registration uses ``purpose="sms"``, country ``US`` and type ``local``.
@@ -3765,12 +3804,9 @@ def register_tools(
     ) -> dict[str, Any]:
         """Check a carrier registration form without filing anything.
 
-        Takes the same arguments as ``submit_verification`` except ``attest_authorized``.
-        Runs every check Hail can run before filing: purpose rules, credit (402),
-        the carrier's current form, duplicates (409), field lengths, each file
-        (type, size, and for ``upload_id`` that it is this workspace's verification
-        document, uploaded within the last hour), and the form's required fields,
-        documents and address (for ``purpose="sms"``, the US texting application).
+        This preflight uses the intended registration and its supporting documents
+        to check the carrier's current requirements, available credit and duplicate
+        registrations. Uploads must belong to this workspace and be less than an hour old.
         Nothing is filed, saved, held or charged, and uploads stay usable.
         Returns ``ok``, ``files`` (slot, upload_id, size_bytes, sha256 per file) and
         ``note``; problems come back as ``problems`` with the field named.
@@ -3817,16 +3853,31 @@ def register_tools(
         fields: Annotated[_JsonObject, _VERIFICATION_FIELDS],
         documents: Annotated[_JsonObject, _DOCUMENT_CHECK_DOCUMENTS],
         files: Annotated[_VERIFICATION_FILES_LIST, _VERIFICATION_FILES],
-        quote_id: Annotated[str | None, _UUID_OR_NULL, _VERIFICATION_QUOTE_ID] = None,
+        quote_id: Annotated[
+            str | None,
+            _UUID_OR_NULL,
+            _d(
+                "Required for reading documents. This is the ``quote_id`` from "
+                "``quote_numbers`` for the offer used to get the form requirements."
+            ),
+        ] = None,
         subject_type: Annotated[
             str | None, _SUBJECT_TYPE_OR_NULL, _SUBJECT_TYPE_REQUIRED
         ] = None,
-        address: Annotated[_PARTIAL_ADDRESS_OR_NULL, _VERIFICATION_ADDRESS] = None,
+        address: Annotated[
+            _PARTIAL_ADDRESS_OR_NULL,
+            _d(
+                "Known parts of the applicant's address when the form requires one. "
+                "The document check can suggest missing values and flag a "
+                "mismatch in the name on the address."
+            ),
+        ] = None,
     ) -> dict[str, Any]:
         """Read the files of a number verification form, before the form is filled or submitted.
 
-        Takes the arguments of ``check_verification``. ``fields`` and ``address``
-        may be empty or partial. An AI model reads each file.
+        This applies to a number offer, using the same quote and applicant type
+        as the requirements. Known ``fields`` and ``address`` values can be partial.
+        An AI model reads each file.
         Returns ``fields``, ``address`` and ``documents.<slot>.fields``: the values the
         files show, by the form's own keys, to fill the form after the user confirms
         them. ``documents.<slot>.option`` is the document type the file looks like.
@@ -3890,25 +3941,28 @@ def register_tools(
         """Submit authorized applicant details and documents for carrier registration.
 
         Submission is irreversible once sent for review. Carriers retain submitted documents.
-        ``fields``, ``address``, ``documents`` and ``files`` follow the carrier's current requirements.
-        SMS campaign text requires user review and approval before submission.
+        Applicant answers, address and documents follow the carrier's current
+        requirements for the chosen applicant type and registration purpose.
+        Number registration needs the offer's quote ID. Toll-free texting needs the
+        owned number's ID. The named applicant must authorize the filing.
+        The user must review and approve SMS campaign text before submission.
 
-        ``purpose="number"``: the balance must cover the offer's setup fee plus first month;
-        otherwise nothing is sent. That amount is reserved during review and pays for a
-        later purchase using this registration. It is returned after rejection, cancellation
-        or 30 days without purchase following approval.
+        For billed workspaces, an offer available for automatic purchase requires credit for
+        the setup fee plus first month. Hail reserves that amount during review and
+        applies it to a purchase using this registration. Hail releases the hold
+        after rejection, cancellation or 30 days without purchase following approval.
         ``purpose="sms"`` registers US local numbers for US texting with carrier filing fees.
         Free toll-free verification uses type ``toll_free``, country ``US`` or ``CA``, the
         owned ``number_id`` and ``registration_kind=toll_free`` among the form fields.
 
-        Base64 files are written into the tool call and add about a third to their size.
-        Base64 files total at most 29 MiB, checked here; the API checks the 30 MB total of
-        all files, uploads included. Slot names use letters, digits, hyphens and underscores,
-        up to 64 characters. At most 100 fields are accepted.
-        ``check_verification`` takes the same arguments and files nothing.
+        Inline files are included in the tool call and base64 adds about a third
+        to their size. Decoded inline files total at most 29 MiB. The API also
+        limits the combined file size, including uploads, to 30 MiB.
+        The form accepts at most 100 applicant answers. ``check_verification``
+        can preflight the same form without filing.
 
         Returns ``id``, ``state`` and ``subject_name``. Carrier review takes business days.
-        A 409 identifies an existing registration; a timeout can leave a submission in progress.
+        A duplicate registration can return 409. A timeout can leave a submission in progress.
         Carrier field errors include ``problems`` and leave no saved submission."""
         # ``fields``, ``documents``, ``files`` and ``address`` are untyped on
         # purpose: MCPServer's schema validation echoes a rejected value
@@ -3970,24 +4024,28 @@ def register_tools(
         files: Annotated[
             _VERIFICATION_FILES_LIST | None,
             _d(
-                "Only the files that replace kept ones, in the "
-                "``submit_verification`` format. A slot not listed reuses its "
-                "kept file."
+                "Replacement files, using the same upload or inline form as "
+                "``submit_verification``. An unchanged slot and document option "
+                "can reuse the saved file."
             ),
         ] = None,
         address: Annotated[_ADDRESS_OR_NULL, _VERIFICATION_ADDRESS] = None,
         quote_id: Annotated[
             str | None,
             _UUID_OR_NULL,
-            _d("A new offer, for when the kept quote is gone (404). Null reuses it."),
+            _d(
+                "Replacement offer from ``quote_numbers`` if the saved quote is "
+                "missing or unavailable. Null reuses the saved quote."
+            ),
         ] = None,
     ) -> dict[str, Any]:
         """File a rejected number registration again, with fixes, from what Hail kept.
 
         Hail keeps a number registration's answers and files for 30 days after
         submit (``kept_until``); ``get_sms_application`` returns the kept answers
-        and file names. Each argument given replaces its kept value; the rest
-        are reused. Country, number type and subject type stay as filed.
+        and file names. A supplied answer map, address or document selection
+        replaces that saved part. Other parts are reused. Country, number type
+        and subject type stay as filed.
 
         Irreversible once sent: it files a new registration (a new ``id``) with
         the same credit rules as ``submit_verification``, and dismisses the
@@ -4344,7 +4402,7 @@ def register_tools(
         annotations=ToolAnnotations(
             title="Update an agent",
             readOnlyHint=False,
-            destructiveHint=False,
+            destructiveHint=True,
             idempotentHint=True,
             openWorldHint=False,
         ),
@@ -4395,11 +4453,14 @@ def register_tools(
     ) -> dict[str, Any]:
         """Update selected fields on a saved workspace agent.
 
-        Omitted fields retain their values. Repeating the same update gives the same result.
-        Changing only language or voice preserves the other value.
-        A field cannot be both set and cleared in the same request.
-        Removing a greeting makes an inbound agent wait for the caller.
-        Other resets restore workspace defaults; the handover limit resets to 1800 seconds.
+        Replaces active settings, including instructions and the whole handover list.
+        Pausing the agent or disabling a channel stops new replies on that channel.
+        Omitted fields retain their values.
+        Updating language or voice alone preserves the other setting.
+        ``clear_fields`` resets the named settings and cannot be combined with a new
+        value for the same field. Clearing the greeting lets the inbound caller speak
+        first. Other resets use workspace defaults, except the handover limit resets
+        to 30 minutes.
         Existing calls keep their starting settings; changes affect later calls and texts.
         Returns the updated agent or an error."""
         try:
@@ -4645,15 +4706,15 @@ def register_tools(
             Field(
                 ge=1,
                 le=500,
-                description="How many contacts to return in one reply. Omitted: 100.",
+                description="Maximum matching contacts to include in this reply. Omitted: 100.",
             ),
         ] = None,
     ) -> dict[str, Any]:
         """List workspace members and manually saved contacts.
 
-        Returns ``items`` with ID, kind, name, phone_e164, email and role.
-        Members have ``kind="member"``, an ID of ``member:<user_id>`` and a role.
-        Manual entries have ``kind="manual"``, a UUID and no role."""
+        A member entry carries a workspace role and a ``member:<user_id>`` ID.
+        A manually saved contact has its own contact ID and no workspace role.
+        Either kind can be selected for handover when it has a phone number."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await list_contacts(client=client, q=q, limit=limit)
@@ -4706,13 +4767,13 @@ def register_tools(
             Field(
                 ge=1,
                 le=200,
-                description=f"{_PAGE_SIZE} Omitted: the API returns 50.",
+                description="Maximum sending identities to include on this page. Omitted: 50.",
             ),
         ] = None,
     ) -> dict[str, Any]:
         """List the workspace's sending identities and default sender address.
 
-        Returns ``items``, ``next_cursor`` and ``default_from``.
+        The listing helps select a sender for ``send_email``.
         Only identities with ``verification_status="verified"`` can send.
         For ``kind="custom"``, ``domain`` is a domain supporting any local part.
         For ``kind="hail_mail"``, it is already a complete email address.
@@ -4770,8 +4831,8 @@ def register_tools(
             str | None,
             Field(pattern=E164.pattern),
             _d(
-                "The number to call or text this contact on, such as "
-                "``+14155551234``. Give this, ``email``, or both."
+                "Number used to call or text the contact. A contact can be "
+                "reachable by phone, email, or both."
             ),
         ] = None,
         email: Annotated[
@@ -4782,10 +4843,11 @@ def register_tools(
             ),
         ] = None,
     ) -> dict[str, Any]:
-        """Save a workspace contact with a name and a phone number or email address.
+        """Save a manually managed contact for calls, texts or email.
 
-        A duplicate phone or email returns 409.
-        Returns the new contact record or an error."""
+        The contact appears in workspace contact searches and can be selected
+        for call handover if it has a phone number. A duplicate phone or email
+        returns 409."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await create_contact(

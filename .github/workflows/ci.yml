@@ -123,3 +123,27 @@ jobs:
               response = client.get("/healthz")
               assert response.status_code == 200, response.text
           PY
+      - name: Verify packaged MCP discovery in OAuth mode
+        run: |
+          docker run --rm --network none -i \
+            -e HAIL_AUTH_URL=https://hail.so/api/auth \
+            -e HAIL_BASE_URL=https://hail.so \
+            -e MCP_RESOURCE_URL=https://mcp.hail.so hail-ci-mcp python - <<'PY'
+          from hailhq.mcp.server import app
+          from starlette.testclient import TestClient
+
+          with TestClient(app) as client:
+              manifest = client.get("/.well-known/mcp.json")
+              assert manifest.status_code == 200, manifest.text
+              assert manifest.headers["content-type"] == "application/json"
+              assert any(
+                  remote["url"] in {"https://mcp.hail.so", "https://mcp.hail.so/"}
+                  for remote in manifest.json()["remotes"]
+              )
+              setup = client.get("/", headers={"Accept": "text/html, text/event-stream;q=0"})
+              assert setup.status_code == 200, setup.text
+              assert setup.headers["content-type"].startswith("text/html")
+              stream = client.get("/", headers={"Accept": "text/event-stream"})
+              assert stream.status_code == 401, stream.text
+              assert "resource_metadata=" in stream.headers["www-authenticate"]
+          PY
