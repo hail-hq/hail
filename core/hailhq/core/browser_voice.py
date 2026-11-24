@@ -204,7 +204,12 @@ async def finish_browser_call(
     if call.status in TERMINAL_CALL_STATUSES:
         # The browser's /stop may settle while a failing worker is cleaning
         # up. Correct only its outcome; never settle money or usage twice.
-        if worker_failed and call.status == "completed":
+        # A stop before media readiness is "canceled"; a worker error there
+        # must stay visible.
+        if worker_failed and (
+            call.status == "completed"
+            or (call.status == "canceled" and call.answered_at is None)
+        ):
             call.status = "failed"
             call.end_reason = "agent_error"
             call.metadata_ = {**call.metadata_, "browser_failed": True}

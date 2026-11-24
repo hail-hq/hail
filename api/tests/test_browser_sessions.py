@@ -334,6 +334,37 @@ async def test_unanswered_browser_finalization_never_reports_completed(
 
 
 @pytest.mark.asyncio
+async def test_worker_failure_before_readiness_corrects_stop_cancel(async_session):
+    from hailhq.api.routes.internal.browser_sessions import view
+
+    call = Call(
+        organization_id=uuid.uuid4(),
+        transport="browser",
+        direction="inbound",
+        provider="browser",
+        voice_config={},
+        max_duration_seconds=60,
+        metadata_={"browser_trial": True},
+        status="queued",
+    )
+    async_session.add(call)
+    await async_session.commit()
+    await finish_browser_call(async_session, call.id)
+    await async_session.commit()
+    await async_session.refresh(call)
+    assert call.status == "canceled"
+    assert view(call)["outcome_final"] is False
+    await finish_browser_call(
+        async_session, call.id, worker_failed=True, worker_finished=True
+    )
+    await async_session.commit()
+    await async_session.refresh(call)
+    assert call.status == "failed"
+    assert call.end_reason == "agent_error"
+    assert view(call)["outcome_final"] is True
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("worker_failed", [False, True])
 async def test_late_worker_failure_corrects_completed_outcome_without_rebilling(
     async_session,

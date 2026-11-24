@@ -30,6 +30,10 @@ from livekit.agents import Agent, AgentSession
 
 logger = logging.getLogger(__name__)
 
+# Module constants so tests can shorten them.
+FAILURE_WRITE_TIMEOUT = 3
+ROOM_CLEANUP_TIMEOUT = 2
+
 
 def public_transcript(history: dict) -> dict:
     """Only spoken user/assistant text. Exclude system messages and tool data."""
@@ -197,7 +201,7 @@ async def run_browser_session(
 
                     async def mark_failure():
                         try:
-                            async with asyncio.timeout(3):
+                            async with asyncio.timeout(FAILURE_WRITE_TIMEOUT):
                                 async with session_scope() as db:
                                     call = await db.get(
                                         Call, call_id, with_for_update=True
@@ -223,7 +227,9 @@ async def run_browser_session(
                     try:
                         await asyncio.wait_for(session.aclose(), timeout=3)
                     except Exception:
-                        worker_failure = True
+                        # Cleanup-only errors must not fail a conversation the
+                        # user already had (and was billed for). Only SDK
+                        # "error" close events latch worker_failure.
                         logger.exception(
                             "browser model cleanup failed call_id=%s", call_id
                         )
@@ -242,10 +248,12 @@ async def run_browser_session(
                 if failure_write is not None:
                     # Driver cancellation/rollback can outlive its timeout.
                     # Waiting for it must not hold up shared-room deletion.
-                    await asyncio.wait({failure_write}, timeout=3)
+                    await asyncio.wait({failure_write}, timeout=FAILURE_WRITE_TIMEOUT)
                 for attempt in range(2):
                     try:
-                        await asyncio.wait_for(ctx.delete_room(), timeout=2)
+                        await asyncio.wait_for(
+                            ctx.delete_room(), timeout=ROOM_CLEANUP_TIMEOUT
+                        )
                         break
                     except Exception:
                         logger.warning(

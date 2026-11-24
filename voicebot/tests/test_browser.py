@@ -143,7 +143,7 @@ async def test_hard_deadline_closes_room_and_finalizes_trial_without_client_time
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failure_write_delay", [0, 2.15, "timeout"])
+@pytest.mark.parametrize("failure_write_delay", [0, 0.25, "timeout"])
 @pytest.mark.parametrize("stop_during", ["room_delete", "model_close"])
 async def test_worker_failure_wins_over_browser_stop_during_room_cleanup(
     async_session, monkeypatch, failure_write_delay, stop_during
@@ -215,7 +215,8 @@ async def test_worker_failure_wins_over_browser_stop_during_room_cleanup(
     monkeypatch.setattr(browser, "build_session", lambda *a, **kw: session)
     monkeypatch.setattr(browser, "build_browser_tools", lambda *a: ([], None))
     original_scope = browser.session_scope
-    scope_count = 0
+    monkeypatch.setattr(browser, "FAILURE_WRITE_TIMEOUT", 0.6)
+    monkeypatch.setattr(browser, "ROOM_CLEANUP_TIMEOUT", 0.2)
     media_cut_before_failure_write = []
     failure_write_started = asyncio.Event()
     release_failure_write = asyncio.Event()
@@ -223,9 +224,9 @@ async def test_worker_failure_wins_over_browser_stop_during_room_cleanup(
 
     @asynccontextmanager
     async def observed_scope():
-        nonlocal scope_count
-        scope_count += 1
-        if scope_count == 3:
+        # Key on the call site: the failure marker runs as its own task.
+        task = asyncio.current_task().get_coro()
+        if getattr(task, "__qualname__", "").endswith("mark_failure"):
             media_cut_before_failure_write.append(room.disconnect.await_count == 1)
             if failure_write_delay:
                 failure_write_started.set()
@@ -245,7 +246,7 @@ async def test_worker_failure_wins_over_browser_stop_during_room_cleanup(
         await asyncio.wait_for(failure_write_started.wait(), timeout=1)
         assert room.disconnect.await_count == 1
         if failure_write_delay == "timeout":
-            await asyncio.wait_for(room_deleted.wait(), timeout=6)
+            await asyncio.wait_for(room_deleted.wait(), timeout=2)
             release_cancel_cleanup.set()
         else:
             await asyncio.sleep(failure_write_delay)
@@ -327,9 +328,8 @@ async def test_disconnect_before_sdk_close_keeps_explicit_error(
     room_handlers["participant_disconnected"](SimpleNamespace(identity="visitor"))
     await callbacks[0]()
     await async_session.refresh(call)
-    assert call.status == (
-        "completed" if close_reason == "user_initiated" else "failed"
-    )
+    # A cleanup-only error (timeout) must not fail a finished conversation.
+    assert call.status == ("failed" if close_reason == "error" else "completed")
 
 
 def test_transcript_does_not_expose_system_instructions_or_tool_results():
