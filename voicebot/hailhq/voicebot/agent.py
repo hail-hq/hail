@@ -1050,6 +1050,20 @@ FIRST_LINE_WAIT_SECONDS = 1.0
 # <spell>...</spell> code, in order.
 _DIGIT = re.compile(r"\d")
 _SPELL = re.compile(r"<spell>.*?</spell>", re.IGNORECASE | re.DOTALL)
+# Quote pairs a model may wrap its whole answer in.
+_QUOTE_PAIRS = {
+    '"': '"',
+    "'": "'",
+    "\u201c": "\u201d",
+    "\u00ab": "\u00bb",
+    "\u300c": "\u300d",
+    "\u201e": "\u201c",
+}
+
+
+def _plain(text: str) -> str:
+    """Lowercase words only, for comparing wording across punctuation."""
+    return " ".join(re.sub(r"[^\w\s]", " ", text.casefold()).split())
 
 
 def _keeps_first_line(first_message: str, text: str, disclosure: str) -> bool:
@@ -1057,7 +1071,9 @@ def _keeps_first_line(first_message: str, text: str, disclosure: str) -> bool:
     repeat the notice, and keeps every digit and spelled code in order."""
     if not text or len(text) > 2 * len(first_message) + 40:
         return False
-    if disclosure.strip() and disclosure.strip() in text:
+    # The notice without its opening word ("Hi,") catches a near repeat.
+    notice = _plain(disclosure).split(" ", 1)[-1]
+    if notice and notice in _plain(text):
         return False
     return _DIGIT.findall(first_message) == _DIGIT.findall(text) and (
         _SPELL.findall(first_message) == _SPELL.findall(text)
@@ -1097,7 +1113,7 @@ async def fitted_first_line(
         )
         return first_message
     text = text.strip()
-    if len(text) >= 2 and text[0] == text[-1] == '"':
+    if len(text) >= 2 and _QUOTE_PAIRS.get(text[0]) == text[-1]:
         text = text[1:-1].strip()
     if not _keeps_first_line(first_message, text, disclosure):
         return first_message
@@ -1138,12 +1154,19 @@ def start_first_line_fit(
 async def _ready_first_line(first_line: asyncio.Task[str] | None, fallback: str) -> str:
     """The fitted line when it is ready within FIRST_LINE_WAIT_SECONDS, else
     the line as written. Never raises."""
-    if first_line is None:
+    if first_line is None or first_line.cancelled():
         return fallback
     try:
         return await asyncio.wait_for(
             asyncio.shield(first_line), timeout=FIRST_LINE_WAIT_SECONDS
         )
+    except asyncio.CancelledError:
+        # The fit was cancelled (the call is ending): say the line as
+        # written. A cancel of this greeting itself still propagates.
+        task = asyncio.current_task()
+        if task is not None and task.cancelling():
+            raise
+        return fallback
     except Exception:
         return fallback
 
@@ -2673,8 +2696,14 @@ async def _run_call(
     # Runs while the phone rings: the greeting reads it at pickup. Hail's own
     # model, not a customer endpoint: one may answer in character instead of
     # rewriting the line.
-    first_line = start_first_line_fit(
-        metadata, lambda: build_llm(None, None), call_id, language
+    # A workspace that brings its own model keeps call content off Hail's
+    # models: its calls say the line as written.
+    first_line = (
+        None
+        if llm_cfg is not None or org_cfgs.get("llm") is not None
+        else start_first_line_fit(
+            metadata, lambda: build_llm(None, None), call_id, language
+        )
     )
     if first_line is not None:
         fit_task = first_line

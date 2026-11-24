@@ -51,8 +51,10 @@ When an outbound call says the AI notice and then a first line, the first
 line is reworded so the caller hears one greeting. The notice stays fixed
 and first. The rewrite (`OPENING_FIT_INSTRUCTIONS` in
 `core/hailhq/core/prompts.py`) runs on Hail's own model while the phone
-rings, so it adds no delay at pickup. It never uses a customer's model,
-which may answer in character instead of rewriting. A rewrite that changes
+rings; at pickup the greeting waits at most one second for it. A
+workspace that uses its own model skips the rewrite, so its call content
+stays off Hail's models, and a customer endpoint may answer in character
+instead of rewriting. A rewrite that changes
 any digit or `<spell>` code, repeats the notice, or comes back late, empty
 or much longer falls back to the line as written. Inbound calls skip it:
 the caller is already on the line, and the default inbound greeting holds

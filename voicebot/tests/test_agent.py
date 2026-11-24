@@ -1126,6 +1126,12 @@ async def test_speak_greeting_says_the_line_as_written_when_the_fit_is_late(
         ("Calling about your order.", "Calling about your order."),
         ('"Calling about your order."', "Calling about your order."),
         ('Say "yes"', 'Say "yes"'),  # a lone quote stays
+        ("\u00abCalling about your order.\u00bb", "Calling about your order."),
+        # A near repeat of the notice (without its "Hi,") is not used.
+        (
+            AI_DISCLOSURE_LINE.split(", ", 1)[-1].upper() + " Calling.",
+            "Hi, calling about your order.",
+        ),
         ("", "Hi, calling about your order."),
         ("x" * 500, "Hi, calling about your order."),
         (f"{AI_DISCLOSURE_LINE} Calling.", "Hi, calling about your order."),
@@ -1162,6 +1168,20 @@ async def test_fitted_first_line_keeps_every_digit_and_code(first, reply, kept):
         UUID("11111111-2222-3333-4444-555555555555"),
     )
     assert line == (reply if kept else first)
+
+
+async def test_speak_greeting_says_the_line_when_the_fit_was_cancelled() -> None:
+    """A call ending during pickup cancels the fit; the greeting still says
+    the line as written instead of raising."""
+    session = FakeAnnouncingSession()
+    cancelled = asyncio.get_running_loop().create_future()
+    cancelled.cancel()
+
+    await speak_greeting(
+        session, {"first_message": "Hi, about your order."}, first_line=cancelled
+    )
+
+    assert session.say_calls == [(f"{AI_DISCLOSURE_LINE} Hi, about your order.", True)]
 
 
 async def test_fitted_first_line_keeps_the_line_when_the_model_fails() -> None:

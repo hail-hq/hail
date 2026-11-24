@@ -263,9 +263,9 @@ class CallCreate(ConsentAttestationMixin):
         default=None,
         description=(
             "Opening line the agent speaks first. After the AI notice, it is "
-            "reworded so it does not repeat the notice's greeting; names, "
-            "numbers and codes stay as written. Omitted: the agent waits for "
-            "the callee to speak first."
+            "reworded so it does not repeat the notice's greeting; numbers "
+            "and codes stay as written. Calls on your own model say it as "
+            "written. Omitted: the agent waits for the callee to speak first."
         ),
     )
     recording_enabled: bool | None = Field(
@@ -1359,9 +1359,10 @@ class AgentCreate(BaseModel):
         max_length=1000,
         description=(
             "Opening line spoken after the AI line. On outbound calls it is "
-            "reworded so it does not repeat the AI line's greeting; names, "
-            "numbers and codes stay as written. Omitted: the agent waits for "
-            "the other side to speak first."
+            "reworded so it does not repeat the AI line's greeting; numbers "
+            "and codes stay as written. Calls on your own model say it as "
+            "written. Omitted: the agent waits for the other side to speak "
+            "first."
         ),
     )
     recording_enabled: bool | None = Field(
