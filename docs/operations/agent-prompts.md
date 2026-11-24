@@ -55,11 +55,13 @@ rings, Hail's own model copies out the greeting that opens the line
 it (`cut_greeting`) only when the line starts with exactly that text, it is
 at most three words with no digit or code, and punctuation follows it (or,
 after a one-word greeting, a capitalized name). The model never writes the
-line, so no other word can change: a free rewrite could drop content or flip
-a sentence's meaning, and no check can catch that. Any other answer, a
+line, so only that hello can be cut: a free rewrite could drop content or
+flip a sentence's meaning, and no check can catch that. The model decides
+what counts as a hello; its instructions exclude thanks, apologies and names. Any other answer, a
 failure or a late answer keeps the line as written. At pickup the greeting
 waits at most one second. A workspace that uses its own model skips this, so
-its call content stays off Hail's models. Inbound calls skip it: the caller
+its call content stays off Hail's models. A custom AI line skips it too: it
+may not greet, and the cut would leave the call with no greeting. Inbound calls skip it: the caller
 is already on the line, and the default inbound greeting holds the AI line
 inside it.
 

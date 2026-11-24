@@ -264,7 +264,8 @@ class CallCreate(ConsentAttestationMixin):
         description=(
             "Opening line the agent speaks first. A greeting at its start "
             '("Hi,") is dropped after the AI notice, which already greets; '
-            "nothing else changes. Calls on your own model say it as written. "
+            "nothing else changes. Calls on your own model or a custom AI line say "
+            "it as written. "
             "Omitted: the agent waits for the callee to speak first."
         ),
     )
@@ -1360,8 +1361,8 @@ class AgentCreate(BaseModel):
         description=(
             "Opening line spoken after the AI line. On outbound calls a "
             'greeting at its start ("Hi,") is dropped, since the AI line '
-            "already greets; nothing else changes. Calls on your own model say "
-            "it as written. Omitted: the agent waits for the other side to "
+            "already greets; nothing else changes. Calls on your own model or a "
+            "custom AI line say it as written. Omitted: the agent waits for the other side to "
             "speak first."
         ),
     )
@@ -1479,8 +1480,8 @@ class AgentUpdate(BaseModel):
         description=(
             "New opening line; null makes the agent wait for the other side. "
             'On outbound calls a greeting at its start ("Hi,") is dropped, '
-            "since the AI line already greets. Calls on your own model, or "
-            "without the AI line, say it as written."
+            "since the AI line already greets. Calls on your own model, with a "
+            "custom AI line, or without the AI line, say it as written."
         ),
     )
     recording_enabled: bool | None = Field(

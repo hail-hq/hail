@@ -1773,7 +1773,7 @@ type AgentCreate struct {
 	// EmailEnabled Answer email on addresses that route email to this agent.
 	EmailEnabled *bool `json:"email_enabled,omitempty"`
 
-	// FirstMessage Opening line spoken after the AI line. On outbound calls a greeting at its start ("Hi,") is dropped, since the AI line already greets; nothing else changes. Calls on your own model say it as written. Omitted: the agent waits for the other side to speak first.
+	// FirstMessage Opening line spoken after the AI line. On outbound calls a greeting at its start ("Hi,") is dropped, since the AI line already greets; nothing else changes. Calls on your own model or a custom AI line say it as written. Omitted: the agent waits for the other side to speak first.
 	FirstMessage *string `json:"first_message,omitempty"`
 
 	// HandoverContacts People the agent may hand a live call to, in order. The agent never sees their numbers.
@@ -1902,7 +1902,7 @@ type AgentUpdate struct {
 	// EmailEnabled Whether the agent answers email.
 	EmailEnabled *bool `json:"email_enabled,omitempty"`
 
-	// FirstMessage New opening line; null makes the agent wait for the other side. On outbound calls a greeting at its start ("Hi,") is dropped, since the AI line already greets. Calls on your own model, or without the AI line, say it as written.
+	// FirstMessage New opening line; null makes the agent wait for the other side. On outbound calls a greeting at its start ("Hi,") is dropped, since the AI line already greets. Calls on your own model, with a custom AI line, or without the AI line, say it as written.
 	FirstMessage *string `json:"first_message,omitempty"`
 
 	// HandoverContacts New handover list; replaces the old one. [] removes all; null leaves it.
@@ -1965,7 +1965,7 @@ type CallCreate struct {
 	// ConsentSource Where/how consent was obtained (e.g. 'signup form', 'prior customer relationship'). Required (non-empty) when message_type is 'marketing'.
 	ConsentSource *string `json:"consent_source,omitempty"`
 
-	// FirstMessage Opening line the agent speaks first. A greeting at its start ("Hi,") is dropped after the AI notice, which already greets; nothing else changes. Calls on your own model say it as written. Omitted: the agent waits for the callee to speak first.
+	// FirstMessage Opening line the agent speaks first. A greeting at its start ("Hi,") is dropped after the AI notice, which already greets; nothing else changes. Calls on your own model or a custom AI line say it as written. Omitted: the agent waits for the callee to speak first.
 	FirstMessage *string `json:"first_message,omitempty"`
 
 	// From Caller-id phone number, E.164 format. Must be a number owned by the organization with the voice capability. Omitted: an active org-owned number is used if one exists, else a number is claimed from the shared pool.

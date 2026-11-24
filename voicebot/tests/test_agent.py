@@ -1132,6 +1132,20 @@ async def test_speak_greeting_says_the_line_as_written_when_the_fit_is_late(
         ),
         ("早上好，我们是关于您明天的预约。", "早上好", "我们是关于您明天的预约。"),
         ("Hi-ya, calling about your order.", "Hi-ya", "Calling about your order."),
+        ("¡Hola! ¿Es un buen momento?", "Hola", "¿Es un buen momento?"),
+        ("Grüß Gott, hier ist Sam.", "grüß gott", "Hier ist Sam."),
+        # A hyphen, apostrophe or other mark does not end a greeting.
+        ("Hi-Tech Dental here, calling.", "Hi", "Hi-Tech Dental here, calling."),
+        ("Hi-ya, calling.", "Hi", "Hi-ya, calling."),
+        # Marks that are content stay: only sentence marks go with the hello.
+        ("Hi, #1 rated clinic calling.", "Hi", "#1 rated clinic calling."),
+        ("Hi, -20% on your next visit.", "Hi", "-20% on your next visit."),
+        # A greeting written without spaces is capped at 10 characters.
+        (
+            "您好我是北方牙科的小李，关于您明天的预约。",
+            "您好我是北方牙科的小李",
+            "您好我是北方牙科的小李，关于您明天的预约。",
+        ),
         ("Hello? Is this Sam?", "Hello", "Is this Sam?"),
         ("Hi… calling about your order.", "Hi", "Calling about your order."),
         ("Hola, ¿es un buen momento?", "Hola", "¿es un buen momento?"),
@@ -1217,6 +1231,30 @@ async def test_a_greeting_only_first_line_drops_out() -> None:
     assert session.say_calls == [(AI_DISCLOSURE_LINE, True)]
 
 
+async def test_speak_greeting_releases_the_opening_when_cancelled_while_waiting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A greeting cancelled while it waits for the fit still releases the
+    opening, so the agent's replies are not blocked for the rest of the call."""
+    monkeypatch.setattr(agent_mod, "FIRST_LINE_WAIT_SECONDS", 5.0)
+    released = []
+    pending = asyncio.get_running_loop().create_future()
+    greeting = asyncio.create_task(
+        speak_greeting(
+            FakeAnnouncingSession(),
+            {"first_message": "Hi, about your order."},
+            first_line=pending,
+            on_opened=lambda: released.append(True),
+        )
+    )
+    await asyncio.sleep(0.01)
+    greeting.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await greeting
+    assert released == [True]
+    pending.cancel()
+
+
 async def test_speak_greeting_says_the_line_when_the_fit_was_cancelled() -> None:
     """A call ending during pickup cancels the fit; the greeting still says
     the line as written instead of raising."""
@@ -1243,6 +1281,8 @@ async def test_speak_greeting_says_the_line_when_the_fit_was_cancelled() -> None
             "direction": "inbound",
             "ai_disclosure_line": "This is an AI assistant.",
         },
+        # A custom AI line may not greet: cutting would leave no greeting.
+        {"first_message": "Hi.", "ai_disclosure_line": "This call uses AI."},
     ],
 )
 async def test_first_line_fit_runs_only_when_the_notice_precedes_the_line(metadata):

@@ -28,7 +28,6 @@ import logging
 import math
 import re
 import time
-import unicodedata
 from collections.abc import Awaitable, Callable, Collection
 from datetime import datetime, timezone
 from typing import Any
@@ -1047,65 +1046,54 @@ FIRST_LINE_FIT_SECONDS = 10.0
 FIRST_LINE_WAIT_SECONDS = 1.0
 # The longest greeting cut from the start of a first line ("Good morning
 # there"). The model copies the greeting out; code cuts it only when the line
-# starts with exactly that text and punctuation follows, so no other word can
-# change.
+# starts with exactly that text and a sentence mark follows, so a cut never
+# lands inside a sentence or a word.
 MAX_GREETING_WORDS = 3
 MAX_GREETING_CHARS = 30
+# A greeting written without spaces ("早上好", "Konnichiwa") is one token,
+# so its length is capped instead of its word count.
+MAX_GREETING_TOKEN_CHARS = 10
 # Only the start of the line goes to the model: a greeting is at the start.
 FIRST_LINE_SAMPLE_CHARS = 120
 # The model's answer when the line does not open with a greeting.
 NO_GREETING = "none"
-# Opening marks stay: "¿Es un buen momento?" keeps its "¿".
-_OPENING_MARKS = frozenset("¿¡")
-
-
-def _is_punct(char: str) -> bool:
-    return unicodedata.category(char).startswith("P")
-
-
-def _closing_punct(char: str) -> bool:
-    """Punctuation that ends a greeting ("," "!" "…" "，"), not an opening
-    mark that starts the next sentence ("¿", "(")."""
-    return (
-        _is_punct(char)
-        and char not in _OPENING_MARKS
-        and unicodedata.category(char) not in ("Ps", "Pi")
-    )
+# Marks that end a greeting and are dropped with it.
+_GREETING_ENDS = frozenset(",.!?…:;，。！？、：；")
+# Marks that open a greeting ("¡Hola!") and are dropped with it.
+_GREETING_OPENS = frozenset("¡¿\"'«“")
 
 
 def cut_greeting(first_message: str, greeting: str) -> str:
-    """``first_message`` without its opening ``greeting`` and the
-    punctuation after it; "" when nothing is left. Unchanged unless the line
+    """``first_message`` without its opening ``greeting`` and the sentence
+    marks after it; "" when nothing is left. Unchanged unless the line
     starts with exactly that greeting (any case), the greeting is short and
-    holds no digit or code, and punctuation, the end of the line, or (after
-    a one-word greeting) a capitalized name follows it, so a cut never lands
-    inside a sentence."""
-    greeting = greeting.strip()
-    while greeting and _is_punct(greeting[-1]):
-        greeting = greeting[:-1].rstrip()
+    holds no digit or code, and a sentence mark, the end of the line, or
+    (after a one-word greeting) a capitalized name follows it."""
+    greeting = greeting.strip().strip("".join(_GREETING_ENDS | _GREETING_OPENS))
+    tokens = greeting.split()
     if (
         not greeting
         or len(greeting) > MAX_GREETING_CHARS
-        or len(greeting.split()) > MAX_GREETING_WORDS
+        or len(tokens) > MAX_GREETING_WORDS
+        or (len(tokens) == 1 and len(greeting) > MAX_GREETING_TOKEN_CHARS)
         or re.search(r"\d", greeting)
         or "<" in greeting
     ):
         return first_message
     line = first_message.lstrip()
-    if not line.casefold().startswith(greeting.casefold()):
+    start = 0
+    while start < len(line) and line[start] in _GREETING_OPENS:
+        start += 1
+    end = start + len(greeting)
+    if line[start:end].lower() != greeting.lower():
         return first_message
-    rest = line[len(greeting) :]
-    # Punctuation ends a greeting ("Hi, ..."). A space does only after a
-    # one-word greeting before a capitalized name ("Hello Sam, ..." keeps
-    # "Sam"); "Hi there" is not cut to "There".
-    after_space = rest.lstrip()
-    named = (
-        len(greeting.split()) == 1 and rest[:1].isspace() and after_space[:1].isupper()
-    )
-    if rest and not _is_punct(rest[0]) and not named:
+    rest = line[end:]
+    # "Hello Sam, ..." keeps "Sam"; "Hi there" is not cut to "There".
+    named = len(tokens) == 1 and rest[:1].isspace() and rest.lstrip()[:1].isupper()
+    if rest and rest[0] not in _GREETING_ENDS and not named:
         return first_message
     i = 0
-    while i < len(rest) and (rest[i].isspace() or _closing_punct(rest[i])):
+    while i < len(rest) and (rest[i].isspace() or rest[i] in _GREETING_ENDS):
         i += 1
     rest = rest[i:]
     # "calling about" becomes "Calling about"; "iPhone" stays as written.
@@ -1166,13 +1154,18 @@ def start_first_line_fit(
     language: str | None = None,
 ) -> asyncio.Task[str] | None:
     """Start fitting the first message to the disclosure while an outbound
-    call rings, or None when there is nothing to fit (no first message or
-    no disclosure) or no ring to hide it in (an inbound caller is already on
-    the line, and the default inbound greeting holds the AI line anyway)."""
+    call rings, or None when there is nothing to fit (no first message, no
+    disclosure, or a custom AI line that may not greet) or no ring to hide
+    it in (an inbound caller is already on the line, and the default inbound
+    greeting holds the AI line anyway)."""
     first_message = metadata.get("first_message")
     if not first_message or not metadata.get("ai_disclosure", True):
         return None
     if metadata.get("direction") == "inbound":
+        return None
+    # Only the built-in AI line is known to greet ("Hi, this is ..."). A
+    # custom one may not, and the cut would leave the call with no greeting.
+    if (metadata.get("ai_disclosure_line") or "").strip():
         return None
     disclosure = disclosure_line(
         metadata.get("org_name"),
@@ -1263,13 +1256,20 @@ async def speak_greeting(
     )
     first_message = metadata.get("first_message")
     inbound = metadata.get("direction") == "inbound"
-    # Get the fitted line before clearing the pickup turn below: nothing may
-    # wait between that clear and the opening, or a late "Hello?" cuts it off.
-    line = (
-        await _ready_first_line(first_line, first_message)
-        if first_message and disclosure
-        else first_message
-    )
+    try:
+        # Get the fitted line before clearing the pickup turn below: nothing
+        # may wait between that clear and the opening, or a late "Hello?"
+        # cuts it off. Inside the try, so the opening is released even if the
+        # greeting is cancelled while it waits.
+        line = (
+            await _ready_first_line(first_line, first_message)
+            if first_message and disclosure
+            else first_message
+        )
+    except BaseException:
+        if on_opened is not None:
+            on_opened()
+        raise
     if generate_opening and not inbound:
         # The turn detector can wait up to max_delay (2.5 s) on a bare pickup
         # "Hello?". If that turn ends after this opening starts, it cuts the
