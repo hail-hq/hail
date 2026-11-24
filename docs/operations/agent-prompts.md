@@ -56,8 +56,9 @@ in `voicebot/hailhq/voicebot/agent.py`; it quotes the notice and the line as
 JSON strings, and the turn cannot call tools.
 
 - If that turn fails or ends with no words, the line is said as written. If
-  the person interrupts it, the turn loop answers them, as it does when the
-  generated opening is interrupted.
+  the person interrupts it before any word, the line goes into the chat as
+  not yet said (`unsaid_line_note`), so the turn loop's reply says it after
+  answering them.
 - The turn runs even if the person talked over the notice, as the generated
   opening does.
 - Exact wording is not guaranteed: the model writes the turn.

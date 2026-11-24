@@ -981,7 +981,8 @@ def _say_first_message(session: Any, first_message: str, disclosure: str) -> Non
     generated opening runs for calls without one. If that turn fails or
     ends without a word while nobody interrupted it, say the line as
     written, so the call never loses its opening line. If the person
-    interrupted it, the turn loop answers them instead."""
+    interrupted it before any word, the line goes into the chat as not yet
+    said, so the turn loop's reply says it after answering them."""
 
     def say_line() -> None:
         try:
@@ -1006,19 +1007,47 @@ def _say_first_message(session: Any, first_message: str, disclosure: str) -> Non
     if add_done is None:
         return
 
+    async def keep_line_for_next_reply() -> None:
+        # The turn loop is answering the person: put the line in the chat so
+        # that reply, or the next, says it, instead of talking over them.
+        try:
+            agent = session.current_agent
+            ctx = agent.chat_ctx.copy()
+            ctx.add_message(role="system", content=unsaid_line_note(first_message))
+            await agent.update_chat_ctx(ctx)
+        except Exception:
+            logger.exception("could not keep the unsaid first message")
+
     def on_done(done: Any) -> None:
         spoke = any(
             getattr(item, "role", None) == "assistant"
             and (getattr(item, "text_content", None) or "").strip()
             for item in getattr(done, "chat_items", []) or []
         )
-        # Interrupted: the turn loop answers the person, as it does when the
-        # generated opening is interrupted.
-        if spoke or done.interrupted:
+        if spoke:
+            return
+        if done.interrupted:
+            task = asyncio.ensure_future(keep_line_for_next_reply())
+            _BACKGROUND.add(task)
+            task.add_done_callback(_BACKGROUND.discard)
             return
         say_line()
 
     add_done(on_done)
+
+
+# Keeps fire-and-forget tasks alive until they finish.
+_BACKGROUND: set[asyncio.Task[None]] = set()
+
+
+def unsaid_line_note(first_message: str) -> str:
+    """A chat note for an opening line the person talked over before it was
+    said: the next reply includes it, after answering them."""
+    return (
+        "Your opening line was not said yet because the person spoke first. "
+        "After answering them, say it, keeping its words: "
+        f"{json.dumps(first_message, ensure_ascii=False)}"
+    )
 
 
 def first_message_instructions(first_message: str, disclosure: str) -> str:
