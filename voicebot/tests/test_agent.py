@@ -38,7 +38,6 @@ from hailhq.voicebot.agent import (
     SIP_CALL_STATUS_ATTRIBUTE,
     SOFT_CAP_END_REASON,
     VOICE_PREAMBLE,
-    SpeechSanitizingAgent,
     _sanitize_tts_stream,
     attach_event_handlers,
     build_instructions,
@@ -59,7 +58,6 @@ from hailhq.voicebot.agent import (
     soft_cap_announce_and_hangup,
     speak_greeting,
     speech_text,
-    unsaid_line_note,
 )
 from hailhq.voicebot.amd import IVR_TOOL_LINES, ivr_navigation_instructions
 from hailhq.voicebot.spoken_lines import SPOKEN_LINES
@@ -1221,23 +1219,6 @@ async def test_failed_greeting_turn_says_the_line_as_written(
     if fallback:
         expected.append(("Hi, about your order.", True))
     assert session.say_calls == expected
-
-
-async def test_an_interrupted_greeting_keeps_the_line_for_the_next_reply() -> None:
-    """The person spoke before any word: the line goes into the chat as not
-    yet said, so the turn loop's reply says it after answering them."""
-    session = FakeAnnouncingSession()
-    agent = SpeechSanitizingAgent(instructions="test")
-    session.current_agent = agent
-    handle = _DoneHandle(None, "", True)
-    session.generate_reply = lambda **_kw: handle
-    await speak_greeting(session, {"first_message": "Hi, code 4821."})
-    for callback in handle.callbacks:
-        callback(handle)
-    await asyncio.sleep(0.05)
-    assert session.say_calls == [(AI_DISCLOSURE_LINE, True)]
-    notes = [m.text_content for m in agent.chat_ctx.messages() if m.role == "system"]
-    assert notes[-1] == unsaid_line_note("Hi, code 4821.")
 
 
 async def test_a_custom_ai_line_keeps_the_literal_greeting() -> None:

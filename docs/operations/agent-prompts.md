@@ -56,17 +56,15 @@ in `voicebot/hailhq/voicebot/agent.py`; it quotes the notice and the line as
 JSON strings, and the turn cannot call tools.
 
 - If that turn fails or ends with no words, the line is said as written. If
-  the person spoke before any word, the line goes into the chat as not yet
-  said (`unsaid_line_note`), so the turn loop's reply says it after
-  answering them.
+  the person interrupts it, the turn loop answers them, as it does when the
+  generated opening is interrupted.
 - The turn runs even if the person talked over the notice, as the generated
   opening does.
 - Exact wording is not guaranteed: the model writes the turn.
 - Kept literal: inbound calls, the phone-menu path when a person was heard,
   calls without an AI notice, calls with a custom AI line (it may not greet),
-  and calls on a customer's own endpoint (per call, or a saved
-  OpenAI-compatible endpoint), which may ignore the instruction. A workspace
-  that only adds its own key for a built-in provider is not "own model".
+  and calls on a customer's own model (a per-call `llm`, or any workspace
+  model setting), which may ignore the instruction.
 
 ## Closing calls
 
