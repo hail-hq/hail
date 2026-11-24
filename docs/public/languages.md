@@ -11,13 +11,16 @@ hail call +14155550100 --language es \
 
 Set it as `voice_config.language` on `POST /v1/calls` or on an agent, with
 `hail call --language`, or with the `language` argument of the MCP
-`place_call` tool. Omitted on a call, the agent's language applies, or
-English if the call has no agent. Hail picks the
+`place_call` tool. Omitted on a call, Hail uses the agent's language,
+then the language of the text-to-speech provider saved in the console,
+then English. Hail picks the
 speech-to-text provider and turn detection for each language. The agent's
 built-in spoken lines, such as the AI line, are said in the call's language.
 
-An unsupported code, or a language your own text-to-speech provider cannot
-speak, is refused with `422`.
+An unsupported code is refused with `422`. So is a language that a speech
+provider you saved in the console cannot handle (speech to text or text to
+speech), unless that provider has fallback on. With fallback on, Hail uses
+its own provider for that call instead.
 
 | Code | Language   | Auto STT     | Turn detection | TTS fallback |
 | ---- | ---------- | ------------ | -------------- | ------------ |
@@ -64,14 +67,15 @@ speak, is refused with `422`.
 What the columns mean:
 
 - **Auto STT**: the speech-to-text provider Hail picks for the language. A
-  speech-to-text provider you save in the console always wins. On a
+  speech-to-text provider you save in the console wins when it supports
+  the language. On a
   self-hosted install, `speechmatics` needs `SPEECHMATICS_API_KEY`; without
   it, the call uses Deepgram with VAD turn detection.
 - **Turn detection**: how the agent knows the other person finished
   speaking. `semantic` is LiveKit's audio turn detector. `STT-adaptive` is
   Speechmatics' end-of-speech detection. `VAD` waits for a gap of silence.
 - **TTS fallback**: `no` means only Cartesia speaks this language, so there
-  is no ElevenLabs backup voice. A saved ElevenLabs voice is refused for it.
+  is no ElevenLabs backup voice. A saved ElevenLabs voice is refused for it, unless fallback is on.
 
 Canonical data: [`core/hailhq/core/languages.py`](../../core/hailhq/core/languages.py).
 Voice routing: [`voicebot/hailhq/voicebot/pipeline.py`](../../voicebot/hailhq/voicebot/pipeline.py).
