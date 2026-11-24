@@ -1149,7 +1149,15 @@ async def test_speak_greeting_says_the_line_as_written_when_the_fit_is_late(
         ),
         ("Hello? Is this Sam?", "Hello", "Is this Sam?"),
         ("Hi… calling about your order.", "Hi", "Calling about your order."),
-        ("Hola, ¿es un buen momento?", "Hola", "¿es un buen momento?"),
+        ("Hola, ¿es un buen momento?", "Hola", "¿Es un buen momento?"),
+        ("Bonjour ! Nous vous appelons.", "Bonjour", "Nous vous appelons."),
+        ("Hi, macOS users wanted.", "Hi", "macOS users wanted."),
+        (
+            "Hi, calling about your order.",
+            "\u201cHi\u201d",
+            "Calling about your order.",
+        ),
+        ("「こんにちは」、お電話です。", "こんにちは", "「こんにちは」、お電話です。"),
         ("Hi, iPhone repair here.", "Hi", "iPhone repair here."),
         ("Hello!", "Hello", ""),  # only a greeting: the notice is said alone
         # No sentence mark after the greeting: a name or a business name.
@@ -1308,6 +1316,18 @@ async def test_first_line_fit_runs_only_when_the_notice_precedes_the_line(metada
         )
         is None
     )
+
+
+async def test_first_line_fit_runs_when_a_custom_line_falls_back_to_the_built_in():
+    """A custom AI line Hail replaces with the built-in one ("[AI] ...")
+    greets like the built-in line, so its greeting is fitted too."""
+    fit = start_first_line_fit(
+        {"first_message": "Hi.", "ai_disclosure_line": "[AI] calling for {org}"},
+        lambda: FakeLLM(reply="Hi"),
+        UUID("11111111-2222-3333-4444-555555555555"),
+    )
+    assert fit is not None
+    assert await fit == ""
 
 
 async def test_speak_greeting_skips_disclosure_when_opted_out() -> None:

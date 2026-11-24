@@ -1062,7 +1062,9 @@ NO_GREETING = "none"
 # Marks that end a greeting and are dropped with it.
 _GREETING_ENDS = frozenset(",.!?…:;，。！？、：；،؟؛।")
 # Marks that open a greeting ("¡Hola!") and are dropped with it.
-_GREETING_OPENS = frozenset("¡¿\"'«“")
+_GREETING_OPENS = frozenset("¡¿\"'«“‘「『")
+# Closing quotes a model may wrap its answer in.
+_GREETING_CLOSES = frozenset("\"'»”’」』")
 
 
 def _width(text: str) -> int:
@@ -1076,7 +1078,9 @@ def cut_greeting(first_message: str, greeting: str) -> str:
     holds no digit, code or sentence mark of its own, and a sentence mark
     or the end of the line follows it. Only the marks right after the
     greeting go with it; the rest keeps its own marks."""
-    greeting = greeting.strip().strip("".join(_GREETING_ENDS | _GREETING_OPENS))
+    greeting = greeting.strip().strip(
+        "".join(_GREETING_ENDS | _GREETING_OPENS | _GREETING_CLOSES)
+    )
     tokens = greeting.split()
     if (
         not greeting
@@ -1097,19 +1101,32 @@ def cut_greeting(first_message: str, greeting: str) -> str:
         return first_message
     rest = line[end:]
     # A sentence mark must end the greeting: "Morning Glory Florist" or
-    # "Aloha Dental" is a name, not a greeting.
-    if rest and rest[0] not in _GREETING_ENDS:
-        return first_message
+    # "Aloha Dental" is a name, not a greeting. French puts a space before
+    # "!" and "?" ("Bonjour ! ..."), so spaces before a mark are allowed.
     i = 0
+    while i < len(rest) and rest[i].isspace():
+        i += 1
+    if i < len(rest) and rest[i] not in _GREETING_ENDS:
+        return first_message
     while i < len(rest) and rest[i] in _GREETING_ENDS:
         i += 1
     while i < len(rest) and rest[i].isspace():
         i += 1
     rest = rest[i:]
-    # "calling about" becomes "Calling about"; "iPhone" stays as written.
-    if rest[:1].islower() and not rest[1:2].isupper():
-        rest = rest[0].upper() + rest[1:]
-    return rest
+    return _capitalized(rest)
+
+
+def _capitalized(text: str) -> str:
+    """``text`` with its first word capitalized, after any opening mark
+    ("¿es" becomes "¿Es"). A word with another capital ("iPhone", "macOS")
+    stays as written."""
+    start = 0
+    while start < len(text) and text[start] in _GREETING_OPENS:
+        start += 1
+    word = re.match(r"\w+", text[start:])
+    if word is None or not word.group(0).islower():
+        return text
+    return text[:start] + text[start].upper() + text[start + 1 :]
 
 
 async def fitted_first_line(
@@ -1173,16 +1190,20 @@ def start_first_line_fit(
         return None
     if metadata.get("direction") == "inbound":
         return None
-    # Only the built-in AI line is known to greet ("Hi, this is ..."). A
-    # custom one may not, and the cut would leave the call with no greeting.
-    if (metadata.get("ai_disclosure_line") or "").strip():
-        return None
     disclosure = disclosure_line(
         metadata.get("org_name"),
         metadata.get("direction"),
         metadata.get("ai_disclosure_line"),
         language,
     )
+    # Only the built-in AI line is known to greet ("Hi, this is ..."). A
+    # custom one may not, and the cut would leave the call with no greeting.
+    # A custom line that falls back to the built-in one counts as built-in.
+    builtin = disclosure_line(
+        metadata.get("org_name"), metadata.get("direction"), None, language
+    )
+    if disclosure != builtin:
+        return None
     return asyncio.create_task(
         fitted_first_line(llm, disclosure, first_message, call_id)
     )
@@ -2744,11 +2765,10 @@ async def _run_call(
         speech.on_state(getattr(ev, "new_state", None), time.monotonic())
 
     other_party_task = asyncio.create_task(other_party(call_id))
-    # Runs while the phone rings: the greeting reads it at pickup. Hail's own
-    # model, not a customer endpoint: one may answer in character instead of
-    # rewriting the line.
-    # A workspace that brings its own model keeps call content off Hail's
-    # models: its calls say the line as written.
+    # Runs while the phone rings: the greeting reads it at pickup. A workspace
+    # that brings its own model keeps call content off Hail's models, and its
+    # endpoint may not follow the copy-only instruction: its calls say the
+    # line as written.
     first_line = (
         None
         if llm_cfg is not None or org_cfgs.get("llm") is not None

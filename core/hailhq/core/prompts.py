@@ -118,7 +118,7 @@ Greeting, Instructions, Language, First line, optional tools, or call limits, \
 then Save. Every call keeps the ability to hang up, press keypad digits, \
 and explain where to change Hail settings. On outbound calls with the \
 built-in AI line, a hello at the start of Greeting ("Hi,") is not said, \
-because the AI line already greets. \
+because the AI line already greets, unless the workspace uses its own model. \
 Instructions control what the agent does and its speaking style; they do not \
 select the voice. The voice selection is in Call settings. An agent with a \
 voice override set through the API or a connected assistant can use a different \
