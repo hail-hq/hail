@@ -334,3 +334,33 @@ async def test_sweep_closes_unanswered_handover_past_max_duration(async_session)
     await async_session.commit()
 
     assert call.id in swept
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("age_seconds, closed", [(10, False), (10_000, True)])
+async def test_sweep_closes_unconfirmed_settled_browser_call(
+    async_session, age_seconds, closed
+):
+    now = datetime.now(timezone.utc)
+    call = Call(
+        organization_id=uuid.uuid4(),
+        transport="browser",
+        direction="inbound",
+        provider="browser",
+        voice_config={},
+        max_duration_seconds=60,
+        metadata_={"browser_trial": True},
+        status="completed",
+        end_reason="normal_hangup",
+        ended_at=now - timedelta(seconds=age_seconds),
+    )
+    async_session.add(call)
+    await async_session.commit()
+    await sweep_stale_calls(async_session, grace_seconds=30)
+    await async_session.commit()
+    await async_session.refresh(call)
+    assert call.status == "completed"
+    assert call.metadata_.get("browser_worker_finished") is (True if closed else None)
+    assert call.metadata_.get("browser_outcome_unconfirmed") is (
+        True if closed else None
+    )

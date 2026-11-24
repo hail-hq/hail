@@ -179,11 +179,15 @@ async def finish_browser_call(
     call_id: UUID,
     *,
     failed: bool = False,
+    worker_failed: bool = False,
+    worker_finished: bool = False,
     ended_at: datetime | None = None,
     started_at: datetime | None = None,
     waive_paid_charge: bool = False,
 ) -> None:
     """Lock and finalize once, including refunds. Caller commits the transaction."""
+    failed = failed or worker_failed
+    worker_finished = worker_finished or worker_failed
     call = (
         await db.execute(
             select(Call)
@@ -198,6 +202,19 @@ async def finish_browser_call(
 
     await release_pool_reservation(db, call_id=call.id)
     if call.status in TERMINAL_CALL_STATUSES:
+        # The browser's /stop may settle while a failing worker is cleaning
+        # up. Correct only its outcome; never settle money or usage twice.
+        # A stop before media readiness is "canceled"; a worker error there
+        # must stay visible.
+        if worker_failed and (
+            call.status == "completed"
+            or (call.status == "canceled" and call.answered_at is None)
+        ):
+            call.status = "failed"
+            call.end_reason = "agent_error"
+            call.metadata_ = {**call.metadata_, "browser_failed": True}
+        if worker_finished:
+            call.metadata_ = {**call.metadata_, "browser_worker_finished": True}
         return
     if started_at is not None and call.answered_at is None:
         call.started_at = call.answered_at = started_at
@@ -211,6 +228,9 @@ async def finish_browser_call(
         else 0
     )
     meta = dict(call.metadata_)
+    if worker_finished:
+        meta["browser_worker_finished"] = True
+    failed = failed or meta.get("browser_failed") is True
     meta["browser_used_ms"] = duration
     if not meta.get("browser_trial"):
         reserved = Decimal(meta["browser_reserved_cents"])
@@ -247,7 +267,14 @@ async def finish_browser_call(
     if waive_paid_charge:
         meta["browser_charge_waived"] = True
     call.metadata_ = meta
-    call.status = "failed" if failed else "completed"
+    # A stop or shutdown can win the race with participant/model setup.
+    # Only a session that reached media readiness completed a conversation.
+    if failed:
+        call.status = "failed"
+    elif call.answered_at is None:
+        call.status = "canceled"
+    else:
+        call.status = "completed"
     call.end_reason = "agent_error" if failed else "normal_hangup"
     call.ended_at = now
 

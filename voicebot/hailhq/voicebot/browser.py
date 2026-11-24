@@ -30,6 +30,10 @@ from livekit.agents import Agent, AgentSession
 
 logger = logging.getLogger(__name__)
 
+# Module constants so tests can shorten them.
+FAILURE_WRITE_TIMEOUT = 3
+ROOM_CLEANUP_TIMEOUT = 2
+
 
 def public_transcript(history: dict) -> dict:
     """Only spoken user/assistant text. Exclude system messages and tool data."""
@@ -169,6 +173,7 @@ async def run_browser_session(
     messaging_api = None
     finish_lock = asyncio.Lock()
     finished = False
+    worker_failure = False
     deadline = None
     setup_deadline = None
     finalization = None
@@ -176,7 +181,7 @@ async def run_browser_session(
     event_tasks = set()
 
     async def finish(*, failed=False):
-        nonlocal finished
+        nonlocal finished, worker_failure
         async with finish_lock:
             if finished:
                 return
@@ -191,10 +196,40 @@ async def run_browser_session(
                     logger.exception(
                         "browser media disconnect failed call_id=%s", call_id
                     )
+                failure_write = None
+                if failed:
+
+                    async def mark_failure():
+                        try:
+                            async with asyncio.timeout(FAILURE_WRITE_TIMEOUT):
+                                async with session_scope() as db:
+                                    call = await db.get(
+                                        Call, call_id, with_for_update=True
+                                    )
+                                    if (
+                                        call is not None
+                                        and call.status not in TERMINAL_CALL_STATUSES
+                                    ):
+                                        call.metadata_ = {
+                                            **call.metadata_,
+                                            "browser_failed": True,
+                                        }
+                                        await db.commit()
+                        except Exception:
+                            logger.exception(
+                                "browser failure marker failed call_id=%s", call_id
+                            )
+
+                    # Save intent alongside cleanup, after the local audio cut.
+                    # Final settlement can correct a stop that wins this race.
+                    failure_write = asyncio.create_task(mark_failure())
                 if session is not None:
                     try:
                         await asyncio.wait_for(session.aclose(), timeout=3)
                     except Exception:
+                        # Cleanup-only errors must not fail a conversation the
+                        # user already had (and was billed for). Only SDK
+                        # "error" close events latch worker_failure.
                         logger.exception(
                             "browser model cleanup failed call_id=%s", call_id
                         )
@@ -210,9 +245,15 @@ async def run_browser_session(
                         logger.exception(
                             "browser messaging cleanup failed call_id=%s", call_id
                         )
+                if failure_write is not None:
+                    # Driver cancellation/rollback can outlive its timeout.
+                    # Waiting for it must not hold up shared-room deletion.
+                    await asyncio.wait({failure_write}, timeout=FAILURE_WRITE_TIMEOUT)
                 for attempt in range(2):
                     try:
-                        await asyncio.wait_for(ctx.delete_room(), timeout=2)
+                        await asyncio.wait_for(
+                            ctx.delete_room(), timeout=ROOM_CLEANUP_TIMEOUT
+                        )
                         break
                     except Exception:
                         logger.warning(
@@ -228,7 +269,9 @@ async def run_browser_session(
                     await finish_browser_call(
                         db,
                         call_id,
-                        failed=failed,
+                        failed=worker_failure,
+                        worker_failed=worker_failure,
+                        worker_finished=session is not None,
                         ended_at=media_ended_at,
                         started_at=media_started_at,
                     )
@@ -237,7 +280,8 @@ async def run_browser_session(
                 ctx.shutdown(reason="browser_ended")
 
     def begin_finish(*, failed=False):
-        nonlocal finalization
+        nonlocal finalization, worker_failure
+        worker_failure = worker_failure or failed
         if finalization is None:
             finalization = asyncio.create_task(finish(failed=failed))
         return finalization
@@ -319,8 +363,9 @@ async def run_browser_session(
 
         @session.on("close")
         def closed(event):
-            if not finished:
-                schedule_finish(failed=getattr(event, "reason", None) == "error")
+            # The SDK can emit its error after a participant disconnect has
+            # already started cleanup. Cleanup state must not hide that error.
+            schedule_finish(failed=getattr(event, "reason", None) == "error")
 
         # Starting the session and model construction are also bounded. The
         # live deadline is armed before greeting, and never controlled by JS.

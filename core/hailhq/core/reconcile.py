@@ -84,6 +84,34 @@ async def sweep_stale_calls(
                 session, call.id, failed=True, waive_paid_charge=True
             )
 
+    # A worker that died after /stop settled the call never writes its marker,
+    # so clients would poll forever. Past the call limit plus grace, close it
+    # as unconfirmed.
+    now = datetime.now(timezone.utc)
+    settled = (
+        (
+            await session.execute(
+                select(Call).where(
+                    Call.transport == "browser",
+                    Call.status.in_(TERMINAL_CALL_STATUSES),
+                    Call.ended_at.is_not(None),
+                    Call.ended_at > now - timedelta(days=1),
+                    Call.metadata_["browser_worker_finished"].as_boolean().is_not(True),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for call in settled:
+        ceiling = call.max_duration_seconds or SETUP_SECONDS
+        if now > call.ended_at + timedelta(seconds=ceiling + grace_seconds):
+            call.metadata_ = {
+                **call.metadata_,
+                "browser_worker_finished": True,
+                "browser_outcome_unconfirmed": True,
+            }
+
     select_stmt = text(f"""
         SELECT c.id, c.status, c.organization_id,
                c.direction, c.from_e164, c.to_e164, c.agent_id
