@@ -332,6 +332,42 @@ async def test_disconnect_before_sdk_close_keeps_explicit_error(
     assert call.status == ("failed" if close_reason == "error" else "completed")
 
 
+@pytest.mark.asyncio
+async def test_client_leaving_before_joining_is_not_a_worker_failure(
+    async_session, monkeypatch
+):
+    from hailhq.core.models import Call
+    from hailhq.voicebot import browser
+
+    call = Call(
+        organization_id=uuid.uuid4(),
+        transport="browser",
+        direction="inbound",
+        provider="browser",
+        voice_config={},
+        max_duration_seconds=60,
+        metadata_={"browser_trial": True},
+        status="queued",
+    )
+    async_session.add(call)
+    await async_session.commit()
+    ctx = SimpleNamespace(
+        room=SimpleNamespace(disconnect=AsyncMock(), on=lambda event: lambda cb: cb),
+        proc=SimpleNamespace(userdata={"vad": None}),
+        add_shutdown_callback=lambda fn: None,
+        connect=AsyncMock(),
+        # The room closes under the wait when the person presses Stop early.
+        wait_for_participant=AsyncMock(side_effect=RuntimeError("room closed")),
+        delete_room=AsyncMock(),
+        shutdown=lambda **kw: None,
+    )
+    monkeypatch.setattr(browser, "resolve_org_configs", AsyncMock(return_value={}))
+    await browser.run_browser_session(ctx, call.id, attach_handlers=lambda *a: set())
+    await async_session.refresh(call)
+    assert call.status != "failed"
+    assert not call.metadata_.get("browser_failed")
+
+
 def test_transcript_does_not_expose_system_instructions_or_tool_results():
     from hailhq.voicebot.browser import public_transcript
 
