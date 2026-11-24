@@ -340,6 +340,9 @@ async def run_browser_session(
         except RuntimeError:
             # The room closed before anyone joined: the person pressed Stop
             # or left while connecting. That is a cancel, not a worker error.
+            # A RuntimeError on a room that is still open is a real failure.
+            if ctx.room.isconnected():
+                raise
             client_left = True
             logger.info("browser client left before joining call_id=%s", call_id)
             await wait_finish()
@@ -430,8 +433,9 @@ async def run_browser_session(
         session.generate_reply(
             instructions="Briefly say you are an AI assistant, greet the person as this agent, then ask how you can help. Use the selected conversation language."
         )
-    except Exception:
+    except Exception as error:
         logger.exception("browser session failed call_id=%s", call_id)
-        # Once the person has left, setup steps fail because the room closed
-        # under them. Such errors are part of the cancel, not a worker failure.
-        await wait_finish(failed=not client_left)
+        # Once the person has left, setup steps fail with a RuntimeError because
+        # the room closed under them. That is part of the cancel. Any other
+        # error is a real worker failure, even after the person left.
+        await wait_finish(failed=not (client_left and isinstance(error, RuntimeError)))

@@ -333,8 +333,12 @@ async def test_disconnect_before_sdk_close_keeps_explicit_error(
 
 
 @pytest.mark.asyncio
-async def test_client_leaving_before_joining_is_not_a_worker_failure(
-    async_session, monkeypatch
+@pytest.mark.parametrize(
+    ("room_connected", "expected_status", "worker_failed"),
+    [(False, "canceled", False), (True, "failed", True)],
+)
+async def test_runtime_error_while_waiting_fails_only_if_room_is_open(
+    async_session, monkeypatch, room_connected, expected_status, worker_failed
 ):
     from hailhq.core.models import Call
     from hailhq.voicebot import browser
@@ -352,7 +356,11 @@ async def test_client_leaving_before_joining_is_not_a_worker_failure(
     async_session.add(call)
     await async_session.commit()
     ctx = SimpleNamespace(
-        room=SimpleNamespace(disconnect=AsyncMock(), on=lambda event: lambda cb: cb),
+        room=SimpleNamespace(
+            disconnect=AsyncMock(),
+            on=lambda event: lambda cb: cb,
+            isconnected=lambda: room_connected,
+        ),
         proc=SimpleNamespace(userdata={"vad": None}),
         add_shutdown_callback=lambda fn: None,
         connect=AsyncMock(),
@@ -364,8 +372,8 @@ async def test_client_leaving_before_joining_is_not_a_worker_failure(
     monkeypatch.setattr(browser, "resolve_org_configs", AsyncMock(return_value={}))
     await browser.run_browser_session(ctx, call.id, attach_handlers=lambda *a: set())
     await async_session.refresh(call)
-    assert call.status != "failed"
-    assert not call.metadata_.get("browser_failed")
+    assert call.status == expected_status
+    assert bool(call.metadata_.get("browser_failed")) is worker_failed
 
 
 def test_transcript_does_not_expose_system_instructions_or_tool_results():
