@@ -360,7 +360,7 @@ async def test_sweep_closes_unconfirmed_settled_browser_call(
     await async_session.commit()
     await async_session.refresh(call)
     assert call.status == "completed"
-    assert call.metadata_.get("browser_worker_finished") is closed
+    assert call.metadata_.get("browser_worker_finished") is (True if closed else None)
     assert call.metadata_.get("browser_outcome_unconfirmed") is (
         True if closed else None
     )
