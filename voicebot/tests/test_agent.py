@@ -31,6 +31,7 @@ from hailhq.core.prompts import (
     fit_to_tools,
     other_party_section,
 )
+from hailhq.voicebot import agent as agent_mod
 from hailhq.voicebot.agent import (
     AI_DISCLOSURE_LINE,
     SIP_CALL_STATUS_ACTIVE,
@@ -1104,8 +1105,6 @@ async def test_speak_greeting_says_the_fitted_line_after_the_disclosure() -> Non
 async def test_speak_greeting_says_the_line_as_written_when_the_fit_is_late(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from hailhq.voicebot import agent as agent_mod
-
     monkeypatch.setattr(agent_mod, "FIRST_LINE_WAIT_SECONDS", 0.01)
     session = FakeAnnouncingSession()
     late = asyncio.get_running_loop().create_future()
@@ -1125,7 +1124,13 @@ async def test_speak_greeting_says_the_line_as_written_when_the_fit_is_late(
     [
         ("Calling about your order.", "Calling about your order."),
         ('"Calling about your order."', "Calling about your order."),
-        ('Say "yes"', 'Say "yes"'),  # a lone quote stays
+        ('"Calling" about your order.', '"Calling" about your order.'),
+        ("(None)", "Hi, calling about your order."),  # too long to drop
+        ("Yes, now works.", "Hi, calling about your order."),  # an answer
+        (
+            "Here is the line: calling about your order.",
+            "Hi, calling about your order.",
+        ),
         ("\u00abCalling about your order.\u00bb", "Calling about your order."),
         # A near repeat of the notice (without its "Hi,") is not used.
         (
@@ -1170,6 +1175,38 @@ async def test_fitted_first_line_keeps_every_digit_and_code(first, reply, kept):
         UUID("11111111-2222-3333-4444-555555555555"),
     )
     assert line == (reply if kept else first)
+
+
+async def test_fitted_first_line_strips_single_quotes_around_an_apostrophe():
+    line = await fitted_first_line(
+        lambda: FakeLLM(reply="'Calling about Sam's order.'"),
+        AI_DISCLOSURE_LINE,
+        "Hi, calling about Sam's order.",
+        UUID("11111111-2222-3333-4444-555555555555"),
+    )
+    assert line == "Calling about Sam's order."
+
+
+@pytest.mark.parametrize("reply", ["(none)", "(None)", "None."])
+async def test_fitted_first_line_drops_only_a_short_greeting(reply):
+    """Any spelling of the empty answer drops a short greeting, but never a
+    line with content."""
+    uid = UUID("11111111-2222-3333-4444-555555555555")
+    assert (
+        await fitted_first_line(
+            lambda: FakeLLM(reply=reply), AI_DISCLOSURE_LINE, "Hello!", uid
+        )
+        == ""
+    )
+    assert (
+        await fitted_first_line(
+            lambda: FakeLLM(reply=reply),
+            AI_DISCLOSURE_LINE,
+            "Hi, your code is 4 8 1 9.",
+            uid,
+        )
+        == "Hi, your code is 4 8 1 9."
+    )
 
 
 async def test_a_greeting_only_first_line_drops_out() -> None:

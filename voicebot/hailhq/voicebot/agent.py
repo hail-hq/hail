@@ -1049,8 +1049,9 @@ FIRST_LINE_WAIT_SECONDS = 1.0
 # Text a rewrite must keep exactly, in order: each number with its separators
 # ("4 8 1 9", "$15.50", "3:30") and each <spell>...</spell> code.
 _NUMBER = re.compile(r"\d(?:[\d .,:/-]*\d)?")
-# The model's answer when the first line was only a greeting.
-NOTHING_LEFT = "(none)"
+# The model's answer when the first line was only a greeting, compared as
+# plain words so "(None)" or "none." match too.
+NOTHING_LEFT = "none"
 _SPELL = re.compile(r"<spell>.*?</spell>", re.IGNORECASE | re.DOTALL)
 # Quote pairs a model may wrap its whole answer in.
 _QUOTE_PAIRS = {
@@ -1068,14 +1069,41 @@ def _plain(text: str) -> str:
     return " ".join(re.sub(r"[^\w\s]", " ", text.casefold()).split())
 
 
-def _keeps_first_line(first_message: str, text: str, disclosure: str) -> bool:
-    """A rewrite is usable when it is not empty, not much longer, does not
-    repeat the notice, and keeps every digit and spelled code in order."""
-    if not text or len(text) > 2 * len(first_message) + 40:
-        return False
-    # The notice without its opening word ("Hi,") catches a near repeat.
-    notice = _plain(disclosure).split(" ", 1)[-1]
-    if notice and notice in _plain(text):
+# How far a rewrite may stray from the first line: it may drop or change up
+# to TRIM_WORDS words at the start, add up to LEAD_WORDS of its own there
+# ("I'm", "Sam here"), and must end with the rest of the line, word for word.
+TRIM_WORDS = 8
+LEAD_WORDS = 4
+# A first line this short, with no numbers or codes, may drop out whole.
+GREETING_WORDS = 4
+
+
+def _keeps_first_line(first_message: str, text: str) -> bool:
+    """A rewrite is usable when it only trims the opening of the first line
+    (see TRIM_WORDS), is no longer than it, and keeps every number and
+    spelled code. An empty
+    rewrite is usable only for a short line with no numbers or codes."""
+    original, rewrite = _plain(first_message).split(), _plain(text).split()
+    if not rewrite:
+        return (
+            len(original) <= GREETING_WORDS
+            and not _NUMBER.search(first_message)
+            and not _SPELL.search(first_message)
+        )
+    kept = 0
+    while (
+        kept < min(len(original), len(rewrite))
+        and original[-1 - kept] == rewrite[-1 - kept]
+    ):
+        kept += 1
+    # A real rewrite only shortens the line: a longer one adds a preamble or
+    # an answer.
+    if (
+        not kept
+        or len(rewrite) > len(original)
+        or len(original) - kept > TRIM_WORDS
+        or len(rewrite) - kept > LEAD_WORDS
+    ):
         return False
     return _NUMBER.findall(first_message) == _NUMBER.findall(text) and (
         _SPELL.findall(first_message) == _SPELL.findall(text)
@@ -1118,11 +1146,17 @@ async def fitted_first_line(
         return first_message
     text = text.strip()
     close = _QUOTE_PAIRS.get(text[:1])
-    if len(text) >= 2 and close == text[-1] and close not in text[1:-1]:
+    # Strip a pair that wraps the whole answer; an apostrophe inside single
+    # quotes ("'Sam's order.'") does not end the pair.
+    if (
+        len(text) >= 2
+        and close == text[-1]
+        and (close == "'" or close not in text[1:-1])
+    ):
         text = text[1:-1].strip()
-    if text == NOTHING_LEFT:
-        return ""
-    if not _keeps_first_line(first_message, text, disclosure):
+    if _plain(text) == NOTHING_LEFT:
+        text = ""
+    if not _keeps_first_line(first_message, text):
         return first_message
     return text
 
