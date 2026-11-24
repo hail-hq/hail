@@ -48,7 +48,7 @@
 
 # Part A: hail PR 1
 
-Branch: `feat/pbx-connected-numbers`. Worktree: `.claude/worktrees/feat-pbx-connected-numbers`.
+Branch: `feat/pbx-connected-numbers`.
 
 ## Task A1: Migration and models
 
@@ -1053,11 +1053,12 @@ async def finish_check(
 - Produces in the voicebot:
 
 ```python
-PBX_CHECK_LINE = "Your phone system is now connected to Hail. Goodbye."
+# spoken_lines.py: SpokenLines.pbx_check, "Your phone system is now connected
+# to Hail. Goodbye." in every supported language
 async def collect_check_digits(room: rtc.Room, seconds: float = CHECK_CODE_SECONDS) -> str
 # listens to "sip_dtmf_received"; returns at the 6th digit (the first 6 only),
 # or after `seconds` with the digits it has
-async def play_check_line(ctx: JobContext) -> None  # best effort, at most 10 s
+async def play_check_line(ctx: JobContext, language: str | None = None) -> None  # best effort, at most 10 s
 ```
 
 - Arrival rule, run only when no `active` row matches the dialed number:
@@ -1069,7 +1070,7 @@ async def play_check_line(ctx: JobContext) -> None  # best effort, at most 10 s
   - Voicebot on `CheckArrived`: `digits = await collect_check_digits(ctx.room)`; `passed = await finish_check(db, arrived, digits)`; when `passed`, `play_check_line(ctx)`.
   - Only the first 6 digits received count. There is no search over a longer string, so 15 s of key presses cannot try many codes. A digit typed before the code makes the check fail; the customer runs it again (5 a day).
   - Then, also on any error, `ctx.delete_room()` and `ctx.shutdown(reason="pbx_check")`; `open_inbound_from_room` returns `None`.
-- `play_check_line(ctx)` builds `AgentSession(tts=build_tts())` (Hail's house voice, no STT or LLM), says `PBX_CHECK_LINE` with `allow_interruptions=False` inside `asyncio.timeout(10)`; any error is logged and ignored.
+- `play_check_line(ctx, language)` builds `AgentSession(tts=build_tts(language=language))` (Hail's house voice, no STT or LLM), says `spoken_lines(language).pbx_check` (English when unknown) with `allow_interruptions=False` inside `asyncio.timeout(10)`; any error is logged and ignored.
 - Risk: a phone system that drops DTMF fails the check with `code_not_received`. The setup page says to keep RFC 2833 / RFC 4733 DTMF on the trunk (the default on common PBXs). The first-customer test (spec "Order of work" step 7) covers it.
 
 - [ ] **Step 1: Write the failing tests.** Core, in `test_sip_connections.py`:
@@ -1148,7 +1149,7 @@ async def test_collect_check_digits_times_out_with_what_it_has(fake_room):
 async def test_check_passed_plays_line_then_deletes_room(check_ctx, session, finish_check_mock):
     finish_check_mock.return_value = True
     assert await open_inbound_from_room(check_ctx, ...) is None
-    session.say.assert_awaited_once_with(PBX_CHECK_LINE, allow_interruptions=False)
+    session.say.assert_awaited_once_with(SPOKEN_LINES["en"].pbx_check, allow_interruptions=False)
     check_ctx.delete_room.assert_awaited_once()
 
 async def test_check_failed_skips_line_and_deletes_room(check_ctx, session, finish_check_mock):
@@ -1206,15 +1207,13 @@ async def check_connected_number(
 - Produces in the voicebot:
 
 ```python
-CHECK_SEND_DELAY_SECONDS = 2   # after the answer, before the first try: the inbound job must be listening
-CHECK_SEND_TRIES = 2
-CHECK_SEND_GAP_SECONDS = 1
+CHECK_SEND_DELAY_SECONDS = 1   # after "arrived", before the send: the inbound job must be listening
 
 async def send_check_code(ctx: JobContext, code: str) -> None
 # waits for the SIP participant's sip.callStatus == "active" (at most CHECK_RING_SECONDS + 5 s),
 # sleeps CHECK_SEND_DELAY_SECONDS, then sends each digit through make_agent_send_dtmf(ctx)
-# with DIGIT_DELAY_SECONDS (core send_dtmf) between digits; CHECK_SEND_TRIES times,
-# CHECK_SEND_GAP_SECONDS apart. Errors are logged; it never raises.
+# with DIGIT_DELAY_SECONDS (core send_dtmf) between digits, once: only the first 6
+# key presses count and a check call has one result. Errors are logged; it never raises.
 ```
 
 - `entrypoint`: when the dispatch metadata has `pbx_check_send`, run `send_check_code` and return. No `AgentSession`, no Call row update, no usage: the API finalizes the check call.
@@ -1324,12 +1323,11 @@ async def test_check_of_active_number_does_not_dial(async_session, lk, active_pb
   Voicebot, in `test_pbx_check_sender.py` (`sleeps` records `asyncio.sleep` arguments; `check_ctx` has one SIP participant already `active`):
 
 ```python
-async def test_check_sender_sends_code_twice_one_second_apart(check_ctx, sleeps):
+async def test_check_sender_sends_code_once(check_ctx, sleeps):
     await send_check_code(check_ctx, "482913")
     digits = [c.kwargs["digit"] for c in check_ctx.room.local_participant.publish_dtmf.await_args_list]
-    assert digits == list("482913482913")
+    assert digits == list("482913")
     assert sleeps[0] == CHECK_SEND_DELAY_SECONDS
-    assert sleeps.count(CHECK_SEND_GAP_SECONDS) == 1
 
 async def test_check_sender_never_raises(check_ctx, sleeps):
     check_ctx.room.local_participant.publish_dtmf.side_effect = RuntimeError("closed")
