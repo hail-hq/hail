@@ -11,8 +11,17 @@ made because we never invoke ``.chat()``.
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock, patch
+
 import pytest
-from hailhq.voicebot.pipeline import ResolvedLayer, build_llm, build_session, build_stt
+from hailhq.core.config import settings
+from hailhq.voicebot.pipeline import (
+    ResolvedLayer,
+    build_llm,
+    build_session,
+    build_stt,
+    interruption_options,
+)
 from livekit.agents import AgentSession
 from livekit.agents.llm import FallbackAdapter
 from livekit.agents.stt import FallbackAdapter as stt_fallback
@@ -117,8 +126,6 @@ def test_call_chain_hands_over_after_text_was_sent(monkeypatch) -> None:
 
 
 def test_build_session_hands_over_after_text_was_sent() -> None:
-    from unittest.mock import MagicMock
-
     session = build_session(None, MagicMock())
     assert isinstance(session.llm, FallbackAdapter)
     assert session.llm._retry_on_chunk_sent is True
@@ -378,8 +385,6 @@ def test_build_stt_speechmatics_without_any_key_fails_fast(
 
 
 def _make_session(language, org_cfgs=None):
-    from unittest.mock import MagicMock
-
     from hailhq.voicebot.pipeline import build_session
 
     return build_session(None, MagicMock(), org_cfgs=org_cfgs, language=language)
@@ -387,8 +392,6 @@ def _make_session(language, org_cfgs=None):
 
 @pytest.mark.parametrize("explicit,expected", [(None, "fr"), ("en", "en")])
 def test_workspace_language_reaches_both_speech_layers(explicit, expected):
-    from unittest.mock import MagicMock, patch
-
     from hailhq.voicebot.pipeline import ResolvedLayer
 
     org_tts = ResolvedLayer(
@@ -818,3 +821,26 @@ def test_elevenlabs_tagalog_sends_the_filipino_code() -> None:
     ]
     assert len(eleven) == 2
     assert {inst._opts.language.language for inst in eleven} == {"fil"}
+
+
+def test_session_asks_for_the_interruption_model_and_keeps_the_one_word_rule(
+    monkeypatch,
+) -> None:
+    # The model is used only when a self-hosted worker names it. The one-word
+    # rule is what the call falls back to when the model is refused or errors.
+    monkeypatch.setattr(settings, "hail_adaptive_interruption", True)
+    assert interruption_options() == {"mode": "adaptive", "min_words": 1}
+    session = build_session(None, MagicMock())
+    assert session.interruption_detection == "adaptive"
+    assert session.options.interruption["min_words"] == 1
+    assert session.options.interruption["enabled"] is True
+
+
+def test_the_off_switch_keeps_the_one_word_rule_and_sends_no_requests(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(settings, "hail_adaptive_interruption", False)
+    assert interruption_options() == {"mode": "vad", "min_words": 1}
+    session = build_session(None, MagicMock())
+    assert session.interruption_detection == "vad"
+    assert session.options.interruption["min_words"] == 1

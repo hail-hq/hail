@@ -49,6 +49,39 @@ For the full flow, refer to [Architecture](../architecture.md).
 Noise filtering, interruption handling, and call recovery are enabled automatically.
 Run the API and voicebot worker from the same release.
 
+By default the agent does not listen while its own voice plays, and listens
+again the moment it stops. Background talk and a short "okay" cannot cut a
+reply off, and the other party speaks between replies. On a line that returns
+the agent's voice late (echo), the worker measures the delay and waits that
+long after each reply. See
+[`speaking_gate.py`](../../../voicebot/hailhq/voicebot/speaking_gate.py).
+
+LiveKit's
+[adaptive interruption model](https://docs.livekit.io/agents/logic/turns/adaptive-interruption-handling/)
+is the alternative: the agent keeps talking over a short "okay" and stops for a
+real interruption. While the model is working, the agent listens while it
+talks, except on calls with measured echo. It is off by default, because LiveKit meters it for
+self-hosted workers:
+
+```bash
+# Worker environment. Turns the model on. Restart the voice worker after
+# changing it.
+HAIL_ADAPTIVE_INTERRUPTION=true
+```
+
+- A request is one check, sent while the other party speaks over the agent.
+- Each plan has a limit of requests per minute and a monthly allowance. On
+  the free plan, one call with background talk reached the per-minute limit
+  after about a minute.
+- Past the monthly allowance, the free plan stops the model and paid plans
+  bill per request.
+- Whenever the model is refused or fails, the call goes on with the default
+  behavior above. No call fails because of it.
+
+Current numbers:
+[Quotas and limits](https://docs.livekit.io/deploy/admin/quotas-and-limits/),
+and your project's own limits under Settings in LiveKit Cloud.
+
 ## 4. Inbound calls
 
 Hail answers calls on a number once the number routes calls to an agent
