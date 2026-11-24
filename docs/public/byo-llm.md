@@ -400,3 +400,6 @@ The resolution logic is in
 [`voicebot/hailhq/voicebot/pipeline.py`](https://github.com/hail-hq/hail/blob/main/voicebot/hailhq/voicebot/pipeline.py)
 (`build_llm`), and the request schema is
 [`LLMConfig`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/schemas.py).
+
+To compare this setup with Hail's model and HTTP tools, and to see how
+calls end, read [Call controls](call-controls.md).
