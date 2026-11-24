@@ -4,17 +4,23 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from hailhq.core.config import Settings, settings
+from hailhq.core import sms_trial
+from hailhq.core.compliance_gate import add_suppression
+from hailhq.core.config import Settings
 from hailhq.core.db import org_lock
 from hailhq.core.models import (
-    CarrierVerification,
     Organization,
     PhoneNumber,
     Sms,
     SmsTrialPhone,
 )
+from hailhq.core.providers.sms.base import SmsProvider
+from hailhq.core.providers.sms.telnyx import TelnyxSmsProvider
+from hailhq.core.providers.sms.twilio import TwilioSmsProvider
 from hailhq.core.sms_trial import (
+    APPROVED_AT_KEY,
     CODE_TTL,
+    PAUSED_KEY,
     SMS_TRIAL_LIMIT,
     TRIAL_FOOTER,
     TRIAL_PREFIX,
@@ -23,6 +29,7 @@ from hailhq.core.sms_trial import (
     NoPendingCode,
     PhoneIsHailNumber,
     PhoneNotUs,
+    PhoneStopped,
     PhoneTaken,
     TrialBodyTooLong,
     TrialSend,
@@ -30,19 +37,19 @@ from hailhq.core.sms_trial import (
     claim_trial_send,
     code_text,
     confirm_phone,
+    confirms_tollfree_approval,
     get_trial_phone,
     is_verified_trial_phone,
     start_phone_proof,
     trial_body,
-    trial_enabled,
+    trial_configured,
     trial_hint_applies,
-    trial_number,
     trial_refusal_reason,
     trial_sender,
     trial_texts_used,
 )
-from pydantic import ValidationError
 from sqlalchemy import event, text
+from sqlalchemy.exc import IntegrityError
 
 TRIAL_E164 = "+18005550199"
 
@@ -65,102 +72,128 @@ def test_trial_body_truncate_keeps_footer():
     assert out.endswith(TRIAL_FOOTER)
 
 
-def test_setting_rejects_non_e164():
-    with pytest.raises(ValidationError):
-        Settings(hail_sms_trial_number="18005550199")
-    assert Settings(hail_sms_trial_number="").hail_sms_trial_number == ""
-    assert Settings(hail_sms_trial_number=TRIAL_E164).hail_sms_trial_number
+def test_no_trial_settings_left():
+    """Trial numbers live in the database: no env var picks or turns them on."""
+    assert not [f for f in Settings.model_fields if "sms_trial" in f]
 
 
-def test_trial_enabled_needs_number_and_sending(monkeypatch):
-    monkeypatch.setattr(settings, "hail_sms_trial_number", "")
-    monkeypatch.setattr(settings, "hail_sms_trial_sending", True)
-    assert not trial_enabled()
-    monkeypatch.setattr(settings, "hail_sms_trial_number", TRIAL_E164)
-    monkeypatch.setattr(settings, "hail_sms_trial_sending", False)
-    assert not trial_enabled()
-    monkeypatch.setattr(settings, "hail_sms_trial_sending", True)
-    assert trial_enabled()
-
-
-async def _seed(session, *, state="active", capabilities=("sms",)):
-    org_id = uuid.uuid4()
-    session.add(Organization(id=org_id, origin="human"))
-    await session.flush()
+async def _seed(
+    session,
+    *,
+    state="active",
+    capabilities=("sms",),
+    e164=TRIAL_E164,
+    approved=False,
+    marked=True,
+    created_at=None,
+):
+    """A Hail pool toll-free number, marked for trial texts by default."""
     number = PhoneNumber(
         id=uuid.uuid4(),
-        organization_id=org_id,
-        e164=TRIAL_E164,
+        organization_id=None,
+        is_pool=True,
+        pool_purpose="sms_trial" if marked else None,
+        e164=e164,
         country_code="US",
         number_type="toll_free",
         capabilities=list(capabilities),
         provider="twilio",
+        provider_resource_id=f"PN{e164[-4:]}",
         provisioning_state=state,
+        provisioning_metadata=(
+            {APPROVED_AT_KEY: datetime.now(UTC).isoformat()} if approved else {}
+        ),
+        **({"created_at": created_at} if created_at else {}),
     )
     session.add(number)
     await session.flush()
-    return org_id, number
+    return number
 
 
-async def _approve(session, org_id, number):
-    reg = CarrierVerification(
-        id=uuid.uuid4(),
-        organization_id=org_id,
-        number_id=number.id,
-        provider="twilio",
-        country_code="US",
-        number_type="toll_free",
-        subject_type="business",
-        purpose="sms",
-        state="approved",
-        requirements_version="test",
-    )
-    session.add(reg)
-    await session.flush()
-    number.sms_registration_id = reg.id
+async def _approve(session, number):
+    number.provisioning_metadata = {APPROVED_AT_KEY: datetime.now(UTC).isoformat()}
     await session.flush()
 
 
-@pytest.mark.asyncio
-async def test_trial_number_off_when_setting_empty(async_session, monkeypatch):
-    await _seed(async_session)
-    monkeypatch.setattr(settings, "hail_sms_trial_number", "")
-    assert await trial_number(async_session) is None
+async def test_trial_configured_needs_a_marked_number(async_session):
+    await _seed(async_session, marked=False)
+    assert await trial_configured(async_session) is False
+    await _seed(async_session, e164="+18005550198")
+    assert await trial_configured(async_session) is True
 
 
-@pytest.mark.asyncio
-async def test_trial_number_finds_active_sms_row(async_session, monkeypatch):
-    await _seed(async_session)
-    monkeypatch.setattr(settings, "hail_sms_trial_number", TRIAL_E164)
-    assert (await trial_number(async_session)).e164 == TRIAL_E164
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "state,capabilities", [("released", ("sms",)), ("active", ("voice",))]
 )
-async def test_trial_number_ignores_inactive_or_voice_only(
-    async_session, monkeypatch, state, capabilities
+async def test_trial_numbers_ignore_inactive_or_voice_only(
+    async_session, state, capabilities
 ):
-    await _seed(async_session, state=state, capabilities=capabilities)
-    monkeypatch.setattr(settings, "hail_sms_trial_number", TRIAL_E164)
-    assert await trial_number(async_session) is None
-
-
-@pytest.mark.asyncio
-async def test_trial_sender_needs_an_approved_registration(async_session, monkeypatch):
-    org_id, number = await _seed(async_session)
-    monkeypatch.setattr(settings, "hail_sms_trial_number", TRIAL_E164)
-    monkeypatch.setattr(settings, "hail_sms_trial_sending", True)
-    assert await trial_number(async_session) is not None
+    await _seed(async_session, state=state, capabilities=capabilities, approved=True)
+    assert await trial_configured(async_session) is False
     assert await trial_sender(async_session) is None
 
-    await _approve(async_session, org_id, number)
-    monkeypatch.setattr(settings, "hail_sms_trial_sending", False)
-    assert await trial_sender(async_session) is None
 
-    monkeypatch.setattr(settings, "hail_sms_trial_sending", True)
+async def test_trial_sender_needs_the_cached_approval(async_session):
+    number = await _seed(async_session)
+    assert await trial_configured(async_session) is True
+    assert await trial_sender(async_session) is None
+    await _approve(async_session, number)
     assert (await trial_sender(async_session)).id == number.id
+
+
+async def test_trial_sender_is_the_oldest_ready_number(async_session):
+    old = await _seed(
+        async_session, approved=True, created_at=datetime(2026, 1, 1, tzinfo=UTC)
+    )
+    new = await _seed(
+        async_session,
+        e164="+18005550198",
+        approved=True,
+        created_at=datetime(2026, 6, 1, tzinfo=UTC),
+    )
+    # Adding a newer number keeps the sender, so codes and texts come from
+    # the same number.
+    assert (await trial_sender(async_session)).id == old.id
+    old.provisioning_metadata = {}
+    await async_session.flush()
+    assert (await trial_sender(async_session)).id == new.id
+
+
+async def test_trial_sender_never_uses_a_call_pool_number(async_session):
+    await _seed(async_session, marked=False, approved=True)
+    assert await trial_sender(async_session) is None
+    assert await trial_configured(async_session) is False
+
+
+@pytest.mark.parametrize("change", ["owned", "local", "not_pool"])
+async def test_only_a_toll_free_pool_number_can_be_marked(async_session, change):
+    """The database refuses a mark on a workspace's own number (so a
+    workspace never trial-texts from a number it owns) or a local number."""
+    org = await _org(async_session)
+    fields = {
+        "owned": {"organization_id": org, "is_pool": False},
+        "local": {"number_type": "local"},
+        "not_pool": {"organization_id": org, "is_pool": False},
+    }[change]
+    row = {
+        "organization_id": None,
+        "is_pool": True,
+        "number_type": "toll_free",
+        **fields,
+    }
+    async_session.add(
+        PhoneNumber(
+            pool_purpose="sms_trial",
+            e164="+18005550197",
+            country_code="US",
+            capabilities=["sms"],
+            provider="twilio",
+            provisioning_state="active",
+            **row,
+        )
+    )
+    with pytest.raises(IntegrityError):
+        await async_session.flush()
 
 
 PHONE = "+14155550142"
@@ -480,17 +513,13 @@ async def _trial_texts(session, org, n, *, status="sent"):
     await session.flush()
 
 
-async def _ready(session, monkeypatch, *, approve=True):
-    """A working baseline: trial number approved, sending on, a customer
-    workspace with a verified phone and no trial texts used."""
-    owner, number = await _seed(session)
-    if approve:
-        await _approve(session, owner, number)
-    monkeypatch.setattr(settings, "hail_sms_trial_number", TRIAL_E164)
-    monkeypatch.setattr(settings, "hail_sms_trial_sending", True)
+async def _ready(session, *, approve=True):
+    """A working baseline: a ready trial number, a customer workspace with a
+    verified phone and no trial texts used."""
+    number = await _seed(session, approved=approve)
     org = await _org(session)
     await _verify(session, org)
-    return owner, number, org
+    return number, org
 
 
 async def _claim(session, org, **kw):
@@ -503,9 +532,10 @@ async def _claim(session, org, **kw):
 @pytest.mark.parametrize(
     "case",
     [
-        "off",
-        "own_workspace",
+        "unmarked",
         "other_from",
+        "call_pool_from",
+        "not_ready_from",
         "not_us",
         "not_verified_phone",
         "pending_phone",
@@ -514,18 +544,19 @@ async def _claim(session, org, **kw):
         "cap_used",
     ],
 )
-async def test_claim_refuses(case, async_session, monkeypatch):
-    owner, _, org = await _ready(
-        async_session, monkeypatch, approve=case != "number_not_approved"
-    )
+async def test_claim_refuses(case, async_session):
+    number, org = await _ready(async_session, approve=case != "number_not_approved")
     kw = {}
-    if case == "off":
-        monkeypatch.setattr(settings, "hail_sms_trial_sending", False)
-    elif case == "own_workspace":
-        org = owner
-        await _verify(async_session, owner, phone="+14155550143")
-        kw["to"] = "+14155550143"
+    if case == "unmarked":
+        number.pool_purpose = None
+        await async_session.flush()
     elif case == "other_from":
+        kw["explicit_from"] = "+18005550198"
+    elif case == "call_pool_from":
+        await _seed(async_session, e164="+18005550198", marked=False, approved=True)
+        kw["explicit_from"] = "+18005550198"
+    elif case == "not_ready_from":
+        await _seed(async_session, e164="+18005550198")
         kw["explicit_from"] = "+18005550198"
     elif case == "not_us":
         kw["to"] = "+447700900123"
@@ -544,8 +575,8 @@ async def test_claim_refuses(case, async_session, monkeypatch):
     assert await _claim(async_session, org, **kw) is None
 
 
-async def test_claim_allows_and_wraps(async_session, monkeypatch):
-    _, number, org = await _ready(async_session, monkeypatch)
+async def test_claim_allows_and_wraps(async_session):
+    number, org = await _ready(async_session)
     t = await _claim(async_session, org)
     assert isinstance(t, TrialSend)
     assert t.number.id == number.id and t.number.e164 == "+18005550199"
@@ -554,8 +585,21 @@ async def test_claim_allows_and_wraps(async_session, monkeypatch):
     assert await _claim(async_session, org, explicit_from=TRIAL_E164) is not None
 
 
-async def test_claim_body_too_long_raises(async_session, monkeypatch):
-    _, _, org = await _ready(async_session, monkeypatch)
+async def test_claim_sends_from_the_named_ready_trial_number(async_session):
+    first, org = await _ready(async_session)
+    second = await _seed(
+        async_session,
+        e164="+18005550198",
+        approved=True,
+        created_at=datetime(2099, 1, 1, tzinfo=UTC),
+    )
+    assert (await _claim(async_session, org)).number.id == first.id
+    named = await _claim(async_session, org, explicit_from=second.e164)
+    assert named.number.id == second.id
+
+
+async def test_claim_body_too_long_raises(async_session):
+    _, org = await _ready(async_session)
     max_chars = 160 - len(TRIAL_PREFIX) - len(TRIAL_FOOTER)
     assert await _claim(async_session, org, body="x" * max_chars, limit=160)
     with pytest.raises(TrialBodyTooLong) as e:
@@ -570,8 +614,8 @@ async def test_claim_body_too_long_raises(async_session, monkeypatch):
     assert len(cut.body) == 160 and cut.body.endswith(TRIAL_FOOTER)
 
 
-async def test_failed_rows_do_not_use_the_cap(async_session, monkeypatch):
-    _, _, org = await _ready(async_session, monkeypatch)
+async def test_failed_rows_do_not_use_the_cap(async_session):
+    _, org = await _ready(async_session)
     await _trial_texts(async_session, org, 24)
     await _trial_texts(async_session, org, 3, status="failed")
     async_session.add(
@@ -598,8 +642,8 @@ async def test_failed_rows_do_not_use_the_cap(async_session, monkeypatch):
     assert await _claim(async_session, org) is not None
 
 
-async def test_25th_ok_26th_refused(async_session, monkeypatch):
-    _, _, org = await _ready(async_session, monkeypatch)
+async def test_25th_ok_26th_refused(async_session):
+    _, org = await _ready(async_session)
     await _trial_texts(async_session, org, 24)
     assert await _claim(async_session, org) is not None
     await _trial_texts(async_session, org, 1)
@@ -607,10 +651,8 @@ async def test_25th_ok_26th_refused(async_session, monkeypatch):
     assert await _claim(async_session, org) is None
 
 
-async def test_two_concurrent_claims_at_24_send_one(
-    async_session, session_factory, monkeypatch
-):
-    _, _, org = await _ready(async_session, monkeypatch)
+async def test_two_concurrent_claims_at_24_send_one(async_session, session_factory):
+    _, org = await _ready(async_session)
     await _trial_texts(async_session, org, 24)
     await async_session.commit()
 
@@ -643,12 +685,10 @@ async def test_two_concurrent_claims_at_24_send_one(
         assert await trial_texts_used(fresh, org) == 25
 
 
-async def test_claim_checks_the_phone_under_the_lock(
-    async_session, session_factory, monkeypatch
-):
+async def test_claim_checks_the_phone_under_the_lock(async_session, session_factory):
     """A phone switch that commits while a claim waits on the workspace
     lock stops that claim: the phone is checked again under the lock."""
-    _, _, org = await _ready(async_session, monkeypatch)
+    _, org = await _ready(async_session)
     await async_session.commit()
 
     async with session_factory() as holder, session_factory() as claimer:
@@ -693,31 +733,27 @@ async def test_unparsable_phone_is_not_us(async_session, bad):
         await _start(async_session, org, phone=bad)
 
 
-@pytest.mark.parametrize("case", ["off", "owner", "cap_used", "not_approved"])
-async def test_trial_hint_applies_only_when_usable(async_session, monkeypatch, case):
-    owner, _, org = await _ready(
-        async_session, monkeypatch, approve=case != "not_approved"
-    )
-    who = org
-    if case == "off":
-        monkeypatch.setattr(settings, "hail_sms_trial_sending", False)
-    elif case == "owner":
-        who = owner
+@pytest.mark.parametrize("case", ["unmarked", "cap_used", "not_approved"])
+async def test_trial_hint_applies_only_when_usable(async_session, case):
+    number, org = await _ready(async_session, approve=case != "not_approved")
+    if case == "unmarked":
+        number.pool_purpose = None
+        await async_session.flush()
     elif case == "cap_used":
         await _trial_texts(async_session, org, SMS_TRIAL_LIMIT)
-    assert await trial_hint_applies(async_session, who) is False
+    assert await trial_hint_applies(async_session, org) is False
 
 
-async def test_trial_hint_applies_with_texts_left(async_session, monkeypatch):
-    _, _, org = await _ready(async_session, monkeypatch)
+async def test_trial_hint_applies_with_texts_left(async_session):
+    _, org = await _ready(async_session)
     await _trial_texts(async_session, org, SMS_TRIAL_LIMIT - 1)
     assert await trial_hint_applies(async_session, org) is True
 
 
 async def test_claim_keeps_the_verified_phone_during_a_switch(
-    async_session, monkeypatch
+    async_session,
 ):
-    _, _, org = await _ready(async_session, monkeypatch)
+    _, org = await _ready(async_session)
     await _start(async_session, org, phone=OTHER)
     assert await _claim(async_session, org) is not None
     assert await _claim(async_session, org, to=OTHER) is None
@@ -748,26 +784,23 @@ async def test_asking_again_for_the_verified_phone_drops_the_pending_one(
 @pytest.mark.parametrize(
     "case,reason",
     [
-        ("off", "Trial texting is not available."),
+        ("unmarked", "Trial texting is not available."),
         ("number_not_approved", "Trial texting is not available."),
         ("number_missing", "Trial texting is not available."),
         ("not_us", "Trial texts go only to your verified trial phone."),
         ("not_verified_phone", "Trial texts go only to your verified trial phone."),
         ("pending_phone", "Trial texts go only to your verified trial phone."),
         ("cap_used", "No trial texts left."),
-        ("owner", None),
-        ("owner_off", None),
         ("usable", None),
     ],
 )
-async def test_trial_refusal_reason(async_session, monkeypatch, case, reason):
-    owner, number, org = await _ready(
-        async_session, monkeypatch, approve=case != "number_not_approved"
-    )
-    who, to = org, PHONE
-    if case in ("off", "owner_off"):
-        monkeypatch.setattr(settings, "hail_sms_trial_sending", False)
-    if case == "number_missing":
+async def test_trial_refusal_reason(async_session, case, reason):
+    number, org = await _ready(async_session, approve=case != "number_not_approved")
+    to = PHONE
+    if case == "unmarked":
+        number.pool_purpose = None
+        await async_session.flush()
+    elif case == "number_missing":
         number.provisioning_state = "released"
         await async_session.flush()
     elif case == "not_us":
@@ -780,21 +813,22 @@ async def test_trial_refusal_reason(async_session, monkeypatch, case, reason):
         await async_session.flush()
     elif case == "cap_used":
         await _trial_texts(async_session, org, SMS_TRIAL_LIMIT)
-    elif case in ("owner", "owner_off"):
-        who = owner
-    assert await trial_refusal_reason(async_session, who, to=to) == reason
+    assert (
+        await trial_refusal_reason(async_session, org, to=to, explicit_from=TRIAL_E164)
+        == reason
+    )
 
 
 # --- trial_texts_used and the partial index ---
 
 
 async def test_trial_texts_used_sends_the_index_predicate_as_a_literal(
-    async_session, monkeypatch
+    async_session,
 ):
     """The partial index ``sms_trial_org_idx`` has the predicate
     ``metadata ? 'sms_trial'``. A key sent as a bind parameter cannot match
     it in a generic prepared plan, so the query must carry the literal."""
-    _, _, org = await _ready(async_session, monkeypatch)
+    _, org = await _ready(async_session)
     seen: list[tuple[str, object]] = []
 
     def _capture(_conn, _cursor, statement, parameters, _context, _many):
@@ -826,3 +860,139 @@ async def test_trial_texts_used_sends_the_index_predicate_as_a_literal(
     finally:
         await conn.exec_driver_sql("DEALLOCATE trial_used_q")
     assert "sms_trial_org_idx" in plan, plan
+
+
+# --- refresh_trial_approvals: the cached carrier approval ---
+
+
+class _Carrier:
+    def __init__(self, answer):
+        self.answer = answer
+        self.asked: list[str] = []
+
+    async def tollfree_approved(self, *, provider_resource_id, e164, fresh=False):
+        assert fresh, "the refresh must skip the in-process cache"
+        self.asked.append(e164)
+        if isinstance(self.answer, Exception):
+            raise self.answer
+        return self.answer
+
+
+@pytest.mark.parametrize(
+    "before,answer,after",
+    [
+        (False, True, True),
+        (True, False, False),
+        # No answer (lookup failed, carrier error) keeps the last answer, so
+        # a slow carrier never turns the trial off.
+        (True, None, True),
+        (False, None, False),
+        (True, RuntimeError("carrier down"), True),
+    ],
+)
+async def test_refresh_caches_the_carrier_answer(
+    async_session, monkeypatch, before, answer, after
+):
+    number = await _seed(async_session, approved=before)
+    await async_session.commit()
+    carrier = _Carrier(answer)
+    monkeypatch.setattr(sms_trial, "sms_route", lambda provider: carrier)
+    await sms_trial.refresh_trial_approvals(async_session)
+    assert carrier.asked == [TRIAL_E164]
+    await async_session.refresh(number)
+    assert (APPROVED_AT_KEY in number.provisioning_metadata) is after
+    assert (await trial_sender(async_session) is not None) is after
+
+
+async def test_refresh_asks_only_about_marked_numbers(async_session, monkeypatch):
+    await _seed(async_session, marked=False, e164="+18005550198")
+    await _seed(async_session)
+    await async_session.commit()
+    carrier = _Carrier(True)
+    monkeypatch.setattr(sms_trial, "sms_route", lambda provider: carrier)
+    counts = await sms_trial.refresh_trial_approvals(async_session)
+    assert carrier.asked == [TRIAL_E164]
+    assert counts == {"approved": 1, "not_approved": 0, "no_answer": 0, "changed": 1}
+
+
+async def test_requests_never_ask_the_carrier(async_session, monkeypatch):
+    """Readiness is read from the row: GET, hints and claims make no
+    carrier call."""
+
+    def no_carrier(provider):
+        raise AssertionError("carrier called on a request")
+
+    monkeypatch.setattr(sms_trial, "sms_route", no_carrier)
+    _, org = await _ready(async_session)
+    assert await trial_configured(async_session)
+    assert await trial_hint_applies(async_session, org)
+    assert await _claim(async_session, org) is not None
+
+
+@pytest.mark.parametrize(
+    "stamp,ready",
+    [(timedelta(hours=1), True), (timedelta(hours=25), False)],
+)
+async def test_an_old_approval_is_not_ready(async_session, stamp, ready):
+    """Lookups that keep failing keep the last yes: after 24 hours without
+    a fresh yes the number is not ready."""
+    number = await _seed(async_session)
+    number.provisioning_metadata = {
+        APPROVED_AT_KEY: (datetime.now(UTC) - stamp).isoformat()
+    }
+    await async_session.flush()
+    assert (await trial_sender(async_session) is not None) is ready
+
+
+async def test_a_paused_number_is_not_ready(async_session):
+    number = await _seed(async_session, approved=True)
+    number.provisioning_metadata = {
+        **number.provisioning_metadata,
+        PAUSED_KEY: datetime.now(UTC).isoformat(),
+    }
+    await async_session.flush()
+    assert await trial_sender(async_session) is None
+    assert await trial_configured(async_session)
+
+
+@pytest.mark.parametrize(
+    "before,answer,changed",
+    [(False, True, 1), (True, True, 0), (True, False, 1), (True, None, 0)],
+)
+async def test_refresh_counts_only_changed_answers(
+    async_session, monkeypatch, before, answer, changed
+):
+    await _seed(async_session, approved=before)
+    await async_session.commit()
+    monkeypatch.setattr(sms_trial, "sms_route", lambda provider: _Carrier(answer))
+    counts = await sms_trial.refresh_trial_approvals(async_session)
+    assert counts["changed"] == changed
+
+
+def test_only_a_carrier_that_answers_can_confirm_approval():
+    assert confirms_tollfree_approval("twilio") is True
+    assert confirms_tollfree_approval("telnyx") is False
+    assert confirms_tollfree_approval("no-such-carrier") is False
+    # The list matches the adapters that answer the check.
+    base = SmsProvider.tollfree_approved
+    assert TwilioSmsProvider.tollfree_approved is not base
+    assert TelnyxSmsProvider.tollfree_approved is base
+
+
+async def test_start_refuses_a_phone_that_replied_stop(async_session):
+    """No new code goes to a phone the workspace has opted out (STOP to a
+    trial number), until it replies START."""
+    org = await _org(async_session)
+    await add_suppression(
+        async_session,
+        organization_id=org,
+        recipient=PHONE,
+        channel="sms",
+        reason="recipient replied STOP",
+        source="stop_keyword",
+    )
+    with pytest.raises(PhoneStopped) as e:
+        await _start(async_session, org)
+    assert str(e.value) == "This phone replied STOP to Hail. Reply START first."
+    other = await _org(async_session)
+    assert (await _start(async_session, other)).code is not None

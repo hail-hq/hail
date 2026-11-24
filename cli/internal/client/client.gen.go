@@ -579,6 +579,7 @@ func (e FieldSpecKind) Valid() bool {
 // Defines values for FileUploadCreatePurpose.
 const (
 	FileUploadCreatePurposeEmailAttachment      FileUploadCreatePurpose = "email_attachment"
+	FileUploadCreatePurposeSmsEvidence          FileUploadCreatePurpose = "sms_evidence"
 	FileUploadCreatePurposeVerificationDocument FileUploadCreatePurpose = "verification_document"
 )
 
@@ -586,6 +587,8 @@ const (
 func (e FileUploadCreatePurpose) Valid() bool {
 	switch e {
 	case FileUploadCreatePurposeEmailAttachment:
+		return true
+	case FileUploadCreatePurposeSmsEvidence:
 		return true
 	case FileUploadCreatePurposeVerificationDocument:
 		return true
@@ -597,6 +600,7 @@ func (e FileUploadCreatePurpose) Valid() bool {
 // Defines values for FileUploadLinkResponsePurpose.
 const (
 	FileUploadLinkResponsePurposeEmailAttachment      FileUploadLinkResponsePurpose = "email_attachment"
+	FileUploadLinkResponsePurposeSmsEvidence          FileUploadLinkResponsePurpose = "sms_evidence"
 	FileUploadLinkResponsePurposeVerificationDocument FileUploadLinkResponsePurpose = "verification_document"
 )
 
@@ -604,6 +608,8 @@ const (
 func (e FileUploadLinkResponsePurpose) Valid() bool {
 	switch e {
 	case FileUploadLinkResponsePurposeEmailAttachment:
+		return true
+	case FileUploadLinkResponsePurposeSmsEvidence:
 		return true
 	case FileUploadLinkResponsePurposeVerificationDocument:
 		return true
@@ -615,6 +621,7 @@ func (e FileUploadLinkResponsePurpose) Valid() bool {
 // Defines values for FileUploadResponsePurpose.
 const (
 	EmailAttachment      FileUploadResponsePurpose = "email_attachment"
+	SmsEvidence          FileUploadResponsePurpose = "sms_evidence"
 	VerificationDocument FileUploadResponsePurpose = "verification_document"
 )
 
@@ -622,6 +629,8 @@ const (
 func (e FileUploadResponsePurpose) Valid() bool {
 	switch e {
 	case EmailAttachment:
+		return true
+	case SmsEvidence:
 		return true
 	case VerificationDocument:
 		return true
@@ -2998,17 +3007,17 @@ type FieldSpecKind string
 
 // FileUploadCreate Body of “POST /uploads“: what the file is for, and its name and type.
 type FileUploadCreate struct {
-	// ContentType MIME type, `type/subtype` with no parameters. A `verification_document` takes `image/jpeg`, `image/png` or `application/pdf` only. This type is stored; the PUT request's own `Content-Type` header is not used.
+	// ContentType MIME type, `type/subtype` with no parameters. A `verification_document` or `sms_evidence` takes `image/jpeg`, `image/png` or `application/pdf` only. This type is stored; the PUT request's own `Content-Type` header is not used.
 	ContentType string `json:"content_type"`
 
 	// Filename The file's name, 1 to 255 chars, no control characters.
 	Filename string `json:"filename"`
 
-	// Purpose What the file is for. `email_attachment`: the id works in `POST /v1/emails` `attachment_ids`. `verification_document`: the id works as the `upload.<slot>` part of `POST /v1/verifications` and `POST /v1/verifications/check`.
+	// Purpose What the file is for. `email_attachment`: the id works in `POST /v1/emails` `attachment_ids`. `verification_document`: the id works as the `upload.<slot>` part of `POST /v1/verifications` and `POST /v1/verifications/check`. `sms_evidence`: a US texting consent screenshot; the PUT returns a public `url` for an `*_evidence_url` field, like `POST /v1/verifications/sms/evidence`.
 	Purpose FileUploadCreatePurpose `json:"purpose"`
 }
 
-// FileUploadCreatePurpose What the file is for. `email_attachment`: the id works in `POST /v1/emails` `attachment_ids`. `verification_document`: the id works as the `upload.<slot>` part of `POST /v1/verifications` and `POST /v1/verifications/check`.
+// FileUploadCreatePurpose What the file is for. `email_attachment`: the id works in `POST /v1/emails` `attachment_ids`. `verification_document`: the id works as the `upload.<slot>` part of `POST /v1/verifications` and `POST /v1/verifications/check`. `sms_evidence`: a US texting consent screenshot; the PUT returns a public `url` for an `*_evidence_url` field, like `POST /v1/verifications/sms/evidence`.
 type FileUploadCreatePurpose string
 
 // FileUploadLinkResponse Returned by “POST /uploads“: a one-time link to send the bytes to.
@@ -3057,6 +3066,9 @@ type FileUploadResponse struct {
 
 	// SizeBytes Bytes stored. Compare with the local file.
 	SizeBytes int `json:"size_bytes"`
+
+	// Url For `sms_evidence`: the public link to the file. Put it in an `*_evidence_url` field. Carrier reviewers open it without signing in. Null for other purposes.
+	Url *string `json:"url,omitempty"`
 }
 
 // FileUploadResponsePurpose What the file is for.
@@ -3705,7 +3717,7 @@ type SmsCreate struct {
 	// ConsentSource Where/how consent was obtained (e.g. 'signup form', 'prior customer relationship'). Required (non-empty) when message_type is 'marketing'.
 	ConsentSource *string `json:"consent_source,omitempty"`
 
-	// From Sender phone number, E.164 format. Must be an active number owned by the organization with the SMS capability. Omitted: destinations where the sender-ID carrier delivers a dynamic alphanumeric sender ID unchanged (about 110 countries: most of Europe, Africa, the Middle East, Asia-Pacific and the Caribbean; one table per carrier in core/hailhq/core/sender_id_corridors.py) use the organization's sender ID, or the platform default 'HAIL' when none is set; Australia (+61) may always use 'HAIL', depending on the carrier. Every other destination, including the US and Canada, uses the organization's oldest active SMS-capable number; if none exists the request fails with 422. SMS never uses the shared pool. Trial texts (up to 25, only to the workspace's verified trial phone): with no from, Hail uses one when the workspace's own number cannot text that US phone; set from to the trial number to use one directly.
+	// From Sender phone number, E.164 format. Must be an active number owned by the organization with the SMS capability. Omitted: destinations where the sender-ID carrier delivers a dynamic alphanumeric sender ID unchanged (about 110 countries: most of Europe, Africa, the Middle East, Asia-Pacific and the Caribbean; one table per carrier in core/hailhq/core/sender_id_corridors.py) use the organization's sender ID, or the platform default 'HAIL' when none is set; Australia (+61) may always use 'HAIL', depending on the carrier. Every other destination, including the US and Canada, uses the organization's oldest active SMS-capable number; if none exists the request fails with 422. SMS never uses the shared pool. Trial texts (only to the workspace's verified trial phone): with no from, Hail uses one when the workspace's own number cannot text that US phone; set from to the trial number to use one directly.
 	From *string `json:"from,omitempty"`
 
 	// MessageType 'marketing' additionally requires a non-empty consent_source. Use 'informational' for transactional/service communications.
@@ -3840,7 +3852,7 @@ type SmsTrialResponse struct {
 	// TextsLeft Trial texts this workspace can still send.
 	TextsLeft int `json:"texts_left"`
 
-	// TextsLimit Trial texts a workspace can send, ever.
+	// TextsLimit All the trial texts the workspace gets.
 	TextsLimit int `json:"texts_limit"`
 
 	// TextsUsed Trial texts this workspace has sent.
@@ -3924,7 +3936,7 @@ type SuppressionResponse struct {
 	// Recipient The suppressed recipient — E.164 phone number for voice/sms, lowercased email address for email.
 	Recipient string `json:"recipient"`
 
-	// Source How this entry was created: 'unsubscribe_link' (email unsubscribe link) or 'stop_keyword' (recipient replied STOP by SMS). 'manual' (operator action) and 'bounce' (bounce handler) are reserved; nothing writes them yet.
+	// Source How this entry was created: 'unsubscribe_link' (email unsubscribe link), 'stop_keyword' (recipient replied STOP by SMS) or 'trial_stop_keyword' (your trial phone replied STOP to Hail's trial number). 'manual' (operator action) and 'bounce' (bounce handler) are reserved; nothing writes them yet.
 	Source string `json:"source"`
 }
 

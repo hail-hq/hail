@@ -19,7 +19,6 @@ import httpx
 from hailhq.core.providers.sms.telnyx import TelnyxSmsProvider
 from hailhq.core.providers.telnyx import TelnyxClient, path_id
 from hailhq.core.providers.verification.base import (
-    BRAND_REJECTED,
     SMS_REFUSED,
     SMS_VALUE_REFUSED,
     DiscardFailures,
@@ -32,6 +31,11 @@ from hailhq.core.providers.verification.base import (
     VerificationProviderError,
 )
 from hailhq.core.providers.verification.forms import display_name, text_length
+from hailhq.core.providers.verification.rejections import (
+    TEXT_KEYS,
+    carrier_texts,
+    with_carrier_text,
+)
 from hailhq.core.providers.verification.sms_form import (
     NINE_DIGIT_COUNTRIES,
     campaign_text,
@@ -43,8 +47,11 @@ from hailhq.core.providers.verification.sms_review import (
     LEGACY_APPLICATION,
     LOW_VOLUME_FASTER_LANE,
     LOW_VOLUME_FASTER_LANE_FAILED,
+    account_problem,
     application_validation_error,
+    brand_rejected_reason,
     campaign_repair_reason,
+    detail_fixes,
 )
 
 logger = logging.getLogger(__name__)
@@ -555,7 +562,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                 refs["vetting_requested"] = False
             return []
         if brand.get("failureReasons") or brand.get("status") != "OK":
-            return _reason_problems(brand.get("failureReasons"), subject_type)
+            return _reason_problems(_reasons(brand.get("failureReasons")), subject_type)
         # A failure here keeps the brand unless Telnyx refused a value
         # (create_draft). ``otp_sent_at`` stays unset for a person.
         if subject_type == "person":
@@ -752,7 +759,13 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                 refs.pop("identity_verified", None)
                 return ProviderStatus(
                     state="rejected",
-                    reason=BRAND_REJECTED,
+                    reason=brand_rejected_reason(
+                        _brand_fixes(
+                            _reasons(brand.get("failureReasons")),
+                            refs.get("subject_type") or "business",
+                        ),
+                        _reasons(brand.get("failureReasons")),
+                    ),
                     raw_reason=str(brand.get("failureReasons") or brand["status"]),
                 )
             if brand.get("status") == "REGISTRATION_PENDING":
@@ -886,12 +899,12 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
                     # the background pass files the campaign again.
                     refs["campaign_needs_repair"] = True
                     refs["needs_information"] = True
-                    raw = str(_errors(exc.response))
+                    errors = _errors(exc.response)
                     logger.warning("10DLC campaign refused; held for answers")
                     return ProviderStatus(
                         state="pending",
-                        reason=campaign_repair_reason(raw),
-                        raw_reason=raw,
+                        reason=campaign_repair_reason(errors),
+                        raw_reason=str(errors),
                     )
                 logger.warning(
                     "10DLC status failed: status=%s errors=%s",
@@ -907,7 +920,7 @@ class TelnyxSmsRegistrationProvider(SmsRegistrationProvider):
             refs["runtime_ready"] = False
             return ProviderStatus(
                 state="rejected",
-                reason=campaign_repair_reason(campaign.get("failureReasons")),
+                reason=campaign_repair_reason(_reasons(campaign.get("failureReasons"))),
                 raw_reason=(
                     str(campaign["failureReasons"])
                     if campaign.get("failureReasons")
@@ -1323,9 +1336,21 @@ def _refused(exc: Exception) -> bool:
         (_pointer(error) or "").removeprefix("/body") in _APPLICATION_POINTERS
         for error in errors
     )
-    prose = " ".join(
-        f"{error.get('title', '')} {error.get('detail', '')}" for error in errors
-    )
+    # Every text key: the outage check reads the same words that get quoted.
+    prose = " ".join(_all_text(error) for error in errors)
+    if known_field:
+        # The same rule as Twilio's Trust Hub check: the customer gets the
+        # refusal when any form-field error is theirs (its own text names
+        # no Hail account problem; "permission" is a form word here). Only
+        # when every form-field error names Hail's account is it an outage.
+        on_form = [
+            e
+            for e in errors
+            if (_pointer(e) or "").removeprefix("/body") in _APPLICATION_POINTERS
+        ]
+        return exc.response.status_code in (400, 422) and any(
+            not account_problem(_all_text(e)) for e in on_form
+        )
     return application_validation_error(
         exc.response.status_code, prose, known_field=known_field
     )
@@ -1407,7 +1432,10 @@ def _pointer(error: dict) -> str | None:
 
 
 def _detail(error: dict) -> str | None:
-    return error.get("detail") or error.get("title")
+    for key in ("detail", "title"):
+        if isinstance(error.get(key), str) and error[key].strip():
+            return error[key]
+    return None
 
 
 def _error_log(response: httpx.Response) -> list:
@@ -1422,49 +1450,283 @@ def _error_log(response: httpx.Response) -> list:
 
 def _response_problems(response: httpx.Response, subject_type) -> list[Problem]:
     """One problem per form field Telnyx points at (``source.pointer``),
-    else one neutral problem."""
+    each with Telnyx's own words (a second error on the same field adds its
+    words to that problem). Errors on no form field go in one general
+    problem, so no reason is lost."""
     names = _FORM_FIELDS[subject_type]
     problems: list[Problem] = []
+    unmatched: list[dict] = []
     for e in _errors(response):
         field = names.get((_pointer(e) or "").rsplit("/", 1)[-1])
-        if field and all(p.field != field for p in problems):
+        if not field:
+            unmatched.append(e)
+            continue
+        problem = next((p for p in problems if p.field == field), None)
+        text = _original_text(e)
+        # A reused email or phone gets its own sentence, as at brand refusal.
+        lead = _DUPLICATE.get(field) if "duplicate" in _all_text(e).lower() else None
+        if problem is None:
             problems.append(
-                Problem(field=field, message=SMS_VALUE_REFUSED, raw=_detail(e))
+                Problem(
+                    field=field,
+                    message=with_carrier_text(
+                        lead or SMS_VALUE_REFUSED, _one_line(text)
+                    ),
+                    raw=_one_line(text),
+                )
             )
-    return problems or [Problem(field="", message=_safe_message(response))]
+        else:
+            _add_carrier_text(problem, text, lead)
+    if not problems:
+        originals = [
+            t for t in map(_one_line, map(_original_text, _errors(response))) if t
+        ]
+        return [
+            Problem(
+                field="",
+                message=_safe_message(response, subject_type),
+                raw="; ".join(originals) or None,
+            )
+        ]
+    if with_carrier_text("", unmatched):
+        problems.append(_general_problem(unmatched, subject_type))
+    return problems
+
+
+def _add_carrier_text(
+    problem: Problem, text: str | None, lead: str | None = None
+) -> None:
+    """Another carrier reason on the same field: its words join that
+    problem, next to the field they name. The quote is built again from all
+    of them, so the cap and tag cleanup cover the whole of it. ``lead``
+    replaces Hail's sentence (a reused email or phone found later)."""
+    # One reason per line: a reason's own "; " must not split it.
+    texts = problem.raw.split("\n") if problem.raw else []
+    text = _one_line(text)
+    if text and text not in texts:
+        texts.append(text)
+    head = lead or problem.message.split(" The carrier said: ", 1)[0]
+    problem.message = with_carrier_text(head, texts)
+    problem.raw = "\n".join(texts) or None
+
+
+def _field_names(reason: dict) -> list[str]:
+    """The form fields a Telnyx reason names: a list, or one name as a string."""
+    fields = reason.get("fields")
+    if isinstance(fields, str):
+        return [fields]
+    if not isinstance(fields, (list, tuple)):
+        return []
+    return [f for f in fields if isinstance(f, str)]
+
+
+def _one_line(text: str | None) -> str | None:
+    """``text`` on one line: a problem's ``raw`` holds one reason per line,
+    so a reason's own line breaks would split it on the way back."""
+    return " ".join(text.split()) or None if isinstance(text, str) else None
+
+
+def _reasons(value: object) -> object:
+    """Telnyx ``failureReasons``: a list of dicts, a plain string, or that
+    list sent as JSON text. JSON text is parsed, so its descriptions are
+    quoted, not the raw payload."""
+    if isinstance(value, str) and value.strip()[:1] in ("[", "{"):
+        try:
+            return json.loads(value)
+        except ValueError:
+            return value
+    return value
+
+
+def _original_text(item: object) -> str | None:
+    """The carrier's own text in one reason or error, field tag and all."""
+    if isinstance(item, str):
+        return item.strip() or None
+    if isinstance(item, dict):
+        # The same key the quote uses: the first whose text survives cleanup.
+        return next(
+            (
+                item[k]
+                for k in TEXT_KEYS
+                if isinstance(item.get(k), str) and carrier_texts(item[k])
+            ),
+            None,
+        )
+    return None
+
+
+def _all_text(item: object) -> str:
+    """Every text key of one reason or error joined, for the detail match:
+    Telnyx can name the detail in ``title`` and explain it in ``detail``."""
+    if isinstance(item, str):
+        return item
+    if isinstance(item, dict):
+        return " ".join(item[k] for k in TEXT_KEYS if isinstance(item.get(k), str))
+    return ""
+
+
+def _text_fixes(texts: list[str], subject_type: str) -> list[str]:
+    """Hail's sentences for carrier texts on no form field: the reuse
+    sentence for a reused email or phone, the detail sentence for the rest."""
+    fixes = [f for t in texts if (f := _duplicate_by_text(t, subject_type))]
+    # The detail sentence for every text, a reused one too ("Email duplicate
+    # ...; EIN does not match"). In a reused text, the detail its reuse
+    # sentence already covers (the email or the phone, not both) is left out.
+    details: list[str] = []
+    for text in texts:
+        found = detail_fixes([text])
+        if reuse := _duplicate_by_text(text, subject_type):
+            covered = (
+                "Check the email address."
+                if "email" in reuse
+                else "Check the phone number."
+            )
+            found = [f for f in found if f != covered]
+        details += found
+    return list(dict.fromkeys(fixes + details))
+
+
+def _general_problem(unmatched: list, subject_type: str) -> Problem:
+    """One problem for carrier reasons on no form field: Hail's sentence for
+    each detail they name (else the generic one), then their words. ``raw``
+    keeps the carrier's own text, so the audit row has what was shown."""
+    originals = [t for t in map(_one_line, map(_original_text, unmatched)) if t]
+    fixes = _text_fixes([_all_text(item) for item in unmatched], subject_type)
+    return Problem(
+        field="",
+        message=with_carrier_text(" ".join(fixes) or SMS_REFUSED, unmatched),
+        raw="; ".join(originals) or None,
+    )
+
+
+def _brand_fixes(reasons, subject_type) -> list[str]:
+    """Hail's fixes for a brand refused after filing, as at filing: the
+    reuse sentence for a reused email or phone, and the detail sentence
+    (tax number, website, address...) for any other reason."""
+    items = reasons if isinstance(reasons, list) else [reasons]
+    # The text plus the fields it names, so a bare "Invalid value" on the
+    # EIN field still gets the tax number sentence.
+    # A duplicate the reuse sentence covers is left out; any other reason,
+    # an unmapped duplicate too ("Duplicate EIN"), gets its detail fix.
+    others = [
+        f"{_all_text(r)} {_named_fields(r, subject_type)}"
+        for r in items
+        if not _duplicate_fixes([r], subject_type)
+    ]
+    fixes = _duplicate_fixes(reasons, subject_type)
+    return fixes + [f for f in detail_fixes(others) if f not in fixes]
+
+
+def _named_fields(reason: object, subject_type: str) -> str:
+    """The form fields a reason lists, as words: Telnyx's name mapped to
+    Hail's form field ("postalCode" is "address postal code"), else split
+    at camelCase, dots and underscores."""
+    if not isinstance(reason, dict):
+        return ""
+    names = _FORM_FIELDS.get(subject_type, {})
+    return " ".join(
+        re.sub(r"(?<=[a-z])(?=[A-Z])|[._]", " ", names.get(n, n)).lower()
+        for n in _field_names(reason)
+    )
+
+
+def _duplicate_by_text(text: str, subject_type: str) -> str | None:
+    """The reuse sentence for a duplicate reason that names no form field,
+    read from its words, for the form this filing used (a person's mobile
+    number, a company's representative phone)."""
+    low = text.lower()
+    if "duplicate" not in low:
+        return None
+    names = _FORM_FIELDS.get(subject_type, {})
+    # The detail nearest a "duplicate": "Duplicate phone number; email
+    # domain invalid" reuses the phone, not the email. A tie is the email.
+    dupes = [m.start() for m in re.finditer("duplicate", low)]
+    best: tuple[int, str] | None = None
+    for pattern, name in ((r"\bemail\b", "email"), (r"\b(?:mobile|phone)\b", "phone")):
+        for m in re.finditer(pattern, low):
+            gap = min(abs(m.start() - d) for d in dupes)
+            if best is None or gap < best[0]:
+                best = (gap, name)
+    return _DUPLICATE.get(names.get(best[1], "")) if best else None
+
+
+def _duplicate_fixes(reasons, subject_type) -> list[str]:
+    """Hail's sentence for each reused phone or email in ``failureReasons``
+    (the same sentences ``_reason_problems`` gives at filing)."""
+    names = _FORM_FIELDS.get(subject_type, {})
+    fixes: list[str] = []
+    items = reasons if isinstance(reasons, list) else [reasons]
+    for reason in items:
+        if not isinstance(reason, dict):
+            # A plain text reason names no field: read it by its words.
+            fix = _duplicate_by_text(_all_text(reason), subject_type)
+            if fix and fix not in fixes:
+                fixes.append(fix)
+            continue
+        if "duplicate" not in _all_text(reason).lower():
+            continue
+        found = [_DUPLICATE.get(names.get(n) or "") for n in _field_names(reason)]
+        found = [f for f in found if f] or [
+            _duplicate_by_text(_all_text(reason), subject_type)
+        ]
+        for fix in found:
+            if fix and fix not in fixes:
+                fixes.append(fix)
+    return fixes
 
 
 def _reason_problems(reasons, subject_type) -> list[Problem]:
     """A refused brand's ``failureReasons`` as problems on the form fields
-    they name. A reused phone or email gets its own sentence."""
+    they name, each with Telnyx's own words. A reused phone or email gets
+    its own sentence."""
     names = _FORM_FIELDS[subject_type]
     problems: list[Problem] = []
-    for reason in reasons or []:
+    unmatched: list[object] = []
+    items = reasons if isinstance(reasons, list) else [reasons]
+    for reason in items:
         if not isinstance(reason, dict):
+            unmatched.append(reason)
             continue
-        text = str(reason.get("description") or "")
-        for name in reason.get("fields") or []:
+        # raw keeps the carrier's own text, field tag and all; the message
+        # quotes it cleaned (with_carrier_text).
+        original = _original_text(reason)
+        shown = False
+        for name in _field_names(reason):
             field = names.get(name)
-            if not field or any(p.field == field for p in problems):
+            if not field:
+                continue
+            shown = True
+            problem = next((p for p in problems if p.field == field), None)
+            if problem is not None:
+                duplicate = (
+                    "duplicate" in _all_text(reason).lower() and field in _DUPLICATE
+                )
+                _add_carrier_text(
+                    problem, original, _DUPLICATE[field] if duplicate else None
+                )
                 continue
             message = SMS_VALUE_REFUSED
-            if "duplicate" in text.lower():
+            if "duplicate" in _all_text(reason).lower():
                 message = _DUPLICATE.get(field, message)
-            problems.append(Problem(field=field, message=message, raw=text or None))
-    return problems or [Problem(field="", message=SMS_REFUSED)]
+            problems.append(
+                Problem(
+                    field=field,
+                    message=with_carrier_text(message, _one_line(original)),
+                    raw=_one_line(original),
+                )
+            )
+        if not shown:
+            # On no form field: its text goes in the general problem, so no
+            # reason is lost.
+            unmatched.append(reason)
+    if not problems or with_carrier_text("", unmatched):
+        problems.append(_general_problem(unmatched, subject_type))
+    return problems
 
 
-def _safe_message(response: httpx.Response) -> str:
-    """A short neutral sentence; never the carrier's own text."""
-    low = " ".join(
-        f"{e.get('title', '')} {e.get('detail', '')}" for e in _errors(response)
-    ).lower()
-    for words, text in (
-        (("ein", "tax id", "registration number"), "Check the business tax number."),
-        (("website", "url"), "Check the website address."),
-        (("address", "street", "postal", "zip"), "Check the address."),
-        (("phone", "mobile"), "Check the phone number."),
-    ):
-        if any(re.search(rf"\b{w}\b", low) for w in words):
-            return text
-    return SMS_REFUSED
+def _safe_message(response: httpx.Response, subject_type: str) -> str:
+    """Hail's sentence for each detail Telnyx names (``_text_fixes``: a
+    reused email or phone gets the reuse sentence), then Telnyx's words."""
+    errors = _errors(response)
+    fixes = _text_fixes([_all_text(e) for e in errors], subject_type)
+    return with_carrier_text(" ".join(fixes) or SMS_REFUSED, errors)

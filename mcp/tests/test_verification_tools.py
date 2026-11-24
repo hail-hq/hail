@@ -2061,6 +2061,64 @@ async def test_create_file_upload_checks_the_purpose_locally(
 
 
 @respx.mock
+async def test_create_file_upload_for_sms_evidence_says_where_the_url_goes(
+    client: HailClient,
+) -> None:
+    link = {**_LINK, "purpose": "sms_evidence", "content_type": "image/png"}
+    route = respx.post(f"{_BASE_URL}/uploads").mock(
+        return_value=httpx.Response(201, json=link)
+    )
+    result = await tools.create_file_upload(
+        client=client,
+        purpose="sms_evidence",
+        filename="signup-form.png",
+        content_type="image/png",
+    )
+    assert json.loads(route.calls.last.request.content)["purpose"] == "sms_evidence"
+    assert result["curl"].startswith("curl --silent --show-error --globoff")
+    assert "*_evidence_url" in result["next"]
+
+
+async def test_create_file_upload_names_every_purpose_when_it_refuses(
+    client: HailClient,
+) -> None:
+    result = await tools.create_file_upload(
+        client=client, purpose="other", filename="a", content_type="a/b"
+    )
+    for purpose in ("email_attachment", "verification_document", "sms_evidence"):
+        assert f"'{purpose}'" in result["error"]
+
+
+async def test_create_file_upload_refuses_other_types_for_sms_evidence(
+    client: HailClient,
+) -> None:
+    result = await tools.create_file_upload(
+        client=client,
+        purpose="sms_evidence",
+        filename="a.svg",
+        content_type="image/svg+xml",
+    )
+    # Refused locally, before any request.
+    assert "sms_evidence must be image/jpeg" in result["error"]
+
+
+async def test_the_upload_tool_offers_sms_evidence(tools_by_name) -> None:
+    tool = tools_by_name["create_file_upload"]
+    purpose = tool.input_schema["properties"]["purpose"]
+    assert "sms_evidence" in purpose["enum"]
+    assert "*_evidence_url" in purpose["description"]
+    assert "sms_evidence" not in (tools_by_name["send_email"].description or "")
+    assert "public ``url``" in (tool.description or "")
+    # The texting tools point to it.
+    for name in (
+        "get_verification_requirements",
+        "preview_sms_application",
+        "amend_sms_application",
+    ):
+        assert "create_file_upload" in (tools_by_name[name].description or ""), name
+
+
+@respx.mock
 async def test_create_file_upload_refuses_a_url_that_would_break_the_shell(
     client: HailClient,
 ) -> None:

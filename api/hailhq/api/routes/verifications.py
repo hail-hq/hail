@@ -28,8 +28,10 @@ identifying data is not written to disk or logs, except
 the name of the person or company (``subject_name``), which the
 database keeps so the customer can tell verifications apart. It is never
 logged. One more exception: when the carrier rejects a verification, its own reason is
-kept in the audit row (``payload.carrier_reason``), never in logs and never
-shown to the customer. That text can quote a value the customer sent.
+kept in the audit row (``payload.carrier_reason``) and never logged. A US
+texting reason (``rejection_reason``, ``Problem.message``) quotes it to the
+workspace after Hail's sentence, so never log those either. That text can
+quote a value the customer sent.
 The multipart body is parsed here with an in-memory parser and a hard size cap,
 so no part is ever spooled to a temporary file.
 """
@@ -166,6 +168,10 @@ from hailhq.core.schemas import (
 )
 from hailhq.core.secret_cipher import SecretCipher
 from hailhq.core.sms_registration_gate import US_SMS_COUNTRY_CODES
+from hailhq.core.sms_trial import (
+    registration_trial_number,
+    registrations_kept_for_trial,
+)
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import (
     DateTime,
@@ -435,8 +441,9 @@ def _log_carrier_refusal(
     carrier: str,
 ) -> None:
     """Log which fields the carrier refused, for the operator. Never the
-    carrier's own text: it can quote the customer's personal data, and logs
-    leave this server. The customer gets ``Problem.message``."""
+    carrier's own text, nor ``Problem.message``, which can quote it: it can
+    hold the customer's personal data, and logs leave this server. The
+    customer gets ``Problem.message``."""
     for p in problems:
         logger.warning(
             "carrier %s refused verification details (org %s, verification %s, "
@@ -683,6 +690,35 @@ async def _uncharged_sms_steps(
     ]
 
 
+# The longest US texting reason stored for a refused or held filing (billed
+# at filing, refused in the background pass or at an admin approve, or read
+# on a poll). It quotes the carrier; other purposes are not cut.
+_SMS_REASON_MAX = 2000
+
+
+def _cap_reason(reason: str, purpose: str) -> str:
+    """A US texting ``reason`` (it quotes the carrier) cut to the cap, with
+    an ellipsis where it was cut. Other purposes keep their reason whole."""
+    if purpose != "sms" or len(reason) <= _SMS_REASON_MAX:
+        return reason
+    return reason[: _SMS_REASON_MAX - 1].rstrip() + "\u2026"
+
+
+def _joined_problems(problems: list[Problem]) -> str:
+    """Every problem in one stored reason, each named by its field (a
+    refusal in the background pass or at an admin approve)."""
+    return "; ".join(
+        f"{p.field}: {p.message}" if p.field else p.message for p in problems
+    )
+
+
+def _billed_reason(reason: str, purpose: str) -> str:
+    """The stored reason of a refusal billed at filing. Only US texting
+    carriers bill at filing today; they get the US texting cap. Another
+    purpose, if one ever bills, is cut at 500 characters."""
+    return _cap_reason(reason, purpose) if purpose == "sms" else reason[:500]
+
+
 async def _record_billed_refusal(
     db: AsyncSession,
     principal: Principal,
@@ -706,7 +742,8 @@ async def _record_billed_refusal(
         subject_type=sub.subject_type,
         subject_name=subject_name,
         state="rejected",
-        rejection_reason=reason[:500],
+        # Each message caps the carrier's words, not their sum: cap it too.
+        rejection_reason=_billed_reason(reason, sub.purpose),
         provider_refs={**billed_refs, "refused_at_filing": True},
         requirements_version=requirements_version,
     )
@@ -731,8 +768,9 @@ def _problems_422(
     carrier: str,
     verification_id: UUID | None = None,
 ) -> HTTPException:
-    """422 with one entry per problem: the field as ``loc`` and Hail's own
-    wording as ``msg``. The carrier's text is neither returned nor logged."""
+    """422 with one entry per problem: the field as ``loc`` and
+    ``Problem.message`` as ``msg``: Hail's wording, which for US texting
+    quotes the carrier's words. Returned to the workspace, never logged."""
     _log_carrier_refusal(problems, organization_id, verification_id, carrier)
     return HTTPException(status_code=422, detail=_problem_details(problems))
 
@@ -856,24 +894,28 @@ def _apply_status(row: CarrierVerification, status: ProviderStatus | None) -> bo
         # right after the commit (_refresh).
         _drop_number_answers(row)
     elif status.state == "rejected":
-        row.state, row.rejection_reason, row.updated_at = "rejected", status.reason, now
+        row.state, row.updated_at = "rejected", now
+        row.rejection_reason = (
+            _cap_reason(status.reason, row.purpose) if status.reason else None
+        )
     elif row.state == "submitting" and status.state == "pending":
         row.state, row.submitted_at, row.updated_at = "submitted", now, now
         if status.reason and (row.provider_refs or {}).get("needs_information"):
             # Held for answers on this same poll: most held rows are not
             # polled again, so keep the repair guidance now.
-            row.rejection_reason = status.reason
+            row.rejection_reason = _cap_reason(status.reason, row.purpose)
     elif row.state == "submitting" and status.state == "draft":
         row.state, row.approved_by, row.updated_at = "awaiting_review", None, now
     elif (
         status.state == "pending"
         and status.reason
         and (row.provider_refs or {}).get("needs_information")
-        and row.rejection_reason != status.reason
+        and row.rejection_reason != _cap_reason(status.reason, row.purpose)
     ):
         # A filing held for the customer's answers: say what to fix. The
         # amend route clears it.
-        row.rejection_reason, row.updated_at = status.reason, now
+        row.rejection_reason = _cap_reason(status.reason, row.purpose)
+        row.updated_at = now
     else:
         return False
     _last_polled.pop(row.id, None)
@@ -1736,11 +1778,14 @@ def _out(
     model: type[VerificationResponse] = VerificationResponse,
     *,
     credit_needed_cents: int | None = None,
+    kept_for_trial: bool = False,
 ) -> VerificationResponse:
     """The response for a row, with ``confirmation``, ``step`` and
     ``identity_confirmed`` filled in. ``credit_needed_cents``: the row's
     credit need from ``_campaign_unfunded`` (the caller reads the balance),
-    None when it does not wait for credit."""
+    None when it does not wait for credit. ``kept_for_trial``: the row
+    covers a trial texting number (``registration_trial_number``), so it
+    cannot be cancelled."""
     refs = row.provider_refs or {}
     identity_confirmed = bool(refs.get("kept_brand_id"))
     if row.purpose == "sms" and row.state == "rejected":
@@ -1765,7 +1810,7 @@ def _out(
             "runtime_ready": (
                 refs.get("runtime_ready") if row.purpose == "sms" else None
             ),
-            "cancellable": _can_cancel(row),
+            "cancellable": _can_cancel(row) and not kept_for_trial,
             "kept_until": (row.created_at + REGISTRATION_KEPT_FOR) if kept else None,
             "resubmittable": kept and row.state == "rejected",
             "waiting_for_credit": credit_needed_cents is not None,
@@ -1783,7 +1828,13 @@ async def _out_checked(
     """``_out`` with ``waiting_for_credit`` and ``credit_needed_cents`` read
     from the balance."""
     waiting = await _campaign_unfunded(db, [row], registry)
-    return _out(row, registry, model, credit_needed_cents=waiting.get(row.id))
+    return _out(
+        row,
+        registry,
+        model,
+        credit_needed_cents=waiting.get(row.id),
+        kept_for_trial=await registration_trial_number(db, row) is not None,
+    )
 
 
 async def approved_handles(
@@ -2766,7 +2817,9 @@ async def _file(
                 prepared.sub,
                 prepared.subject_name,
                 draft.billed_refs,
-                "; ".join(p.message for p in draft.problems),
+                # The messages alone (each a full sentence, so a space between
+                # them): the form shows each field's problem.
+                " ".join(p.message for p in draft.problems),
                 prepared.requirements.version,
             )
         raise _problems_422(
@@ -3724,10 +3777,10 @@ async def _refuse_row(
         db,
         row,
         provider,
-        "; ".join(
-            f"{p.field}: {p.message}" if p.field else p.message for p in problems
-        ),
-        carrier_reason="; ".join(p.raw for p in problems if p.raw) or None,
+        _cap_reason(_joined_problems(problems), row.purpose),
+        # One separator: a problem's raw holds one carrier reason per line.
+        carrier_reason="; ".join(p.raw.replace("\n", "; ") for p in problems if p.raw)
+        or None,
         kept_state=kept_state,
     )
 
@@ -4125,7 +4178,16 @@ async def list_verifications(
     for row in sorted(gated, key=lambda r: r.created_at):  # oldest first
         await _refresh(db, row, registry)
     waiting = await _campaign_unfunded(db, rows, registry)
-    return [_out(r, registry, credit_needed_cents=waiting.get(r.id)) for r in rows]
+    kept = await registrations_kept_for_trial(db, rows)
+    return [
+        _out(
+            r,
+            registry,
+            credit_needed_cents=waiting.get(r.id),
+            kept_for_trial=r.id in kept,
+        )
+        for r in rows
+    ]
 
 
 @router.get(
@@ -4711,6 +4773,13 @@ async def cancel_verification(
             status_code=409,
             detail="This verification is under review or cannot be cancelled in its current state.",
         )
+    if await registration_trial_number(db, row) is not None:
+        # The number moved into Hail's trial texting pool: the cancel would
+        # delete its toll-free verification at the carrier.
+        raise HTTPException(
+            status_code=409,
+            detail="This registration covers a Hail trial texting number and cannot be cancelled.",
+        )
     provider = registry(row.provider, row.purpose)
     # Billing releases the transaction so its own org lock can be acquired.
     # Re-read under both locks afterwards: a poll may have approved/attached
@@ -4981,8 +5050,15 @@ async def admin_list(
         .all()
     )
     waiting = await _campaign_unfunded(db, rows, registry)
+    kept = await registrations_kept_for_trial(db, rows)
     return [
-        _out(r, registry, AdminVerification, credit_needed_cents=waiting.get(r.id))
+        _out(
+            r,
+            registry,
+            AdminVerification,
+            credit_needed_cents=waiting.get(r.id),
+            kept_for_trial=r.id in kept,
+        )
         for r in rows
     ]
 
@@ -5041,7 +5117,7 @@ async def admin_approve(
             status_code=http_status.HTTP_409_CONFLICT,
             # Superadmin only: the carrier's own words help the review.
             detail="the carrier no longer accepts this draft: "
-            + "; ".join(p.raw or p.message for p in problems),
+            + "; ".join((p.raw or p.message).replace("\n", "; ") for p in problems),
         )
     try:
         submitted = await _submit_row(
@@ -5058,7 +5134,7 @@ async def admin_approve(
             status_code=http_status.HTTP_409_CONFLICT,
             # Superadmin only: the carrier's own words help the review.
             detail="the carrier refused the submission: "
-            + "; ".join(p.raw or p.message for p in exc.problems),
+            + "; ".join((p.raw or p.message).replace("\n", "; ") for p in exc.problems),
         ) from exc
     if not submitted and row.state == "awaiting_review":
         raise _carrier_unavailable()

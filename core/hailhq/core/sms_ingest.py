@@ -25,14 +25,15 @@ from hailhq.core.compliance_gate import (
 )
 from hailhq.core.config import settings
 from hailhq.core.db import org_lock
-from hailhq.core.models import Call, PhoneNumber, Sms, SmsEvent
+from hailhq.core.models import Call, PhoneNumber, Sms, SmsEvent, SmsTrialPhone
 from hailhq.core.providers.sms import ProviderSmsResult, SmsProvider
+from hailhq.core.sms_trial import POOL_PURPOSE as TRIAL_POOL_PURPOSE
 from hailhq.core.telemetry import bind_organization
 from hailhq.core.telemetry_identity import tag_context
 from hailhq.core.text_agent import should_queue_reply
 from hailhq.core.threads import ACTIVE_CALL_SKIP, active_call_for_thread
 from hailhq.core.webhook_fanout import fanout_sms_event
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -185,6 +186,63 @@ async def active_browser_sms_call(db, number, sender):
     return call if held is not None and held.id == number.id else None
 
 
+# ``suppressions.source`` of an opt-out made by STOP to a trial number.
+TRIAL_STOP_SOURCE = "trial_stop_keyword"
+
+
+async def _trial_number_keyword(
+    db: AsyncSession, from_e164: str, body: str, opt_out_type: str | None
+) -> IngestResult:
+    """A text to a trial texting number (no workspace owns it). STOP opts
+    the phone out in every workspace that holds it as its trial phone:
+    verified, waiting for its code, or the new phone waiting beside a
+    verified one. The consent check then refuses trial texts and
+    ``start_phone_proof`` sends no more codes. START removes only those
+    opt-outs (``TRIAL_STOP_SOURCE``); a workspace's own STOP stays. Every
+    other text, and a phone no workspace holds, is dropped: Hail does not
+    read replies."""
+    action = _opt_out_action(body, opt_out_type)
+    organization_ids: list[UUID] = []
+    if action in ("STOP", "START"):
+        organization_ids = list(
+            (
+                await db.execute(
+                    select(SmsTrialPhone.organization_id).where(
+                        or_(
+                            SmsTrialPhone.phone_e164 == from_e164,
+                            SmsTrialPhone.pending_phone_e164 == from_e164,
+                        )
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    if not organization_ids:
+        return IngestResult(sms_id=None, dropped_reason="unknown_number")
+    for organization_id in organization_ids:
+        if action == "STOP":
+            # Its own source: START to a trial number removes only these,
+            # never a STOP the phone sent to the workspace's own number.
+            await add_suppression(
+                db,
+                organization_id=organization_id,
+                recipient=from_e164,
+                channel="sms",
+                reason="recipient replied STOP to a trial number",
+                source=TRIAL_STOP_SOURCE,
+            )
+        else:
+            await remove_suppression(
+                db,
+                organization_id=organization_id,
+                recipient=from_e164,
+                channel="sms",
+                source=TRIAL_STOP_SOURCE,
+            )
+    return IngestResult(sms_id=None, dropped_reason="trial_number_keyword")
+
+
 async def ingest_inbound_sms(
     db: AsyncSession,
     *,
@@ -213,6 +271,8 @@ async def ingest_inbound_sms(
                 return IngestResult(
                     sms_id=None, dropped_reason="wrong_carrier_or_capability"
                 )
+            if number.pool_purpose == TRIAL_POOL_PURPOSE:
+                return await _trial_number_keyword(db, from_e164, body, opt_out_type)
             browser_call = await active_browser_sms_call(db, number, from_e164)
         if browser_call is None:
             return IngestResult(sms_id=None, dropped_reason="unknown_number")

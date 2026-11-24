@@ -284,17 +284,15 @@ def status(client, refs) -> ProviderStatus:
         raw = "; ".join(
             str(v) for v in (record.rejection_reason, record.error_code) if v
         )
+        # The topic match reads the code too; only the text is quoted.
+        reason = campaign_repair_reason(raw, quote=record.rejection_reason)
         if record.edit_allowed:
             refs["needs_information"] = True
             refs["campaign_needs_repair"] = True
             return ProviderStatus(
-                state="pending",
-                reason=campaign_repair_reason(raw),
-                raw_reason=raw or None,
+                state="pending", reason=reason, raw_reason=raw or None
             )
-        return ProviderStatus(
-            state="rejected", reason=campaign_repair_reason(raw), raw_reason=raw or None
-        )
+        return ProviderStatus(state="rejected", reason=reason, raw_reason=raw or None)
     return ProviderStatus(state="pending")
 
 

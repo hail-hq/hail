@@ -39,15 +39,15 @@ from hailhq.core.sms_trial import (
     NoPendingCode,
     PhoneIsHailNumber,
     PhoneNotUs,
+    PhoneStopped,
     PhoneTaken,
     WrongCode,
     code_text,
     confirm_phone,
     get_trial_phone,
     start_phone_proof,
-    trial_number,
+    trial_configured,
     trial_sender,
-    trial_sender_of,
     trial_texts_used,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -74,16 +74,9 @@ _CONSOLE_ONLY_RESPONSE: dict = {
 async def _trial_status(db: AsyncSession, organization_id: UUID) -> SmsTrialResponse:
     row = await get_trial_phone(db, organization_id)
     used = await trial_texts_used(db, organization_id)
-    number = await trial_number(db)
     return SmsTrialResponse(
-        configured=number is not None,
-        # The trial number's owner sends from it as its own number, never
-        # as trial texts.
-        available=(
-            number is not None
-            and number.organization_id != organization_id
-            and await trial_sender_of(db, number) is not None
-        ),
+        configured=await trial_configured(db),
+        available=await trial_sender(db) is not None,
         status=row.status if row is not None else "none",
         phone=row.phone_e164 if row is not None else None,
         pending_phone=row.pending_phone_e164 if row is not None else None,
@@ -109,7 +102,7 @@ async def get_sms_trial(
     """Read the workspace's US trial texting status.
 
     Shows whether trial texting is set up and can send now, the workspace's
-    trial phone and its status, and how many of the 25 trial texts are left.
+    trial phone and its status, and how many trial texts are left.
     """
     return await _trial_status(db, principal.organization_id)
 
@@ -168,7 +161,7 @@ async def start_sms_trial_phone(
     confirmed; until then the new phone shows as pending_phone. Asking
     again for the verified phone drops the waiting new phone. A
     workspace or a phone gets at most 5 codes in 24 hours. Code texts are
-    free and do not count toward the 25 trial texts. Console sessions only.
+    free and do not count as trial texts. Console sessions only.
     """
     _require_console(principal)
     number = await trial_sender(db)
@@ -184,7 +177,7 @@ async def start_sms_trial_phone(
             consent_version=body.consent_version,
             user_id=principal.user_id,
         )
-    except (PhoneNotUs, PhoneIsHailNumber) as exc:
+    except (PhoneNotUs, PhoneIsHailNumber, PhoneStopped) as exc:
         await db.rollback()
         raise unprocessable(str(exc), loc=["body", "phone"]) from exc
     except PhoneTaken as exc:

@@ -14,12 +14,12 @@ after it closes (hailhq.core.retention).
 
 from __future__ import annotations
 
-import ipaddress
+import asyncio
+import contextlib
+import logging
 import re
-import secrets
 from functools import lru_cache
 from typing import Annotated
-from urllib.parse import urlparse
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -31,10 +31,20 @@ from hailhq.api.multipart import parse_capped_form
 from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES, exempt_prefix
 from hailhq.core.config import settings
 from hailhq.core.s3_mail import S3MailClient
-from hailhq.core.sms_evidence import SMS_EVIDENCE_PREFIX
-from hailhq.core.urls import join_url
+from hailhq.core.sms_evidence import (
+    MAX_EVIDENCE_BYTES,
+    MAX_EVIDENCE_FILES,
+    evidence_folder,
+    evidence_key,
+    evidence_url,
+    new_evidence_token,
+    public_evidence_base,
+    sniff_evidence_type,
+)
 from pydantic import BaseModel, Field
 from starlette.datastructures import UploadFile
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/verifications/sms/evidence",
@@ -48,22 +58,11 @@ router = APIRouter(
 # file bytes per request.
 exempt_prefix("/verifications/sms/evidence/")
 
-MAX_EVIDENCE_BYTES = 10 * 1024 * 1024
 # Room for the multipart boundaries and part headers around the file.
 _MAX_BODY_BYTES = MAX_EVIDENCE_BYTES + 64 * 1024
 _TOKEN = re.compile(r"[A-Za-z0-9_-]{32}")
 _TOO_BIG = "The file must be 10 MB or smaller."
-# Files one organization may keep. Normal use needs a few per registration;
-# the cap stops a leaked key from filling storage.
-MAX_EVIDENCE_FILES = 100
-# The file's first bytes decide its type, never the name or the header the
-# client sent. Only these types are kept or served: no HTML or SVG on the
-# API's origin.
-_SIGNATURES = (
-    (b"\x89PNG\r\n\x1a\n", "image/png"),
-    (b"\xff\xd8\xff", "image/jpeg"),
-    (b"%PDF-", "application/pdf"),
-)
+WRONG_TYPE = "Upload a PNG, JPG or PDF."
 _UPLOAD_BODY = {
     "requestBody": {
         "required": True,
@@ -109,10 +108,6 @@ def get_evidence_store() -> S3MailClient | None:
     return _store_for(bucket) if bucket else None
 
 
-def _sniff(data: bytes) -> str | None:
-    return next((kind for sig, kind in _SIGNATURES if data.startswith(sig)), None)
-
-
 async def _read_upload(request: Request) -> bytes:
     """The one file part, read with the body capped before parsing."""
     form = await parse_capped_form(
@@ -136,43 +131,118 @@ async def _read_upload(request: Request) -> bytes:
     return data
 
 
-_PRIVATE_SUFFIXES = (
-    ".localhost",
-    ".local",
-    ".internal",
-    ".lan",
-    ".home.arpa",
-    ".test",
-    ".example",
-    ".invalid",
-)
-
-
-def _full() -> HTTPException:
+def evidence_unavailable() -> HTTPException:
+    """503: reviewers open the link from outside, so a local address or a
+    server with no bucket never works."""
     return HTTPException(
-        status_code=http_status.HTTP_409_CONFLICT,
+        status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
         detail=(
-            f"This account already keeps {MAX_EVIDENCE_FILES} uploaded files, the "
-            "most allowed. Delete one you no longer use, or contact support."
+            "This server cannot store files for carrier reviewers. It needs a "
+            "mail bucket and a public https HAIL_API_URL. Paste a public link instead."
         ),
     )
 
 
-def _public_base() -> str | None:
-    """HAIL_API_URL when carrier reviewers can reach it, else None."""
-    parsed = urlparse(settings.hail_api_url)
-    host = (parsed.hostname or "").lower().rstrip(".")
-    if parsed.scheme != "https" or not host:
-        return None
+def _storage_down() -> HTTPException:
+    return HTTPException(
+        status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="storage unavailable; try again",
+    )
+
+
+def evidence_full() -> HTTPException:
+    return HTTPException(
+        status_code=http_status.HTTP_409_CONFLICT,
+        detail=(
+            f"This account already keeps {MAX_EVIDENCE_FILES} uploaded files, the "
+            "most allowed. Delete one you no longer use in the console or with "
+            "DELETE /v1/verifications/sms/evidence/{organization_id}/{token}, "
+            "or contact support."
+        ),
+    )
+
+
+async def ensure_evidence_room(store: S3MailClient, organization_id: UUID) -> None:
+    """409 when the organization keeps the most files allowed. Called before
+    a body is read, so an account at the cap costs no 10 MB read."""
+    folder = evidence_folder(organization_id)
     try:
-        return settings.hail_api_url if ipaddress.ip_address(host).is_global else None
-    except ValueError:
-        pass
-    # A name must have a dot and must not use a suffix that only resolves
-    # inside a network.
-    if "." not in host or host.endswith(_PRIVATE_SUFFIXES):
-        return None
-    return settings.hail_api_url
+        count = await store.count_prefix(folder, up_to=MAX_EVIDENCE_FILES)
+    except Exception as exc:
+        raise _storage_down() from exc
+    if count >= MAX_EVIDENCE_FILES:
+        raise evidence_full()
+
+
+async def keep_evidence(
+    store: S3MailClient,
+    organization_id: UUID,
+    token: str,
+    data: bytes,
+    content_type: str,
+) -> None:
+    """Store one file at its link's key, then hold the cap.
+
+    Parallel uploads can all pass the first count. Count again after the
+    save and take this file back (409) when the account went over the cap.
+    Any failure from the save on, a cancelled request included, also takes
+    the file back: the caller never got its link, so nobody could delete it.
+    A storage error is 503.
+    """
+    folder = evidence_folder(organization_id)
+    key = evidence_key(organization_id, token)
+    # The write runs in a worker thread that a cancel cannot stop, so it is
+    # its own task: the cleanup waits for it before deleting, or the write
+    # could land after the delete and leave a file nobody has a link to.
+    put = asyncio.ensure_future(store.put_attachment(key, data, content_type))
+    try:
+        await asyncio.shield(put)
+        over = (
+            await store.count_prefix(folder, up_to=MAX_EVIDENCE_FILES + 1)
+            > MAX_EVIDENCE_FILES
+        )
+    except BaseException as exc:
+        # Deleting a key the save never wrote is harmless.
+        await _forget_after(put, store, key)
+        if isinstance(exc, Exception):
+            raise _storage_down() from exc
+        raise
+    if over:
+        await forget_evidence(store, key)
+        raise evidence_full()
+
+
+# Cleanups still running after their request was cancelled. Held here so
+# the event loop's weak reference does not let them be collected midway.
+_cleanups: set[asyncio.Task[None]] = set()
+
+
+async def _wait_then_forget(
+    put: asyncio.Future[None], store: S3MailClient, key: str
+) -> None:
+    with contextlib.suppress(BaseException):
+        await put
+    await forget_evidence(store, key)
+
+
+async def _forget_after(
+    put: asyncio.Future[None], store: S3MailClient, key: str
+) -> None:
+    """Delete the file once its write has ended, even if this request is
+    cancelled again while it waits."""
+    task = asyncio.ensure_future(_wait_then_forget(put, store, key))
+    _cleanups.add(task)
+    task.add_done_callback(_cleanups.discard)
+    await asyncio.shield(task)
+
+
+async def forget_evidence(store: S3MailClient, key: str) -> None:
+    """Delete a file whose link was never handed out. Best effort: a
+    failure only logs. Shielded, so a cancelled request still deletes it."""
+    try:
+        await asyncio.shield(store.delete(key))
+    except Exception:
+        logger.warning("could not delete an unused evidence file", exc_info=True)
 
 
 @router.post(
@@ -180,7 +250,16 @@ def _public_base() -> str | None:
     response_model=EvidenceUploadResponse,
     status_code=http_status.HTTP_201_CREATED,
     operation_id="upload_sms_evidence",
-    responses={409: {"description": "The account keeps the most files allowed."}},
+    responses={
+        409: {"description": "The account keeps the most files allowed."},
+        503: {
+            "description": (
+                "This server cannot store files for carrier reviewers (no mail "
+                "bucket or no public https URL), or storage failed for a moment: "
+                "try again."
+            )
+        },
+    },
     openapi_extra=_UPLOAD_BODY,
 )
 async def upload_sms_evidence(
@@ -195,39 +274,19 @@ async def upload_sms_evidence(
     it without signing in, so anyone with the link can see the file. Remove
     personal information first. Pasting your own public link still works.
     """
-    base = _public_base()
+    base = public_evidence_base()
     if store is None or base is None:
-        # Reviewers open the link from outside: a local address never works.
-        raise HTTPException(
-            status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=(
-                "This server cannot store files for carrier reviewers. It needs a "
-                "mail bucket and a public https HAIL_API_URL. Paste a public link instead."
-            ),
-        )
+        raise evidence_unavailable()
     org = principal.organization_id
-    # Before reading the body, so an account at the cap costs no 10 MB read.
-    folder = f"{SMS_EVIDENCE_PREFIX}{org}/"
-    # Checked before the body is read, so a full account costs no upload.
-    if await store.count_prefix(folder, up_to=MAX_EVIDENCE_FILES) >= MAX_EVIDENCE_FILES:
-        raise _full()
+    await ensure_evidence_room(store, org)
     data = await _read_upload(request)
-    content_type = _sniff(data)
+    content_type = sniff_evidence_type(data)
     if content_type is None:
-        raise unprocessable("Upload a PNG, JPG or PDF.", loc=["body", "file"])
-    token = secrets.token_urlsafe(24)
-    key = f"{folder}{token}"
-    await store.put_attachment(key, data, content_type)
-    # Parallel uploads can all pass the first count. Count again after the
-    # save and take this file back when the account went over the cap.
-    if (
-        await store.count_prefix(folder, up_to=MAX_EVIDENCE_FILES + 1)
-        > MAX_EVIDENCE_FILES
-    ):
-        await store.delete(key)
-        raise _full()
+        raise unprocessable(WRONG_TYPE, loc=["body", "file"])
+    token = new_evidence_token()
+    await keep_evidence(store, org, token, data, content_type)
     return EvidenceUploadResponse(
-        url=join_url(base, f"v1/verifications/sms/evidence/{org}/{token}"),
+        url=evidence_url(base, org, token),
         content_type=content_type,
         size_bytes=len(data),
     )
@@ -257,9 +316,7 @@ async def get_sms_evidence(
         raise HTTPException(status_code=404, detail="Not found")
     # The file is served from storage, never from the API's origin, and the
     # API never streams it. Signing is local: no storage call per view.
-    url = await store.presign_get(
-        f"{SMS_EVIDENCE_PREFIX}{organization_id}/{token}", ttl_seconds=600
-    )
+    url = await store.presign_get(evidence_key(organization_id, token), ttl_seconds=600)
     return RedirectResponse(
         url,
         status_code=http_status.HTTP_302_FOUND,
@@ -295,11 +352,22 @@ async def delete_sms_evidence(
         )
     if organization_id != principal.organization_id or not _TOKEN.fullmatch(token):
         raise HTTPException(status_code=404, detail="Not found")
-    key = f"{SMS_EVIDENCE_PREFIX}{organization_id}/{token}"
+    key = evidence_key(organization_id, token)
     if not await store.count_prefix(key, up_to=1):
         raise HTTPException(status_code=404, detail="Not found")
     await store.delete(key)
     return Response(status_code=http_status.HTTP_204_NO_CONTENT)
 
 
-__all__ = ["get_evidence_store", "router"]
+__all__ = [
+    "MAX_EVIDENCE_BYTES",
+    "MAX_EVIDENCE_FILES",
+    "WRONG_TYPE",
+    "ensure_evidence_room",
+    "evidence_full",
+    "evidence_unavailable",
+    "forget_evidence",
+    "get_evidence_store",
+    "keep_evidence",
+    "router",
+]

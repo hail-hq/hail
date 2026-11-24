@@ -64,14 +64,21 @@ T-Mobile users, and no trust score. If Twilio cannot verify that company, the
 registration waits: cancel it and file again with `daily_texts=OVER_2000`.
 Twilio has no faster lane, so Hail ignores `faster_lane_ok` here.
 
-**Trial texting (United States).** Set `HAIL_SMS_TRIAL_NUMBER` to a toll-free
-number with approved toll-free verification; empty turns it off. Put that
-number in a separate operator organization: the organization that owns the
-trial number never sends trial texts. `HAIL_SMS_TRIAL_SENDING` (default
-`false`, not in `.env.example`) turns sending on; set it to `true` only once
-that verification covers trial texts. Each organization verifies one phone and
-sends up to 25 texts to it, ever. Verifying the phone needs a Hail console session, so on a
-self-host without the console leave `HAIL_SMS_TRIAL_NUMBER` empty. Code:
+**Trial texting (United States).** Trial texts come from a Hail pool number
+marked for them, never from an env var. Put a US toll-free number in the pool
+as a trial number with the ops script (dry run first, then `--yes`):
+
+```bash
+uv run python scripts/ops/sms_trial_numbers.py mark --number +18005550199 --yes
+uv run python scripts/ops/sms_trial_numbers.py status
+```
+
+The number sends once its toll-free verification is approved in the Twilio
+console: the API's verification pass (`HAIL_VERIFICATION_POLL_SECONDS`) asks
+Twilio and caches the answer on the row. A marked number is never used for
+calls. `pause --number <E.164> --yes` stops its trial texts at once. Each organization verifies one phone and gets trial texts to it.
+Verifying the phone needs a Hail console session, so on a self-host
+without the console mark no number. Code:
 [`core/hailhq/core/sms_trial.py`](../../../core/hailhq/core/sms_trial.py).
 
 **Sender ID (optional, rest-of-world).** For destinations that allow it, set a

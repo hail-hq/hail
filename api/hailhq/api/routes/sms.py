@@ -8,7 +8,7 @@ No pool fallback: SMS requires a dedicated PhoneNumber on the org (see
 Decision 6 of the SMS design spec) — inbound replies need unambiguous
 number-to-org routing, which a shared pool number can't provide.
 
-One exception: up to 25 trial texts from Hail's trial number to the
+One exception: trial texts from Hail's trial number to the
 workspace's verified trial phone. With no ``from`` a trial text is used only
 when the workspace's own number cannot text that US phone; a ``from`` equal
 to the trial number uses one directly.
@@ -81,6 +81,7 @@ from hailhq.core.sms_trial import (
     TrialBodyTooLong,
     claim_trial_send,
     trial_hint_applies,
+    trial_number_by_e164,
     trial_refusal_reason,
 )
 from hailhq.core.telemetry_identity import tag_context
@@ -268,7 +269,7 @@ async def create_sms(
     recipient_consent=true on the request body; Hail does not verify
     lawful basis to contact the recipient, the caller warrants it.
 
-    Trial texts (up to 25, only to the workspace's verified trial phone):
+    Trial texts (only to the workspace's verified trial phone):
     with no from, Hail uses one when the workspace's own number cannot text
     that US phone; set from to the trial number to use one directly.
     """
@@ -357,7 +358,10 @@ async def create_sms(
     # own number is missing or blocked, as at the agent send sites.
     # ``claim_trial_send`` decides the rest.
     trial = None
-    trial_from = body.from_ is not None and body.from_ == settings.hail_sms_trial_number
+    trial_from = (
+        body.from_ is not None
+        and await trial_number_by_e164(db, body.from_) is not None
+    )
     if trial_from or (own_checked and (own_number is None or own_block is not None)):
         try:
             trial = await claim_trial_send(
@@ -449,7 +453,10 @@ async def create_sms(
                 # name why, not that the number belongs to someone else.
                 reason = (
                     await trial_refusal_reason(
-                        db, principal.organization_id, to=body.to
+                        db,
+                        principal.organization_id,
+                        to=body.to,
+                        explicit_from=body.from_,
                     )
                     if trial_from
                     else None

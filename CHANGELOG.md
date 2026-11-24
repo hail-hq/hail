@@ -13,6 +13,53 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 - Calls: the agent finishes what it is saying before it listens again, so background talk or an echo of its own voice no longer cuts it off. A longer reply is spoken about two sentences at a time, with a short pause after each part in which the other party can speak.
 - Calls: when the agent hears speech that does not fit the conversation (a TV, a radio, other people), it says so and asks instead of answering it.
+
+## [0.37.0] (2026-11-23)
+
+A refused US texting registration now says why: Hail's fix first, then the
+carrier's own words. Trial texting help points to the console Overview.
+
+Component versions cut alongside this release:
+**`cli-v0.34.0`** (Homebrew + GitHub Releases). No database migrations.
+
+### Changed
+
+- US texting registration: a rejection now shows the carrier's own reason after Hail's fix, in the console, the API and the email.
+- Trial texting: the CLI help, the MCP tool and the API point to the console's Overview > Test a text.
+
+## [0.36.0] (2026-11-22)
+
+An AI agent using the MCP server can now upload a US texting consent
+screenshot and get its public evidence link. The consent disclosure check
+accepts policies named by their link words. Self-hosts drop the old hail-mail
+prefix columns: upgrade to 0.35.0 first.
+
+No component versions are cut alongside this release: the CLI and SDK did not
+change for users. Database migrations run on deploy.
+
+### Added
+
+- MCP: upload a US texting consent screenshot with `create_file_upload` and get its public evidence link.
+
+### Changed
+
+- US texting registration: the consent disclosure may name "Privacy Policy" and "SMS Terms" instead of their web addresses.
+- Self-host: the database drops the old `local_prefix_user` and `local_prefix_org` columns. Read `local_prefix_workspace` and `local_prefix_name`. The API still accepts the old field names. Upgrade to the 0.35.0 release first (the commit tagged `sdk-v0.25.0`).
+
+## [0.35.0] (2026-11-21)
+
+Hail-mail address fields have clearer names: `local_prefix_workspace` is the
+part before the `+`, and `local_prefix_name` is the part after it. The old
+names are deprecated. Used alone in CLI flags or SDK client methods, they still
+work with any server. With an older server, requests that use the new names
+fail with a 422 error.
+
+Component versions cut alongside this release:
+**`cli-v0.33.0`** (Homebrew + GitHub Releases) and **`sdk-v0.25.0`** (PyPI).
+Database migrations run on deploy.
+
+### Changed
+
 - Email: hail-mail prefix fields are now `local_prefix_workspace` (before the `+`) and `local_prefix_name` (after it). The old `local_prefix_user` and `local_prefix_org` still work and are deprecated.
 - CLI and SDK: the new prefix names (`--local-prefix-workspace` and `--local-prefix-name` in the CLI, `local_prefix_workspace` and `local_prefix_name` in the SDK) need a Hail server from this release or newer. The old names, used alone, still work with older servers.
 - CLI: `hail email domain` commands (register, get, verify, route) print `Workspace:` and `Name:` instead of `User prefix:` and `Org prefix:`.
@@ -38,6 +85,7 @@ Component versions cut alongside this release:
 
 - Self-host: inbound calls can use one LiveKit trunk per carrier, locked to that carrier ([LiveKit Cloud §4](docs/public/self-host/livekit-cloud.md#4-inbound-calls)).
 - Self-host: the voicebot image is about 0.9 GB smaller, and a release that changes only Hail code adds a few MB of new image layers instead of every package again.
+- Self-host: US trial texts come from pool numbers marked with `scripts/ops/sms_trial_numbers.py` ([Twilio setup](docs/public/self-host/twilio.md)). `HAIL_SMS_TRIAL_NUMBER` and `HAIL_SMS_TRIAL_SENDING` are gone.
 - **Breaking.** Self-host with a `LIVEKIT_<CARRIER>_SIP_INBOUND_TRUNK_ID` set: before upgrading, add `hail-placeholder-shared` to the shared inbound trunk's `numbers`, or empty `LIVEKIT_SIP_INBOUND_TRUNK_ID`. A shared trunk with no numbers now takes calls to every number.
 
 ### Fixed
@@ -51,7 +99,7 @@ Component versions cut alongside this release:
 Agents can call your own API with HTTP tools, answer email, and know the
 date and time. Calls return their transcript and a summary. Number
 verification can read documents before filing and resubmit after a rejection.
-A workspace can send up to 25 trial texts to its own verified US phone.
+A workspace can send trial texts to its own verified US phone.
 
 Component versions cut alongside this release:
 **`cli-v0.32.0`** (Homebrew + GitHub Releases) and **`sdk-v0.23.0`** (PyPI).
@@ -64,7 +112,7 @@ The MCP registry entry moves to 0.2.0. Database migrations run on deploy.
 - Call agents know the date, time and time zone at the start of each call.
 - Text and email reply agents know the date, time and time zone too.
 - Calls: `GET /v1/calls/{id}` returns the call's transcript, and the new `call.summarized` webhook sends the transcript and a short summary after each call.
-- US trial texting: a workspace can send up to 25 texts, ever, to its own verified phone from a Hail number, with no US registration needed. Set it up in the console under Numbers.
+- US trial texting: a workspace can send trial texts to its own verified phone from a Hail number, with no US registration needed. Set it up in the console under Numbers.
 - Rejected number registrations can be fixed and sent again for 30 days with `POST /v1/verifications/{id}/resubmit` (MCP: `resubmit_verification`).
 - `sms.received` webhooks and `received` SMS events have a new `compliance_keyword` field: `STOP`, `START` or `HELP` when the text is one of those keywords, otherwise `null`.
 - [Hail for Vercel Chat SDK](https://github.com/hail-hq/chat-sdk-adapter/releases/tag/v0.1.0): the published [`@hail-hq/chat-sdk-adapter`](https://www.npmjs.com/package/@hail-hq/chat-sdk-adapter) connects SMS webhooks and replies to Chat SDK. Hail maintains the adapter; its Vercel vendor-official listing requires separate acceptance.

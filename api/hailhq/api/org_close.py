@@ -70,6 +70,7 @@ from hailhq.core.providers.verification.base import (
     counted_discard,
 )
 from hailhq.core.retention import closed_org_ids
+from hailhq.core.sms_trial import registration_trial_number
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
@@ -281,7 +282,13 @@ async def _blocking_number(
     True), else None. A number verification covers the org's numbers of
     its carrier, country and type (older numbers do not name the
     verification they used); an SMS registration covers the numbers on it
-    and its toll-free number."""
+    and its toll-free number. A toll-free number moved into the trial
+    texting pool counts as refused: no workspace owns it, it is never
+    released, and the cancel would delete its verification at the carrier,
+    so the registration is kept for ops."""
+    trial = await registration_trial_number(db, row)
+    if trial is not None:
+        return trial, True
     live = _unreleased([row.organization_id])
     if row.purpose == "number":
         tie = and_(

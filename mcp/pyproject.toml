@@ -36,6 +36,9 @@ build-backend = "hatchling.build"
 packages = ["hailhq"]
 dev-mode-dirs = ["."]
 
+[tool.hatch.build.targets.wheel.force-include]
+"server.json" = "hailhq/mcp/server.json"
+
 [tool.uv.sources]
 hailhq-core = { workspace = true }
 

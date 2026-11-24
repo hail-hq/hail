@@ -59,16 +59,21 @@ class TwilioSmsProvider(SmsProvider):
             client = TwilioClient(self.account_sid, token)
         self._client = client
 
-    async def tollfree_approved(self, *, provider_resource_id: str, e164: str) -> bool:
+    async def tollfree_approved(
+        self, *, provider_resource_id: str, e164: str, fresh: bool = False
+    ) -> bool | None:
         """Preserve existing manual approvals without importing identity or filing.
 
         The current owned phone and every TFV record read must match this
         account and exact SID, and the newest record must be approved. An old
         approval for another/released number never authorizes this sender.
-        A "yes" is cached for ``_TOLLFREE_APPROVED_TTL_SECONDS``.
+        A "yes" is cached for ``_TOLLFREE_APPROVED_TTL_SECONDS``. None when
+        the lookup failed (timeout, carrier error): no answer either way. A
+        number Twilio no longer holds (404) or an account it refuses (401,
+        403) is False. ``fresh`` skips the cached yes.
         """
         key = (self.account_sid or "", provider_resource_id, e164)
-        if _tollfree_approved_until.get(key, 0.0) > time.monotonic():
+        if not fresh and _tollfree_approved_until.get(key, 0.0) > time.monotonic():
             return True
 
         def read():
@@ -100,13 +105,14 @@ class TwilioSmsProvider(SmsProvider):
         try:
             approved = await asyncio.wait_for(asyncio.to_thread(read), timeout=5)
         except Exception as exc:
+            status = exc.status if isinstance(exc, TwilioRestException) else None
             logger.warning(
                 "Toll-free approval lookup failed: exception=%s status=%s code=%s",
                 type(exc).__name__,
-                exc.status if isinstance(exc, TwilioRestException) else None,
+                status,
                 exc.code if isinstance(exc, TwilioRestException) else None,
             )
-            return False
+            return False if status in (401, 403, 404) else None
         if approved:
             now = time.monotonic()
             # Drop expired entries so numbers no longer texted do not pile up.
@@ -305,9 +311,11 @@ class LazyTwilioSmsProvider(SmsProvider):
             self._inner = TwilioSmsProvider()
         return self._inner
 
-    async def tollfree_approved(self, *, provider_resource_id: str, e164: str) -> bool:
+    async def tollfree_approved(
+        self, *, provider_resource_id: str, e164: str, fresh: bool = False
+    ) -> bool | None:
         return await self._provider().tollfree_approved(
-            provider_resource_id=provider_resource_id, e164=e164
+            provider_resource_id=provider_resource_id, e164=e164, fresh=fresh
         )
 
     async def send_sms(

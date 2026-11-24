@@ -9,7 +9,7 @@ Hail exposes MCP as a **remote server**. Hail Cloud uses OAuth. Paste the URL in
 - **Hail Cloud**: `https://mcp.hail.so`
 - **Self-hosted**: `http://<your-host>:8081` — refer to [Self-host](#self-host) below.
 
-The Streamable HTTP transport serves the MCP root path. There is no `/mcp` suffix and no SSE.
+Use the root URL for Streamable HTTP. The server also supports `/mcp` for clients that expect that path.
 
 > For web-based clients (Claude.ai, ChatGPT), the URL must be reachable from the client's servers — public DNS + TLS. If you want web clients to reach a self-hosted instance, tunnel it via cloudflared / tailscale funnel.
 
@@ -21,9 +21,11 @@ Example. Ask your agent: "Find me a US number that can call and text." It calls 
 { "country_code": "US", "capabilities": ["voice", "sms"] }
 ```
 
-The server exposes 43 tools. Schemas (args, validation, return shapes) are the source of truth — refer to [`mcp/hailhq/mcp/tools.py`](https://github.com/hail-hq/hail/blob/main/mcp/hailhq/mcp/tools.py).
+Use `tools/list` for the current tool descriptions and schemas. The source definitions live in [`tools.py`](https://github.com/hail-hq/hail/blob/main/mcp/hailhq/mcp/tools.py) and [`output_schemas.py`](https://github.com/hail-hq/hail/blob/main/mcp/hailhq/mcp/output_schemas.py).
 
-Every tool sets the MCP hints `readOnlyHint`, `destructiveHint`, `idempotentHint` and `openWorldHint`, so clients can ask for approval before a write. `release_number`, `delete_agent`, `acquire_number`, `submit_verification`, `resubmit_verification` and `cancel_verification` are marked destructive. The first three also need a confirmation argument (`confirm_e164`, `confirm_name`, `confirm_total_cents`). `submit_verification` and `resubmit_verification` need `attest_authorized: true`.
+Every tool sets the MCP hints `readOnlyHint`, `destructiveHint`, `idempotentHint` and `openWorldHint`, so clients can ask for approval before a write. `release_number`, `delete_agent`, `acquire_number`, `submit_verification`, `resubmit_verification`, `cancel_verification` and `amend_sms_application` are marked destructive. The first three also need a confirmation argument (`confirm_e164`, `confirm_name`, `confirm_total_cents`). `submit_verification`, `resubmit_verification` and `amend_sms_application` need `attest_authorized: true`.
+
+`route_number`, `route_email_domain` and `update_agent` are also marked destructive because they replace active routing or agent settings and can stop replies. Hosts may ask for approval before these updates; the tools do not require a separate confirmation argument. Phone routing has `openWorldHint: true` because registering or unregistering inbound voice can change carrier and LiveKit routing.
 
 `place_call`, `send_sms` and `send_email` need `recipient_consent` set to the JSON boolean `true`. Strings such as `"true"` and numbers such as `1` are refused before any request is sent.
 
@@ -37,7 +39,7 @@ Every tool sets the MCP hints `readOnlyHint`, `destructiveHint`, `idempotentHint
 | `list_sms`                      | List recent SMS messages (cursor-paginated).                                                                                    |
 | `send_email`                    | Send an outbound email (supports `attachment_ids`).                                                                             |
 | `upload_email_attachment`       | Upload a small file (under about 50 KB) as base64, get back a reusable id.                                                      |
-| `create_file_upload`            | A one-time link to upload a file with `curl`, for an email attachment or a verification document.                               |
+| `create_file_upload`            | A one-time link to upload a file with `curl`: an email attachment, a verification document or texting consent evidence.         |
 | `get_email`                     | Fetch one email's full record (body + inbound headers).                                                                         |
 | `list_emails`                   | List emails (`direction="inbound"` for replies).                                                                                |
 | `get_email_raw`                 | Presigned URL for an inbound email's raw MIME.                                                                                  |
@@ -69,6 +71,9 @@ Every tool sets the MCP hints `readOnlyHint`, `destructiveHint`, `idempotentHint
 | `submit_verification`           | Send details and documents to the carrier. Irreversible. Needs `attest_authorized`.                                             |
 | `list_verifications`            | List the org's verifications and their states (read-only).                                                                      |
 | `get_verification`              | Fetch one verification; poll it for `approved` (read-only).                                                                     |
+| `get_sms_application`           | Read saved answers for an SMS application or a rejected number registration.                                                    |
+| `preview_sms_application`       | Preview the description, consent flow and sample messages for a US texting application.                                         |
+| `amend_sms_application`         | Correct an existing SMS application that needs more information. Requires `attest_authorized`.                                  |
 | `resubmit_verification`         | File a rejected number registration again from the kept answers and files, with fixes. Irreversible. Needs `attest_authorized`. |
 | `cancel_verification`           | Cancel an `awaiting_review` one, dismiss a `rejected` one, or end an approved US SMS registration.                              |
 | `confirm_verification`          | Enter the code the carrier texted a person (`confirmation: "code"`).                                                            |
@@ -88,6 +93,7 @@ A tool call carries text only, so a file in base64 makes the model write every c
    The link needs no key and works once. The response has `size_bytes` and `sha256`; compare them with the local file (`wc -c`, `shasum -a 256`).
 
 3. Use the `id`: in `send_email`'s `attachment_ids` (`email_attachment`, 25 MB at most), or as `{"slot", "upload_id"}` in the `files` of `check_verification` and `submit_verification` (`verification_document`: JPG, PNG or PDF, 10 MB at most, usable for 1 hour).
+   For `sms_evidence` (a US texting consent screenshot: JPG, PNG or PDF, 10 MB at most), the `curl` response also has `url`, a public link. Put it in the registration's `*_evidence_url` field, for example `website_evidence_url`. Carrier reviewers open it without signing in, so remove personal information first. A workspace keeps at most 100 evidence files.
 
 This needs a client with a shell (Claude Code, Codex, Cursor). Claude.ai web chat has none: there, only `upload_email_attachment` and base64 `files` work, for small files.
 
@@ -152,7 +158,7 @@ Some numbers, for example a UK mobile, need a carrier check of the organization 
 
 9. `get_verification`: `{"verification_id": "<id>"}`. Poll every few minutes to hours, not every few seconds. Review takes business days. Hail sends no email or webhook when it ends.
 10. On `approved`: `quote_numbers` again. The offer is now `ready`. Then `acquire_number` and `route_number` as above. The organization may hold several approved verifications (several people or companies). Each entry in the offer's `verifications` has a `subject_name`: the person's or company's name from the form. When more than one is approved, show the user the names, ask which one, and pass its `id` as `verification_id` to `acquire_number`.
-11. On `rejected`: read `rejection_reason` and ask the user what to fix. For a number registration with `resubmittable: true`, `get_sms_application` shows the kept answers and file names, and `resubmit_verification` files it again with only the changes (Hail keeps them for 30 days after submit, until `kept_until`). Otherwise call `cancel_verification` to dismiss it and submit a new one.
+11. On `rejected`: read `rejection_reason` and ask the user what to fix. If it says the carrier suspended the registration, do not file a new one: a new filing cannot fix a suspension. Ask the user to contact support, as the reason says. For a number registration with `resubmittable: true`, `get_sms_application` shows the kept answers and file names, and `resubmit_verification` files it again with only the changes (Hail keeps them for 30 days after submit, until `kept_until`). Otherwise call `cancel_verification` to dismiss it and submit a new one.
 
 A person's US texting registration may wait on the person. `confirmation: "code"`: ask them for the code the carrier texted and call `confirm_verification` with `{"verification_id": "<id>", "code": "<code>"}`. `confirmation: "reply"`: they answer the carrier's text; nothing to call.
 
