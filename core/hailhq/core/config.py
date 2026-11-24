@@ -1,3 +1,4 @@
+import re
 from typing import Literal
 from uuid import UUID
 
@@ -17,6 +18,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # through the deploy flag alone.
 SELF_HOSTED_ORG_ID = UUID(int=0)
 
+# HAIL_SIP_INBOUND_SECRET goes into a SIP URI as is (Twilio origination URL),
+# so only URI-safe characters; long enough not to guess. Checked where it is
+# used (inbound_calls.py, scripts/ops/sip_trunks.py), never at startup.
+SIP_SECRET_PATTERN = re.compile(r"[A-Za-z0-9_-]{20,}")
+
 
 class VoicePreference(BaseModel):
     """Optional editorial preference, still checked against live capabilities."""
@@ -32,6 +38,8 @@ class Settings(BaseSettings):
         env_file=(".env", ".env.local"),
         env_file_encoding="utf-8",
         extra="ignore",
+        # A startup error must never print a secret value.
+        hide_input_in_errors=True,
     )
 
     # Optional backend observability (EU only).
@@ -113,6 +121,14 @@ class Settings(BaseSettings):
     # attached to it when they route calls to an agent. Empty = Twilio
     # numbers cannot take calls.
     twilio_sip_trunk_sid: str = ""
+    # Shared secret Twilio sends on every call to LiveKit, as the X-Hail-Secret
+    # SIP header in the trunk's origination URI. LiveKit maps it to a
+    # participant attribute; a Twilio call without it is refused
+    # (inbound_calls.py). Set on both sides by scripts/ops/sip_trunks.py.
+    # Empty = no check (self-host default). Never stops startup: a value
+    # that does not match SIP_SECRET_PATTERN, or no Twilio trunk of its own,
+    # turns the check off with an ERROR log (inbound_calls.py).
+    hail_sip_inbound_secret: str = ""
     # Hail's approved primary customer profile (Trust Hub, business identity
     # "ISV Reseller or Partner"). Customers' 10DLC profiles are assigned to it.
     twilio_primary_profile_sid: str = ""

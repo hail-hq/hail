@@ -49,7 +49,12 @@ from hailhq.core.db import session_scope
 from hailhq.core.directory import DirectoryEntry, find_by_phone
 from hailhq.core.disclosure import after_greeting_text, disclosure_text
 from hailhq.core.handover import HANDOVER_DEFAULT_MAX_SECONDS
-from hailhq.core.inbound_calls import Rejected, SipAttributes, open_inbound_call
+from hailhq.core.inbound_calls import (
+    SIP_SECRET_ATTRIBUTE,
+    Rejected,
+    SipAttributes,
+    open_inbound_call,
+)
 from hailhq.core.internal_webhook import notify_usage_event_recorded
 from hailhq.core.languages import SUPPORTED_LANGUAGES
 from hailhq.core.livekit import VOICE_READY_ATTRIBUTE
@@ -1535,7 +1540,8 @@ async def open_inbound_from_room(
 
     Reads the SIP participant's attributes (``sip.trunkPhoneNumber`` is the
     org number, ``sip.phoneNumber`` the caller, ``sip.trunkID`` the LiveKit
-    inbound trunk) and asks core who answers. On a refusal the room is
+    inbound trunk, ``hail.sip_secret`` the Twilio shared secret) and asks
+    core who answers. On a refusal the room is
     deleted, which hangs up on the caller, and ``None`` is returned so the
     entrypoint exits without starting a session.
     """
@@ -1559,6 +1565,8 @@ async def open_inbound_from_room(
         provider_call_sid=attrs.get("sip.callIDFull")
         or attrs.get("sip.callID")
         or None,
+        # The X-Hail-Secret header, mapped by the LiveKit Twilio trunk.
+        sip_secret=attrs.get(SIP_SECRET_ATTRIBUTE, ""),
     )
     try:
         async with session_scope() as db:

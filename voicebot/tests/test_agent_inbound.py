@@ -10,7 +10,12 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from hailhq.core.inbound_calls import Accepted, Rejected, SipAttributes
+from hailhq.core.inbound_calls import (
+    SIP_SECRET_ATTRIBUTE,
+    Accepted,
+    Rejected,
+    SipAttributes,
+)
 from hailhq.core.models import Agent, Call, PhoneNumber, Sms
 from hailhq.voicebot import agent as agent_mod
 from hailhq.voicebot.agent import parse_metadata
@@ -99,6 +104,25 @@ async def test_accepted_returns_metadata_from_sip_attributes(
     ]
     assert ctx.delete_room_calls == 0
     assert ctx.shutdown_calls == []
+
+
+async def test_the_twilio_secret_attribute_is_passed_on(
+    monkeypatch: pytest.MonkeyPatch, no_db
+) -> None:
+    """The LiveKit Twilio trunk maps the X-Hail-Secret header to this
+    attribute (infra/livekit/inbound-trunks.json); core checks it."""
+    seen: list[SipAttributes] = []
+
+    async def fake_open(_db, attrs):
+        seen.append(attrs)
+        return Accepted({"call_id": uuid.uuid4(), "direction": "inbound"})
+
+    monkeypatch.setattr(agent_mod, "open_inbound_call", fake_open)
+    ctx = _Ctx(_SipParticipant({**_ATTRS, SIP_SECRET_ATTRIBUTE: "from-twilio"}))
+
+    await agent_mod.open_inbound_from_room(ctx)  # type: ignore[arg-type]
+
+    assert [a.sip_secret for a in seen] == ["from-twilio"]
 
 
 async def test_rejected_deletes_room_and_exits(
