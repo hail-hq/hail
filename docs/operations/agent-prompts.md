@@ -57,8 +57,10 @@ quotes the notice and the line as JSON strings.
 - If the model turn fails, or ends with no words, the line is said as
   written.
 - Exact wording is not guaranteed: the model writes the turn.
-- The phone-menu path joins the two as written: the turn loop is already
-  answering a person.
+- On the phone-menu path, when a person was heard, the two are joined as
+  written: the turn loop is already answering that person.
+- Replies stay held until the greeting turn ends, and that turn cannot call
+  tools. If the person talks over the notice, the line is said as written.
 - Inbound calls keep the literal greeting: replies are not held for the
   opening there.
 

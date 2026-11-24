@@ -229,11 +229,21 @@ class SpeechSanitizingAgent(Agent):
         super().__init__(**kwargs)
         self._opening_pending = opening_pending
         self._held_words: list[str] = []
+        # Instructions of the explicit opening turn that may run while the
+        # opening is held (the greeting after the AI notice).
+        self._opening_turn: str | None = None
         self.phone_menu: PhoneMenu | None = None
+
+    def allow_opening_turn(self, instructions: str) -> None:
+        """Let the one explicit turn with these ``instructions`` through
+        while the opening is still held; replies to the person stay held
+        until :meth:`release_opening`."""
+        self._opening_turn = instructions
 
     def release_opening(self) -> str | None:
         """Let replies through. Returns what the person said while held."""
         self._opening_pending = False
+        self._opening_turn = None
         # An early (preemptive) reply started while held is empty, because
         # llm_node returned None. Drop it so the next turn is generated fresh
         # instead of reusing it. Private in livekit-agents 1.8.8;
@@ -289,7 +299,7 @@ class SpeechSanitizingAgent(Agent):
                 )
 
     async def llm_node(self, chat_ctx: Any, tools: Any, model_settings: Any) -> Any:
-        if self._opening_pending:
+        if self._opening_pending and not self._is_opening_turn(chat_ctx):
             # Preemptive generation can run before on_user_turn_completed.
             return None
         if self.phone_menu is not None and self.phone_menu.active:
@@ -301,6 +311,18 @@ class SpeechSanitizingAgent(Agent):
                 role="system", content=ivr_navigation_instructions(None, names)
             )
         return Agent.default.llm_node(self, chat_ctx, tools, model_settings)
+
+    def _is_opening_turn(self, chat_ctx: Any) -> bool:
+        """True for the explicit opening turn: LiveKit adds a reply's
+        instructions to its chat as a system message."""
+        wanted = self._opening_turn
+        if not wanted:
+            return False
+        return any(
+            getattr(item, "role", None) == "system"
+            and wanted in (getattr(item, "text_content", None) or "")
+            for item in getattr(chat_ctx, "items", [])
+        )
 
     async def tts_node(self, text: Any, model_settings: Any) -> Any:
         if self.phone_menu is not None and self.phone_menu.active:
@@ -975,46 +997,65 @@ def opening_instructions(
     return f"{base} They have not said anything yet."
 
 
-def _say_first_message(session: Any, first_message: str, disclosure: str) -> None:
+def _say_first_message(
+    session: Any,
+    first_message: str,
+    disclosure: str,
+    agent: Any = None,
+    on_opened: Callable[[], str | None] | None = None,
+) -> None:
     """Have the agent say ``first_message`` after the disclosure (see
-    :func:`first_message_instructions`). If that turn ends without saying a
-    word or calling a tool, however it ended (a model error, or a caller
-    turn that cut in first), say the line as written: the call must not
-    lose its opening line. A turn that spoke or acted is left as is, so the
-    greeting never restarts."""
-    handle = session.generate_reply(
-        instructions=first_message_instructions(first_message, disclosure)
-    )
+    :func:`first_message_instructions`), as a text-only turn. Replies to the
+    person stay held until this turn ends (``agent`` lets only this turn
+    through), so a "Hello?" during it gets no competing reply. If the turn
+    ends without a word, however it ended, the line is said as written, so
+    the call never loses its opening line; a turn that spoke is left as is,
+    so the greeting never restarts. ``on_opened`` releases the hold after."""
+    instructions = first_message_instructions(first_message, disclosure)
+    if agent is not None:
+        agent.allow_opening_turn(instructions)
+    handle = session.generate_reply(instructions=instructions, tool_choice="none")
     add_done = getattr(handle, "add_done_callback", None)
     if add_done is None:
+        if on_opened is not None:
+            on_opened()
         return
 
-    def on_done(done: Any) -> None:
-        items = getattr(done, "chat_items", []) or []
-        acted = any(
-            getattr(item, "type", None) == "function_call"
-            or (
+    async def finish(done: Any) -> None:
+        try:
+            spoke = any(
                 getattr(item, "role", None) == "assistant"
                 and (getattr(item, "text_content", None) or "").strip()
+                for item in getattr(done, "chat_items", []) or []
             )
-            for item in items
-        )
-        if acted:
-            return
-        try:
-            session.say(first_message, allow_interruptions=True)
+            if not spoke:
+                await session.say(first_message, allow_interruptions=True)
+        except RuntimeError:
+            pass  # the call ended: nothing to say
         except Exception:
             logger.exception("could not say the first message after a failed turn")
+        finally:
+            if on_opened is not None:
+                on_opened()
+
+    def on_done(done: Any) -> None:
+        task = asyncio.ensure_future(finish(done))
+        _BACKGROUND.add(task)
+        task.add_done_callback(_BACKGROUND.discard)
 
     add_done(on_done)
+
+
+# Keeps fire-and-forget tasks alive until they finish.
+_BACKGROUND: set[asyncio.Task[None]] = set()
 
 
 def first_message_instructions(first_message: str, disclosure: str) -> str:
     """The prompt for the opening turn that says the agent's ``first_message``
     right after the AI ``disclosure``, as one greeting with it. Both are
     quoted as JSON strings, so a quote inside them cannot end the quote. The
-    other party's pickup words stay out: they are untrusted, and the chat
-    already holds anything they said."""
+    other party's pickup words stay out: they are untrusted. Words held
+    during the turn stay in the chat for the next reply."""
     return (
         f"You just said this introduction: {json.dumps(disclosure, ensure_ascii=False)}. "
         "Now say your opening line, below, so the two sound like one greeting. "
@@ -1099,6 +1140,7 @@ async def speak_greeting(
     generate_opening: bool = True,
     on_opened: Callable[[], str | None] | None = None,
     language: str | None = None,
+    agent: Any = None,
 ) -> None:
     """Open the call: disclosure (unless opted out), then the first message.
 
@@ -1197,7 +1239,12 @@ async def speak_greeting(
                 # opening, so the caller is not greeted twice ("Hi, this is an
                 # AI assistant ... Hi, this is ..."). Outbound only: there the
                 # pickup turn is cleared and replies wait for the opening.
-                await session.say(disclosure, allow_interruptions=True)
+                notice = await session.say(disclosure, allow_interruptions=True)
+                if getattr(notice, "interrupted", False):
+                    # The person talked over the notice: say the line as
+                    # written instead of telling the model the notice played.
+                    await session.say(first_message, allow_interruptions=True)
+                    return
                 blended = True
                 return
             else:
@@ -1207,14 +1254,20 @@ async def speak_greeting(
         if disclosure:
             await session.say(disclosure, allow_interruptions=True)
     finally:
-        # Release even when say fails, so the agent is never left unable to reply.
-        heard = on_opened() if on_opened is not None else None
         if blended:
-            _say_first_message(session, first_message, disclosure)
+            # The greeting turn releases the hold when it ends.
+            _say_first_message(session, first_message, disclosure, agent, on_opened)
+            heard = None
+        else:
+            # Release even when say fails, so the agent is never left unable
+            # to reply.
+            heard = on_opened() if on_opened is not None else None
     # An inbound caller dialed in: with no ``first_message`` the agent waits
     # for them to speak (the documented ``first_message: null`` behavior). The
     # generated opening is written for a call Hail placed ("say why you are
     # calling") and would tell the caller the agent called them.
+    if blended:
+        return
     if generate_opening and not inbound:
         session.generate_reply(
             instructions=opening_instructions(
@@ -1269,6 +1322,7 @@ def arm_deferred_greeting(
                 generate_opening=not text,
                 on_opened=agent.release_opening,
                 language=language,
+                agent=agent,
             )
         except Exception:
             # The session can close while the greeting plays.
@@ -2978,6 +3032,7 @@ async def _run_call(
                 pickup_transcript=amd_result.transcript if amd_result else None,
                 on_opened=agent.release_opening,
                 language=language,
+                agent=agent,
             )
             recovery.start()
         except Exception:

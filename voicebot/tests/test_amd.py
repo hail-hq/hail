@@ -621,7 +621,7 @@ class _FakeAmdSession:
         for fn in self.handlers.get("user_state_changed", []):
             fn(ev)
 
-    def generate_reply(self, *, instructions: str) -> Any:
+    def generate_reply(self, *, instructions: str, **_kwargs: Any) -> Any:
         self.replies.append(instructions)
         return SimpleNamespace()
 

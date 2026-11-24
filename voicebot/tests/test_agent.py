@@ -37,6 +37,7 @@ from hailhq.voicebot.agent import (
     SIP_CALL_STATUS_ATTRIBUTE,
     SOFT_CAP_END_REASON,
     VOICE_PREAMBLE,
+    SpeechSanitizingAgent,
     _sanitize_tts_stream,
     attach_event_handlers,
     build_instructions,
@@ -62,6 +63,7 @@ from hailhq.voicebot.amd import IVR_TOOL_LINES, ivr_navigation_instructions
 from hailhq.voicebot.spoken_lines import SPOKEN_LINES
 from livekit import rtc
 from livekit.agents import Agent, AgentSession
+from livekit.agents.llm import ChatContext
 from livekit.api import SipCallError
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -1158,6 +1160,54 @@ class _DoneHandle:
         return self._error
 
 
+async def test_greeting_turn_is_text_only_and_passes_the_hold() -> None:
+    """The greeting turn cannot call tools, and it is the one turn the held
+    opening lets through; a reply to the person is still held."""
+    agent = SpeechSanitizingAgent(instructions="test", opening_pending=True)
+    session = FakeAnnouncingSession()
+    await speak_greeting(
+        session, {"first_message": "Hi, about your order."}, agent=agent
+    )
+    assert session.generate_reply_options == [{"tool_choice": "none"}]
+
+    turn = ChatContext()
+    turn.add_message(role="system", content=session.generate_reply_calls[0])
+    assert agent._is_opening_turn(turn)
+    other = ChatContext()
+    other.add_message(role="user", content="Hello?")
+    assert not agent._is_opening_turn(other)
+    assert await agent.llm_node(other, [], None) is None
+
+
+async def test_an_interrupted_notice_is_followed_by_the_line_as_written() -> None:
+    """If the person talks over the AI notice, the model is not told it
+    played: the line is said as written."""
+    session = FakeAnnouncingSession()
+
+    class Cut:
+        interrupted = True
+
+        def __await__(self):
+            async def done():
+                return self
+
+            return done().__await__()
+
+    said = session.say
+
+    def say(text, **kw):
+        said(text, **kw)
+        return Cut()
+
+    session.say = say
+    await speak_greeting(session, {"first_message": "Hi, about your order."})
+    assert session.say_calls == [
+        (AI_DISCLOSURE_LINE, True),
+        ("Hi, about your order.", True),
+    ]
+    assert session.generate_reply_calls == []
+
+
 @pytest.mark.parametrize(
     ("error", "words", "interrupted", "tool", "fallback"),
     [
@@ -1167,7 +1217,6 @@ class _DoneHandle:
         (None, "Calling about your order.", False, False, False),
         # Words already spoken: never restart the greeting, even on an error.
         (RuntimeError("tts down"), "Calling about", False, False, False),
-        (None, "", False, True, False),  # the turn hung up instead
     ],
 )
 async def test_failed_greeting_turn_says_the_line_as_written(
@@ -1177,14 +1226,24 @@ async def test_failed_greeting_turn_says_the_line_as_written(
     handle = _DoneHandle(error, words, interrupted, tool)
     session.generate_reply = lambda **_kw: handle
 
-    await speak_greeting(session, {"first_message": "Hi, about your order."})
+    released = []
+    await speak_greeting(
+        session,
+        {"first_message": "Hi, about your order."},
+        on_opened=lambda: released.append(True),
+    )
+    # Replies stay held while the greeting turn runs.
+    assert released == []
 
     for callback in handle.callbacks:
         callback(handle)
+    for _ in range(3):
+        await asyncio.sleep(0)
     expected = [(AI_DISCLOSURE_LINE, True)]
     if fallback:
         expected.append(("Hi, about your order.", True))
     assert session.say_calls == expected
+    assert released == [True]
 
 
 async def test_generated_opening_reacts_to_pickup_transcript() -> None:

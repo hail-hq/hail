@@ -2252,8 +2252,8 @@ _AGENT_FIRST_MESSAGE = _d(
     "Greeting spoken after the AI disclosure. On outbound calls the agent says "
     "it as one greeting with the disclosure: word for word, except a hello the "
     "disclosure already said. Exact wording is not "
-    "guaranteed. Inbound calls say it as written. Without one, an inbound "
-    "agent waits for the caller."
+    "guaranteed. Inbound calls keep its words (the default AI line goes after "
+    "its first sentence). Without one, an inbound agent waits for the caller."
 )
 _AGENT_AI_DISCLOSURE = _d("Speak the AI disclosure line first on every call.")
 _AGENT_RECORDING = _d(
