@@ -51,10 +51,11 @@ class VoiceConfig(BaseModel):
     vad: Literal["silero"] = "silero"
     turn_detection: Literal["livekit"] = "livekit"
     # Spoken language for the call (lowercase ISO 639-1, e.g. "da").
-    # The *server* enforces the supported set (39 codes — see
-    # docs/languages.md and the OpenAPI enum); the SDK deliberately stays
+    # The *server* enforces the supported set (39 codes, see
+    # docs/public/languages.md and the OpenAPI enum); the SDK deliberately stays
     # permissive (shape-only) so existing SDK releases keep working when
-    # languages are added server-side. None -> provider defaults (English).
+    # languages are added server-side. None -> the agent's language, then the
+    # workspace TTS language, then English.
     language: str | None = Field(default=None, pattern=r"^[a-z]{2}$")
 
 

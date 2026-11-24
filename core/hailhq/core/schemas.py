@@ -180,9 +180,11 @@ class VoiceConfig(BaseModel):
         default=None,
         description=(
             "Spoken language for the call as a lowercase ISO 639-1 code "
-            "(e.g. 'da'). One of the 39 supported codes — see "
-            "docs/languages.md. Applied to STT, TTS, and turn detection. "
-            "Omitted: the providers' defaults (English)."
+            "(e.g. 'da'). One of the 39 supported codes: see "
+            "https://hail.so/docs/languages. Applied to STT, TTS, and turn "
+            "detection. Omitted on a call: the saved agent's language when "
+            "the call sends no voice_config, then the language of the "
+            "workspace's text-to-speech provider, then English."
         ),
     )
 
@@ -262,8 +264,9 @@ class CallCreate(ConsentAttestationMixin):
     first_message: str | None = Field(
         default=None,
         description=(
-            "Opening line the agent speaks first. Omitted: the agent waits "
-            "for the callee to speak first."
+            "Opening line the agent speaks first, after the AI disclosure "
+            "line. Omitted: the agent's model writes a short opening after "
+            "pickup."
         ),
     )
     recording_enabled: bool | None = Field(
@@ -294,8 +297,8 @@ class CallCreate(ConsentAttestationMixin):
     metadata: dict = Field(
         default_factory=dict,
         description=(
-            "Free-form JSON object attached to the call and echoed back on "
-            "reads. Not interpreted by Hail. Keys starting with "
+            "Free-form JSON object stored with the call. Not interpreted by "
+            "Hail, and not returned by GET /v1/calls/{call_id}. Keys starting with "
             "'recording_' and the key 'failure_code' are reserved and rejected."
         ),
     )
@@ -520,8 +523,8 @@ class SmsCreate(ConsentAttestationMixin):
     metadata: dict = Field(
         default_factory=dict,
         description=(
-            "Free-form JSON object attached to the message and echoed back "
-            "on reads. Not interpreted by Hail. The key 'sms_trial' is "
+            "Free-form JSON object stored with the message. Not interpreted "
+            "by Hail, and not returned by GET /v1/sms/{sms_id}. The key 'sms_trial' is "
             "reserved and rejected."
         ),
     )
@@ -1352,7 +1355,7 @@ class AgentCreate(BaseModel):
     first_message: str | None = Field(
         default=None,
         max_length=1000,
-        description="Opening line spoken after the AI line. Omitted: the agent waits for the other side to speak first.",
+        description="Opening line spoken after the AI line. Omitted: on a call the agent answers, it waits for the caller to speak first; on a call it places, its model writes a short opening after pickup.",
     )
     recording_enabled: bool | None = Field(
         default=None,

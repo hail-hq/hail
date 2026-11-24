@@ -3200,7 +3200,8 @@ def register_tools(
 
         Without a voice override, the built-in providers use the deployment's
         configured voice. A workspace provider uses its configured voice or its
-        own default. An omitted language uses the speech providers' defaults (English).
+        own default. An omitted language uses the workspace text-to-speech language,
+        then English.
         Without a tool list, the workspace's channels determine the available tools.
         The workspace call limit applies unless overridden, and the handover limit
         defaults to 30 minutes from the contact answering.
