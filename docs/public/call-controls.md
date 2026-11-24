@@ -40,8 +40,10 @@ Every field on `POST /v1/calls` applies to that call only.
 - `recording_enabled`: `true` or `false` for this call. Omitted, the agent
   and then the workspace setting decide.
 - `ai_disclosure`: speak the AI line first (default `true`).
-- `metadata`: a JSON object. Hail stores it and returns it on reads. The
-  model does not see it. Put what the agent must know in `system_prompt`.
+- `metadata`: a JSON object that Hail stores with the call. The model does
+  not see it, and `GET /v1/calls/{call_id}` does not return it. Keep your
+  own record keyed by the call `id`. Put what the agent must know in
+  `system_prompt`.
   Keys that start with `recording_`, and the key `failure_code`, are
   reserved and refused with `422`.
 - `agent_id`: start from a saved [agent](agents.md). Any field you send on

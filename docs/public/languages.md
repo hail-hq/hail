@@ -9,7 +9,8 @@ hail call +14155550100 --language es \
   --recipient-consent
 ```
 
-The same field works on `POST /v1/calls`, on agents, and in the MCP
+Set it as `voice_config.language` on `POST /v1/calls` or on an agent, with
+`hail call --language`, or with the `language` argument of the MCP
 `place_call` tool. Omitted on a call, the agent's language applies, or
 English if the call has no agent. Hail picks the
 speech-to-text provider and turn detection for each language. The agent's
