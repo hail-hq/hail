@@ -1359,7 +1359,7 @@ async def test_check_setup_failure_is_livekit_failed(
     assert await connected_numbers._checks_today(async_session, ORG, e164, now) == 0
 
 
-async def test_checks_today_skips_only_pre_dial_failures(
+async def test_checks_today_skips_only_hail_setup_failures(
     async_session, pbx_number, pool_number
 ):
     now = datetime.now(timezone.utc)
@@ -1367,7 +1367,7 @@ async def test_checks_today_skips_only_pre_dial_failures(
         "carrier_route_failed": False,
         "room_create_failed": False,
         "agent_dispatch_failed": False,
-        "sip_participant_failed": True,
+        "sip_participant_failed": False,
         "sweeper_timeout": True,
         "normal_hangup": True,
         "user_unavailable": True,
@@ -1398,14 +1398,33 @@ async def test_checks_today_skips_only_pre_dial_failures(
     )
 
 
-async def test_check_dial_failure_still_counts_and_reports_no_call(
+async def test_check_livekit_dial_error_is_a_setup_failure(
     async_session, check_lk, pbx_number, pool_number
 ):
+    """A LiveKit timeout or server error before any SIP answer is Hail's
+    failure: livekit_failed, and not a check the customer used up."""
     check_lk.create_sip_participant.side_effect = RuntimeError("sip down")
-    result = await check_connected_number(async_session, check_lk, pbx_number)
-    assert (result.state, result.reason) == ("unverified", "no_call_arrived")
+    with pytest.raises(ConnectedNumberError) as e:
+        await check_connected_number(async_session, check_lk, pbx_number)
+    assert e.value.code == "livekit_failed"
     call = await _the_check_call(async_session, pbx_number.id)
     assert (call.status, call.end_reason) == ("failed", "sip_participant_failed")
+    now = datetime.now(timezone.utc)
+    assert (
+        await connected_numbers._checks_today(async_session, ORG, pbx_number.e164, now)
+        == 0
+    )
+
+
+async def test_check_sip_refusal_counts_and_reports_no_call(
+    async_session, check_lk, pbx_number, pool_number
+):
+    """A SIP answer from the carrier means the call was tried: it counts."""
+    check_lk.create_sip_participant.side_effect = SipCallError(
+        "unavailable", "busy", status=200, metadata={"sip_status_code": "486"}
+    )
+    result = await check_connected_number(async_session, check_lk, pbx_number)
+    assert (result.state, result.reason) == ("unverified", "no_call_arrived")
     now = datetime.now(timezone.utc)
     assert (
         await connected_numbers._checks_today(async_session, ORG, pbx_number.e164, now)

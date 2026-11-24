@@ -671,11 +671,14 @@ CHECK_POLL_SECONDS = 0.25
 # A wrong-trunk INVITE (``not_authenticated``) is not final: the right trunk
 # can still arrive before the deadline.
 _CHECK_FINAL = ("passed", "code_not_received")
-# Hail-side failures before the dial: not a check the customer used up.
+# Hail-side failures: not a check the customer used up. A dial that LiveKit
+# itself fails (a timeout, a server error) counts here too; a SIP answer from
+# the carrier (``SipCallError``) means the call was tried and does count.
 _CHECK_SETUP_FAILURES = (
     CallEndReason.CARRIER_ROUTE_FAILED.value,
     CallEndReason.ROOM_CREATE_FAILED.value,
     CallEndReason.AGENT_DISPATCH_FAILED.value,
+    CallEndReason.SIP_PARTICIPANT_FAILED.value,
 )
 
 
@@ -688,8 +691,9 @@ async def _checks_today(
 ) -> int:
     """Check calls to ``e164`` in this organization in the last 24 h, by
     number, not by row id: removing and adding the number again gives it a
-    new id but not a new allowance. A Hail-side failure before the dial does
-    not count; one in flight (no end reason yet) does."""
+    new id but not a new allowance. A Hail-side setup failure (including a
+    dial LiveKit itself failed) does not count; one in flight (no end reason
+    yet) does."""
     return await db.scalar(
         select(func.count())
         .select_from(Call)
