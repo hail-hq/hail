@@ -1014,7 +1014,13 @@ def _say_first_message(
     instructions = first_message_instructions(first_message, disclosure)
     if agent is not None:
         agent.allow_opening_turn(instructions)
-    handle = session.generate_reply(instructions=instructions, tool_choice="none")
+    try:
+        handle = session.generate_reply(instructions=instructions, tool_choice="none")
+    except Exception:
+        # Never leave replies held for the rest of the call.
+        if on_opened is not None:
+            on_opened()
+        raise
     add_done = getattr(handle, "add_done_callback", None)
     if add_done is None:
         if on_opened is not None:
@@ -1035,8 +1041,13 @@ def _say_first_message(
         except Exception:
             logger.exception("could not say the first message after a failed turn")
         finally:
-            if on_opened is not None:
-                on_opened()
+            heard = on_opened() if on_opened is not None else None
+        if heard:
+            # Words held during the greeting are in the chat: answer them.
+            try:
+                session.generate_reply()
+            except RuntimeError:
+                pass  # the call ended
 
     def on_done(done: Any) -> None:
         task = asyncio.ensure_future(finish(done))
@@ -1141,8 +1152,11 @@ async def speak_greeting(
     on_opened: Callable[[], str | None] | None = None,
     language: str | None = None,
     agent: Any = None,
+    blend: bool = True,
 ) -> None:
     """Open the call: disclosure (unless opted out), then the first message.
+    ``blend`` False keeps the literal join of disclosure and first message:
+    a customer's own model may ignore the greeting instruction.
 
     The disclosure leads by default and can only be skipped, never
     customized or reordered: its template is not reachable via
@@ -1234,7 +1248,7 @@ async def speak_greeting(
                 # The AI line sits after the first sentence: a caller who
                 # speaks over the greeting must still hear it.
                 interruptible = False
-            elif generate_opening and not inbound:
+            elif blend and generate_opening and not inbound:
                 # The agent says the greeting right after the notice, as one
                 # opening, so the caller is not greeted twice ("Hi, this is an
                 # AI assistant ... Hi, this is ..."). Outbound only: there the
@@ -1291,6 +1305,7 @@ def arm_deferred_greeting(
     on_machine: Callable[[AMDCategory], Awaitable[None]],
     classifier: LLM | None,
     language: str | None = None,
+    blend: bool = True,
 ) -> None:
     """Release the greeting once completed speech is not a recorded menu.
 
@@ -1323,6 +1338,7 @@ def arm_deferred_greeting(
                 on_opened=agent.release_opening,
                 language=language,
                 agent=agent,
+                blend=blend,
             )
         except Exception:
             # The session can close while the greeting plays.
@@ -2675,6 +2691,9 @@ async def _run_call(
         speech.on_state(getattr(ev, "new_state", None), time.monotonic())
 
     other_party_task = asyncio.create_task(other_party(call_id))
+    # A customer's own model may ignore Hail's greeting instruction: its
+    # calls keep the literal greeting (see speak_greeting).
+    own_model = llm_cfg is not None or org_cfgs.get("llm") is not None
     agent_tools, agent_api = await build_tools_safely(
         metadata,
         call_id,
@@ -3015,6 +3034,7 @@ async def _run_call(
             # AMD's classifier, built once per call (see build_amd_models).
             classifier=models.llm,
             language=language,
+            blend=not own_model,
         )
         session.generate_reply(
             instructions=ivr_navigation_instructions(amd_result.transcript, tool_names)
@@ -3033,6 +3053,7 @@ async def _run_call(
                 on_opened=agent.release_opening,
                 language=language,
                 agent=agent,
+                blend=not own_model,
             )
             recovery.start()
         except Exception:

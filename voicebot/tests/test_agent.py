@@ -1145,12 +1145,11 @@ def test_first_message_instructions_quote_the_notice_and_the_line() -> None:
 
 
 class _DoneHandle:
-    def __init__(self, error=None, words="", interrupted=False, tool=False):
+    def __init__(self, error=None, words=""):
         self._error = error
-        self.interrupted = interrupted
         self.chat_items = (
             [SimpleNamespace(role="assistant", text_content=words)] if words else []
-        ) + ([SimpleNamespace(type="function_call", name="end_call")] if tool else [])
+        )
         self.callbacks = []
 
     def add_done_callback(self, callback):
@@ -1209,23 +1208,16 @@ async def test_an_interrupted_notice_is_followed_by_the_line_as_written() -> Non
 
 
 @pytest.mark.parametrize(
-    ("error", "words", "interrupted", "tool", "fallback"),
+    ("words", "fallback"),
     [
-        (RuntimeError("model down"), "", False, False, True),
-        (None, "", False, False, True),  # no words
-        (None, "", True, False, True),  # a caller turn cut in before any word
-        (None, "Calling about your order.", False, False, False),
-        # Words already spoken: never restart the greeting, even on an error.
-        (RuntimeError("tts down"), "Calling about", False, False, False),
+        ("", True),  # an error, an interruption or an empty turn: no words
+        ("Calling about", False),  # words spoken: never restart the greeting
     ],
 )
-async def test_failed_greeting_turn_says_the_line_as_written(
-    error, words, interrupted, tool, fallback
-):
+async def test_failed_greeting_turn_says_the_line_as_written(words, fallback):
     session = FakeAnnouncingSession()
-    handle = _DoneHandle(error, words, interrupted, tool)
+    handle = _DoneHandle(None, words)
     session.generate_reply = lambda **_kw: handle
-
     released = []
     await speak_greeting(
         session,
@@ -1244,6 +1236,40 @@ async def test_failed_greeting_turn_says_the_line_as_written(
         expected.append(("Hi, about your order.", True))
     assert session.say_calls == expected
     assert released == [True]
+
+
+async def test_words_held_during_the_greeting_get_an_answer() -> None:
+    session = FakeAnnouncingSession()
+    handle = _DoneHandle(None, "Calling about your order.")
+    replies = []
+
+    def generate_reply(**kwargs):
+        replies.append(kwargs)
+        return handle
+
+    session.generate_reply = generate_reply
+    await speak_greeting(
+        session,
+        {"first_message": "Hi, about your order."},
+        on_opened=lambda: "Who is this?",
+    )
+    for callback in handle.callbacks:
+        callback(handle)
+    for _ in range(3):
+        await asyncio.sleep(0)
+    # The greeting turn, then a plain reply to the held words.
+    assert len(replies) == 2
+    assert replies[1] == {}
+
+
+async def test_own_model_calls_keep_the_literal_greeting() -> None:
+    """A customer's own model may ignore the greeting instruction."""
+    session = FakeAnnouncingSession()
+    await speak_greeting(
+        session, {"first_message": "Hi, about your order."}, blend=False
+    )
+    assert session.say_calls == [(f"{AI_DISCLOSURE_LINE} Hi, about your order.", True)]
+    assert session.generate_reply_calls == []
 
 
 async def test_generated_opening_reacts_to_pickup_transcript() -> None:

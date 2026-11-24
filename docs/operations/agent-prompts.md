@@ -63,6 +63,9 @@ quotes the notice and the line as JSON strings.
   tools. If the person talks over the notice, the line is said as written.
 - Inbound calls keep the literal greeting: replies are not held for the
   opening there.
+- Calls on a customer's own model keep the literal greeting: their endpoint
+  may ignore the instruction.
+- Words the person says during the greeting are answered right after it.
 
 ## Closing calls
 
