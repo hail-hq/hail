@@ -179,7 +179,7 @@ LiveKit Cloud checks `allowed_addresses` only once LiveKit enables that check fo
   - After the replace it reads the trunk again and adds back, one at a time, any number of the copy it lost (`re-add ...`). A number LiveKit refuses prints `could not re-add <number>` and stops with an error: add it by hand (`lk sip inbound update --numbers`).
   - If any other field differs from the copy (allowed addresses, digest user and the rest), it prints `the replace changed <field>: <before> -> <now>` and stops with an error: restore those fields by hand (`lk sip inbound update`), then run `apply` again.
   - A number routed in that same second is not in the copy and is lost: compare the number count in `status` before and after.
-- The header travels in plain text between Twilio and LiveKit unless the origination URI uses `transport=tls` (LiveKit Cloud accepts TLS). The transport is not changed here.
+- Use `transport=tls` on the origination URI, so the header is encrypted between Twilio and LiveKit. `apply` keeps the transport it finds. With `transport=tcp` the header travels in plain text: change the URI in the Twilio console (**Elastic SIP Trunking → Manage → Trunks → the trunk → Origination**), then call a Twilio number to check.
 
 ### Secret header rollout
 
