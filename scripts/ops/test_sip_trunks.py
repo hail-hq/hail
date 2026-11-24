@@ -144,6 +144,11 @@ def no_db(monkeypatch):
     monkeypatch.setattr(st, "live_carriers", nobody)
     monkeypatch.setattr(st, "live_number_carriers", nobody)
 
+    async def no_routed(_carrier):
+        return []
+
+    monkeypatch.setattr(st, "routed_numbers", no_routed)
+
 
 @pytest.fixture(autouse=True)
 def env(monkeypatch):
@@ -1402,3 +1407,22 @@ async def test_trunk_changes_ignores_address_order() -> None:
     assert st.trunk_changes(a, b) == []
     b.headers_to_attributes["X-A"] = "a"
     assert st.trunk_changes(a, b) == ["headers_to_attributes: {} -> {'X-A': 'a'}"]
+
+
+async def test_replace_puts_back_a_number_routed_during_it(monkeypatch) -> None:
+    """A number Hail added between the copy and the replace is not in the
+    copy; the routed numbers read from the database put it back."""
+    monkeypatch.setattr(settings, "livekit_twilio_sip_inbound_trunk_id", "ST_tw")
+    sip = FakeSip(
+        trunk("ST_shared", "shared", ["hail-placeholder-shared"]),
+        trunk("ST_tw", "hail-inbound-twilio", ["hail-placeholder-twilio"]),
+        rule_trunks=("ST_shared", "ST_tw"),
+    )
+    sip.trunks["ST_tw"].allowed_addresses.extend(["54.172.60.0/30", "54.244.51.0/30"])
+
+    async def routed(_carrier):
+        return ["+14155550102"]
+
+    monkeypatch.setattr(st, "routed_numbers", routed)
+    await st.apply(sip, DATA, SPECS["twilio"], yes=True)
+    assert "+14155550102" in sip.trunks["ST_tw"].numbers

@@ -221,7 +221,11 @@ def header_map_differs(trunk, header_map: dict[str, str]) -> bool:
 
 
 async def set_headers_to_attributes(
-    sip, trunk_id: str, name: str, header_map: dict[str, str]
+    sip,
+    trunk_id: str,
+    name: str,
+    header_map: dict[str, str],
+    routed=(),
 ) -> None:
     """The field update has no ``headers_to_attributes``: replace the whole
     trunk with a copy read just before. Header maps not in the JSON stay.
@@ -237,7 +241,9 @@ async def set_headers_to_attributes(
         raise TrunkError(f"LiveKit answered {result.sip_trunk_id} for {trunk_id}")
     now = await trunk_by_id(sip, trunk_id)
     after = set(now.numbers)
-    lost = [n for n in before if n not in after]
+    # ``routed``: the carrier's routed numbers read just before, so a number
+    # Hail added between the copy and the replace is put back too.
+    lost = list(dict.fromkeys(n for n in [*before, *routed] if n not in after))
     for number in lost:
         # Printed before the add: if it fails, these are the numbers to add.
         print(f"re-add {number} to {name}: the replace lost it", flush=True)
@@ -476,11 +482,17 @@ async def apply(sip, data: dict, spec: Spec, yes: bool, carriers_of=None) -> lis
             plan.append(
                 f"replace trunk {spec.name} to "
                 f"{header_map_text(header_map).removesuffix(', ')} (other header maps "
-                "kept; a number routed in that same second is lost: compare "
-                "status before and after)"
+                "kept; numbers the replace drops, and routed numbers missing "
+                "after it, are added back)"
             )
             if yes:
-                await set_headers_to_attributes(sip, trunk_id, spec.name, header_map)
+                await set_headers_to_attributes(
+                    sip,
+                    trunk_id,
+                    spec.name,
+                    header_map,
+                    routed=await routed_numbers(spec.carrier),
+                )
         plan.append(
             f"update trunk {spec.name} ({trunk_id}): allowed addresses "
             f"{addresses}, "
@@ -513,6 +525,7 @@ async def apply(sip, data: dict, spec: Spec, yes: bool, carriers_of=None) -> lis
             )
             continue
         new_url = with_header(url.sip_url, SIP_SECRET_HEADER, secret)
+        had_secret = masked(url.sip_url) != url.sip_url
         if new_url == url.sip_url:
             plan.append(
                 f"Twilio origination URL {url.sid} already sends {SIP_SECRET_HEADER}"
@@ -521,6 +534,11 @@ async def apply(sip, data: dict, spec: Spec, yes: bool, carriers_of=None) -> lis
         line = (
             f"Twilio origination URL {url.sid}: {masked(url.sip_url)} -> "
             f"{masked(new_url)} (priority {url.priority}, weight {url.weight} kept)"
+            + (
+                ": CHANGES the secret; do the Secret header rollback first"
+                if had_secret
+                else ""
+            )
         )
         if not yes:
             plan.append(line)
@@ -566,6 +584,20 @@ async def live_number_carriers(numbers: list[str]) -> dict[str, str]:
     for inbound calls or not: a number that routes later still takes its
     calls on the trunk it is listed on."""
     return await _carriers(numbers, routed_only=False)
+
+
+async def routed_numbers(carrier: str) -> list[str]:
+    """Every live number of ``carrier`` that Hail has routed for inbound
+    calls: after a full trunk replace, these belong on the carrier trunk."""
+    async with session_scope() as db:
+        rows = await db.execute(
+            select(PhoneNumber.e164).where(
+                PhoneNumber.provider == carrier,
+                PhoneNumber.provisioning_state.notin_(("released", "failed")),
+                PhoneNumber.inbound_registered_at.is_not(None),
+            )
+        )
+        return list(rows.scalars().all())
 
 
 async def _carriers(numbers: list[str], routed_only: bool) -> dict[str, str]:
