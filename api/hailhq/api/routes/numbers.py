@@ -382,7 +382,18 @@ async def release_org_number(
                 "with 204 and no carrier call."
             ),
         },
-        503: {"description": "The number's carrier is not configured on this server."},
+        502: {
+            "description": (
+                "A connected phone system's number could not be taken off its "
+                "inbound trunk; the number stays as it was."
+            ),
+        },
+        503: {
+            "description": (
+                "The number's carrier is not configured on this server, or, "
+                "for a connected phone system's number, inbound calls are not."
+            ),
+        },
     },
 )
 async def release_number(
