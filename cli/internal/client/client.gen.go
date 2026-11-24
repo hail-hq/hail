@@ -1773,7 +1773,7 @@ type AgentCreate struct {
 	// EmailEnabled Answer email on addresses that route email to this agent.
 	EmailEnabled *bool `json:"email_enabled,omitempty"`
 
-	// FirstMessage Opening line spoken after the AI line. Omitted: the agent waits for the other side to speak first.
+	// FirstMessage Opening line spoken after the AI line. On outbound calls the agent says it as one greeting with the AI line: word for word, except a hello the AI line already said. Exact wording is not guaranteed. Inbound calls keep its words (the default AI line goes after its first sentence); without the AI line, with a custom AI line, after a phone menu when a person answers, or on your own model, it is said as written. Omitted: the agent waits for the other side to speak first.
 	FirstMessage *string `json:"first_message,omitempty"`
 
 	// HandoverContacts People the agent may hand a live call to, in order. The agent never sees their numbers.
@@ -1902,7 +1902,7 @@ type AgentUpdate struct {
 	// EmailEnabled Whether the agent answers email.
 	EmailEnabled *bool `json:"email_enabled,omitempty"`
 
-	// FirstMessage New opening line; null makes the agent wait for the other side.
+	// FirstMessage New opening line; null makes the agent wait for the other side. On outbound calls the agent says it as one greeting with the AI line, leaving out a hello the AI line already said (not with a custom AI line, after a phone menu when a person answers, or on your own model).
 	FirstMessage *string `json:"first_message,omitempty"`
 
 	// HandoverContacts New handover list; replaces the old one. [] removes all; null leaves it.
@@ -1965,7 +1965,7 @@ type CallCreate struct {
 	// ConsentSource Where/how consent was obtained (e.g. 'signup form', 'prior customer relationship'). Required (non-empty) when message_type is 'marketing'.
 	ConsentSource *string `json:"consent_source,omitempty"`
 
-	// FirstMessage Opening line the agent speaks first. Omitted: the agent waits for the callee to speak first.
+	// FirstMessage Opening line the agent speaks first. After the AI line, the agent says it as one greeting with that line: word for word, except a hello the AI line already said. Exact wording is not guaranteed. Without the AI line, with a custom AI line, after a phone menu when a person answers, or on your own model, it is said as written. Omitted: the agent waits for the callee to speak first.
 	FirstMessage *string `json:"first_message,omitempty"`
 
 	// From Caller-id phone number, E.164 format. Must be a number owned by the organization with the voice capability. Omitted: an active org-owned number is used if one exists, else a number is claimed from the shared pool.

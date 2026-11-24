@@ -262,8 +262,13 @@ class CallCreate(ConsentAttestationMixin):
     first_message: str | None = Field(
         default=None,
         description=(
-            "Opening line the agent speaks first. Omitted: the agent waits "
-            "for the callee to speak first."
+            "Opening line the agent speaks first. After the AI line, the agent "
+            "says it as one greeting with that line: word for word, except a "
+            "hello the AI line already said. Exact wording "
+            "is not guaranteed. Without the AI line, with a custom AI line, after a "
+            "phone menu when a person answers, or on your own model, it is said as "
+            "written. "
+            "Omitted: the agent waits for the callee to speak first."
         ),
     )
     recording_enabled: bool | None = Field(
@@ -1355,7 +1360,15 @@ class AgentCreate(BaseModel):
     first_message: str | None = Field(
         default=None,
         max_length=1000,
-        description="Opening line spoken after the AI line. Omitted: the agent waits for the other side to speak first.",
+        description=(
+            "Opening line spoken after the AI line. On outbound calls the agent "
+            "says it as one greeting with the AI line: word for word, except a "
+            "hello the AI line already said. Exact wording "
+            "is not guaranteed. Inbound calls keep its words (the default AI line "
+            "goes after its first sentence); without the AI line, with a custom AI "
+            "line, after a phone menu when a person answers, or on your own model, it is said as written. Omitted: the agent waits for the other side to "
+            "speak first."
+        ),
     )
     recording_enabled: bool | None = Field(
         default=None,
@@ -1468,7 +1481,12 @@ class AgentUpdate(BaseModel):
     first_message: str | None = Field(
         default=None,
         max_length=1000,
-        description="New opening line; null makes the agent wait for the other side.",
+        description=(
+            "New opening line; null makes the agent wait for the other side. On "
+            "outbound calls the agent says it as one greeting with the AI line, "
+            "leaving out a hello the AI line already said (not with a custom AI "
+            "line, after a phone menu when a person answers, or on your own model)."
+        ),
     )
     recording_enabled: bool | None = Field(
         default=None,

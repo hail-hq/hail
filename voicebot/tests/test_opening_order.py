@@ -4,7 +4,12 @@ import asyncio
 from unittest.mock import AsyncMock, Mock, PropertyMock
 
 import pytest
-from hailhq.voicebot.agent import SpeechSanitizingAgent, speak_greeting
+from hailhq.voicebot.agent import (
+    AI_DISCLOSURE_LINE,
+    SpeechSanitizingAgent,
+    first_message_instructions,
+    speak_greeting,
+)
 from livekit.agents import AgentSession, StopResponse
 from livekit.agents.llm import ChatContext, ChatMessage
 
@@ -62,8 +67,12 @@ async def test_automatic_replies_resume_only_after_introduction(first_message):
         await greeting
         await agent.on_user_turn_completed(ChatContext(), None)
         assert len(session.say_calls) == 1
+        # The agent's own turn follows the notice: the first message, or a
+        # generated opening that does not greet again.
         if first_message:
-            assert session.generate_reply_calls == []
+            assert session.generate_reply_calls == [
+                first_message_instructions(first_message, AI_DISCLOSURE_LINE)
+            ]
         else:
             assert len(session.generate_reply_calls) == 1
             assert (

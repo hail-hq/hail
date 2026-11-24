@@ -115,7 +115,10 @@ opening that page does not save a recording choice.
 - Saved agents are under Agents in the console. Open the agent to edit \
 Greeting, Instructions, Language, First line, optional tools, or call limits, \
 then Save. Every call keeps the ability to hang up, press keypad digits, \
-and explain where to change Hail settings. \
+and explain where to change Hail settings. On calls the agent places, it \
+says Greeting right after the AI line as one greeting, leaving out a hello \
+the AI line already said, unless the AI line is custom, a person answers \
+after a phone menu, or the call or workspace uses its own model. \
 Instructions control what the agent does and its speaking style; they do not \
 select the voice. The voice selection is in Call settings. An agent with a \
 voice override set through the API or a connected assistant can use a different \

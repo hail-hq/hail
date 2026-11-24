@@ -45,6 +45,28 @@ Use synthetic conversations; do not commit customer transcripts or recordings.
 String tests check prompt composition and required guidance, not model compliance.
 Live behavior needs a separately authorized test call or a synthetic model evaluation.
 
+## Opening line
+
+On outbound calls, Hail says the AI notice word for word. Then, the same way
+the generated opening runs for calls without a greeting, the agent's model
+says the greeting (`first_message`, "Greeting" in the console) as one
+greeting with the notice. It keeps the line word for word, except a hello
+word the notice already said. The instruction is `first_message_instructions`
+in `voicebot/hailhq/voicebot/agent.py`; it quotes the notice and the line as
+JSON strings, and the turn cannot call tools.
+
+- The turn cannot be talked over, like the inbound greeting: the line often
+  carries facts the person must hear (a time, a code, a notice). Words said
+  during it are not heard; the agent listens again right after it.
+- If that turn fails or ends with no words, the line is said as written.
+- The turn runs even if the person talked over the notice, as the generated
+  opening does.
+- Exact wording is not guaranteed: the model writes the turn.
+- Kept literal: inbound calls, the phone-menu path when a person was heard,
+  calls without an AI notice, calls with a custom AI line (it may not greet),
+  and calls on a customer's own model (a per-call `llm`, or any workspace
+  model setting), which may ignore the instruction.
+
 ## Closing calls
 
 Outbound conversational calls (tests, feedback, and welcome calls) finish the

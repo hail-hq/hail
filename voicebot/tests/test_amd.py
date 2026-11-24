@@ -19,6 +19,7 @@ from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.models import Call, CallEvent
 from hailhq.voicebot import amd as amd_mod
 from hailhq.voicebot import ivr as ivr_mod
+from hailhq.voicebot.agent import first_message_instructions
 from hailhq.voicebot.amd import (
     MACHINE_HANGUP_CATEGORIES,
     NO_SPEECH_THRESHOLD_SECONDS,
@@ -620,7 +621,7 @@ class _FakeAmdSession:
         for fn in self.handlers.get("user_state_changed", []):
             fn(ev)
 
-    def generate_reply(self, *, instructions: str) -> Any:
+    def generate_reply(self, *, instructions: str, **_kwargs: Any) -> Any:
         self.replies.append(instructions)
         return SimpleNamespace()
 
@@ -868,7 +869,12 @@ async def test_non_hangup_categories_speak_the_disclosure(
         async_session, monkeypatch, amd_result=_prediction(category)
     )
 
-    assert session.say_calls == [f"{AI_DISCLOSURE_LINE} Is this a good time?"]
+    # The notice is spoken as written; the agent says the greeting after it.
+    assert session.say_calls == [AI_DISCLOSURE_LINE]
+    assert len(session.replies) == 1
+    assert session.replies[0].startswith(
+        first_message_instructions("Is this a good time?", AI_DISCLOSURE_LINE)
+    )
     assert ctx.delete_room_calls == 0
     assert ctx.shutdown_calls == []
 
@@ -886,9 +892,7 @@ async def test_disclosure_follows_the_workspace_voice_language(
         amd_result=_prediction("human"),
         org_cfgs={"tts": tts},
     )
-    assert session.say_calls == [
-        "Hej, det här är en AI-assistent. Is this a good time?"
-    ]
+    assert session.say_calls == ["Hej, det här är en AI-assistent."]
 
 
 async def test_failed_greeting_is_not_saved_as_no_answer(

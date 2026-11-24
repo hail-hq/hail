@@ -138,6 +138,7 @@ class FakeAnnouncingSession:
     def __init__(self) -> None:
         self.say_calls: list[tuple[str, bool]] = []
         self.generate_reply_calls: list[str | None] = []
+        self.generate_reply_options: list[dict[str, Any]] = []
         self.last_handle: FakeSpeechHandle | None = None
         # Utterances already spoken or requested at each clear_user_turn().
         self.cleared_after: list[int] = []
@@ -151,8 +152,11 @@ class FakeAnnouncingSession:
         self.last_handle = handle
         return handle
 
-    def generate_reply(self, *, instructions: str | None = None) -> FakeSpeechHandle:
+    def generate_reply(
+        self, *, instructions: str | None = None, **kwargs: Any
+    ) -> FakeSpeechHandle:
         self.generate_reply_calls.append(instructions)
+        self.generate_reply_options.append(kwargs)
         return FakeSpeechHandle()
 
 
