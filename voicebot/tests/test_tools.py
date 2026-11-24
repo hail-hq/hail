@@ -10,7 +10,6 @@ from unittest.mock import AsyncMock
 import hailhq.voicebot.tools as tools_mod
 import pytest
 from hailhq.core.agent_tools import http_tool
-from hailhq.core.agent_tools.registry import call_tools
 from hailhq.core.config import settings
 from hailhq.core.models import Agent, AgentHttpTool
 from hailhq.core.secret_cipher import SecretCipher, generate_key
@@ -21,7 +20,7 @@ from hailhq.voicebot.tools import (
 )
 
 # The tools every call keeps, in build order.
-EVERY_CALL = [s.name for s in call_tools() if s.on_every_call]
+EVERY_CALL = ["end_call", "send_dtmf", "hail_settings_help"]
 
 
 class FakeRunContext:

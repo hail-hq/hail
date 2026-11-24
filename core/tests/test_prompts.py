@@ -44,6 +44,13 @@ def test_privacy_and_help_stub_apply_to_every_call() -> None:
     assert "Do not invent a console menu for" in guide  # HTTP tools
 
 
+def test_voice_settings_guide_distinguishes_optional_and_always_on_tools() -> None:
+    guide = prompts.VOICE_CONFIGURATION_HELP
+    assert "optional tools" in guide
+    assert "Every call keeps the ability to hang up, press keypad digits," in guide
+    assert "and look up Hail settings." in guide
+
+
 def test_text_instructions_keep_the_same_private_boundary() -> None:
     text = prompts.build_text_instructions("Take messages.", thread_tool=True)
     assert prompts.PLATFORM_PRIVACY in text
@@ -165,7 +172,7 @@ def test_prompt_text_is_pinned() -> None:
         "37e9a0b5058e8c60355db926a963a8fba59c0fc4dd43d9ede4c7116e464e9e8b"
     )
     assert _sha(prompts.VOICE_CONFIGURATION_HELP) == (
-        "22cf701fda60a28bd310c1ee6af96b7405d54832837df06cfdfdd0c2152d2ca8"
+        "06867cebb3e86eccdb5c0181b2e441d8c559693403f4d0f25cbc2ad8921d3959"
     )
 
 

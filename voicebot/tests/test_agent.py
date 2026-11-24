@@ -1556,21 +1556,18 @@ async def test_build_tools_safely_degrades_on_failure(
         return None
 
     call_id = UUID("11111111-2222-3333-4444-555555555557")
+    expected_tools = ["end_call", "send_dtmf", "hail_settings_help"]
     # Must not raise.
     tools, api = await build_tools_safely({}, call_id, _hangup, _send_dtmf)
 
     # Without an organization the call still keeps its every-call tools.
-    assert [t.info.name for t in tools] == [
-        s.name for s in call_tools() if s.on_every_call
-    ]
+    assert [t.info.name for t in tools] == expected_tools
     assert api is None
 
     # With a valid organization the call keeps its every-call tools.
     meta = {"organization_id": "11111111-2222-3333-4444-555555555555"}
     tools, api = await build_tools_safely(meta, call_id, _hangup, _send_dtmf)
-    assert [t.info.name for t in tools] == [
-        s.name for s in call_tools() if s.on_every_call
-    ]
+    assert [t.info.name for t in tools] == expected_tools
     assert api is None
 
 
