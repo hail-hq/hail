@@ -216,11 +216,20 @@ Run from the repo root of the main checkout. Values marked _(chat)_ are not writ
    ```
 
 6. Call the same number again. The agent must answer.
-7. Run the probe from a laptop at that number (the same command as the [Rollout](#rollout) section above, step 7.5). It still prints `ACCEPTED` (exit 1): LiveKit rings before Hail sees the call, and the probe cancels at the first ring. The probe cannot see Hail refuse the call. The pass check is a dropped call:
+7. Run the probe from a laptop at that number, with `--ring`. Without it, the probe hangs up at the first ring, before the voicebot checks the header, and proves nothing.
+
+   ```bash
+   python3 scripts/ops/sip_invite_probe.py \
+     --ring \
+     --host <project>.sip.livekit.cloud \
+     --number +<E.164 number on the Twilio trunk>
+   ```
+
+   It must print `DROPPED:`, a ring (`180 Ringing` or another 18x), then a final code (exit 0). Seen on production: `DROPPED: 180 Ringing, then 486 Rejected`, about 1.5 seconds after the INVITE. `DROPPED` alone proves nothing: LiveKit also ends a call nobody answers, after its ringing timeout, for example when the voicebot is down. The pass needs both:
    - Logfire shows the warning `inbound call to +<number> refused: X-Hail-Secret header missing (carrier=twilio)`;
    - the workspace's call log shows NO new call from `+12025550100`.
 
-   If the warning does not show, the probe may have hung up before the voicebot saw the call: run it again. If a new call row shows, Hail did not drop the call: roll back ([Secret header rollback](#secret-header-rollback)).
+   `ACCEPTED: 200 OK (hung up)` (exit 1), or a new call row, means Hail did not drop the call: roll back ([Secret header rollback](#secret-header-rollback)). `INCONCLUSIVE` (exit 2) proves nothing: run it again. `REFUSED` (exit 0) means the trunk's IP lock refused the laptop before the voicebot saw the call: the header check cannot be tested from this address.
 
 ### Secret header rollback
 
