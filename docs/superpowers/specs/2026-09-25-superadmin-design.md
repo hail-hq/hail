@@ -12,7 +12,6 @@ Hail staff (`*@hail.so`) can open any customer organization in the console, with
 - Powers: everything an owner can do in the chosen org.
 - Visibility: no `members` row is ever created. Audit rows carry `actor_kind = superadmin`; the console prints "Hail support" for them.
 - Scope of the power: the console session only. API keys, the CLI and MCP tokens never carry the role. They keep acting on the person's own organization, as today.
-- Not included: two-factor login. A stolen `@hail.so` Google account gives owner power on every org. Tracked as a follow-up.
 
 ## Why not member rows
 

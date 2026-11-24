@@ -78,7 +78,7 @@ _dmarc.mail.hail.so  TXT  "v=DMARC1; p=none; rua=mailto:dmarc-reports@hail.so; a
 
 Field summary: `p=none` reports but does not block (start here). `quarantine` moves unaligned mail to spam. `reject` drops it. `adkim=s` and `aspf=s` require strict alignment between the DKIM/SPF authentication domain and the From domain.
 
-> **TODO(dmarc-ratchet):** Hail's public `mail.hail.so` is currently at `p=none`. After 30 or more days of clean DMARC aggregate reports (no unauthenticated mail in `rua=` feeds), step the policy to `p=quarantine`. Monitor for 30 more days, then move to `p=reject`. Self-hosters must follow the same staged rollout on their own subdomain.
+> **DMARC rollout:** start at `p=none`. After 30 or more days of clean DMARC aggregate reports (no unauthenticated mail in `rua=` feeds), step the policy to `p=quarantine`. Monitor for 30 more days, then move to `p=reject`. Use the same staged rollout on your own subdomain.
 
 ## 6. Configure Hail
 

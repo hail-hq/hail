@@ -104,7 +104,7 @@ Ranked by relevance/impact score, highest first. Update the **Status** column as
 ## TODO
 
 - [ ] **Reconcile the duplicate tracker in `hail-website/submissions/`.** A
-      second, divergent copy exists at `/Users/r/playground/hail-website/submissions/`
+      second, divergent copy exists at `hail-website/submissions/`
       (9 files, dated 2026-07-14 — newer than these). Both trees are untracked in
       git, so neither has a committed history to arbitrate. **This directory is
       authoritative** (decided 2026-07-15): it holds the tracker, `_TEMPLATE.md`,

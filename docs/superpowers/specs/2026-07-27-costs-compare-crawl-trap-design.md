@@ -174,7 +174,7 @@ costs/{llm,stt,tts}.json  --(featured: true)-->  web/lib/featured.ts
 
 - `node --test scripts/costs/check-featured.test.mjs` — the three CI invariants, following the `check-stale.test.mjs` precedent.
 - `pnpm site:build` — proves all 96 pages prerender and that `/compare` is no longer marked `ƒ (Dynamic)` in the route table.
-- `check-jsonschema --schemafile costs/schema/<cat>.schema.json costs/<cat>.json` for the v2.3 flag. Note `pnpm costs:validate` is currently broken on macOS hosts by a pipx/Python 3.14 ABI issue; `/Users/r/.local/bin/check-jsonschema` works.
+- `check-jsonschema --schemafile costs/schema/<cat>.schema.json costs/<cat>.json` for the v2.3 flag. Note `pnpm costs:validate` is currently broken on macOS hosts by a pipx/Python 3.14 ABI issue; `~/.local/bin/check-jsonschema` works.
 - Post-deploy: `curl -sI https://hail.so/costs/compare/<pair>` must show `x-vercel-cache: HIT`, and `curl -sI https://hail.so/costs` must return 200 with no redirect. (The earlier version of this line expected a 308 from the raw Vercel host — see the rejected redirect above.)
 
 ## Consequences

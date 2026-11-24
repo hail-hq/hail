@@ -10,14 +10,14 @@
 
 ## Global Constraints
 
-- Repo/worktree: `/Users/r/playground/hail/.claude/worktrees/multi-country-numbers`, branch `feat/multi-country-numbers` (off `main`).
+- Repo/worktree: a worktree of this repo (`.claude/worktrees/multi-country-numbers`), branch `feat/multi-country-numbers` (off `main`).
 - **Never merge locally to `main`.** Integration is via GitHub PR. Commit to the feature branch only.
 - **No `Co-Authored-By: Claude` (or any AI-attribution) trailer** in commit messages.
 - **OpenAPI**: after any change to a route or a request/response schema, regenerate `openapi/openapi.yaml` in the same PR (the `NumberType` change alters `NumberAcquireRequest`'s schema, so this plan regenerates it). Command: run the API locally then `curl -s http://localhost:8080/openapi.json | python -c "import json,sys,yaml; yaml.safe_dump(json.load(sys.stdin), sys.stdout, sort_keys=False)" > openapi/openapi.yaml`.
 - **Provider-adapter layering**: Twilio SDK usage stays in `core/hailhq/core/providers/`. The sync script is a standalone Node script and does not import `core`.
 - Number types are exactly `local | mobile | toll_free | national`. ISO country codes are alpha-2 uppercase. Prices are decimal strings.
 - **Data-safety invariant (the whole point):** the sync must NEVER write an empty or short `numbers[]`. If the fetch yields `< 40` countries, abort and leave the committed file untouched — a truncated allow-list would make held numbers unbillable.
-- Reference data (for fixtures / acceptance): `…/scratchpad/twilio-numbers.csv` (the real Twilio CSV, 106 rows) and `…/scratchpad/numbers-data.json` (the parsed expected shape). Path prefix: `/private/tmp/claude-501/-Users-r-playground/003eca1d-9725-42a2-b57a-817f889f44fb/scratchpad/`.
+- Reference data (for fixtures / acceptance): `…/scratchpad/twilio-numbers.csv` (the real Twilio CSV, 106 rows) and `…/scratchpad/numbers-data.json` (the parsed expected shape). Path prefix: the planning session's scratchpad directory.
 - Python: `ruff` + `black` + `mypy` + `pytest` in CI; run `cd api && uv run pytest`, `uvx black`, `uvx ruff check`. Commits are Conventional Commits.
 
 ---

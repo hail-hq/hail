@@ -675,7 +675,7 @@ Expected: all green.
 - [ ] **Step 1: Re-dump the spec**
 
 ```bash
-cd /Users/r/playground/hail
+cd <repo root>
 uv run python -c "
 import yaml
 from hailhq.api.main import app

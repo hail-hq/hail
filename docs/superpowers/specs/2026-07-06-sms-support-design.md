@@ -10,9 +10,8 @@ Repo: `hail/` (core/api/cli/sdk/mcp/openapi) + `hail-website/` (console UI + bil
 > proposed a standalone `SmsSuppression` table without awareness of that
 > work — this revision drops that duplication in favor of extending the
 > shared system, generalizes the number-acquisition flow to be cross-channel
-> rather than SMS-only, and adds an abuse-monitoring section for a
-> confirmed gap (no automated opt-out/complaint-rate enforcement exists
-> anywhere today — see "Abuse monitoring" below).
+> rather than SMS-only, and adds an abuse-monitoring section (see
+> "Abuse monitoring" below).
 >
 > **Revision (2026-07-07):** verified the shared-Brand/Campaign question
 > (previously Risk 1, "unconfirmed") directly against Twilio's live API and
@@ -404,8 +403,8 @@ list/get/set_capabilities` (generic, new).
    warns about.
    - Concrete state on Hail's live Twilio account (verified via API,
      2026-07-07): KYB/Trust Hub business profile already approved (SID
-     `BU67001392606cddd3e0a83fc874b2d157`); a second, unused duplicate
-     profile (`BUfc485de79738063a172680dc07fec64a`, still "in-review")
+     `BU...`); a second, unused duplicate
+     profile (`BU...`, still "in-review")
      should be abandoned before building on the approved one; zero A2P Brand
      Registrations and zero Campaigns exist yet; three US numbers
      (`hail-1/2/3`) are provisioned and ready to attach once a Brand +
@@ -414,7 +413,7 @@ list/get/set_capabilities` (generic, new).
    - Concrete next steps: verify the approved Trust Hub profile's Business
      Identity type (confirm it's a standard business profile, not
      accidentally something that would block a straightforward Brand
-     registration), register one Standard Brand (Opero Labs ApS is a
+     registration), register one Standard Brand (the operating company is a
      foreign/non-US entity, so Sole Proprietor registration doesn't apply),
      register one Campaign under it, then attach `hail-1/2/3` to a
      Messaging Service's Sender Pool. Budget **~2-3 weeks minimum**

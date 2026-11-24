@@ -17,7 +17,7 @@
 Create the worktree:
 
 ```
-cd /Users/r/playground/hail
+cd <repo root>
 git switch -c feat/mcp-resource-server
 ```
 
@@ -162,7 +162,7 @@ Expected: 4/4 pass.
 - [ ] **Step 5: Commit.**
 
 ```
-cd /Users/r/playground/hail
+cd <repo root>
 git add mcp/hailhq/mcp/auth.py mcp/tests/test_auth_mode.py
 git commit -m "feat(mcp): boot-time auth mode selector
 
@@ -959,7 +959,7 @@ Expected: all green.
 - [ ] **Step 2: Run the api suite for regression.**
 
 ```
-cd /Users/r/playground/hail/api && uv run pytest -q
+cd <repo root>/api && uv run pytest -q
 ```
 
 Expected: still 138/138 (1a's tests are unaffected, but smoke as a precaution).
@@ -968,7 +968,7 @@ Expected: still 138/138 (1a's tests are unaffected, but smoke as a precaution).
 
 ```
 # Boot the MCP in oauth-rs mode against a local hail-website + API.
-cd /Users/r/playground/hail/mcp
+cd <repo root>/mcp
 HAIL_AUTH_URL=http://localhost:3000/api/auth \
 HAIL_AUTH_AUDIENCES=http://localhost:8081 \
 MCP_RESOURCE_URL=http://localhost:8081 \
