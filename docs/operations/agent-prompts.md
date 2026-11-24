@@ -47,29 +47,34 @@ Live behavior needs a separately authorized test call or a synthetic model evalu
 
 ## Opening line
 
-When an outbound call says the AI notice and then the agent's greeting
-(`first_message`, "Greeting" in the console), a hello at its start ("Hi,",
-"Guten Tag,") is dropped, so the caller hears one greeting. The notice stays fixed and first. While the phone
-rings, Hail's own model copies out the greeting that opens the line
-(`OPENING_FIT_INSTRUCTIONS` in `core/hailhq/core/prompts.py`), and code cuts
-it (`cut_greeting`) only when the line starts with exactly that text, it is
-at most three words with no digit, code or sentence mark of its own, and a
-sentence mark follows it. A business name that starts with a hello word
-("Morning Glory Florist") is not cut, because no sentence mark follows the
-hello. The model never writes the
-line, so only that hello can be cut: a free rewrite could drop content or
-flip a sentence's meaning, and no check can catch that. The model decides
-what counts as a hello; its instructions exclude thanks, apologies and names,
-but code cannot verify that, so a model mistake can drop up to three opening
-words, such as a name. The rest of the line is said exactly as written. Any other answer, a
-failure or an answer not ready at pickup keeps the line as written; the
-greeting never waits for it, and a late answer is cancelled. A workspace that uses its own model skips this, so
-its call content stays off Hail's models. A custom AI line skips it too: it
-may not greet, and the cut would leave the call with no greeting. A custom
-line that Hail replaces with the built-in one (it opened with "[", "{" or a
-backtick) counts as built-in. Inbound calls skip it: the caller
-is already on the line, and the default inbound greeting holds the AI line
-inside it.
+On outbound calls, Hail says the AI notice, then the agent's greeting
+(`first_message`, "Greeting" in the console). A hello at the start of the
+greeting ("Hi,", "Guten Tag,") is dropped, so the caller hears one greeting.
+The notice stays fixed and first.
+
+How it works:
+
+- While the phone rings, Hail's own model copies out the hello that opens
+  the greeting (`OPENING_FIT_INSTRUCTIONS` in `core/hailhq/core/prompts.py`).
+- Code cuts it (`cut_greeting`) only when the greeting starts with exactly
+  that text, the hello is short, and a sentence mark and a space follow it.
+- So "Morning Glory Florist", "Hi-Tech Dental" and "Hello.io" are never cut.
+- The rest of the line is said as written; only its first letter is
+  capitalized, by the call's language.
+- The model never writes the line, so it cannot reword or flip a sentence.
+  A free rewrite could do both, and no check can catch that.
+- The model decides what counts as a hello, and code cannot check it. A model
+  mistake can drop up to three opening words, such as a name.
+- The greeting uses the answer only if it is ready at pickup. It never waits,
+  and a late answer is cancelled.
+
+Skipped, so the greeting is said whole:
+
+- a workspace that uses its own model: call content stays off Hail's models;
+- a custom AI line: it may not greet (one Hail replaces with the built-in
+  line, because it opened with "[", "{" or a backtick, counts as built-in);
+- inbound calls: the caller is already on the line, and the default inbound
+  greeting holds the AI line inside it.
 
 ## Closing calls
 
