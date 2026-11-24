@@ -1,10 +1,12 @@
 import uuid
 
 import pytest
+from hailhq.core import handover
 from hailhq.core.compliance_gate import add_suppression
 from hailhq.core.handover import (
     HandoverInvalid,
     HandoverItem,
+    HandoverPerson,
     country_of,
     handover_targets,
     load_handover,
@@ -498,3 +500,24 @@ async def test_validate_refuses_contact_without_phone_or_extension(
     c = await _ext_contact(async_session, org, "Mail only", email="m@example.com")
     with pytest.raises(HandoverInvalid, match="has no phone number or extension$"):
         await validate_handover(async_session, org, [HandoverItem(str(c.id), "x")])
+
+
+@pytest.mark.parametrize(("extension", "valid"), [("800", True), ("1234567", False)])
+async def test_validate_handover_checks_the_extension(
+    async_session, monkeypatch, extension, valid
+) -> None:
+    """Saving a handover contact reads the extension like the runtime paths:
+    a long one is no extension, so a contact with only that is refused."""
+    org = uuid.uuid4()
+    wire = str(uuid.uuid4())
+
+    async def people(_db, _org, _ids):
+        return {wire: HandoverPerson(wire, "Support line", None, None, extension)}
+
+    monkeypatch.setattr(handover, "resolve_people", people)
+    items = [HandoverItem(wire, "Front desk")]
+    if valid:
+        await validate_handover(async_session, org, items)
+    else:
+        with pytest.raises(HandoverInvalid, match="no phone number or extension"):
+            await validate_handover(async_session, org, items)

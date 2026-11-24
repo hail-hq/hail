@@ -291,7 +291,7 @@ async def validate_handover(
         if item.contact_id in unchanged:
             continue
         if not person.phone_e164:
-            if person.extension:
+            if pbx_extension(person.extension):
                 continue  # dialed inside the customer's phone system
             raise HandoverInvalid(
                 f"{person.name} has no phone number or extension", index
