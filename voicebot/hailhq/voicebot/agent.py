@@ -1700,8 +1700,9 @@ async def check_arrival(
     call_id: UUID, seconds: float = CHECK_ARRIVAL_WAIT_SECONDS
 ) -> bool:
     """True once the inbound side wrote ``arrived`` for check call
-    ``call_id``; False on any other outcome first (the call reached the
-    wrong trunk) or after ``seconds``."""
+    ``call_id``; False after ``seconds``, or once the check has a final
+    result. A wrong-trunk INVITE (``not_authenticated``) is not final: the
+    right trunk can still arrive."""
     loop = asyncio.get_running_loop()
     deadline = loop.time() + seconds
     while True:
@@ -1709,7 +1710,7 @@ async def check_arrival(
             outcomes = await check_outcomes(db, call_id)
         if "arrived" in outcomes:
             return True
-        if outcomes or loop.time() >= deadline:
+        if outcomes - {"not_authenticated"} or loop.time() >= deadline:
             return False
         await asyncio.sleep(CHECK_ARRIVAL_POLL_SECONDS)
 

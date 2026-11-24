@@ -649,7 +649,9 @@ CHECK_RESULT_WAIT_SECONDS = CHECK_CODE_SECONDS + 3
 # The check Call's max_duration_seconds, same as CHECK_WINDOW.
 CHECK_MAX_DURATION_SECONDS = 90
 CHECK_POLL_SECONDS = 0.25
-_CHECK_FINAL = ("passed", "code_not_received", "not_authenticated")
+# A wrong-trunk INVITE (``not_authenticated``) is not final: the right trunk
+# can still arrive before the deadline.
+_CHECK_FINAL = ("passed", "code_not_received")
 # Hail-side failures before the dial: not a check the customer used up.
 _CHECK_SETUP_FAILURES = (
     CallEndReason.CARRIER_ROUTE_FAILED.value,
@@ -868,10 +870,11 @@ async def check_connected_number(
     await db.commit()
     if "passed" in outcomes:
         return CheckResult("active", None, call_id)
-    if "not_authenticated" in outcomes:
-        return CheckResult("unverified", "not_authenticated", call_id)
     if outcomes & {"arrived", "code_not_received"}:
         return CheckResult("unverified", "code_not_received", call_id)
+    # Only when nothing arrived on the right trunk.
+    if "not_authenticated" in outcomes:
+        return CheckResult("unverified", "not_authenticated", call_id)
     return CheckResult("unverified", "no_call_arrived", call_id)
 
 

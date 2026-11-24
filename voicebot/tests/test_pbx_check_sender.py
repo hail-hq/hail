@@ -242,7 +242,21 @@ async def test_check_arrival_sees_a_late_arrival(async_session):
 async def test_check_arrival_refuses_wrong_trunk(async_session):
     call_id = await _check_call(async_session)
     await _event(async_session, call_id, "not_authenticated")
-    assert await check_arrival(call_id, seconds=0.5) is False
+    assert await check_arrival(call_id, seconds=0.3) is False
+
+
+async def test_check_arrival_waits_past_a_wrong_trunk(async_session):
+    """A wrong-trunk INVITE is not final: the right trunk can still arrive."""
+    call_id = await _check_call(async_session)
+    await _event(async_session, call_id, "not_authenticated")
+
+    async def _later():
+        await asyncio.sleep(0.1)
+        await _event(async_session, call_id, "arrived")
+
+    task = asyncio.create_task(_later())
+    assert await check_arrival(call_id, seconds=2) is True
+    await task
 
 
 async def test_check_arrival_gives_up(async_session):

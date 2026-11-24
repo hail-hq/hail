@@ -1427,6 +1427,28 @@ async def test_check_wrong_trunk_reports_not_authenticated(
     assert (result.state, result.reason) == ("unverified", "not_authenticated")
 
 
+async def test_check_wrong_trunk_then_right_trunk_passes(
+    async_session, check_lk, pbx_number, pool_number
+):
+    """A wrong-trunk INVITE is recorded but does not end the check: the
+    right trunk can still answer before the deadline."""
+    check_lk.create_sip_participant.side_effect = inbound_says(
+        "not_authenticated", "arrived", later="passed", activate=True, delay=0.2
+    )
+    result = await check_connected_number(async_session, check_lk, pbx_number)
+    assert (result.state, result.reason) == ("active", None)
+
+
+async def test_check_right_trunk_wins_over_a_wrong_one(
+    async_session, check_lk, pbx_number, pool_number
+):
+    check_lk.create_sip_participant.side_effect = inbound_says(
+        "not_authenticated", "arrived"
+    )
+    result = await check_connected_number(async_session, check_lk, pbx_number)
+    assert (result.state, result.reason) == ("unverified", "code_not_received")
+
+
 async def test_check_code_not_received_reports_it(
     async_session, check_lk, pbx_number, pool_number
 ):

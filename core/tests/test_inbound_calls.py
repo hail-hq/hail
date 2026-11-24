@@ -695,6 +695,25 @@ async def test_check_arrival_on_other_trunk_does_not_activate(
     assert (await last_check_event(check)).payload == {"outcome": "not_authenticated"}
 
 
+async def test_check_arrival_on_the_right_trunk_after_a_wrong_one(
+    async_session, unverified_number, seed_check_call, last_check_event
+):
+    """A wrong-trunk INVITE does not end the check: the right one still
+    arrives and its code still counts."""
+    check = await seed_check_call(
+        unverified_number, status="ringing", requested_at=utcnow()
+    )
+    wrong = await open_inbound_call(
+        async_session, attrs(dialed="+14155550100", trunk_id="ST_in_shared")
+    )
+    assert wrong == Rejected("pbx_check_wrong_trunk")
+    right = await open_inbound_call(
+        async_session, attrs(dialed="+14155550100", trunk_id="ST_in_pbx")
+    )
+    assert right == CheckArrived(unverified_number.id, check.id)
+    assert (await last_check_event(check)).payload == {"outcome": "arrived"}
+
+
 async def test_check_arrival_without_trunk_id_does_not_activate(
     async_session, unverified_number, seed_check_call, last_check_event
 ):
