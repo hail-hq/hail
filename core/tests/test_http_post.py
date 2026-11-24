@@ -1,10 +1,13 @@
 import re
 import socket
+import ssl
+from contextlib import asynccontextmanager
 
 import httpx
 import pytest
 from hailhq.core.http_post import (
     PrivateNetworkBlockedError,
+    describe_send_error,
     httpx_post,
     validate_webhook_target,
 )
@@ -380,3 +383,200 @@ async def test_httpx_post_tries_at_most_three_addresses(respx_mock, monkeypatch)
             "https://example.com/x", b"{}", {}, allow_private_networks=False
         )
     assert [route.called for route in routes] == [True, True, True, False, False]
+
+
+def _tls_connect_error(cause: ssl.SSLError) -> httpx.ConnectError:
+    """A connect error as httpcore raises it: chained from the ssl error."""
+    try:
+        try:
+            raise cause
+        except ssl.SSLError as exc:
+            raise httpx.ConnectError("connect failed") from exc
+    except httpx.ConnectError as exc:
+        return exc
+
+
+def _cert_alert() -> ssl.SSLError:
+    """The endpoint's TLS alert about a certificate (ssl sets ``reason``)."""
+    alert = ssl.SSLError("alert")
+    alert.reason = "SSLV3_ALERT_CERTIFICATE_UNKNOWN"
+    return alert
+
+
+def _hidden_tls_error() -> httpx.ConnectError:
+    """A refused connect raised ``from None`` while a TLS error was handled."""
+    try:
+        try:
+            raise ssl.SSLError("cleanup")
+        except ssl.SSLError:
+            raise httpx.ConnectError("refused") from None
+    except httpx.ConnectError as exc:
+        return exc
+
+
+def _two_addresses(monkeypatch):
+    def fake_getaddrinfo(host, port, **kw):
+        return [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0)),
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.35", 0)),
+        ]
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+
+
+def _fail_sends(monkeypatch, outcomes):
+    """Each address answers from ``outcomes`` (an exception or a status). Not
+    respx: respx rewrites a raised error's chain, and the TLS check reads it."""
+    tried = []
+    budgets = []
+
+    class _Response:
+        def __init__(self, status):
+            self.status_code, self.encoding = status, "utf-8"
+
+        async def aiter_bytes(self):
+            yield b"ok"
+
+    @asynccontextmanager
+    async def fake_stream(self, method, url, **kw):
+        tried.append(str(url))
+        budgets.append(kw["timeout"].connect)
+        outcome = outcomes[str(url)]
+        if isinstance(outcome, BaseException):
+            raise outcome
+        yield _Response(outcome)
+
+    monkeypatch.setattr(httpx.AsyncClient, "stream", fake_stream)
+    return tried, budgets
+
+
+@pytest.mark.asyncio
+async def test_httpx_post_tries_the_next_address_after_a_tls_error(monkeypatch):
+    _two_addresses(monkeypatch)
+    tried, _ = _fail_sends(
+        monkeypatch,
+        {
+            "https://93.184.216.34/x": _tls_connect_error(
+                ssl.SSLCertVerificationError("expired")
+            ),
+            "https://93.184.216.35/x": 200,
+        },
+    )
+    assert await httpx_post(
+        "https://example.com/x", b"{}", {}, allow_private_networks=False
+    ) == (200, "ok")
+    assert len(tried) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("first", "last", "reason"),
+    [
+        # A certificate failure wins over a later refuse or timeout.
+        (
+            _tls_connect_error(ssl.SSLCertVerificationError("expired")),
+            httpx.ConnectError("network unreachable"),
+            "The TLS certificate check failed.",
+        ),
+        (
+            _tls_connect_error(ssl.SSLCertVerificationError("expired")),
+            httpx.ConnectTimeout("timed out"),
+            "The TLS certificate check failed.",
+        ),
+        # A certificate failure beats an earlier handshake failure.
+        (
+            _tls_connect_error(ssl.SSLError("WRONG_VERSION_NUMBER")),
+            _tls_connect_error(ssl.SSLCertVerificationError("expired")),
+            "The TLS certificate check failed.",
+        ),
+        # Otherwise the last address's error is reported.
+        (
+            httpx.ConnectTimeout("timed out"),
+            httpx.ConnectError("refused"),
+            "Could not connect to your endpoint.",
+        ),
+    ],
+)
+async def test_httpx_post_reports_the_most_useful_error_when_every_address_fails(
+    monkeypatch, first, last, reason
+):
+    _two_addresses(monkeypatch)
+    _, budgets = _fail_sends(
+        monkeypatch,
+        {"https://93.184.216.34/x": first, "https://93.184.216.35/x": last},
+    )
+    with pytest.raises((httpx.ConnectError, httpx.ConnectTimeout)) as caught:
+        await httpx_post(
+            "https://example.com/x", b"{}", {}, allow_private_networks=False
+        )
+    assert describe_send_error(caught.value) == reason
+    # The last address keeps the full connect budget: a slow but working
+    # address must still get its delivery.
+    assert budgets[-1] == 10.0
+
+
+@pytest.mark.asyncio
+async def test_httpx_post_keeps_a_tls_failure_from_a_middle_address(monkeypatch):
+    def fake_getaddrinfo(host, port, **kw):
+        return [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", (f"93.184.216.{n}", 0))
+            for n in (34, 35, 36)
+        ]
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+    _fail_sends(
+        monkeypatch,
+        {
+            "https://93.184.216.34/x": httpx.ConnectTimeout("timed out"),
+            "https://93.184.216.35/x": _tls_connect_error(
+                ssl.SSLCertVerificationError("expired")
+            ),
+            "https://93.184.216.36/x": httpx.ConnectTimeout("timed out"),
+        },
+    )
+    with pytest.raises(httpx.ConnectError) as caught:
+        await httpx_post(
+            "https://example.com/x", b"{}", {}, allow_private_networks=False
+        )
+    assert describe_send_error(caught.value) == "The TLS certificate check failed."
+
+
+@pytest.mark.parametrize(
+    ("exc", "reason"),
+    [
+        (httpx.ConnectTimeout("t"), "Could not connect to your endpoint in time."),
+        (
+            httpx.ConnectTimeout("_ssl.c:989: The handshake operation timed out"),
+            "Could not connect to your endpoint in time.",
+        ),
+        (httpx.ReadTimeout("t"), "No answer from your endpoint in time."),
+        (TimeoutError(), "No answer from your endpoint in time."),
+        (
+            PrivateNetworkBlockedError(NOT_PUBLIC),
+            "target_url is not allowed: it does not resolve to a public address.",
+        ),
+        (UnsafeUrlError("URL has no host"), "target_url is not a valid URL."),
+        (
+            _tls_connect_error(ssl.SSLCertVerificationError("expired")),
+            "The TLS certificate check failed.",
+        ),
+        (
+            _tls_connect_error(ssl.SSLError("WRONG_VERSION_NUMBER")),
+            "The TLS handshake failed.",
+        ),
+        (_tls_connect_error(_cert_alert()), "The TLS handshake failed."),
+        (_hidden_tls_error(), "Could not connect to your endpoint."),
+        # Words in a message are not a TLS error: only the ssl exception is.
+        (
+            httpx.ConnectError("connect to tls-gw.example.com (10.0.0.5) failed"),
+            "Could not connect to your endpoint.",
+        ),
+        (
+            httpx.RemoteProtocolError("bad"),
+            "Your endpoint closed the connection without a valid answer.",
+        ),
+        (RuntimeError("Bearer secret-key-value"), "Could not reach your endpoint."),
+    ],
+)
+def test_describe_send_error_gives_a_fixed_reason(exc, reason):
+    assert describe_send_error(exc) == reason
