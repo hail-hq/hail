@@ -990,14 +990,7 @@ def _say_first_message(session: Any, first_message: str, disclosure: str) -> Non
     if add_done is None:
         return
 
-    def on_done(done: Any) -> None:
-        spoke = any(
-            getattr(item, "role", None) == "assistant"
-            and (getattr(item, "text_content", None) or "").strip()
-            for item in getattr(done, "chat_items", []) or []
-        )
-        if spoke or (done.exception() is None and done.interrupted):
-            return
+    def say_line() -> None:
         try:
             session.say(first_message, allow_interruptions=True)
         except RuntimeError:
@@ -1005,7 +998,37 @@ def _say_first_message(session: Any, first_message: str, disclosure: str) -> Non
         except Exception:
             logger.exception("could not say the first message after a failed turn")
 
+    async def say_line_unless_replying() -> None:
+        # An interruption by noise leaves an empty turn that nothing answers;
+        # real speech gets a reply from the turn loop. Wait briefly, then say
+        # the line only if the agent is not already replying.
+        await asyncio.sleep(INTERRUPTED_GREETING_WAIT_SECONDS)
+        if getattr(session, "agent_state", "listening") not in ("thinking", "speaking"):
+            say_line()
+
+    def on_done(done: Any) -> None:
+        spoke = any(
+            getattr(item, "role", None) == "assistant"
+            and (getattr(item, "text_content", None) or "").strip()
+            for item in getattr(done, "chat_items", []) or []
+        )
+        if spoke:
+            return
+        if done.exception() is None and done.interrupted:
+            task = asyncio.ensure_future(say_line_unless_replying())
+            _BACKGROUND.add(task)
+            task.add_done_callback(_BACKGROUND.discard)
+            return
+        say_line()
+
     add_done(on_done)
+
+
+# An interrupted greeting turn that said nothing: how long to wait for the
+# turn loop's reply before saying the line as written.
+INTERRUPTED_GREETING_WAIT_SECONDS = 1.5
+# Keeps fire-and-forget tasks alive until they finish.
+_BACKGROUND: set[asyncio.Task[None]] = set()
 
 
 def first_message_instructions(first_message: str, disclosure: str) -> str:
@@ -1194,16 +1217,19 @@ async def speak_greeting(
                 # The AI line sits after the first sentence: a caller who
                 # speaks over the greeting must still hear it.
                 interruptible = False
-            elif blend and generate_opening and not inbound:
+            elif (
+                blend
+                and generate_opening
+                and not inbound
+                and not (metadata.get("ai_disclosure_line") or "").strip()
+            ):
                 # The agent says the greeting right after the notice, as one
                 # opening, so the caller is not greeted twice ("Hi, this is an
-                # AI assistant ... Hi, this is ..."). Outbound only: there the
-                # pickup turn is cleared and replies wait for the opening.
-                notice = await session.say(disclosure, allow_interruptions=True)
-                if getattr(notice, "interrupted", False):
-                    # The person talked over the notice: the turn loop answers
-                    # them, as when a joined greeting is cut off.
-                    return
+                # AI assistant ... Hi, this is ..."). Outbound with the
+                # built-in AI line only: it always greets, and there the
+                # pickup turn is cleared. The turn runs even if the notice was
+                # talked over, as the generated opening does.
+                await session.say(disclosure, allow_interruptions=True)
                 blended = True
                 return
             else:

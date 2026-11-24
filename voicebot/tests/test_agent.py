@@ -1157,9 +1157,9 @@ class _DoneHandle:
         return self._error
 
 
-async def test_an_interrupted_notice_hands_over_to_the_turn_loop() -> None:
-    """If the person talks over the AI notice, the model is not told it
-    played, and the turn loop answers them."""
+async def test_an_interrupted_notice_still_runs_the_greeting_turn() -> None:
+    """If the person talks over the AI notice, the greeting turn still runs,
+    as the generated opening does, so the line is not lost."""
     session = FakeAnnouncingSession()
 
     class Cut:
@@ -1179,9 +1179,11 @@ async def test_an_interrupted_notice_hands_over_to_the_turn_loop() -> None:
 
     session.say = say
     await speak_greeting(session, {"first_message": "Hi, about your order."})
-    # As when a joined greeting is cut off: the turn loop answers them.
+    # The greeting turn still runs, as the generated opening does.
     assert session.say_calls == [(AI_DISCLOSURE_LINE, True)]
-    assert session.generate_reply_calls == []
+    assert session.generate_reply_calls == [
+        first_message_instructions("Hi, about your order.", AI_DISCLOSURE_LINE)
+    ]
 
 
 @pytest.mark.parametrize(
@@ -1191,12 +1193,15 @@ async def test_an_interrupted_notice_hands_over_to_the_turn_loop() -> None:
         (None, "", False, True),  # no words
         (None, "Calling about your order.", False, False),
         (RuntimeError("tts down"), "Calling about", False, False),  # no restart
-        (None, "", True, False),  # the person spoke: the turn loop answers them
+        # Interrupted before any word, and nothing is replying (noise): the
+        # line is said after a short wait.
+        (None, "", True, True),
     ],
 )
 async def test_failed_greeting_turn_says_the_line_as_written(
-    error, words, interrupted, fallback
+    error, words, interrupted, fallback, monkeypatch
 ):
+    monkeypatch.setattr(agent_mod, "INTERRUPTED_GREETING_WAIT_SECONDS", 0.01)
     session = FakeAnnouncingSession()
     handle = _DoneHandle(error, words, interrupted)
     session.generate_reply = lambda **_kw: handle
@@ -1210,10 +1215,42 @@ async def test_failed_greeting_turn_says_the_line_as_written(
     assert released == [True]
     for callback in handle.callbacks:
         callback(handle)
+    await asyncio.sleep(0.05)
     expected = [(AI_DISCLOSURE_LINE, True)]
     if fallback:
         expected.append(("Hi, about your order.", True))
     assert session.say_calls == expected
+
+
+async def test_interrupted_greeting_waits_for_a_real_reply(monkeypatch) -> None:
+    """When the person really spoke, the turn loop is replying: the line is
+    not said on top of that reply."""
+    monkeypatch.setattr(agent_mod, "INTERRUPTED_GREETING_WAIT_SECONDS", 0.01)
+    session = FakeAnnouncingSession()
+    session.agent_state = "speaking"
+    handle = _DoneHandle(None, "", True)
+    session.generate_reply = lambda **_kw: handle
+    await speak_greeting(session, {"first_message": "Hi, about your order."})
+    for callback in handle.callbacks:
+        callback(handle)
+    await asyncio.sleep(0.05)
+    assert session.say_calls == [(AI_DISCLOSURE_LINE, True)]
+
+
+async def test_a_custom_ai_line_keeps_the_literal_greeting() -> None:
+    """A custom AI line may not greet, so the greeting keeps its hello."""
+    session = FakeAnnouncingSession()
+    await speak_greeting(
+        session,
+        {
+            "first_message": "Hi Sam, about your order.",
+            "ai_disclosure_line": "This call uses an AI assistant.",
+        },
+    )
+    assert session.say_calls == [
+        ("This call uses an AI assistant. Hi Sam, about your order.", True)
+    ]
+    assert session.generate_reply_calls == []
 
 
 async def test_greeting_turn_is_text_only() -> None:

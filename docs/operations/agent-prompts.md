@@ -55,14 +55,16 @@ word the notice already said. The instruction is `first_message_instructions`
 in `voicebot/hailhq/voicebot/agent.py`; it quotes the notice and the line as
 JSON strings, and the turn cannot call tools.
 
-- If that turn fails or ends with no words, and nobody interrupted it, the
-  line is said as written.
-- If the person talks over the notice or the greeting, the turn loop answers
-  them, as it does for any opening.
+- If that turn fails or ends with no words, the line is said as written. If
+  it was interrupted before any word, the line is said after 1.5 seconds
+  unless the agent is already replying (`INTERRUPTED_GREETING_WAIT_SECONDS`).
+- The turn runs even if the person talked over the notice, as the generated
+  opening does.
 - Exact wording is not guaranteed: the model writes the turn.
 - Kept literal: inbound calls, the phone-menu path when a person was heard,
-  calls without an AI notice, and calls on a customer's own model (workspace
-  or per call), whose endpoint may ignore the instruction.
+  calls without an AI notice, calls with a custom AI line (it may not greet),
+  and calls on a customer's own model (workspace or per call), whose
+  endpoint may ignore the instruction.
 
 ## Closing calls
 
