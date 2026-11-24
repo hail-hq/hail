@@ -39,7 +39,7 @@ MIN_CORRELATION = 0.2
 PEAK_RATIO = 1.08
 LAG_TOLERANCE = 0.025
 TAIL = 0.3  # margin after the return delay before listening again
-CARRY = 3.0  # how long speech that began before a reply stays heard into it
+CARRY = 1.5  # how long speech that began before a reply stays heard into it
 QUIET_WINDOWS = 24  # compared agent windows without a match before echo is dropped
 
 # Sessions (by id) whose input stays live through agent audio for now (a
@@ -255,8 +255,8 @@ class Playout(io.AudioOutput):
         # False: stay open during playout unless echo is measured (an
         # interruption model then decides what stops the agent).
         self.always: Callable[[], bool] = lambda: True
-        # Replies still to play before the gate applies (an outbound opening).
-        self.skip_replies = 0
+        # True keeps the input live through agent audio (an outbound opening).
+        self.hold_open = False
         self._started_at = 0.0
         self._paused_at = 0.0
         self._playing = False
@@ -270,8 +270,6 @@ class Playout(io.AudioOutput):
         self._paused_at = 0.0
         self._expected_end = 0.0  # unplayed audio of an interrupted reply is gone
         self._finished_at = time.time()
-        if self.skip_replies:
-            self.skip_replies -= 1
         self.reset()
 
     def pause(self) -> None:
@@ -298,7 +296,7 @@ class Playout(io.AudioOutput):
 
     def muted(self, now: float) -> bool:
         """Whether agent audio, or its measured return, can be on the line."""
-        if self.skip_replies:
+        if self.hold_open:
             return False
         if self.playing(now):
             return self.always() or self.echo_delay is not None
@@ -407,11 +405,15 @@ class SpeakingGuard:
         session: AgentSession,
         *,
         enabled: Callable[[], bool],
-        skip_replies: int = 0,
+        open_until_first_turn: bool = False,
         on_echo: Callable[[dict], Awaitable[None]] | None = None,
     ) -> None:
         self.session = session
-        self.skip_replies = skip_replies  # replies played before the gate applies
+        # A placed call can reach a menu or voicemail that passed as a person
+        # and talks over the opening. The input stays live until the other
+        # party has taken a turn after the agent first spoke.
+        self.open_until_first_turn = open_until_first_turn
+        self._agent_spoke = False
         self._echo_scored = 0
         self._seen_match: tuple[float, float] | None = None
         self.enabled = enabled  # False keeps the input untouched (phone menus)
@@ -432,6 +434,14 @@ class SpeakingGuard:
                 self._raw_task.cancel()
             self._clear()
 
+        @session.on("conversation_item_added")
+        def item_added(event) -> None:
+            role = getattr(getattr(event, "item", None), "role", None)
+            if role == "assistant":
+                self._agent_spoke = True
+            elif role == "user" and self._agent_spoke and self.playout:
+                self.playout.hold_open = False
+
     def attach(self) -> None:
         sink = getattr(getattr(self.session, "output", None), "audio", None)
         source = getattr(getattr(self.session, "input", None), "audio", None)
@@ -443,12 +453,19 @@ class SpeakingGuard:
         # calls with measured echo. Once the model is refused or fails, the
         # gate takes over.
         self.playout.always = lambda: not interruption_model_live(session)
-        self.playout.skip_replies = self.skip_replies
+        self.playout.hold_open = self.open_until_first_turn
         self.session.output.audio = self.playout
         self.session.input.audio = SpeakingGate(
             source,
             self.playout,
-            lambda: self.enabled() and id(session) not in _listening,
+            lambda: (
+                self.enabled()
+                # A goodbye stays heard, except on a line with echo: there
+                # the returning goodbye would pass as someone still talking.
+                and (
+                    id(session) not in _listening or self.playout.echo_delay is not None
+                )
+            ),
             lambda: getattr(session, "user_state", None) == "speaking",
         )
         self._raw_task = asyncio.create_task(self._observe_raw(), name="echo_raw_input")

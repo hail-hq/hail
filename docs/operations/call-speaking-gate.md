@@ -13,17 +13,17 @@ LIMIT 20;
 
 ## What it does
 
-| Moment                                      | The agent's input                                                       |
-| ------------------------------------------- | ----------------------------------------------------------------------- |
-| Agent audio is playing                      | Silent. Nothing the other party says is heard.                          |
-| Agent stopped, no echo measured             | Live at once. A quick "yes" is heard.                                   |
-| Agent stopped, echo measured on this call   | Silent for the measured delay plus 0.3 s, then live.                    |
-| Agent is thinking                           | Live.                                                                   |
-| Outbound call, the agent's opening          | Live. A menu or voicemail greeting that passed as a person stays heard. |
-| Outbound call, phone menu being followed    | Live all the time.                                                      |
-| The goodbye before a hang-up                | Live. Someone who talks over it keeps the call open.                    |
-| Someone already talking when a reply starts | Live for up to 3 s, so they are not cut mid-word.                       |
-| A transferred call is connected             | Live all the time (the agent is muted).                                 |
+| Moment                                                              | The agent's input                                                                            |
+| ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| Agent audio is playing                                              | Silent. Nothing the other party says is heard.                                               |
+| Agent stopped, no echo measured                                     | Live at once. A quick "yes" is heard.                                                        |
+| Agent stopped, echo measured on this call                           | Silent for the measured delay plus 0.3 s, then live.                                         |
+| Agent is thinking                                                   | Live.                                                                                        |
+| Outbound call, until the other party takes a turn after the opening | Live. A menu or voicemail greeting that passed as a person stays heard.                      |
+| Outbound call, phone menu being followed                            | Live all the time.                                                                           |
+| The goodbye before a hang-up                                        | Live, so someone who talks over it keeps the call open. Silent on a call with measured echo. |
+| Someone already talking when a reply starts                         | Live for up to 1.5 s, so they are not cut mid-word.                                          |
+| A transferred call is connected                                     | Live all the time (the agent is muted).                                                      |
 
 Code: [`speaking_gate.py`](../../voicebot/hailhq/voicebot/speaking_gate.py),
 wired in `entrypoint` in
@@ -52,6 +52,10 @@ of them with a radio playing, gave no confirmation.
   each part the agent is silent for about 1 s. When the other party speaks in
   that pause, the rest is dropped and their turn is answered. When they stay
   quiet, the next part is spoken.
+- A reply that calls a tool is spoken whole, and so is every reply while
+  LiveKit's interruption model is working.
+- Background talk that is going on at the moment a reply starts is heard for
+  up to 1.5 s and can still cut that reply.
 - Detection runs on the worker's event loop, a few 0.5 s windows per half
   second.
 

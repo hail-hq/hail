@@ -7,6 +7,8 @@ from unittest.mock import Mock
 import pytest
 from hailhq.voicebot import reply_limit
 from hailhq.voicebot.reply_limit import (
+    HARD_CHARS,
+    HARD_SLACK,
     MAX_CHARS,
     ReplyContinuation,
     ReplyLimiter,
@@ -68,24 +70,28 @@ def test_full_stops_without_spaces_count():
     assert 0 < len(spoken) < len(text) and spoken.endswith("\u3002")
 
 
-async def test_tool_calls_after_the_cut_still_reach_the_session():
+async def test_a_reply_that_calls_a_tool_is_spoken_whole():
     def chunk(content=None, tool_calls=None):
         return SimpleNamespace(
             delta=SimpleNamespace(content=content, tool_calls=tool_calls or [])
         )
 
     async def stream():
-        for piece in (LONG[:80], LONG[80:], " Goodbye for now."):
+        for piece in (LONG[:80], LONG[80:]):
             yield chunk(piece)
         yield chunk(tool_calls=["end_call"])
+        yield chunk(" Goodbye for now.")
         yield SimpleNamespace(delta=None, usage="tokens")
 
-    seen = [c async for c in limit_reply(stream())]
-    assert "".join(c.delta.content or "" for c in seen if c.delta) == TWO
+    kept = []
+    seen = [c async for c in limit_reply(stream(), kept.append)]
+    spoken = "".join(c.delta.content or "" for c in seen if c.delta)
+    assert spoken == LONG + " Goodbye for now."
     assert [c.delta.tool_calls for c in seen if c.delta and c.delta.tool_calls] == [
         ["end_call"]
     ]
     assert seen[-1].usage == "tokens"
+    assert kept == []  # nothing is continued after a tool call
 
 
 async def test_plain_text_streams_are_limited_too():
@@ -102,7 +108,7 @@ REST = (
 )
 
 
-async def test_the_rest_of_a_cut_reply_is_handed_over_but_not_after_a_tool_call():
+async def test_the_rest_of_a_cut_reply_is_handed_over():
     async def text():
         for i in range(0, len(LONG), 11):
             yield LONG[i : i + 11]
@@ -111,13 +117,36 @@ async def test_the_rest_of_a_cut_reply_is_handed_over_but_not_after_a_tool_call(
     assert "".join([c async for c in limit_reply(text(), kept.append)]) == TWO
     assert [k.strip() for k in kept] == [REST]
 
-    async def with_tool():
-        yield SimpleNamespace(delta=SimpleNamespace(content=LONG, tool_calls=[]))
-        yield SimpleNamespace(delta=SimpleNamespace(content=None, tool_calls=["x"]))
 
-    kept.clear()
-    [c async for c in limit_reply(with_tool(), kept.append)]
-    assert kept == []
+@pytest.mark.parametrize(
+    "text",
+    [
+        (
+            "Thanks for waiting. Your package was handed to the carrier and will "
+            "reach St. Louis by Friday morning."
+        ),
+        "Danke. Ihr Termin ist am Dienstag, dem 24. November um 15 Uhr eingetragen.",
+        "The office opens again tomorrow. Call us after 9 a.m. Eastern for the result.",
+        "I spoke with the clinic today. Dr. Lee can see you on Monday or on Thursday.",
+    ],
+)
+def test_abbreviations_and_dates_do_not_cut_a_sentence(text):
+    assert split_reply(text) == (text, "")
+
+
+def test_other_scripts_and_run_on_replies_are_cut_too():
+    hindi = (
+        "\u092f\u0939 \u090f\u0915 \u0932\u0902\u092c\u093e \u0935\u093e\u0915\u094d\u092f \u0939\u0948\u0964 "
+        * 8
+    )
+    part, rest = split_reply(hindi)
+    assert rest and part.endswith("\u0964")
+    run_on = "and then the next item on the list " * 20
+    part, rest = split_reply(run_on)
+    assert rest and HARD_CHARS <= len(part) <= HARD_CHARS + HARD_SLACK
+    unbroken = "x" * 1000
+    part, rest = split_reply(unbroken)
+    assert len(part) == HARD_CHARS + HARD_SLACK and rest
 
 
 def test_split_reply_gives_the_next_part_and_what_is_left():
@@ -154,6 +183,17 @@ async def test_the_rest_is_spoken_after_a_pause_when_they_stay_quiet(quick):
     session.emit("conversation_item_added", **said())
     await asyncio.sleep(0.05)
     assert session.say.call_count == 2  # nothing is left
+
+
+async def test_the_turn_being_answered_does_not_drop_the_rest(quick):
+    # With early generation the SDK adds the user's turn after the reply text
+    # exists, and before the first part is spoken.
+    session, rest = continuing()
+    rest.keep(REST)
+    session.emit("conversation_item_added", **said(role="user"))
+    session.emit("conversation_item_added", **said())
+    await asyncio.sleep(0.05)
+    session.say.assert_called_once_with(REST)
 
 
 @pytest.mark.parametrize("how", ["turn", "words", "interrupted", "not allowed"])

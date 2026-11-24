@@ -78,7 +78,7 @@ class Source(io.AudioInput):
         return self.frame
 
 
-def call(enabled=lambda: True, on_echo=None, skip_replies=0):
+def call(enabled=lambda: True, on_echo=None, open_until_first_turn=False):
     loud = rtc.AudioFrame(np.full(400, 5000, "<i2").tobytes(), RATE, 1, 400)
     session = Session()
     sink = Sink()
@@ -87,7 +87,10 @@ def call(enabled=lambda: True, on_echo=None, skip_replies=0):
     session.room_io = SimpleNamespace(linked_participant=None)
     session.user_state = "listening"
     guard = SpeakingGuard(
-        session, enabled=enabled, skip_replies=skip_replies, on_echo=on_echo
+        session,
+        enabled=enabled,
+        open_until_first_turn=open_until_first_turn,
+        on_echo=on_echo,
     )
     guard.attach()
     return session, sink, guard, loud
@@ -361,12 +364,21 @@ async def test_speech_that_began_before_a_reply_is_not_cut_mid_word():
     await guard.aclose()
 
 
-async def test_the_opening_of_a_placed_call_is_not_gated():
-    session, sink, guard, loud = call(skip_replies=1)
+def said(role):
+    return {"item": SimpleNamespace(role=role, interrupted=False)}
+
+
+async def test_a_placed_call_is_not_gated_until_they_took_a_turn_after_the_opening():
+    session, sink, guard, loud = call(open_until_first_turn=True)
     gate = session.input.audio
-    await session.output.audio.capture_frame(agent_frame())
-    assert await gate.__anext__() is loud  # a menu over the opening stays heard
-    sink.on_playback_finished(playback_position=1.0, interrupted=False)
+    session.emit("conversation_item_added", **said("user"))  # the pickup "Hello?"
+    # The AI line, then the generated opening: two replies, both heard over.
+    for _ in range(2):
+        await session.output.audio.capture_frame(agent_frame())
+        assert await gate.__anext__() is loud
+        sink.on_playback_finished(playback_position=1.0, interrupted=False)
+        session.emit("conversation_item_added", **said("assistant"))
+    session.emit("conversation_item_added", **said("user"))
     await session.output.audio.capture_frame(agent_frame())
     assert silent(await gate.__anext__())
     await guard.aclose()
@@ -378,6 +390,10 @@ async def test_the_goodbye_before_a_hang_up_stays_heard():
     await session.output.audio.capture_frame(agent_frame())
     with listening_through(session):
         assert await gate.__anext__() is loud
+        # On a line with echo the returning goodbye must not pass as speech.
+        guard.playout.echo_delay = 0.8
+        assert silent(await gate.__anext__())
+        guard.playout.echo_delay = None
     assert silent(await gate.__anext__())
     await guard.aclose()
 

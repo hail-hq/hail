@@ -105,7 +105,11 @@ from hailhq.voicebot.pipeline import (
 from hailhq.voicebot.recording import start_recording, stop_recording
 from hailhq.voicebot.recovery import ConversationRecovery
 from hailhq.voicebot.reply_limit import ReplyContinuation, limit_reply
-from hailhq.voicebot.speaking_gate import TAIL, SpeakingGuard
+from hailhq.voicebot.speaking_gate import (
+    TAIL,
+    SpeakingGuard,
+    interruption_model_live,
+)
 from hailhq.voicebot.spoken_lines import spoken_lines
 from hailhq.voicebot.telemetry import connect_livekit_tracing
 from hailhq.voicebot.tools import SpeechTracker, build_agent_tools
@@ -303,6 +307,13 @@ class SpeechSanitizingAgent(Agent):
         rest = self.continuation
         if rest is not None:
             rest.drop()
+        try:
+            can_interrupt = interruption_model_live(self.session)
+        except Exception:
+            can_interrupt = False  # no session yet: keep replies short
+        if can_interrupt:
+            # The other party can interrupt: no need to cut the reply.
+            return Agent.default.llm_node(self, chat_ctx, tools, model_settings)
         return limit_reply(
             Agent.default.llm_node(self, chat_ctx, tools, model_settings),
             on_rest=rest.keep if rest is not None else None,
@@ -2703,9 +2714,7 @@ async def _run_call(
             and not bridge_state.get("picked_up")
             and not bridge_state.get("connected")
         ),
-        # A placed call can reach a menu or voicemail that passed as a person
-        # and talks over the opening: the opening is not gated.
-        skip_replies=0 if metadata.get("direction") == "inbound" else 1,
+        open_until_first_turn=metadata.get("direction") != "inbound",
         on_echo=lambda payload: write_call_event(
             call_id, "audio_echo_detected", payload
         ),

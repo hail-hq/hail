@@ -11,7 +11,8 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Changed
 
-- Calls: the agent finishes what it is saying before it listens again, so background talk or an echo of its own voice no longer cuts it off. A longer reply is spoken about two sentences at a time, with a short pause after each part in which the other party can speak.
+- Calls: the agent finishes what it is saying before it listens again, so background talk or an echo of its own voice no longer cuts it off.
+- Calls: a longer reply is spoken about two sentences at a time, with a short pause in which the other party can speak.
 - Calls: when the agent hears speech that does not fit the conversation (a TV, a radio, other people), it says so and asks instead of answering it.
 
 ## [0.37.0] (2026-11-23)
