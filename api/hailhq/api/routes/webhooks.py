@@ -283,9 +283,6 @@ async def test_subscription(
     With ``subscription_id`` the subscription's secret signs the test, and an
     omitted ``authorization`` sends the saved header. Without it the test is
     not signed: a new subscription gets its secret when it is created.
-
-    Each API key can send 20 tests a minute, on top of the general limit.
-    More return 429 with ``Retry-After``.
     """
     enforce_route_limit(request, "webhook-test", _TEST_LIMIT_PER_MINUTE)
     authorization = _authorization_value(body.authorization)

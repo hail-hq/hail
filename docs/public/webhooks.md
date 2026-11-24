@@ -407,8 +407,7 @@ Nothing is stored or retried, and a failed test does not count toward
 auto-disable. A new endpoint has no signing secret yet, so its test carries no
 `X-Hail-Signature`. Pass `subscription_id` to test a saved subscription: its
 secret signs the test, and an omitted `authorization` sends the saved header to
-the saved URL. Each API key can send 20 tests a minute; more return `429`
-with `Retry-After`. Schemas: `WebhookTestRequest` and `WebhookTestResponse` in
+the saved URL. Schemas: `WebhookTestRequest` and `WebhookTestResponse` in
 [`openapi/openapi.yaml`](https://github.com/hail-hq/hail/blob/main/openapi/openapi.yaml).
 
 ## Chat SDK
