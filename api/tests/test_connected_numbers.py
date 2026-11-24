@@ -688,6 +688,23 @@ async def test_add_number_commit_failure_removes_the_e164_from_the_trunk(
     lk.remove_inbound_number.assert_awaited_once_with(trunk_id, "+14155550100")
 
 
+async def test_add_number_caps_unverified_numbers_per_org(async_session, lk, conn):
+    for i in range(connected_numbers.UNVERIFIED_PER_ORG):
+        await _number(async_session, conn, "unverified", e164=f"+1415555{100 + i:04d}")
+    with pytest.raises(ConnectedNumberError) as e:
+        await add_connected_number(async_session, lk, conn, "+14155550190")
+    assert e.value.code == "too_many_unverified"
+    lk.add_inbound_number.assert_not_awaited()
+    assert await _count(async_session, "+14155550190") == 0
+
+
+async def test_add_number_cap_counts_only_unverified(async_session, lk, conn):
+    for i in range(connected_numbers.UNVERIFIED_PER_ORG):
+        await _number(async_session, conn, "active", e164=f"+1415555{100 + i:04d}")
+    n = await add_connected_number(async_session, lk, conn, "+14155550190")
+    assert n.provisioning_state == "unverified"
+
+
 async def test_add_number_taken_elsewhere_is_a_clean_error(async_session, lk, conn):
     async_session.add(
         PhoneNumber(

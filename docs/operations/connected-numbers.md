@@ -64,7 +64,7 @@ The check calls the number from a Hail line and sends a 6-digit code as key pres
 
 - PBX host: Hail refuses an IP address in a private, loopback, link-local or reserved range, and names such as `localhost` or ones ending in `.local` or `.internal`. Hail does not resolve the name. LiveKit's SIP service resolves it and dials from its own network (LiveKit Cloud's network, not Hail's). A self-hosted LiveKit SIP service must not be able to reach internal ranges: block its egress to them with a firewall.
 - 5 checks per number per 24 hours.
-- `unverified` numbers are removed after 7 days.
+- `unverified` numbers are removed after 7 days. One workspace holds at most 10 at a time (`too_many_unverified`).
 - The check call is billed as a normal outbound call.
 
 ## 6. Manual LiveKit probe

@@ -60,6 +60,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 logger = logging.getLogger(__name__)
 
 UNSET: Final = object()
+# Connected numbers one organization may hold before their ownership check:
+# an unproven claim reserves the number, so claims are few.
+UNVERIFIED_PER_ORG: Final = 10
 
 _TRANSPORTS = ("auto", "udp", "tcp", "tls")
 _HOST = re.compile(
@@ -83,7 +86,8 @@ class ConnectedNumberError(Exception):
     ``code`` is one of: invalid_input, number_taken, invalid_number,
     has_numbers, connection_deleted, not_unverified, check_in_progress,
     check_limit, no_funds, not_callable, pool_exhausted, livekit_failed,
-    host_not_allowed, password_required, not_configured, not_found.
+    host_not_allowed, password_required, not_configured, not_found,
+    too_many_unverified.
     """
 
     def __init__(self, code: str, field: str | None = None, message: str = "") -> None:
@@ -497,7 +501,22 @@ async def add_connected_number(
     await db.refresh(connection)
     try:
         _live(connection)
-    except ConnectedNumberError:
+        unverified = await db.scalar(
+            select(func.count())
+            .select_from(PhoneNumber)
+            .where(
+                PhoneNumber.organization_id == connection.organization_id,
+                PhoneNumber.provider == "pbx",
+                PhoneNumber.provisioning_state == "unverified",
+            )
+        )
+        if unverified >= UNVERIFIED_PER_ORG:
+            raise ConnectedNumberError(
+                "too_many_unverified",
+                None,
+                "check or remove the numbers waiting for their check first",
+            )
+    except BaseException:
         await db.rollback()
         raise
     trunk_id = connection.livekit_inbound_trunk_id
