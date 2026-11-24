@@ -211,16 +211,20 @@ def test_ring_waits_and_reports_a_dropped_call() -> None:
             early = conn.recv(65536)
         except TimeoutError:
             early = b""
-        assert not early.startswith(b"CANCEL ")
+        # Recorded so the CANCEL check below sees it: an assert in this
+        # thread does not fail the test.
+        if early:
+            seen.append(early)
         conn.settimeout(2)
         conn.sendall(_response(inv, 486, "Rejected"))
 
-    port, seen, thread = serve(ring_then_drop)
+    seen: list[bytes] = []
+    port, recorded, thread = serve(ring_then_drop)
     code, verdict = probe.probe("127.0.0.1", port, NUMBER, timeout=2, ring=True)
     thread.join(3)
     assert code == 0
     assert verdict == "DROPPED: 180 Ringing, then 486 Rejected"
-    sent = b"".join(seen[1:])
+    sent = b"".join(seen + recorded[1:])
     assert b"CANCEL " not in sent
     assert b"ACK " in sent
 

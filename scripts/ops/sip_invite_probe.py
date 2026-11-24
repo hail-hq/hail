@@ -29,6 +29,8 @@ checks anything.
 
 * 0 DROPPED: the call rang, then ended with a final 3xx to 6xx before anyone
   answered. Check the voicebot log for the reason.
+* 0 REFUSED: as above. The trunk refused the call, so the voicebot never saw
+  it.
 * 1 ACCEPTED: answered (2xx). The probe hangs up at once.
 * 2 as above, or still ringing when the wait ends (the probe cancels).
 

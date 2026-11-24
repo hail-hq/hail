@@ -225,11 +225,11 @@ Run from the repo root of the main checkout. Values marked _(chat)_ are not writ
      --number +<E.164 number on the Twilio trunk>
    ```
 
-   It must print `DROPPED: 180 Ringing, then` a final code, like `486 Rejected` (exit 0), and:
+   It must print `DROPPED:`, a ring (`180 Ringing` or another 18x), then a final code (exit 0). Seen on production: `DROPPED: 180 Ringing, then 486 Rejected`, about 1.5 seconds after the INVITE. `DROPPED` alone proves nothing: LiveKit also ends a call nobody answers, after its ringing timeout, for example when the voicebot is down. The pass needs both:
    - Logfire shows the warning `inbound call to +<number> refused: X-Hail-Secret header missing (carrier=twilio)`;
    - the workspace's call log shows NO new call from `+12025550100`.
 
-   `ACCEPTED: 200 OK (hung up)` (exit 1), or a new call row, means Hail did not drop the call: roll back ([Secret header rollback](#secret-header-rollback)). `INCONCLUSIVE` (exit 2) proves nothing: run it again.
+   `ACCEPTED: 200 OK (hung up)` (exit 1), or a new call row, means Hail did not drop the call: roll back ([Secret header rollback](#secret-header-rollback)). `INCONCLUSIVE` (exit 2) proves nothing: run it again. `REFUSED` (exit 0) means the trunk's IP lock refused the laptop before the voicebot saw the call: the header check cannot be tested from this address.
 
 ### Secret header rollback
 
