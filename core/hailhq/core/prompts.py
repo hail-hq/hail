@@ -326,7 +326,8 @@ OPENING_FIT_INSTRUCTIONS = (
     "in the same order, so a closing question stays last. "
     "Use the first line's language. Do not repeat the notice. Reply with the "
     "rewritten line only, as plain spoken text with no quotes. If nothing "
-    "repeats, reply with the first line unchanged."
+    "repeats, reply with the first line unchanged. If the first line is only "
+    "a greeting, reply with exactly: (none)"
 )
 
 # The call.summarized webhook's summary (voicebot/hailhq/voicebot/callsummary.py).

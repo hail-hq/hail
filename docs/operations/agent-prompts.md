@@ -54,9 +54,11 @@ and first. The rewrite (`OPENING_FIT_INSTRUCTIONS` in
 rings; at pickup the greeting waits at most one second for it. A
 workspace that uses its own model skips the rewrite, so its call content
 stays off Hail's models, and a customer endpoint may answer in character
-instead of rewriting. A rewrite that changes
-any digit or `<spell>` code, repeats the notice, or comes back late, empty
-or much longer falls back to the line as written. Inbound calls skip it:
+instead of rewriting. A rewrite that changes any number (with its
+separators) or `<spell>` code, repeats the notice, or comes back late,
+empty or much longer falls back to the line as written. A first line that
+is only a greeting drops out, and the notice is said alone. Inbound calls
+skip it:
 the caller is already on the line, and the default inbound greeting holds
 the AI line inside it.
 

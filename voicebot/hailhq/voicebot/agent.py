@@ -1046,9 +1046,11 @@ FIRST_LINE_FIT_SECONDS = 10.0
 FIRST_LINE_WAIT_SECONDS = 1.0
 
 
-# Text a rewrite must keep exactly: every digit (prices, times, codes) and each
-# <spell>...</spell> code, in order.
-_DIGIT = re.compile(r"\d")
+# Text a rewrite must keep exactly, in order: each number with its separators
+# ("4 8 1 9", "$15.50", "3:30") and each <spell>...</spell> code.
+_NUMBER = re.compile(r"\d(?:[\d .,:/-]*\d)?")
+# The model's answer when the first line was only a greeting.
+NOTHING_LEFT = "(none)"
 _SPELL = re.compile(r"<spell>.*?</spell>", re.IGNORECASE | re.DOTALL)
 # Quote pairs a model may wrap its whole answer in.
 _QUOTE_PAIRS = {
@@ -1075,17 +1077,19 @@ def _keeps_first_line(first_message: str, text: str, disclosure: str) -> bool:
     notice = _plain(disclosure).split(" ", 1)[-1]
     if notice and notice in _plain(text):
         return False
-    return _DIGIT.findall(first_message) == _DIGIT.findall(text) and (
+    return _NUMBER.findall(first_message) == _NUMBER.findall(text) and (
         _SPELL.findall(first_message) == _SPELL.findall(text)
     )
 
 
 async def fitted_first_line(
-    llm: LLM, disclosure: str, first_message: str, call_id: UUID
+    make_llm: Callable[[], LLM], disclosure: str, first_message: str, call_id: UUID
 ) -> str:
     """``first_message`` reworded to follow the AI ``disclosure`` without
-    repeating its greeting (see :data:`OPENING_FIT_INSTRUCTIONS`). The
-    unchanged line on any failure, an empty answer or a much longer one."""
+    repeating its greeting (see :data:`OPENING_FIT_INSTRUCTIONS`); "" when
+    the line was only a greeting. The unchanged line on any failure or an
+    answer that fails :func:`_keeps_first_line`. The model is built here, so
+    a fit cancelled before it starts opens no connection."""
     messages = [
         {"role": "system", "content": OPENING_FIT_INSTRUCTIONS},
         {
@@ -1096,7 +1100,7 @@ async def fitted_first_line(
     try:
         text = await asyncio.wait_for(
             run_chat(
-                llm,
+                make_llm(),
                 messages,
                 [],
                 no_tools,
@@ -1113,8 +1117,11 @@ async def fitted_first_line(
         )
         return first_message
     text = text.strip()
-    if len(text) >= 2 and _QUOTE_PAIRS.get(text[0]) == text[-1]:
+    close = _QUOTE_PAIRS.get(text[:1])
+    if len(text) >= 2 and close == text[-1] and close not in text[1:-1]:
         text = text[1:-1].strip()
+    if text == NOTHING_LEFT:
+        return ""
     if not _keeps_first_line(first_message, text, disclosure):
         return first_message
     return text
@@ -1141,13 +1148,8 @@ def start_first_line_fit(
         metadata.get("ai_disclosure_line"),
         language,
     )
-    try:
-        model = llm()
-    except Exception:
-        logger.warning("call_id=%s no model to fit the first line", call_id)
-        return None
     return asyncio.create_task(
-        fitted_first_line(model, disclosure, first_message, call_id)
+        fitted_first_line(llm, disclosure, first_message, call_id)
     )
 
 
@@ -1229,6 +1231,13 @@ async def speak_greeting(
     )
     first_message = metadata.get("first_message")
     inbound = metadata.get("direction") == "inbound"
+    # Get the fitted line before clearing the pickup turn below: nothing may
+    # wait between that clear and the opening, or a late "Hello?" cuts it off.
+    line = (
+        await _ready_first_line(first_line, first_message)
+        if first_message and disclosure
+        else first_message
+    )
     if generate_opening and not inbound:
         # The turn detector can wait up to max_delay (2.5 s) on a bare pickup
         # "Hello?". If that turn ends after this opening starts, it cuts the
@@ -1272,8 +1281,8 @@ async def speak_greeting(
                 # speaks over the greeting must still hear it.
                 interruptible = False
             else:
-                line = await _ready_first_line(first_line, first_message)
-                greeting = f"{disclosure} {line}"
+                # An empty line: the first line was only a greeting.
+                greeting = f"{disclosure} {line}".strip()
             await session.say(greeting, allow_interruptions=interruptible)
             return
         if disclosure:

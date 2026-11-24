@@ -1140,7 +1140,7 @@ async def test_speak_greeting_says_the_line_as_written_when_the_fit_is_late(
 async def test_fitted_first_line_falls_back_to_the_line_as_written(reply, expected):
     """An empty, runaway or notice-repeating answer keeps the line as written."""
     line = await fitted_first_line(
-        FakeLLM(reply=reply),
+        lambda: FakeLLM(reply=reply),
         AI_DISCLOSURE_LINE,
         "Hi, calling about your order.",
         UUID("11111111-2222-3333-4444-555555555555"),
@@ -1151,7 +1151,9 @@ async def test_fitted_first_line_falls_back_to_the_line_as_written(reply, expect
 @pytest.mark.parametrize(
     ("first", "reply", "kept"),
     [
-        ("Hi, your code is 4 8 1 9.", "Your code is 4819.", True),
+        ("Hi, your code is 4 8 1 9.", "Your code is 4 8 1 9.", True),
+        ("Hi, your code is 4 8 1 9.", "Your code is 4819.", False),
+        ("Hi, it is $15.50 at 3:30.", "It is $1550 at 330.", False),
         ("Hi, your code is 4 8 1 9.", "Your code is 481.", False),
         ("Hi, Friday at 3 PM?", "Friday at 3 PM?", True),
         ("Hi, Friday at 3 PM?", "Friday at 4 PM?", False),
@@ -1162,12 +1164,28 @@ async def test_fitted_first_line_falls_back_to_the_line_as_written(reply, expect
 async def test_fitted_first_line_keeps_every_digit_and_code(first, reply, kept):
     """A rewrite that changes a digit or a spelled code is not used."""
     line = await fitted_first_line(
-        FakeLLM(reply=reply),
+        lambda: FakeLLM(reply=reply),
         AI_DISCLOSURE_LINE,
         first,
         UUID("11111111-2222-3333-4444-555555555555"),
     )
     assert line == (reply if kept else first)
+
+
+async def test_a_greeting_only_first_line_drops_out() -> None:
+    """A first line that is only a greeting leaves the notice alone."""
+    line = await fitted_first_line(
+        lambda: FakeLLM(reply="(none)"),
+        AI_DISCLOSURE_LINE,
+        "Hello!",
+        UUID("11111111-2222-3333-4444-555555555555"),
+    )
+    assert line == ""
+    session = FakeAnnouncingSession()
+    fitted = asyncio.get_running_loop().create_future()
+    fitted.set_result("")
+    await speak_greeting(session, {"first_message": "Hello!"}, first_line=fitted)
+    assert session.say_calls == [(AI_DISCLOSURE_LINE, True)]
 
 
 async def test_speak_greeting_says_the_line_when_the_fit_was_cancelled() -> None:
@@ -1190,7 +1208,7 @@ async def test_fitted_first_line_keeps_the_line_when_the_model_fails() -> None:
             raise RuntimeError("model down")
 
     line = await fitted_first_line(
-        Broken(),
+        Broken,
         AI_DISCLOSURE_LINE,
         "Hi there.",
         UUID("11111111-2222-3333-4444-555555555555"),
