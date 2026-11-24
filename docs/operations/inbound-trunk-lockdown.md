@@ -166,12 +166,13 @@ LiveKit Cloud checks `allowed_addresses` only once LiveKit enables that check fo
   - A refused call may be forged, on any trunk, so Hail writes no call row and sends no webhook. A failed row would let a forger put calls with any caller ID into a customer's call log.
   - It logs a warning `X-Hail-Secret header missing` or `wrong`. If the call arrived on the shared trunk, it also logs `Twilio number still on the shared trunk; move it` at INFO, once per number per voicebot process.
   - The value must be 20 or more letters, digits, `-` or `_`, and `LIVEKIT_TWILIO_SIP_INBOUND_TRUNK_ID` must name the Twilio trunk (not empty, not the shared trunk). Otherwise the check is off and the voicebot logs an ERROR (`HAIL_SIP_INBOUND_SECRET is set but no Twilio inbound trunk: secret check off`, or `is not 20 or more letters, digits, - or _`). No service stops at startup over it.
-- The secret is not hidden inside LiveKit: anyone with access to the LiveKit project can read it as the `hail.sip_secret` participant attribute of a Twilio call. To rotate it: do the [Secret header rollback](#secret-header-rollback), set a new value, then repeat [Secret header rollout](#secret-header-rollout) steps 3 to 7.
+- The secret is not hidden inside LiveKit: anyone with access to the LiveKit project can read it as the `hail.sip_secret` participant attribute of a Twilio call. To rotate it: do the [Secret header rollback](#secret-header-rollback), then repeat [Secret header rollout](#secret-header-rollout) steps 3 to 7, with `--rotate` added to both `apply` commands in step 3.
 - `apply --carrier twilio` sets the LiveKit map and the Twilio URLs. It skips both, with the plan line `secret header: skipped, <reason>`, when:
   - the key is empty, or not 20 or more letters, digits, `-` or `_`;
   - a live Twilio number is still on the shared trunk, routed for inbound calls or not (the plan lists them; run `move --carrier twilio`, or `move --carrier twilio --number <it> --drop-unknown` for one not routed, then `apply` again);
   - `TWILIO_SIP_TRUNK_SID` is empty or its origination URLs cannot be read;
-  - no origination URL goes to LiveKit.
+  - no origination URL goes to LiveKit;
+  - an origination URL already sends a different secret, and `--rotate` is not given.
 
   The allowed addresses are applied either way, so the weekly IP fix never waits for the secret.
 - LiveKit's field update cannot set the map, so the first `apply` replaces the whole trunk with a copy read just before. Header maps other than `X-Hail-Secret` stay.
@@ -230,4 +231,4 @@ sed -i '' -E 's/^HAIL_SIP_INBOUND_SECRET=.*/HAIL_SIP_INBOUND_SECRET=/' .env
 grep -c '^HAIL_SIP_INBOUND_SECRET=$' .env
 ```
 
-To change the secret, roll back first, then repeat [Secret header rollout](#secret-header-rollout) steps 3 to 7 (step 3 generates the new value). In the other order, every Twilio call is refused between `apply` and the end of the deploy.
+To change the secret, roll back first, then repeat [Secret header rollout](#secret-header-rollout) steps 3 to 7 (step 3 generates the new value). Add `--rotate` to both `apply` commands in step 3: without it, `apply` keeps the old secret in the Twilio URLs. In the other order, every Twilio call is refused between `apply` and the end of the deploy.

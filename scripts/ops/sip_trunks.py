@@ -29,7 +29,9 @@ Every command except ``status`` prints its plan and changes nothing until
   plan line, while ``HAIL_SIP_INBOUND_SECRET`` is empty, while a live
   Twilio number (routed or not) is still on the shared trunk (which does
   not map the header: run ``move --carrier twilio`` first; the plan lists
-  them), while ``HAIL_SIP_INBOUND_SECRET`` is not 20 or more letters,
+  them), while an origination URL already sends a different secret
+  (after the Secret header rollback, add ``--rotate`` to replace it),
+  while ``HAIL_SIP_INBOUND_SECRET`` is not 20 or more letters,
   digits, - or _, while ``TWILIO_SIP_TRUNK_SID`` is empty or its
   origination URLs cannot be read, or when no origination URL goes to
   LiveKit. The allowed
@@ -175,6 +177,13 @@ def with_header(sip_url: str, name: str, value: str) -> str:
     if not placed:
         out.append(f"{name}={value}")
     return base + "?" + "&".join(out)
+
+
+def sends_other_secret(sip_url: str, secret: str) -> bool:
+    """True when ``sip_url`` already has a secret header that is not
+    ``secret``."""
+    has_header = masked(sip_url) != sip_url
+    return has_header and with_header(sip_url, SIP_SECRET_HEADER, secret) != sip_url
 
 
 def sip_host(sip_url: str) -> str:
@@ -335,9 +344,13 @@ async def rule_named(sip, name: str):
     return rule
 
 
-async def apply(sip, data: dict, spec: Spec, yes: bool, carriers_of=None) -> list[str]:
+async def apply(
+    sip, data: dict, spec: Spec, yes: bool, carriers_of=None, rotate: bool = False
+) -> list[str]:
     """Plan, and with ``yes`` do. Returns the plan lines. ``carriers_of``
-    defaults to :func:`live_number_carriers` (looked up at call time)."""
+    defaults to :func:`live_number_carriers` (looked up at call time).
+    ``rotate`` allows replacing a different secret already in an
+    origination URL."""
     # Every check runs before the first change, dry run or not.
     password = password_for(spec)
     secret = secret_for(spec)
@@ -424,6 +437,18 @@ async def apply(sip, data: dict, spec: Spec, yes: bool, carriers_of=None) -> lis
                     skip = (
                         "TWILIO_SIP_TRUNK_SID has no origination URL to a "
                         f"LiveKit SIP host (*{LIVEKIT_SIP_HOST_SUFFIX})"
+                    )
+                elif not rotate and any(
+                    is_livekit(u.sip_url) and sends_other_secret(u.sip_url, secret)
+                    for u in origination
+                ):
+                    # Twilio would send the new value while the VM still
+                    # checks the old one: every Twilio call refused.
+                    origination = []
+                    skip = (
+                        f"an origination URL already sends a different "
+                        f"{SIP_SECRET_HEADER}: do the Secret header rollback "
+                        f"first, then apply --carrier {spec.carrier} --rotate"
                     )
     header_map = {} if skip else spec.headers_to_attributes
     if skip:
@@ -541,7 +566,6 @@ async def apply(sip, data: dict, spec: Spec, yes: bool, carriers_of=None) -> lis
             )
             continue
         new_url = with_header(url.sip_url, SIP_SECRET_HEADER, secret)
-        had_secret = masked(url.sip_url) != url.sip_url
         if new_url == url.sip_url:
             plan.append(
                 f"Twilio origination URL {url.sid} already sends {SIP_SECRET_HEADER}"
@@ -551,8 +575,8 @@ async def apply(sip, data: dict, spec: Spec, yes: bool, carriers_of=None) -> lis
             f"Twilio origination URL {url.sid}: {masked(url.sip_url)} -> "
             f"{masked(new_url)} (priority {url.priority}, weight {url.weight} kept)"
             + (
-                ": CHANGES the secret; do the Secret header rollback first"
-                if had_secret
+                ": CHANGES the secret (--rotate)"
+                if sends_other_secret(url.sip_url, secret)
                 else ""
             )
         )
@@ -925,7 +949,7 @@ async def run(args: argparse.Namespace) -> list[str]:
             )
         spec = specs[args.carrier]
         if args.command == "apply":
-            return await apply(lk.sip, data, spec, args.yes)
+            return await apply(lk.sip, data, spec, args.yes, rotate=args.rotate)
         return await move(
             lk.sip,
             data,
@@ -949,6 +973,12 @@ def main(argv: list[str] | None = None) -> int:
         p = sub.add_parser(name)
         p.add_argument("--carrier", choices=CARRIERS, required=True)
         p.add_argument("--yes", action="store_true", help="make the changes")
+        if name == "apply":
+            p.add_argument(
+                "--rotate",
+                action="store_true",
+                help="replace a different secret already in a Twilio origination URL",
+            )
         if name == "move":
             p.add_argument("--back", action="store_true", help="carrier -> shared")
             p.add_argument(

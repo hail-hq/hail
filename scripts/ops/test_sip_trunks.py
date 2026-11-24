@@ -1049,6 +1049,43 @@ async def test_sip_host(url, host) -> None:
     assert st.sip_host(url) == host
 
 
+async def test_twilio_apply_keeps_a_different_secret_without_rotate(tw) -> None:
+    """Twilio would send the new secret while the VM checks the old one."""
+    tw.urls["OU0"] = st.twilio.OriginationUrl(
+        "OU0", f"{LK}?X-Hail-Secret=old-secret-value-0123456789", 10, 20, True
+    )
+    sip = FakeSip(trunk("ST_shared", "shared", ["+14155550100"]))
+    plan = await st.apply(sip, DATA, SPECS["twilio"], yes=True)
+    assert (
+        "secret header: skipped, an origination URL already sends a different "
+        "X-Hail-Secret: do the Secret header rollback first, then apply "
+        "--carrier twilio --rotate"
+    ) in plan
+    assert tw.updates == []
+
+
+async def test_twilio_apply_rotate_replaces_a_different_secret(tw, capsys) -> None:
+    tw.urls["OU0"] = st.twilio.OriginationUrl(
+        "OU0", f"{LK}?X-Hail-Secret=old-secret-value-0123456789", 10, 20, True
+    )
+    sip = FakeSip(trunk("ST_shared", "shared", ["+14155550100"]))
+    await st.apply(sip, DATA, SPECS["twilio"], yes=True, rotate=True)
+    assert tw.updates == [("OU0", f"{LK}?X-Hail-Secret={SECRET}")]
+    assert ": CHANGES the secret (--rotate)" in capsys.readouterr().out
+
+
+def test_main_passes_rotate(monkeypatch) -> None:
+    seen = {}
+
+    async def fake_run(args):
+        seen["rotate"] = args.rotate
+        return []
+
+    monkeypatch.setattr(st, "run", fake_run)
+    assert st.main(["apply", "--carrier", "twilio", "--rotate"]) == 0
+    assert seen["rotate"] is True
+
+
 async def test_twilio_apply_skips_urls_that_are_not_livekit(tw) -> None:
     tw.urls["OU1"] = st.twilio.OriginationUrl(
         "OU1", "sip:x.sip.livekit.cloud.evil.test", 10, 10, True
