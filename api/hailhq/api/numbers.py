@@ -19,7 +19,7 @@ from hailhq.core.sms_registration_gate import (
     on_approved_registration,
     registered_sms_number,
 )
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = ["AnswerOnlyNumber", "resolve_org_number", "resolve_sms_number"]
@@ -42,8 +42,9 @@ async def resolve_org_number(
     ``capability`` (e.g. ``"sms"``) additionally requires the number's
     ``capabilities`` array to carry it — a number can legitimately be
     voice-only. Returns ``None`` when nothing matches; the caller owns the
-    failure path (calls fall back to the shared pool, SMS 422s). An explicit
-    connected number with no outbound trunk raises :class:`AnswerOnlyNumber`.
+    failure path (calls fall back to the shared pool, SMS 422s). A connected
+    number is returned only when named explicitly; one with no outbound trunk
+    raises :class:`AnswerOnlyNumber`.
     """
     stmt = select(PhoneNumber).where(
         PhoneNumber.organization_id == organization_id,
@@ -64,16 +65,11 @@ async def resolve_org_number(
             if conn is None or conn.livekit_outbound_trunk_id is None:
                 raise AnswerOnlyNumber(explicit_e164)
         return number
-    # The default caller ID must be a number Hail can dial from: skip a
-    # connected number whose phone system only answers (no outbound trunk).
+    # A connected number (pbx) is the caller ID only when ``from`` names it:
+    # the default is a carrier number, else the caller falls back (calls use
+    # the shared pool).
     stmt = (
-        stmt.outerjoin(SipConnection, SipConnection.id == PhoneNumber.sip_connection_id)
-        .where(
-            or_(
-                PhoneNumber.provider != "pbx",
-                SipConnection.livekit_outbound_trunk_id.is_not(None),
-            )
-        )
+        stmt.where(PhoneNumber.provider != "pbx")
         .order_by(PhoneNumber.created_at.asc())
         .limit(1)
     )

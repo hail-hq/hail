@@ -1210,9 +1210,29 @@ async def test_default_caller_id_skips_answer_only_pbx_number(
     assert found.provider == "twilio"
 
 
-async def test_default_caller_id_may_be_pbx_with_host(
+async def test_default_caller_id_is_never_a_pbx_number(
     async_session, org_and_key, add_phone_number
 ):
+    """A connected number is the caller ID only when ``from`` names it: an
+    older one with an outbound address still loses to a carrier number."""
+    org_id, _, _ = org_and_key
+    pbx = await _pbx_number(
+        async_session,
+        org_id,
+        host="pbx.example.com",
+        outbound_trunk="ST_out_pbx",
+        e164="+14155550100",
+    )
+    await add_phone_number(async_session, org_id, e164="+14155550101")
+    assert (await resolve_org_number(async_session, org_id, None)).provider == "twilio"
+    named = await resolve_org_number(async_session, org_id, "+14155550100")
+    assert named.id == pbx.id
+
+
+async def test_default_caller_id_with_only_pbx_numbers_is_none(
+    async_session, org_and_key
+):
+    """With no carrier number, a call without ``from`` uses the shared pool."""
     org_id, _, _ = org_and_key
     await _pbx_number(
         async_session,
@@ -1221,9 +1241,7 @@ async def test_default_caller_id_may_be_pbx_with_host(
         outbound_trunk="ST_out_pbx",
         e164="+14155550100",
     )
-    await add_phone_number(async_session, org_id, e164="+14155550101")
-    found = await resolve_org_number(async_session, org_id, None)
-    assert found.provider == "pbx"
+    assert await resolve_org_number(async_session, org_id, None) is None
 
 
 async def test_release_endpoint_removes_pbx_number(
