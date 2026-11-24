@@ -27,7 +27,7 @@
 - The handover leg's time comes from its `call_legs` row (`role = 'handover'`, `answered_at`, `left_at`), which the voicebot already writes for every SIP leg before the call's usage event. No new column.
 - Ownership check call: the normal outbound price for the destination (a carrier call from a pool number).
 - `call_legs` rows of a `pbx` call: `provider = 'pbx'`, `cost_status = 'found'`, `cost_usd = 0` at insert.
-- Migration revision: `0092`, `down_revision = "0091"`. The docstring names the tables checked (CLAUDE.md "Schema changes" rule 4).
+- Migration revision: the next free revision after main's head, `down_revision` set to that head. The docstring names the tables checked (CLAUDE.md "Schema changes" rule 4).
 - Tests need local Postgres: `docker compose -f docker-compose.yml -f docker-compose.local.yml up -d postgres`, then `export DATABASE_URL=postgresql+psycopg://hail:hail@localhost:5432/hail`.
 - Python checks before each commit: `uvx ruff==0.16.10 check .` and `uvx black==26.10.0 --check .` from the repo root.
 - Commits: Conventional Commits. No `Co-Authored-By` or other AI attribution line.
@@ -53,7 +53,7 @@ Branch: `feat/pbx-connected-numbers`.
 ## Task A1: Migration and models
 
 **Files:**
-- Create: `api/migrations/versions/0092_sip_connections.py`
+- Create: `api/migrations/versions/<next>_sip_connections.py`
 - Modify: `core/hailhq/core/models.py` (`Contact` 118-172, `PhoneNumber` 631-775, `CallLeg` 944-1025; new `SipConnection` class after `PhoneNumber`)
 - Test: `api/tests/test_sip_connections_migration.py`, `core/tests/test_models.py`
 
@@ -135,12 +135,12 @@ async def test_call_leg_accepts_pbx(async_session, pbx_call):
   `pbx_row(e164, sip_connection_id, **over)` and `number_row(...)` are small builders in the test file (provider `pbx`, `capabilities=["voice"]`, `country_code="US"`, `number_type="local"`).
 
 - [ ] **Step 2: Run them.** `cd api && uv run pytest tests/test_sip_connections_migration.py -v` and `cd core && uv run pytest tests/test_models.py -v`. Expected: FAIL (no file, no columns).
-- [ ] **Step 3: Implement.** Write `0092_sip_connections.py` (`revision = "0092"`, `down_revision = "0091"`). Docstring: tables checked are `org_provider_config` (BYO keys for `llm`/`tts`/`stt` only, one row per org, layer and provider; the voicebot loads every row as pipeline settings) and `phone_numbers` (numbers, not credentials); neither fits, so a new table. Downgrade reverses each change and fails while `pbx` rows or extension-only contacts exist (the restored CHECKs reject them); say so in the docstring. Mirror every column and constraint in `models.py`.
+- [ ] **Step 3: Implement.** Write `<next>_sip_connections.py` (the next free revision after main's head). Docstring: tables checked are `org_provider_config` (BYO keys for `llm`/`tts`/`stt` only, one row per org, layer and provider; the voicebot loads every row as pipeline settings) and `phone_numbers` (numbers, not credentials); neither fits, so a new table. Downgrade reverses each change and fails while `pbx` rows or extension-only contacts exist (the restored CHECKs reject them); say so in the docstring. Mirror every column and constraint in `models.py`.
 - [ ] **Step 4: Run them.** Same commands. Expected: PASS. Also `cd api && uv run pytest tests/test_migrations.py -v`. Expected: PASS.
 - [ ] **Step 5: Commit.**
 
 ```bash
-git add api/migrations/versions/0092_sip_connections.py core/hailhq/core/models.py \
+git add api/migrations/versions/<next>_sip_connections.py core/hailhq/core/models.py \
   api/tests/test_sip_connections_migration.py core/tests/test_models.py
 git commit -m "feat(db): sip_connections table and pbx number, leg and extension columns"
 ```

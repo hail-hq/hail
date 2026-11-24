@@ -471,7 +471,7 @@ def test_the_prompt_loader_for_history_is_gone() -> None:
         assert not hasattr(agent_mod, name), name
 
 
-# Ownership check, inbound side (Task A12).
+# Ownership check, inbound side.
 
 
 class _Room(rtc.EventEmitter):

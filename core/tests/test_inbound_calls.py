@@ -527,7 +527,7 @@ async def test_answer_only_pbx_call_offers_no_handover(async_session) -> None:
     assert out.metadata["handover_targets"] == []
 
 
-# Ownership check, inbound side (Task A12).
+# Ownership check, inbound side.
 
 
 def utcnow() -> datetime:

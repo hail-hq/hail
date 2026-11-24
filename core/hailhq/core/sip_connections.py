@@ -37,7 +37,7 @@ CHECK_CALL_META = "pbx_check_number_id"
 # call_events.kind written by the inbound side.
 CHECK_EVENT_KIND = "pbx_check"
 # calls.metadata key on the check call: a keyed hash of the code (see
-# ``hash_check_code``), never the code. The key name stays for A13.
+# ``hash_check_code``), never the code.
 CHECK_CODE_META = "pbx_check_code_sha256"
 CHECK_CODE_DIGITS = 6
 

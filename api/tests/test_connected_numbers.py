@@ -896,7 +896,7 @@ async def test_stale_cleanup_skips_a_number_released_before_the_lock(
 
 
 # --------------------------------------------------------------------------- #
-# Ownership check, outbound side (Task A13)
+# Ownership check, outbound side
 # --------------------------------------------------------------------------- #
 
 POOL_E164 = "+14155550199"
@@ -1242,7 +1242,7 @@ async def test_check_sends_code_before_the_dial(
 async def test_check_passes_with_the_real_inbound_side(
     async_session, check_lk, pbx_number, pool_number, conn
 ):
-    """The real A12 inbound side, not a fake: the INVITE on the connection's
+    """The real inbound side, not a fake: the INVITE on the connection's
     trunk is a check in flight, and the code from the dispatch activates."""
     lk = check_lk
     number_id, e164 = pbx_number.id, pbx_number.e164
