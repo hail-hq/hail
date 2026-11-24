@@ -22,6 +22,16 @@ Verdicts and exit codes:
   trunk proves nothing), another final code (printed), or 100 Trying with
   no final answer.
 
+With ``--ring`` the probe does not cancel at the first ring: it waits for
+the final answer, so the voicebot sees the call and can drop it (the Twilio
+secret header check). Without it, the probe hangs up before the voicebot
+checks anything.
+
+* 0 DROPPED: the call rang, then ended with a final 3xx to 6xx before anyone
+  answered. Check the voicebot log for the reason.
+* 1 ACCEPTED: answered (2xx). The probe hangs up at once.
+* 2 as above, or still ringing when the wait ends (the probe cancels).
+
 Standard library only.
 """
 
@@ -39,6 +49,8 @@ CALLER = "+12025550100"
 E164 = re.compile(r"^\+[1-9]\d{6,14}$")
 CONNECT_TIMEOUT = 10.0
 ANSWER_TIMEOUT = 15.0
+# --ring: LiveKit rings until the voicebot answers or drops the call.
+RING_TIMEOUT = 40.0
 # What LiveKit answers a call no trunk accepts (livekit/sip, pkg/sip/inbound.go):
 # 404 "Does not match any SIP Trunks" or "No trunk found", 403 "Auth failure",
 # and 401/407 to ask for a password.
@@ -195,7 +207,13 @@ def _contact(headers: dict[str, str]) -> str | None:
     return match.group(1) if match else None
 
 
-def probe(host: str, port: int, number: str, timeout: float = ANSWER_TIMEOUT):
+def probe(
+    host: str,
+    port: int,
+    number: str,
+    timeout: float = ANSWER_TIMEOUT,
+    ring: bool = False,
+):
     """Returns (exit code, verdict line)."""
     try:
         # IPv4 only: the INVITE writes the local address into Via, Contact
@@ -212,7 +230,7 @@ def probe(host: str, port: int, number: str, timeout: float = ANSWER_TIMEOUT):
         dialog = Dialog(host, port, number, local_ip, local_port)
         state = {"accepted": None, "answered": False}
         try:
-            return _dialog(sock, dialog, state)
+            return _dialog(sock, dialog, state, ring)
         except OSError as exc:
             accepted = state["accepted"]
             if accepted:
@@ -227,13 +245,21 @@ def probe(host: str, port: int, number: str, timeout: float = ANSWER_TIMEOUT):
             return 2, f"INCONCLUSIVE: an answer this probe cannot read ({exc})"
 
 
-def _dialog(sock: socket.socket, dialog: Dialog, state: dict) -> tuple[int, str]:
+def _dialog(
+    sock: socket.socket, dialog: Dialog, state: dict, ring: bool = False
+) -> tuple[int, str]:
     sock.sendall(dialog.invite())
     reader = Reader(sock)
     while True:
         response = reader.next()
         accepted = state["accepted"]
         if response is None:
+            if ring and accepted:
+                _send(sock, dialog.cancel())
+                return 2, (
+                    f"INCONCLUSIVE: {accepted.code} {accepted.reason}, "
+                    "then no final answer (cancelled)"
+                )
             if accepted:
                 return 1, f"ACCEPTED: {accepted.code} {accepted.reason}"
             if state["answered"]:
@@ -257,7 +283,8 @@ def _dialog(sock: socket.socket, dialog: Dialog, state: dict) -> tuple[int, str]
         if response.code < 200:
             if accepted is None:
                 state["accepted"] = response
-                _send(sock, dialog.cancel())
+                if not ring:
+                    _send(sock, dialog.cancel())
             continue
         # The verdict is known now; a failed ACK or BYE must not change it.
         if response.code < 300:
@@ -265,6 +292,11 @@ def _dialog(sock: socket.socket, dialog: Dialog, state: dict) -> tuple[int, str]
             _send(sock, dialog.ack(to_tag, True, target), dialog.bye(to_tag, target))
             return 1, f"ACCEPTED: {response.code} {response.reason} (hung up)"
         _send(sock, dialog.ack(to_tag, False))
+        if ring and accepted:
+            return 0, (
+                f"DROPPED: {accepted.code} {accepted.reason}, then "
+                f"{response.code} {response.reason}"
+            )
         if accepted:
             return 1, f"ACCEPTED: {accepted.code} {accepted.reason} (cancelled)"
         if response.code in REFUSED_CODES:
@@ -286,11 +318,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--host", required=True, help="<project>.sip.livekit.cloud")
     parser.add_argument("--number", required=True, help="E.164 number on the trunk")
     parser.add_argument("--port", type=int, default=5060)
+    parser.add_argument(
+        "--ring",
+        action="store_true",
+        help="keep ringing until the final answer, so the voicebot sees the call",
+    )
     args = parser.parse_args(argv)
     if not E164.match(args.number):
         parser.error("--number must be E.164, like +14155550100")
     try:
-        code, verdict = probe(args.host, args.port, args.number)
+        if args.ring:
+            code, verdict = probe(
+                args.host, args.port, args.number, RING_TIMEOUT, ring=True
+            )
+        else:
+            code, verdict = probe(args.host, args.port, args.number)
     except Exception as exc:  # exit 1 means ACCEPTED: never use it for a bug
         code, verdict = 2, f"INCONCLUSIVE: the probe failed ({exc!r})"
     print(verdict)
