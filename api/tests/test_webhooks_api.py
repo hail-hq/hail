@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import socket
 from datetime import timedelta
 from uuid import UUID, uuid4
@@ -9,9 +10,11 @@ from uuid import UUID, uuid4
 import httpx
 import pytest
 from hailhq.api.main import _request_span_arguments
+from hailhq.api.routes import webhooks as webhooks_routes
 from hailhq.core.config import settings
 from hailhq.core.models import WebhookDelivery, WebhookSubscription
 from hailhq.core.secret_cipher import SecretCipher, generate_key
+from hailhq.core.webhooks import sign_payload
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -739,3 +742,216 @@ async def test_event_catalog_does_not_allow_unknown_subscription_events(
         headers=auth_headers,
     )
     assert response.status_code == 422
+
+
+class _FakeReceiver:
+    """Stands in for httpx_post in the test-send route and records the call."""
+
+    def __init__(
+        self, status: int = 200, text: str = "ok", exc: Exception | None = None
+    ):
+        self.status, self.text, self.exc = status, text, exc
+        self.calls: list[tuple[str, bytes, dict[str, str]]] = []
+
+    async def __call__(self, url, body, headers, **kwargs):
+        self.calls.append((url, body, headers))
+        if self.exc is not None:
+            raise self.exc
+        return self.status, self.text
+
+
+@pytest.fixture()
+def receiver(monkeypatch: pytest.MonkeyPatch) -> _FakeReceiver:
+    fake = _FakeReceiver()
+    monkeypatch.setattr(webhooks_routes, "httpx_post", fake)
+    return fake
+
+
+@pytest.mark.asyncio
+async def test_test_send_for_new_endpoint_is_unsigned_and_redacts_echo(
+    client, auth_headers, receiver
+):
+    receiver.text = "seen Bearer receiver_key_123 here"
+    response = await client.post(
+        "/webhooks/test",
+        headers=auth_headers,
+        json={
+            "target_url": "https://hooks.example.com/receive",
+            "authorization": "Bearer receiver_key_123",
+        },
+    )
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["ok"] is True
+    assert result["status_code"] == 200
+    assert result["signed"] is False
+    assert "receiver_key_123" not in result["response_body"]
+    url, body, headers = receiver.calls[0]
+    assert url == "https://hooks.example.com/receive"
+    assert headers["Authorization"] == "Bearer receiver_key_123"
+    assert headers["X-Hail-Event"] == "webhook.test"
+    assert "X-Hail-Signature" not in headers
+    assert json.loads(body)["type"] == "webhook.test"
+
+
+@pytest.mark.asyncio
+async def test_test_send_for_saved_subscription_signs_and_uses_saved_header(
+    client, auth_headers, receiver
+):
+    created = await client.post(
+        "/webhooks",
+        headers=auth_headers,
+        json={
+            "target_url": "https://hooks.example.com/receive",
+            "event_types": ["call.completed"],
+            "authorization": "Bearer saved_receiver_key",
+        },
+    )
+    assert created.status_code == 201, created.text
+    secret, sub_id = created.json()["secret"], created.json()["id"]
+
+    response = await client.post(
+        "/webhooks/test",
+        headers=auth_headers,
+        json={
+            "target_url": "https://hooks.example.com/receive",
+            "subscription_id": sub_id,
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["signed"] is True
+    _, body, headers = receiver.calls[0]
+    assert headers["Authorization"] == "Bearer saved_receiver_key"
+    assert headers["X-Hail-Subscription"] == sub_id
+    timestamp = int(headers["X-Hail-Signature"].split(",")[0].removeprefix("t="))
+    assert headers["X-Hail-Signature"] == sign_payload(
+        body, secret, timestamp=timestamp
+    )
+
+    removed = await client.post(
+        "/webhooks/test",
+        headers=auth_headers,
+        json={
+            "target_url": "https://hooks.example.com/receive",
+            "subscription_id": sub_id,
+            "authorization": "",
+        },
+    )
+    assert removed.status_code == 200, removed.text
+    assert "Authorization" not in receiver.calls[1][2]
+
+    moved = await client.post(
+        "/webhooks/test",
+        headers=auth_headers,
+        json={
+            "target_url": "https://other.example.com/hook",
+            "subscription_id": sub_id,
+        },
+    )
+    assert moved.status_code == 422
+    assert len(receiver.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_test_send_reports_receiver_errors(client, auth_headers, receiver):
+    receiver.status, receiver.text = 401, "bad key"
+    rejected = await client.post(
+        "/webhooks/test",
+        headers=auth_headers,
+        json={"target_url": "https://hooks.example.com/receive"},
+    )
+    assert rejected.json()["ok"] is False
+    assert rejected.json()["status_code"] == 401
+    assert rejected.json()["response_body"] == "bad key"
+
+    receiver.exc = httpx.ReadTimeout("timed out")
+    timed_out = await client.post(
+        "/webhooks/test",
+        headers=auth_headers,
+        json={"target_url": "https://hooks.example.com/receive"},
+    )
+    assert timed_out.status_code == 200
+    assert timed_out.json()["ok"] is False
+    assert timed_out.json()["status_code"] is None
+    assert timed_out.json()["error"] == "No answer within 10 seconds."
+
+    receiver.exc = httpx.ConnectTimeout("timed out")
+    no_connect = await client.post(
+        "/webhooks/test",
+        headers=auth_headers,
+        json={"target_url": "https://hooks.example.com/receive"},
+    )
+    assert no_connect.json()["error"] == "Could not connect to your endpoint in time."
+
+
+@pytest.mark.asyncio
+async def test_test_send_refuses_bad_targets_and_other_orgs(
+    client, auth_headers, async_session, receiver
+):
+    from .conftest import insert_org_and_key
+
+    http = await client.post(
+        "/webhooks/test",
+        headers=auth_headers,
+        json={"target_url": "http://hooks.example.com/receive"},
+    )
+    assert http.status_code == 422
+
+    _, _, other_key = await insert_org_and_key(async_session)
+    other = await client.post(
+        "/webhooks",
+        headers={"Authorization": f"Bearer {other_key}"},
+        json={
+            "target_url": "https://hooks.example.com/receive",
+            "event_types": ["call.completed"],
+        },
+    )
+    assert other.status_code == 201, other.text
+    foreign = await client.post(
+        "/webhooks/test",
+        headers=auth_headers,
+        json={
+            "target_url": "https://hooks.example.com/receive",
+            "subscription_id": other.json()["id"],
+        },
+    )
+    assert foreign.status_code == 404
+    assert receiver.calls == []
+
+
+@pytest.mark.asyncio
+async def test_test_send_holds_no_db_transaction_during_post(
+    client, auth_headers, async_session, monkeypatch
+):
+    seen: list[bool] = []
+
+    async def fake_post(url, body, headers, **kwargs):
+        seen.append(async_session.in_transaction())
+        return 200, "ok"
+
+    monkeypatch.setattr(webhooks_routes, "httpx_post", fake_post)
+    # The second request skips the throttled API key stamp, which commits.
+    for _ in range(2):
+        response = await client.post(
+            "/webhooks/test",
+            headers=auth_headers,
+            json={"target_url": "https://hooks.example.com/receive"},
+        )
+        assert response.status_code == 200, response.text
+    assert seen == [False, False]
+
+
+@pytest.mark.asyncio
+async def test_test_send_has_its_own_per_minute_limit(client, auth_headers, receiver):
+    body = {"target_url": "https://hooks.example.com/receive"}
+    for _ in range(webhooks_routes._TEST_LIMIT_PER_MINUTE):
+        ok = await client.post("/webhooks/test", headers=auth_headers, json=body)
+        assert ok.status_code == 200, ok.text
+    limited = await client.post("/webhooks/test", headers=auth_headers, json=body)
+    assert limited.status_code == 429
+    assert "Retry-After" in limited.headers
+    # The headers name the test bucket, not the general one.
+    assert limited.headers["RateLimit-Limit"] == str(
+        webhooks_routes._TEST_LIMIT_PER_MINUTE
+    )
+    assert limited.headers["RateLimit-Remaining"] == "0"

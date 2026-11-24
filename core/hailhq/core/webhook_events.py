@@ -47,3 +47,9 @@ class WebhookEventType(StrEnum):
     CALL_NO_ANSWER = ("call.no_answer", "No answer", "Calls")
     CALL_TRANSFERRED = ("call.transferred", "Call transferred", "Calls")
     CALL_SUMMARIZED = ("call.summarized", "Call summarized", "Calls")
+
+
+# Sent by `POST /v1/webhooks/test` as `X-Hail-Event`. It is not a member of
+# WebhookEventType on purpose: no one can subscribe to it, so it stays out of
+# the `/v1/webhooks/event-types` catalog and subscription validation.
+WEBHOOK_TEST_EVENT = "webhook.test"
