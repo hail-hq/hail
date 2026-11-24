@@ -2360,7 +2360,6 @@ async def test_other_party_finds_the_caller(monkeypatch):
 async def test_other_party_is_none_on_any_failure(monkeypatch):
     from contextlib import asynccontextmanager
 
-
     @asynccontextmanager
     async def refused():
         raise ConnectionRefusedError
