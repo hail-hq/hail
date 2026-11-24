@@ -266,7 +266,8 @@ class CallCreate(ConsentAttestationMixin):
             "says it as one greeting with that line: word for word, except a "
             "hello the AI line already said. Exact wording "
             "is not guaranteed. Without the AI line, with a custom AI line, after a "
-            "phone menu, or on your own model, it is said as written. "
+            "phone menu when a person answers, or on your own model, it is said as "
+            "written. "
             "Omitted: the agent waits for the callee to speak first."
         ),
     )
@@ -1365,7 +1366,7 @@ class AgentCreate(BaseModel):
             "hello the AI line already said. Exact wording "
             "is not guaranteed. Inbound calls keep its words (the default AI line "
             "goes after its first sentence); without the AI line, with a custom AI "
-            "line, after a phone menu, or on your own model, it is said as written. Omitted: the agent waits for the other side to "
+            "line, after a phone menu when a person answers, or on your own model, it is said as written. Omitted: the agent waits for the other side to "
             "speak first."
         ),
     )
@@ -1484,7 +1485,7 @@ class AgentUpdate(BaseModel):
             "New opening line; null makes the agent wait for the other side. On "
             "outbound calls the agent says it as one greeting with the AI line, "
             "leaving out a hello the AI line already said (not with a custom AI "
-            "line, after a phone menu, or on your own model)."
+            "line, after a phone menu when a person answers, or on your own model)."
         ),
     )
     recording_enabled: bool | None = Field(

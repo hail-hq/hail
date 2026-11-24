@@ -1193,8 +1193,8 @@ async def test_an_interrupted_notice_still_runs_the_greeting_turn() -> None:
         (None, "", False, True),  # no words
         (None, "Calling about your order.", False, False),
         (RuntimeError("tts down"), "Calling about", False, False),  # no restart
-        # Interrupted before any word: kept for the next reply, not said on
-        # top of the person.
+        # Interrupted before any word: the turn loop answers the person, as
+        # when the generated opening is interrupted.
         (None, "", True, False),
     ],
 )
@@ -1235,6 +1235,35 @@ async def test_a_custom_ai_line_keeps_the_literal_greeting() -> None:
         ("This call uses an AI assistant. Hi Sam, about your order.", True)
     ]
     assert session.generate_reply_calls == []
+
+
+async def test_an_unspeakable_custom_ai_line_blends_like_the_built_in_one() -> None:
+    """A custom line that falls back to the built-in one is the built-in line,
+    so the greeting is blended with it."""
+    session = FakeAnnouncingSession()
+    await speak_greeting(
+        session,
+        {"first_message": "Hi, about your order.", "ai_disclosure_line": "{x} AI"},
+    )
+    assert session.say_calls == [(AI_DISCLOSURE_LINE, True)]
+    assert session.generate_reply_calls == [
+        first_message_instructions("Hi, about your order.", AI_DISCLOSURE_LINE)
+    ]
+
+
+async def test_a_greeting_turn_that_cannot_start_says_the_line() -> None:
+    """Any error starting the turn falls back to the line as written."""
+    session = FakeAnnouncingSession()
+
+    def broken(**_kw: object) -> None:
+        raise ValueError("bad chat context")
+
+    session.generate_reply = broken
+    await speak_greeting(session, {"first_message": "Hi, about your order."})
+    assert session.say_calls == [
+        (AI_DISCLOSURE_LINE, True),
+        ("Hi, about your order.", True),
+    ]
 
 
 async def test_greeting_turn_is_text_only() -> None:

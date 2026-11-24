@@ -982,13 +982,6 @@ def _say_first_message(session: Any, first_message: str, disclosure: str) -> Non
     ends without a word while nobody interrupted it, say the line as
     written, so the call never loses its opening line. If the person
     interrupted it, the turn loop answers them instead."""
-    handle = session.generate_reply(
-        instructions=first_message_instructions(first_message, disclosure),
-        tool_choice="none",
-    )
-    add_done = getattr(handle, "add_done_callback", None)
-    if add_done is None:
-        return
 
     def say_line() -> None:
         try:
@@ -997,6 +990,21 @@ def _say_first_message(session: Any, first_message: str, disclosure: str) -> Non
             pass  # the call ended: nothing to say
         except Exception:
             logger.exception("could not say the first message after a failed turn")
+
+    try:
+        handle = session.generate_reply(
+            instructions=first_message_instructions(first_message, disclosure),
+            tool_choice="none",
+        )
+    except RuntimeError:
+        return  # the call ended right after the notice
+    except Exception:
+        logger.exception("could not start the greeting turn")
+        say_line()
+        return
+    add_done = getattr(handle, "add_done_callback", None)
+    if add_done is None:
+        return
 
     def on_done(done: Any) -> None:
         spoke = any(
@@ -1155,6 +1163,10 @@ async def speak_greeting(
         if metadata.get("ai_disclosure", True)
         else None
     )
+    # A custom line that cannot be spoken falls back to the built-in one.
+    built_in_line = disclosure == disclosure_line(
+        metadata.get("org_name"), metadata.get("direction"), None, language
+    )
     first_message = metadata.get("first_message")
     inbound = metadata.get("direction") == "inbound"
     if generate_opening and not inbound:
@@ -1192,7 +1204,7 @@ async def speak_greeting(
             interruptible = True
             if not disclosure:
                 greeting = first_message
-            elif inbound and not (metadata.get("ai_disclosure_line") or "").strip():
+            elif inbound and built_in_line:
                 greeting = greeting_with_ai_line(
                     first_message,
                     after_greeting_text(metadata.get("org_name"), language),
@@ -1200,12 +1212,7 @@ async def speak_greeting(
                 # The AI line sits after the first sentence: a caller who
                 # speaks over the greeting must still hear it.
                 interruptible = False
-            elif (
-                blend
-                and generate_opening
-                and not inbound
-                and not (metadata.get("ai_disclosure_line") or "").strip()
-            ):
+            elif blend and generate_opening and not inbound and built_in_line:
                 # The agent says the greeting right after the notice, as one
                 # opening, so the caller is not greeted twice ("Hi, this is an
                 # AI assistant ... Hi, this is ..."). Outbound with the
@@ -1226,10 +1233,7 @@ async def speak_greeting(
         heard = on_opened() if on_opened is not None else None
         if blended:
             # After the hold is released, as the generated opening runs.
-            try:
-                _say_first_message(session, first_message, disclosure)
-            except RuntimeError:
-                pass  # the call ended right after the notice
+            _say_first_message(session, first_message, disclosure)
     # An inbound caller dialed in: with no ``first_message`` the agent waits
     # for them to speak (the documented ``first_message: null`` behavior). The
     # generated opening is written for a call Hail placed ("say why you are
