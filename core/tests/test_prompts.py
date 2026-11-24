@@ -48,7 +48,7 @@ def test_voice_settings_guide_distinguishes_optional_and_always_on_tools() -> No
     guide = prompts.VOICE_CONFIGURATION_HELP
     assert "optional tools" in guide
     assert "Every call keeps the ability to hang up, press keypad digits," in guide
-    assert "and look up Hail settings." in guide
+    assert "and explain where to change Hail settings." in guide
 
 
 def test_text_instructions_keep_the_same_private_boundary() -> None:
@@ -172,7 +172,7 @@ def test_prompt_text_is_pinned() -> None:
         "37e9a0b5058e8c60355db926a963a8fba59c0fc4dd43d9ede4c7116e464e9e8b"
     )
     assert _sha(prompts.VOICE_CONFIGURATION_HELP) == (
-        "06867cebb3e86eccdb5c0181b2e441d8c559693403f4d0f25cbc2ad8921d3959"
+        "949d9b1e099e90adbf6a72cdcb261998659ad5a665b586e9f03cd1fac390995b"
     )
 
 
