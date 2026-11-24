@@ -21,7 +21,7 @@
 - Secrets: Fernet with `HAIL_PROVIDER_SECRET_KEY` (`provider_cipher()` in `core/hailhq/core/provider_config.py`). No new env var.
 - Inbound trunk `numbers` always holds the placeholder `pbx-<connection id>`. Never send a `set` or an empty list for a connection trunk.
 - Dialed number must be `+E.164`. A caller of 1 to 6 digits stays as given, without `+`.
-- `contacts.extension`: 1 to 15 characters of digits, `*` or `#`.
+- `contacts.extension`: 1 to 6 characters of digits, `*` or `#`.
 - Ownership check: ring limit 30 s, a 6-digit code sent as key presses (only the first 6 digits received count), check window and check call max duration 90 s, at most 5 checks per number per rolling 24 h, `unverified` rows older than 7 days are removed.
 - Connected call price (owner, 2026-11-18): 10 cents a minute of call length, every direction and country. Each answered handover leg adds 10 cents a minute from its answer to its end, so a 2-person handover costs 20 cents a minute while the person is on the line. Both are pro rata by the millisecond, like the call price today. Recording adds 1 cent a minute of call length. Monthly fee 0; setup fee 0. hail-website `lib/private-rates.ts`: `PBX_PRICES.cents_per_minute = 10`, `PBX_PRICES.handover_cents_per_minute = 10`.
 - The handover leg's time comes from its `call_legs` row (`role = 'handover'`, `answered_at`, `left_at`), which the voicebot already writes for every SIP leg before the call's usage event. No new column.
@@ -71,7 +71,7 @@ Branch: `feat/pbx-connected-numbers`.
   - `phone_numbers_sip_connection_idx`: index `sip_connection_id` WHERE `sip_connection_id IS NOT NULL`
   - `call_legs_provider_check`: `provider IN ('twilio','telnyx','didww','pbx')`
   - `contacts_phone_email_or_extension` replaces `contacts_phone_or_email`: `phone_e164 IS NOT NULL OR email IS NOT NULL OR extension IS NOT NULL`
-  - `contacts_extension_format`: `extension ~ '^[0-9*#]{1,15}$'`
+  - `contacts_extension_format`: `extension ~ '^[0-9*#]{1,6}$'`
 
 - [ ] **Step 1: Write the failing tests.** Migration round trip in the style of `api/tests/test_call_balance_holds_migration.py` (`pytestmark = pytest.mark.recreate_schema`, load the file with `importlib`, run `downgrade()` then `upgrade()`):
 

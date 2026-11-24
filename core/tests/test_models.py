@@ -240,6 +240,21 @@ async def test_contact_with_only_extension(async_session):
         await async_session.flush()
 
 
+@pytest.mark.parametrize("extension", ["1", "*800#", "123456"])
+async def test_contact_extension_up_to_six_characters(async_session, extension):
+    async_session.add(Contact(organization_id=ORG, name="Desk", extension=extension))
+    await async_session.commit()
+
+
+@pytest.mark.parametrize("extension", ["1234567", "9011442079460000"])
+async def test_contact_extension_longer_than_six_is_refused(async_session, extension):
+    """An outside number with a dial prefix is not an extension: it would skip
+    the checks a phone number gets on a handover."""
+    async_session.add(Contact(organization_id=ORG, name="Desk", extension=extension))
+    with pytest.raises(IntegrityError, match="contacts_extension_format"):
+        await async_session.flush()
+
+
 async def test_call_leg_accepts_pbx(async_session, pbx_call):
     leg = CallLeg(
         call_id=pbx_call.id,

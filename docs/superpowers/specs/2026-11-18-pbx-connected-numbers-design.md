@@ -180,7 +180,7 @@ A test call the customer makes through their own PBX proves nothing: they choose
 ### 6. Outbound calls and handover
 
 - `POST /v1/calls` from a `pbx` number dials through the connection's outbound trunk. The PBX applies its own outbound rules and caller ID policy.
-- **A contact may be an extension (builder call, 2026-11-18).** `contacts.extension`: 1-15 characters of digits, `*` or `#`. A ring group or queue ("Support line", ext 800) is a contact with only a name and an extension. Changes that follow:
+- **A contact may be an extension (builder call, 2026-11-18).** `contacts.extension`: 1-6 characters of digits, `*` or `#` (the length the inbound side keeps as an extension caller; longer could carry a dial prefix and an outside number). A ring group or queue ("Support line", ext 800) is a contact with only a name and an extension. Changes that follow:
   - `contacts_phone_or_email` CHECK becomes phone, email or extension. `ContactCreate`, MCP `create_contact`, CLI contacts and the console contact form accept it.
   - `validate_handover` and `handover_targets` (`core/hailhq/core/handover.py`), `_linked_person` and the phone check in `agent_handover` accept an extension contact on a `pbx` call. On a carrier call, an extension contact is skipped.
   - The sold-country check and `check_handover_allowed` do not apply to an extension (it never leaves the customer's PBX). They still apply to an E.164 contact dialed through the PBX.

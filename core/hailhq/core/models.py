@@ -138,7 +138,7 @@ class Contact(Base):
     name: Mapped[str] = mapped_column(Text, nullable=False)
     phone_e164: Mapped[str | None] = mapped_column(Text, nullable=True)
     email: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # A number inside a customer's PBX: digits, ``*`` or ``#``, 1 to 15.
+    # A number inside a customer's PBX: digits, ``*`` or ``#``, 1 to 6.
     extension: Mapped[str | None] = mapped_column(Text, nullable=True)
     # created_by intentionally has no FK — users is website-owned (see 0001/0029);
     # keys and rows may outlive their creator.
@@ -158,7 +158,7 @@ class Contact(Base):
             name="contacts_phone_email_or_extension",
         ),
         CheckConstraint(
-            "extension ~ '^[0-9*#]{1,15}$'", name="contacts_extension_format"
+            "extension ~ '^[0-9*#]{1,6}$'", name="contacts_extension_format"
         ),
         Index(
             "contacts_org_phone_key",

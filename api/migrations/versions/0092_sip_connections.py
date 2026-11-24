@@ -18,7 +18,7 @@ Other changes:
   ``sip_connection_id`` (FK, ``ON DELETE RESTRICT``), and a CHECK that
   ``provider = 'pbx'`` holds exactly when it is set.
 - ``call_legs``: provider CHECK allows ``pbx``.
-- ``contacts``: ``extension`` (digits, ``*``, ``#``, 1 to 15), and the
+- ``contacts``: ``extension`` (digits, ``*``, ``#``, 1 to 6), and the
   "at least one way to reach" CHECK now counts it.
 
 Downgrade reverses each change. It fails while ``pbx`` numbers, ``pbx``
@@ -114,7 +114,7 @@ def upgrade() -> None:
     )
     op.execute(
         "ALTER TABLE contacts ADD CONSTRAINT contacts_extension_format"
-        " CHECK (extension ~ '^[0-9*#]{1,15}$')"
+        " CHECK (extension ~ '^[0-9*#]{1,6}$')"
     )
 
 

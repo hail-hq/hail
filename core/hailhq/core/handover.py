@@ -47,6 +47,17 @@ HANDOVER_SMS_REASON_CHARS = 120
 # What a caller could steer the reason into to phish the contact: links, bare
 # or spelled-out domains, emails and phone numbers. File names stay.
 _FULLWIDTH_DOTS = str.maketrans({"\u3002": ".", "\uff0e": ".", "\uff61": "."})
+# A phone-system extension: 1 to 6 digits, ``*`` or ``#``, the same length
+# the inbound side keeps as an extension caller. Longer would let a dial
+# prefix plus an outside number skip the checks a phone number gets.
+PBX_EXTENSION = re.compile(r"[0-9*#]{1,6}")
+
+
+def pbx_extension(value: str | None) -> str | None:
+    """``value`` when it is a valid extension, else None."""
+    return value if value and PBX_EXTENSION.fullmatch(value) else None
+
+
 _FILE_EXTENSIONS = frozenset(
     {"pdf", "doc", "docx", "xls", "xlsx", "csv", "txt", "jpg", "jpeg", "png", "heic"}
 )
@@ -453,7 +464,7 @@ async def handover_targets(
     seen: dict[str, int] = {}
     targets = []
     for row in rows:
-        extension = row["extension"] if via_pbx else None
+        extension = pbx_extension(row["extension"]) if via_pbx else None
         if not row["phone_e164"] and not extension:
             continue
         name = row["name"]

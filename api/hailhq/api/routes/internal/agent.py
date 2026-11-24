@@ -126,6 +126,7 @@ from hailhq.core.handover import (
     handover_sms_text,
     has_answered_handover,
     load_handover,
+    pbx_extension,
 )
 from hailhq.core.internal_webhook import quote_call_price, quotes_enabled
 from hailhq.core.models import (
@@ -2119,7 +2120,7 @@ async def agent_handover(
     via_pbx = call.provider == PBX
     # On a connected call the extension wins: the phone system dials it. A
     # carrier call dials only a phone.
-    extension = contact.extension if via_pbx else None
+    extension = pbx_extension(contact.extension) if via_pbx else None
     target = extension or contact.phone_e164
     if not target:
         return deny

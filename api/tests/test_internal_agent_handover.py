@@ -11,7 +11,7 @@ from hailhq.core import hmac_signing
 from hailhq.core.billing import CALL_META_BILLED
 from hailhq.core.compliance_gate import GateResult, add_suppression
 from hailhq.core.config import settings
-from hailhq.core.handover import ON_CALL_LINE
+from hailhq.core.handover import ON_CALL_LINE, HandoverPerson
 from hailhq.core.models import (
     AccountCredit,
     Agent,
@@ -1107,6 +1107,24 @@ async def test_handover_to_contact_with_phone_and_extension_dials_extension(
     body = (await _post_handover(client, call, contact)).json()
     assert body["ok"] is True
     assert body["to_e164"] == "800"
+    gate_mock.assert_not_awaited()
+
+
+async def test_handover_refuses_an_extension_longer_than_six(
+    client, async_session, monkeypatch, gate_mock
+):
+    """A long "extension" can carry an outside number with a dial prefix:
+    the route never dials it, even if a row ever holds one."""
+    call, contact = await _seed_pbx(async_session)
+    long = HandoverPerson(str(contact.id), "Support line", None, None, "9011442079460000")
+
+    async def linked(_db, _call, _wire_id):
+        return long
+
+    monkeypatch.setattr(f"{AGENT_MODULE}._linked_person", linked)
+    body = (await _post_handover(client, call, contact)).json()
+    assert body["ok"] is False
+    assert body.get("trunk_id") is None
     gate_mock.assert_not_awaited()
 
 
