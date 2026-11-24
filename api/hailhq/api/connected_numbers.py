@@ -18,7 +18,6 @@ from typing import Any, Final, Literal
 from uuid import UUID, uuid4
 
 import phonenumbers
-from hailhq.core.agent_tools.send_dtmf import DIGIT_DELAY_SECONDS
 from hailhq.core.billing import CALL_META_BILLED, has_funds
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.carrier_routing import voice_route
@@ -35,15 +34,14 @@ from hailhq.core.pool import (
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
 from hailhq.core.secret_cipher import SecretKeyMissing
 from hailhq.core.sip_connections import (
-    CHECK_ARRIVAL_WAIT_SECONDS,
     CHECK_CALL_META,
     CHECK_CODE_DIGITS,
     CHECK_CODE_META,
-    CHECK_CODE_SECONDS,
+    CHECK_LINE_SECONDS,
+    CHECK_RESULT_WAIT_SECONDS,
     CHECK_RING_SECONDS,
-    CHECK_SEND_DELAY_SECONDS,
+    CHECK_WINDOW,
     CHECKS_PER_DAY,
-    PBX_CHECK_LINE_SECONDS,
     UNVERIFIED_TTL,
     check_in_flight,
     check_outcomes,
@@ -663,22 +661,8 @@ class CheckResult:
     call_id: UUID | None
 
 
-# After a pass, how long the outbound leg stays up: the whole line, plus a
-# margin, so it is not cut off.
-CHECK_LINE_SECONDS = PBX_CHECK_LINE_SECONDS + 2
-# After the answer, how long to wait for the inbound side's result: the
-# sender's wait for "arrived" and its delay, the 6 key presses, the inbound
-# side's wait for them, and a margin.
-CHECK_RESULT_MARGIN_SECONDS = 2
-CHECK_RESULT_WAIT_SECONDS = (
-    CHECK_ARRIVAL_WAIT_SECONDS
-    + CHECK_SEND_DELAY_SECONDS
-    + CHECK_CODE_DIGITS * DIGIT_DELAY_SECONDS
-    + CHECK_CODE_SECONDS
-    + CHECK_RESULT_MARGIN_SECONDS
-)
 # The check Call's max_duration_seconds, same as CHECK_WINDOW.
-CHECK_MAX_DURATION_SECONDS = 90
+CHECK_MAX_DURATION_SECONDS = int(CHECK_WINDOW.total_seconds())
 CHECK_POLL_SECONDS = 0.25
 # A wrong-trunk INVITE (``not_authenticated``) is not final: the right trunk
 # can still arrive before the deadline.

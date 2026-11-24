@@ -7,11 +7,13 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import math
 import secrets
 from datetime import datetime, timedelta
 from uuid import UUID
 
 import phonenumbers
+from hailhq.core.agent_tools.send_dtmf import DIGIT_DELAY_SECONDS
 from hailhq.core.config import settings
 from hailhq.core.models import Call, CallEvent, PhoneNumber, SipConnection
 from hailhq.core.provider_config import provider_cipher
@@ -22,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 CHECK_RING_SECONDS = 30
+CHECK_CODE_DIGITS = 6
 # How long the inbound leg waits for the 6-digit code.
 CHECK_CODE_SECONDS = 15
 CHECKS_PER_DAY = 5
@@ -33,9 +36,35 @@ PBX_CHECK_LINE_SECONDS = 10
 # before it listens).
 CHECK_ARRIVAL_WAIT_SECONDS = CHECK_CODE_SECONDS
 CHECK_SEND_DELAY_SECONDS = 1
-# A check call newer than this, not terminal, is in flight.
-# Ring 30 + result wait about 35 + line 12 = about 77 s, under 90.
-CHECK_WINDOW = timedelta(seconds=90)
+# After the answer, how long the API waits for the inbound side's result:
+# the sender's wait for "arrived" and its delay, the 6 key presses, the
+# inbound side's wait for them, and a margin.
+CHECK_RESULT_MARGIN_SECONDS = 2
+CHECK_RESULT_WAIT_SECONDS = (
+    CHECK_ARRIVAL_WAIT_SECONDS
+    + CHECK_SEND_DELAY_SECONDS
+    + CHECK_CODE_DIGITS * DIGIT_DELAY_SECONDS
+    + CHECK_CODE_SECONDS
+    + CHECK_RESULT_MARGIN_SECONDS
+)
+# After a pass, how long the outbound leg stays up: the whole line, plus a
+# margin, so it is not cut off.
+CHECK_LINE_SECONDS = PBX_CHECK_LINE_SECONDS + 2
+# Room, dispatch and dial set-up before the ring starts.
+CHECK_SETUP_SECONDS = 10
+CHECK_WINDOW_MARGIN_SECONDS = 20
+# A check call newer than this, not terminal, is in flight. It covers the
+# worst case (set-up, ring, result wait, line) plus a margin; the check
+# call's max duration is the same.
+CHECK_WINDOW = timedelta(
+    seconds=math.ceil(
+        CHECK_SETUP_SECONDS
+        + CHECK_RING_SECONDS
+        + CHECK_RESULT_WAIT_SECONDS
+        + CHECK_LINE_SECONDS
+        + CHECK_WINDOW_MARGIN_SECONDS
+    )
+)
 UNVERIFIED_TTL = timedelta(days=7)
 # calls.metadata key on an ownership check call. Every check key starts with
 # ``PBX_CHECK_METADATA_PREFIX``, which POST /calls rejects.
@@ -45,7 +74,6 @@ CHECK_EVENT_KIND = "pbx_check"
 # calls.metadata key on the check call: a keyed hash of the code (see
 # ``hash_check_code``), never the code.
 CHECK_CODE_META = "pbx_check_code_sha256"
-CHECK_CODE_DIGITS = 6
 
 _TYPES = {
     phonenumbers.PhoneNumberType.FIXED_LINE: "local",

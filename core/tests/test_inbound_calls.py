@@ -26,6 +26,7 @@ from hailhq.core.sip_connections import (
     CHECK_CALL_META,
     CHECK_CODE_META,
     CHECK_EVENT_KIND,
+    CHECK_WINDOW,
     hash_check_code,
 )
 from sqlalchemy import func, select, text
@@ -756,7 +757,7 @@ async def test_arrival_after_window_is_dropped(
     check = await seed_check_call(
         unverified_number,
         status="ringing",
-        requested_at=utcnow() - timedelta(seconds=91),
+        requested_at=utcnow() - CHECK_WINDOW - timedelta(seconds=1),
     )
     out = await open_inbound_call(
         async_session, attrs(dialed="+14155550100", trunk_id="ST_in_pbx")

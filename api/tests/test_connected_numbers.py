@@ -56,6 +56,7 @@ from hailhq.core.sip_connections import (
     CHECK_EVENT_KIND,
     CHECK_RING_SECONDS,
     CHECK_SEND_DELAY_SECONDS,
+    CHECK_SETUP_SECONDS,
     CHECK_WINDOW,
     PBX_CHECK_LINE_SECONDS,
     check_in_flight,
@@ -1145,11 +1146,16 @@ def test_check_timing_fits_the_window():
     )
     # The outbound leg outlasts the whole line the voicebot may say.
     assert CHECK_LINE_SECONDS >= PBX_CHECK_LINE_SECONDS + 2
-    assert (
-        CHECK_RING_SECONDS + CHECK_RESULT_WAIT_SECONDS + CHECK_LINE_SECONDS
-        < CHECK_WINDOW.total_seconds()
+    # The window (and the call's max duration) covers the worst case: set-up,
+    # ring, result wait and line, plus a 20 s margin.
+    worst = (
+        CHECK_SETUP_SECONDS
+        + CHECK_RING_SECONDS
+        + CHECK_RESULT_WAIT_SECONDS
+        + CHECK_LINE_SECONDS
     )
-    assert CHECK_MAX_DURATION_SECONDS == CHECK_WINDOW.total_seconds() == 90
+    assert CHECK_WINDOW.total_seconds() >= worst + 20
+    assert CHECK_MAX_DURATION_SECONDS == CHECK_WINDOW.total_seconds()
 
 
 async def test_check_passes_and_bills_one_answered_call(
@@ -1166,7 +1172,7 @@ async def test_check_passes_and_bills_one_answered_call(
     assert call.status == "completed"
     assert call.end_reason == "normal_hangup"
     assert call.answered_at is not None
-    assert call.max_duration_seconds == 90
+    assert call.max_duration_seconds == CHECK_MAX_DURATION_SECONDS
     assert call.direction == "outbound"
     assert call.from_number_id == pool_number.id
     assert call.to_e164 == pbx_number.e164

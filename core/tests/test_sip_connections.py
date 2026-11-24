@@ -258,14 +258,15 @@ async def test_check_in_flight_skips_finished_checks(async_session, pbx_number):
 async def test_check_in_flight_skips_checks_older_than_the_window(
     async_session, pbx_number
 ):
-    assert CHECK_WINDOW == timedelta(seconds=90)
-    await _check_call(async_session, pbx_number, "ringing", T0 - timedelta(seconds=91))
+    await _check_call(
+        async_session, pbx_number, "ringing", T0 - CHECK_WINDOW - timedelta(seconds=1)
+    )
     assert await check_in_flight(async_session, pbx_number.id, T0) is None
     inside = await _check_call(
         async_session,
         pbx_number,
         "ringing",
-        T0 - timedelta(seconds=89),
+        T0 - CHECK_WINDOW + timedelta(seconds=1),
         caller_e164="+14155550161",
     )
     assert (await check_in_flight(async_session, pbx_number.id, T0)).id == inside.id
