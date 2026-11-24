@@ -1140,7 +1140,8 @@ async def test_speak_greeting_says_the_line_as_written_when_the_fit_is_late(
         # Marks that are content stay: only sentence marks go with the hello.
         ("Hi, #1 rated clinic calling.", "Hi", "#1 rated clinic calling."),
         ("Hi, -20% on your next visit.", "Hi", "-20% on your next visit."),
-        # A greeting written without spaces is capped at 10 characters.
+        # A greeting written without spaces is capped by width.
+        ("おはようございます、Samさん。", "おはようございます", "Samさん。"),
         (
             "您好我是北方牙科的小李，关于您明天的预约。",
             "您好我是北方牙科的小李",
@@ -1151,7 +1152,19 @@ async def test_speak_greeting_says_the_line_as_written_when_the_fit_is_late(
         ("Hola, ¿es un buen momento?", "Hola", "¿es un buen momento?"),
         ("Hi, iPhone repair here.", "Hi", "iPhone repair here."),
         ("Hello!", "Hello", ""),  # only a greeting: the notice is said alone
-        ("Hello Sam, this is Northgate.", "Hello", "Sam, this is Northgate."),
+        # No sentence mark after the greeting: a name or a business name.
+        ("Hello Sam, this is Northgate.", "Hello", "Hello Sam, this is Northgate."),
+        ("Morning Glory Florist here.", "Morning", "Morning Glory Florist here."),
+        # A greeting with a mark inside it would take a name with it.
+        ("Hi, Sam, your order shipped.", "Hi, Sam", "Hi, Sam, your order shipped."),
+        # Only the marks right after the greeting go with it.
+        ("Hi, .NET developers wanted.", "Hi", ".NET developers wanted."),
+        ("مرحبًا، نتصل بخصوص موعدك.", "مرحبًا", "نتصل بخصوص موعدك."),
+        (
+            "Здравствуйте, звоним по поводу записи.",
+            "Здравствуйте",
+            "Звоним по поводу записи.",
+        ),
         ("Hi there, calling.", "Hi", "Hi there, calling."),
         ("Good morning Sam, calling.", "Good morning", "Good morning Sam, calling."),
         # No cut unless the line opens with exactly that greeting, followed by

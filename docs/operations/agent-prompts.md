@@ -53,8 +53,9 @@ caller hears one greeting. The notice stays fixed and first. While the phone
 rings, Hail's own model copies out the greeting that opens the line
 (`OPENING_FIT_INSTRUCTIONS` in `core/hailhq/core/prompts.py`), and code cuts
 it (`cut_greeting`) only when the line starts with exactly that text, it is
-at most three words with no digit or code, and punctuation follows it (or,
-after a one-word greeting, a capitalized name). The model never writes the
+at most three words with no digit, code or sentence mark of its own, and a
+sentence mark follows it. A name or business name that starts with a hello
+word ("Morning Glory Florist") is never cut. The model never writes the
 line, so only that hello can be cut: a free rewrite could drop content or
 flip a sentence's meaning, and no check can catch that. The model decides
 what counts as a hello; its instructions exclude thanks, apologies and names. Any other answer, a

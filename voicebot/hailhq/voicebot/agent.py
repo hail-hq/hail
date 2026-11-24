@@ -28,6 +28,7 @@ import logging
 import math
 import re
 import time
+import unicodedata
 from collections.abc import Awaitable, Callable, Collection
 from datetime import datetime, timezone
 from typing import Any
@@ -1047,37 +1048,44 @@ FIRST_LINE_WAIT_SECONDS = 1.0
 # The longest greeting cut from the start of a first line ("Good morning
 # there"). The model copies the greeting out; code cuts it only when the line
 # starts with exactly that text and a sentence mark follows, so a cut never
-# lands inside a sentence or a word.
+# lands inside a sentence, a word or a name.
 MAX_GREETING_WORDS = 3
 MAX_GREETING_CHARS = 30
-# A greeting written without spaces ("早上好", "Konnichiwa") is one token,
-# so its length is capped instead of its word count.
-MAX_GREETING_TOKEN_CHARS = 10
+# A greeting written without spaces ("早上好", "Здравствуйте") is one token,
+# so its width is capped instead of its word count. A wide (CJK) character
+# counts twice: it carries more than a letter.
+MAX_GREETING_TOKEN_WIDTH = 18
 # Only the start of the line goes to the model: a greeting is at the start.
 FIRST_LINE_SAMPLE_CHARS = 120
 # The model's answer when the line does not open with a greeting.
 NO_GREETING = "none"
 # Marks that end a greeting and are dropped with it.
-_GREETING_ENDS = frozenset(",.!?…:;，。！？、：；")
+_GREETING_ENDS = frozenset(",.!?…:;，。！？、：；،؟؛।")
 # Marks that open a greeting ("¡Hola!") and are dropped with it.
 _GREETING_OPENS = frozenset("¡¿\"'«“")
+
+
+def _width(text: str) -> int:
+    return sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in text)
 
 
 def cut_greeting(first_message: str, greeting: str) -> str:
     """``first_message`` without its opening ``greeting`` and the sentence
     marks after it; "" when nothing is left. Unchanged unless the line
     starts with exactly that greeting (any case), the greeting is short and
-    holds no digit or code, and a sentence mark, the end of the line, or
-    (after a one-word greeting) a capitalized name follows it."""
+    holds no digit, code or sentence mark of its own, and a sentence mark
+    or the end of the line follows it. Only the marks right after the
+    greeting go with it; the rest keeps its own marks."""
     greeting = greeting.strip().strip("".join(_GREETING_ENDS | _GREETING_OPENS))
     tokens = greeting.split()
     if (
         not greeting
         or len(greeting) > MAX_GREETING_CHARS
         or len(tokens) > MAX_GREETING_WORDS
-        or (len(tokens) == 1 and len(greeting) > MAX_GREETING_TOKEN_CHARS)
+        or (len(tokens) == 1 and _width(greeting) > MAX_GREETING_TOKEN_WIDTH)
         or re.search(r"\d", greeting)
         or "<" in greeting
+        or any(c in _GREETING_ENDS for c in greeting)
     ):
         return first_message
     line = first_message.lstrip()
@@ -1088,12 +1096,14 @@ def cut_greeting(first_message: str, greeting: str) -> str:
     if line[start:end].lower() != greeting.lower():
         return first_message
     rest = line[end:]
-    # "Hello Sam, ..." keeps "Sam"; "Hi there" is not cut to "There".
-    named = len(tokens) == 1 and rest[:1].isspace() and rest.lstrip()[:1].isupper()
-    if rest and rest[0] not in _GREETING_ENDS and not named:
+    # A sentence mark must end the greeting: "Morning Glory Florist" or
+    # "Aloha Dental" is a name, not a greeting.
+    if rest and rest[0] not in _GREETING_ENDS:
         return first_message
     i = 0
-    while i < len(rest) and (rest[i].isspace() or rest[i] in _GREETING_ENDS):
+    while i < len(rest) and rest[i] in _GREETING_ENDS:
+        i += 1
+    while i < len(rest) and rest[i].isspace():
         i += 1
     rest = rest[i:]
     # "calling about" becomes "Calling about"; "iPhone" stays as written.
