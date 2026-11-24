@@ -264,7 +264,7 @@ class CallCreate(ConsentAttestationMixin):
         description=(
             "Opening line the agent speaks first. After the AI line, the agent "
             "says it as one greeting with that line: word for word, except a "
-            "hello or self-introduction the AI line already said. Exact wording "
+            "hello the AI line already said. Exact wording "
             "is not guaranteed. Without the AI line it is said as written. "
             "Omitted: the agent waits for the callee to speak first."
         ),
@@ -1361,7 +1361,7 @@ class AgentCreate(BaseModel):
         description=(
             "Opening line spoken after the AI line. On outbound calls the agent "
             "says it as one greeting with the AI line: word for word, except a "
-            "hello or self-introduction the AI line already said. Exact wording "
+            "hello the AI line already said. Exact wording "
             "is not guaranteed. Inbound calls and calls without the AI line say "
             "it as written. Omitted: the agent waits for the other side to "
             "speak first."

@@ -6,7 +6,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Changed
 
-- Calls open with one greeting: after the AI line, the agent says its greeting in its own words, without saying hello twice.
+- Outbound calls open with one greeting: after the AI line, the agent says its greeting word for word, without a second hello.
 
 ## [0.38.0] (2026-11-24)
 

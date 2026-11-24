@@ -1143,12 +1143,12 @@ def test_first_message_instructions_quote_the_notice_and_the_line() -> None:
 
 
 class _DoneHandle:
-    def __init__(self, error=None, words="", interrupted=False):
+    def __init__(self, error=None, words="", interrupted=False, tool=False):
         self._error = error
         self.interrupted = interrupted
         self.chat_items = (
             [SimpleNamespace(role="assistant", text_content=words)] if words else []
-        )
+        ) + ([SimpleNamespace(type="function_call", name="end_call")] if tool else [])
         self.callbacks = []
 
     def add_done_callback(self, callback):
@@ -1159,19 +1159,22 @@ class _DoneHandle:
 
 
 @pytest.mark.parametrize(
-    ("error", "words", "interrupted", "fallback"),
+    ("error", "words", "interrupted", "tool", "fallback"),
     [
-        (RuntimeError("model down"), "", False, True),
-        (None, "", False, True),  # no words and nobody interrupted
-        (None, "Calling about your order.", False, False),
-        (None, "", True, False),  # the person spoke: the turn loop answers
+        (RuntimeError("model down"), "", False, False, True),
+        (None, "", False, False, True),  # no words
+        (None, "", True, False, True),  # a caller turn cut in before any word
+        (None, "Calling about your order.", False, False, False),
+        # Words already spoken: never restart the greeting, even on an error.
+        (RuntimeError("tts down"), "Calling about", False, False, False),
+        (None, "", False, True, False),  # the turn hung up instead
     ],
 )
 async def test_failed_greeting_turn_says_the_line_as_written(
-    error, words, interrupted, fallback
+    error, words, interrupted, tool, fallback
 ):
     session = FakeAnnouncingSession()
-    handle = _DoneHandle(error, words, interrupted)
+    handle = _DoneHandle(error, words, interrupted, tool)
     session.generate_reply = lambda **_kw: handle
 
     await speak_greeting(session, {"first_message": "Hi, about your order."})

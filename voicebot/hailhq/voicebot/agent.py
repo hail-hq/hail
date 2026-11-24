@@ -977,9 +977,11 @@ def opening_instructions(
 
 def _say_first_message(session: Any, first_message: str, disclosure: str) -> None:
     """Have the agent say ``first_message`` after the disclosure (see
-    :func:`first_message_instructions`). If that turn fails, or ends with
-    no words while nobody interrupted it, say the line as written: a model
-    error must not leave the call without its opening line."""
+    :func:`first_message_instructions`). If that turn ends without saying a
+    word or calling a tool, however it ended (a model error, or a caller
+    turn that cut in first), say the line as written: the call must not
+    lose its opening line. A turn that spoke or acted is left as is, so the
+    greeting never restarts."""
     handle = session.generate_reply(
         instructions=first_message_instructions(first_message, disclosure)
     )
@@ -988,12 +990,16 @@ def _say_first_message(session: Any, first_message: str, disclosure: str) -> Non
         return
 
     def on_done(done: Any) -> None:
-        spoke = any(
-            getattr(item, "role", None) == "assistant"
-            and (getattr(item, "text_content", None) or "").strip()
-            for item in getattr(done, "chat_items", []) or []
+        items = getattr(done, "chat_items", []) or []
+        acted = any(
+            getattr(item, "type", None) == "function_call"
+            or (
+                getattr(item, "role", None) == "assistant"
+                and (getattr(item, "text_content", None) or "").strip()
+            )
+            for item in items
         )
-        if done.exception() is None and (spoke or done.interrupted):
+        if acted:
             return
         try:
             session.say(first_message, allow_interruptions=True)
@@ -1012,9 +1018,10 @@ def first_message_instructions(first_message: str, disclosure: str) -> str:
     return (
         f"You just said this introduction: {json.dumps(disclosure, ensure_ascii=False)}. "
         "Now say your opening line, below, so the two sound like one greeting. "
-        "Say it word for word, except leave out a hello or a self-introduction "
-        "that your introduction already said. Keep everything else exactly, "
-        "including numbers, codes, any notice, and the name you address them "
+        "Say it word for word, except leave out a hello word at its start "
+        '("Hi", "Hello", "Good morning"), since your introduction already '
+        "greeted them. Keep everything else exactly: any name, business or who "
+        "is calling, numbers, codes, any notice, and the name you address them "
         'by ("Hello Sam, ..." becomes "Sam, ..."). Add nothing else; if '
         "they asked something during the introduction, answer it briefly "
         "after the line. Then give them room to respond. Your opening line: "
@@ -1104,8 +1111,9 @@ async def speak_greeting(
     ``ai_disclosure`` default is ``True`` so a dispatch that predates the
     field (rolling deploy) keeps the disclosure.
 
-    With a disclosure, the disclosure is said as written and the agent's
-    model then says the ``first_message`` in its own words
+    On an outbound call with a disclosure, the disclosure is said as written
+    and the agent's model then says the ``first_message`` word for word,
+    without a hello the disclosure already said
     (:func:`first_message_instructions`), so the two sound like one
     greeting instead of the agent greeting twice ("Hi, this is an AI
     assistant… Hi, this is…"). On the phone-menu path

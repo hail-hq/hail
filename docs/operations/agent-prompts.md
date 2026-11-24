@@ -49,8 +49,8 @@ Live behavior needs a separately authorized test call or a synthetic model evalu
 
 On outbound calls, Hail says the AI notice word for word. The agent's model
 then says the greeting (`first_message`, "Greeting" in the console) as one
-greeting with it. It keeps the line word for word, except a hello or a
-self-introduction the notice already said. The instruction is
+greeting with it. It keeps the line word for word, except a hello the
+notice already said. The instruction is
 `first_message_instructions` in `voicebot/hailhq/voicebot/agent.py`; it
 quotes the notice and the line as JSON strings.
 

@@ -2250,8 +2250,8 @@ _AGENT_PROMPT = _d(
 )
 _AGENT_FIRST_MESSAGE = _d(
     "Greeting spoken after the AI disclosure. On outbound calls the agent says "
-    "it as one greeting with the disclosure: word for word, except a hello or "
-    "self-introduction the disclosure already said. Exact wording is not "
+    "it as one greeting with the disclosure: word for word, except a hello the "
+    "disclosure already said. Exact wording is not "
     "guaranteed. Inbound calls say it as written. Without one, an inbound "
     "agent waits for the caller."
 )
@@ -2383,8 +2383,8 @@ def register_tools(
             str | None,
             _d(
                 "Line spoken on pickup, after the AI notice. The agent says it as "
-                "one greeting with the notice: word for word, except a hello or "
-                "self-introduction the notice already said. Exact wording is "
+                "one greeting with the notice: word for word, except a hello the "
+                "notice already said. Exact wording is "
                 "not guaranteed. Without the AI notice it is said as written. "
                 "Without it, the agent reacts to the answer or silence."
             ),
