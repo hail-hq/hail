@@ -127,8 +127,9 @@ whose origination URI is LiveKit. Hail attaches the number when it routes
 calls to an agent; you set up the trunk once.
 
 1. On the trunk from step 3, open **Origination** and add the origination
-   URI `sip:<project>.sip.livekit.cloud;transport=tcp` (your LiveKit SIP
-   endpoint is on the project's settings page).
+   URI `sip:<project>.sip.livekit.cloud;transport=tls` (your LiveKit SIP
+   endpoint is on the project's settings page). TLS encrypts the call setup
+   (not the audio) between Twilio and LiveKit; Twilio uses port 5061 for it.
 2. Copy the trunk SID (`TK...`) into `.env` as `TWILIO_SIP_TRUNK_SID`.
 3. Create the LiveKit inbound trunk and dispatch rule
    ([LiveKit Cloud §4](./livekit-cloud.md#4-inbound-calls)) and set

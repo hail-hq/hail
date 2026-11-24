@@ -8,6 +8,10 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 - Outbound calls open with one greeting: the agent drops a second hello after the AI line.
 
+### Fixed
+
+- Webhooks: a delivery that cannot reach its endpoint shows a short reason, such as a TLS or connection failure.
+
 ## [0.38.0] (2026-11-24)
 
 Calls can always hang up: every call keeps `end_call` and `send_dtmf`, whatever

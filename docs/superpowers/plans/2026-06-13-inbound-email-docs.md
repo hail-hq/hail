@@ -29,7 +29,7 @@ The verify snippet in the guide must be provably correct. Generate a real signat
 - [ ] **Step 1:** From the repo root, run the real signer and capture the output:
 
 ```bash
-cd /Users/r/playground/hail/core && uv run python -c '
+cd <repo root>/core && uv run python -c '
 from hailhq.core.webhooks import sign_payload
 body = b"{\"id\":\"evt_123\",\"type\":\"email.received\",\"data\":{\"id\":\"em_1\"}}"
 print("body =", body.decode())

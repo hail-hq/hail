@@ -80,7 +80,7 @@ Changes:
 
 - Every read is scoped by org, agent, and the caller number found by the server.
 - No tool or API accepts a caller number to read.
-- Caller ID on a phone call can be faked. A spoofer sees that number's history. Accepted risk: keep secrets out of agent instructions and texts.
+- Caller ID on a phone call can be faked: keep secrets out of agent instructions and texts.
 - History the agent reads with the tool goes to the agent's LLM, including a bring-your-own endpoint.
 - `retention.py` and `dsar.py` already cover `calls`, `sms` and `call_events`. No new table to add.
 

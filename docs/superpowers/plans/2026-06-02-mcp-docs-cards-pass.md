@@ -19,14 +19,14 @@ Both repos have feature branches from the past two phases. This pass spans both 
 In `hail/`:
 
 ```
-cd /Users/r/playground/hail
+cd <repo root>
 git switch -c feat/mcp-docs-cards-pass
 ```
 
 In `hail-website/`:
 
 ```
-cd /Users/r/playground/hail-website
+cd <hail-website root>
 git switch -c feat/mcp-docs-cards-pass
 ```
 
@@ -52,7 +52,7 @@ The doc moves from "key-bearer first" to "URL-paste-and-click-Allow first". Self
 - [ ] **Step 1: Read the current file.**
 
 ```
-cat /Users/r/playground/hail/docs/setup/mcp.md
+cat docs/setup/mcp.md
 ```
 
 Note: it currently has a "URL" section that mentions both self-host AND "Hail Cloud (later)" — that "later" is now wrong. Tools table is fine. SSE transition-window paragraph is wrong (1c removed SSE).
@@ -122,7 +122,7 @@ The MCP service picks its auth mode from env at boot — see the [MCP modes tabl
 - [ ] **Step 3: Commit.**
 
 ```
-cd /Users/r/playground/hail
+cd <repo root>
 git add docs/setup/mcp.md
 git commit -m "$(printf 'docs(mcp): rewrite setup guide cloud-first\n\nOpening + URL section + Claude.ai/ChatGPT snippets now lead with the\npaste-URL-click-Allow OAuth flow shipped in Phase 1b+1c. Self-host\nstays first-class in its own section below, with the env-var contract\nlinking out to the operations runbook MCP-modes table. SSE\ntransition-window paragraph removed (1c dropped SSE entirely).\n\nCo-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>')"
 ```
@@ -140,7 +140,7 @@ All 8 client cards: snippet becomes OAuth-first; two new `notes` lines per card 
 - [ ] **Step 1: Read the current file.**
 
 ```
-cat /Users/r/playground/hail-website/app/mcp/clients.ts
+cat <hail-website root>/app/mcp/clients.ts
 ```
 
 Note the `McpClient` shape: `slug, name, tag, glyph, surfaces, intro, method, snippet { lang, file, code }, verify, notes, docsUrl`. Each card needs `snippet` and `notes` updated; everything else stays. Also note `MCP_CLIENT_ORDER`: claude, chatgpt, gemini, cursor, windsurf, copilot, zed, raycast. There's also an `MCP_ENDPOINT_URL` const at the top — confirm it's `https://mcp.hail.so`.
@@ -188,7 +188,7 @@ The `intro`, `verify`, `tag`, `glyph`, `surfaces`, `docsUrl` fields are unchange
 - [ ] **Step 4: Typecheck.**
 
 ```
-cd /Users/r/playground/hail-website && pnpm tsc --noEmit -p tsconfig.json
+cd <hail-website root> && pnpm tsc --noEmit -p tsconfig.json
 ```
 
 Expected: clean. If type errors, the `McpClient` shape probably needs the same fields it always had — verify no field was accidentally renamed.
@@ -198,7 +198,7 @@ Expected: clean. If type errors, the `McpClient` shape probably needs the same f
 If this file exists, check whether it renders from `MCP_CLIENTS` keyed by the slug (Task is done — the rewrite propagates automatically) or whether it has its own per-client copy that needs separate updating.
 
 ```
-ls /Users/r/playground/hail-website/app/mcp/\[client\]/
+ls <hail-website root>/app/mcp/\[client\]/
 ```
 
 If a non-shared per-client copy exists, audit each instance and propagate the same OAuth-first treatment. Surface as a sub-task if substantial.
@@ -206,7 +206,7 @@ If a non-shared per-client copy exists, audit each instance and propagate the sa
 - [ ] **Step 6: Commit.**
 
 ```
-cd /Users/r/playground/hail-website
+cd <hail-website root>
 git add app/mcp/clients.ts
 # also add app/mcp/[client]/page.tsx if Step 5 touched it
 git commit -m "$(printf 'docs(mcp): rewrite client cards OAuth-first\n\nEvery card in app/mcp/clients.ts now leads with the paste-URL-click-Allow\nflow shipped in Phase 1b+1c. Per-client snippet content authored from\neach client current MCP documentation (linked as docsUrl per card).\nNotes array on every card gains pointers to hail.so/console/apps for\nrevoke management and to docs/setup/mcp for the self-host static-key\nfallback.\n\nCo-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>')"
@@ -225,7 +225,7 @@ Replace the MCP tab's `<pre>` payload with the URL-plus-narration block.
 - [ ] **Step 1: Read the current file.**
 
 ```
-cat /Users/r/playground/hail-website/app/components/CodePanel.tsx
+cat <hail-website root>/app/components/CodePanel.tsx
 ```
 
 Note the three tabs (`cli` / `mcp` / `sdk`) and their respective `<pre ref={...}>` blocks. The MCP one currently has a static-key `mcp.json` shape. Other tabs are out of scope.
@@ -255,7 +255,7 @@ Use the same token-class conventions the surrounding code uses (the `c` / `k` / 
 - [ ] **Step 3: Typecheck.**
 
 ```
-cd /Users/r/playground/hail-website && pnpm tsc --noEmit -p tsconfig.json
+cd <hail-website root> && pnpm tsc --noEmit -p tsconfig.json
 ```
 
 Expected: clean.
@@ -263,7 +263,7 @@ Expected: clean.
 - [ ] **Step 4: Boot dev server briefly + visually confirm.**
 
 ```
-cd /Users/r/playground/hail-website && timeout 12s pnpm dev 2>&1 | tail -10 || true
+cd <hail-website root> && timeout 12s pnpm dev 2>&1 | tail -10 || true
 ```
 
 Expected: `Ready`. Open `http://localhost:3000/` (or whichever port is free) — click the MCP.JSON tab, confirm the new payload renders, the copy button still works.
@@ -271,7 +271,7 @@ Expected: `Ready`. Open `http://localhost:3000/` (or whichever port is free) —
 - [ ] **Step 5: Commit.**
 
 ```
-cd /Users/r/playground/hail-website
+cd <hail-website root>
 git add app/components/CodePanel.tsx
 git commit -m "$(printf 'feat(home): swap CodePanel MCP tab to OAuth-by-URL\n\nThe homepage MCP tab no longer carries an mcp.json with an embedded\nbearer. Single-URL paste + narration bullets match the cloud-OAuth\nflow shipped in 1c. Last bullet links self-hosters to the setup doc.\n\nCo-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>')"
 ```
@@ -289,7 +289,7 @@ Add a one-line hero callout linking to `/console/apps`.
 - [ ] **Step 1: Read the file + find the hero section.**
 
 ```
-sed -n '1,60p' /Users/r/playground/hail-website/app/mcp/page.tsx
+sed -n '1,60p' <hail-website root>/app/mcp/page.tsx
 ```
 
 Look for the `<section className="mcp-idx-hero">` block. Find the existing `<p className="lede">` (the hero subtitle) — the new callout goes either inside the same wrap div, immediately below the lede, or directly below the section. Pick whichever placement preserves the existing visual hierarchy.
@@ -312,13 +312,13 @@ If the project has a more idiomatic "secondary lede" or "subnote" class in `glob
 - [ ] **Step 3: Typecheck + dev-server smoke.**
 
 ```
-cd /Users/r/playground/hail-website && pnpm tsc --noEmit -p tsconfig.json
+cd <hail-website root> && pnpm tsc --noEmit -p tsconfig.json
 ```
 
 Expected: clean.
 
 ```
-cd /Users/r/playground/hail-website && timeout 12s pnpm dev 2>&1 | tail -10 || true
+cd <hail-website root> && timeout 12s pnpm dev 2>&1 | tail -10 || true
 ```
 
 Open `http://localhost:3000/mcp` — confirm the callout renders below the lede, the link goes to `/console/apps`.
@@ -326,7 +326,7 @@ Open `http://localhost:3000/mcp` — confirm the callout renders below the lede,
 - [ ] **Step 4: Commit.**
 
 ```
-cd /Users/r/playground/hail-website
+cd <hail-website root>
 git add app/mcp/page.tsx
 git commit -m "$(printf 'feat(mcp-page): link first-connect hero to authorized-apps console\n\nOne-line callout below the hero lede pointing users at\n/console/apps, where they can revoke authorized DCR clients after\ntheir first OAuth flow. Closes the loop on the 1b Authorized Apps\npanel.\n\nCo-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>')"
 ```
@@ -342,8 +342,8 @@ After Tasks 1-4 land, sweep for residual contradictions:
 - [ ] **Step 1: Grep for stale references.**
 
 ```
-cd /Users/r/playground/hail && grep -rn "HAIL_API_KEY" docs/setup/mcp.md
-cd /Users/r/playground/hail-website && grep -rn "HAIL_API_KEY\|mcp-remote.*--header" app/mcp/ app/components/CodePanel.tsx app/page.tsx
+cd <repo root> && grep -rn "HAIL_API_KEY" docs/setup/mcp.md
+cd <hail-website root> && grep -rn "HAIL_API_KEY\|mcp-remote.*--header" app/mcp/ app/components/CodePanel.tsx app/page.tsx
 ```
 
 In `hail/`: `HAIL_API_KEY` should appear ONLY in the self-host section of `mcp.md` (zero false positives at the top of the file).
@@ -353,8 +353,8 @@ In `hail-website/`: `HAIL_API_KEY` should appear ONLY in the `notes` array of ea
 - [ ] **Step 2: Grep for stale SSE mentions.**
 
 ```
-cd /Users/r/playground/hail && grep -rn "/sse\|legacy SSE\|transition window\|/messages/" docs/setup/mcp.md
-cd /Users/r/playground/hail-website && grep -rn "/sse\|legacy SSE" app/mcp/
+cd <repo root> && grep -rn "/sse\|legacy SSE\|transition window\|/messages/" docs/setup/mcp.md
+cd <hail-website root> && grep -rn "/sse\|legacy SSE" app/mcp/
 ```
 
 Expected: no matches in either repo. 1c removed SSE; the docs+cards pass must remove the mentions.
@@ -362,7 +362,7 @@ Expected: no matches in either repo. 1c removed SSE; the docs+cards pass must re
 - [ ] **Step 3: Verify the homepage CodePanel doesn't reference a key.**
 
 ```
-cd /Users/r/playground/hail-website && grep -n "HAIL_API_KEY\|hl_live" app/components/CodePanel.tsx
+cd <hail-website root> && grep -n "HAIL_API_KEY\|hl_live" app/components/CodePanel.tsx
 ```
 
 Expected: no matches in the MCP tab. (The ZSH or AGENT.PY tabs may still reference keys legitimately — those tabs are out of scope.)

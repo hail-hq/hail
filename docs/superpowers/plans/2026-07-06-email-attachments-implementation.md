@@ -44,7 +44,7 @@ No behavior change — pure rename so the client/bucket reflect that they now se
 - [ ] **Step 1: Rename the module and its test file with git, preserving history**
 
 ```bash
-cd /Users/r/playground/hail
+cd <repo root>
 git mv core/hailhq/core/s3_inbound.py core/hailhq/core/s3_mail.py
 git mv core/tests/test_s3_inbound.py core/tests/test_s3_mail.py
 ```
@@ -222,7 +222,7 @@ Replace the `s3: S3InboundClient` parameter type on `_persist_attachments` (and 
 
 ```bash
 cd core && uv run pytest tests/test_s3_mail.py -v
-grep -rn "S3InboundClient\|hail_inbound_bucket\|hail_inbound_email_name_prefix\|s3_inbound" --include="*.py" /Users/r/playground/hail/core
+grep -rn "S3InboundClient\|hail_inbound_bucket\|hail_inbound_email_name_prefix\|s3_inbound" --include="*.py" .
 ```
 
 Expected: pytest passes; the grep returns nothing (confirms no core-layer stragglers — `api/` call sites are handled in Task 2).
@@ -257,7 +257,7 @@ git commit -m "refactor(core): rename inbound S3 client/bucket to generic mail n
 These three tokens are renamed identically everywhere they appear (verified by earlier grep to be confined to `api/main.py`, `api/routes/emails.py`, `api/routes/internal/ses_events.py`, and the three test files above — `core/` was already handled in Task 1):
 
 ```bash
-cd /Users/r/playground/hail
+cd <repo root>
 grep -rl "S3InboundClient\|hail_inbound_bucket\|hailhq\.core\.s3_inbound" \
   api/hailhq/api/main.py \
   api/hailhq/api/routes/emails.py \
@@ -417,7 +417,7 @@ git commit -m "refactor(api): rename S3 inbound client call sites to generic mai
 - [ ] **Step 1: Rename the file**
 
 ```bash
-cd /Users/r/playground/hail
+cd <repo root>
 git mv infra/terraform/s3_inbound.tf infra/terraform/s3_mail.tf
 ```
 
@@ -1983,7 +1983,7 @@ git commit -m "feat(sdk): add client.email_attachments.create + emails.create(at
 - [ ] **Step 1: Regenerate the OpenAPI spec**
 
 ```bash
-cd /Users/r/playground/hail/api
+cd <repo root>/api
 uv run python -c "from hailhq.api.main import app; import sys, yaml; yaml.safe_dump(app.openapi(), sys.stdout, sort_keys=False)" > ../openapi/openapi.yaml
 ```
 
@@ -1998,7 +1998,7 @@ Expected: non-zero changes.
 - [ ] **Step 2: Regenerate the Go client**
 
 ```bash
-cd /Users/r/playground/hail/cli && make codegen
+cd <repo root>/cli && make codegen
 ```
 
 Expected: `internal/client/client.gen.go` is rewritten; `git diff --stat internal/client/client.gen.go` shows changes including new types (`EmailAttachmentUploadResponse`, `HTTPValidationError` reuse) and a new client method for the `upload_email_attachment` operation.
@@ -2370,7 +2370,7 @@ git commit -m "docs: document outbound email attachments (API/MCP/SDK/CLI) + ren
 ## Final verification (run once, after all tasks)
 
 ```bash
-cd /Users/r/playground/hail
+cd <repo root>
 (cd core && uv run pytest)
 (cd api && uv run pytest)
 (cd mcp && uv run pytest)

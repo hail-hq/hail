@@ -174,6 +174,7 @@ async def run_browser_session(
     finish_lock = asyncio.Lock()
     finished = False
     worker_failure = False
+    client_left = False
     deadline = None
     setup_deadline = None
     finalization = None
@@ -334,12 +335,25 @@ async def run_browser_session(
 
         setup_deadline = asyncio.create_task(expire_setup())
         await ctx.connect()
-        participant = await asyncio.wait_for(ctx.wait_for_participant(), timeout=30)
+        try:
+            participant = await asyncio.wait_for(ctx.wait_for_participant(), timeout=30)
+        except RuntimeError:
+            # The room closed before anyone joined: the person pressed Stop
+            # or left while connecting. That is a cancel, not a worker error.
+            # A RuntimeError on a room that is still open is a real failure.
+            if ctx.room.isconnected():
+                raise
+            client_left = True
+            logger.info("browser client left before joining call_id=%s", call_id)
+            await wait_finish()
+            return
         identity = participant.identity
 
         @ctx.room.on("participant_disconnected")
         def disconnected(p):
+            nonlocal client_left
             if p.identity == identity:
+                client_left = True
                 schedule_finish()
 
         # Load the same configured models and voice used by real calls.
@@ -419,6 +433,9 @@ async def run_browser_session(
         session.generate_reply(
             instructions="Briefly say you are an AI assistant, greet the person as this agent, then ask how you can help. Use the selected conversation language."
         )
-    except Exception:
+    except Exception as error:
         logger.exception("browser session failed call_id=%s", call_id)
-        await wait_finish(failed=True)
+        # Once the person has left, setup steps fail with a RuntimeError because
+        # the room closed under them. That is part of the cancel. Any other
+        # error is a real worker failure, even after the person left.
+        await wait_finish(failed=not (client_left and isinstance(error, RuntimeError)))

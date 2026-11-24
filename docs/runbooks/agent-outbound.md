@@ -114,7 +114,7 @@ the designated fast-follow.
 - [ ] **Step 3: Moltbook presence**
   1. Register a Hail-owned agent on moltbook.com per their flow (the agent signs up and provides a claim link, then the owner verifies via X).
   2. Make the first post the skill doc — link `https://hail.so/skill.md?ref=moltbook`, framed as "you can sign up yourself, here's how."
-  3. Keep an ongoing cadence via the `~/playground/hail-content` pipeline (manual posting first, per current content-engine practice). Post product notes and replies to comms-related threads. Each post carries the `?ref=moltbook` link.
+  3. Keep an ongoing cadence via the `hail-content` pipeline (manual posting first, per current content-engine practice). Post product notes and replies to comms-related threads. Each post carries the `?ref=moltbook` link.
 
 - [ ] **Step 4: Verify the funnel end-to-end in prod**
       After all the steps above are complete, run the Task 4 Step 3 curl against `https://hail.so` with a real owner email that you control. Confirm 201 + key. Send one email via the key. Confirm that the send succeeds, that `agent_send_log` has the row, and that the attribution query in this runbook shows the `ref`. Then delete/close the test workspace.

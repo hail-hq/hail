@@ -137,10 +137,6 @@ MailFromDomain=f"send.{domain}", BehaviorOnMxFailure="USE_DEFAULT_VALUE")`.
 - In `delete_email_domain`, before `provider.delete_identity(...)`: query for
   **any other org** with a row for the same `domain`. If one exists, skip the SES
   delete (drop only this org's row). Same for the MAIL FROM teardown.
-- 🟡 Residual, accepted + documented: the _verify free-ride_ — if the true owner
-  verifies `<domain>` in org A, a squatter row in org B reads "verified" off the
-  shared SES identity. Unfixable with SES Easy DKIM (identity-level, not org).
-  Low likelihood; recorded as a known limitation.
 
 ### D. Inbound on custom domains
 
@@ -228,13 +224,12 @@ pending / failed` state. Show DMARC as a labeled "recommended, not required".
 Add to the inbound-email docs:
 
 - **Rate limits / latency** on `GET /emails/{id}` and
-  `GET /emails/{id}/attachments/{aid}`: no rate limiting today; both are a single
+  `GET /emails/{id}/attachments/{aid}`: both are a single
   indexed DB read (+ an S3 presign for attachments).
 - **Presigned-URL TTL = 300s.** Retry against the **stable**
   `…/emails/{id}/attachments/{aid}` (302) endpoint, **not** the baked `url` in the
   webhook payload (which is a pre-expiring presigned link).
-- **Verify status values** = `pending` / `verified` / `failed`; no rate limit on
-  `POST /{id}/verify`. With the auto-poll worker, self-serve flows rarely need to
+- **Verify status values** = `pending` / `verified` / `failed`. With the auto-poll worker, self-serve flows rarely need to
   poll it at all.
 
 ## Testing

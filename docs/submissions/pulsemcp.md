@@ -93,5 +93,5 @@ hail-website/public/assets/brand/logo/monogram-1024.png
 
 ```
 
-File checked: `/Users/r/playground/hail/docs/submissions/pulsemcp.md` (no edits made — already accurate).
+File checked: `docs/submissions/pulsemcp.md` (no edits made — already accurate).
 ```

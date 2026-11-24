@@ -32,6 +32,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
+from hailhq.core.http_post import describe_send_error
 from hailhq.core.models import WebhookDelivery, WebhookSubscription
 from hailhq.core.telemetry import operation, telemetry_enabled
 from hailhq.core.telemetry_identity import (
@@ -285,8 +286,14 @@ class WebhookWorker:
             # pooled connection. The claim's deferral keeps the row ours.
             try:
                 status, resp_body = await self._http_post(target_url, body, headers)
-            except Exception as exc:  # pragma: no cover
-                status, resp_body = None, str(exc)
+            except Exception as exc:
+                # The type only: the message can hold the receiver key.
+                logger.warning(
+                    "webhook send failed: %s",
+                    type(exc).__name__,
+                    extra={"delivery_id": str(delivery_id)},
+                )
+                status, resp_body = None, describe_send_error(exc)
 
             # A receiver or HTTP exception can reflect its request credentials.
             # Keep those out of the delivery inspector and audit history.

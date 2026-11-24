@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Fix all 7 confirmed findings from the `/code-review` pass on pending, uncommitted changes in `/Users/r/hail` (a Python monorepo: `api/`, `core/`, `mcp/`, `voicebot/`, `cli/`, `sdk/`), without changing any other intended behavior.
+**Goal:** Fix all 7 confirmed findings from the `/code-review` pass on pending, uncommitted changes in this repo (a Python monorepo: `api/`, `core/`, `mcp/`, `voicebot/`, `cli/`, `sdk/`), without changing any other intended behavior.
 
 **Architecture:** Two findings (SDK, CLI) fix client integrations that the in-flight API change broke; two (DSAR case-sensitivity, DSAR cc/bcc) fix the same `lookup_recipient` function in sequence; two (org_closures race, org_closures dependency wiring) fix the same small route file in sequence; one (HMAC triplication) extracts a shared module used by three existing files. Tasks within a shared file are ordered so each builds on the prior task's version; tasks across different files are independent.
 
