@@ -1544,7 +1544,9 @@ class AgentResponse(BaseModel):
     organization_id: UUID = Field(description="Organization that owns this agent.")
     name: str = Field(description="Display name, unique per organization.")
     system_prompt: str = Field(description="Task instructions.")
-    first_message: str | None = Field(description="Opening line, or null: on calls it answers, the agent waits for the caller after the AI line; on calls it places, its model usually writes an opening.")
+    first_message: str | None = Field(
+        description="Opening line, or null: on calls it answers, the agent waits for the caller after the AI line; on calls it places, its model usually writes an opening."
+    )
     recording_enabled: bool | None = Field(
         default=None,
         description="Null inherits the workspace recording choice; true or false sets recording for this agent's calls, whatever the workspace setting.",
