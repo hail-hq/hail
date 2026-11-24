@@ -321,7 +321,10 @@ class CallCreate(ConsentAttestationMixin):
         description=(
             "Agent tools to allow on this call. Omitted: every tool the "
             "organization's configured channels support (new channels appear "
-            "automatically). Empty list: no tools. Tool names are validated "
+            "automatically). Empty list: only the tools every call keeps "
+            "(end_call, send_dtmf and Hail's settings guide); a saved agent's "
+            "HTTP tools stay on. "
+            "Tool names are validated "
             "against the server's registry."
         ),
     )
@@ -1382,7 +1385,12 @@ class AgentCreate(BaseModel):
     )
     tools: list[str] | None = Field(
         default=None,
-        description="Agent tools to allow. Omitted: every tool the organization's channels support. Empty list: none.",
+        description=(
+            "Agent tools to allow. Omitted: every tool the organization's "
+            "channels support. Empty list: only the tools every call keeps "
+            "(end_call, send_dtmf and Hail's settings guide). HTTP tools stay "
+            "on."
+        ),
     )
     max_duration_seconds: int | None = Field(
         default=None,
@@ -1478,7 +1486,11 @@ class AgentUpdate(BaseModel):
         default=None, description="New TTS voice and language settings."
     )
     tools: list[str] | None = Field(
-        default=None, description="New allowed tools; null allows every tool."
+        default=None,
+        description=(
+            "New allowed tools; null allows every tool. Calls always keep "
+            "end_call, send_dtmf and Hail's settings guide."
+        ),
     )
     max_duration_seconds: int | None = Field(
         default=None,

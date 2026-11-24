@@ -28,7 +28,7 @@ import logging
 import math
 import re
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Collection
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
@@ -111,7 +111,7 @@ from hailhq.voicebot.recording import start_recording, stop_recording
 from hailhq.voicebot.recovery import ConversationRecovery
 from hailhq.voicebot.spoken_lines import spoken_lines
 from hailhq.voicebot.telemetry import connect_livekit_tracing
-from hailhq.voicebot.tools import SpeechTracker, build_agent_tools
+from hailhq.voicebot.tools import SpeechTracker, build_agent_tools, every_call_tools
 from livekit import rtc
 from livekit.agents import Agent, JobContext, JobProcess, StopResponse
 from livekit.agents.llm import LLM, LLMError
@@ -296,8 +296,9 @@ class SpeechSanitizingAgent(Agent):
             if self.phone_menu.checking or not self.phone_menu.can_navigate:
                 return None
             chat_ctx = chat_ctx.copy()
+            names = [t.info.name for t in tools or [] if hasattr(t, "info")]
             chat_ctx.add_message(
-                role="system", content=ivr_navigation_instructions(None)
+                role="system", content=ivr_navigation_instructions(None, names)
             )
         return Agent.default.llm_node(self, chat_ctx, tools, model_settings)
 
@@ -314,8 +315,12 @@ def build_instructions(
     language: str | None = None,
     other_party: str | None = None,
     clock: str | None = None,
+    tool_names: Collection[str] | None = None,
 ) -> str:
-    """The call's instructions (see :func:`hailhq.core.prompts.build_voice_instructions`)."""
+    """The call's instructions (see :func:`hailhq.core.prompts.build_voice_instructions`).
+    ``tool_names`` are the call's tools; None means every tool. The prompt
+    never names a tool the call lacks: the model would write its name as
+    text, and the voice would read it aloud."""
     # The language line goes before the privacy reminder, which stays last.
     spoken = (
         f"Speak in {SUPPORTED_LANGUAGES[language].name} for this call."
@@ -323,7 +328,9 @@ def build_instructions(
         else None
     )
     tail = "\n\n".join(part for part in (other_party, clock, spoken) if part) or None
-    return build_voice_instructions(system_prompt, direction, other_party=tail)
+    return build_voice_instructions(
+        system_prompt, direction, other_party=tail, tool_names=tool_names
+    )
 
 
 def _call_clock(metadata: dict[str, Any], inbound: bool) -> str | None:
@@ -894,12 +901,13 @@ async def build_tools_safely(
     cancel_bridge: Callable[[], Awaitable[bool]] | None = None,
     prompt: Callable[[str], Awaitable[None]] | None = None,
 ) -> tuple[list, AgentApiClient | None]:
-    """Build this call's agent tools, degrading to none on any failure.
+    """Build this call's agent tools, degrading to the tools every call
+    keeps on any failure.
 
     A tool-layer startup failure (e.g. a DB rollback on a dead connection
-    inside ``build_agent_tools``) must never kill the call, degrade to no
-    tools rather than let the exception escape ``entrypoint()`` and abort
-    the session.
+    inside ``build_agent_tools``) must never kill the call: it degrades
+    rather than let the exception escape ``entrypoint()`` and abort the
+    session. The every-call tools stay, so the call can still hang up.
     """
     try:
         return await build_agent_tools(
@@ -914,10 +922,22 @@ async def build_tools_safely(
         )
     except Exception:
         logger.exception(
-            "call_id=%s build_agent_tools failed; continuing without agent tools",
+            "call_id=%s build_agent_tools failed; continuing with every-call tools",
             call_id,
         )
-        return [], None
+        # Every-call tools need no database or API.
+        try:
+            tools = every_call_tools(
+                metadata,
+                call_id=call_id,
+                hangup=hangup,
+                send_dtmf=send_dtmf,
+                spoke_since=spoke_since,
+            )
+        except Exception:
+            logger.exception("call_id=%s every-call tools fallback failed", call_id)
+            tools = []
+        return tools, None
 
 
 # Spoken opening when the caller supplied no ``first_message``. A real LLM
@@ -2551,12 +2571,9 @@ async def _run_call(
         cancel_bridge=make_bridge_cancel(ctx, call_id, bridge_state),
         prompt=lambda text: _prompt_agent(session, bridge_state, text),
     )
+    tool_names = [t.info.name for t in agent_tools]
     if agent_tools:
-        logger.info(
-            "call_id=%s agent tools enabled: %s",
-            call_id,
-            [t.info.name for t in agent_tools],
-        )
+        logger.info("call_id=%s agent tools enabled: %s", call_id, tool_names)
 
     known = await other_party_task
     if known is not None and stt_takes_keyterms(session.stt):
@@ -2572,11 +2589,14 @@ async def _run_call(
             language=language,
             # send_email reaches members and contacts that have an email.
             other_party=(
-                other_party_section(known.name, can_email=known.has_email)
+                other_party_section(
+                    known.name, can_email=known.has_email, tool_names=tool_names
+                )
                 if known is not None
                 else None
             ),
             clock=_call_clock(metadata, inbound),
+            tool_names=tool_names,
         ),
         tools=agent_tools,
     )
@@ -2853,7 +2873,8 @@ async def _run_call(
         # turn in which to press a key, observed in production as the agent
         # reciting its disclosure into a "press one / press two" menu while
         # the tree timed out. `generate_reply` is a real LLM turn with
-        # `send_dtmf` attached, which is what actually navigates the menu.
+        # `send_dtmf` attached when the call has it, which is what actually
+        # navigates the menu; without it the no-keys menu prompt is used.
         # The disclosure is deferred, not dropped: `arm_deferred_greeting`
         # speaks it once speech is classified as a person, or after a bounded
         # wait when speech cannot be classified.
@@ -2872,7 +2893,7 @@ async def _run_call(
             language=language,
         )
         session.generate_reply(
-            instructions=ivr_navigation_instructions(amd_result.transcript)
+            instructions=ivr_navigation_instructions(amd_result.transcript, tool_names)
         )
     else:
         # AMD holds the greeting for up to its detection window, and the

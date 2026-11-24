@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from hailhq.core.agent_tools import (
     end_call,
+    hail_help,
     list_contacts,
     read_email,
     send_dtmf,
@@ -28,4 +29,10 @@ def all_tools() -> tuple[ToolSpec, ...]:
     )
 
 
-__all__ = ["all_tools"]
+def call_tools() -> tuple[ToolSpec, ...]:
+    """Every built-in tool a call can have: the tools a `tools` list may
+    name, plus the settings guide, which no list names."""
+    return (*all_tools(), hail_help.SPEC)
+
+
+__all__ = ["all_tools", "call_tools"]

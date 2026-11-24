@@ -8,6 +8,14 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 - Webhooks: send a test event to an endpoint before you save it with `POST /v1/webhooks/test`, and see the receiver's answer.
 
+### Changed
+
+- `end_call` and `send_dtmf` stay on every call, so a bring-your-own model must support tool calling.
+
+### Fixed
+
+- Calls can always hang up, and call prompts never name a tool the call does not have.
+
 ## [0.37.0] (2026-11-23)
 
 A refused US texting registration now says why: Hail's fix first, then the

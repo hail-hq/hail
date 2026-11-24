@@ -15,13 +15,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Collection
 from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID
 
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.config import settings
+from hailhq.core.prompts import ToolLine, fit_to_tools
 from hailhq.voicebot.classify import (
     CLASSIFIER_REQUEST_TIMEOUT_SECONDS,
     CLASSIFY_TIMEOUT_SECONDS,
@@ -393,10 +394,43 @@ the line. A hold announcement is still a recording. If a post-call survey \
 starts, end the call without selecting a rating."""
 
 
-def ivr_navigation_instructions(transcript: str | None) -> str:
-    """The prompt handed to the LLM when AMD reports a phone tree."""
+# The menu prompt's sentences that name a tool (see ToolLine).
+IVR_TOOL_LINES: tuple[ToolLine, ...] = (
+    ToolLine(
+        "Use the send_dtmf tool to press the option that best advances the "
+        "reason for your call. Wait for the complete menu before choosing. A "
+        "pause or one offered digit does not mean the list has finished. Only "
+        "choose an offered option that matches the call's goal. An extension "
+        "option is only useful when you know the requested extension. Never "
+        "invent a zero/operator option. If the full menu offers no relevant "
+        "option, wait for a repeat.",
+        frozenset({"send_dtmf"}),
+        # A hold queue plays different recordings for minutes before a person
+        # answers: keep waiting. Only the same menu, repeated, means no one is
+        # coming.
+        "You cannot press keys on this call. Wait for a person. A hold message "
+        "is not a reason to leave. If the same menu has played three times "
+        "with no person and nothing new, end the call.",
+    ),
+    ToolLine(
+        "Press keys, do not speak your choice, the menu cannot hear you. Key "
+        "presses happen only through the send_dtmf tool, never write JSON, "
+        "code, or tool-call syntax in your reply.",
+        frozenset({"send_dtmf"}),
+        "Do not speak to the menu, it cannot hear you. Never write JSON, code, "
+        "or tool-call syntax in your reply.",
+    ),
+)
+
+
+def ivr_navigation_instructions(
+    transcript: str | None, tool_names: Collection[str] | None = None
+) -> str:
+    """The prompt handed to the LLM when AMD reports a phone tree.
+    ``tool_names`` as in :func:`hailhq.core.prompts.fit_to_tools`."""
     menu = (transcript or "").strip() or "(the menu text was not captured)"
-    return IVR_NAVIGATION_INSTRUCTIONS.format(transcript=menu)
+    text = IVR_NAVIGATION_INSTRUCTIONS.format(transcript=menu)
+    return fit_to_tools(text, tool_names, IVR_TOOL_LINES)
 
 
 def amd_end_reason(category: str) -> str:
@@ -541,6 +575,7 @@ async def run_amd(
 __all__ = [
     "DETECTION_TIMEOUT_SECONDS",
     "IVR_NAVIGATION_INSTRUCTIONS",
+    "IVR_TOOL_LINES",
     "MACHINE_HANGUP_CATEGORIES",
     "MACHINE_IVR_CATEGORY",
     "NO_SPEECH_THRESHOLD_SECONDS",

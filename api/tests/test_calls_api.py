@@ -1268,7 +1268,7 @@ async def test_post_calls_tools_empty_and_omitted_passthrough(
     livekit_mock: AsyncMock,
     add_phone_number,
 ) -> None:
-    """`tools: []` dispatches as [] (no tools); omitted dispatches as None
+    """`tools: []` dispatches as [] (only every-call tools); omitted dispatches as None
     (all tools). Pins the []-vs-None distinction so a refactor to a
     truthiness check (`if body.tools:`) can't silently collapse [] into
     the None path."""

@@ -2266,8 +2266,12 @@ _AGENT_VOICE_ID = _d(
     "such as an ElevenLabs voice ID."
 )
 _AGENT_TOOLS = _d(
-    "Names of allowed built-in tools for calls or replies. An empty list "
-    "selects none. Hail adds call transfer when handover contacts are configured."
+    "Names of the tools the agent may use during a call or reply. "
+    "Omitted: every tool the workspace's channels support. An empty list: none, "
+    "except that a call keeps the tools every call needs (end_call, "
+    "send_dtmf and Hail's settings guide). "
+    "HTTP tools stay on."
+    " Hail adds call transfer when handover contacts are configured."
 )
 _AGENT_MAX_DURATION = _d(
     "Longest a call with this agent may last, in seconds, counted from "
@@ -2406,8 +2410,11 @@ def register_tools(
         tools: Annotated[
             list[str] | None,
             _d(
-                "Names of the agent tools allowed on this call. An empty list "
-                "disables them. Omitted: every tool the workspace's channels support."
+                "Names of the agent tools allowed on this call. An empty list: "
+                "only the tools every call keeps (end_call, send_dtmf and Hail's "
+                "settings guide). A saved "
+                "agent's HTTP tools stay on. Omitted: every tool the "
+                "workspace's channels support."
             ),
         ] = None,
         idempotency_key: Annotated[str | None, _IDEMPOTENCY_KEY] = None,

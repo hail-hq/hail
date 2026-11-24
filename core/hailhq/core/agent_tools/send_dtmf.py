@@ -108,6 +108,7 @@ SPEC = ToolSpec(
     risk_tier="session_control",
     is_available=_always,
     execute=_execute,
+    on_every_call=True,
 )
 
 __all__ = [

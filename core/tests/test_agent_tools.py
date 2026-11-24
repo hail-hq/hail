@@ -8,6 +8,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from hailhq.core import schemas
 from hailhq.core.agent_tools.registry import all_tools
 from hailhq.core.agent_tools.send_email import (
     EMAIL_RUN_SPEC,
@@ -792,3 +793,15 @@ async def test_thread_history_withheld_scope_reads_nothing(async_session):
         assert await tool.execute(ctx, {"source": source}) == (
             "There is nothing earlier."
         )
+
+
+@pytest.mark.parametrize(
+    "model", [schemas.CallCreate, schemas.AgentCreate, schemas.AgentUpdate]
+)
+def test_tools_field_names_every_call_tool(model):
+    """The API `tools` text names each tool every call keeps (on_every_call),
+    so it cannot drift from the flag."""
+    text = model.model_fields["tools"].description
+    for spec in all_tools():
+        if spec.on_every_call:
+            assert spec.name in text, (model.__name__, spec.name)
