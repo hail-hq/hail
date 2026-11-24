@@ -1172,10 +1172,36 @@ async def test_handover_quote_on_pbx_call_sends_two_pbx_legs(
     call, contact = await _seed_pbx(async_session, billed=True)
     assert (await _post_handover(client, call, contact)).json()["ok"] is True
     legs = max((c.args[1] for c in quote_mock.await_args_list), key=len)
-    assert [(leg["direction"], leg["carrier"], leg["number_e164"]) for leg in legs] == [
-        ("inbound", "pbx", "+14155550100"),
-        ("outbound", "pbx", "800"),
+    # The hail-website quote takes an extension as number_e164 on a pbx leg.
+    assert legs == [
+        {
+            "direction": "inbound",
+            "carrier": "pbx",
+            "number_e164": "+14155550100",
+            "caller_e164": "+14155550199",
+        },
+        {
+            "direction": "outbound",
+            "carrier": "pbx",
+            "number_e164": "800",
+            "caller_e164": "+14155550100",
+        },
     ]
+
+
+async def test_handover_route_error_is_a_spoken_refusal(
+    client, async_session, monkeypatch
+):
+    async def broken_route(_db, _number):
+        raise RuntimeError("trunk lookup failed")
+
+    monkeypatch.setattr(f"{AGENT_MODULE}.voice_route", broken_route)
+    call, contact = await _seed_pbx(async_session)
+    body = (await _post_handover(client, call, contact)).json()
+    assert body["ok"] is False
+    assert body["spoken"]
+    assert body.get("trunk_id") is None
+    assert await _block_reason(async_session, call) == "carrier_route_failed"
 
 
 # Passes before and after the connected-number handover (the route already

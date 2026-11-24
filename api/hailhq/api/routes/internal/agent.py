@@ -2148,7 +2148,8 @@ async def agent_handover(
             return await _deny_handover(call, body, gate.reason or "gate")
     try:
         trunk_id, headers = await voice_route(db, number)
-    except ValueError:
+    except Exception:  # an unset trunk, a deleted connection, a DB error
+        logger.warning("handover route failed for call %s", call.id, exc_info=True)
         return await _deny_handover(call, body, "carrier_route_failed")
     hail_number = call.to_e164 if call.direction == "inbound" else call.from_e164
     # A connected call shows the person on the line to the handover contact;
