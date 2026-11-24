@@ -46,7 +46,7 @@ def upgrade() -> None:
           organization_id            UUID NOT NULL,
           label                      TEXT NOT NULL,
           inbound_username           TEXT NOT NULL,
-          encrypted_inbound_password TEXT NOT NULL,
+          encrypted_inbound_password TEXT,
           pbx_host                   TEXT,
           pbx_port                   INTEGER NOT NULL DEFAULT 5060,
           pbx_transport              TEXT NOT NULL DEFAULT 'auto',

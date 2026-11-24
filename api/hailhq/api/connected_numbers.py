@@ -307,10 +307,11 @@ async def update_connection(
         if (
             host is not None
             and destination_changed
-            and old_encrypted_password is not None
+            and encrypted_password is not None
             and pbx_password is UNSET
         ):
-            # Never send a stored password to a new destination.
+            # Never send a stored password to a new destination. Dropping the
+            # username drops the password, so nothing is sent.
             raise ConnectedNumberError(
                 "password_required", "pbx_password", "send the PBX password again"
             )
@@ -408,15 +409,22 @@ async def _restore_outbound_trunk(
 async def rotate_inbound_password(
     db: AsyncSession, lk: LiveKitClient, connection: SipConnection
 ) -> str:
-    """Give the inbound trunk a new password. Returns it in plain text."""
-    _live(connection)
-    password = new_password()
-    encrypted = encrypt_secret(password)
-    old_password = decrypt_secret(connection.encrypted_inbound_password)
-    trunk_id = connection.livekit_inbound_trunk_id
-    # Read before the commit: a rollback expires the row.
-    username = connection.inbound_username
-    await _livekit(lk.set_pbx_inbound_credentials, trunk_id, username, password)
+    """Give the inbound trunk a new password. Returns it in plain text.
+    Under the org lock, so it cannot race ``delete_connection``."""
+    await org_lock(db, connection.organization_id)
+    await db.refresh(connection)
+    try:
+        _live(connection)
+        password = new_password()
+        encrypted = encrypt_secret(password)
+        old_password = decrypt_secret(connection.encrypted_inbound_password)
+        trunk_id = connection.livekit_inbound_trunk_id
+        # Read before the commit: a rollback expires the row.
+        username = connection.inbound_username
+        await _livekit(lk.set_pbx_inbound_credentials, trunk_id, username, password)
+    except BaseException:
+        await db.rollback()
+        raise
     try:
         connection.encrypted_inbound_password = encrypted
         await db.commit()
@@ -456,6 +464,12 @@ async def delete_connection(
             if trunk_id is not None:
                 await _livekit(lk.delete_sip_trunk, trunk_id)
         connection.deleted_at = datetime.now(timezone.utc)
+        # A deleted connection keeps no secret and no address. The inbound
+        # username stays: it is unique and never handed out again.
+        connection.encrypted_inbound_password = None
+        connection.pbx_username = None
+        connection.encrypted_pbx_password = None
+        connection.pbx_host = None
         await db.commit()
     except BaseException:
         await db.rollback()

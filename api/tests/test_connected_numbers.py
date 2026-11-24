@@ -409,6 +409,7 @@ async def test_rotate_inbound_password_keeps_old_when_livekit_fails(
     with pytest.raises(ConnectedNumberError) as e:
         await rotate_inbound_password(async_session, lk, conn)
     assert e.value.code == "livekit_failed"
+    await async_session.refresh(conn)  # the failure rolled back
     assert conn.encrypted_inbound_password == old
 
 
@@ -429,6 +430,39 @@ async def test_delete_connection_deletes_trunks_and_tombstones(async_session, lk
         "ST_in",
         "ST_out",
     }
+
+
+async def test_delete_connection_forgets_the_secrets(
+    async_session, lk, conn_with_password
+):
+    await delete_connection(async_session, lk, conn_with_password)
+    await async_session.refresh(conn_with_password)
+    assert conn_with_password.deleted_at is not None
+    assert (
+        conn_with_password.encrypted_inbound_password,
+        conn_with_password.pbx_username,
+        conn_with_password.encrypted_pbx_password,
+        conn_with_password.pbx_host,
+    ) == (None, None, None, None)
+    assert conn_with_password.inbound_username  # kept: unique, never reused
+
+
+async def test_rotate_inbound_password_reads_the_row_under_the_lock(
+    async_session, lk, conn
+):
+    """A connection deleted by another request after this one loaded it is
+    refused before any LiveKit call."""
+    async with session_scope() as other:
+        await other.execute(
+            update(SipConnection)
+            .where(SipConnection.id == conn.id)
+            .values(deleted_at=NOW)
+        )
+        await other.commit()
+    with pytest.raises(ConnectedNumberError) as e:
+        await rotate_inbound_password(async_session, lk, conn)
+    assert e.value.code == "connection_deleted"
+    lk.set_pbx_inbound_credentials.assert_not_awaited()
 
 
 async def test_delete_connection_twice_is_refused(async_session, lk, conn):
@@ -557,6 +591,28 @@ async def test_host_change_with_new_password_updates_trunk(
         "hail",
         "new-pw",
     )
+
+
+async def test_host_change_dropping_the_username_needs_no_password(
+    async_session, lk, conn_with_password
+):
+    """No stored password goes to the new host, so none is asked for."""
+    conn = await update_connection(
+        async_session,
+        lk,
+        conn_with_password,
+        pbx_host="pbx2.example.com",
+        pbx_username=None,
+    )
+    assert lk.update_pbx_outbound_trunk.await_args.args == (
+        "ST_out",
+        "pbx2.example.com",
+        5060,
+        "auto",
+        None,
+        None,
+    )
+    assert (conn.pbx_username, conn.encrypted_pbx_password) == (None, None)
 
 
 async def test_host_change_without_stored_password_is_allowed(async_session, lk, conn):
