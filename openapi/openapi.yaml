@@ -6600,8 +6600,9 @@ components:
           title: First Message
           description:
             "Opening line spoken after the AI line. Omitted: on a call
-            the agent answers, it waits for the caller to speak first; on a call it
-            places, its model usually writes a short opening after pickup."
+            the agent answers, it speaks the AI line when it is on, then waits for
+            the caller; on a call it places, its model usually writes a short opening
+            after pickup."
         recording_enabled:
           anyOf:
             - type: boolean
@@ -6755,8 +6756,9 @@ components:
             - type: "null"
           title: First Message
           description:
-            "Opening line, or null: the agent waits on calls it answers,
-            and its model usually writes an opening on calls it places."
+            "Opening line, or null: on calls it answers, the agent waits
+            for the caller after the AI line; on calls it places, its model usually
+            writes an opening."
         recording_enabled:
           anyOf:
             - type: boolean
@@ -6896,9 +6898,9 @@ components:
             - type: "null"
           title: First Message
           description:
-            New opening line; null removes it. Then the agent waits on
-            calls it answers, and its model usually writes an opening on calls it
-            places.
+            New opening line; null removes it. Then, on calls it answers,
+            the agent waits for the caller after the AI line; on calls it places,
+            its model usually writes an opening.
         recording_enabled:
           anyOf:
             - type: boolean
@@ -7098,10 +7100,9 @@ components:
             - type: "null"
           title: First Message
           description:
-            "Opening line the agent speaks first, after the AI disclosure
-            line when it is on. Omitted: the saved agent's first_message when agent_id
-            is set; otherwise the agent's model usually writes a short opening after
-            pickup."
+            "Opening line, spoken after the AI disclosure line when it
+            is on. Omitted: the saved agent's first_message when agent_id is set;
+            otherwise the agent's model usually writes a short opening after pickup."
         recording_enabled:
           anyOf:
             - type: boolean
@@ -12207,9 +12208,9 @@ components:
           description:
             "Spoken language for the call as a lowercase ISO 639-1 code
             (e.g. 'da'). One of the 39 supported codes: see https://hail.so/docs/languages.
-            Applied to STT, TTS, and turn detection. Omitted on a call: the saved
-            agent's language when the call sends no voice_config, then the language
-            of the workspace's text-to-speech provider, then English."
+            Applied to STT, TTS, and turn detection. Omitted: the language of the
+            workspace's text-to-speech provider, then English. A call with agent_id
+            and no voice_config uses the agent's language."
       additionalProperties: false
       type: object
       title: VoiceConfig

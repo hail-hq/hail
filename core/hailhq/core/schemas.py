@@ -182,9 +182,9 @@ class VoiceConfig(BaseModel):
             "Spoken language for the call as a lowercase ISO 639-1 code "
             "(e.g. 'da'). One of the 39 supported codes: see "
             "https://hail.so/docs/languages. Applied to STT, TTS, and turn "
-            "detection. Omitted on a call: the saved agent's language when "
-            "the call sends no voice_config, then the language of the "
-            "workspace's text-to-speech provider, then English."
+            "detection. Omitted: the language of the workspace's "
+            "text-to-speech provider, then English. A call with agent_id "
+            "and no voice_config uses the agent's language."
         ),
     )
 
@@ -264,8 +264,8 @@ class CallCreate(ConsentAttestationMixin):
     first_message: str | None = Field(
         default=None,
         description=(
-            "Opening line the agent speaks first, after the AI disclosure "
-            "line when it is on. Omitted: the saved agent's first_message "
+            "Opening line, spoken after the AI disclosure line when it is "
+            "on. Omitted: the saved agent's first_message "
             "when agent_id is set; otherwise the agent's model usually writes "
             "a short opening after pickup."
         ),
@@ -1356,7 +1356,7 @@ class AgentCreate(BaseModel):
     first_message: str | None = Field(
         default=None,
         max_length=1000,
-        description="Opening line spoken after the AI line. Omitted: on a call the agent answers, it waits for the caller to speak first; on a call it places, its model usually writes a short opening after pickup.",
+        description="Opening line spoken after the AI line. Omitted: on a call the agent answers, it speaks the AI line when it is on, then waits for the caller; on a call it places, its model usually writes a short opening after pickup.",
     )
     recording_enabled: bool | None = Field(
         default=None,
@@ -1464,7 +1464,7 @@ class AgentUpdate(BaseModel):
     first_message: str | None = Field(
         default=None,
         max_length=1000,
-        description="New opening line; null removes it. Then the agent waits on calls it answers, and its model usually writes an opening on calls it places.",
+        description="New opening line; null removes it. Then, on calls it answers, the agent waits for the caller after the AI line; on calls it places, its model usually writes an opening.",
     )
     recording_enabled: bool | None = Field(
         default=None,
@@ -1544,7 +1544,7 @@ class AgentResponse(BaseModel):
     organization_id: UUID = Field(description="Organization that owns this agent.")
     name: str = Field(description="Display name, unique per organization.")
     system_prompt: str = Field(description="Task instructions.")
-    first_message: str | None = Field(description="Opening line, or null: the agent waits on calls it answers, and its model usually writes an opening on calls it places.")
+    first_message: str | None = Field(description="Opening line, or null: on calls it answers, the agent waits for the caller after the AI line; on calls it places, its model usually writes an opening.")
     recording_enabled: bool | None = Field(
         default=None,
         description="Null inherits the workspace recording choice; true or false sets recording for this agent's calls, whatever the workspace setting.",
