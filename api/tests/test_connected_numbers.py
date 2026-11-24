@@ -347,8 +347,22 @@ async def test_update_connection_restores_the_trunk_when_commit_fails(
         )
     calls = lk.update_pbx_outbound_trunk.await_args_list
     assert len(calls) == 2
-    assert calls[0].args == ("ST_out", "pbx2.example.com", 5080, "auto", "hail", "new-pw")
-    assert calls[1].args == ("ST_out", "pbx.example.com", 5060, "auto", "hail", "old-pw")
+    assert calls[0].args == (
+        "ST_out",
+        "pbx2.example.com",
+        5080,
+        "auto",
+        "hail",
+        "new-pw",
+    )
+    assert calls[1].args == (
+        "ST_out",
+        "pbx.example.com",
+        5060,
+        "auto",
+        "hail",
+        "old-pw",
+    )
     lk.delete_sip_trunk.assert_not_awaited()
 
 
