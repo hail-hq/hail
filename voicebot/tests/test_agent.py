@@ -1173,7 +1173,16 @@ async def test_speak_greeting_never_waits_and_cancels_a_late_fit() -> None:
         # A greeting written without spaces is capped: 16 letters or 5 wide
         # characters.
         ("こんにちは、Samさん。", "こんにちは", "Samさん。"),
-        # More than 5 wide characters: a self-introduction, not a greeting.
+        ("おはようございます、Samさん。", "おはようございます", "Samさん。"),
+        (
+            "안녕하십니까, 예약 건으로 전화드렸습니다.",
+            "안녕하십니까",
+            "예약 건으로 전화드렸습니다.",
+        ),
+        ("G'day, calling about your order.", "G'day", "calling about your order."),
+        # A mark followed by a letter is inside a name, not after a hello.
+        ("Hello.io here about your demo.", "Hello", "Hello.io here about your demo."),
+        # More than 4 Chinese characters: a self-introduction, not a greeting.
         (
             "您好我是小李，关于您的预约。",
             "您好我是小李",

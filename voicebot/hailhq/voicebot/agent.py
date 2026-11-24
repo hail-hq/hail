@@ -1051,16 +1051,21 @@ FIRST_LINE_FIT_SECONDS = 10.0
 MAX_GREETING_WORDS = 3
 MAX_GREETING_CHARS = 30
 # A greeting written without spaces is one token, so its length is capped
-# instead of its word count: 16 letters ("Здравствуйте") or 5 wide (CJK)
-# characters ("早上好", "こんにちは"), which carry more than a letter.
+# instead of its word count: 16 letters ("Здравствуйте") or 9 wide (CJK)
+# characters ("早上好", "おはようございます"), which carry more than a letter.
 MAX_GREETING_TOKEN_CHARS = 16
-MAX_GREETING_WIDE_CHARS = 5
+MAX_GREETING_WIDE_CHARS = 9
+# A Chinese character carries a word: "早上好" is 3, "您好我是小李" (a self-
+# introduction) is 6.
+MAX_GREETING_HAN_CHARS = 4
 # Only the start of the line goes to the model: a greeting is at the start.
 FIRST_LINE_SAMPLE_CHARS = 120
 # The model's answer when the line does not open with a greeting.
 NO_GREETING = "none"
 # Marks that end a greeting and are dropped with it.
 _GREETING_ENDS = frozenset(",.!?…:;，。！？、：；،؟؛।")
+# Full-width marks need no space after them ("早上好，我们").
+_WIDE_ENDS = frozenset("，。！？、：；")
 # Marks that open a greeting ("¡Hola!") and are dropped with it.
 _GREETING_OPENS = frozenset("¡¿\"'«“‘「『")
 # Closing quotes a model may wrap its answer in.
@@ -1089,6 +1094,10 @@ def sentence_start(text: str, language: str | None = None) -> str:
     return text[:start] + upper + text[start + 1 :]
 
 
+def _han_chars(text: str) -> int:
+    return sum(unicodedata.name(c, "").startswith("CJK UNIFIED") for c in text)
+
+
 def _wide_chars(text: str) -> int:
     return sum(unicodedata.east_asian_width(c) in "WF" for c in text)
 
@@ -1110,6 +1119,7 @@ def cut_greeting(first_message: str, greeting: str) -> str:
         or len(tokens) > MAX_GREETING_WORDS
         or (len(tokens) == 1 and len(greeting) > MAX_GREETING_TOKEN_CHARS)
         or _wide_chars(greeting) > MAX_GREETING_WIDE_CHARS
+        or _han_chars(greeting) > MAX_GREETING_HAN_CHARS
         or re.search(r"\d", greeting)
         or "<" in greeting
         or any(c in _GREETING_ENDS for c in greeting)
@@ -1133,6 +1143,10 @@ def cut_greeting(first_message: str, greeting: str) -> str:
         return first_message
     while i < len(rest) and rest[i] in _GREETING_ENDS:
         i += 1
+    # A mark ends the hello only before a space or the end of the line
+    # ("Hello.io" is a name), unless it is a full-width mark.
+    if i < len(rest) and not rest[i].isspace() and rest[i - 1] not in _WIDE_ENDS:
+        return first_message
     while i < len(rest) and rest[i].isspace():
         i += 1
     rest = rest[i:]

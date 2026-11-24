@@ -172,7 +172,7 @@ def test_prompt_text_is_pinned() -> None:
         "37e9a0b5058e8c60355db926a963a8fba59c0fc4dd43d9ede4c7116e464e9e8b"
     )
     assert _sha(prompts.VOICE_CONFIGURATION_HELP) == (
-        "6d168fb09fc50da179f4810caeb2f87f136fdf68dc94c7127a2ba2392d509f38"
+        "640acb0a43031c61018c791068c4b2a6b49a7fbf1d67bc0f72ae9bd7e70b58ed"
     )
 
 
