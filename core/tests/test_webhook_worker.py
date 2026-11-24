@@ -14,6 +14,7 @@ from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
 
+import httpx
 import pytest
 from hailhq.core.http_post import httpx_post
 from hailhq.core.models import EmailDomain, WebhookDelivery, WebhookSubscription
@@ -68,6 +69,45 @@ async def test_authenticated_receiver_gets_authorization_and_signed_event(
     assert delivery.status == ("pending" if receiver_raises else "succeeded")
     assert "cursor_receiver_test_key" not in delivery.response_body
     assert "cursor_" not in delivery.response_body
+    if receiver_raises:
+        # A fixed category, never the exception text.
+        assert delivery.response_body == "Could not reach your endpoint."
+
+
+@pytest.mark.asyncio
+async def test_failed_send_stores_a_category_not_the_error_text(async_session, caplog):
+    org_id = uuid.uuid4()
+    sub = WebhookSubscription(
+        organization_id=org_id,
+        target_url="https://hooks.example.com/h",
+        secret_encrypted=SecretCipher(generate_key()).encrypt("signing_secret"),
+        event_types=["call.completed"],
+    )
+    async_session.add(sub)
+    await async_session.commit()
+    delivery = WebhookDelivery(
+        subscription_id=sub.id,
+        event_type="call.completed",
+        event_id=uuid.uuid4(),
+        payload={"organization_id": str(org_id), "data": {}},
+    )
+    async_session.add(delivery)
+    await async_session.commit()
+
+    async def refused(_url, _body, _headers):
+        raise httpx.ConnectError("Bearer secret-key-value at 10.0.0.5")
+
+    worker = _build_worker(async_session, http_post=refused)
+    with caplog.at_level("WARNING", logger="hailhq.core.webhook_worker"):
+        assert await worker.tick() == 1
+    await async_session.refresh(delivery)
+    assert delivery.response_body == "Could not connect to your endpoint."
+    # The log names the type and the delivery, never the message.
+    [record] = [r for r in caplog.records if "webhook send failed" in r.message]
+    assert "ConnectError" in record.message
+    assert record.delivery_id == str(delivery.id)
+    assert "secret-key-value" not in record.getMessage()
+    assert record.exc_info is None
 
 
 def test_reflected_credentials_cover_basic_and_skip_short_fragments():

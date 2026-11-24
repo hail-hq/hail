@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import socket
 from datetime import timedelta
@@ -751,10 +752,17 @@ class _FakeReceiver:
         self, status: int = 200, text: str = "ok", exc: Exception | None = None
     ):
         self.status, self.text, self.exc = status, text, exc
+        self.delay = 0.0
         self.calls: list[tuple[str, bytes, dict[str, str]]] = []
 
     async def __call__(self, url, body, headers, **kwargs):
         self.calls.append((url, body, headers))
+        try:
+            await asyncio.sleep(self.delay)
+        except asyncio.CancelledError:
+            if self.exc is None:
+                raise
+            raise self.exc from None  # a cancel that comes out as another error
         if self.exc is not None:
             raise self.exc
         return self.status, self.text
@@ -873,7 +881,7 @@ async def test_test_send_reports_receiver_errors(client, auth_headers, receiver)
     assert timed_out.status_code == 200
     assert timed_out.json()["ok"] is False
     assert timed_out.json()["status_code"] is None
-    assert timed_out.json()["error"] == "No answer within 10 seconds."
+    assert timed_out.json()["error"] == "No answer from your endpoint in time."
 
     receiver.exc = httpx.ConnectTimeout("timed out")
     no_connect = await client.post(
@@ -882,6 +890,35 @@ async def test_test_send_reports_receiver_errors(client, auth_headers, receiver)
         json={"target_url": "https://hooks.example.com/receive"},
     )
     assert no_connect.json()["error"] == "Could not connect to your endpoint in time."
+
+    # A TimeoutError from the sender itself is not the route's deadline.
+    receiver.exc = TimeoutError()
+    inner = await client.post(
+        "/webhooks/test",
+        headers=auth_headers,
+        json={"target_url": "https://hooks.example.com/receive"},
+    )
+    assert inner.json()["error"] == "No answer from your endpoint in time."
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancel_as", [None, httpx.ReadError("closed")])
+async def test_test_send_deadline_names_the_time(
+    client, auth_headers, receiver, monkeypatch, cancel_as
+):
+    # The route's own deadline ends a slow endpoint and says so, also when
+    # the cancel comes out of the sender as another error.
+    monkeypatch.setattr(webhooks_routes, "_TEST_TIMEOUT_SECONDS", 0.05)
+    receiver.delay = 30.0
+    receiver.exc = cancel_as
+    slow = await client.post(
+        "/webhooks/test",
+        headers=auth_headers,
+        json={"target_url": "https://hooks.example.com/receive"},
+    )
+    assert slow.json()["error"] == "The test took longer than 0.05 seconds."
+    # The deadline ends the send: the 30 second receiver is not awaited.
+    assert 50 <= slow.json()["duration_ms"] < 2000
 
 
 @pytest.mark.asyncio

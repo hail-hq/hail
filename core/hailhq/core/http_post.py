@@ -8,12 +8,14 @@ disable the guard via ``HAIL_WEBHOOK_ALLOW_PRIVATE_NETWORKS=true``.
 from __future__ import annotations
 
 import asyncio
+import ssl
 
 import httpx
 from hailhq.core.url_guard import UnsafeUrlError, assert_public_host, connect_target
 
 __all__ = [
     "PrivateNetworkBlockedError",
+    "describe_send_error",
     "httpx_post",
     "validate_webhook_target",
 ]
@@ -21,6 +23,45 @@ __all__ = [
 
 class PrivateNetworkBlockedError(RuntimeError):
     """Refused to POST: target does not resolve, or resolves to a non-public address."""
+
+
+def _tls_cause(exc: BaseException) -> ssl.SSLError | None:
+    """The TLS error under an httpx connect error, read from the exception
+    chain (httpcore re-raises with ``from``), never from message text."""
+    seen: BaseException | None = exc
+    for _ in range(10):  # a chain is short; stop on a cycle
+        if seen is None:
+            return None
+        if isinstance(seen, ssl.SSLError):
+            return seen
+        # Follow what Python itself would show: the cause, or a context that
+        # was not hidden with ``from None``.
+        seen = seen.__cause__ or (
+            None if seen.__suppress_context__ else seen.__context__
+        )
+    return None
+
+
+def describe_send_error(exc: BaseException) -> str:
+    """A fixed category, never the exception text: it can name internal hosts."""
+    if isinstance(exc, httpx.ConnectTimeout):
+        return "Could not connect to your endpoint in time."
+    if isinstance(exc, (httpx.TimeoutException, TimeoutError)):
+        return "No answer from your endpoint in time."
+    if isinstance(exc, PrivateNetworkBlockedError):
+        return "target_url is not allowed: it does not resolve to a public address."
+    if isinstance(exc, UnsafeUrlError):
+        return "target_url is not a valid URL."
+    if isinstance(exc, httpx.ConnectError):
+        tls = _tls_cause(exc)
+        if isinstance(tls, ssl.SSLCertVerificationError):
+            return "The TLS certificate check failed."
+        if tls is not None:
+            return "The TLS handshake failed."
+        return "Could not connect to your endpoint."
+    if isinstance(exc, httpx.RemoteProtocolError):
+        return "Your endpoint closed the connection without a valid answer."
+    return "Could not reach your endpoint."
 
 
 def validate_webhook_target(url: str, *, allow_private_networks: bool) -> None:
@@ -116,6 +157,12 @@ async def httpx_post(
     async with asyncio.timeout(timeout_seconds * 2), httpx.AsyncClient(
         timeout=full
     ) as client:
+        # A certificate or TLS failure on one address is the most useful
+        # reason when every address fails: a plain refuse or timeout on the
+        # last one (often IPv6 with no route) would hide it. Chosen trade-off:
+        # a stale record's certificate can then be named while the live
+        # address refuses. A certificate failure beats other TLS failures.
+        tls_failure: tuple[httpx.ConnectError, ssl.SSLError] | None = None
         for index, target in enumerate(targets):
             try:
                 async with client.stream(
@@ -139,9 +186,22 @@ async def httpx_post(
                         raw = raw[:max_body_bytes]
                     text = raw.decode(resp.encoding or "utf-8", "replace")
                     return resp.status_code, text
-            except (httpx.ConnectError, httpx.ConnectTimeout):
+            except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
                 # Nothing was sent: try the next checked address. A dead
-                # address often times out instead of refusing.
+                # address often times out instead of refusing, and a stale
+                # record can serve another certificate.
+                tls = _tls_cause(exc) if isinstance(exc, httpx.ConnectError) else None
+                if tls is not None:
+                    is_cert = isinstance(tls, ssl.SSLCertVerificationError)
+                    kept_cert = tls_failure is not None and isinstance(
+                        tls_failure[1], ssl.SSLCertVerificationError
+                    )
+                    if tls_failure is None or (is_cert and not kept_cert):
+                        tls_failure = (exc, tls)
                 if index == len(targets) - 1:
+                    if tls_failure is not None and tls_failure[0] is not exc:
+                        # The original httpx error (it keeps its request),
+                        # with the ssl error as its direct cause.
+                        raise tls_failure[0] from tls_failure[1]
                     raise
     raise AssertionError("unreachable: targets is never empty")
