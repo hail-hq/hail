@@ -1041,10 +1041,9 @@ def greeting_with_ai_line(first_message: str, ai_line: str) -> str:
     return f"{head} {ai_line} {tail}"
 
 
-# Budget for fitting the first line. It runs while the phone rings, so it
-# rarely delays the greeting; the greeting waits at most FIRST_LINE_WAIT more.
+# Budget for fitting the first line. It runs while the phone rings; the
+# greeting uses it only if it is ready at pickup and never waits for it.
 FIRST_LINE_FIT_SECONDS = 10.0
-FIRST_LINE_WAIT_SECONDS = 1.0
 # The longest greeting cut from the start of a first line ("Good morning
 # there"). The model copies the greeting out; code cuts it only when the line
 # starts with exactly that text and a sentence mark follows, so a cut never
@@ -1113,20 +1112,7 @@ def cut_greeting(first_message: str, greeting: str) -> str:
     while i < len(rest) and rest[i].isspace():
         i += 1
     rest = rest[i:]
-    return _capitalized(rest)
-
-
-def _capitalized(text: str) -> str:
-    """``text`` with its first word capitalized, after any opening mark
-    ("¿es" becomes "¿Es"). A word with another capital ("iPhone", "macOS")
-    stays as written."""
-    start = 0
-    while start < len(text) and text[start] in _GREETING_OPENS:
-        start += 1
-    word = re.match(r"\w+", text[start:])
-    if word is None or not word.group(0).islower():
-        return text
-    return text[:start] + text[start].upper() + text[start + 1 :]
+    return rest
 
 
 async def fitted_first_line(
@@ -1209,24 +1195,18 @@ def start_first_line_fit(
     )
 
 
-async def _ready_first_line(first_line: asyncio.Task[str] | None, fallback: str) -> str:
-    """The fitted line when it is ready within FIRST_LINE_WAIT_SECONDS, else
-    the line as written. Never raises."""
-    if first_line is None or first_line.cancelled():
+def _ready_first_line(first_line: asyncio.Task[str] | None, fallback: str) -> str:
+    """The fitted line when it is ready, else the line as written: the
+    greeting never waits on the model. A fit still running is cancelled, so
+    its answer is not paid for in vain."""
+    if first_line is None:
         return fallback
-    try:
-        return await asyncio.wait_for(
-            asyncio.shield(first_line), timeout=FIRST_LINE_WAIT_SECONDS
-        )
-    except asyncio.CancelledError:
-        # The fit was cancelled (the call is ending): say the line as
-        # written. A cancel of this greeting itself still propagates.
-        task = asyncio.current_task()
-        if task is not None and task.cancelling():
-            raise
+    if not first_line.done():
+        first_line.cancel()
         return fallback
-    except Exception:
+    if first_line.cancelled() or first_line.exception() is not None:
         return fallback
+    return first_line.result()
 
 
 async def speak_greeting(
@@ -1287,20 +1267,12 @@ async def speak_greeting(
     )
     first_message = metadata.get("first_message")
     inbound = metadata.get("direction") == "inbound"
-    try:
-        # Get the fitted line before clearing the pickup turn below: nothing
-        # may wait between that clear and the opening, or a late "Hello?"
-        # cuts it off. Inside the try, so the opening is released even if the
-        # greeting is cancelled while it waits.
-        line = (
-            await _ready_first_line(first_line, first_message)
-            if first_message and disclosure
-            else first_message
-        )
-    except BaseException:
-        if on_opened is not None:
-            on_opened()
-        raise
+    # Never waits: a fit not ready at pickup leaves the line as written.
+    line = (
+        _ready_first_line(first_line, first_message)
+        if first_message and disclosure
+        else first_message
+    )
     if generate_opening and not inbound:
         # The turn detector can wait up to max_delay (2.5 s) on a bare pickup
         # "Hello?". If that turn ends after this opening starts, it cuts the

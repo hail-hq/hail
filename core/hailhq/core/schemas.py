@@ -261,7 +261,7 @@ class CallCreate(ConsentAttestationMixin):
     )
     first_message: str | None = Field(
         default=None,
-        description='Opening line the agent speaks first. On outbound calls with the built-in AI line, a greeting at its start ("Hi,") is dropped, since the AI line already greets, and the rest starts with a capital letter. Calls on your own model, inbound calls, and calls with a custom AI line or no AI line say it as written. Omitted: the agent waits for the callee to speak first.',
+        description='Opening line the agent speaks first. With the built-in AI line, a greeting at its start that a sentence mark ends ("Hi,") is usually dropped, since the AI line already greets; the rest is said as written. Calls on your own model, and calls with a custom AI line or no AI line, say it whole. Omitted: the agent waits for the callee to speak first.',
     )
     recording_enabled: bool | None = Field(
         default=None,
@@ -1352,7 +1352,7 @@ class AgentCreate(BaseModel):
     first_message: str | None = Field(
         default=None,
         max_length=1000,
-        description='Opening line spoken after the AI line. On outbound calls with the built-in AI line, a greeting at its start ("Hi,") is dropped, since the AI line already greets, and the rest starts with a capital letter. Calls on your own model, inbound calls, and calls with a custom AI line or no AI line say it as written. Omitted: the agent waits for the other side to speak first.',
+        description='Opening line spoken after the AI line. On outbound calls with the built-in AI line, a greeting at its start that a sentence mark ends ("Hi,") is usually dropped, since the AI line already greets; the rest is said as written. Calls on your own model, inbound calls, and calls with a custom AI line or no AI line say it whole. Omitted: the agent waits for the other side to speak first.',
     )
     recording_enabled: bool | None = Field(
         default=None,
@@ -1465,7 +1465,7 @@ class AgentUpdate(BaseModel):
     first_message: str | None = Field(
         default=None,
         max_length=1000,
-        description='New opening line; null makes the agent wait for the other side. On outbound calls with the built-in AI line, a greeting at its start ("Hi,") is dropped, since the AI line already greets, and the rest starts with a capital letter. Calls on your own model, inbound calls, and calls with a custom AI line or no AI line say it as written.',
+        description='New opening line; null makes the agent wait for the other side. On outbound calls with the built-in AI line, a greeting at its start that a sentence mark ends ("Hi,") is usually dropped, since the AI line already greets; the rest is said as written. Calls on your own model, inbound calls, and calls with a custom AI line or no AI line say it whole.',
     )
     recording_enabled: bool | None = Field(
         default=None,

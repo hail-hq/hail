@@ -83,7 +83,6 @@ CALL_ID = UUID("22222222-3333-4444-5555-666666666666")
 @pytest.fixture(autouse=True)
 def _short_handover_settle(monkeypatch):
     """The bridge waits HANDOVER_SETTLE_SECONDS after the contact speaks."""
-    from hailhq.voicebot import agent as agent_mod
 
     monkeypatch.setattr(agent_mod, "HANDOVER_SETTLE_SECONDS", 0.05)
 
@@ -304,7 +303,6 @@ async def test_entrypoint_org_config_load_failure_finalizes_cleanly(
     a HAIL_PROVIDER_SECRET_KEY rotation invalidating stored ciphertext) must
     fail fast as provider_key_error (finalizing the Call row via on_call_end)
     and must NOT propagate raw out of entrypoint() and leak the number."""
-    from hailhq.voicebot import agent as agent_mod
 
     org_id = UUID("11111111-2222-3333-4444-555555555555")
     call_id = await _make_call_row(async_session)
@@ -1103,10 +1101,9 @@ async def test_speak_greeting_says_the_fitted_line_after_the_disclosure() -> Non
     ]
 
 
-async def test_speak_greeting_says_the_line_as_written_when_the_fit_is_late(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(agent_mod, "FIRST_LINE_WAIT_SECONDS", 0.01)
+async def test_speak_greeting_never_waits_and_cancels_a_late_fit() -> None:
+    """A fit not ready at pickup leaves the line as written, with no wait,
+    and the fit is cancelled so its answer is not paid for in vain."""
     session = FakeAnnouncingSession()
     late = asyncio.get_running_loop().create_future()
 
@@ -1117,23 +1114,23 @@ async def test_speak_greeting_says_the_line_as_written_when_the_fit_is_late(
     assert session.say_calls == [
         (f"{AI_DISCLOSURE_LINE} Hi, calling about your order.", True)
     ]
-    late.cancel()
+    assert late.cancelled()
 
 
 @pytest.mark.parametrize(
     ("first", "greeting", "expected"),
     [
-        ("Hi, calling about your order.", "Hi", "Calling about your order."),
+        ("Hi, calling about your order.", "Hi", "calling about your order."),
         ("Hello there! Is now a good time?", "Hello there", "Is now a good time?"),
         (
             "Guten Tag, hier ist Northgate Dental.",
             "Guten Tag",
-            "Hier ist Northgate Dental.",
+            "hier ist Northgate Dental.",
         ),
         ("早上好，我们是关于您明天的预约。", "早上好", "我们是关于您明天的预约。"),
-        ("Hi-ya, calling about your order.", "Hi-ya", "Calling about your order."),
+        ("Hi-ya, calling about your order.", "Hi-ya", "calling about your order."),
         ("¡Hola! ¿Es un buen momento?", "Hola", "¿Es un buen momento?"),
-        ("Grüß Gott, hier ist Sam.", "grüß gott", "Hier ist Sam."),
+        ("Grüß Gott, hier ist Sam.", "grüß gott", "hier ist Sam."),
         # A hyphen, apostrophe or other mark does not end a greeting.
         ("Hi-Tech Dental here, calling.", "Hi", "Hi-Tech Dental here, calling."),
         ("Hi-ya, calling.", "Hi", "Hi-ya, calling."),
@@ -1148,14 +1145,16 @@ async def test_speak_greeting_says_the_line_as_written_when_the_fit_is_late(
             "您好我是北方牙科的小李，关于您明天的预约。",
         ),
         ("Hello? Is this Sam?", "Hello", "Is this Sam?"),
-        ("Hi… calling about your order.", "Hi", "Calling about your order."),
-        ("Hola, ¿es un buen momento?", "Hola", "¿Es un buen momento?"),
+        ("Hi… calling about your order.", "Hi", "calling about your order."),
+        ("Hola, ¿es un buen momento?", "Hola", "¿es un buen momento?"),
+        # The rest keeps its own letters: Turkish "iyi" must not become "Iyi".
+        ("Merhaba, iyi günler.", "Merhaba", "iyi günler."),
         ("Bonjour ! Nous vous appelons.", "Bonjour", "Nous vous appelons."),
         ("Hi, macOS users wanted.", "Hi", "macOS users wanted."),
         (
             "Hi, calling about your order.",
             "\u201cHi\u201d",
-            "Calling about your order.",
+            "calling about your order.",
         ),
         ("「こんにちは」、お電話です。", "こんにちは", "「こんにちは」、お電話です。"),
         ("Hi, iPhone repair here.", "Hi", "iPhone repair here."),
@@ -1171,7 +1170,7 @@ async def test_speak_greeting_says_the_line_as_written_when_the_fit_is_late(
         (
             "Здравствуйте, звоним по поводу записи.",
             "Здравствуйте",
-            "Звоним по поводу записи.",
+            "звоним по поводу записи.",
         ),
         ("Hi there, calling.", "Hi", "Hi there, calling."),
         ("Good morning Sam, calling.", "Good morning", "Good morning Sam, calling."),
@@ -1208,8 +1207,8 @@ def test_cut_greeting_removes_only_a_greeting_that_opens_the_line(
 @pytest.mark.parametrize(
     ("reply", "expected"),
     [
-        ("Hi", "Calling about your order."),
-        ('"Hi"', "Calling about your order."),
+        ("Hi", "calling about your order."),
+        ('"Hi"', "calling about your order."),
         ("none", "Hi, calling about your order."),
         ("None.", "Hi, calling about your order."),
         ("", "Hi, calling about your order."),
@@ -1250,30 +1249,6 @@ async def test_a_greeting_only_first_line_drops_out() -> None:
     fitted.set_result("")
     await speak_greeting(session, {"first_message": "Hello!"}, first_line=fitted)
     assert session.say_calls == [(AI_DISCLOSURE_LINE, True)]
-
-
-async def test_speak_greeting_releases_the_opening_when_cancelled_while_waiting(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A greeting cancelled while it waits for the fit still releases the
-    opening, so the agent's replies are not blocked for the rest of the call."""
-    monkeypatch.setattr(agent_mod, "FIRST_LINE_WAIT_SECONDS", 5.0)
-    released = []
-    pending = asyncio.get_running_loop().create_future()
-    greeting = asyncio.create_task(
-        speak_greeting(
-            FakeAnnouncingSession(),
-            {"first_message": "Hi, about your order."},
-            first_line=pending,
-            on_opened=lambda: released.append(True),
-        )
-    )
-    await asyncio.sleep(0.01)
-    greeting.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await greeting
-    assert released == [True]
-    pending.cancel()
 
 
 async def test_speak_greeting_says_the_line_when_the_fit_was_cancelled() -> None:
@@ -1784,7 +1759,6 @@ async def test_build_tools_safely_degrades_on_failure(
     any exception (e.g. a DB rollback on a dead connection) degrades to
     the tools every call keeps.
     """
-    from hailhq.voicebot import agent as agent_mod
 
     async def _boom(
         _metadata: dict,
@@ -1824,7 +1798,6 @@ async def test_build_tools_safely_passes_through_on_success(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The happy path is a pure passthrough of `build_agent_tools`' result."""
-    from hailhq.voicebot import agent as agent_mod
 
     sentinel_tools = [object()]
     sentinel_api = object()
@@ -2308,7 +2281,6 @@ async def test_slow_answer_post_does_not_delay_the_mute() -> None:
 
 
 async def test_shutdown_waits_briefly_for_answer_post(monkeypatch) -> None:
-    from hailhq.voicebot import agent as agent_mod
     from hailhq.voicebot.agent import finish_answer_post
 
     monkeypatch.setattr(agent_mod, "ANSWER_POST_SHUTDOWN_WAIT_SECONDS", 0.05)
@@ -2357,7 +2329,6 @@ async def test_other_party_finds_the_caller(monkeypatch):
     from contextlib import asynccontextmanager
 
     from hailhq.core.directory import DirectoryEntry
-    from hailhq.voicebot import agent as agent_mod
 
     class Result:
         def one_or_none(self):
@@ -2389,7 +2360,6 @@ async def test_other_party_finds_the_caller(monkeypatch):
 async def test_other_party_is_none_on_any_failure(monkeypatch):
     from contextlib import asynccontextmanager
 
-    from hailhq.voicebot import agent as agent_mod
 
     @asynccontextmanager
     async def refused():

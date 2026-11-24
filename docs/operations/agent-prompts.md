@@ -60,9 +60,10 @@ hello. The model never writes the
 line, so only that hello can be cut: a free rewrite could drop content or
 flip a sentence's meaning, and no check can catch that. The model decides
 what counts as a hello; its instructions exclude thanks, apologies and names,
-but code cannot verify that, so a model mistake can drop one opening word. Any other answer, a
-failure or a late answer keeps the line as written. At pickup the greeting
-waits at most one second. A workspace that uses its own model skips this, so
+but code cannot verify that, so a model mistake can drop up to three opening
+words, such as a name. The rest of the line is said exactly as written. Any other answer, a
+failure or an answer not ready at pickup keeps the line as written; the
+greeting never waits for it, and a late answer is cancelled. A workspace that uses its own model skips this, so
 its call content stays off Hail's models. A custom AI line skips it too: it
 may not greet, and the cut would leave the call with no greeting. A custom
 line that Hail replaces with the built-in one (it opened with "[", "{" or a
