@@ -8,6 +8,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 - Calls: `HAIL_ADAPTIVE_INTERRUPTION=true` on the voice worker makes the agent keep talking over a short "okay" and stop for a real interruption (off by default; LiveKit meters it).
 - Call events: `audio_echo_detected` is written when the agent's own voice comes back on the line (`delay_ms`, `correlation`, `matched_windows`).
+- Webhooks: send a test event to an endpoint before you save it with `POST /v1/webhooks/test`, and see the receiver's answer.
 
 ### Changed
 

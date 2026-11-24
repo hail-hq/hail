@@ -236,7 +236,7 @@ curl -X POST "$HAIL_API_URL/v1/webhooks/<sub-id>/deliveries/<delivery-id>/redeli
   -H "Authorization: Bearer $HAIL_API_KEY"
 ```
 
-Other endpoints: `PATCH /webhooks/{id}` (update URL, events, or status), `DELETE /webhooks/{id}`, and `POST /webhooks/{id}/rotate-secret`. Event types cover email, SMS, and call events — the canonical list is `WebhookEventType` in [`core/hailhq/core/schemas.py`](../../core/hailhq/core/schemas.py).
+Other endpoints: `PATCH /webhooks/{id}` (update URL, events, or status), `DELETE /webhooks/{id}`, `POST /webhooks/{id}/rotate-secret`, and `POST /webhooks/test` (send one test event and see your receiver's answer). Event types cover email, SMS, and call events — the canonical list is `WebhookEventType` in [`core/hailhq/core/schemas.py`](../../core/hailhq/core/schemas.py).
 
 ## Auth and utilities
 

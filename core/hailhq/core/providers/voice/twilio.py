@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass
 from decimal import Decimal
 from uuid import UUID
 
@@ -470,6 +471,52 @@ async def detach_inbound_number(resource_id: str | None, e164: str) -> None:
 
     try:
         await asyncio.to_thread(detach)
+    except TwilioRestException as exc:
+        raise CarrierRequestError(exc.status) from exc
+
+
+# --- origination URLs: where the Elastic SIP trunk sends calls (LiveKit).
+# Only the operator script reads or changes them (scripts/ops/sip_trunks.py).
+
+
+@dataclass(frozen=True)
+class OriginationUrl:
+    sid: str
+    sip_url: str
+    priority: int | None
+    weight: int | None
+    enabled: bool | None
+
+
+async def origination_urls() -> list[OriginationUrl]:
+    """The trunk's origination URLs, as Twilio lists them."""
+    trunk_sid = _trunk_sid()
+
+    def read() -> list[OriginationUrl]:
+        return [
+            OriginationUrl(u.sid, u.sip_url, u.priority, u.weight, u.enabled)
+            for u in _order_client()
+            .trunking.v1.trunks(trunk_sid)
+            .origination_urls.list()
+        ]
+
+    try:
+        return await asyncio.to_thread(read)
+    except TwilioRestException as exc:
+        raise CarrierRequestError(exc.status) from exc
+
+
+async def set_origination_sip_url(sid: str, sip_url: str) -> None:
+    """Change only the SIP URL: priority, weight and enabled stay as they are."""
+    trunk_sid = _trunk_sid()
+
+    def update() -> None:
+        _order_client().trunking.v1.trunks(trunk_sid).origination_urls(sid).update(
+            sip_url=sip_url
+        )
+
+    try:
+        await asyncio.to_thread(update)
     except TwilioRestException as exc:
         raise CarrierRequestError(exc.status) from exc
 
