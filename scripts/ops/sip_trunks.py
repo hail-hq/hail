@@ -29,11 +29,13 @@ Every command except ``status`` prints its plan and changes nothing until
   plan line, while ``HAIL_SIP_INBOUND_SECRET`` is empty, while a live
   Twilio number (routed or not) is still on the shared trunk (which does
   not map the header: run ``move --carrier twilio`` first; the plan lists
-  them), while ``TWILIO_SIP_TRUNK_SID`` is empty or its origination URLs
-  cannot be read, or when no origination URL goes to LiveKit. The allowed
+  them), while ``HAIL_SIP_INBOUND_SECRET`` is not 20 or more letters,
+  digits, - or _, while ``TWILIO_SIP_TRUNK_SID`` is empty or its
+  origination URLs cannot be read, or when no origination URL goes to
+  LiveKit. The allowed
   addresses are applied either way. If the replace that sets the map
   changes any other field of the trunk, it prints the change and stops
-  (numbers it lost are added back first).
+  (numbers it lost are added back first, one at a time).
   Prints the trunk id for ``LIVEKIT_<CARRIER>_SIP_INBOUND_TRUNK_ID``. On the
   shared trunk it only adds the shared placeholder. It adds numbers only
   (Hail manages them).
@@ -136,19 +138,13 @@ def password_for(spec: Spec) -> str:
 
 def secret_for(spec: Spec) -> str:
     """HAIL_SIP_INBOUND_SECRET for a trunk that maps the secret header; ""
-    when it is empty (the header steps are then skipped)."""
+    when it is empty. ``apply`` skips the header steps for an empty or
+    malformed value."""
     if not spec.headers_to_attributes:
         return ""
     if spec.carrier != "twilio":
         raise TrunkError(f"{spec.carrier}: only Twilio sends {SIP_SECRET_HEADER}")
-    secret = settings.hail_sip_inbound_secret
-    if secret and not SIP_SECRET_PATTERN.fullmatch(secret):
-        # It goes into a SIP URI as is. Hail turns its check off for such a
-        # value (inbound_calls.py) instead of stopping at startup.
-        raise TrunkError(
-            "HAIL_SIP_INBOUND_SECRET must be 20 or more letters, digits, - or _"
-        )
-    return secret
+    return settings.hail_sip_inbound_secret
 
 
 def _is_header(header: str, name: str) -> bool:
@@ -229,9 +225,10 @@ async def set_headers_to_attributes(
 ) -> None:
     """The field update has no ``headers_to_attributes``: replace the whole
     trunk with a copy read just before. Header maps not in the JSON stay.
-    Then read it again and add back any number of the copy it lost. Any
-    other field that differs from the copy is printed and stops the run
-    (:class:`TrunkError`), for the operator to restore by hand."""
+    Then read it again and add back, one at a time, any number of the copy
+    it lost. A number LiveKit refuses, or any other field that differs from
+    the copy, is printed and stops the run (:class:`TrunkError`), for the
+    operator to fix by hand."""
     replace = api.SIPInboundTrunkInfo()
     replace.CopyFrom(await trunk_by_id(sip, trunk_id))
     before = list(replace.numbers)
@@ -244,20 +241,34 @@ async def set_headers_to_attributes(
     # ``routed``: the carrier's routed numbers read just before, so a number
     # Hail added between the copy and the replace is put back too.
     lost = list(dict.fromkeys(n for n in [*before, *routed] if n not in after))
+    failed: list[str] = []
     for number in lost:
-        # Printed before the add: if it fails, these are the numbers to add.
+        # One at a time: LiveKit refuses a whole add when one number is on
+        # another trunk. Printed before the add, so the output names it.
         print(f"re-add {number} to {name}: the replace lost it", flush=True)
-    if lost:
-        await sip.update_inbound_trunk_fields(trunk_id, numbers=ListUpdate(add=lost))
+        try:
+            await sip.update_inbound_trunk_fields(
+                trunk_id, numbers=ListUpdate(add=[number])
+            )
+        except Exception as exc:
+            print(f"could not re-add {number} to {name}: {exc}", flush=True)
+            failed.append(number)
     changed = trunk_changes(replace, now)
     for line in changed:
         print(f"{name}: the replace changed {line}", flush=True)
-    if changed:
-        raise TrunkError(
-            f"the replace changed {len(changed)} field(s) of {name} (printed "
-            "above; its numbers are back): restore them by hand "
-            "(lk sip inbound update), then run apply again"
+    errors = []
+    if failed:
+        errors.append(
+            f"could not re-add {len(failed)} number(s) to {name} (printed "
+            "above): add them by hand (lk sip inbound update --numbers)"
         )
+    if changed:
+        errors.append(
+            f"the replace changed {len(changed)} field(s) of {name} (printed "
+            "above): restore them by hand (lk sip inbound update)"
+        )
+    if errors:
+        raise TrunkError("; ".join(errors) + ", then run apply again")
 
 
 # Not compared after a replace: numbers are re-added, LiveKit sets the times.
@@ -373,6 +384,10 @@ async def apply(sip, data: dict, spec: Spec, yes: bool, carriers_of=None) -> lis
     on_shared: list[str] = []
     if spec.headers_to_attributes and not secret:
         skip = "HAIL_SIP_INBOUND_SECRET is empty"
+    elif secret and not SIP_SECRET_PATTERN.fullmatch(secret):
+        # It goes into a SIP URI as is. Hail turns its check off for such a
+        # value (inbound_calls.py), so the header is not needed yet.
+        skip = "HAIL_SIP_INBOUND_SECRET is not 20 or more letters, digits, - or _"
     elif secret:
         # Twilio numbers still on the shared trunk, routed or not (one that
         # routes later takes its calls there): it does not map the header,
@@ -521,7 +536,8 @@ async def apply(sip, data: dict, spec: Spec, yes: bool, carriers_of=None) -> lis
         if not is_livekit(url.sip_url):
             plan.append(
                 f"Twilio origination URL {url.sid}: {masked(url.sip_url)} "
-                "skipped (not LiveKit)"
+                "skipped (not LiveKit). If it reaches LiveKit by IP or CNAME, "
+                "Hail refuses its calls once the secret is on the VM"
             )
             continue
         new_url = with_header(url.sip_url, SIP_SECRET_HEADER, secret)

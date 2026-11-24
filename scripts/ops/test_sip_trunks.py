@@ -924,11 +924,18 @@ async def test_new_twilio_trunk_without_the_secret_has_no_header_map(
     assert tw.updates == []
 
 
-async def test_twilio_apply_refuses_a_secret_unfit_for_a_uri(monkeypatch) -> None:
+async def test_twilio_apply_skips_the_header_for_a_secret_unfit_for_a_uri(
+    monkeypatch, tw
+) -> None:
+    """A malformed secret never stops the weekly IP fix."""
     monkeypatch.setattr(settings, "hail_sip_inbound_secret", "a b&c" * 10)
-    sip = FakeSip(trunk("ST_shared", "shared", ["+14155550100"]))
-    with pytest.raises(st.TrunkError, match="letters, digits"):
-        await st.apply(sip, DATA, SPECS["twilio"], yes=False)
+    sip = _locked_twilio_trunk(monkeypatch)
+    plan = await st.apply(sip, DATA, SPECS["twilio"], yes=True)
+    assert (
+        "secret header: skipped, HAIL_SIP_INBOUND_SECRET is not 20 or more "
+        "letters, digits, - or _"
+    ) in plan
+    _assert_addresses_only(sip, tw)
 
 
 async def test_twilio_apply_without_an_origination_url_skips_the_header(
@@ -1051,7 +1058,8 @@ async def test_twilio_apply_skips_urls_that_are_not_livekit(tw) -> None:
     assert [sid for sid, _ in tw.updates] == ["OU0"]
     assert (
         "Twilio origination URL OU1: sip:x.sip.livekit.cloud.evil.test "
-        "skipped (not LiveKit)"
+        "skipped (not LiveKit). If it reaches LiveKit by IP or CNAME, "
+        "Hail refuses its calls once the secret is on the VM"
     ) in plan
 
 
@@ -1206,6 +1214,37 @@ async def test_replace_keeps_other_header_maps_and_re_adds_lost_numbers(
     sip.calls.clear()
     await st.apply(sip, DATA, SPECS["twilio"], yes=True)
     assert not [c for c in sip.calls if c[0] == "replace"]
+
+
+async def test_replace_re_adds_each_lost_number_even_when_one_is_refused(
+    monkeypatch, capsys
+) -> None:
+    monkeypatch.setattr(settings, "livekit_twilio_sip_inbound_trunk_id", "ST_tw")
+    sip = FakeSip(
+        trunk("ST_shared", "shared", ["hail-placeholder-shared"]),
+        trunk(
+            "ST_tw",
+            "hail-inbound-twilio",
+            ["hail-placeholder-twilio", "+14155550101", "+14155550102"],
+        ),
+        rule_trunks=("ST_shared", "ST_tw"),
+    )
+    sip.fail_add.add(("ST_tw", "+14155550101"))
+    real_replace = sip.update_inbound_trunk
+
+    async def lossy_replace(trunk_id, info):
+        result = await real_replace(trunk_id, info)
+        sip.trunks[trunk_id].numbers.remove("+14155550101")
+        sip.trunks[trunk_id].numbers.remove("+14155550102")
+        return result
+
+    sip.update_inbound_trunk = lossy_replace
+    with pytest.raises(st.TrunkError, match=r"could not re-add 1 number\(s\)"):
+        await st.apply(sip, DATA, SPECS["twilio"], yes=True)
+    assert "+14155550102" in sip.trunks["ST_tw"].numbers
+    assert "could not re-add +14155550101 to hail-inbound-twilio" in (
+        capsys.readouterr().out
+    )
 
 
 @pytest.mark.parametrize(
