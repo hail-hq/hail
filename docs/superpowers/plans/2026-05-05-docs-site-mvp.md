@@ -201,7 +201,7 @@ docs/next-env.d.ts
 - [ ] **Step 9: Install dependencies**
 
 ```bash
-cd /Users/r/playground/hail
+cd <repo root>
 pnpm install
 ```
 
@@ -210,7 +210,7 @@ Expected: pnpm resolves and installs Next.js, Fumadocs, TanStack, nuqs into `doc
 - [ ] **Step 10: Verify the dev server starts**
 
 ```bash
-cd /Users/r/playground/hail/docs
+cd <repo root>/docs
 pnpm dev
 ```
 
@@ -324,7 +324,7 @@ export default function HomePage() {
 - [ ] **Step 6: Run a quick build to ensure Fumadocs MDX postinstall ran and `.source` resolves**
 
 ```bash
-cd /Users/r/playground/hail/docs
+cd <repo root>/docs
 pnpm fumadocs-mdx
 ```
 
@@ -1314,7 +1314,7 @@ chore(docs): add pnpm site scripts and Vercel config
 - [ ] **Step 1: Build clean and serve production locally**
 
 ```bash
-cd /Users/r/playground/hail
+cd <repo root>
 pnpm site:build
 pnpm site:start
 ```

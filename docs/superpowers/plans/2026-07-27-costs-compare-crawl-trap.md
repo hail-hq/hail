@@ -12,7 +12,7 @@
 
 - **Branch:** `feat/costs-compare-static-pages` (gitflow). All work happens in a git worktree.
 - **Commits:** Conventional Commits (`type(scope): description`). **Never** add a `Co-Authored-By` trailer or any AI-attribution line.
-- **Schema validation:** `pnpm costs:validate` is broken on macOS hosts by a pipx/Python 3.14 ABI fault. Use `/Users/r/.local/bin/check-jsonschema --schemafile <schema> <data>` locally. CI is unaffected.
+- **Schema validation:** `pnpm costs:validate` is broken on macOS hosts by a pipx/Python 3.14 ABI fault. Use `~/.local/bin/check-jsonschema --schemafile <schema> <data>` locally. CI is unaffected.
 - **Costs data formatting:** after any edit to `costs/*.json`, run `pnpm exec prettier --write costs/<file>.json` from the repo root. Never rewrite these files with `jq`, `python`, or `node` — re-serializing expands arrays and escapes non-ASCII, producing a 1,000+ line formatting diff.
 - **String sorting must be deterministic.** Use bare `.sort()` (UTF-16 code-unit order) for slug and pair ordering, never `localeCompare` — it is locale-dependent and would produce different route sets on different machines.
 - **URL construction:** build absolute URLs with `new URL(path, SITE_ORIGIN)`, never string concatenation. Per the repo invariant in `CLAUDE.md`, URLs are not strings.
@@ -113,7 +113,7 @@ tts: 6
 ```bash
 for f in llm stt tts; do
   printf "%-4s " "$f"
-  /Users/r/.local/bin/check-jsonschema --schemafile costs/schema/$f.schema.json costs/$f.json 2>&1 | tail -1
+  ~/.local/bin/check-jsonschema --schemafile costs/schema/$f.schema.json costs/$f.json 2>&1 | tail -1
 done
 ```
 
@@ -1497,7 +1497,7 @@ Run the whole gate before opening the PR:
 ```bash
 cd "$(git rev-parse --show-toplevel)"
 for f in llm stt tts; do
-  /Users/r/.local/bin/check-jsonschema --schemafile costs/schema/$f.schema.json costs/$f.json
+  ~/.local/bin/check-jsonschema --schemafile costs/schema/$f.schema.json costs/$f.json
 done
 node --test "scripts/costs/*.test.mjs"
 node scripts/costs/check-featured.mjs

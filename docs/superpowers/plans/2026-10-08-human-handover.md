@@ -1561,7 +1561,7 @@ cd ../cli && make codegen && go build ./... && go test ./...
 
 ### Task 9: Console data and form state (hail-website)
 
-Work in a new worktree: `git -C ~/playground/hail-website worktree add -b feat/human-handover .claude/worktrees/human-handover origin/master`. `node_modules`: symlink `../../../node_modules` like earlier worktrees.
+Work in a new worktree: `git -C <hail-website root> worktree add -b feat/human-handover .claude/worktrees/human-handover origin/master`. `node_modules`: symlink `../../../node_modules` like earlier worktrees.
 
 **Files:**
 - Modify: `lib/agent-queries.ts`, `app/console/agents/actions.ts`, `app/console/agents/agent-form.ts`, `app/console/agents/AgentSheet.tsx` (`fromAgent` only), `app/console/agents/new/page.tsx`, `app/console/agents/[id]/page.tsx`

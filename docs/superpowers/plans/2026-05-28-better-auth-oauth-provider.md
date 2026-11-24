@@ -189,7 +189,7 @@ MCP_RESOURCE_URL=http://localhost:8081
 - [ ] **Step 5: Typecheck.**
 
 ```
-cd /Users/r/playground/hail-website && pnpm tsc --noEmit -p tsconfig.json
+cd <hail-website root> && pnpm tsc --noEmit -p tsconfig.json
 ```
 
 Expected: clean. If TypeScript complains about the `jwks.keyPairConfig.alg` path (Better Auth's option shape may differ), correct it now using the discovered path from Step 2.
@@ -214,7 +214,7 @@ git commit -m "$(printf 'feat(auth): add jwt + oauth-provider + mcp Better Auth 
 Better Auth exposes a CLI for schema generation. Run:
 
 ```
-cd /Users/r/playground/hail-website && pnpm dlx @better-auth/cli --help
+cd <hail-website root> && pnpm dlx @better-auth/cli --help
 ```
 
 Expected: a help summary listing `generate` (and/or `migrate`). Use `generate` to write the SQL to a file; do **not** use `migrate` (which would apply it directly to the running DB — we want the SQL committed).
@@ -222,7 +222,7 @@ Expected: a help summary listing `generate` (and/or `migrate`). Use `generate` t
 - [ ] **Step 2: Generate the migration.**
 
 ```
-cd /Users/r/playground/hail-website && pnpm dlx @better-auth/cli generate --output "better-auth_migrations/$(date -u +%Y-%m-%dT%H-%M-%S.000Z).sql"
+cd <hail-website root> && pnpm dlx @better-auth/cli generate --output "better-auth_migrations/$(date -u +%Y-%m-%dT%H-%M-%S.000Z).sql"
 ```
 
 Expected: a new SQL file is written under `better-auth_migrations/` with `CREATE TABLE` statements for `jwks`, `oauth_clients`, `oauth_access_tokens`, `oauth_refresh_tokens`, and `oauth_consents`. **Review the file** — confirm column names are snake_case (matching the schema aliases from Task 1 Step 3).
@@ -230,7 +230,7 @@ Expected: a new SQL file is written under `better-auth_migrations/` with `CREATE
 - [ ] **Step 3: Apply the migration to local Postgres.**
 
 ```
-cd /Users/r/playground/hail-website && psql "$DATABASE_URL" -f better-auth_migrations/<the-just-generated-file>.sql
+cd <hail-website root> && psql "$DATABASE_URL" -f better-auth_migrations/<the-just-generated-file>.sql
 ```
 
 Replace `<the-just-generated-file>` with the actual filename. Expected: `CREATE TABLE` × 5; no errors. If `DATABASE_URL` isn't set in your shell, source `.env.local` first.
@@ -238,7 +238,7 @@ Replace `<the-just-generated-file>` with the actual filename. Expected: `CREATE 
 - [ ] **Step 4: Verify the tables exist.**
 
 ```
-cd /Users/r/playground/hail-website && psql "$DATABASE_URL" -c "\dt jwks oauth_clients oauth_access_tokens oauth_refresh_tokens oauth_consents"
+cd <hail-website root> && psql "$DATABASE_URL" -c "\dt jwks oauth_clients oauth_access_tokens oauth_refresh_tokens oauth_consents"
 ```
 
 Expected: five rows in the output.
@@ -246,7 +246,7 @@ Expected: five rows in the output.
 - [ ] **Step 5: Boot the dev server.**
 
 ```
-cd /Users/r/playground/hail-website && pnpm dev
+cd <hail-website root> && pnpm dev
 ```
 
 Expected: no errors during startup. The Better Auth handler initializes; OAuth routes should be mounted (visible in the dev log if Better Auth logs them) — `Ctrl+C` to stop after confirming.
@@ -390,7 +390,7 @@ The styling is intentionally bare-minimum — visual polish is out of scope for 
 - [ ] **Step 4: Typecheck.**
 
 ```
-cd /Users/r/playground/hail-website && pnpm tsc --noEmit -p tsconfig.json
+cd <hail-website root> && pnpm tsc --noEmit -p tsconfig.json
 ```
 
 Expected: clean. Fix any errors arising from the helper-name guess (the exact shape of `auth.api.acceptOAuthConsent`'s body and response is what most likely needs a small adjustment).
@@ -475,8 +475,8 @@ describe("OAuth discovery", () => {
 
 - [ ] **Step 2: Run the test against a running dev server.**
 
-In one terminal: `cd /Users/r/playground/hail-website && pnpm dev`.
-In another: `cd /Users/r/playground/hail-website && pnpm vitest run tests/oauth-discovery.test.ts`.
+In one terminal: `cd <hail-website root> && pnpm dev`.
+In another: `cd <hail-website root> && pnpm vitest run tests/oauth-discovery.test.ts`.
 Expected: tests pass. If `jwks` returns a non-RS256 key, the algorithm config from Task 1 Step 3 didn't take effect — revisit and use the exact option path discovered in Task 1 Step 2.
 
 If the test file's `fetch` against the dev server is too brittle for CI (which it may be — the dev server isn't always up), the implementer may instead use a different vitest strategy: import the route handler from `app/api/auth/[...all]/route.ts` and invoke it directly with a synthesized `Request` object. Either approach is acceptable; pick whichever the repo's existing test patterns favor (check `hail-website/tests/` and `app/api/internal/usage-events/rate/route.ts`'s tests if any).
@@ -701,7 +701,7 @@ Locate the console nav (likely in `app/console/layout.tsx` or `app/console/OrgMe
 - [ ] **Step 6: Typecheck.**
 
 ```
-cd /Users/r/playground/hail-website && pnpm tsc --noEmit -p tsconfig.json
+cd <hail-website root> && pnpm tsc --noEmit -p tsconfig.json
 ```
 
 Expected: clean.
@@ -767,7 +767,7 @@ BETTER_AUTH_JWKS_URL=http://localhost:3000/api/auth/jwks
 ALLOWED_AUDIENCES=http://localhost:8080,http://localhost:8081
 ```
 
-Run the API: `cd /Users/r/playground/hail/api && uv run uvicorn hailhq.api.main:app --reload --port 8080`. Then:
+Run the API: `cd <repo root>/api && uv run uvicorn hailhq.api.main:app --reload --port 8080`. Then:
 
 ```
 curl -s -H "Authorization: Bearer <the-access-token>" http://localhost:8080/whoami

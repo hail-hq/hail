@@ -1140,7 +1140,7 @@ root.AddCommand(newMcpCmd(opts))
 Add `HAIL_MCP_URL` to `.env.example` under the appropriate section (per repo invariant: env vars must be added in the same commit):
 
 ```bash
-cd /Users/r/playground/hail && grep -n "HAIL_MCP_URL\|^# MCP" .env.example | head
+cd <repo root> && grep -n "HAIL_MCP_URL\|^# MCP" .env.example | head
 ```
 
 If `HAIL_MCP_URL` is not present, add it under the MCP-shaped section with a comment:
@@ -1440,7 +1440,7 @@ git commit -m "feat(cli): add `hail auth token`"
 Run:
 
 ```bash
-grep -nE "EmailStatus\s*=|EmailStatus.*Literal" /Users/r/playground/hail/core/hailhq/core/schemas.py
+grep -nE "EmailStatus\s*=|EmailStatus.*Literal" core/hailhq/core/schemas.py
 ```
 
 Note the terminal-shaped values (e.g. `sent`, `failed`, `delivered`, `bounced`). Reflect them into `tail.go` in step 3 — verify each name matches the enum exactly.

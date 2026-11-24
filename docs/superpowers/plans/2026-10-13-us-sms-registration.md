@@ -18,7 +18,7 @@
 - Every new env var goes into `.env.example` in the same commit, and each worktree `.env` mirrors `.env.example` line for line.
 - After any API route change, regenerate `openapi/openapi.yaml` and the Go client in the same PR.
 - Conventional Commits. No `Co-Authored-By` line. Never push to `main`.
-- Branch: `feat/us-sms-registration` in worktree `/Users/r/playground/hail-us-sms-registration` (hail) and `/Users/r/playground/hail-website-us-sms-registration` (hail-website, Task 11). Run every command from the worktree.
+- Branch: `feat/us-sms-registration` in a worktree of each repo (hail, and hail-website for Task 11). Run every command from the worktree.
 - Tests: `cd api && uv run pytest tests/<file> -q`, `cd core && uv run pytest tests/<file> -q`. Lint: `uv run ruff check . && uv run black --check .` at the repo root.
 - Copy follows ASD-STE100: short sentences, active voice, no em dash.
 
@@ -2357,7 +2357,7 @@ Expected: all checks green. Fix failures on the branch; do not merge.
 
 ### Task 11: Console (hail-website): wizard, Numbers card, monthly fee
 
-**Files (repo `/Users/r/playground/hail-website`, worktree `/Users/r/playground/hail-website-us-sms-registration`, branch `feat/us-sms-registration`):**
+**Files (repo `hail-website`, in a worktree, branch `feat/us-sms-registration`):**
 - Modify: `lib/verification.ts` (`VerificationRow.purpose`)
 - Modify: `app/console/numbers/verification-actions.ts` (`purpose` through both actions)
 - Modify: `app/console/numbers/VerificationWizard.tsx` (`purpose` prop, fee line, person copy)
@@ -2366,7 +2366,7 @@ Expected: all checks green. Fix failures on the branch; do not merge.
 - Modify: `lib/monthly-fee-rater.ts`, `lib/private-rates.ts` (or wherever registration fees live after reading it)
 - Test: `app/console/numbers/__tests__/UsTextingCard.test.tsx`, `lib/__tests__/monthly-fee-rater.test.ts`
 
-Set up: `cd /Users/r/playground/hail-website && git fetch origin && git worktree add -b feat/us-sms-registration /Users/r/playground/hail-website-us-sms-registration origin/master && cd /Users/r/playground/hail-website-us-sms-registration && cp ../hail-website/.env .env && pnpm install --frozen-lockfile`.
+Set up: `cd <hail-website root> && git fetch origin && git worktree add -b feat/us-sms-registration <hail-website worktree> origin/master && cd <hail-website worktree> && cp <hail-website root>/.env .env && pnpm install --frozen-lockfile`.
 
 - [ ] **Step 1: Types and actions**
 

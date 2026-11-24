@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Repo: `/Users/r/playground/hail`. All paths below are relative to it.
+- Repo: the repo root. All paths below are relative to it.
 - **OpenAPI is source of truth for the CLI**: after any API route change, regenerate `openapi/openapi.yaml` in the same PR (Task 13).
 - **New env vars must land in `.env.example` in the same commit** (Task 10).
 - **Provider adapters live in `core/hailhq/core/providers/<channel>/`**; `api/` never imports boto3 directly.

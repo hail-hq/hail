@@ -8,7 +8,7 @@
 
 **Tech Stack:** YAML, Mintlify MDX, `docs.json`; Node/`tsx` validator (`scripts/validation/providers/validate.ts`); `curl` for behavioural checks; Docker Compose for the local end-to-end test.
 
-**Working repo:** `r13i/nango` fork at `/Users/r/playground/nango` (a fork of `NangoHQ/nango`). All tasks run there. The design spec and submission tracker live in the separate `hail` repo and are **not** touched by this plan.
+**Working repo:** a local clone of the `r13i/nango` fork (a fork of `NangoHQ/nango`). All tasks run there. The design spec and submission tracker live in the separate `hail` repo and are **not** touched by this plan.
 
 **Design source:** `hail` repo → `docs/superpowers/specs/2026-07-15-nango-connector-design.md`. Copy source: `hail` repo → `docs/submissions/nango.md`.
 
@@ -33,7 +33,7 @@
 
 **Files:**
 
-- Modify: `/Users/r/playground/nango/packages/providers/providers.yaml` (insert immediately before the `haileyhr:` entry)
+- Modify: `packages/providers/providers.yaml` (insert immediately before the `haileyhr:` entry)
 
 **Interfaces:**
 
@@ -45,7 +45,7 @@
 The controller has already created `feat/add-hail-provider` off `upstream/master` (the fork's `origin/master` was 139 commits stale). Just confirm you are on it and the tree is clean:
 
 ```bash
-cd /Users/r/playground/nango
+cd <nango fork root>
 git branch --show-current   # expect: feat/add-hail-provider
 git status -s               # expect: empty
 ```
@@ -126,7 +126,7 @@ git commit -m "feat(providers): add Hail API provider"
 
 **Files:**
 
-- Modify: `/Users/r/playground/nango/packages/providers/providers.yaml` (insert directly after the `hail:` block from Task 1, before `haileyhr:`)
+- Modify: `packages/providers/providers.yaml` (insert directly after the `hail:` block from Task 1, before `haileyhr:`)
 
 **Interfaces:**
 
@@ -230,10 +230,10 @@ git commit -m "feat(providers): add Hail MCP provider"
 
 **Files:**
 
-- Create: `/Users/r/playground/nango/docs/api-integrations/hail.mdx`
-- Create: `/Users/r/playground/nango/docs/api-integrations/hail/connect.mdx`
-- Create: `/Users/r/playground/nango/docs/api-integrations/hail-mcp.mdx`
-- Modify: `/Users/r/playground/nango/docs/docs.json` (register all three slugs — two page slugs: `hail` and `hail-mcp`; the `hail/connect` page is reached via `docs_connect` and is not separately listed, matching `resend`)
+- Create: `docs/api-integrations/hail.mdx`
+- Create: `docs/api-integrations/hail/connect.mdx`
+- Create: `docs/api-integrations/hail-mcp.mdx`
+- Modify: `docs/docs.json` (register all three slugs — two page slugs: `hail` and `hail-mcp`; the `hail/connect` page is reached via `docs_connect` and is not separately listed, matching `resend`)
 
 **Interfaces:**
 
@@ -415,7 +415,7 @@ This is the acceptance gate the CONTRIBUTING guide requires ("please thoroughly 
 - [ ] **Step 1: Start Nango locally**
 
 ```bash
-cd /Users/r/playground/nango
+cd <nango fork root>
 docker compose up
 ```
 
@@ -449,7 +449,7 @@ Note pass/fail for each of Steps 2–4 in `hail` repo → `docs/submissions/nang
 - [ ] **Step 1: Review the full diff**
 
 ```bash
-cd /Users/r/playground/nango
+cd <nango fork root>
 git log --oneline upstream/master..HEAD
 git diff upstream/master..HEAD --stat
 ```

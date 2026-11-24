@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- Repo: `/Users/r/playground/hail/.claude/worktrees/sms-console-ui`, branch `feat/sms-console-ui`. All work is in the **hail** repo (the public one that owns `costs/` and `web/`).
+- Repo: a worktree of this repo (`.claude/worktrees/sms-console-ui`), branch `feat/sms-console-ui`. All work is in the **hail** repo (the public one that owns `costs/` and `web/`).
 - Data-file envelope version is `2`; `license` is the const `"CC-BY-4.0"`. Copy these verbatim.
 - Prices are **decimal strings** (e.g. `"1.15"`), never numbers — matches the schema `decimal` pattern `^(0|[1-9][0-9]*)(\.[0-9]{1,8})?$`.
 - `verified_by` must match the GitHub-handle regex `^[a-zA-Z0-9](?:[a-zA-Z0-9]|-(?=[a-zA-Z0-9])){0,38}$`. Use `r13i` (the handle already used across `costs/*.json`).

@@ -11,7 +11,7 @@ a provider block plus a docs page. Nango has no "type" field — a product with
 both an API and an MCP server ships **two entries** (`slack` + `slack-mcp`,
 `linear` + `linear-mcp`), so Hail does the same.
 
-Work happens in the existing fork `r13i/nango` (`/Users/r/playground/nango`,
+Work happens in the existing fork `r13i/nango` (a local clone of the fork,
 branch `master`). The spec lives here, in the `hail` repo, deliberately: a
 `docs/superpowers/specs/` file inside the nango checkout would land in the
 upstream PR diff.

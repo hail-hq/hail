@@ -296,7 +296,7 @@ Do the steps below in sequence. Each provider gets one focused dispatch.
 ### Step 0 — Pre-flight
 
 ```bash
-cd /Users/r/playground/hail   # or wherever the repo lives
+cd <repo root>   # or wherever the repo lives
 git status --short costs/      # must be empty
 pnpm costs:validate            # baseline must pass (fall back to direct check-jsonschema if needed)
 ```
@@ -363,7 +363,7 @@ You are running a weekly cost-data refresh for {provider} in the Hail Costs Data
 
 ## Working directory
 
-/Users/r/playground/hail
+The repo root.
 
 ## Workflow constraints
 
