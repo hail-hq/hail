@@ -4,6 +4,10 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+### Changed
+
+- Calls: the agent answers sooner. It waits at most 1.2 seconds, down from 2.5, when it is unsure the other person has finished speaking.
+
 ## [0.37.0] (2026-11-23)
 
 A refused US texting registration now says why: Hail's fix first, then the

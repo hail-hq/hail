@@ -11,8 +11,16 @@ made because we never invoke ``.chat()``.
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import pytest
-from hailhq.voicebot.pipeline import ResolvedLayer, build_llm, build_session, build_stt
+from hailhq.voicebot.pipeline import (
+    MAX_TURN_END_WAIT,
+    ResolvedLayer,
+    build_llm,
+    build_session,
+    build_stt,
+)
 from livekit.agents import AgentSession
 from livekit.agents.llm import FallbackAdapter
 from livekit.agents.stt import FallbackAdapter as stt_fallback
@@ -818,3 +826,11 @@ def test_elevenlabs_tagalog_sends_the_filipino_code() -> None:
     ]
     assert len(eleven) == 2
     assert {inst._opts.language.language for inst in eleven} == {"fil"}
+
+
+def test_the_agent_waits_at_most_1_2_seconds_for_an_unsure_end_of_turn() -> None:
+    assert MAX_TURN_END_WAIT == 1.2
+    session = build_session(None, MagicMock())
+    assert session.options.endpointing["max_delay"] == 1.2
+    # The quick path, when the check is sure, stays the SDK's.
+    assert session.options.endpointing["min_delay"] < 1.2

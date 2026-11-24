@@ -809,6 +809,14 @@ def startup_capability_warnings() -> list[str]:
     return warnings
 
 
+# How long the agent waits after the other party stops, when the end-of-turn
+# check is unsure they have finished. The SDK default is 2.5 s. On real calls
+# the check was unsure on most turns, also after "Hello?" and "Thanks.", so
+# the agent answered 2.5 s late most of the time. Lower answers sooner; too low
+# answers someone who only paused to think.
+MAX_TURN_END_WAIT = 1.2
+
+
 def build_session(
     llm_cfg: dict[str, Any] | None,
     vad: agents_vad.VAD,
@@ -905,6 +913,7 @@ def build_session(
         llm=build_llm(llm_cfg, org_cfgs.get("llm"), retry_on_chunk_sent=True),
         turn_handling=TurnHandlingOptions(
             turn_detection=turn_detection,
+            endpointing={"max_delay": MAX_TURN_END_WAIT},
             # Only the setting that differs from the SDK defaults: a transcribed
             # word, not VAD energy alone, is needed to interrupt the agent.
             interruption={"min_words": 1},
