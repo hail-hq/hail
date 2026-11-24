@@ -50,10 +50,10 @@ Every field on `POST /v1/calls` applies to that call only.
   the call replaces the agent's value. `voice_config` is replaced as one
   object: to change only the language, send the agent's `voice_id` too.
 
-These are set on the [agent](agents.md) or in the workspace call settings,
-not per call:
+These are set on the [agent](agents.md), not per call:
 
-- `max_duration_seconds` (60 to 3600): the call length limit. Hail can also
+- `max_duration_seconds` (60 to 3600): the call length limit. The workspace
+  call settings hold a default for agents without one. Hail can also
   shorten it to what the workspace balance covers.
 - `handover_max_duration_seconds` (60 to 3600, default 1800): the limit once
   a person takes the call.

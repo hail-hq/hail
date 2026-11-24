@@ -11,9 +11,10 @@ hail call +14155550100 --language es \
 
 Set it as `voice_config.language` on `POST /v1/calls` or on an agent, with
 `hail call --language`, or with the `language` argument of the MCP
-`place_call` tool. Omitted on a call, Hail uses the agent's language,
-then the language of the text-to-speech provider saved in the console,
-then English. Hail picks the
+`place_call` tool. When a call sends no `voice_config`, Hail uses the
+agent's language. A call that sends `voice_config` without a language
+skips the agent's language. Then Hail uses the language of the
+text-to-speech provider saved in the console, then English. Hail picks the
 speech-to-text provider and turn detection for each language. The agent's
 built-in spoken lines, such as the AI line, are said in the call's language.
 
