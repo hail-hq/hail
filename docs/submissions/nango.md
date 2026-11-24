@@ -39,8 +39,8 @@ and evidence: [`../superpowers/specs/2026-07-15-nango-connector-design.md`](../s
 
 ## Steps to submit
 
-1. Work in the existing fork `r13i/nango` (`/Users/r/playground/nango`, currently
-   `master`). Branch off per gitflow, e.g. `feat/add-hail-provider`.
+1. Work in a fork of `NangoHQ/nango`, on
+   `master`. Branch off per gitflow, e.g. `feat/add-hail-provider`.
 2. Add both blocks from **Content** to `packages/providers/providers.yaml`,
    placed **alphabetically** (after `gusto`).
 3. Write the three docs pages (see Content):

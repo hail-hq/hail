@@ -13,7 +13,6 @@ agent:
 - Apply and move: [`scripts/ops/sip_trunks.py`](../../scripts/ops/sip_trunks.py) (LiveKit API). Every command is a dry run until `--yes`.
 - Weekly IP check: [`sip-allowlist-check`](../../.github/workflows/sip-allowlist-check.yml), Monday 09:30 UTC ([order](../../costs/README.md#weekly-jobs-in-order)).
 - Negative test: [`scripts/ops/sip_invite_probe.py`](../../scripts/ops/sip_invite_probe.py).
-- Limit of an IP list: a carrier that sends every customer's calls from the same signaling IPs needs a per-account check as well, a password (DIDWW) or a secret header (the [Twilio secret header](#twilio-secret-header)). An IP list alone admits any customer of that carrier.
 - Exception to "infrastructure is Terraform only" (owner decision): LiveKit SIP trunks have no Terraform provider, so a committed JSON file plus this script define them.
 
 How LiveKit picks a trunk ([`sip.go`](https://github.com/livekit/protocol/blob/main/sip/sip.go)):
