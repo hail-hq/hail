@@ -1044,80 +1044,43 @@ def greeting_with_ai_line(first_message: str, ai_line: str) -> str:
 # rarely delays the greeting; the greeting waits at most FIRST_LINE_WAIT more.
 FIRST_LINE_FIT_SECONDS = 10.0
 FIRST_LINE_WAIT_SECONDS = 1.0
+# The most greeting words cut from the start of a first line ("Good morning
+# there"). The model only counts them; code cuts, so nothing else can change.
+MAX_GREETING_WORDS = 3
+_WORD = re.compile(r"\w+(?:['\u2019]\w+)*")
+_COUNT = re.compile(r"\s*(\d+)\s*\.?\s*")
 
 
-# Text a rewrite must keep exactly, in order: each number with its separators
-# ("4 8 1 9", "$15.50", "3:30") and each <spell>...</spell> code.
-_NUMBER = re.compile(r"\d(?:[\d .,:/-]*\d)?")
-# The model's answer when the first line was only a greeting, compared as
-# plain words so "(None)" or "none." match too.
-NOTHING_LEFT = "none"
-_SPELL = re.compile(r"<spell>.*?</spell>", re.IGNORECASE | re.DOTALL)
-# Quote pairs a model may wrap its whole answer in.
-_QUOTE_PAIRS = {
-    '"': '"',
-    "'": "'",
-    "\u201c": "\u201d",
-    "\u00ab": "\u00bb",
-    "\u300c": "\u300d",
-    "\u201e": "\u201c",
-}
-
-
-def _plain(text: str) -> str:
-    """Lowercase words only, for comparing wording across punctuation."""
-    return " ".join(re.sub(r"[^\w\s]", " ", text.casefold()).split())
-
-
-# How far a rewrite may stray from the first line: it may drop or change up
-# to TRIM_WORDS words at the start, add up to LEAD_WORDS of its own there
-# ("I'm", "Sam here"), and must end with the rest of the line, word for word.
-TRIM_WORDS = 8
-LEAD_WORDS = 4
-# A first line this short, with no numbers or codes, may drop out whole.
-GREETING_WORDS = 4
-
-
-def _keeps_first_line(first_message: str, text: str) -> bool:
-    """A rewrite is usable when it only trims the opening of the first line
-    (see TRIM_WORDS), is no longer than it, and keeps every number and
-    spelled code. An empty
-    rewrite is usable only for a short line with no numbers or codes."""
-    original, rewrite = _plain(first_message).split(), _plain(text).split()
-    if not rewrite:
-        return (
-            len(original) <= GREETING_WORDS
-            and not _NUMBER.search(first_message)
-            and not _SPELL.search(first_message)
-        )
-    kept = 0
-    while (
-        kept < min(len(original), len(rewrite))
-        and original[-1 - kept] == rewrite[-1 - kept]
-    ):
-        kept += 1
-    # A real rewrite only shortens the line: a longer one adds a preamble or
-    # an answer.
-    if (
-        not kept
-        or len(rewrite) > len(original)
-        or len(original) - kept > TRIM_WORDS
-        or len(rewrite) - kept > LEAD_WORDS
-    ):
-        return False
-    return _NUMBER.findall(first_message) == _NUMBER.findall(text) and (
-        _SPELL.findall(first_message) == _SPELL.findall(text)
-    )
+def cut_greeting(first_message: str, words: int) -> str:
+    """``first_message`` without its first ``words`` words and the
+    punctuation after them; "" when nothing is left. Unchanged when
+    ``words`` is out of range or the cut would drop a digit or a spelled
+    code."""
+    if not 0 < words <= MAX_GREETING_WORDS:
+        return first_message
+    found = list(_WORD.finditer(first_message))
+    if len(found) < words:
+        return first_message
+    cut = found[words - 1].end()
+    head = first_message[:cut]
+    if re.search(r"\d", head) or "<" in head:
+        return first_message
+    rest = first_message[cut:].lstrip(" \t,.!;:\u3001\uff0c\u3002\uff01-\u2014")
+    if rest[:1].islower():
+        rest = rest[0].upper() + rest[1:]
+    return rest
 
 
 async def fitted_first_line(
     make_llm: Callable[[], LLM], disclosure: str, first_message: str, call_id: UUID
 ) -> str:
-    """``first_message`` reworded to follow the AI ``disclosure`` without
-    repeating its greeting (see :data:`OPENING_FIT_INSTRUCTIONS`); "" when
-    the line was only a greeting. The unchanged line on any failure or an
-    answer that fails :func:`_keeps_first_line`. The model is built here, so
-    a fit cancelled before it starts opens no connection."""
+    """``first_message`` without a leading greeting that repeats the AI
+    ``disclosure``'s; "" when the line was only a greeting. The model counts
+    the greeting words (see :data:`OPENING_FIT_INSTRUCTIONS`) and
+    :func:`cut_greeting` removes them, so no other word can change. The
+    unchanged line on any failure or an answer that is not a count. The
+    model is built here, so a fit cancelled before it starts opens no
+    connection."""
     messages = [
         {"role": "system", "content": OPENING_FIT_INSTRUCTIONS},
         {
@@ -1144,21 +1107,10 @@ async def fitted_first_line(
             type(exc).__name__,
         )
         return first_message
-    text = text.strip()
-    close = _QUOTE_PAIRS.get(text[:1])
-    # Strip a pair that wraps the whole answer; an apostrophe inside single
-    # quotes ("'Sam's order.'") does not end the pair.
-    if (
-        len(text) >= 2
-        and close == text[-1]
-        and (close == "'" or close not in text[1:-1])
-    ):
-        text = text[1:-1].strip()
-    if _plain(text) == NOTHING_LEFT:
-        text = ""
-    if not _keeps_first_line(first_message, text):
+    count = _COUNT.fullmatch(text or "")
+    if count is None:
         return first_message
-    return text
+    return cut_greeting(first_message, int(count.group(1)))
 
 
 def start_first_line_fit(

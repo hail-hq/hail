@@ -42,6 +42,7 @@ from hailhq.voicebot.agent import (
     attach_event_handlers,
     build_instructions,
     build_tools_safely,
+    cut_greeting,
     disconnect_reason_to_status,
     entrypoint,
     fitted_first_line,
@@ -1120,30 +1121,41 @@ async def test_speak_greeting_says_the_line_as_written_when_the_fit_is_late(
 
 
 @pytest.mark.parametrize(
-    ("reply", "expected"),
+    ("first", "words", "expected"),
     [
-        ("Calling about your order.", "Calling about your order."),
-        ('"Calling about your order."', "Calling about your order."),
-        ('"Calling" about your order.', '"Calling" about your order.'),
-        ("(None)", "Hi, calling about your order."),  # too long to drop
-        ("Yes, now works.", "Hi, calling about your order."),  # an answer
-        (
-            "Here is the line: calling about your order.",
-            "Hi, calling about your order.",
-        ),
-        ("\u00abCalling about your order.\u00bb", "Calling about your order."),
-        # A near repeat of the notice (without its "Hi,") is not used.
-        (
-            AI_DISCLOSURE_LINE.split(", ", 1)[-1].upper() + " Calling.",
-            "Hi, calling about your order.",
-        ),
-        ("", "Hi, calling about your order."),
-        ("x" * 500, "Hi, calling about your order."),
-        (f"{AI_DISCLOSURE_LINE} Calling.", "Hi, calling about your order."),
+        ("Hi, calling about your order.", 1, "Calling about your order."),
+        ("Hello there! Is now a good time?", 2, "Is now a good time?"),
+        ("Guten Tag, hier ist Northgate Dental.", 2, "Hier ist Northgate Dental."),
+        ("你好，我们打电话是关于您明天的预约。", 1, "我们打电话是关于您明天的预约。"),
+        ("Hello!", 1, ""),  # only a greeting: the notice is said alone
+        ("Is now a good time?", 0, "Is now a good time?"),
+        # Out of range, or a cut that would drop a digit or a code: unchanged.
+        ("Hi there, this is Sam calling.", 4, "Hi there, this is Sam calling."),
+        ("Hi 24 Hour Dental here.", 2, "Hi 24 Hour Dental here."),
+        ("Hi <spell>A7</spell> here.", 2, "Hi <spell>A7</spell> here."),
     ],
 )
-async def test_fitted_first_line_falls_back_to_the_line_as_written(reply, expected):
-    """An empty, runaway or notice-repeating answer keeps the line as written."""
+def test_cut_greeting_removes_only_the_counted_words(first, words, expected):
+    """Code cuts the words the model counted; no other word can change."""
+    assert cut_greeting(first, words) == expected
+
+
+@pytest.mark.parametrize(
+    ("reply", "expected"),
+    [
+        ("1", "Calling about your order."),
+        (" 1. ", "Calling about your order."),
+        ("0", "Hi, calling about your order."),
+        # Anything but a count keeps the line as written: the model never
+        # writes the line itself.
+        ("Calling about your order.", "Hi, calling about your order."),
+        ("Not calling about your order.", "Hi, calling about your order."),
+        ("one", "Hi, calling about your order."),
+        ("", "Hi, calling about your order."),
+        ("9", "Hi, calling about your order."),
+    ],
+)
+async def test_fitted_first_line_uses_only_a_count(reply, expected):
     line = await fitted_first_line(
         lambda: FakeLLM(reply=reply),
         AI_DISCLOSURE_LINE,
@@ -1153,71 +1165,22 @@ async def test_fitted_first_line_falls_back_to_the_line_as_written(reply, expect
     assert line == expected
 
 
-@pytest.mark.parametrize(
-    ("first", "reply", "kept"),
-    [
-        ("Hi, your code is 4 8 1 9.", "Your code is 4 8 1 9.", True),
-        ("Hi, your code is 4 8 1 9.", "Your code is 4819.", False),
-        ("Hi, it is $15.50 at 3:30.", "It is $1550 at 330.", False),
-        ("Hi, your code is 4 8 1 9.", "Your code is 481.", False),
-        ("Hi, Friday at 3 PM?", "Friday at 3 PM?", True),
-        ("Hi, Friday at 3 PM?", "Friday at 4 PM?", False),
-        ("Hi, code <spell>A7X9</spell>.", "Code <spell>A7X9</spell>.", True),
-        ("Hi, code <spell>A7X9</spell>.", "Code A7X9.", False),
-    ],
-)
-async def test_fitted_first_line_keeps_every_digit_and_code(first, reply, kept):
-    """A rewrite that changes a digit or a spelled code is not used."""
+async def test_fitted_first_line_keeps_the_line_when_the_model_fails() -> None:
+    class Broken(FakeLLM):
+        def chat(self, **_kwargs):
+            raise RuntimeError("model down")
+
     line = await fitted_first_line(
-        lambda: FakeLLM(reply=reply),
+        Broken,
         AI_DISCLOSURE_LINE,
-        first,
+        "Hi there.",
         UUID("11111111-2222-3333-4444-555555555555"),
     )
-    assert line == (reply if kept else first)
-
-
-async def test_fitted_first_line_strips_single_quotes_around_an_apostrophe():
-    line = await fitted_first_line(
-        lambda: FakeLLM(reply="'Calling about Sam's order.'"),
-        AI_DISCLOSURE_LINE,
-        "Hi, calling about Sam's order.",
-        UUID("11111111-2222-3333-4444-555555555555"),
-    )
-    assert line == "Calling about Sam's order."
-
-
-@pytest.mark.parametrize("reply", ["(none)", "(None)", "None."])
-async def test_fitted_first_line_drops_only_a_short_greeting(reply):
-    """Any spelling of the empty answer drops a short greeting, but never a
-    line with content."""
-    uid = UUID("11111111-2222-3333-4444-555555555555")
-    assert (
-        await fitted_first_line(
-            lambda: FakeLLM(reply=reply), AI_DISCLOSURE_LINE, "Hello!", uid
-        )
-        == ""
-    )
-    assert (
-        await fitted_first_line(
-            lambda: FakeLLM(reply=reply),
-            AI_DISCLOSURE_LINE,
-            "Hi, your code is 4 8 1 9.",
-            uid,
-        )
-        == "Hi, your code is 4 8 1 9."
-    )
+    assert line == "Hi there."
 
 
 async def test_a_greeting_only_first_line_drops_out() -> None:
     """A first line that is only a greeting leaves the notice alone."""
-    line = await fitted_first_line(
-        lambda: FakeLLM(reply="(none)"),
-        AI_DISCLOSURE_LINE,
-        "Hello!",
-        UUID("11111111-2222-3333-4444-555555555555"),
-    )
-    assert line == ""
     session = FakeAnnouncingSession()
     fitted = asyncio.get_running_loop().create_future()
     fitted.set_result("")
@@ -1237,20 +1200,6 @@ async def test_speak_greeting_says_the_line_when_the_fit_was_cancelled() -> None
     )
 
     assert session.say_calls == [(f"{AI_DISCLOSURE_LINE} Hi, about your order.", True)]
-
-
-async def test_fitted_first_line_keeps_the_line_when_the_model_fails() -> None:
-    class Broken(FakeLLM):
-        def chat(self, **_kwargs):
-            raise RuntimeError("model down")
-
-    line = await fitted_first_line(
-        Broken,
-        AI_DISCLOSURE_LINE,
-        "Hi there.",
-        UUID("11111111-2222-3333-4444-555555555555"),
-    )
-    assert line == "Hi there."
 
 
 @pytest.mark.parametrize(

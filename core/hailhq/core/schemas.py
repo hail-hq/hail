@@ -262,11 +262,10 @@ class CallCreate(ConsentAttestationMixin):
     first_message: str | None = Field(
         default=None,
         description=(
-            "Opening line the agent speaks first. After the AI notice, it is "
-            "reworded so it does not repeat the notice: a repeated greeting or "
-            "business name may be dropped; digits and spelled codes stay as "
-            "written. Calls on your own model say it as written. Omitted: the "
-            "agent waits for the callee to speak first."
+            "Opening line the agent speaks first. A greeting at its start "
+            '("Hi,") is dropped after the AI notice, which already greets; '
+            "nothing else changes. Calls on your own model say it as written. "
+            "Omitted: the agent waits for the callee to speak first."
         ),
     )
     recording_enabled: bool | None = Field(
@@ -1359,11 +1358,11 @@ class AgentCreate(BaseModel):
         default=None,
         max_length=1000,
         description=(
-            "Opening line spoken after the AI line. On outbound calls it is "
-            "reworded so it does not repeat the AI line: a repeated greeting or "
-            "business name may be dropped; digits and spelled codes stay as "
-            "written. Calls on your own model say it as written. Omitted: the "
-            "agent waits for the other side to speak first."
+            "Opening line spoken after the AI line. On outbound calls a "
+            'greeting at its start ("Hi,") is dropped, since the AI line '
+            "already greets; nothing else changes. Calls on your own model say "
+            "it as written. Omitted: the agent waits for the other side to "
+            "speak first."
         ),
     )
     recording_enabled: bool | None = Field(
@@ -1477,7 +1476,11 @@ class AgentUpdate(BaseModel):
     first_message: str | None = Field(
         default=None,
         max_length=1000,
-        description="New opening line; null makes the agent wait for the other side.",
+        description=(
+            "New opening line; null makes the agent wait for the other side. "
+            'On outbound calls a greeting at its start ("Hi,") is dropped, '
+            "since the AI line already greets."
+        ),
     )
     recording_enabled: bool | None = Field(
         default=None,

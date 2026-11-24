@@ -2249,8 +2249,9 @@ _AGENT_PROMPT = _d(
     "Instructions that define the agent's behavior on calls, texts and email replies."
 )
 _AGENT_FIRST_MESSAGE = _d(
-    "Greeting spoken after the AI disclosure. Without one, an inbound agent "
-    "waits for the caller."
+    "Greeting spoken after the AI disclosure. On outbound calls a greeting "
+    'word at its start ("Hi,") is dropped, since the disclosure already greets. '
+    "Without one, an inbound agent waits for the caller."
 )
 _AGENT_AI_DISCLOSURE = _d("Speak the AI disclosure line first on every call.")
 _AGENT_RECORDING = _d(
@@ -2379,8 +2380,9 @@ def register_tools(
         first_message: Annotated[
             str | None,
             _d(
-                "Line spoken on pickup. Without it, the agent reacts to the "
-                "answer or silence."
+                "Line spoken on pickup, after the AI notice. A greeting word at "
+                'its start ("Hi,") is dropped, since the notice already greets. '
+                "Without it, the agent reacts to the answer or silence."
             ),
         ] = None,
         language: Annotated[

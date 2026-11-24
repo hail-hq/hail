@@ -47,20 +47,19 @@ Live behavior needs a separately authorized test call or a synthetic model evalu
 
 ## Opening line
 
-When an outbound call says the AI notice and then a first line, the first
-line is reworded so the caller hears one greeting. The notice stays fixed
-and first. The rewrite (`OPENING_FIT_INSTRUCTIONS` in
-`core/hailhq/core/prompts.py`) runs on Hail's own model while the phone
-rings; at pickup the greeting waits at most one second for it. A
-workspace that uses its own model skips the rewrite, so its call content
-stays off Hail's models, and a customer endpoint may answer in character
-instead of rewriting. A rewrite that changes any number (with its
-separators) or `<spell>` code, repeats the notice, or comes back late,
-empty or much longer falls back to the line as written. A first line that
-is only a greeting drops out, and the notice is said alone. Inbound calls
-skip it:
-the caller is already on the line, and the default inbound greeting holds
-the AI line inside it.
+When an outbound call says the AI notice and then a first line, a greeting
+at the start of the first line ("Hi,", "Guten Tag,") is dropped, so the
+caller hears one greeting. The notice stays fixed and first. While the phone
+rings, Hail's own model counts the greeting words (`OPENING_FIT_INSTRUCTIONS`
+in `core/hailhq/core/prompts.py`), and code cuts at most three of them
+(`cut_greeting`). The model never writes the line, so no other word can
+change: a free rewrite could drop content or flip a sentence's meaning, and
+no check can catch that. A cut that would remove a digit or a code, an
+answer that is not a count, a failure or a late answer keeps the line as
+written. At pickup the greeting waits at most one second for the count. A
+workspace that uses its own model skips this, so its call content stays off
+Hail's models. Inbound calls skip it: the caller is already on the line, and
+the default inbound greeting holds the AI line inside it.
 
 ## Closing calls
 
