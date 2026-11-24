@@ -54,7 +54,8 @@ notice already said. The instruction is
 `first_message_instructions` in `voicebot/hailhq/voicebot/agent.py`; it
 quotes the notice and the line as JSON strings.
 
-- If the model turn fails, or ends with no words, the line is said as
+- If the model turn fails, ends with no words, or has not started speaking
+  within 3 seconds (`FIRST_MESSAGE_START_SECONDS`), the line is said as
   written.
 - Exact wording is not guaranteed: the model writes the turn.
 - On the phone-menu path, when a person was heard, the two are joined as

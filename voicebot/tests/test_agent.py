@@ -31,6 +31,7 @@ from hailhq.core.prompts import (
     fit_to_tools,
     other_party_section,
 )
+from hailhq.voicebot import agent as agent_mod
 from hailhq.voicebot.agent import (
     AI_DISCLOSURE_LINE,
     SIP_CALL_STATUS_ACTIVE,
@@ -1199,12 +1200,17 @@ async def test_an_interrupted_notice_is_followed_by_the_line_as_written() -> Non
         return Cut()
 
     session.say = say
-    await speak_greeting(session, {"first_message": "Hi, about your order."})
+    await speak_greeting(
+        session,
+        {"first_message": "Hi, about your order."},
+        on_opened=lambda: "Who is this?",
+    )
     assert session.say_calls == [
         (AI_DISCLOSURE_LINE, True),
         ("Hi, about your order.", True),
     ]
-    assert session.generate_reply_calls == []
+    # What they said over the notice is answered after the line.
+    assert session.generate_reply_calls == [None]
 
 
 @pytest.mark.parametrize(
@@ -1260,6 +1266,58 @@ async def test_words_held_during_the_greeting_get_an_answer() -> None:
     # The greeting turn, then a plain reply to the held words.
     assert len(replies) == 2
     assert replies[1] == {}
+
+
+async def test_words_held_before_the_greeting_are_not_answered_twice() -> None:
+    """The greeting turn sees words held before it; only words held while it
+    runs get a reply after it."""
+    agent = SpeechSanitizingAgent(instructions="test", opening_pending=True)
+    agent._held_words.append("Hello?")
+    session = FakeAnnouncingSession()
+    handle = _DoneHandle(None, "Calling about your order.")
+    replies = []
+
+    def generate_reply(**kwargs):
+        replies.append(kwargs)
+        return handle
+
+    session.generate_reply = generate_reply
+    await speak_greeting(
+        session,
+        {"first_message": "Hi, about your order."},
+        agent=agent,
+        on_opened=agent.release_opening,
+    )
+    for callback in handle.callbacks:
+        callback(handle)
+    for _ in range(3):
+        await asyncio.sleep(0)
+    assert len(replies) == 1  # the greeting turn only
+
+
+async def test_a_slow_greeting_turn_is_stopped_and_the_line_said(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(agent_mod, "FIRST_MESSAGE_START_SECONDS", 0.05)
+    session = FakeAnnouncingSession()
+
+    class Slow(_DoneHandle):
+        stopped = False
+
+        def done(self):
+            return self.stopped
+
+        def interrupt(self, force=False):
+            self.stopped = True
+            for callback in self.callbacks:
+                callback(self)
+
+    handle = Slow(None, "")
+    session.generate_reply = lambda **_kw: handle
+    await speak_greeting(session, {"first_message": "Hi, about your order."})
+    await asyncio.sleep(0.3)
+    assert handle.stopped
+    assert session.say_calls[-1] == ("Hi, about your order.", True)
 
 
 async def test_own_model_calls_keep_the_literal_greeting() -> None:

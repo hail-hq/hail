@@ -1012,6 +1012,9 @@ def _say_first_message(
     the call never loses its opening line; a turn that spoke is left as is,
     so the greeting never restarts. ``on_opened`` releases the hold after."""
     instructions = first_message_instructions(first_message, disclosure)
+    # Words held before this turn are in its chat, and it answers them; only
+    # words held while it runs need a reply after it.
+    held_before = len(agent._held_words) if agent is not None else 0
     if agent is not None:
         agent.allow_opening_turn(instructions)
     try:
@@ -1041,8 +1044,11 @@ def _say_first_message(
         except Exception:
             logger.exception("could not say the first message after a failed turn")
         finally:
+            held_during = agent._held_words[held_before:] if agent is not None else []
             heard = on_opened() if on_opened is not None else None
-        if heard:
+            if agent is None:
+                held_during = [heard] if heard else []
+        if held_during:
             # Words held during the greeting are in the chat: answer them.
             try:
                 session.generate_reply()
@@ -1056,7 +1062,30 @@ def _say_first_message(
 
     add_done(on_done)
 
+    async def watchdog() -> None:
+        # A slow or failing model must not leave a long silence after the
+        # notice: if the turn has not started speaking in time, stop it, and
+        # finish says the line as written.
+        deadline = asyncio.get_running_loop().time() + FIRST_MESSAGE_START_SECONDS
+        while asyncio.get_running_loop().time() < deadline:
+            if handle.done() or getattr(session, "agent_state", None) == "speaking":
+                return
+            await asyncio.sleep(0.1)
+        if not handle.done():
+            try:
+                handle.interrupt(force=True)
+            except Exception:
+                logger.exception("could not stop a slow greeting turn")
 
+    if hasattr(handle, "done") and hasattr(handle, "interrupt"):
+        task = asyncio.ensure_future(watchdog())
+        _BACKGROUND.add(task)
+        task.add_done_callback(_BACKGROUND.discard)
+
+
+# The greeting turn must start speaking within this time after the notice,
+# or the line is said as written.
+FIRST_MESSAGE_START_SECONDS = 3.0
 # Keeps fire-and-forget tasks alive until they finish.
 _BACKGROUND: set[asyncio.Task[None]] = set()
 
@@ -1235,6 +1264,7 @@ async def speak_greeting(
         if eou_task is not None:
             eou_task.cancel()
     blended = False
+    answer_held = False
     try:
         if first_message:
             interruptible = True
@@ -1256,8 +1286,10 @@ async def speak_greeting(
                 notice = await session.say(disclosure, allow_interruptions=True)
                 if getattr(notice, "interrupted", False):
                     # The person talked over the notice: say the line as
-                    # written instead of telling the model the notice played.
+                    # written instead of telling the model the notice played,
+                    # then answer what they said.
                     await session.say(first_message, allow_interruptions=True)
+                    answer_held = True
                     return
                 blended = True
                 return
@@ -1276,12 +1308,16 @@ async def speak_greeting(
             # Release even when say fails, so the agent is never left unable
             # to reply.
             heard = on_opened() if on_opened is not None else None
+            if answer_held and heard:
+                # The person talked over the notice: answer what they said.
+                try:
+                    session.generate_reply()
+                except RuntimeError:
+                    pass  # the call ended
     # An inbound caller dialed in: with no ``first_message`` the agent waits
     # for them to speak (the documented ``first_message: null`` behavior). The
     # generated opening is written for a call Hail placed ("say why you are
     # calling") and would tell the caller the agent called them.
-    if blended:
-        return
     if generate_opening and not inbound:
         session.generate_reply(
             instructions=opening_instructions(
