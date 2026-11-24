@@ -20,11 +20,11 @@ from hailhq.core.inbound_calls import (
 from hailhq.core.models import Agent, Call, PhoneNumber, Sms
 from hailhq.voicebot import agent as agent_mod
 from hailhq.voicebot.agent import (
-    PBX_CHECK_LINE,
     collect_check_digits,
     open_inbound_from_room,
     parse_metadata,
 )
+from hailhq.voicebot.spoken_lines import SPOKEN_LINES
 from livekit import rtc
 
 
@@ -554,10 +554,27 @@ async def test_check_passed_plays_line_then_deletes_room(
     assert (arrived, digits) == (check_ctx.arrived, "482913")
     session.start.assert_awaited_once()
     assert session.start.await_args.kwargs["record"] is False
-    session.say.assert_awaited_once_with(PBX_CHECK_LINE, allow_interruptions=False)
+    session.say.assert_awaited_once_with(
+        SPOKEN_LINES["en"].pbx_check, allow_interruptions=False
+    )
     session.aclose.assert_awaited_once()
     check_ctx.delete_room.assert_awaited_once()
     check_ctx.shutdown.assert_called_once_with(reason="pbx_check")
+
+
+async def test_check_line_speaks_the_given_language(check_ctx, session):
+    await agent_mod.play_check_line(check_ctx, language="fr")
+    session.say.assert_awaited_once_with(
+        SPOKEN_LINES["fr"].pbx_check, allow_interruptions=False
+    )
+    assert agent_mod.build_tts.call_args.kwargs == {"language": "fr"}
+
+
+async def test_check_line_without_language_is_english(check_ctx, session):
+    await agent_mod.play_check_line(check_ctx)
+    session.say.assert_awaited_once_with(
+        SPOKEN_LINES["en"].pbx_check, allow_interruptions=False
+    )
 
 
 async def test_check_failed_skips_line_and_deletes_room(

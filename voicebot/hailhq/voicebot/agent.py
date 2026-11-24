@@ -1608,8 +1608,8 @@ async def open_inbound_from_room(
     return outcome.metadata
 
 
-# Ownership check of a connected number: what the check leg says after a pass.
-PBX_CHECK_LINE = "Your phone system is now connected to Hail. Goodbye."
+# Ownership check of a connected number: how long the line after a pass may
+# take (the line is ``spoken_lines(...).pbx_check``).
 PBX_CHECK_LINE_SECONDS = 10
 
 
@@ -1638,13 +1638,14 @@ async def collect_check_digits(
     return "".join(digits)
 
 
-async def play_check_line(ctx: JobContext) -> None:
-    """Say ``PBX_CHECK_LINE`` in Hail's house voice (no STT or LLM). Best
-    effort, at most ``PBX_CHECK_LINE_SECONDS``; errors are logged."""
+async def play_check_line(ctx: JobContext, language: str | None = None) -> None:
+    """Say the ownership check line in ``language`` (English when unknown) in
+    Hail's house voice (no STT or LLM). Best effort, at most
+    ``PBX_CHECK_LINE_SECONDS``; errors are logged."""
     session: AgentSession | None = None
     try:
         async with asyncio.timeout(PBX_CHECK_LINE_SECONDS):
-            session = AgentSession(tts=build_tts())
+            session = AgentSession(tts=build_tts(language=language))
             await session.start(
                 agent=Agent(instructions=""),
                 room=ctx.room,
@@ -1652,7 +1653,9 @@ async def play_check_line(ctx: JobContext) -> None:
                 room_options=room_io.RoomOptions(audio_input=False, text_input=False),
                 session_host=False,
             )
-            await session.say(PBX_CHECK_LINE, allow_interruptions=False)
+            await session.say(
+                spoken_lines(language).pbx_check, allow_interruptions=False
+            )
     except Exception:
         logger.warning("check line not played in room %s", ctx.room.name, exc_info=True)
     finally:
@@ -1682,12 +1685,12 @@ async def run_check_leg(ctx: JobContext, arrived: CheckArrived) -> None:
         ctx.shutdown(reason="pbx_check")
 
 
-# Ownership check, outbound leg: it only sends the code as key presses.
-# The first try goes this long after the inbound side reports "arrived":
-# its job is listening by then (it writes "arrived" just before it listens).
+# Ownership check, outbound leg: it only sends the code as key presses, once.
+# Only the first 6 key presses count and a check call has one result, so a
+# second send could never help. It goes this long after the inbound side
+# reports "arrived": its job is listening by then (it writes "arrived" just
+# before it listens).
 CHECK_SEND_DELAY_SECONDS = 1
-CHECK_SEND_TRIES = 2
-CHECK_SEND_GAP_SECONDS = 1
 # How long the dialed leg may take to answer.
 CHECK_ANSWER_WAIT_SECONDS = CHECK_RING_SECONDS + 5
 # How long to wait for "arrived" after the answer, and how often to look.
@@ -1737,8 +1740,7 @@ async def _check_leg_answered(room: rtc.Room, seconds: float) -> bool:
 async def send_check_code(ctx: JobContext, call_id: UUID, code: str) -> None:
     """Send the ownership check code as key presses on the outbound leg:
     after the answer and the inbound side's ``arrived``, plus
-    ``CHECK_SEND_DELAY_SECONDS``; ``CHECK_SEND_TRIES`` times,
-    ``CHECK_SEND_GAP_SECONDS`` apart. Never logs the code, never raises.
+    ``CHECK_SEND_DELAY_SECONDS``, once. Never logs the code, never raises.
     The API deletes the room when it has the result."""
     try:
         if not await _check_leg_answered(ctx.room, CHECK_ANSWER_WAIT_SECONDS):
@@ -1748,16 +1750,13 @@ async def send_check_code(ctx: JobContext, call_id: UUID, code: str) -> None:
             logger.info("ownership check call %s: no arrival; code not sent", call_id)
             return
         await asyncio.sleep(CHECK_SEND_DELAY_SECONDS)
-        for attempt in range(CHECK_SEND_TRIES):
-            if attempt:
-                await asyncio.sleep(CHECK_SEND_GAP_SECONDS)
-            for i, key in enumerate(code):
-                if i:
-                    await asyncio.sleep(DIGIT_DELAY_SECONDS)
-                # Not make_agent_send_dtmf: it logs each key.
-                await ctx.room.local_participant.publish_dtmf(
-                    code=DTMF_CODES[key], digit=key
-                )
+        for i, key in enumerate(code):
+            if i:
+                await asyncio.sleep(DIGIT_DELAY_SECONDS)
+            # Not make_agent_send_dtmf: it logs each key.
+            await ctx.room.local_participant.publish_dtmf(
+                code=DTMF_CODES[key], digit=key
+            )
         logger.info("ownership check call %s: code sent", call_id)
     except Exception as exc:
         # The type only: an error text may hold a key.
@@ -3095,11 +3094,8 @@ __all__ = [
     "AI_DISCLOSURE_LINE",
     "BYO_LLM_FAILURE_END_REASON",
     "CHECK_SEND_DELAY_SECONDS",
-    "CHECK_SEND_GAP_SECONDS",
-    "CHECK_SEND_TRIES",
     "DTMF_TOOL_NAME",
     "MAX_CONSECUTIVE_LLM_ERRORS",
-    "PBX_CHECK_LINE",
     "SIP_CALL_STATUS_ACTIVE",
     "SIP_CALL_STATUS_ATTRIBUTE",
     "SOFT_CAP_END_REASON",

@@ -16,7 +16,6 @@ from hailhq.core.sip_connections import CHECK_EVENT_KIND
 from hailhq.voicebot import agent
 from hailhq.voicebot.agent import (
     CHECK_SEND_DELAY_SECONDS,
-    CHECK_SEND_GAP_SECONDS,
     check_arrival,
     entrypoint,
     send_check_code,
@@ -92,21 +91,18 @@ def _one_try(code: str) -> list[tuple[str, object]]:
     return out
 
 
-async def test_check_sender_sends_code_twice_one_second_apart(
-    check_ctx, steps, arrived
-):
+async def test_check_sender_sends_code_once(check_ctx, steps, arrived):
+    """Only the first 6 key presses count and each check call has one result,
+    so a second send could never help: the code goes once."""
     await send_check_code(check_ctx, uuid.UUID(CALL_ID), "482913")
     assert steps == [
         ("sleep", CHECK_SEND_DELAY_SECONDS),
         *_one_try("482913"),
-        ("sleep", CHECK_SEND_GAP_SECONDS),
-        *_one_try("482913"),
     ]
     assert CHECK_SEND_DELAY_SECONDS == 1
-    assert CHECK_SEND_GAP_SECONDS == 1
     arrived.assert_awaited_once_with(uuid.UUID(CALL_ID))
     calls = check_ctx.room.local_participant.publish_dtmf.await_args_list
-    assert [c.kwargs["code"] for c in calls] == [4, 8, 2, 9, 1, 3] * 2
+    assert [c.kwargs["code"] for c in calls] == [4, 8, 2, 9, 1, 3]
 
 
 async def test_check_sender_waits_for_the_answer(check_ctx, steps, arrived):
@@ -126,7 +122,7 @@ async def test_check_sender_waits_for_the_answer(check_ctx, steps, arrived):
     for handler in list(check_ctx.room.handlers["participant_attributes_changed"]):
         handler({"sip.callStatus": "active"}, participant)
     await task
-    assert [s[1] for s in steps if s[0] == "dtmf"] == list("482913482913")
+    assert [s[1] for s in steps if s[0] == "dtmf"] == list("482913")
     assert check_ctx.room.handlers["participant_attributes_changed"] == []
 
 
