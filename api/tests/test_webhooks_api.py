@@ -950,3 +950,8 @@ async def test_test_send_has_its_own_per_minute_limit(client, auth_headers, rece
     limited = await client.post("/webhooks/test", headers=auth_headers, json=body)
     assert limited.status_code == 429
     assert "Retry-After" in limited.headers
+    # The headers name the test bucket, not the general one.
+    assert limited.headers["RateLimit-Limit"] == str(
+        webhooks_routes._TEST_LIMIT_PER_MINUTE
+    )
+    assert limited.headers["RateLimit-Remaining"] == "0"

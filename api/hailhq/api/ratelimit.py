@@ -201,9 +201,11 @@ class GeneralRateLimitMiddleware(BaseHTTPMiddleware):
             )
 
         response = await call_next(request)
-        response.headers["RateLimit-Limit"] = str(item.amount)
-        response.headers["RateLimit-Remaining"] = str(remaining)
-        response.headers["RateLimit-Reset"] = str(reset_in)
+        # A route limit's 429 (enforce_route_limit) already names its own,
+        # stricter bucket: keep those numbers.
+        response.headers.setdefault("RateLimit-Limit", str(item.amount))
+        response.headers.setdefault("RateLimit-Remaining", str(remaining))
+        response.headers.setdefault("RateLimit-Reset", str(reset_in))
         return response
 
 
@@ -222,7 +224,12 @@ def enforce_route_limit(request: Request, name: str, per_minute: int) -> None:
         raise HTTPException(
             status_code=429,
             detail="Rate limit exceeded. Retry after the Retry-After header (seconds).",
-            headers={"Retry-After": str(reset_in)},
+            headers={
+                "Retry-After": str(reset_in),
+                "RateLimit-Limit": str(item.amount),
+                "RateLimit-Remaining": "0",
+                "RateLimit-Reset": str(reset_in),
+            },
         )
 
 

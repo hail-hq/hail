@@ -105,20 +105,16 @@ async def httpx_post(
     )
     # One deadline for the whole send: httpx times each phase alone, so a
     # receiver that drips its answer, or several dead addresses, could hold a
-    # worker slot far longer. Connects get a shorter budget for fallbacks.
-    # A single address gets the full budget, so a slow TCP + TLS start is not
-    # reported as a failure; the short budget only applies when there is a
-    # fallback address to move on to.
-    timeout = httpx.Timeout(
-        timeout_seconds,
-        connect=(
-            min(_CONNECT_SECONDS, timeout_seconds)
-            if len(targets) > 1
-            else timeout_seconds
-        ),
+    # worker slot far longer. The last address (or the only one) gets the full
+    # connect budget, so a slow TCP + TLS start is not reported as a failure;
+    # the short budget only applies when there is a fallback address to move
+    # on to.
+    full = httpx.Timeout(timeout_seconds)
+    short = httpx.Timeout(
+        timeout_seconds, connect=min(_CONNECT_SECONDS, timeout_seconds)
     )
     async with asyncio.timeout(timeout_seconds * 2), httpx.AsyncClient(
-        timeout=timeout
+        timeout=full
     ) as client:
         for index, target in enumerate(targets):
             try:
@@ -129,6 +125,7 @@ async def httpx_post(
                     headers=send_headers,
                     auth=auth,
                     extensions=extensions,
+                    timeout=full if index == len(targets) - 1 else short,
                 ) as resp:
                     chunks: list[bytes] = []
                     size = 0
