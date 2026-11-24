@@ -233,14 +233,14 @@ def probe(
             return _dialog(sock, dialog, state, ring)
         except OSError as exc:
             accepted = state["accepted"]
-            if accepted:
+            if accepted and not ring:
                 return 1, f"ACCEPTED: {accepted.code} {accepted.reason}"
             return 2, f"INCONCLUSIVE: the connection failed ({exc})"
         except ValueError as exc:
             # A garbled status line or Content-Length. A traceback would exit
             # 1, the ACCEPTED code.
             accepted = state["accepted"]
-            if accepted:
+            if accepted and not ring:
                 return 1, f"ACCEPTED: {accepted.code} {accepted.reason}"
             return 2, f"INCONCLUSIVE: an answer this probe cannot read ({exc})"
 
@@ -250,7 +250,14 @@ def _dialog(
 ) -> tuple[int, str]:
     sock.sendall(dialog.invite())
     reader = Reader(sock)
+    # --ring: the timeout covers the whole wait, so repeated 18x answers
+    # cannot keep the probe ringing past it.
+    ring_deadline = (
+        time.monotonic() + reader.timeout if ring and reader.timeout else None
+    )
     while True:
+        if ring_deadline is not None:
+            reader.timeout = max(ring_deadline - time.monotonic(), 0.001)
         response = reader.next()
         accepted = state["accepted"]
         if response is None:

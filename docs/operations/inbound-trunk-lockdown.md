@@ -225,11 +225,11 @@ Run from the repo root of the main checkout. Values marked _(chat)_ are not writ
      --number +<E.164 number on the Twilio trunk>
    ```
 
-   It must print `DROPPED: 180 Ringing, then 486 Rejected` (exit 0), and:
+   It must print `DROPPED: 180 Ringing, then` a final code, like `486 Rejected` (exit 0), and:
    - Logfire shows the warning `inbound call to +<number> refused: X-Hail-Secret header missing (carrier=twilio)`;
    - the workspace's call log shows NO new call from `+12025550100`.
 
-   `ACCEPTED: 200 OK` (exit 1), or a new call row, means Hail did not drop the call: roll back ([Secret header rollback](#secret-header-rollback)).
+   `ACCEPTED: 200 OK (hung up)` (exit 1), or a new call row, means Hail did not drop the call: roll back ([Secret header rollback](#secret-header-rollback)). `INCONCLUSIVE` (exit 2) proves nothing: run it again.
 
 ### Secret header rollback
 

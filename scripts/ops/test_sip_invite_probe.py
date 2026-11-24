@@ -256,3 +256,14 @@ def test_ring_still_passes_a_trunk_refusal() -> None:
     thread.join(3)
     assert code == 0
     assert verdict == "REFUSED: 404 No trunk found"
+
+
+def test_ring_then_closed_connection_is_inconclusive() -> None:
+    """--ring: a ring, then a closed connection, is not proof of an answer."""
+    port, _seen, thread = serve(
+        lambda conn, inv: conn.sendall(_response(inv, 180, "Ringing")) or conn.close()
+    )
+    code, verdict = probe.probe("127.0.0.1", port, NUMBER, timeout=2, ring=True)
+    thread.join(3)
+    assert code == 2
+    assert verdict.startswith("INCONCLUSIVE: the connection failed")
