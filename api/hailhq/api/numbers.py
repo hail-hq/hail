@@ -12,14 +12,14 @@ from typing import Literal
 from uuid import UUID
 
 from hailhq.core.db import org_lock
-from hailhq.core.models import Agent, PhoneNumber
+from hailhq.core.models import Agent, PhoneNumber, SipConnection
 from hailhq.core.sms_registration_gate import (
     approved_registration_ids,
     is_us,
     on_approved_registration,
     registered_sms_number,
 )
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = ["resolve_org_number", "resolve_sms_number"]
@@ -48,7 +48,21 @@ async def resolve_org_number(
     if explicit_e164 is not None:
         stmt = stmt.where(PhoneNumber.e164 == explicit_e164)
     else:
-        stmt = stmt.order_by(PhoneNumber.created_at.asc()).limit(1)
+        # The default caller ID must be a number Hail can dial from: skip a
+        # connected number whose phone system only answers (no outbound trunk).
+        stmt = (
+            stmt.outerjoin(
+                SipConnection, SipConnection.id == PhoneNumber.sip_connection_id
+            )
+            .where(
+                or_(
+                    PhoneNumber.provider != "pbx",
+                    SipConnection.livekit_outbound_trunk_id.is_not(None),
+                )
+            )
+            .order_by(PhoneNumber.created_at.asc())
+            .limit(1)
+        )
     return (await db.execute(stmt)).scalar_one_or_none()
 
 

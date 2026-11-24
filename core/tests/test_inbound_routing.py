@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock
 import pytest
 from hailhq.core import carrier_routing, inbound_routing
 from hailhq.core.config import settings
-from hailhq.core.models import PhoneNumber
+from hailhq.core.models import PhoneNumber, SipConnection
 from hailhq.core.providers.voice.base import CarrierNotConfigured
 from livekit.api import TwirpError
 
@@ -181,6 +181,58 @@ async def test_livekit_failure_undoes_the_carrier_attach(async_session, hooks) -
     hooks["detach"].assert_awaited_once_with("PN1", "+14155550100")
 
 
+async def _pbx_number(session) -> PhoneNumber:
+    org = uuid.uuid4()
+    conn = SipConnection(
+        organization_id=org,
+        label="Main office",
+        inbound_username=f"hail-{uuid.uuid4().hex[:12]}",
+        encrypted_inbound_password="token",
+        default_region="US",
+        livekit_inbound_trunk_id="ST_in_pbx",
+    )
+    session.add(conn)
+    await session.flush()
+    number = PhoneNumber(
+        organization_id=org,
+        e164="+14155550100",
+        country_code="US",
+        number_type="local",
+        capabilities=["voice"],
+        provider="pbx",
+        sip_connection_id=conn.id,
+        provisioning_state="unverified",
+    )
+    session.add(number)
+    await session.flush()
+    return number
+
+
+async def test_register_pbx_skips_carrier_and_adds_to_connection_trunk(
+    async_session, hooks
+) -> None:
+    lk = AsyncMock()
+    number = await _pbx_number(async_session)
+
+    await inbound_routing.register(async_session, lk, number)
+
+    hooks["attach"].assert_not_awaited()
+    lk.add_inbound_number.assert_awaited_once_with("ST_in_pbx", "+14155550100")
+    assert number.inbound_registered_at is not None
+
+
+async def test_unregister_pbx_keeps_number_on_trunk(async_session, hooks) -> None:
+    lk = AsyncMock()
+    number = await _pbx_number(async_session)
+    await inbound_routing.register(async_session, lk, number)
+
+    await inbound_routing.unregister(async_session, lk, number)
+
+    lk.remove_inbound_number.assert_not_awaited()
+    hooks["detach"].assert_not_awaited()
+    assert number.inbound_registered_at is None
+
+
 async def test_unregister_also_clears_the_shared_trunk_while_numbers_move(
     async_session, hooks, monkeypatch
 ) -> None:
@@ -255,3 +307,19 @@ async def test_unregister_after_the_shared_trunk_is_retired(
     await inbound_routing.unregister(async_session, lk, number)
 
     assert number.inbound_registered_at is None
+
+
+async def test_register_pbx_clears_a_stale_shared_entry_first(
+    async_session, hooks, monkeypatch
+) -> None:
+    """A number that was on the shared trunk (it came from a carrier) would
+    make LiveKit refuse the add to the connection trunk."""
+    monkeypatch.setattr(settings, "livekit_sip_inbound_trunk_id", "ST_shared")
+    lk = AsyncMock()
+    number = await _pbx_number(async_session)
+
+    await inbound_routing.register(async_session, lk, number)
+
+    lk.remove_inbound_number.assert_awaited_once_with("ST_shared", "+14155550100")
+    lk.add_inbound_number.assert_awaited_once_with("ST_in_pbx", "+14155550100")
+    hooks["attach"].assert_not_awaited()

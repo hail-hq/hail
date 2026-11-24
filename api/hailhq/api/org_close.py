@@ -10,7 +10,12 @@ step:
    released on a later pass, once the carrier answered. A failed order
    whose carrier number was not given back (``unreleased_resource_id``) is
    given back here too (``retry_release``), so a final refusal is stored.
-2. cancels each carrier registration (number verifications, US texting
+2. removes each connected phone system number (``pbx``) from its trunk and
+   marks it released, then deletes each connection (both trunks), through
+   ``remove_connected_number`` and ``delete_connection``. No carrier is
+   called. Without LiveKit, or when LiveKit fails, the item counts as
+   failed and is retried on the next pass; it is never stored as a refusal.
+3. cancels each carrier registration (number verifications, US texting
    brands and campaigns, toll-free verifications) through ``cancel_locked``
    (the same code as ``DELETE /verifications/{id}``), in any state, with
    the whole filing discarded (no brand kept for a next filing). A
@@ -58,20 +63,21 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from uuid import UUID
 
+from hailhq.api.connected_numbers import delete_connection, remove_connected_number
 from hailhq.api.number_orders import retry_release
 from hailhq.api.routes.numbers import release_org_number
 from hailhq.api.routes.verifications import Registry, cancel_locked
 from hailhq.core.carrier_routing import CARRIERS, carrier_http_status, failure_kind
 from hailhq.core.db import org_lock
 from hailhq.core.livekit import LiveKitClient
-from hailhq.core.models import CarrierVerification, PhoneNumber
+from hailhq.core.models import CarrierVerification, PhoneNumber, SipConnection
 from hailhq.core.providers.verification.base import (
     DiscardRefused,
     counted_discard,
 )
 from hailhq.core.retention import closed_org_ids
 from hailhq.core.sms_trial import registration_trial_number
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -193,7 +199,8 @@ async def _release_numbers(
                 PhoneNumber.organization_id.in_(org_ids),
                 ~PhoneNumber.provisioning_metadata.has_key(RELEASE_REFUSED),
                 or_(
-                    PhoneNumber.provisioning_state == "active",
+                    # unverified: a connected number whose check has not passed.
+                    PhoneNumber.provisioning_state.in_(("active", "unverified")),
                     # A failed order: release_org_number only dismisses it.
                     and_(
                         PhoneNumber.provisioning_state == "failed",
@@ -210,6 +217,33 @@ async def _release_numbers(
         try:
             number = await db.get(PhoneNumber, number_id)
             if number is None:
+                continue
+            if number.provider == "pbx":
+                # Never a carrier call, never a stored refusal: a LiveKit
+                # failure is retried on the next pass.
+                if lk is None:
+                    counts.failed += 1
+                    logger.warning(
+                        "account close: connected number %s (org %s) not "
+                        "removed, LiveKit is not configured; retried next pass",
+                        number_id,
+                        org,
+                    )
+                    continue
+                try:
+                    await remove_connected_number(db, lk, number)
+                except Exception as exc:
+                    await db.rollback()
+                    counts.failed += 1
+                    logger.warning(
+                        "account close: removal of connected number %s "
+                        "(org %s) failed (%s); retried next pass",
+                        number_id,
+                        org,
+                        type(exc).__name__,
+                    )
+                    continue
+                counts.released += 1
                 continue
             if number.provider not in CARRIERS:
                 # release_org_number refuses it (409) on every try.
@@ -254,6 +288,45 @@ async def _release_numbers(
                     org,
                     type(exc).__name__,
                 )
+
+
+async def _delete_connections(
+    db: AsyncSession, org_ids, lk: LiveKitClient | None, counts: CloseCounts
+) -> None:
+    """Delete each phone system connection of the closed orgs that has no
+    live number left. A failure is retried on the next pass."""
+    live_number = exists().where(
+        PhoneNumber.sip_connection_id == SipConnection.id,
+        PhoneNumber.provisioning_state.not_in(("released", "failed")),
+    )
+    rows = (
+        await db.execute(
+            select(SipConnection.id, SipConnection.organization_id).where(
+                SipConnection.organization_id.in_(org_ids),
+                SipConnection.deleted_at.is_(None),
+                ~live_number,
+            )
+        )
+    ).all()
+    await db.commit()
+    for conn_id, org in rows:
+        try:
+            if lk is None:
+                raise RuntimeError("LiveKit is not configured")
+            conn = await db.get(SipConnection, conn_id)
+            if conn is None:
+                continue
+            await delete_connection(db, lk, conn)
+        except Exception as exc:
+            await db.rollback()
+            counts.failed += 1
+            logger.warning(
+                "account close: delete of connection %s (org %s) failed "
+                "(%s); retried next pass",
+                conn_id,
+                org,
+                type(exc).__name__,
+            )
 
 
 async def _store_release_refusal(
@@ -452,6 +525,7 @@ async def close_org_carrier_items(
     # A subquery, not a list: org_closures only grows.
     org_ids = closed_org_ids(now, organization_id)
     await _release_numbers(db, org_ids, now, lk, counts)
+    await _delete_connections(db, org_ids, lk, counts)
     await _cancel_registrations(db, org_ids, now, registry, counts)
     if any(counts.as_dict().values()):
         logger.info("account close: %s", counts.as_dict())

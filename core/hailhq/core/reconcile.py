@@ -33,6 +33,7 @@ from hailhq.core.call_failures import call_failure_message
 from hailhq.core.handover import ANSWERED_HANDOVER_SQL, HANDOVER_BACKSTOP_SECONDS
 from hailhq.core.models import Call, CallEvent
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
+from hailhq.core.sip_connections import CHECK_CALL_META
 from hailhq.core.threads import requeue_skipped_for_call
 from hailhq.core.webhook_fanout import fanout_call_event
 from sqlalchemy import bindparam, func, text, update
@@ -114,7 +115,8 @@ async def sweep_stale_calls(
 
     select_stmt = text(f"""
         SELECT c.id, c.status, c.organization_id,
-               c.direction, c.from_e164, c.to_e164, c.agent_id
+               c.direction, c.from_e164, c.to_e164, c.agent_id,
+               c.metadata ->> :check_key IS NOT NULL AS is_check
           FROM calls c
          WHERE c.transport = 'phone' AND c.status NOT IN :terminal_statuses
            AND c.max_duration_seconds IS NOT NULL
@@ -136,6 +138,7 @@ async def sweep_stale_calls(
                 "grace_s": grace_seconds,
                 "backstop_s": HANDOVER_BACKSTOP_SECONDS,
                 "terminal_statuses": list(TERMINAL_CALL_STATUSES),
+                "check_key": CHECK_CALL_META,
             },
         )
     ).fetchall()
@@ -160,6 +163,7 @@ async def sweep_stale_calls(
         from_e164,
         to_e164,
         agent_id,
+        is_check,
     ) in rows:
         session.add(
             CallEvent(
@@ -172,24 +176,27 @@ async def sweep_stale_calls(
                 },
             )
         )
-        await fanout_call_event(
-            session,
-            organization_id=organization_id,
-            event_type="call.failed",
-            event_id=call_id,
-            data={
-                "id": str(call_id),
-                "status": "failed",
-                "direction": direction,
-                "from": from_e164,
-                "to": to_e164,
-                "agent_id": str(agent_id) if agent_id else None,
-                "end_reason": CallEndReason.SWEEPER_TIMEOUT.value,
-                "failure_message": call_failure_message(
-                    "failed", {}, CallEndReason.SWEEPER_TIMEOUT.value
-                ),
-            },
-        )
+        # An ownership check call is Hail's own: no customer webhook. Hail
+        # sets the key; POST /calls refuses pbx_check_ keys.
+        if not is_check:
+            await fanout_call_event(
+                session,
+                organization_id=organization_id,
+                event_type="call.failed",
+                event_id=call_id,
+                data={
+                    "id": str(call_id),
+                    "status": "failed",
+                    "direction": direction,
+                    "from": from_e164,
+                    "to": to_e164,
+                    "agent_id": str(agent_id) if agent_id else None,
+                    "end_reason": CallEndReason.SWEEPER_TIMEOUT.value,
+                    "failure_message": call_failure_message(
+                        "failed", {}, CallEndReason.SWEEPER_TIMEOUT.value
+                    ),
+                },
+            )
         if agent_id is not None:
             # Texts skipped for this call never reached the voice agent.
             call = await session.get(Call, call_id)

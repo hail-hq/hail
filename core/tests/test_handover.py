@@ -270,6 +270,7 @@ async def test_replace_and_load_mixed(async_session) -> None:
             "name": "Sam",
             "phone_e164": "+14155550126",
             "email": m.email,
+            "extension": None,
             "note": "first",
         },
         {
@@ -277,6 +278,7 @@ async def test_replace_and_load_mixed(async_session) -> None:
             "name": "Person 0",
             "phone_e164": "+14155550125",
             "email": c.email,
+            "extension": None,
             "note": "second",
         },
     ]
@@ -416,3 +418,83 @@ def test_handover_sms_text_drops_links() -> None:
     assert "evil" not in text
     long = handover_sms_text("Desk", None, "x" * 500)
     assert long.count("x") == 120
+
+
+async def _ext_contact(s, org, name, *, extension=None, phone=None, email=None):
+    c = Contact(
+        organization_id=org,
+        name=name,
+        phone_e164=phone,
+        email=email,
+        extension=extension,
+    )
+    s.add(c)
+    await s.flush()
+    return c
+
+
+async def test_extension_contact_offered_only_on_pbx_call(async_session) -> None:
+    org, agent, _ = await _agent_and_contacts(async_session)
+    line = await _ext_contact(async_session, org, "Support line", extension="800")
+    await replace_handover(async_session, agent.id, [HandoverItem(str(line.id), "x")])
+    assert await handover_targets(async_session, agent.id) == []
+    targets = await handover_targets(async_session, agent.id, via_pbx=True)
+    assert [t["label"] for t in targets] == ["Support line"]
+    assert "800" not in repr(targets)
+
+
+async def test_load_handover_rows_carry_extension(async_session) -> None:
+    org, agent, (a,) = await _agent_and_contacts(async_session, "+14155550101")
+    line = await _ext_contact(async_session, org, "Support line", extension="800")
+    await replace_handover(
+        async_session,
+        agent.id,
+        [HandoverItem(str(a.id), "x"), HandoverItem(str(line.id), "y")],
+    )
+    rows = (await load_handover(async_session, [agent.id]))[agent.id]
+    assert [r["extension"] for r in rows] == [None, "800"]
+
+
+async def test_extension_on_the_line_is_flagged(async_session) -> None:
+    org, agent, _ = await _agent_and_contacts(async_session)
+    line = await _ext_contact(async_session, org, "Support line", extension="800")
+    await replace_handover(async_session, agent.id, [HandoverItem(str(line.id), "x")])
+    t = await handover_targets(async_session, agent.id, "800", via_pbx=True)
+    assert t[0]["on_call"] is True
+    t = await handover_targets(async_session, agent.id, "801", via_pbx=True)
+    assert "on_call" not in t[0]
+
+
+async def test_validate_accepts_extension_only_contact(
+    async_session, monkeypatch
+) -> None:
+    from unittest.mock import AsyncMock
+
+    from hailhq.core import handover
+
+    gate = AsyncMock(side_effect=AssertionError("gate must not run"))
+    monkeypatch.setattr(handover, "check_handover_allowed", gate)
+    org, _, _ = await _agent_and_contacts(async_session)
+    line = await _ext_contact(async_session, org, "Support line", extension="800")
+    await validate_handover(async_session, org, [HandoverItem(str(line.id), "x")])
+    gate.assert_not_awaited()
+
+
+async def test_validate_still_checks_phone_of_contact_with_extension(
+    async_session,
+) -> None:
+    org, _, _ = await _agent_and_contacts(async_session)
+    c = await _ext_contact(
+        async_session, org, "Desk", extension="800", phone="+999123456789"
+    )
+    with pytest.raises(HandoverInvalid, match="country Hail does not call"):
+        await validate_handover(async_session, org, [HandoverItem(str(c.id), "x")])
+
+
+async def test_validate_refuses_contact_without_phone_or_extension(
+    async_session,
+) -> None:
+    org, _, _ = await _agent_and_contacts(async_session)
+    c = await _ext_contact(async_session, org, "Mail only", email="m@example.com")
+    with pytest.raises(HandoverInvalid, match="has no phone number or extension$"):
+        await validate_handover(async_session, org, [HandoverItem(str(c.id), "x")])

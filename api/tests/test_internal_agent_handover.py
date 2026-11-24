@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import json
 import uuid
+from unittest.mock import AsyncMock
 
 import pytest
 from hailhq.core import hmac_signing
 from hailhq.core.billing import CALL_META_BILLED
-from hailhq.core.compliance_gate import add_suppression
+from hailhq.core.compliance_gate import GateResult, add_suppression
 from hailhq.core.config import settings
+from hailhq.core.handover import ON_CALL_LINE
 from hailhq.core.models import (
+    AccountCredit,
     Agent,
     AgentHandoverContact,
     AuditLog,
@@ -20,6 +23,7 @@ from hailhq.core.models import (
     Email,
     EmailDomain,
     PhoneNumber,
+    SipConnection,
     Sms,
     UsageEvent,
     WebhookDelivery,
@@ -959,3 +963,241 @@ async def test_result_follow_up_records_the_finished_notices(
         .all()
     )
     assert len(deliveries) <= 1
+
+
+# --- connected calls: handover through the phone system --------------------
+
+AGENT_MODULE = "hailhq.api.routes.internal.agent"
+
+
+async def _seed_pbx(
+    s,
+    *,
+    caller="+14155550199",
+    extension="800",
+    phone=None,
+    trunk="ST_out_pbx",
+    provider="pbx",
+    billed=False,
+):
+    """An inbound call to ``+14155550100`` from ``caller``, on a connected
+    number (``provider="pbx"``) or a carrier number, handed to one contact."""
+    org = uuid.uuid4()
+    conn = SipConnection(
+        organization_id=org,
+        label="Main office",
+        inbound_username="hail-" + uuid.uuid4().hex[:12],
+        encrypted_inbound_password="token",
+        default_region="US",
+        pbx_host="pbx.example.com" if trunk else None,
+        livekit_outbound_trunk_id=trunk,
+    )
+    agent = Agent(organization_id=org, name="Desk", system_prompt="Help.")
+    contact = Contact(
+        organization_id=org, name="Support line", phone_e164=phone, extension=extension
+    )
+    s.add_all([conn, agent, contact])
+    if billed:
+        s.add(
+            AccountCredit(
+                organization_id=org,
+                kind="credit",
+                channel="credit",
+                amount_cents=10_000,
+                source="test",
+                ref="test",
+            )
+        )
+    await s.flush()
+    s.add(
+        AgentHandoverContact(
+            agent_id=agent.id, contact_id=contact.id, note="Front desk", position=0
+        )
+    )
+    pbx = provider == "pbx"
+    number = PhoneNumber(
+        organization_id=org,
+        e164="+14155550100",
+        country_code="US",
+        number_type="local",
+        capabilities=["voice"] if pbx else ["voice", "sms"],
+        provider=provider,
+        provider_resource_id=None if pbx else "PN_test",
+        provisioning_state="active",
+        sip_connection_id=conn.id if pbx else None,
+    )
+    s.add(number)
+    await s.flush()
+    call = Call(
+        organization_id=org,
+        direction="inbound",
+        to_number_id=number.id,
+        from_e164=caller,
+        to_e164=number.e164,
+        status="in_progress",
+        agent_id=agent.id,
+        provider=provider,
+        voice_config={},
+        metadata_={CALL_META_BILLED: True} if billed else {},
+    )
+    s.add(call)
+    await s.commit()
+    return call, contact
+
+
+async def _post_handover(client, call, contact):
+    return await _post(
+        client,
+        "/internal/agent/handover",
+        {"call_id": str(call.id), "contact_id": str(contact.id)},
+    )
+
+
+async def _block_reason(s, call) -> str:
+    audit = (
+        await s.execute(
+            select(AuditLog).where(
+                AuditLog.resource_id == call.id,
+                AuditLog.action == "agent.handover.blocked",
+            )
+        )
+    ).scalar_one()
+    return audit.payload["reason"]
+
+
+@pytest.fixture()
+def gate_mock(monkeypatch):
+    mock = AsyncMock(return_value=GateResult(allowed=True))
+    monkeypatch.setattr(f"{AGENT_MODULE}.check_handover_allowed", mock)
+    return mock
+
+
+async def test_handover_to_extension_on_pbx_call(client, async_session):
+    call, contact = await _seed_pbx(async_session)
+    body = (await _post_handover(client, call, contact)).json()
+    assert body["ok"] is True
+    assert body["to_e164"] == "800"
+    assert body["from_e164"] == "+14155550199"  # the original caller
+    assert body["trunk_id"] == "ST_out_pbx"
+    assert body["headers"] is None
+
+
+@pytest.mark.parametrize("allowed", [False, True])
+async def test_handover_to_phone_on_pbx_call_keeps_gate(
+    client, async_session, gate_mock, allowed
+):
+    call, contact = await _seed_pbx(async_session, extension=None, phone="+14155550123")
+    gate_mock.return_value = GateResult(allowed=allowed, reason="suppressed")
+    body = (await _post_handover(client, call, contact)).json()
+    assert body["ok"] is allowed
+    gate_mock.assert_awaited_once()
+    assert gate_mock.await_args.args[2] == "+14155550123"
+    if allowed:
+        assert body["to_e164"] == "+14155550123"
+        assert body["from_e164"] == "+14155550199"
+        assert body["trunk_id"] == "ST_out_pbx"
+    else:
+        assert await _block_reason(async_session, call) == "suppressed"
+
+
+async def test_handover_to_contact_with_phone_and_extension_dials_extension(
+    client, async_session, gate_mock
+):
+    call, contact = await _seed_pbx(async_session, phone="+14155550123")
+    body = (await _post_handover(client, call, contact)).json()
+    assert body["ok"] is True
+    assert body["to_e164"] == "800"
+    gate_mock.assert_not_awaited()
+
+
+async def test_handover_refuses_extension_on_the_line(client, async_session):
+    call, contact = await _seed_pbx(async_session, caller="101", extension="101")
+    body = (await _post_handover(client, call, contact)).json()
+    assert body["ok"] is False
+    assert body["spoken"] == ON_CALL_LINE.format(name="Support line")
+    assert await _block_reason(async_session, call) == "contact_is_on_call"
+
+
+async def test_handover_from_extension_caller_keeps_extension(client, async_session):
+    call, contact = await _seed_pbx(async_session, caller="101")
+    assert (await _post_handover(client, call, contact)).json()["from_e164"] == "101"
+
+
+@pytest.mark.parametrize(
+    "caller", ["anonymous", "", "sip:101@pbx.example.com", "1234567", "+0123"]
+)
+async def test_handover_from_anonymous_caller_uses_hail_number(
+    client, async_session, caller
+):
+    call, contact = await _seed_pbx(async_session, caller=caller)
+    body = (await _post_handover(client, call, contact)).json()
+    assert body["ok"] is True
+    assert body["from_e164"] == "+14155550100"
+
+
+async def test_handover_without_pbx_host_is_denied(client, async_session):
+    call, contact = await _seed_pbx(async_session, trunk=None)
+    body = (await _post_handover(client, call, contact)).json()
+    assert body["ok"] is False
+    assert body.get("trunk_id") is None
+    assert await _block_reason(async_session, call) == "carrier_route_failed"
+
+
+async def test_extension_contact_denied_on_carrier_call(client, async_session):
+    call, contact = await _seed_pbx(async_session, provider="twilio")
+    body = (await _post_handover(client, call, contact)).json()
+    assert body["ok"] is False
+    assert body.get("trunk_id") is None
+
+
+async def test_carrier_call_dials_the_phone_of_a_contact_with_an_extension(
+    client, async_session
+):
+    call, contact = await _seed_pbx(
+        async_session, provider="twilio", phone="+14155550123"
+    )
+    body = (await _post_handover(client, call, contact)).json()
+    assert body["ok"] is True
+    assert body["to_e164"] == "+14155550123"
+    assert body["from_e164"] == "+14155550100"  # the Hail number, as before
+    assert body["trunk_id"] == "ST_out_tw"
+
+
+async def test_handover_quote_on_pbx_call_sends_two_pbx_legs(
+    client, async_session, monkeypatch
+):
+    quote_mock = AsyncMock(return_value=None)
+    monkeypatch.setattr(f"{AGENT_MODULE}.quote_call_price", quote_mock)
+    monkeypatch.setattr(f"{AGENT_MODULE}.quotes_enabled", lambda: True)
+    call, contact = await _seed_pbx(async_session, billed=True)
+    assert (await _post_handover(client, call, contact)).json()["ok"] is True
+    legs = max((c.args[1] for c in quote_mock.await_args_list), key=len)
+    assert [(leg["direction"], leg["carrier"], leg["number_e164"]) for leg in legs] == [
+        ("inbound", "pbx", "+14155550100"),
+        ("outbound", "pbx", "800"),
+    ]
+
+
+# Passes before and after the connected-number handover (the route already
+# skips a contact with no phone). Kept as a regression test.
+async def test_handover_notice_to_extension_contact_skips_text(
+    client, async_session, sms_mock
+):
+    call, contact = await _seed_pbx(async_session)
+    r = await _post(client, "/internal/agent/handover-sms", _sms_payload(call, contact))
+    assert r.json() == {"sms": "skipped:no_contact"}
+    sms_mock.send_sms.assert_not_awaited()
+
+
+@pytest.mark.parametrize("value", ["101", "+14155550100", "123456"])
+def test_pbx_caller_id_accepts_ascii_digits(value):
+    from hailhq.api.routes.internal.agent import _PBX_CALLER_ID
+
+    assert _PBX_CALLER_ID.fullmatch(value)
+
+
+@pytest.mark.parametrize("value", ["١٠١", "+١٤١٥٥٥٥٠١٠٠", "1234567"])
+def test_pbx_caller_id_refuses_other_digits(value):
+    from hailhq.api.routes.internal.agent import _PBX_CALLER_ID
+
+    assert not _PBX_CALLER_ID.fullmatch(value)

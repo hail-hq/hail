@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
-from hailhq.core.carrier_routing import carrier
+from hailhq.core.carrier_routing import PBX, carrier, inbound_trunk
 from hailhq.core.config import settings
 from hailhq.core.livekit import LiveKitClient
 from hailhq.core.models import PhoneNumber
@@ -41,17 +41,20 @@ async def register(db: AsyncSession, lk: LiveKitClient, number: PhoneNumber) -> 
     """Idempotent: a registered number returns at once."""
     if number.inbound_registered_at is not None:
         return
-    entry = carrier(number.provider)
     try:
-        trunk_id = entry.inbound_trunk()
+        trunk_id = await inbound_trunk(db, number)
     except ValueError as exc:
         raise InboundRoutingError("livekit_add", exc, config=True) from exc
-    try:
-        await entry.attach_inbound(number.provider_resource_id, number.e164)
-    except Exception as exc:
-        raise InboundRoutingError(
-            "carrier_attach", exc, config=_is_config_error(exc)
-        ) from exc
+    # A connected number has no carrier: the customer's phone system sends
+    # the call straight to Hail's trunk for that connection.
+    entry = None if number.provider == PBX else carrier(number.provider)
+    if entry is not None:
+        try:
+            await entry.attach_inbound(number.provider_resource_id, number.e164)
+        except Exception as exc:
+            raise InboundRoutingError(
+                "carrier_attach", exc, config=_is_config_error(exc)
+            ) from exc
     try:
         # A stale entry on the shared trunk would make LiveKit refuse the add
         # (a number is listed on one trunk only). Best effort: a shared-trunk
@@ -68,14 +71,15 @@ async def register(db: AsyncSession, lk: LiveKitClient, number: PhoneNumber) -> 
     except Exception as exc:
         # Do not leave the carrier pointing at a LiveKit trunk that refuses
         # the number: callers would hear a failure tone until someone retries.
-        try:
-            await entry.detach_inbound(number.provider_resource_id, number.e164)
-        except Exception:
-            logger.warning(
-                "number %s: carrier detach after LiveKit failure also failed",
-                number.e164,
-                exc_info=True,
-            )
+        if entry is not None:
+            try:
+                await entry.detach_inbound(number.provider_resource_id, number.e164)
+            except Exception:
+                logger.warning(
+                    "number %s: carrier detach after LiveKit failure also failed",
+                    number.e164,
+                    exc_info=True,
+                )
         raise InboundRoutingError("livekit_add", exc) from exc
     number.inbound_registered_at = datetime.now(timezone.utc)
     await db.flush()
@@ -84,6 +88,14 @@ async def register(db: AsyncSession, lk: LiveKitClient, number: PhoneNumber) -> 
 async def unregister(db: AsyncSession, lk: LiveKitClient, number: PhoneNumber) -> None:
     """Idempotent: an unregistered number returns at once."""
     if number.inbound_registered_at is None:
+        return
+    if number.provider == PBX:
+        # The number stays on its connection trunk while the row is
+        # ``unverified`` or ``active``: a call then reaches Hail and gets a
+        # ``no_agent`` refusal the customer can see. The trunk never goes
+        # empty (an empty list would accept any number).
+        number.inbound_registered_at = None
+        await db.flush()
         return
     entry = carrier(number.provider)
     try:

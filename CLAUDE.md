@@ -90,7 +90,8 @@ Internal runbooks (not published) live in `docs/operations/`:
 [call-record-deletion.md](docs/operations/call-record-deletion.md) (deleting one call, its recording and its charges from a workspace),
 [voice-llm.md](docs/operations/voice-llm.md) (the house LLM chain, Bedrock access and model ids),
 [inbound-trunk-lockdown.md](docs/operations/inbound-trunk-lockdown.md) (one LiveKit inbound trunk per carrier, locked by IP or password, plus the Twilio secret header; cutover, negative test, weekly IP check),
-[sms-trial-numbers.md](docs/operations/sms-trial-numbers.md) (the pool numbers that send US trial texts: mark, unmark, move, readiness).
+[sms-trial-numbers.md](docs/operations/sms-trial-numbers.md) (the pool numbers that send US trial texts: mark, unmark, move, readiness),
+[connected-numbers.md](docs/operations/connected-numbers.md) (a customer's phone system on its own LiveKit trunks: ops commands, dispatch rule, ownership check).
 
 ## Order of work
 

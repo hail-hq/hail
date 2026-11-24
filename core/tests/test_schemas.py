@@ -312,3 +312,18 @@ def test_email_create_strips_from_name_before_length_check() -> None:
         recipient_consent=True,
     )
     assert email.from_name == "Acme"
+
+
+@pytest.mark.parametrize(
+    "key", ["pbx_check_number_id", "pbx_check_code_sha256", "pbx_check_anything"]
+)
+def test_call_create_rejects_pbx_check_metadata(key):
+    """Ownership check calls are found by these keys: a caller (API or MCP)
+    must not be able to plant them."""
+    with pytest.raises(ValidationError, match="reserved"):
+        CallCreate(
+            to="+14155551234",
+            system_prompt="Hi",
+            recipient_consent=True,
+            metadata={key: "x"},
+        )

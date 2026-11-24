@@ -96,8 +96,10 @@ def _capability_fees(path: Path) -> tuple[dict, ...]:
 
 
 def _sms_route_exists(provider: str) -> bool:
-    from hailhq.core.carrier_routing import CARRIERS
+    from hailhq.core.carrier_routing import CARRIERS, PBX
 
+    if provider == PBX:
+        return False
     return provider not in CARRIERS or CARRIERS[provider].sms_route is not None
 
 
