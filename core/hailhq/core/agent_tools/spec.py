@@ -11,10 +11,11 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Literal
 
 from hailhq.core.agent_tools.client import AgentApiClient
+from hailhq.core.prompts import fit_to_tools
 from hailhq.core.threads import ThreadScope
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -119,6 +120,23 @@ class ToolSpec:
     on_every_call: bool = False
 
 
+def fit_descriptions(specs: list[ToolSpec]) -> list[ToolSpec]:
+    """``specs`` with each Hail-written description fitted to the tools in
+    ``specs`` (see :func:`hailhq.core.prompts.fit_to_tools`): a description
+    that names a tool the run lacks makes the model write that name as text.
+    A customer's HTTP tool (``customer_api``) keeps its description as
+    written."""
+    names = [s.name for s in specs]
+    return [
+        (
+            s
+            if s.risk_tier == "customer_api"
+            else replace(s, description=fit_to_tools(s.description, names))
+        )
+        for s in specs
+    ]
+
+
 __all__ = [
     "NO_CALL",
     "SPOKEN_FALLBACK",
@@ -127,4 +145,5 @@ __all__ = [
     "RiskTier",
     "ToolContext",
     "ToolSpec",
+    "fit_descriptions",
 ]

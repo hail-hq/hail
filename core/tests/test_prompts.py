@@ -3,7 +3,9 @@ from datetime import datetime, timezone
 
 import pytest
 from hailhq.core import prompts
+from hailhq.core.agent_tools import list_contacts, read_email, send_email, send_sms
 from hailhq.core.agent_tools.send_email import SELF_RECIPIENT
+from hailhq.core.agent_tools.spec import fit_descriptions
 
 
 def test_framing_leads_and_instructions_follow() -> None:
@@ -345,3 +347,38 @@ def test_onboarding_voice_help_names_the_optional_trial_settings():
     assert "Language and voice" in guide
     assert "without leaving the trial" in guide
     assert "next conversation" in guide
+
+
+_EMAIL_RUN_SPECS = (
+    read_email.SPEC,
+    list_contacts.EMAIL_RUN_SPEC,
+    send_email.EMAIL_RUN_SPEC,
+    send_sms.EMAIL_RUN_SPEC,
+)
+_EMAIL_RUN_NAMES = [s.name for s in _EMAIL_RUN_SPECS]
+
+
+@pytest.mark.parametrize(
+    "have",
+    [
+        [],  # a retry after a send gets no tools
+        *[[n for n in _EMAIL_RUN_NAMES if n != gone] for gone in _EMAIL_RUN_NAMES],
+    ],
+)
+def test_email_reply_names_no_tool_the_run_lacks(have):
+    """The email prompt and the run's tool descriptions name only tools the
+    run has: a missing tool's name would end up in the reply as text."""
+    specs = fit_descriptions([s for s in _EMAIL_RUN_SPECS if s.name in have])
+    texts = [
+        prompts.build_email_instructions("Answer mail.", tool_names=have),
+        *(s.description for s in specs),
+    ]
+    for text in texts:
+        for name in set(_EMAIL_RUN_NAMES) - set(have):
+            assert name not in text, (name, text[:80])
+
+
+def test_email_reply_with_every_tool_is_unchanged():
+    assert prompts.build_email_instructions(
+        "Answer mail.", tool_names=_EMAIL_RUN_NAMES
+    ) == prompts.build_email_instructions("Answer mail.")

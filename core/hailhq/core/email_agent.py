@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import re
 import uuid
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
@@ -838,16 +839,22 @@ def build_chat_messages(
     trust: SenderTrust,
     sends_tried: bool = False,
     clock: str | None = None,
+    tool_names: Collection[str] | None = None,
 ) -> list[dict[str, Any]]:
     """OpenAI-style messages: the system message, then the thread. Mail from
     people is ``user``, labeled so the model reads it as mail, and only an
     agent's own replies are ``assistant``. ``sends_tried`` means an earlier
-    attempt at this reply used the send tools, and the chat does not show them."""
+    attempt at this reply used the send tools, and the chat does not show them.
+    ``tool_names`` are the run's tools, so the prompt names no other."""
     messages: list[dict[str, Any]] = [
         {
             "role": "system",
             "content": build_email_instructions(
-                agent.system_prompt, trust=trust, sends_tried=sends_tried, clock=clock
+                agent.system_prompt,
+                trust=trust,
+                sends_tried=sends_tried,
+                clock=clock,
+                tool_names=tool_names,
             ),
         }
     ]
