@@ -6,7 +6,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Changed
 
-- Outbound calls open with one greeting: a hello at the start of the agent's greeting (`first_message`) is dropped after the AI line.
+- Calls open with one greeting: after the AI line, the agent says its greeting in its own words, without saying hello twice.
 
 ## [0.38.0] (2026-11-24)
 

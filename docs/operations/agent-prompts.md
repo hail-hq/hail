@@ -47,34 +47,14 @@ Live behavior needs a separately authorized test call or a synthetic model evalu
 
 ## Opening line
 
-On outbound calls, Hail says the AI notice, then the agent's greeting
-(`first_message`, "Greeting" in the console). A hello at the start of the
-greeting ("Hi,", "Guten Tag,") is dropped, so the caller hears one greeting.
-The notice stays fixed and first.
-
-How it works:
-
-- While the phone rings, Hail's own model copies out the hello that opens
-  the greeting (`OPENING_FIT_INSTRUCTIONS` in `core/hailhq/core/prompts.py`).
-- Code cuts it (`cut_greeting`) only when the greeting starts with exactly
-  that text, the hello is short, and a sentence mark and a space follow it.
-- So "Morning Glory Florist", "Hi-Tech Dental" and "Hello.io" are never cut.
-- The rest of the line is said as written; only its first letter is
-  capitalized, by the call's language.
-- The model never writes the line, so it cannot reword or flip a sentence.
-  A free rewrite could do both, and no check can catch that.
-- The model decides what counts as a hello, and code cannot check it. A model
-  mistake can drop up to three opening words, such as a name.
-- The greeting uses the answer only if it is ready at pickup. It never waits,
-  and a late answer is cancelled.
-
-Skipped, so the greeting is said whole:
-
-- a workspace that uses its own model: call content stays off Hail's models;
-- a custom AI line: it may not greet (one Hail replaces with the built-in
-  line, because it opened with "[", "{" or a backtick, counts as built-in);
-- inbound calls: the caller is already on the line, and the default inbound
-  greeting holds the AI line inside it.
+Hail says the AI notice word for word, then the agent's model says the
+greeting (`first_message`, "Greeting" in the console) in its own words. The
+two sound like one greeting, so the caller is not greeted twice. The
+instruction is `first_message_instructions` in
+`voicebot/hailhq/voicebot/agent.py`. On the phone-menu path the two are
+joined as written, because the turn loop is already answering a person.
+An inbound agent with the default AI line keeps one literal greeting, with
+the AI line inside it.
 
 ## Closing calls
 

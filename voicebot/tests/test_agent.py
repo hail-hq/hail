@@ -31,7 +31,6 @@ from hailhq.core.prompts import (
     fit_to_tools,
     other_party_section,
 )
-from hailhq.voicebot import agent as agent_mod
 from hailhq.voicebot.agent import (
     AI_DISCLOSURE_LINE,
     SIP_CALL_STATUS_ACTIVE,
@@ -42,10 +41,9 @@ from hailhq.voicebot.agent import (
     attach_event_handlers,
     build_instructions,
     build_tools_safely,
-    cut_greeting,
     disconnect_reason_to_status,
     entrypoint,
-    fitted_first_line,
+    first_message_instructions,
     handle_sip_disconnect,
     is_sip_answer_signal,
     make_agent_bridge,
@@ -56,11 +54,9 @@ from hailhq.voicebot.agent import (
     on_call_end,
     opening_instructions,
     parse_metadata,
-    sentence_start,
     soft_cap_announce_and_hangup,
     speak_greeting,
     speech_text,
-    start_first_line_fit,
 )
 from hailhq.voicebot.amd import IVR_TOOL_LINES, ivr_navigation_instructions
 from hailhq.voicebot.spoken_lines import SPOKEN_LINES
@@ -84,6 +80,7 @@ CALL_ID = UUID("22222222-3333-4444-5555-666666666666")
 @pytest.fixture(autouse=True)
 def _short_handover_settle(monkeypatch):
     """The bridge waits HANDOVER_SETTLE_SECONDS after the contact speaks."""
+    from hailhq.voicebot import agent as agent_mod
 
     monkeypatch.setattr(agent_mod, "HANDOVER_SETTLE_SECONDS", 0.05)
 
@@ -304,6 +301,7 @@ async def test_entrypoint_org_config_load_failure_finalizes_cleanly(
     a HAIL_PROVIDER_SECRET_KEY rotation invalidating stored ciphertext) must
     fail fast as provider_key_error (finalizing the Call row via on_call_end)
     and must NOT propagate raw out of entrypoint() and leak the number."""
+    from hailhq.voicebot import agent as agent_mod
 
     org_id = UUID("11111111-2222-3333-4444-555555555555")
     call_id = await _make_call_row(async_session)
@@ -1079,279 +1077,12 @@ async def test_speak_greeting_speaks_disclosure_before_first_message() -> None:
 
     await speak_greeting(session, {"first_message": "Hi, calling about your order."})
 
-    assert session.say_calls == [
-        (f"{AI_DISCLOSURE_LINE} Hi, calling about your order.", True)
-    ]
-
-
-async def test_speak_greeting_says_the_fitted_line_after_the_disclosure() -> None:
-    """The fitted first line follows the disclosure, which stays first and
-    unchanged."""
-    session = FakeAnnouncingSession()
-    fitted = asyncio.get_running_loop().create_future()
-    fitted.set_result("Calling about your order.")
-
-    await speak_greeting(
-        session,
-        {"first_message": "Hi, calling about your order."},
-        first_line=fitted,
-    )
-
-    assert session.say_calls == [
-        (f"{AI_DISCLOSURE_LINE} Calling about your order.", True)
-    ]
-
-
-@pytest.mark.parametrize(
-    ("text", "language", "expected"),
-    [
-        ("calling about your order.", None, "Calling about your order."),
-        ("¿es un buen momento?", "es", "¿Es un buen momento?"),
-        ("iyi günler.", "tr", "İyi günler."),
-        ("iyi günler.", "en", "Iyi günler."),
-        ("iPhone repair here.", None, "iPhone repair here."),
-        ("macOS users wanted.", None, "macOS users wanted."),
-        ("我们是关于您明天的预约。", "zh", "我们是关于您明天的预约。"),
-    ],
-)
-def test_sentence_start_capitalizes_one_letter(text, language, expected):
-    assert sentence_start(text, language) == expected
-
-
-async def test_speak_greeting_capitalizes_only_a_cut_line() -> None:
-    session = FakeAnnouncingSession()
-    fitted = asyncio.get_running_loop().create_future()
-    fitted.set_result("calling about your order.")
-    await speak_greeting(
-        session, {"first_message": "Hi, calling about your order."}, first_line=fitted
-    )
-    assert session.say_calls == [
-        (f"{AI_DISCLOSURE_LINE} Calling about your order.", True)
-    ]
-
-    session = FakeAnnouncingSession()
-    await speak_greeting(session, {"first_message": "hey there."})
-    assert session.say_calls == [(f"{AI_DISCLOSURE_LINE} hey there.", True)]
-
-
-async def test_speak_greeting_never_waits_and_cancels_a_late_fit() -> None:
-    """A fit not ready at pickup leaves the line as written, with no wait,
-    and the fit is cancelled so its answer is not paid for in vain."""
-    session = FakeAnnouncingSession()
-    late = asyncio.get_running_loop().create_future()
-
-    await speak_greeting(
-        session, {"first_message": "Hi, calling about your order."}, first_line=late
-    )
-
-    assert session.say_calls == [
-        (f"{AI_DISCLOSURE_LINE} Hi, calling about your order.", True)
-    ]
-    assert late.cancelled()
-
-
-@pytest.mark.parametrize(
-    ("first", "greeting", "expected"),
-    [
-        ("Hi, calling about your order.", "Hi", "calling about your order."),
-        ("Hello there! Is now a good time?", "Hello there", "Is now a good time?"),
-        (
-            "Guten Tag, hier ist Northgate Dental.",
-            "Guten Tag",
-            "hier ist Northgate Dental.",
-        ),
-        ("早上好，我们是关于您明天的预约。", "早上好", "我们是关于您明天的预约。"),
-        ("Hi-ya, calling about your order.", "Hi-ya", "calling about your order."),
-        ("¡Hola! ¿Es un buen momento?", "Hola", "¿Es un buen momento?"),
-        ("Grüß Gott, hier ist Sam.", "grüß gott", "hier ist Sam."),
-        # A hyphen, apostrophe or other mark does not end a greeting.
-        ("Hi-Tech Dental here, calling.", "Hi", "Hi-Tech Dental here, calling."),
-        ("Hi-ya, calling.", "Hi", "Hi-ya, calling."),
-        # Marks that are content stay: only sentence marks go with the hello.
-        ("Hi, #1 rated clinic calling.", "Hi", "#1 rated clinic calling."),
-        ("Hi, -20% on your next visit.", "Hi", "-20% on your next visit."),
-        # A greeting written without spaces is capped: 16 letters or 5 wide
-        # characters.
-        ("こんにちは、Samさん。", "こんにちは", "Samさん。"),
-        ("おはようございます、Samさん。", "おはようございます", "Samさん。"),
-        (
-            "안녕하십니까, 예약 건으로 전화드렸습니다.",
-            "안녕하십니까",
-            "예약 건으로 전화드렸습니다.",
-        ),
-        ("G'day, calling about your order.", "G'day", "calling about your order."),
-        # A mark followed by a letter is inside a name, not after a hello.
-        ("Hello.io here about your demo.", "Hello", "Hello.io here about your demo."),
-        # More than 4 Chinese characters: a self-introduction, not a greeting.
-        (
-            "您好我是小李，关于您的预约。",
-            "您好我是小李",
-            "您好我是小李，关于您的预约。",
-        ),
-        (
-            "您好我是北方牙科的小李，关于您明天的预约。",
-            "您好我是北方牙科的小李",
-            "您好我是北方牙科的小李，关于您明天的预约。",
-        ),
-        ("Hello? Is this Sam?", "Hello", "Is this Sam?"),
-        ("Hi… calling about your order.", "Hi", "calling about your order."),
-        ("Hola, ¿es un buen momento?", "Hola", "¿es un buen momento?"),
-        # The rest keeps its own letters: Turkish "iyi" must not become "Iyi".
-        ("Merhaba, iyi günler.", "Merhaba", "iyi günler."),
-        ("Bonjour ! Nous vous appelons.", "Bonjour", "Nous vous appelons."),
-        ("Hi, macOS users wanted.", "Hi", "macOS users wanted."),
-        (
-            "Hi, calling about your order.",
-            "\u201cHi\u201d",
-            "calling about your order.",
-        ),
-        ("「こんにちは」、お電話です。", "こんにちは", "「こんにちは」、お電話です。"),
-        ("Hi, iPhone repair here.", "Hi", "iPhone repair here."),
-        ("Hello!", "Hello", ""),  # only a greeting: the notice is said alone
-        # No sentence mark after the greeting: a name or a business name.
-        ("Hello Sam, this is Northgate.", "Hello", "Hello Sam, this is Northgate."),
-        ("Morning Glory Florist here.", "Morning", "Morning Glory Florist here."),
-        # A greeting with a mark inside it would take a name with it.
-        ("Hi, Sam, your order shipped.", "Hi, Sam", "Hi, Sam, your order shipped."),
-        # Only the marks right after the greeting go with it.
-        ("Hi, .NET developers wanted.", "Hi", ".NET developers wanted."),
-        ("مرحبًا، نتصل بخصوص موعدك.", "مرحبًا", "نتصل بخصوص موعدك."),
-        (
-            "Здравствуйте, звоним по поводу записи.",
-            "Здравствуйте",
-            "звоним по поводу записи.",
-        ),
-        ("Hi there, calling.", "Hi", "Hi there, calling."),
-        ("Good morning Sam, calling.", "Good morning", "Good morning Sam, calling."),
-        # No cut unless the line opens with exactly that greeting, followed by
-        # punctuation, short and with no digit or code.
-        (
-            "Hi, this is Sam from Northgate.",
-            "Hi, this is Sam",
-            "Hi, this is Sam from Northgate.",
-        ),
-        (
-            "早上好，我们是关于您明天的预约。",
-            "早上",
-            "早上好，我们是关于您明天的预约。",
-        ),
-        ("Hiya, calling.", "Hi", "Hiya, calling."),
-        ("Is now a good time?", "Hello", "Is now a good time?"),
-        ("Hi 24 Hour Dental, here.", "Hi 24", "Hi 24 Hour Dental, here."),
-        (
-            "Good morning to you all, friends.",
-            "Good morning to you all",
-            "Good morning to you all, friends.",
-        ),
-    ],
-)
-def test_cut_greeting_removes_only_a_greeting_that_opens_the_line(
-    first, greeting, expected
-):
-    """Code cuts only the greeting the model copied out, and only where
-    punctuation ends it; no other word can change."""
-    assert cut_greeting(first, greeting) == expected
-
-
-@pytest.mark.parametrize(
-    ("reply", "expected"),
-    [
-        ("Hi", "calling about your order."),
-        ('"Hi"', "calling about your order."),
-        ("none", "Hi, calling about your order."),
-        ("None.", "Hi, calling about your order."),
-        ("", "Hi, calling about your order."),
-        # Anything that does not open the line keeps it as written: the model
-        # never writes the line itself.
-        ("Calling about your order.", "Hi, calling about your order."),
-        ("Not calling about your order.", "Hi, calling about your order."),
-    ],
-)
-async def test_fitted_first_line_cuts_only_the_copied_greeting(reply, expected):
-    line = await fitted_first_line(
-        lambda: FakeLLM(reply=reply),
-        AI_DISCLOSURE_LINE,
-        "Hi, calling about your order.",
-        UUID("11111111-2222-3333-4444-555555555555"),
-    )
-    assert line == expected
-
-
-async def test_fitted_first_line_keeps_the_line_when_the_model_fails() -> None:
-    class Broken(FakeLLM):
-        def chat(self, **_kwargs):
-            raise RuntimeError("model down")
-
-    line = await fitted_first_line(
-        Broken,
-        AI_DISCLOSURE_LINE,
-        "Hi there.",
-        UUID("11111111-2222-3333-4444-555555555555"),
-    )
-    assert line == "Hi there."
-
-
-async def test_a_greeting_only_first_line_drops_out() -> None:
-    """A first line that is only a greeting leaves the notice alone."""
-    session = FakeAnnouncingSession()
-    fitted = asyncio.get_running_loop().create_future()
-    fitted.set_result("")
-    await speak_greeting(session, {"first_message": "Hello!"}, first_line=fitted)
+    # The notice is said word for word; the agent says the greeting after it,
+    # in one turn, without greeting twice.
     assert session.say_calls == [(AI_DISCLOSURE_LINE, True)]
-
-
-async def test_speak_greeting_says_the_line_when_the_fit_was_cancelled() -> None:
-    """A call ending during pickup cancels the fit; the greeting still says
-    the line as written instead of raising."""
-    session = FakeAnnouncingSession()
-    cancelled = asyncio.get_running_loop().create_future()
-    cancelled.cancel()
-
-    await speak_greeting(
-        session, {"first_message": "Hi, about your order."}, first_line=cancelled
-    )
-
-    assert session.say_calls == [(f"{AI_DISCLOSURE_LINE} Hi, about your order.", True)]
-
-
-@pytest.mark.parametrize(
-    "metadata",
-    [
-        {},  # no first line
-        {"first_message": "Hi.", "ai_disclosure": False},  # no AI notice
-        # An inbound caller is already on the line: no ring to hide it in.
-        {"first_message": "Hi.", "direction": "inbound"},
-        {
-            "first_message": "Hi.",
-            "direction": "inbound",
-            "ai_disclosure_line": "This is an AI assistant.",
-        },
-        # A custom AI line may not greet: cutting would leave no greeting.
-        {"first_message": "Hi.", "ai_disclosure_line": "This call uses AI."},
-    ],
-)
-async def test_first_line_fit_runs_only_when_the_notice_precedes_the_line(metadata):
-    def no_model():
-        raise AssertionError("model built")
-
-    assert (
-        start_first_line_fit(
-            metadata, no_model, UUID("11111111-2222-3333-4444-555555555555")
-        )
-        is None
-    )
-
-
-async def test_first_line_fit_runs_when_a_custom_line_falls_back_to_the_built_in():
-    """A custom AI line Hail replaces with the built-in one ("[AI] ...")
-    greets like the built-in line, so its greeting is fitted too."""
-    fit = start_first_line_fit(
-        {"first_message": "Hi.", "ai_disclosure_line": "[AI] calling for {org}"},
-        lambda: FakeLLM(reply="Hi"),
-        UUID("11111111-2222-3333-4444-555555555555"),
-    )
-    assert fit is not None
-    assert await fit == ""
+    assert session.generate_reply_calls == [
+        first_message_instructions("Hi, calling about your order.")
+    ]
 
 
 async def test_speak_greeting_skips_disclosure_when_opted_out() -> None:
@@ -1383,13 +1114,29 @@ async def test_speak_greeting_speaks_disclosure_when_no_first_message() -> None:
     ]
 
 
-async def test_speak_greeting_first_message_suppresses_generated_opening() -> None:
-    """A caller ``first_message`` is the opening, no LLM turn on top of it."""
+async def test_speak_greeting_first_message_replaces_the_generated_opening() -> None:
+    """The agent's turn says the ``first_message``, not a generic opening.
+    On the phone-menu path, where a person just spoke, it is said as written
+    after the notice and the turn loop answers them."""
     session = FakeAnnouncingSession()
-
     await speak_greeting(session, {"first_message": "Hi, about your order."})
+    assert session.generate_reply_calls == [
+        first_message_instructions("Hi, about your order.")
+    ]
 
+    session = FakeAnnouncingSession()
+    await speak_greeting(
+        session, {"first_message": "Hi, about your order."}, generate_opening=False
+    )
+    assert session.say_calls == [(f"{AI_DISCLOSURE_LINE} Hi, about your order.", True)]
     assert session.generate_reply_calls == []
+
+
+def test_first_message_instructions_carry_the_line_and_pickup_words() -> None:
+    text = first_message_instructions("Hi, about your order.", "Joe's Pizza?")
+    assert '"Hi, about your order."' in text
+    assert "Joe's Pizza?" in text
+    assert "do not greet or introduce yourself again" in text
 
 
 async def test_generated_opening_reacts_to_pickup_transcript() -> None:
@@ -1808,6 +1555,7 @@ async def test_build_tools_safely_degrades_on_failure(
     any exception (e.g. a DB rollback on a dead connection) degrades to
     the tools every call keeps.
     """
+    from hailhq.voicebot import agent as agent_mod
 
     async def _boom(
         _metadata: dict,
@@ -1847,6 +1595,7 @@ async def test_build_tools_safely_passes_through_on_success(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The happy path is a pure passthrough of `build_agent_tools`' result."""
+    from hailhq.voicebot import agent as agent_mod
 
     sentinel_tools = [object()]
     sentinel_api = object()
@@ -1921,7 +1670,8 @@ async def test_speak_greeting_uses_inbound_line_and_agent_template():
             "first_message": "Hello.",
         },
     )
-    assert session.say_calls == [("You reached Acme. I am an AI. Hello.", True)]
+    assert session.say_calls == [("You reached Acme. I am an AI.", True)]
+    assert session.generate_reply_calls == [first_message_instructions("Hello.")]
 
 
 # --- human handover bridge -------------------------------------------------
@@ -2330,6 +2080,7 @@ async def test_slow_answer_post_does_not_delay_the_mute() -> None:
 
 
 async def test_shutdown_waits_briefly_for_answer_post(monkeypatch) -> None:
+    from hailhq.voicebot import agent as agent_mod
     from hailhq.voicebot.agent import finish_answer_post
 
     monkeypatch.setattr(agent_mod, "ANSWER_POST_SHUTDOWN_WAIT_SECONDS", 0.05)
@@ -2378,6 +2129,7 @@ async def test_other_party_finds_the_caller(monkeypatch):
     from contextlib import asynccontextmanager
 
     from hailhq.core.directory import DirectoryEntry
+    from hailhq.voicebot import agent as agent_mod
 
     class Result:
         def one_or_none(self):
@@ -2408,6 +2160,8 @@ async def test_other_party_finds_the_caller(monkeypatch):
 
 async def test_other_party_is_none_on_any_failure(monkeypatch):
     from contextlib import asynccontextmanager
+
+    from hailhq.voicebot import agent as agent_mod
 
     @asynccontextmanager
     async def refused():

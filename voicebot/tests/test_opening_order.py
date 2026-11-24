@@ -62,14 +62,12 @@ async def test_automatic_replies_resume_only_after_introduction(first_message):
         await greeting
         await agent.on_user_turn_completed(ChatContext(), None)
         assert len(session.say_calls) == 1
-        if first_message:
-            assert session.generate_reply_calls == []
-        else:
-            assert len(session.generate_reply_calls) == 1
-            assert (
-                "Do not greet or introduce yourself again"
-                in session.generate_reply_calls[0]
-            )
+        # With or without a first message, the agent's own turn follows the
+        # notice and does not greet again.
+        assert len(session.generate_reply_calls) == 1
+        assert "Do not greet or introduce yourself again" in (
+            session.generate_reply_calls[0].replace("do not greet", "Do not greet")
+        )
     finally:
         greeting.cancel()
         await asyncio.gather(greeting, return_exceptions=True)

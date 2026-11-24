@@ -2249,13 +2249,10 @@ _AGENT_PROMPT = _d(
     "Instructions that define the agent's behavior on calls, texts and email replies."
 )
 _AGENT_FIRST_MESSAGE = _d(
-    "Greeting spoken after the AI disclosure. On outbound calls with the "
-    "built-in AI line, a greeting at its start that a sentence mark ends "
-    '("Hi,") is usually dropped, since the disclosure already greets; the '
-    "rest is said as written, starting with a capital letter. Calls on a "
-    "workspace's own model, inbound calls, and calls with a custom AI line or "
-    "no AI notice say it whole. "
-    "Without one, an inbound agent waits for the caller."
+    "Greeting spoken after the AI disclosure. The agent says it in its own "
+    "words, as one greeting with the disclosure: it does not say hello twice, "
+    "and keeps the greeting's meaning, names, numbers and codes. Without one, "
+    "an inbound agent waits for the caller."
 )
 _AGENT_AI_DISCLOSURE = _d("Speak the AI disclosure line first on every call.")
 _AGENT_RECORDING = _d(
@@ -2384,12 +2381,10 @@ def register_tools(
         first_message: Annotated[
             str | None,
             _d(
-                "Line spoken on pickup, after the AI notice. With the built-in "
-                "AI line, a greeting at its start that a sentence mark ends "
-                '("Hi,") is usually dropped, since the notice already greets; '
-                "the rest is said as written, starting with a capital letter. "
-                "Calls on a workspace's own model, and calls with a custom AI "
-                "line or no AI notice, say it whole. Without it, the agent reacts to the answer or silence."
+                "Line spoken on pickup, after the AI notice. The agent says it "
+                "in its own words, as one greeting with the notice: it does not "
+                "say hello twice, and keeps the line's meaning, names, numbers "
+                "and codes. Without it, the agent reacts to the answer or silence."
             ),
         ] = None,
         language: Annotated[

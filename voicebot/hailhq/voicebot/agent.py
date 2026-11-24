@@ -28,7 +28,6 @@ import logging
 import math
 import re
 import time
-import unicodedata
 from collections.abc import Awaitable, Callable, Collection
 from datetime import datetime, timezone
 from typing import Any
@@ -62,7 +61,6 @@ from hailhq.core.livekit import VOICE_READY_ATTRIBUTE
 from hailhq.core.models import Call, CallEvent, UsageEvent
 from hailhq.core.pool import CALL_META_FROM_POOL, release_pool_reservation
 from hailhq.core.prompts import (
-    OPENING_FIT_INSTRUCTIONS,
     VOICE_PREAMBLE,
     VOICE_PREAMBLE_INBOUND,
     build_voice_instructions,
@@ -99,13 +97,11 @@ from hailhq.voicebot.amd import (
 )
 from hailhq.voicebot.audio import prewarm_audio, room_options
 from hailhq.voicebot.browser import run_browser_session
-from hailhq.voicebot.chat_loop import no_tools, run_chat
 from hailhq.voicebot.handover_watch import contact_speaks
 from hailhq.voicebot.ivr import PhoneMenu
 from hailhq.voicebot.leg_tracker import LegTracker
 from hailhq.voicebot.pipeline import (
     ProviderKeyError,
-    build_llm,
     build_session,
     decrypt_llm_metadata,
     resolve_org_configs,
@@ -979,6 +975,27 @@ def opening_instructions(
     return f"{base} They have not said anything yet."
 
 
+def first_message_instructions(
+    first_message: str, pickup_transcript: str | None = None
+) -> str:
+    """The prompt for the opening turn that says the agent's ``first_message``
+    right after the AI notice: in the agent's own words, as one greeting with
+    the notice, which has already greeted and said who the agent is."""
+    base = (
+        "The spoken introduction has already greeted the person and said who "
+        "you are and who you represent. Now say your opening line, below, so "
+        "the two sound like one greeting: do not greet or introduce yourself "
+        "again, so leave out any hello word at its start (such as Hi, Hello, "
+        "Good morning, Bonjour or 早上好). Keep everything else: its meaning, "
+        "the name you address them by, numbers and codes. Add nothing else, "
+        f'then give them room to respond. Your opening line: "{first_message}"'
+    )
+    heard = (pickup_transcript or "").strip()
+    if heard:
+        return f'{base} They answered the phone saying: "{heard}".'
+    return base
+
+
 # A sentence end followed by the next sentence. Chinese and Japanese marks
 # take no space after them.
 _SENTENCE_END = re.compile(r"(\w*)(?:[.!?؟।\u037e]\s+|[。！？]\s*)(?=\S)")
@@ -1041,212 +1058,6 @@ def greeting_with_ai_line(first_message: str, ai_line: str) -> str:
     return f"{head} {ai_line} {tail}"
 
 
-# Budget for fitting the first line. It runs while the phone rings; the
-# greeting uses it only if it is ready at pickup and never waits for it.
-FIRST_LINE_FIT_SECONDS = 10.0
-# The longest greeting cut from the start of a first line ("Good morning
-# there"). The model copies the greeting out; code cuts it only when the line
-# starts with exactly that text and a sentence mark follows, so a cut never
-# lands inside a sentence, a word or a name.
-MAX_GREETING_WORDS = 3
-MAX_GREETING_CHARS = 30
-# A greeting written without spaces is one token, so its length is capped
-# instead of its word count: 16 letters ("Здравствуйте") or 9 wide (CJK)
-# characters ("早上好", "おはようございます"), which carry more than a letter.
-MAX_GREETING_TOKEN_CHARS = 16
-MAX_GREETING_WIDE_CHARS = 9
-# A Chinese character carries a word: "早上好" is 3, "您好我是小李" (a self-
-# introduction) is 6.
-MAX_GREETING_HAN_CHARS = 4
-# Only the start of the line goes to the model: a greeting is at the start.
-FIRST_LINE_SAMPLE_CHARS = 120
-# The model's answer when the line does not open with a greeting.
-NO_GREETING = "none"
-# Marks that end a greeting and are dropped with it.
-_GREETING_ENDS = frozenset(",.!?…:;，。！？、：；،؟؛।")
-# Full-width marks need no space after them ("早上好，我们").
-_WIDE_ENDS = frozenset("，。！？、：；")
-# Marks that open a greeting ("¡Hola!") and are dropped with it.
-_GREETING_OPENS = frozenset("¡¿\"'«“‘「『")
-# Closing quotes a model may wrap its answer in.
-_GREETING_CLOSES = frozenset("\"'»”’」』")
-
-
-# Languages whose dotted "i" capitalizes to "İ", not "I".
-_DOTTED_I_LANGUAGES = frozenset({"tr", "az"})
-
-
-def sentence_start(text: str, language: str | None = None) -> str:
-    """``text`` with its first letter capitalized when its first word is all
-    lowercase, after any opening mark ("¿es" becomes "¿Es"). Only that one
-    letter changes: "iPhone" and "macOS" stay, and Turkish "iyi" becomes
-    "İyi". The rest of a cut line follows the AI notice's full stop."""
-    start = 0
-    while start < len(text) and text[start] in _GREETING_OPENS:
-        start += 1
-    word = re.match(r"\w+", text[start:])
-    if word is None or not word.group(0).islower():
-        return text
-    first = text[start]
-    upper = "İ" if first == "i" and language in _DOTTED_I_LANGUAGES else first.upper()
-    if len(upper) != 1:
-        return text
-    return text[:start] + upper + text[start + 1 :]
-
-
-def _han_chars(text: str) -> int:
-    return sum(unicodedata.name(c, "").startswith("CJK UNIFIED") for c in text)
-
-
-def _wide_chars(text: str) -> int:
-    return sum(unicodedata.east_asian_width(c) in "WF" for c in text)
-
-
-def cut_greeting(first_message: str, greeting: str) -> str:
-    """``first_message`` without its opening ``greeting`` and the sentence
-    marks after it; "" when nothing is left. Unchanged unless the line
-    starts with exactly that greeting (any case), the greeting is short and
-    holds no digit, code or sentence mark of its own, and a sentence mark
-    or the end of the line follows it. Only the marks right after the
-    greeting go with it; the rest keeps its own marks."""
-    greeting = greeting.strip().strip(
-        "".join(_GREETING_ENDS | _GREETING_OPENS | _GREETING_CLOSES)
-    )
-    tokens = greeting.split()
-    if (
-        not greeting
-        or len(greeting) > MAX_GREETING_CHARS
-        or len(tokens) > MAX_GREETING_WORDS
-        or (len(tokens) == 1 and len(greeting) > MAX_GREETING_TOKEN_CHARS)
-        or _wide_chars(greeting) > MAX_GREETING_WIDE_CHARS
-        or _han_chars(greeting) > MAX_GREETING_HAN_CHARS
-        or re.search(r"\d", greeting)
-        or "<" in greeting
-        or any(c in _GREETING_ENDS for c in greeting)
-    ):
-        return first_message
-    line = first_message.lstrip()
-    start = 0
-    while start < len(line) and line[start] in _GREETING_OPENS:
-        start += 1
-    end = start + len(greeting)
-    if line[start:end].lower() != greeting.lower():
-        return first_message
-    rest = line[end:]
-    # A sentence mark must end the greeting: "Morning Glory Florist" or
-    # "Aloha Dental" is a name, not a greeting. French puts a space before
-    # "!" and "?" ("Bonjour ! ..."), so spaces before a mark are allowed.
-    i = 0
-    while i < len(rest) and rest[i].isspace():
-        i += 1
-    if i < len(rest) and rest[i] not in _GREETING_ENDS:
-        return first_message
-    while i < len(rest) and rest[i] in _GREETING_ENDS:
-        i += 1
-    # A mark ends the hello only before a space or the end of the line
-    # ("Hello.io" is a name), unless it is a full-width mark.
-    if i < len(rest) and not rest[i].isspace() and rest[i - 1] not in _WIDE_ENDS:
-        return first_message
-    while i < len(rest) and rest[i].isspace():
-        i += 1
-    rest = rest[i:]
-    return rest
-
-
-async def fitted_first_line(
-    make_llm: Callable[[], LLM], disclosure: str, first_message: str, call_id: UUID
-) -> str:
-    """``first_message`` without a leading greeting, which the AI
-    ``disclosure`` already gave; "" when the line was only a greeting. The
-    model copies the greeting out (see :data:`OPENING_FIT_INSTRUCTIONS`) and
-    :func:`cut_greeting` removes it, so no other word can change. The
-    unchanged line on any failure or an answer that does not open the line.
-    The model is built here, so a fit cancelled before it starts opens no
-    connection."""
-    messages = [
-        {"role": "system", "content": OPENING_FIT_INSTRUCTIONS},
-        {
-            "role": "user",
-            "content": (
-                f"AI notice: {disclosure}\n"
-                f"First line: {first_message[:FIRST_LINE_SAMPLE_CHARS]}"
-            ),
-        },
-    ]
-    try:
-        text = await asyncio.wait_for(
-            run_chat(
-                make_llm(),
-                messages,
-                [],
-                no_tools,
-                max_rounds=1,
-                log_label=f"call_id={call_id}",
-            ),
-            timeout=FIRST_LINE_FIT_SECONDS,
-        )
-    except Exception as exc:
-        logger.warning(
-            "call_id=%s first line not fitted, saying it as written: %s",
-            call_id,
-            type(exc).__name__,
-        )
-        return first_message
-    greeting = (text or "").strip().strip("\"'")
-    if not greeting or greeting.casefold().rstrip(".") == NO_GREETING:
-        return first_message
-    return cut_greeting(first_message, greeting)
-
-
-def start_first_line_fit(
-    metadata: dict[str, Any],
-    llm: Callable[[], LLM],
-    call_id: UUID,
-    language: str | None = None,
-) -> asyncio.Task[str] | None:
-    """Start fitting the first message to the disclosure while an outbound
-    call rings, or None when there is nothing to fit (no first message, no
-    disclosure, or a custom AI line that may not greet) or no ring to hide
-    it in (an inbound caller is already on the line, and the default inbound
-    greeting holds the AI line anyway)."""
-    first_message = metadata.get("first_message")
-    if not first_message or not metadata.get("ai_disclosure", True):
-        return None
-    if metadata.get("direction") == "inbound":
-        return None
-    disclosure = disclosure_line(
-        metadata.get("org_name"),
-        metadata.get("direction"),
-        metadata.get("ai_disclosure_line"),
-        language,
-    )
-    # Only the built-in AI line is known to greet ("Hi, this is ..."). A
-    # custom one may not, and the cut would leave the call with no greeting.
-    # A custom line that falls back to the built-in one counts as built-in.
-    builtin = disclosure_line(
-        metadata.get("org_name"), metadata.get("direction"), None, language
-    )
-    if disclosure != builtin:
-        return None
-    return asyncio.create_task(
-        fitted_first_line(llm, disclosure, first_message, call_id)
-    )
-
-
-def _ready_first_line(first_line: asyncio.Task[str] | None, fallback: str) -> str:
-    """The fitted line when it is ready, else the line as written: the
-    greeting never waits on the model. A fit still running is cancelled, so
-    its answer is not paid for in vain."""
-    if first_line is None:
-        return fallback
-    if not first_line.done():
-        first_line.cancel()
-        return fallback
-    if first_line.cancelled() or first_line.exception() is not None:
-        return fallback
-    return first_line.result()
-
-
 async def speak_greeting(
     session: AgentSession,
     metadata: dict[str, Any],
@@ -1255,12 +1066,8 @@ async def speak_greeting(
     generate_opening: bool = True,
     on_opened: Callable[[], str | None] | None = None,
     language: str | None = None,
-    first_line: asyncio.Task[str] | None = None,
 ) -> None:
     """Open the call: disclosure (unless opted out), then the first message.
-    ``first_line`` is the first message fitted to follow the disclosure (see
-    :func:`fitted_first_line`); without it, or when it is late, the first
-    message is said as written.
 
     The disclosure leads by default and can only be skipped, never
     customized or reordered: its template is not reachable via
@@ -1271,11 +1078,14 @@ async def speak_greeting(
     ``ai_disclosure`` default is ``True`` so a dispatch that predates the
     field (rolling deploy) keeps the disclosure.
 
-    A caller ``first_message`` is spoken as written, or fitted to follow the
-    disclosure on an outbound call (``first_line``), concatenated onto the
-    disclosure as a single ``session.say()`` call, one spoken turn, not
-    two back-to-back utterances that sound like the agent introducing
-    itself twice. An inbound agent with no custom line goes further: the
+    With a disclosure, the disclosure is said as written and the agent's
+    model then says the ``first_message`` in its own words
+    (:func:`first_message_instructions`), so the two sound like one
+    greeting instead of the agent greeting twice ("Hi, this is an AI
+    assistant… Hi, this is…"). On the phone-menu path
+    (``generate_opening=False``) the two are joined as written, since the
+    turn loop is already answering the person. An inbound agent with no
+    custom line keeps one literal turn: the
     short line goes inside its greeting (:func:`greeting_with_ai_line`),
     because "Hi, this is an AI assistant… Hey, this is Joker!" still
     greets the caller twice. Without a ``first_message``, the LLM generates the
@@ -1305,12 +1115,6 @@ async def speak_greeting(
     )
     first_message = metadata.get("first_message")
     inbound = metadata.get("direction") == "inbound"
-    # Never waits: a fit not ready at pickup leaves the line as written.
-    line = (
-        _ready_first_line(first_line, first_message)
-        if first_message and disclosure
-        else first_message
-    )
     if generate_opening and not inbound:
         # The turn detector can wait up to max_delay (2.5 s) on a bare pickup
         # "Hello?". If that turn ends after this opening starts, it cuts the
@@ -1340,6 +1144,7 @@ async def speak_greeting(
         eou_task = getattr(recognition, "_end_of_turn_task", None)
         if eou_task is not None:
             eou_task.cancel()
+    blended = False
     try:
         if first_message:
             interruptible = True
@@ -1353,12 +1158,15 @@ async def speak_greeting(
                 # The AI line sits after the first sentence: a caller who
                 # speaks over the greeting must still hear it.
                 interruptible = False
+            elif generate_opening:
+                # The agent says the greeting in its own words right after the
+                # notice, as one opening, so the caller is not greeted twice
+                # ("Hi, this is an AI assistant ... Hi, this is ...").
+                await session.say(disclosure, allow_interruptions=True)
+                blended = True
+                return
             else:
-                # An empty line: the first line was only a greeting.
-                # A cut line starts a new sentence after the notice.
-                if line != first_message:
-                    line = sentence_start(line, language)
-                greeting = f"{disclosure} {line}".strip()
+                greeting = f"{disclosure} {first_message}"
             await session.say(greeting, allow_interruptions=interruptible)
             return
         if disclosure:
@@ -1366,6 +1174,13 @@ async def speak_greeting(
     finally:
         # Release even when say fails, so the agent is never left unable to reply.
         heard = on_opened() if on_opened is not None else None
+        if blended:
+            session.generate_reply(
+                instructions=first_message_instructions(
+                    first_message,
+                    " ".join(filter(None, (pickup_transcript, heard))),
+                )
+            )
     # An inbound caller dialed in: with no ``first_message`` the agent waits
     # for them to speak (the documented ``first_message: null`` behavior). The
     # generated opening is written for a call Hail placed ("say why you are
@@ -1393,7 +1208,6 @@ def arm_deferred_greeting(
     on_machine: Callable[[AMDCategory], Awaitable[None]],
     classifier: LLM | None,
     language: str | None = None,
-    first_line: asyncio.Task[str] | None = None,
 ) -> None:
     """Release the greeting once completed speech is not a recorded menu.
 
@@ -1425,7 +1239,6 @@ def arm_deferred_greeting(
                 generate_opening=not text,
                 on_opened=agent.release_opening,
                 language=language,
-                first_line=first_line,
             )
         except Exception:
             # The session can close while the greeting plays.
@@ -2778,26 +2591,6 @@ async def _run_call(
         speech.on_state(getattr(ev, "new_state", None), time.monotonic())
 
     other_party_task = asyncio.create_task(other_party(call_id))
-    # Runs while the phone rings: the greeting reads it at pickup. A workspace
-    # that brings its own model keeps call content off Hail's models, and its
-    # endpoint may not follow the copy-only instruction: its calls say the
-    # line as written.
-    first_line = (
-        None
-        if llm_cfg is not None or org_cfgs.get("llm") is not None
-        else start_first_line_fit(
-            metadata, lambda: build_llm(None, None), call_id, language
-        )
-    )
-    if first_line is not None:
-        fit_task = first_line
-
-        async def cancel_first_line_fit() -> None:
-            # A call that ends before the greeting (voicemail, no answer)
-            # does not wait on the model.
-            fit_task.cancel()
-
-        ctx.add_shutdown_callback(cancel_first_line_fit)
     agent_tools, agent_api = await build_tools_safely(
         metadata,
         call_id,
@@ -3138,7 +2931,6 @@ async def _run_call(
             # AMD's classifier, built once per call (see build_amd_models).
             classifier=models.llm,
             language=language,
-            first_line=first_line,
         )
         session.generate_reply(
             instructions=ivr_navigation_instructions(amd_result.transcript, tool_names)
@@ -3156,7 +2948,6 @@ async def _run_call(
                 pickup_transcript=amd_result.transcript if amd_result else None,
                 on_opened=agent.release_opening,
                 language=language,
-                first_line=first_line,
             )
             recovery.start()
         except Exception:
