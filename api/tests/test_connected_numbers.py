@@ -62,7 +62,7 @@ from hailhq.core.sip_connections import (
     decrypt_secret,
     hash_check_code,
 )
-from livekit.api import SipCallError
+from livekit.api import ServerError, SipCallError
 from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
@@ -1379,6 +1379,7 @@ async def test_checks_today_skips_only_hail_setup_failures(
         "room_create_failed": False,
         "agent_dispatch_failed": False,
         "sip_participant_failed": False,
+        "unknown": True,  # dial outcome unknown: the number may have rung
         "sweeper_timeout": True,
         "normal_hangup": True,
         "user_unavailable": True,
@@ -1409,12 +1410,17 @@ async def test_checks_today_skips_only_hail_setup_failures(
     )
 
 
-async def test_check_livekit_dial_error_is_a_setup_failure(
-    async_session, check_lk, pbx_number, pool_number
+@pytest.mark.parametrize(
+    "code", ["invalid_argument", "unauthenticated", "permission_denied", "not_found"]
+)
+async def test_check_dial_refused_before_the_invite_is_a_setup_failure(
+    async_session, check_lk, pbx_number, pool_number, code
 ):
-    """A LiveKit timeout or server error before any SIP answer is Hail's
-    failure: livekit_failed, and not a check the customer used up."""
-    check_lk.create_sip_participant.side_effect = RuntimeError("sip down")
+    """LiveKit refused the dial request itself (no SIP status): no INVITE was
+    sent, so it is Hail's failure and not a check the customer used up."""
+    check_lk.create_sip_participant.side_effect = ServerError(
+        code, "refused", status=400
+    )
     with pytest.raises(ConnectedNumberError) as e:
         await check_connected_number(async_session, check_lk, pbx_number)
     assert e.value.code == "livekit_failed"
@@ -1424,6 +1430,33 @@ async def test_check_livekit_dial_error_is_a_setup_failure(
     assert (
         await connected_numbers._checks_today(async_session, ORG, pbx_number.e164, now)
         == 0
+    )
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        TimeoutError(),
+        ConnectionError("reset"),
+        ServerError("deadline_exceeded", "slow", status=504),
+        ServerError("internal", "boom", status=500),
+    ],
+    ids=["timeout", "connection", "deadline", "internal"],
+)
+async def test_check_dial_outcome_unknown_still_counts(
+    async_session, check_lk, pbx_number, pool_number, error
+):
+    """A timeout or unknown error may have rung the number: it counts toward
+    the daily checks and reports no_call_arrived."""
+    check_lk.create_sip_participant.side_effect = error
+    result = await check_connected_number(async_session, check_lk, pbx_number)
+    assert (result.state, result.reason) == ("unverified", "no_call_arrived")
+    call = await _the_check_call(async_session, pbx_number.id)
+    assert (call.status, call.end_reason) == ("failed", "unknown")
+    now = datetime.now(timezone.utc)
+    assert (
+        await connected_numbers._checks_today(async_session, ORG, pbx_number.e164, now)
+        == 1
     )
 
 

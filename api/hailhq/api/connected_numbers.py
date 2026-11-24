@@ -55,7 +55,7 @@ from hailhq.core.sip_connections import (
     number_shape,
 )
 from hailhq.core.telephony_catalog import sells_in
-from livekit.api import SipCallError
+from livekit.api import ServerError, SipCallError
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -683,9 +683,22 @@ CHECK_POLL_SECONDS = 0.25
 # A wrong-trunk INVITE (``not_authenticated``) is not final: the right trunk
 # can still arrive before the deadline.
 _CHECK_FINAL = ("passed", "code_not_received")
-# Hail-side failures: not a check the customer used up. A dial that LiveKit
-# itself fails (a timeout, a server error) counts here too; a SIP answer from
-# the carrier (``SipCallError``) means the call was tried and does count.
+# Twirp codes of a dial request LiveKit refused before sending any INVITE.
+_PRE_DIAL_CODES = frozenset(
+    {
+        "invalid_argument",
+        "malformed",
+        "bad_route",
+        "unauthenticated",
+        "permission_denied",
+        "not_found",
+        "failed_precondition",
+    }
+)
+# Hail-side failures: not a check the customer used up. A dial LiveKit
+# refused before sending any INVITE counts here too (``sip_participant_failed``).
+# A SIP answer from the carrier, a timeout or an unknown error may have rung
+# the number, so it does count (the last two end as ``unknown``).
 _CHECK_SETUP_FAILURES = (
     CallEndReason.CARRIER_ROUTE_FAILED.value,
     CallEndReason.ROOM_CREATE_FAILED.value,
@@ -847,6 +860,17 @@ async def check_connected_number(
                 call_id,
                 exc.sip_status_code,
             )
+        except Exception as exc:
+            if isinstance(exc, ServerError) and exc.code in _PRE_DIAL_CODES:
+                raise  # refused before any INVITE: a setup failure
+            # A timeout or an unknown error: the number may have rung, so the
+            # check counts. The type only: an error text may hold the code.
+            logger.warning(
+                "ownership check call %s: dial outcome unknown (%s)",
+                call_id,
+                type(exc).__name__,
+            )
+            failure = CallEndReason.UNKNOWN.value
         else:
             answered_at = datetime.now(timezone.utc)
             stage = "result_wait"  # log label only: answered calls never fail
