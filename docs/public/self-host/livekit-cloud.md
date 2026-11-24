@@ -138,3 +138,12 @@ dispatch rule**. Hail adds and removes numbers on the trunk itself.
 Reference: LiveKit [accepting calls](https://docs.livekit.io/telephony/accepting-calls/),
 [inbound trunk](https://docs.livekit.io/telephony/accepting-calls/inbound-trunk/),
 [dispatch rule](https://docs.livekit.io/telephony/accepting-calls/dispatch-rule/).
+
+## 5. Connected phone systems
+
+A connected phone system gets its own LiveKit trunks, and LiveKit's SIP
+service dials its host. Hail refuses a host that is an internal IP address
+or an internal name, but it does not resolve the name: LiveKit does, from
+its own network. If you run your own LiveKit SIP service, firewall its
+egress so it cannot reach internal ranges (private, loopback, link-local,
+and your cloud's metadata address).
