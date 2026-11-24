@@ -1121,41 +1121,70 @@ async def test_speak_greeting_says_the_line_as_written_when_the_fit_is_late(
 
 
 @pytest.mark.parametrize(
-    ("first", "words", "expected"),
+    ("first", "greeting", "expected"),
     [
-        ("Hi, calling about your order.", 1, "Calling about your order."),
-        ("Hello there! Is now a good time?", 2, "Is now a good time?"),
-        ("Guten Tag, hier ist Northgate Dental.", 2, "Hier ist Northgate Dental."),
-        ("你好，我们打电话是关于您明天的预约。", 1, "我们打电话是关于您明天的预约。"),
-        ("Hello!", 1, ""),  # only a greeting: the notice is said alone
-        ("Is now a good time?", 0, "Is now a good time?"),
-        # Out of range, or a cut that would drop a digit or a code: unchanged.
-        ("Hi there, this is Sam calling.", 4, "Hi there, this is Sam calling."),
-        ("Hi 24 Hour Dental here.", 2, "Hi 24 Hour Dental here."),
-        ("Hi <spell>A7</spell> here.", 2, "Hi <spell>A7</spell> here."),
+        ("Hi, calling about your order.", "Hi", "Calling about your order."),
+        ("Hello there! Is now a good time?", "Hello there", "Is now a good time?"),
+        (
+            "Guten Tag, hier ist Northgate Dental.",
+            "Guten Tag",
+            "Hier ist Northgate Dental.",
+        ),
+        ("早上好，我们是关于您明天的预约。", "早上好", "我们是关于您明天的预约。"),
+        ("Hi-ya, calling about your order.", "Hi-ya", "Calling about your order."),
+        ("Hello? Is this Sam?", "Hello", "Is this Sam?"),
+        ("Hi… calling about your order.", "Hi", "Calling about your order."),
+        ("Hola, ¿es un buen momento?", "Hola", "¿es un buen momento?"),
+        ("Hi, iPhone repair here.", "Hi", "iPhone repair here."),
+        ("Hello!", "Hello", ""),  # only a greeting: the notice is said alone
+        ("Hello Sam, this is Northgate.", "Hello", "Sam, this is Northgate."),
+        ("Hi there, calling.", "Hi", "Hi there, calling."),
+        ("Good morning Sam, calling.", "Good morning", "Good morning Sam, calling."),
+        # No cut unless the line opens with exactly that greeting, followed by
+        # punctuation, short and with no digit or code.
+        (
+            "Hi, this is Sam from Northgate.",
+            "Hi, this is Sam",
+            "Hi, this is Sam from Northgate.",
+        ),
+        (
+            "早上好，我们是关于您明天的预约。",
+            "早上",
+            "早上好，我们是关于您明天的预约。",
+        ),
+        ("Hiya, calling.", "Hi", "Hiya, calling."),
+        ("Is now a good time?", "Hello", "Is now a good time?"),
+        ("Hi 24 Hour Dental, here.", "Hi 24", "Hi 24 Hour Dental, here."),
+        (
+            "Good morning to you all, friends.",
+            "Good morning to you all",
+            "Good morning to you all, friends.",
+        ),
     ],
 )
-def test_cut_greeting_removes_only_the_counted_words(first, words, expected):
-    """Code cuts the words the model counted; no other word can change."""
-    assert cut_greeting(first, words) == expected
+def test_cut_greeting_removes_only_a_greeting_that_opens_the_line(
+    first, greeting, expected
+):
+    """Code cuts only the greeting the model copied out, and only where
+    punctuation ends it; no other word can change."""
+    assert cut_greeting(first, greeting) == expected
 
 
 @pytest.mark.parametrize(
     ("reply", "expected"),
     [
-        ("1", "Calling about your order."),
-        (" 1. ", "Calling about your order."),
-        ("0", "Hi, calling about your order."),
-        # Anything but a count keeps the line as written: the model never
-        # writes the line itself.
+        ("Hi", "Calling about your order."),
+        ('"Hi"', "Calling about your order."),
+        ("none", "Hi, calling about your order."),
+        ("None.", "Hi, calling about your order."),
+        ("", "Hi, calling about your order."),
+        # Anything that does not open the line keeps it as written: the model
+        # never writes the line itself.
         ("Calling about your order.", "Hi, calling about your order."),
         ("Not calling about your order.", "Hi, calling about your order."),
-        ("one", "Hi, calling about your order."),
-        ("", "Hi, calling about your order."),
-        ("9", "Hi, calling about your order."),
     ],
 )
-async def test_fitted_first_line_uses_only_a_count(reply, expected):
+async def test_fitted_first_line_cuts_only_the_copied_greeting(reply, expected):
     line = await fitted_first_line(
         lambda: FakeLLM(reply=reply),
         AI_DISCLOSURE_LINE,

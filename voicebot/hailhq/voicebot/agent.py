@@ -28,6 +28,7 @@ import logging
 import math
 import re
 import time
+import unicodedata
 from collections.abc import Awaitable, Callable, Collection
 from datetime import datetime, timezone
 from typing import Any
@@ -1044,29 +1045,71 @@ def greeting_with_ai_line(first_message: str, ai_line: str) -> str:
 # rarely delays the greeting; the greeting waits at most FIRST_LINE_WAIT more.
 FIRST_LINE_FIT_SECONDS = 10.0
 FIRST_LINE_WAIT_SECONDS = 1.0
-# The most greeting words cut from the start of a first line ("Good morning
-# there"). The model only counts them; code cuts, so nothing else can change.
+# The longest greeting cut from the start of a first line ("Good morning
+# there"). The model copies the greeting out; code cuts it only when the line
+# starts with exactly that text and punctuation follows, so no other word can
+# change.
 MAX_GREETING_WORDS = 3
-_WORD = re.compile(r"\w+(?:['\u2019]\w+)*")
-_COUNT = re.compile(r"\s*(\d+)\s*\.?\s*")
+MAX_GREETING_CHARS = 30
+# Only the start of the line goes to the model: a greeting is at the start.
+FIRST_LINE_SAMPLE_CHARS = 120
+# The model's answer when the line does not open with a greeting.
+NO_GREETING = "none"
+# Opening marks stay: "¿Es un buen momento?" keeps its "¿".
+_OPENING_MARKS = frozenset("¿¡")
 
 
-def cut_greeting(first_message: str, words: int) -> str:
-    """``first_message`` without its first ``words`` words and the
-    punctuation after them; "" when nothing is left. Unchanged when
-    ``words`` is out of range or the cut would drop a digit or a spelled
-    code."""
-    if not 0 < words <= MAX_GREETING_WORDS:
+def _is_punct(char: str) -> bool:
+    return unicodedata.category(char).startswith("P")
+
+
+def _closing_punct(char: str) -> bool:
+    """Punctuation that ends a greeting ("," "!" "…" "，"), not an opening
+    mark that starts the next sentence ("¿", "(")."""
+    return (
+        _is_punct(char)
+        and char not in _OPENING_MARKS
+        and unicodedata.category(char) not in ("Ps", "Pi")
+    )
+
+
+def cut_greeting(first_message: str, greeting: str) -> str:
+    """``first_message`` without its opening ``greeting`` and the
+    punctuation after it; "" when nothing is left. Unchanged unless the line
+    starts with exactly that greeting (any case), the greeting is short and
+    holds no digit or code, and punctuation, the end of the line, or (after
+    a one-word greeting) a capitalized name follows it, so a cut never lands
+    inside a sentence."""
+    greeting = greeting.strip()
+    while greeting and _is_punct(greeting[-1]):
+        greeting = greeting[:-1].rstrip()
+    if (
+        not greeting
+        or len(greeting) > MAX_GREETING_CHARS
+        or len(greeting.split()) > MAX_GREETING_WORDS
+        or re.search(r"\d", greeting)
+        or "<" in greeting
+    ):
         return first_message
-    found = list(_WORD.finditer(first_message))
-    if len(found) < words:
+    line = first_message.lstrip()
+    if not line.casefold().startswith(greeting.casefold()):
         return first_message
-    cut = found[words - 1].end()
-    head = first_message[:cut]
-    if re.search(r"\d", head) or "<" in head:
+    rest = line[len(greeting) :]
+    # Punctuation ends a greeting ("Hi, ..."). A space does only after a
+    # one-word greeting before a capitalized name ("Hello Sam, ..." keeps
+    # "Sam"); "Hi there" is not cut to "There".
+    after_space = rest.lstrip()
+    named = (
+        len(greeting.split()) == 1 and rest[:1].isspace() and after_space[:1].isupper()
+    )
+    if rest and not _is_punct(rest[0]) and not named:
         return first_message
-    rest = first_message[cut:].lstrip(" \t,.!;:\u3001\uff0c\u3002\uff01-\u2014")
-    if rest[:1].islower():
+    i = 0
+    while i < len(rest) and (rest[i].isspace() or _closing_punct(rest[i])):
+        i += 1
+    rest = rest[i:]
+    # "calling about" becomes "Calling about"; "iPhone" stays as written.
+    if rest[:1].islower() and not rest[1:2].isupper():
         rest = rest[0].upper() + rest[1:]
     return rest
 
@@ -1074,18 +1117,21 @@ def cut_greeting(first_message: str, words: int) -> str:
 async def fitted_first_line(
     make_llm: Callable[[], LLM], disclosure: str, first_message: str, call_id: UUID
 ) -> str:
-    """``first_message`` without a leading greeting that repeats the AI
-    ``disclosure``'s; "" when the line was only a greeting. The model counts
-    the greeting words (see :data:`OPENING_FIT_INSTRUCTIONS`) and
-    :func:`cut_greeting` removes them, so no other word can change. The
-    unchanged line on any failure or an answer that is not a count. The
-    model is built here, so a fit cancelled before it starts opens no
+    """``first_message`` without a leading greeting, which the AI
+    ``disclosure`` already gave; "" when the line was only a greeting. The
+    model copies the greeting out (see :data:`OPENING_FIT_INSTRUCTIONS`) and
+    :func:`cut_greeting` removes it, so no other word can change. The
+    unchanged line on any failure or an answer that does not open the line.
+    The model is built here, so a fit cancelled before it starts opens no
     connection."""
     messages = [
         {"role": "system", "content": OPENING_FIT_INSTRUCTIONS},
         {
             "role": "user",
-            "content": f"AI notice: {disclosure}\nFirst line: {first_message}",
+            "content": (
+                f"AI notice: {disclosure}\n"
+                f"First line: {first_message[:FIRST_LINE_SAMPLE_CHARS]}"
+            ),
         },
     ]
     try:
@@ -1107,10 +1153,10 @@ async def fitted_first_line(
             type(exc).__name__,
         )
         return first_message
-    count = _COUNT.fullmatch(text or "")
-    if count is None:
+    greeting = (text or "").strip().strip("\"'")
+    if not greeting or greeting.casefold().rstrip(".") == NO_GREETING:
         return first_message
-    return cut_greeting(first_message, int(count.group(1)))
+    return cut_greeting(first_message, greeting)
 
 
 def start_first_line_fit(

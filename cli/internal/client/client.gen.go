@@ -1902,7 +1902,7 @@ type AgentUpdate struct {
 	// EmailEnabled Whether the agent answers email.
 	EmailEnabled *bool `json:"email_enabled,omitempty"`
 
-	// FirstMessage New opening line; null makes the agent wait for the other side. On outbound calls a greeting at its start ("Hi,") is dropped, since the AI line already greets.
+	// FirstMessage New opening line; null makes the agent wait for the other side. On outbound calls a greeting at its start ("Hi,") is dropped, since the AI line already greets. Calls on your own model, or without the AI line, say it as written.
 	FirstMessage *string `json:"first_message,omitempty"`
 
 	// HandoverContacts New handover list; replaces the old one. [] removes all; null leaves it.

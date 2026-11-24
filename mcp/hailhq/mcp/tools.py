@@ -2251,6 +2251,7 @@ _AGENT_PROMPT = _d(
 _AGENT_FIRST_MESSAGE = _d(
     "Greeting spoken after the AI disclosure. On outbound calls a greeting "
     'word at its start ("Hi,") is dropped, since the disclosure already greets. '
+    "Calls on your own model, or without the AI notice, say it as written. "
     "Without one, an inbound agent waits for the caller."
 )
 _AGENT_AI_DISCLOSURE = _d("Speak the AI disclosure line first on every call.")
@@ -2382,7 +2383,8 @@ def register_tools(
             _d(
                 "Line spoken on pickup, after the AI notice. A greeting word at "
                 'its start ("Hi,") is dropped, since the notice already greets. '
-                "Without it, the agent reacts to the answer or silence."
+                "Calls on your own model, or without the AI notice, say it as "
+                "written. Without it, the agent reacts to the answer or silence."
             ),
         ] = None,
         language: Annotated[

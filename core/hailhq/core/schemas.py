@@ -1479,7 +1479,8 @@ class AgentUpdate(BaseModel):
         description=(
             "New opening line; null makes the agent wait for the other side. "
             'On outbound calls a greeting at its start ("Hi,") is dropped, '
-            "since the AI line already greets."
+            "since the AI line already greets. Calls on your own model, or "
+            "without the AI line, say it as written."
         ),
     )
     recording_enabled: bool | None = Field(
