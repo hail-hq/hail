@@ -47,13 +47,16 @@ Live behavior needs a separately authorized test call or a synthetic model evalu
 
 ## Opening line
 
-When a call says the AI notice and then a first line, the first line is
-reworded so the caller hears one greeting. The notice stays fixed and first.
-The rewrite (`OPENING_FIT_INSTRUCTIONS` in `core/hailhq/core/prompts.py`)
-runs on the call's own model while the phone rings, so it adds no delay at
-pickup. Names, numbers and codes stay as written. A late, empty or failed
-rewrite falls back to the line as written. An inbound greeting with the
-default AI line already holds the notice inside it, so it skips the rewrite.
+When an outbound call says the AI notice and then a first line, the first
+line is reworded so the caller hears one greeting. The notice stays fixed
+and first. The rewrite (`OPENING_FIT_INSTRUCTIONS` in
+`core/hailhq/core/prompts.py`) runs on Hail's own model while the phone
+rings, so it adds no delay at pickup. It never uses a customer's model,
+which may answer in character instead of rewriting. A rewrite that changes
+any digit or `<spell>` code, repeats the notice, or comes back late, empty
+or much longer falls back to the line as written. Inbound calls skip it:
+the caller is already on the line, and the default inbound greeting holds
+the AI line inside it.
 
 ## Closing calls
 

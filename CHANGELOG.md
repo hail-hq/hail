@@ -6,7 +6,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Changed
 
-- Calls open with one greeting: the first line is reworded so it does not repeat the AI notice's greeting.
+- Outbound calls open with one greeting: the first line is reworded so it does not repeat the AI notice's greeting.
 
 ## [0.38.0] (2026-11-24)
 

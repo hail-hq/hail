@@ -98,7 +98,7 @@ from hailhq.voicebot.amd import (
 )
 from hailhq.voicebot.audio import prewarm_audio, room_options
 from hailhq.voicebot.browser import run_browser_session
-from hailhq.voicebot.chat_loop import run_chat
+from hailhq.voicebot.chat_loop import no_tools, run_chat
 from hailhq.voicebot.handover_watch import contact_speaks
 from hailhq.voicebot.ivr import PhoneMenu
 from hailhq.voicebot.leg_tracker import LegTracker
@@ -117,7 +117,7 @@ from hailhq.voicebot.telemetry import connect_livekit_tracing
 from hailhq.voicebot.tools import SpeechTracker, build_agent_tools, every_call_tools
 from livekit import rtc
 from livekit.agents import Agent, JobContext, JobProcess, StopResponse
-from livekit.agents.llm import LLM, FunctionToolCall, LLMError
+from livekit.agents.llm import LLM, LLMError
 from livekit.agents.voice import AgentSession, ConversationItemAddedEvent
 from livekit.agents.voice.amd import AMDCategory
 from livekit.api import (
@@ -1046,9 +1046,22 @@ FIRST_LINE_FIT_SECONDS = 10.0
 FIRST_LINE_WAIT_SECONDS = 1.0
 
 
-async def _no_tools(call: FunctionToolCall) -> tuple[str, bool]:
-    # run_chat gets no tools, so the model cannot call one.
-    return "", False
+# Text a rewrite must keep exactly: every digit (prices, times, codes) and each
+# <spell>...</spell> code, in order.
+_DIGIT = re.compile(r"\d")
+_SPELL = re.compile(r"<spell>.*?</spell>", re.IGNORECASE | re.DOTALL)
+
+
+def _keeps_first_line(first_message: str, text: str, disclosure: str) -> bool:
+    """A rewrite is usable when it is not empty, not much longer, does not
+    repeat the notice, and keeps every digit and spelled code in order."""
+    if not text or len(text) > 2 * len(first_message) + 40:
+        return False
+    if disclosure.strip() and disclosure.strip() in text:
+        return False
+    return _DIGIT.findall(first_message) == _DIGIT.findall(text) and (
+        _SPELL.findall(first_message) == _SPELL.findall(text)
+    )
 
 
 async def fitted_first_line(
@@ -1070,7 +1083,7 @@ async def fitted_first_line(
                 llm,
                 messages,
                 [],
-                _no_tools,
+                no_tools,
                 max_rounds=1,
                 log_label=f"call_id={call_id}",
             ),
@@ -1083,8 +1096,10 @@ async def fitted_first_line(
             type(exc).__name__,
         )
         return first_message
-    text = text.strip().strip('"')
-    if not text or len(text) > 2 * len(first_message) + 40:
+    text = text.strip()
+    if len(text) >= 2 and text[0] == text[-1] == '"':
+        text = text[1:-1].strip()
+    if not _keeps_first_line(first_message, text, disclosure):
         return first_message
     return text
 
@@ -1095,14 +1110,14 @@ def start_first_line_fit(
     call_id: UUID,
     language: str | None = None,
 ) -> asyncio.Task[str] | None:
-    """Start fitting the first message to the disclosure before it plays, or
-    None when the greeting does not join them (no first message, no
-    disclosure, or an inbound greeting that already holds the AI line)."""
+    """Start fitting the first message to the disclosure while an outbound
+    call rings, or None when there is nothing to fit (no first message or
+    no disclosure) or no ring to hide it in (an inbound caller is already on
+    the line, and the default inbound greeting holds the AI line anyway)."""
     first_message = metadata.get("first_message")
     if not first_message or not metadata.get("ai_disclosure", True):
         return None
-    inbound = metadata.get("direction") == "inbound"
-    if inbound and not (metadata.get("ai_disclosure_line") or "").strip():
+    if metadata.get("direction") == "inbound":
         return None
     disclosure = disclosure_line(
         metadata.get("org_name"),
@@ -1157,7 +1172,8 @@ async def speak_greeting(
     ``ai_disclosure`` default is ``True`` so a dispatch that predates the
     field (rolling deploy) keeps the disclosure.
 
-    A caller ``first_message`` is spoken verbatim, concatenated onto the
+    A caller ``first_message`` is spoken as written, or fitted to follow the
+    disclosure on an outbound call (``first_line``), concatenated onto the
     disclosure as a single ``session.say()`` call, one spoken turn, not
     two back-to-back utterances that sound like the agent introducing
     itself twice. An inbound agent with no custom line goes further: the
@@ -2654,13 +2670,21 @@ async def _run_call(
         speech.on_state(getattr(ev, "new_state", None), time.monotonic())
 
     other_party_task = asyncio.create_task(other_party(call_id))
-    # Runs while the phone rings: the greeting reads it at pickup.
+    # Runs while the phone rings: the greeting reads it at pickup. Hail's own
+    # model, not a customer endpoint: one may answer in character instead of
+    # rewriting the line.
     first_line = start_first_line_fit(
-        metadata,
-        lambda: build_llm(llm_cfg, org_cfgs.get("llm")),
-        call_id,
-        language,
+        metadata, lambda: build_llm(None, None), call_id, language
     )
+    if first_line is not None:
+        fit_task = first_line
+
+        async def cancel_first_line_fit() -> None:
+            # A call that ends before the greeting (voicemail, no answer)
+            # does not wait on the model.
+            fit_task.cancel()
+
+        ctx.add_shutdown_callback(cancel_first_line_fit)
     agent_tools, agent_api = await build_tools_safely(
         metadata,
         call_id,

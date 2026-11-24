@@ -30,9 +30,8 @@ from hailhq.core.call_analysis import (
 )
 from hailhq.core.db import session_scope
 from hailhq.core.prompts import CALL_SUMMARY_INSTRUCTIONS
-from hailhq.voicebot.chat_loop import LLM_TIMEOUT_SECONDS, run_chat
+from hailhq.voicebot.chat_loop import LLM_TIMEOUT_SECONDS, no_tools, run_chat
 from hailhq.voicebot.pipeline import build_llm, resolve_org_configs
-from livekit.agents.llm import FunctionToolCall
 
 logger = logging.getLogger("hailhq.voicebot.callsummary")
 
@@ -72,11 +71,6 @@ def _transcript_text(turns: list[dict[str, Any]]) -> str:
     return f"{text[:half]}\n[...]\n{text[-half:]}"
 
 
-async def _no_tools(call: FunctionToolCall) -> tuple[str, bool]:
-    # run_chat gets no tools, so the model cannot call one.
-    return "", True
-
-
 async def summarize(
     organization_id: uuid.UUID, call_id: uuid.UUID, turns: list[dict[str, Any]]
 ) -> str | None:
@@ -94,7 +88,7 @@ async def summarize(
                 llm,
                 messages,
                 [],
-                _no_tools,
+                no_tools,
                 max_rounds=1,
                 log_label=f"call_id={call_id}",
             ),

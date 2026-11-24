@@ -1125,12 +1125,14 @@ async def test_speak_greeting_says_the_line_as_written_when_the_fit_is_late(
     [
         ("Calling about your order.", "Calling about your order."),
         ('"Calling about your order."', "Calling about your order."),
+        ('Say "yes"', 'Say "yes"'),  # a lone quote stays
         ("", "Hi, calling about your order."),
         ("x" * 500, "Hi, calling about your order."),
+        (f"{AI_DISCLOSURE_LINE} Calling.", "Hi, calling about your order."),
     ],
 )
 async def test_fitted_first_line_falls_back_to_the_line_as_written(reply, expected):
-    """An empty or runaway answer keeps the customer's line as written."""
+    """An empty, runaway or notice-repeating answer keeps the line as written."""
     line = await fitted_first_line(
         FakeLLM(reply=reply),
         AI_DISCLOSURE_LINE,
@@ -1138,6 +1140,28 @@ async def test_fitted_first_line_falls_back_to_the_line_as_written(reply, expect
         UUID("11111111-2222-3333-4444-555555555555"),
     )
     assert line == expected
+
+
+@pytest.mark.parametrize(
+    ("first", "reply", "kept"),
+    [
+        ("Hi, your code is 4 8 1 9.", "Your code is 4819.", True),
+        ("Hi, your code is 4 8 1 9.", "Your code is 481.", False),
+        ("Hi, Friday at 3 PM?", "Friday at 3 PM?", True),
+        ("Hi, Friday at 3 PM?", "Friday at 4 PM?", False),
+        ("Hi, code <spell>A7X9</spell>.", "Code <spell>A7X9</spell>.", True),
+        ("Hi, code <spell>A7X9</spell>.", "Code A7X9.", False),
+    ],
+)
+async def test_fitted_first_line_keeps_every_digit_and_code(first, reply, kept):
+    """A rewrite that changes a digit or a spelled code is not used."""
+    line = await fitted_first_line(
+        FakeLLM(reply=reply),
+        AI_DISCLOSURE_LINE,
+        first,
+        UUID("11111111-2222-3333-4444-555555555555"),
+    )
+    assert line == (reply if kept else first)
 
 
 async def test_fitted_first_line_keeps_the_line_when_the_model_fails() -> None:
@@ -1159,8 +1183,13 @@ async def test_fitted_first_line_keeps_the_line_when_the_model_fails() -> None:
     [
         {},  # no first line
         {"first_message": "Hi.", "ai_disclosure": False},  # no AI notice
-        # The inbound greeting already holds the AI line.
+        # An inbound caller is already on the line: no ring to hide it in.
         {"first_message": "Hi.", "direction": "inbound"},
+        {
+            "first_message": "Hi.",
+            "direction": "inbound",
+            "ai_disclosure_line": "This is an AI assistant.",
+        },
     ],
 )
 async def test_first_line_fit_runs_only_when_the_notice_precedes_the_line(metadata):

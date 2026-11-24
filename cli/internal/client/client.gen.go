@@ -1773,7 +1773,7 @@ type AgentCreate struct {
 	// EmailEnabled Answer email on addresses that route email to this agent.
 	EmailEnabled *bool `json:"email_enabled,omitempty"`
 
-	// FirstMessage Opening line spoken after the AI line. It is reworded so it does not repeat the AI line's greeting; names, numbers and codes stay as written. Omitted: the agent waits for the other side to speak first.
+	// FirstMessage Opening line spoken after the AI line. On outbound calls it is reworded so it does not repeat the AI line's greeting; names, numbers and codes stay as written. Omitted: the agent waits for the other side to speak first.
 	FirstMessage *string `json:"first_message,omitempty"`
 
 	// HandoverContacts People the agent may hand a live call to, in order. The agent never sees their numbers.

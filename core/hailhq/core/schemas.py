@@ -1358,10 +1358,10 @@ class AgentCreate(BaseModel):
         default=None,
         max_length=1000,
         description=(
-            "Opening line spoken after the AI line. It is reworded so it does "
-            "not repeat the AI line's greeting; names, numbers and codes stay "
-            "as written. Omitted: the agent waits for the other side to speak "
-            "first."
+            "Opening line spoken after the AI line. On outbound calls it is "
+            "reworded so it does not repeat the AI line's greeting; names, "
+            "numbers and codes stay as written. Omitted: the agent waits for "
+            "the other side to speak first."
         ),
     )
     recording_enabled: bool | None = Field(

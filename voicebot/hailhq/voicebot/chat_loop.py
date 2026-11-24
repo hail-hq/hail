@@ -33,6 +33,11 @@ TOOL_APOLOGY = "Sorry, the earlier messages could not be read."
 ToolRunner = Callable[[FunctionToolCall], Awaitable[tuple[str, bool]]]
 
 
+async def no_tools(call: FunctionToolCall) -> tuple[str, bool]:
+    """The tool runner of a chat with no tools: the model cannot call one."""
+    return "", True
+
+
 class HttpToolTime:
     """The HTTP tool time one reply has left. A call starts only while a
     whole timeout still fits, so the tools never use more than
