@@ -884,9 +884,7 @@ class SipConnection(Base):
     label: Mapped[str] = mapped_column(Text, nullable=False)
     inbound_username: Mapped[str] = mapped_column(Text, nullable=False)
     # None once the connection is deleted.
-    encrypted_inbound_password: Mapped[str | None] = mapped_column(
-        Text, nullable=True
-    )
+    encrypted_inbound_password: Mapped[str | None] = mapped_column(Text, nullable=True)
     # NULL: answer only, Hail never dials this PBX.
     pbx_host: Mapped[str | None] = mapped_column(Text, nullable=True)
     pbx_port: Mapped[int] = mapped_column(

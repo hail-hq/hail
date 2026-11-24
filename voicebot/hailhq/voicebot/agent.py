@@ -1609,8 +1609,6 @@ async def open_inbound_from_room(
     return outcome.metadata
 
 
-
-
 async def collect_check_digits(
     room: rtc.Room, seconds: float = CHECK_CODE_SECONDS
 ) -> str:
