@@ -495,6 +495,18 @@ async def _organization_name(org_id: UUID) -> str | None:
     return await fetch_organization_name(str(org_id))
 
 
+async def _can_hand_over(db: AsyncSession, number: PhoneNumber) -> bool:
+    """False for a connected number whose phone system only answers: with no
+    outbound trunk, every handover leg would fail, so none is offered."""
+    if number.provider != PBX:
+        return True
+    try:
+        conn = await connection_of(db, number)
+    except ValueError:
+        return False
+    return conn.livekit_outbound_trunk_id is not None
+
+
 async def _answer_or_refuse(
     db: AsyncSession,
     number: PhoneNumber,
@@ -572,6 +584,13 @@ async def _answer_or_refuse(
         attrs.caller,
         agent.id,
     )
+    targets = (
+        await handover_targets(
+            db, agent.id, attrs.caller, via_pbx=number.provider == PBX
+        )
+        if await _can_hand_over(db, number)
+        else []
+    )
     return Accepted(
         {
             "call_id": call.id,
@@ -588,9 +607,7 @@ async def _answer_or_refuse(
             "ai_disclosure": agent.ai_disclosure,
             "ai_disclosure_line": disclosure_line,
             "tools": agent.tools,
-            "handover_targets": await handover_targets(
-                db, agent.id, attrs.caller, via_pbx=number.provider == PBX
-            ),
+            "handover_targets": targets,
             "handover_max_duration_seconds": handover_limit(agent),
             "org_name": await org_name,
         }

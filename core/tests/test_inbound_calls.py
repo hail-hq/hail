@@ -11,8 +11,10 @@ from hailhq.core.config import settings
 from hailhq.core.models import (
     AccountCredit,
     Agent,
+    AgentHandoverContact,
     Call,
     CallEvent,
+    Contact,
     OrganizationCallSettings,
     PhoneNumber,
     SipConnection,
@@ -194,7 +196,9 @@ async def test_shared_trunk_serves_every_carrier(async_session, monkeypatch) -> 
     assert isinstance(outcome, inbound_calls.Accepted)
 
 
-async def _pbx_seed(session, inbound_trunk_id="ST_in_pbx", **number_kwargs):
+async def _pbx_seed(
+    session, inbound_trunk_id="ST_in_pbx", outbound_trunk_id=None, **number_kwargs
+):
     org = uuid.uuid4()
     conn = SipConnection(
         organization_id=org,
@@ -202,7 +206,9 @@ async def _pbx_seed(session, inbound_trunk_id="ST_in_pbx", **number_kwargs):
         inbound_username="hail-aabbccddeeff",
         encrypted_inbound_password="token",
         default_region="US",
+        pbx_host="pbx.example.com" if outbound_trunk_id else None,
         livekit_inbound_trunk_id=inbound_trunk_id,
+        livekit_outbound_trunk_id=outbound_trunk_id,
     )
     session.add(conn)
     await session.flush()
@@ -478,6 +484,47 @@ async def test_refused_call_of_deleted_connection_keeps_extension(
     assert isinstance(out, inbound_calls.Rejected)
     call = await async_session.get(Call, out.call_id)
     assert call.from_e164 == "101"
+
+
+async def _handover_contacts(session, org, agent) -> None:
+    """One contact with a phone, one with only an extension."""
+    phone = Contact(organization_id=org, name="Sam Lee", phone_e164="+14155550123")
+    ext = Contact(organization_id=org, name="Front desk", extension="800")
+    session.add_all([phone, ext])
+    await session.flush()
+    session.add_all(
+        [
+            AgentHandoverContact(
+                agent_id=agent.id, contact_id=phone.id, note="Sales", position=0
+            ),
+            AgentHandoverContact(
+                agent_id=agent.id, contact_id=ext.id, note="Desk", position=1
+            ),
+        ]
+    )
+    await session.commit()
+
+
+async def test_pbx_call_offers_phone_and_extension_targets(async_session) -> None:
+    org, agent, _ = await _pbx_seed(async_session, outbound_trunk_id="ST_out_pbx")
+    await _handover_contacts(async_session, org, agent)
+    out = await inbound_calls.open_inbound_call(
+        async_session, _attrs(trunk_id="ST_in_pbx")
+    )
+    labels = [t["label"] for t in out.metadata["handover_targets"]]
+    assert labels == ["Sam Lee", "Front desk"]
+
+
+async def test_answer_only_pbx_call_offers_no_handover(async_session) -> None:
+    """A phone system that only answers has no address for the second leg:
+    every handover would fail, so the agent is offered none."""
+    org, agent, _ = await _pbx_seed(async_session)
+    await _handover_contacts(async_session, org, agent)
+    out = await inbound_calls.open_inbound_call(
+        async_session, _attrs(trunk_id="ST_in_pbx")
+    )
+    assert isinstance(out, inbound_calls.Accepted)
+    assert out.metadata["handover_targets"] == []
 
 
 # Ownership check, inbound side (Task A12).
