@@ -261,82 +261,95 @@ async def update_connection(
     pbx_username: Any = UNSET,
     pbx_password: Any = UNSET,
 ) -> SipConnection:
-    """Change a connection; the outbound trunk follows ``pbx_host``."""
-    _live(connection)
-    new_label = connection.label if label is UNSET else _clean_label(label)
-    host = connection.pbx_host if pbx_host is UNSET else _check_host(pbx_host)
-    port = connection.pbx_port if pbx_port is UNSET else _check_port(pbx_port)
-    transport = (
-        connection.pbx_transport
-        if pbx_transport is UNSET
-        else _check_transport(pbx_transport)
-    )
-    username = connection.pbx_username if pbx_username is UNSET else pbx_username
-    if username is not None and not isinstance(username, str):
-        raise _invalid("pbx_username")
-
-    if pbx_password is UNSET:
-        # Dropping the username drops its password.
-        encrypted_password = connection.encrypted_pbx_password if username else None
-    elif pbx_password is None:
-        encrypted_password = None
-    else:
-        if not isinstance(pbx_password, str) or username is None:
-            raise _invalid("pbx_password")
-        encrypted_password = encrypt_secret(pbx_password)
-    password = decrypt_secret(encrypted_password) if encrypted_password else None
-
-    destination_changed = (host, port, transport) != (
-        connection.pbx_host,
-        connection.pbx_port,
-        connection.pbx_transport,
-    )
-    if (
-        host is not None
-        and destination_changed
-        and connection.encrypted_pbx_password is not None
-        and pbx_password is UNSET
-    ):
-        # Never send a stored password to a new destination.
-        raise ConnectedNumberError(
-            "password_required", "pbx_password", "send the PBX password again"
-        )
-
+    """Change a connection; the outbound trunk follows ``pbx_host``. Under
+    the org lock, so it cannot race ``delete_connection``. A failed commit
+    puts the outbound trunk back as it was."""
+    await org_lock(db, connection.organization_id)
+    await db.refresh(connection)
+    # Read now: a rollback expires the row.
     old_host = connection.pbx_host
+    old_port = connection.pbx_port
+    old_transport = connection.pbx_transport
+    old_username = connection.pbx_username
+    old_encrypted_password = connection.encrypted_pbx_password
     old_outbound = connection.livekit_outbound_trunk_id
-    outbound_id = old_outbound
     created: str | None = None
+    updated = False
     drop: str | None = None
-    if host is None:
-        if old_outbound is not None:
-            drop = old_outbound
-            outbound_id = None
-    elif old_outbound is None:
-        created = outbound_id = await _livekit(
-            lk.create_pbx_outbound_trunk,
-            connection.id,
-            host,
-            port,
-            transport,
-            username,
-            password,
+    try:
+        _live(connection)
+        new_label = connection.label if label is UNSET else _clean_label(label)
+        host = old_host if pbx_host is UNSET else _check_host(pbx_host)
+        port = old_port if pbx_port is UNSET else _check_port(pbx_port)
+        transport = (
+            old_transport if pbx_transport is UNSET else _check_transport(pbx_transport)
         )
-    elif (host, port, transport, username, encrypted_password) != (
-        old_host,
-        connection.pbx_port,
-        connection.pbx_transport,
-        connection.pbx_username,
-        connection.encrypted_pbx_password,
-    ):
-        await _livekit(
-            lk.update_pbx_outbound_trunk,
-            old_outbound,
-            host,
-            port,
-            transport,
-            username,
-            password,
+        username = old_username if pbx_username is UNSET else pbx_username
+        if username is not None and not isinstance(username, str):
+            raise _invalid("pbx_username")
+
+        if pbx_password is UNSET:
+            # Dropping the username drops its password.
+            encrypted_password = old_encrypted_password if username else None
+        elif pbx_password is None:
+            encrypted_password = None
+        else:
+            if not isinstance(pbx_password, str) or username is None:
+                raise _invalid("pbx_password")
+            encrypted_password = encrypt_secret(pbx_password)
+        password = decrypt_secret(encrypted_password) if encrypted_password else None
+
+        destination_changed = (host, port, transport) != (
+            old_host,
+            old_port,
+            old_transport,
         )
+        if (
+            host is not None
+            and destination_changed
+            and old_encrypted_password is not None
+            and pbx_password is UNSET
+        ):
+            # Never send a stored password to a new destination.
+            raise ConnectedNumberError(
+                "password_required", "pbx_password", "send the PBX password again"
+            )
+
+        outbound_id = old_outbound
+        if host is None:
+            if old_outbound is not None:
+                drop = old_outbound
+                outbound_id = None
+        elif old_outbound is None:
+            created = outbound_id = await _livekit(
+                lk.create_pbx_outbound_trunk,
+                connection.id,
+                host,
+                port,
+                transport,
+                username,
+                password,
+            )
+        elif (host, port, transport, username, encrypted_password) != (
+            old_host,
+            old_port,
+            old_transport,
+            old_username,
+            old_encrypted_password,
+        ):
+            await _livekit(
+                lk.update_pbx_outbound_trunk,
+                old_outbound,
+                host,
+                port,
+                transport,
+                username,
+                password,
+            )
+            updated = True
+    except BaseException:
+        await db.rollback()
+        raise
 
     try:
         connection.label = new_label
@@ -348,13 +361,48 @@ async def update_connection(
         connection.livekit_outbound_trunk_id = outbound_id
         await db.commit()
     except BaseException:
-        await db.rollback()
+        try:
+            await db.rollback()
+        except Exception:
+            logger.warning("rollback failed after connection update", exc_info=True)
         if created is not None:
             await _drop_trunks(lk, [created])
+        elif updated:
+            await _restore_outbound_trunk(
+                lk,
+                old_outbound,
+                old_host,
+                old_port,
+                old_transport,
+                old_username,
+                old_encrypted_password,
+            )
         raise
     if drop is not None:
         await _drop_trunks(lk, [drop])
     return connection
+
+
+async def _restore_outbound_trunk(
+    lk: LiveKitClient,
+    trunk_id: str,
+    host: str,
+    port: int,
+    transport: str,
+    username: str | None,
+    encrypted_password: str | None,
+) -> None:
+    """Put the outbound trunk back as the row still has it. Best effort."""
+    try:
+        password = decrypt_secret(encrypted_password) if encrypted_password else None
+        await lk.update_pbx_outbound_trunk(
+            trunk_id, host, port, transport, username, password
+        )
+    except Exception as exc:
+        # The type only: an error text may hold the password.
+        logger.warning(
+            "could not restore outbound trunk %s (%s)", trunk_id, type(exc).__name__
+        )
 
 
 async def rotate_inbound_password(
@@ -426,6 +474,10 @@ async def add_connected_number(
     # Non-geographic numbers (+800...) have region "001", not an ISO country.
     if country is None or country == "001":
         raise ConnectedNumberError("invalid_number", "e164", "not a valid number")
+    # One spelling for the row, the trunk and the unique index.
+    e164 = phonenumbers.format_number(
+        phonenumbers.parse(e164, None), phonenumbers.PhoneNumberFormat.E164
+    )
     await org_lock(db, connection.organization_id)
     await db.refresh(connection)
     try:
@@ -668,7 +720,12 @@ async def check_connected_number(
     # 3. A billed call to a destination Hail calls.
     if not await has_funds(db, org_id):
         raise await _refuse_check(db, "no_funds")
-    if not sells_in(number.country_code):
+    try:
+        sold = sells_in(number.country_code)
+    except Exception:  # e.g. a missing catalog file
+        logger.warning("catalog unreadable for a connected number check", exc_info=True)
+        sold = False
+    if not sold:
         raise await _refuse_check(db, "not_callable")
     if not (await check_handover_allowed(db, org_id, e164)).allowed:
         raise await _refuse_check(db, "not_callable")

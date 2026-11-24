@@ -39,6 +39,7 @@ from hailhq.core.models import (
     Call,
     CallEvent,
     PhoneNumber,
+    SipConnection,
     UsageEvent,
     WebhookDelivery,
     WebhookSubscription,
@@ -57,7 +58,7 @@ from hailhq.core.sip_connections import (
     hash_check_code,
 )
 from livekit.api import SipCallError
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
 ORG = UUID("00000000-0000-0000-0000-0000000000a6")
@@ -312,6 +313,70 @@ async def test_update_connection_refuses_deleted(async_session, lk, conn):
     assert e.value.code == "connection_deleted"
 
 
+async def test_update_connection_reads_the_row_under_the_lock(async_session, lk, conn):
+    """A connection deleted by another request after this one loaded it is
+    refused before any LiveKit call."""
+    async with session_scope() as other:
+        await other.execute(
+            update(SipConnection)
+            .where(SipConnection.id == conn.id)
+            .values(deleted_at=NOW)
+        )
+        await other.commit()
+    with pytest.raises(ConnectedNumberError) as e:
+        await update_connection(async_session, lk, conn, pbx_host="pbx2.example.com")
+    assert e.value.code == "connection_deleted"
+    lk.update_pbx_outbound_trunk.assert_not_awaited()
+    lk.create_pbx_outbound_trunk.assert_not_awaited()
+
+
+async def test_update_connection_restores_the_trunk_when_commit_fails(
+    async_session, lk, conn_with_password, monkeypatch
+):
+    monkeypatch.setattr(
+        async_session, "commit", AsyncMock(side_effect=IntegrityError("x", {}, None))
+    )
+    with pytest.raises(IntegrityError):
+        await update_connection(
+            async_session,
+            lk,
+            conn_with_password,
+            pbx_host="pbx2.example.com",
+            pbx_port=5080,
+            pbx_password="new-pw",
+        )
+    calls = lk.update_pbx_outbound_trunk.await_args_list
+    assert len(calls) == 2
+    assert calls[0].args == ("ST_out", "pbx2.example.com", 5080, "auto", "hail", "new-pw")
+    assert calls[1].args == ("ST_out", "pbx.example.com", 5060, "auto", "hail", "old-pw")
+    lk.delete_sip_trunk.assert_not_awaited()
+
+
+async def test_update_connection_deletes_a_new_trunk_when_commit_fails(
+    async_session, lk, answer_only_conn, monkeypatch
+):
+    monkeypatch.setattr(
+        async_session, "commit", AsyncMock(side_effect=IntegrityError("x", {}, None))
+    )
+    with pytest.raises(IntegrityError):
+        await update_connection(
+            async_session, lk, answer_only_conn, pbx_host="pbx.example.com"
+        )
+    lk.delete_sip_trunk.assert_awaited_once_with("ST_out")
+
+
+async def test_update_connection_restore_failure_still_raises_the_commit_error(
+    async_session, lk, conn, monkeypatch
+):
+    monkeypatch.setattr(
+        async_session, "commit", AsyncMock(side_effect=IntegrityError("x", {}, None))
+    )
+    lk.update_pbx_outbound_trunk.side_effect = [None, RuntimeError("down")]
+    with pytest.raises(IntegrityError):
+        await update_connection(async_session, lk, conn, pbx_host="pbx2.example.com")
+    assert lk.update_pbx_outbound_trunk.await_count == 2
+
+
 async def test_rotate_inbound_password_updates_trunk_and_row(async_session, lk, conn):
     old = decrypt_secret(conn.encrypted_inbound_password)
     new = await rotate_inbound_password(async_session, lk, conn)
@@ -447,6 +512,7 @@ async def test_host_change_needs_password_again(async_session, lk, conn_with_pas
     assert (e.value.code, e.value.field) == ("password_required", "pbx_password")
     lk.update_pbx_outbound_trunk.assert_not_awaited()
     lk.create_pbx_outbound_trunk.assert_not_awaited()
+    await async_session.refresh(conn_with_password)  # the refusal rolled back
     assert conn_with_password.pbx_host == "pbx.example.com"
 
 
@@ -525,6 +591,30 @@ async def test_add_number_is_unverified_voice_only_and_on_trunk(
     lk.add_inbound_number.assert_awaited_once_with(
         conn.livekit_inbound_trunk_id, "+14155550100"
     )
+
+
+async def test_add_number_stores_e164(async_session, lk, conn):
+    n = await add_connected_number(async_session, lk, conn, "+1 415 555 0100")
+    assert n.e164 == "+14155550100"
+    lk.add_inbound_number.assert_awaited_once_with(
+        conn.livekit_inbound_trunk_id, "+14155550100"
+    )
+    with pytest.raises(ConnectedNumberError) as e:
+        await add_connected_number(async_session, lk, conn, "+14155550100")
+    assert e.value.code == "number_taken"
+    assert lk.add_inbound_number.await_count == 1
+
+
+async def test_add_number_commit_failure_removes_the_e164_from_the_trunk(
+    async_session, lk, conn, monkeypatch
+):
+    trunk_id = conn.livekit_inbound_trunk_id
+    monkeypatch.setattr(
+        async_session, "commit", AsyncMock(side_effect=RuntimeError("commit failed"))
+    )
+    with pytest.raises(RuntimeError):
+        await add_connected_number(async_session, lk, conn, "+1 (415) 555-0100")
+    lk.remove_inbound_number.assert_awaited_once_with(trunk_id, "+14155550100")
 
 
 async def test_add_number_taken_elsewhere_is_a_clean_error(async_session, lk, conn):
@@ -1375,6 +1465,20 @@ async def test_check_of_country_hail_does_not_sell_in_is_refused(
         await check_connected_number(async_session, check_lk, pbx_number)
     assert e.value.code == "not_callable"
     check_lk.create_room.assert_not_awaited()
+
+
+async def test_check_with_unreadable_catalog_is_not_callable(
+    async_session, check_lk, pbx_number, pool_number, monkeypatch
+):
+    def broken(country):
+        raise FileNotFoundError("catalog")
+
+    monkeypatch.setattr(connected_numbers, "sells_in", broken)
+    with pytest.raises(ConnectedNumberError) as e:
+        await check_connected_number(async_session, check_lk, pbx_number)
+    assert e.value.code == "not_callable"
+    check_lk.create_room.assert_not_awaited()
+    assert await async_session.scalar(select(func.count()).select_from(Call)) == 0
 
 
 async def test_check_without_secret_key_is_not_configured(
