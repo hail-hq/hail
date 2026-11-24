@@ -975,20 +975,50 @@ def opening_instructions(
     return f"{base} They have not said anything yet."
 
 
-def first_message_instructions(first_message: str) -> str:
+def _say_first_message(session: Any, first_message: str, disclosure: str) -> None:
+    """Have the agent say ``first_message`` after the disclosure (see
+    :func:`first_message_instructions`). If that turn fails, or ends with
+    no words while nobody interrupted it, say the line as written: a model
+    error must not leave the call without its opening line."""
+    handle = session.generate_reply(
+        instructions=first_message_instructions(first_message, disclosure)
+    )
+    add_done = getattr(handle, "add_done_callback", None)
+    if add_done is None:
+        return
+
+    def on_done(done: Any) -> None:
+        spoke = any(
+            getattr(item, "role", None) == "assistant"
+            and (getattr(item, "text_content", None) or "").strip()
+            for item in getattr(done, "chat_items", []) or []
+        )
+        if done.exception() is None and (spoke or done.interrupted):
+            return
+        try:
+            session.say(first_message, allow_interruptions=True)
+        except Exception:
+            logger.exception("could not say the first message after a failed turn")
+
+    add_done(on_done)
+
+
+def first_message_instructions(first_message: str, disclosure: str) -> str:
     """The prompt for the opening turn that says the agent's ``first_message``
-    right after the AI notice: in the agent's own words, as one greeting with
-    the notice, which has already greeted and said who the agent is. The
-    other party's pickup words stay out of it: they are untrusted, and a
-    ``first_message`` opening does not answer them."""
+    right after the AI ``disclosure``, as one greeting with it. Both are
+    quoted as JSON strings, so a quote inside them cannot end the quote. The
+    other party's pickup words stay out: they are untrusted, and the chat
+    already holds anything they said."""
     return (
-        "The spoken introduction has already greeted the person and said who "
-        "you are and who you represent. Now say your opening line, below, so "
-        "the two sound like one greeting: do not greet or introduce yourself "
-        "again, so leave out any hello word at its start (such as Hi, Hello, "
-        "Good morning, Bonjour or 早上好). Keep everything else: its meaning, "
-        "the name you address them by, numbers and codes. Add nothing else, "
-        f'then give them room to respond. Your opening line: "{first_message}"'
+        f"You just said this introduction: {json.dumps(disclosure, ensure_ascii=False)}. "
+        "Now say your opening line, below, so the two sound like one greeting. "
+        "Say it word for word, except leave out a hello or a self-introduction "
+        "that your introduction already said. Keep everything else exactly, "
+        "including numbers, codes, any notice, and the name you address them "
+        'by ("Hello Sam, ..." becomes "Sam, ..."). Add nothing else; if '
+        "they asked something during the introduction, answer it briefly "
+        "after the line. Then give them room to respond. Your opening line: "
+        f"{json.dumps(first_message, ensure_ascii=False)}"
     )
 
 
@@ -1154,10 +1184,11 @@ async def speak_greeting(
                 # The AI line sits after the first sentence: a caller who
                 # speaks over the greeting must still hear it.
                 interruptible = False
-            elif generate_opening:
-                # The agent says the greeting in its own words right after the
-                # notice, as one opening, so the caller is not greeted twice
-                # ("Hi, this is an AI assistant ... Hi, this is ...").
+            elif generate_opening and not inbound:
+                # The agent says the greeting right after the notice, as one
+                # opening, so the caller is not greeted twice ("Hi, this is an
+                # AI assistant ... Hi, this is ..."). Outbound only: there the
+                # pickup turn is cleared and replies wait for the opening.
                 await session.say(disclosure, allow_interruptions=True)
                 blended = True
                 return
@@ -1171,9 +1202,7 @@ async def speak_greeting(
         # Release even when say fails, so the agent is never left unable to reply.
         heard = on_opened() if on_opened is not None else None
         if blended:
-            session.generate_reply(
-                instructions=first_message_instructions(first_message)
-            )
+            _say_first_message(session, first_message, disclosure)
     # An inbound caller dialed in: with no ``first_message`` the agent waits
     # for them to speak (the documented ``first_message: null`` behavior). The
     # generated opening is written for a call Hail placed ("say why you are

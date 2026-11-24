@@ -263,9 +263,10 @@ class CallCreate(ConsentAttestationMixin):
         default=None,
         description=(
             "Opening line the agent speaks first. After the AI line, the agent "
-            "says it in its own words, as one greeting with that line: it does "
-            "not say hello twice, and keeps the line's meaning, names, numbers "
-            "and codes. Omitted: the agent waits for the callee to speak first."
+            "says it as one greeting with that line: word for word, except a "
+            "hello or self-introduction the AI line already said. Exact wording "
+            "is not guaranteed. Without the AI line it is said as written. "
+            "Omitted: the agent waits for the callee to speak first."
         ),
     )
     recording_enabled: bool | None = Field(
@@ -1358,10 +1359,12 @@ class AgentCreate(BaseModel):
         default=None,
         max_length=1000,
         description=(
-            "Opening line spoken after the AI line. The agent says it in its "
-            "own words, as one greeting with the AI line: it does not say hello "
-            "twice, and keeps the line's meaning, names, numbers and codes. "
-            "Omitted: the agent waits for the other side to speak first."
+            "Opening line spoken after the AI line. On outbound calls the agent "
+            "says it as one greeting with the AI line: word for word, except a "
+            "hello or self-introduction the AI line already said. Exact wording "
+            "is not guaranteed. Inbound calls and calls without the AI line say "
+            "it as written. Omitted: the agent waits for the other side to "
+            "speak first."
         ),
     )
     recording_enabled: bool | None = Field(
@@ -1476,9 +1479,9 @@ class AgentUpdate(BaseModel):
         default=None,
         max_length=1000,
         description=(
-            "New opening line; null makes the agent wait for the other side. "
-            "After the AI line, the agent says it in its own words, as one "
-            "greeting with that line."
+            "New opening line; null makes the agent wait for the other side. On "
+            "outbound calls the agent says it as one greeting with the AI line, "
+            "leaving out a hello the AI line already said."
         ),
     )
     recording_enabled: bool | None = Field(

@@ -47,14 +47,20 @@ Live behavior needs a separately authorized test call or a synthetic model evalu
 
 ## Opening line
 
-Hail says the AI notice word for word, then the agent's model says the
-greeting (`first_message`, "Greeting" in the console) in its own words. The
-two sound like one greeting, so the caller is not greeted twice. The
-instruction is `first_message_instructions` in
-`voicebot/hailhq/voicebot/agent.py`. On the phone-menu path the two are
-joined as written, because the turn loop is already answering a person.
-An inbound agent with the default AI line keeps one literal greeting, with
-the AI line inside it.
+On outbound calls, Hail says the AI notice word for word. The agent's model
+then says the greeting (`first_message`, "Greeting" in the console) as one
+greeting with it. It keeps the line word for word, except a hello or a
+self-introduction the notice already said. The instruction is
+`first_message_instructions` in `voicebot/hailhq/voicebot/agent.py`; it
+quotes the notice and the line as JSON strings.
+
+- If the model turn fails, or ends with no words, the line is said as
+  written.
+- Exact wording is not guaranteed: the model writes the turn.
+- The phone-menu path joins the two as written: the turn loop is already
+  answering a person.
+- Inbound calls keep the literal greeting: replies are not held for the
+  opening there.
 
 ## Closing calls
 

@@ -873,7 +873,7 @@ async def test_non_hangup_categories_speak_the_disclosure(
     assert session.say_calls == [AI_DISCLOSURE_LINE]
     assert len(session.replies) == 1
     assert session.replies[0].startswith(
-        first_message_instructions("Is this a good time?")
+        first_message_instructions("Is this a good time?", AI_DISCLOSURE_LINE)
     )
     assert ctx.delete_room_calls == 0
     assert ctx.shutdown_calls == []
