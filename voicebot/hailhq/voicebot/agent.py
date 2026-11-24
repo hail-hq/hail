@@ -106,6 +106,7 @@ from hailhq.voicebot.pipeline import (
     decrypt_llm_metadata,
     resolve_org_configs,
     stt_takes_keyterms,
+    use_conversation_turn_wait,
 )
 from hailhq.voicebot.recording import start_recording, stop_recording
 from hailhq.voicebot.recovery import ConversationRecovery
@@ -1045,8 +1046,13 @@ async def speak_greeting(
     generate_opening: bool = True,
     on_opened: Callable[[], str | None] | None = None,
     language: str | None = None,
+    person_confirmed: bool = True,
 ) -> None:
     """Open the call: disclosure (unless opted out), then the first message.
+
+    ``person_confirmed=False`` is a greeting spoken without knowing who
+    answered (detection skipped, failed or unsure): the end-of-turn wait
+    stays long, because a recording may be on the line.
 
     The disclosure leads by default and can only be skipped, never
     customized or reordered: its template is not reachable via
@@ -1119,6 +1125,9 @@ async def speak_greeting(
         eou_task = getattr(recognition, "_end_of_turn_task", None)
         if eou_task is not None:
             eou_task.cancel()
+    if person_confirmed:
+        # From here the agent talks with a person: answer sooner.
+        use_conversation_turn_wait(session)
     try:
         if first_message:
             interruptible = True
@@ -1199,6 +1208,8 @@ def arm_deferred_greeting(
                 generate_opening=not text,
                 on_opened=agent.release_opening,
                 language=language,
+                # Empty text: the wait ran out with nobody classified.
+                person_confirmed=bool(text),
             )
         except Exception:
             # The session can close while the greeting plays.
@@ -2908,6 +2919,15 @@ async def _run_call(
                 pickup_transcript=amd_result.transcript if amd_result else None,
                 on_opened=agent.release_opening,
                 language=language,
+                # A caller who dialed in is a person. On a placed call only
+                # a human verdict is: detection can be skipped or unsure.
+                person_confirmed=(
+                    metadata.get("direction") == "inbound"
+                    or (
+                        amd_result is not None
+                        and amd_result.category == AMDCategory.HUMAN
+                    )
+                ),
             )
             recovery.start()
         except Exception:

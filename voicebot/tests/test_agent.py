@@ -58,6 +58,7 @@ from hailhq.voicebot.agent import (
     speech_text,
 )
 from hailhq.voicebot.amd import IVR_TOOL_LINES, ivr_navigation_instructions
+from hailhq.voicebot.pipeline import MAX_TURN_END_WAIT
 from hailhq.voicebot.spoken_lines import SPOKEN_LINES
 from livekit import rtc
 from livekit.agents import Agent, AgentSession
@@ -2534,6 +2535,27 @@ def test_greeting_with_ai_line_in_other_languages(message, spoken):
     from hailhq.voicebot.agent import greeting_with_ai_line
 
     assert greeting_with_ai_line(message, "AI line.") == spoken
+
+
+async def test_the_greeting_to_a_person_switches_to_the_shorter_turn_wait() -> None:
+    session = FakeAnnouncingSession()
+
+    await speak_greeting(session, {"first_message": "Hello."})
+
+    # Set before anything is spoken.
+    assert session.option_updates == [
+        ({"endpointing_opts": {"max_delay": MAX_TURN_END_WAIT}}, 0)
+    ]
+    assert session.say_calls
+
+
+async def test_a_greeting_without_a_confirmed_person_keeps_the_long_wait() -> None:
+    session = FakeAnnouncingSession()
+
+    await speak_greeting(session, {"first_message": "Hello."}, person_confirmed=False)
+
+    assert session.option_updates == []
+    assert session.say_calls
 
 
 # Every tool name a call can have: the built-ins and cancel_transfer, which

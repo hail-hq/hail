@@ -11,8 +11,18 @@ made because we never invoke ``.chat()``.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
+
 import pytest
-from hailhq.voicebot.pipeline import ResolvedLayer, build_llm, build_session, build_stt
+from hailhq.voicebot.pipeline import (
+    MAX_TURN_END_WAIT,
+    ResolvedLayer,
+    build_llm,
+    build_session,
+    build_stt,
+    use_conversation_turn_wait,
+)
 from livekit.agents import AgentSession
 from livekit.agents.llm import FallbackAdapter
 from livekit.agents.stt import FallbackAdapter as stt_fallback
@@ -117,8 +127,6 @@ def test_call_chain_hands_over_after_text_was_sent(monkeypatch) -> None:
 
 
 def test_build_session_hands_over_after_text_was_sent() -> None:
-    from unittest.mock import MagicMock
-
     session = build_session(None, MagicMock())
     assert isinstance(session.llm, FallbackAdapter)
     assert session.llm._retry_on_chunk_sent is True
@@ -378,8 +386,6 @@ def test_build_stt_speechmatics_without_any_key_fails_fast(
 
 
 def _make_session(language, org_cfgs=None):
-    from unittest.mock import MagicMock
-
     from hailhq.voicebot.pipeline import build_session
 
     return build_session(None, MagicMock(), org_cfgs=org_cfgs, language=language)
@@ -387,8 +393,6 @@ def _make_session(language, org_cfgs=None):
 
 @pytest.mark.parametrize("explicit,expected", [(None, "fr"), ("en", "en")])
 def test_workspace_language_reaches_both_speech_layers(explicit, expected):
-    from unittest.mock import MagicMock, patch
-
     from hailhq.voicebot.pipeline import ResolvedLayer
 
     org_tts = ResolvedLayer(
@@ -818,3 +822,16 @@ def test_elevenlabs_tagalog_sends_the_filipino_code() -> None:
     ]
     assert len(eleven) == 2
     assert {inst._opts.language.language for inst in eleven} == {"fil"}
+
+
+def test_the_shorter_wait_reaches_a_real_session_and_never_costs_the_call() -> None:
+    session = build_session(None, MagicMock())
+    assert session.options.endpointing["max_delay"] > MAX_TURN_END_WAIT
+    use_conversation_turn_wait(session)
+    assert session.options.endpointing["max_delay"] == MAX_TURN_END_WAIT
+
+    def broken(**_kwargs):
+        raise RuntimeError("session closed")
+
+    use_conversation_turn_wait(SimpleNamespace(update_options=broken))
+    use_conversation_turn_wait(object())  # a session without the method

@@ -30,6 +30,10 @@ Component versions cut alongside this release:
 
 - Calls can always hang up, and call prompts never name a tool the call does not have.
 
+### Changed
+
+- Calls: the agent answers sooner once a person is on the line. It waits at most 1.2 seconds, down from 2.5, when it is unsure they have finished speaking (languages with semantic turn detection; phone calls and browser test calls).
+
 ## [0.37.0] (2026-11-23)
 
 A refused US texting registration now says why: Hail's fix first, then the
