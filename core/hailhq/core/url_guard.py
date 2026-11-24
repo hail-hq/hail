@@ -36,8 +36,10 @@ tools the save check here is a first filter, and the real guard is the
 resolver check in ``agent_tools/http_tool.py``, which judges every address
 aiohttp is about to connect to.
 
-Not covered: httpx resolves the host again when it connects, so a DNS
-rebind between the two lookups is still possible.
+Webhook deliveries connect to an address ``assert_public_host`` returned,
+so a DNS rebind after the check cannot move them. ``assert_public_https_url``
+callers (the LLM ``base_url``) still let httpx resolve the host again when it
+connects, so a rebind between the two lookups is possible there.
 """
 
 from __future__ import annotations
@@ -160,8 +162,11 @@ def ip_is_public(ip: str | ipaddress.IPv4Address | ipaddress.IPv6Address) -> boo
     )
 
 
-def assert_public_host(host: str, port: int) -> None:
+def assert_public_host(host: str, port: int) -> list[str]:
     """Raise UnsafeUrlError unless ``host`` resolves and every address is public.
+
+    Returns the checked addresses, so a caller can connect to one of them
+    instead of resolving again (a second lookup can answer differently).
 
     ``localhost`` and ``*.localhost`` are refused before any lookup.
     ``host`` is the ASCII host from ``connect_target``. Blocking (DNS):
@@ -201,6 +206,7 @@ def assert_public_host(host: str, port: int) -> None:
             # must not reveal what our resolver answers for internal names.
             logger.info("url guard: %s resolves to non-public %s", host, ip)
             raise UnsafeUrlError(NOT_PUBLIC)
+    return [info[4][0] for info in infos]
 
 
 def assert_public_https_url(url: str) -> str:

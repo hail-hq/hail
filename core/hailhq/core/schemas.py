@@ -322,7 +322,10 @@ class CallCreate(ConsentAttestationMixin):
         description=(
             "Agent tools to allow on this call. Omitted: every tool the "
             "organization's configured channels support (new channels appear "
-            "automatically). Empty list: no tools. Tool names are validated "
+            "automatically). Empty list: only the tools every call keeps "
+            "(end_call, send_dtmf and Hail's settings guide); a saved agent's "
+            "HTTP tools stay on. "
+            "Tool names are validated "
             "against the server's registry."
         ),
     )
@@ -1383,7 +1386,12 @@ class AgentCreate(BaseModel):
     )
     tools: list[str] | None = Field(
         default=None,
-        description="Agent tools to allow. Omitted: every tool the organization's channels support. Empty list: none.",
+        description=(
+            "Agent tools to allow. Omitted: every tool the organization's "
+            "channels support. Empty list: only the tools every call keeps "
+            "(end_call, send_dtmf and Hail's settings guide). HTTP tools stay "
+            "on."
+        ),
     )
     max_duration_seconds: int | None = Field(
         default=None,
@@ -1487,7 +1495,11 @@ class AgentUpdate(BaseModel):
         default=None, description="New TTS voice and language settings."
     )
     tools: list[str] | None = Field(
-        default=None, description="New allowed tools; null allows every tool."
+        default=None,
+        description=(
+            "New allowed tools; null allows every tool. Calls always keep "
+            "end_call, send_dtmf and Hail's settings guide."
+        ),
     )
     max_duration_seconds: int | None = Field(
         default=None,
@@ -3324,6 +3336,41 @@ class WebhookSubscriptionPatch(BaseModel):
     status: WebhookSubscriptionStatus | None = Field(
         default=None,
         description="Set to 'disabled' to pause deliveries, or 'active' to resume. Omit to leave unchanged.",
+    )
+
+
+class WebhookTestRequest(BaseModel):
+    target_url: str = Field(
+        min_length=1, description="HTTPS URL to send the test event to."
+    )
+    authorization: SecretStr | None = Field(
+        default=None,
+        description="Authorization header to send, e.g. Bearer <receiver key>. With subscription_id, omit or null to send the saved header (only when target_url is the saved URL); an empty string sends none.",
+    )
+    subscription_id: UUID | None = Field(
+        default=None,
+        description="Saved subscription to test. Its secret signs the test. Without it the test is not signed, because a new subscription has no secret yet.",
+    )
+
+
+class WebhookTestResponse(BaseModel):
+    """Result of one test POST. Nothing is stored or retried."""
+
+    ok: bool = Field(description="True when the receiver answered with a 2xx status.")
+    status_code: int | None = Field(
+        default=None,
+        description="HTTP status the receiver answered with. Null when no answer came.",
+    )
+    duration_ms: int = Field(description="Time from sending to the answer or error.")
+    response_body: str | None = Field(
+        default=None,
+        description="Start of the receiver's answer (at most 4096 characters), with the Authorization header removed.",
+    )
+    error: str | None = Field(
+        default=None, description="Why no answer came (timeout, connection refused)."
+    )
+    signed: bool = Field(
+        description="Whether the test carried an X-Hail-Signature header."
     )
 
 

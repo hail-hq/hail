@@ -7,6 +7,8 @@ through customer APIs or the console. See docs/operations/agent-prompts.md.
 from __future__ import annotations
 
 import logging
+from collections.abc import Collection, Iterable
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from html import escape
 from typing import Any, Literal
@@ -51,14 +53,17 @@ __all__ = [
     "TEAM_EMAIL_LABEL",
     "TEXT_PREAMBLE",
     "THREAD_TOOL_HINT_TEXT",
+    "TOOL_LINES",
     "VOICE_CONFIGURATION_HELP",
     "VOICE_PREAMBLE",
     "VOICE_PREAMBLE_INBOUND",
     "SenderTrust",
+    "ToolLine",
     "build_email_instructions",
     "build_text_instructions",
     "build_voice_instructions",
     "clock_section",
+    "fit_to_tools",
     "knowledge_section",
     "number_with_one_zone",
     "other_party_section",
@@ -111,7 +116,9 @@ to the next conversation. Voice selection is optional before the first trial. \
 Call recording is under Call settings and other ways to connect on Go live; \
 opening that page does not save a recording choice.
 - Saved agents are under Agents in the console. Open the agent to edit \
-Greeting, Instructions, Language, First line, tools, or call limits, then Save. \
+Greeting, Instructions, Language, First line, optional tools, or call limits, \
+then Save. Every call keeps the ability to hang up, press keypad digits, \
+and explain where to change Hail settings. \
 Instructions control what the agent does and its speaking style; they do not \
 select the voice. The voice selection is in Call settings. An agent with a \
 voice override set through the API or a connected assistant can use a different \
@@ -373,9 +380,26 @@ THREAD_TOOL_HINT_TEXT = (
 )
 
 
-def other_party_section(name: str, *, can_email: bool) -> str:
+# The "email me" hint of other_party_section. {name} is filled in after the
+# hint is fitted to the call's tools (see fit_to_tools).
+_EMAIL_ME_HINT = (
+    ' When they want an email sent to themselves ("me", "my'
+    ' email"), call send_email with recipient_name "me": never ask'
+    " who to email or use their name for it. If they told you a"
+    ' different name, they are not "{name}": do not use "me", say'
+    " you can only email addresses on file."
+    " If they only ask you to send something, ask once: by text or by"
+    " email?"
+)
+
+
+def other_party_section(
+    name: str, *, can_email: bool, tool_names: Collection[str] | None = None
+) -> str:
     """Who is on the line, when their number matched a contact. Without it
-    the model asks "who should I email?" when the caller says "email me"."""
+    the model asks "who should I email?" when the caller says "email me".
+    ``can_email``: the contact has an email on file. ``tool_names`` as in
+    :func:`fit_to_tools`."""
     line = (
         f'The person on this call is "{name}", one of your contacts. Someone'
         " else can use the same phone: if the person clearly tells you their"
@@ -383,15 +407,7 @@ def other_party_section(name: str, *, can_email: bool) -> str:
         " mishearing, not a name: never call them by it."
     )
     if can_email:
-        line += (
-            ' When they want an email sent to themselves ("me", "my'
-            ' email"), call send_email with recipient_name "me": never ask'
-            " who to email or use their name for it. If they told you a"
-            f' different name, they are not "{name}": do not use "me", say'
-            " you can only email addresses on file."
-            " If they only ask you to send something, ask once: by text or by"
-            " email?"
-        )
+        line += fit_to_tools(_EMAIL_ME_HINT, tool_names).replace("{name}", name)
     return f"{OTHER_PARTY_HEADING}\n\n{line}"
 
 
@@ -558,19 +574,121 @@ def safe_clock_section(**kwargs: Any) -> str | None:
         return None
 
 
+@dataclass(frozen=True)
+class ToolLine:
+    """A sentence of a Hail prompt that names a tool or relies on one.
+
+    On a call without the tools in ``needs`` (all of them, or any one when
+    ``any_of``), :func:`fit_to_tools` replaces ``text`` with ``without``. A
+    prompt that names a missing tool makes the model write the name as text,
+    and the voice reads it aloud. A new tool sentence needs one entry here,
+    never new code."""
+
+    text: str
+    needs: frozenset[str]
+    without: str = ""
+    any_of: bool = False
+
+
+# Every sentence that names a tool in the voice prompts (VOICE_PREAMBLE,
+# VOICE_PREAMBLE_INBOUND, _EMAIL_ME_HINT) and in the call tools' descriptions
+# (the voicebot fits each description to the call's tools). The menu prompt
+# in voicebot/amd.py has its own table. Tests check each ``text`` is still in
+# its prompt or description.
+TOOL_LINES: tuple[ToolLine, ...] = (
+    ToolLine(
+        "do not say goodbye or use end_call in the turn that asks",
+        frozenset({"end_call"}),
+        "do not say goodbye or hang up in the turn that asks",
+    ),
+    ToolLine(
+        "thank them, say goodbye, and use end_call.",
+        frozenset({"end_call"}),
+        "thank them, say goodbye, and hang up.",
+    ),
+    ToolLine(
+        "- If you reach an automated menu, press the keys it asks for instead "
+        "of speaking — a menu cannot hear you. Choose the option that advances "
+        "the call, or the one for a human operator when none fits.",
+        frozenset({"send_dtmf"}),
+        "- If you reach an automated menu, you cannot press keys on this call. "
+        "Stay quiet and wait for a person. If the same menu has played three "
+        "times with no person and nothing new, end the call.",
+    ),
+    ToolLine(
+        "\n- Sending a text or email follows the rules in that tool's description.",
+        frozenset({"send_sms", "send_email"}),
+        any_of=True,
+    ),
+    ToolLine(
+        "When asked, use the hail_settings_help tool before you answer (never "
+        "say its name aloud), and never guess a menu or a voice name. You "
+        "cannot see or change settings during this call. If the tool is "
+        "missing or fails, say you cannot look that up right now.",
+        frozenset({"hail_settings_help"}),
+        "When asked, say you cannot look that up during this call, and never "
+        "guess a menu or a voice name. You cannot see or change settings "
+        "during this call.",
+    ),
+    ToolLine(
+        ' When they want an email sent to themselves ("me", "my email"), call '
+        'send_email with recipient_name "me": never ask who to email or use '
+        "their name for it. If they told you a different name, they are not "
+        '"{name}": do not use "me", say you can only email addresses on file.',
+        frozenset({"send_email"}),
+    ),
+    ToolLine(
+        " If they only ask you to send something, ask once: by text or by email?",
+        frozenset({"send_sms", "send_email"}),
+    ),
+    # Tool descriptions.
+    ToolLine(" (use list_contacts to see who)", frozenset({"list_contacts"})),
+    ToolLine(
+        " Saved contacts are not listed, but send_email can reach them by name.",
+        frozenset({"send_email"}),
+    ),
+    ToolLine(
+        " Reuse attachment IDs and reply_to_email_id with send_email to return "
+        "originals from the selected thread.",
+        frozenset({"send_email"}),
+    ),
+)
+
+
+def fit_to_tools(
+    text: str,
+    tool_names: Collection[str] | None,
+    lines: Iterable[ToolLine] = TOOL_LINES,
+) -> str:
+    """``text`` with each tool sentence the call cannot use replaced (see
+    :class:`ToolLine`). ``tool_names`` are the call's tools; None means every
+    tool, and returns ``text`` unchanged."""
+    if tool_names is None:
+        return text
+    have = set(tool_names)
+    for line in lines:
+        ok = bool(line.needs & have) if line.any_of else line.needs <= have
+        if not ok:
+            text = text.replace(line.text, line.without)
+    return text
+
+
 def build_voice_instructions(
     system_prompt: str | None,
     direction: str | None = None,
     *,
     other_party: str | None = None,
+    tool_names: Collection[str] | None = None,
 ) -> str:
     """Assemble a call's instructions: voice preamble first, the agent's own
     instructions after. The preamble is non-overridable framing
     (:data:`VOICE_PREAMBLE_INBOUND` when ``direction`` is ``"inbound"``);
     with no instructions it alone is the instruction set. Mode-agnostic: the
     same for the fallback chain and a BYO endpoint. ``other_party`` (see
-    :func:`other_party_section`) goes last."""
+    :func:`other_party_section`) goes last. ``tool_names`` as in
+    :func:`fit_to_tools`."""
     preamble = VOICE_PREAMBLE_INBOUND if direction == "inbound" else VOICE_PREAMBLE
+    preamble = fit_to_tools(preamble, tool_names)
     caller = (system_prompt or "").strip()
     out = preamble if not caller else f"{preamble}\n\n{VOICE_HEADING}\n\n{caller}"
     if other_party:

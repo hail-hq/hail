@@ -366,3 +366,31 @@ async def test_didww_trunk_auth_needs_a_trunk_and_a_password(
         await didww.set_voice_in_trunk_auth("hail-didww", "")
     with pytest.raises(CarrierNotConfigured, match="password"):
         await didww.check_voice_in_trunk("hail-didww", "")
+
+
+async def test_twilio_origination_urls_are_read_and_only_the_url_changes(
+    twilio_trunk: MagicMock,
+) -> None:
+    url = MagicMock(
+        sid="OU1", sip_url="sip:lk.example.test", priority=10, weight=20, enabled=True
+    )
+    twilio_trunk.origination_urls.list.return_value = [url]
+    assert await twilio.origination_urls() == [
+        twilio.OriginationUrl("OU1", "sip:lk.example.test", 10, 20, True)
+    ]
+    await twilio.set_origination_sip_url("OU1", "sip:lk.example.test?X-A=b")
+    twilio_trunk.origination_urls.assert_called_once_with("OU1")
+    twilio_trunk.origination_urls.return_value.update.assert_called_once_with(
+        sip_url="sip:lk.example.test?X-A=b"
+    )
+
+
+async def test_twilio_origination_url_errors_are_carrier_errors(
+    twilio_trunk: MagicMock,
+) -> None:
+    twilio_trunk.origination_urls.list.side_effect = _twilio_exc(401)
+    with pytest.raises(CarrierRequestError):
+        await twilio.origination_urls()
+    twilio_trunk.origination_urls.return_value.update.side_effect = _twilio_exc(404)
+    with pytest.raises(CarrierRequestError):
+        await twilio.set_origination_sip_url("OU1", "sip:x")

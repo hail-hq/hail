@@ -73,7 +73,9 @@ class ToolContext:
     """
 
     call_id: uuid.UUID | None
-    organization_id: uuid.UUID
+    # None only for the every-call tools of a call whose dispatch has no
+    # valid organization: those tools never read it.
+    organization_id: uuid.UUID | None
     api: AgentApiClient | None
     hangup: Callable[[], Awaitable[None]] | None
     send_dtmf: Callable[[str], Awaitable[None]] | None
@@ -110,6 +112,11 @@ class ToolSpec:
     # Said on a call while the tool runs (customer HTTP tools). The voicebot
     # speaks it without waiting for it to finish.
     wait_message: str | None = None
+    # True for a tool every call keeps, whatever its `tools` list says (a
+    # call must always be able to hang up). Such a tool needs no database
+    # or API: the voicebot skips its availability check and still adds it
+    # when building the other tools fails.
+    on_every_call: bool = False
 
 
 __all__ = [

@@ -142,6 +142,240 @@ async def test_hard_deadline_closes_room_and_finalizes_trial_without_client_time
     await ctx.callback()
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_write_delay", [0, 0.25, "timeout"])
+@pytest.mark.parametrize("stop_during", ["room_delete", "model_close"])
+async def test_worker_failure_wins_over_browser_stop_during_room_cleanup(
+    async_session, monkeypatch, failure_write_delay, stop_during
+):
+    import asyncio
+    from contextlib import asynccontextmanager
+    from unittest.mock import Mock
+
+    from hailhq.core.browser_voice import finish_browser_call
+    from hailhq.core.models import Call
+    from hailhq.voicebot import browser
+
+    call = Call(
+        organization_id=uuid.uuid4(),
+        transport="browser",
+        direction="inbound",
+        provider="browser",
+        voice_config={},
+        max_duration_seconds=60,
+        metadata_={"browser_trial": True},
+        status="queued",
+    )
+    async_session.add(call)
+    await async_session.commit()
+
+    # Deleting the room disconnects the browser; dropping only the worker's
+    # local RTC connection first must not wait on a database transaction.
+    async def browser_stop():
+        async with original_scope() as db:
+            await finish_browser_call(db, call.id)
+            await db.commit()
+
+    session = SimpleNamespace(
+        on=Mock(return_value=lambda callback: callback),
+        start=AsyncMock(),
+        aclose=AsyncMock(
+            side_effect=browser_stop if stop_during == "model_close" else None
+        ),
+        history=SimpleNamespace(to_dict=lambda: {"items": []}),
+        generate_reply=Mock(side_effect=RuntimeError("model failed after readiness")),
+    )
+    room = SimpleNamespace(
+        on=Mock(return_value=lambda callback: callback),
+        disconnect=AsyncMock(),
+        local_participant=SimpleNamespace(
+            set_attributes=AsyncMock(), publish_data=AsyncMock()
+        ),
+    )
+    callbacks = []
+    room_deleted = asyncio.Event()
+
+    async def delete_room():
+        if stop_during == "room_delete":
+            await browser_stop()
+        room_deleted.set()
+
+    ctx = SimpleNamespace(
+        room=room,
+        proc=SimpleNamespace(userdata={"vad": None}),
+        add_shutdown_callback=callbacks.append,
+        connect=AsyncMock(),
+        wait_for_participant=AsyncMock(
+            return_value=SimpleNamespace(identity="visitor")
+        ),
+        delete_room=AsyncMock(side_effect=delete_room),
+        shutdown=Mock(),
+    )
+    monkeypatch.setattr(browser, "resolve_org_configs", AsyncMock(return_value={}))
+    monkeypatch.setattr(browser, "build_session", lambda *a, **kw: session)
+    monkeypatch.setattr(browser, "build_browser_tools", lambda *a: ([], None))
+    original_scope = browser.session_scope
+    monkeypatch.setattr(browser, "FAILURE_WRITE_TIMEOUT", 0.6)
+    monkeypatch.setattr(browser, "ROOM_CLEANUP_TIMEOUT", 0.2)
+    media_cut_before_failure_write = []
+    failure_write_started = asyncio.Event()
+    release_failure_write = asyncio.Event()
+    release_cancel_cleanup = asyncio.Event()
+
+    @asynccontextmanager
+    async def observed_scope():
+        # Key on the call site: the failure marker runs as its own task.
+        task = asyncio.current_task().get_coro()
+        if getattr(task, "__qualname__", "").endswith("mark_failure"):
+            media_cut_before_failure_write.append(room.disconnect.await_count == 1)
+            if failure_write_delay:
+                failure_write_started.set()
+                try:
+                    await release_failure_write.wait()
+                finally:
+                    if failure_write_delay == "timeout":
+                        await release_cancel_cleanup.wait()
+        async with original_scope() as db:
+            yield db
+
+    monkeypatch.setattr(browser, "session_scope", observed_scope)
+    task = asyncio.create_task(
+        browser.run_browser_session(ctx, call.id, attach_handlers=lambda *a: set())
+    )
+    if failure_write_delay:
+        await asyncio.wait_for(failure_write_started.wait(), timeout=1)
+        assert room.disconnect.await_count == 1
+        if failure_write_delay == "timeout":
+            await asyncio.wait_for(room_deleted.wait(), timeout=2)
+            release_cancel_cleanup.set()
+        else:
+            await asyncio.sleep(failure_write_delay)
+        release_failure_write.set()
+    await task
+    await callbacks[0]()
+    await async_session.refresh(call)
+    assert call.answered_at is not None
+    assert call.status == "failed"
+    assert call.end_reason == "agent_error"
+    assert media_cut_before_failure_write == [True]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("close_reason", ["error", "user_initiated", "timeout"])
+async def test_disconnect_before_sdk_close_keeps_explicit_error(
+    async_session, monkeypatch, close_reason
+):
+    from hailhq.core.models import Call
+    from hailhq.voicebot import browser
+
+    call = Call(
+        organization_id=uuid.uuid4(),
+        transport="browser",
+        direction="inbound",
+        provider="browser",
+        voice_config={},
+        max_duration_seconds=60,
+        metadata_={"browser_trial": True},
+        status="queued",
+    )
+    async_session.add(call)
+    await async_session.commit()
+    session_handlers = {}
+    room_handlers = {}
+
+    def register(handlers, event):
+        def decorator(callback):
+            handlers[event] = callback
+            return callback
+
+        return decorator
+
+    async def close():
+        if close_reason == "timeout":
+            raise TimeoutError("SDK close did not finish")
+        session_handlers["close"](SimpleNamespace(reason=close_reason))
+
+    session = SimpleNamespace(
+        on=lambda event: register(session_handlers, event),
+        start=AsyncMock(),
+        aclose=AsyncMock(side_effect=close),
+        generate_reply=lambda **kw: None,
+        history=SimpleNamespace(to_dict=lambda: {"items": []}),
+    )
+    room = SimpleNamespace(
+        on=lambda event: register(room_handlers, event),
+        disconnect=AsyncMock(),
+        local_participant=SimpleNamespace(
+            set_attributes=AsyncMock(), publish_data=AsyncMock()
+        ),
+    )
+    callbacks = []
+    ctx = SimpleNamespace(
+        room=room,
+        proc=SimpleNamespace(userdata={"vad": None}),
+        add_shutdown_callback=callbacks.append,
+        connect=AsyncMock(),
+        wait_for_participant=AsyncMock(
+            return_value=SimpleNamespace(identity="visitor")
+        ),
+        delete_room=AsyncMock(),
+        shutdown=lambda **kw: None,
+    )
+    monkeypatch.setattr(browser, "resolve_org_configs", AsyncMock(return_value={}))
+    monkeypatch.setattr(browser, "build_session", lambda *a, **kw: session)
+    monkeypatch.setattr(browser, "build_browser_tools", lambda *a: ([], None))
+    await browser.run_browser_session(ctx, call.id, attach_handlers=lambda *a: set())
+    room_handlers["participant_disconnected"](SimpleNamespace(identity="visitor"))
+    await callbacks[0]()
+    await async_session.refresh(call)
+    # A cleanup-only error (timeout) must not fail a finished conversation.
+    assert call.status == ("failed" if close_reason == "error" else "completed")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("room_connected", "expected_status", "worker_failed"),
+    [(False, "canceled", False), (True, "failed", True)],
+)
+async def test_runtime_error_while_waiting_fails_only_if_room_is_open(
+    async_session, monkeypatch, room_connected, expected_status, worker_failed
+):
+    from hailhq.core.models import Call
+    from hailhq.voicebot import browser
+
+    call = Call(
+        organization_id=uuid.uuid4(),
+        transport="browser",
+        direction="inbound",
+        provider="browser",
+        voice_config={},
+        max_duration_seconds=60,
+        metadata_={"browser_trial": True},
+        status="queued",
+    )
+    async_session.add(call)
+    await async_session.commit()
+    ctx = SimpleNamespace(
+        room=SimpleNamespace(
+            disconnect=AsyncMock(),
+            on=lambda event: lambda cb: cb,
+            isconnected=lambda: room_connected,
+        ),
+        proc=SimpleNamespace(userdata={"vad": None}),
+        add_shutdown_callback=lambda fn: None,
+        connect=AsyncMock(),
+        # The room closes under the wait when the person presses Stop early.
+        wait_for_participant=AsyncMock(side_effect=RuntimeError("room closed")),
+        delete_room=AsyncMock(),
+        shutdown=lambda **kw: None,
+    )
+    monkeypatch.setattr(browser, "resolve_org_configs", AsyncMock(return_value={}))
+    await browser.run_browser_session(ctx, call.id, attach_handlers=lambda *a: set())
+    await async_session.refresh(call)
+    assert call.status == expected_status
+    assert bool(call.metadata_.get("browser_failed")) is worker_failed
+
+
 def test_transcript_does_not_expose_system_instructions_or_tool_results():
     from hailhq.voicebot.browser import public_transcript
 

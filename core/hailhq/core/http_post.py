@@ -52,6 +52,11 @@ def validate_webhook_target(url: str, *, allow_private_networks: bool) -> None:
         raise ValueError(f"target_url is not allowed: {exc}") from exc
 
 
+# Fallback addresses tried after a failed connect, and the connect budget each.
+_MAX_ADDRESSES = 3
+_CONNECT_SECONDS = 3.0
+
+
 async def httpx_post(
     url: str,
     body: bytes,
@@ -59,6 +64,7 @@ async def httpx_post(
     *,
     allow_private_networks: bool,
     timeout_seconds: float = 10.0,
+    max_body_bytes: int | None = None,
 ) -> tuple[int, str]:
     """POST and return ``(status_code, response_text)``.
 
@@ -66,20 +72,76 @@ async def httpx_post(
     (no host, bad port, control characters). Raises
     ``PrivateNetworkBlockedError`` when ``allow_private_networks`` is False
     and the host does not resolve or has a non-public address.
+
+    With the guard on, the request goes to the address that passed the
+    check, not to a second DNS answer: the Host header and the TLS name
+    check keep the original host. ``max_body_bytes`` stops reading the
+    answer after that many bytes. Raises ``TimeoutError`` when the whole
+    send takes longer than twice ``timeout_seconds``.
     """
-    _, host, port = connect_target(url)
+    parsed, host, port = connect_target(url)
+    targets = [parsed]
+    extensions: dict[str, str] = {}
+    send_headers = dict(headers)
     if not allow_private_networks:
         try:
-            await asyncio.to_thread(assert_public_host, host, port)
+            addresses = await asyncio.to_thread(assert_public_host, host, port)
         except UnsafeUrlError as exc:
             raise PrivateNetworkBlockedError(str(exc)) from exc
-    async with httpx.AsyncClient(timeout=timeout_seconds) as client:
-        # An explicit receiver header takes precedence over Basic credentials
-        # embedded in a legacy target URL. HTTPX otherwise overwrites it.
-        auth = (
-            httpx.Auth()
-            if any(name.lower() == "authorization" for name in headers)
-            else httpx.USE_CLIENT_DEFAULT
-        )
-        resp = await client.post(url, content=body, headers=headers, auth=auth)
-        return resp.status_code, resp.text
+        # IPv4 first: a host without an IPv6 route fails every IPv6 connect.
+        # The rest stay as fallbacks, as httpx's own connect would try them.
+        ordered = sorted(dict.fromkeys(addresses), key=lambda ip: ":" in ip)
+        # A name with many records must not multiply the send time.
+        targets = [parsed.copy_with(host=ip) for ip in ordered[:_MAX_ADDRESSES]]
+        send_headers["Host"] = parsed.netloc.decode("ascii")
+        if parsed.scheme == "https":
+            extensions["sni_hostname"] = host
+    # An explicit receiver header takes precedence over Basic credentials
+    # embedded in a legacy target URL. HTTPX otherwise overwrites it.
+    auth = (
+        httpx.Auth()
+        if any(name.lower() == "authorization" for name in send_headers)
+        else httpx.USE_CLIENT_DEFAULT
+    )
+    # One deadline for the whole send: httpx times each phase alone, so a
+    # receiver that drips its answer, or several dead addresses, could hold a
+    # worker slot far longer. The last address (or the only one) gets the full
+    # connect budget, so a slow TCP + TLS start is not reported as a failure;
+    # the short budget only applies when there is a fallback address to move
+    # on to.
+    full = httpx.Timeout(timeout_seconds)
+    short = httpx.Timeout(
+        timeout_seconds, connect=min(_CONNECT_SECONDS, timeout_seconds)
+    )
+    async with asyncio.timeout(timeout_seconds * 2), httpx.AsyncClient(
+        timeout=full
+    ) as client:
+        for index, target in enumerate(targets):
+            try:
+                async with client.stream(
+                    "POST",
+                    target,
+                    content=body,
+                    headers=send_headers,
+                    auth=auth,
+                    extensions=extensions,
+                    timeout=full if index == len(targets) - 1 else short,
+                ) as resp:
+                    chunks: list[bytes] = []
+                    size = 0
+                    async for chunk in resp.aiter_bytes():
+                        chunks.append(chunk)
+                        size += len(chunk)
+                        if max_body_bytes is not None and size >= max_body_bytes:
+                            break
+                    raw = b"".join(chunks)
+                    if max_body_bytes is not None:
+                        raw = raw[:max_body_bytes]
+                    text = raw.decode(resp.encoding or "utf-8", "replace")
+                    return resp.status_code, text
+            except (httpx.ConnectError, httpx.ConnectTimeout):
+                # Nothing was sent: try the next checked address. A dead
+                # address often times out instead of refusing.
+                if index == len(targets) - 1:
+                    raise
+    raise AssertionError("unreachable: targets is never empty")

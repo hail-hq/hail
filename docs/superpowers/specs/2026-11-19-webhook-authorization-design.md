@@ -1,6 +1,6 @@
 # Webhook receiver authorization
 
-Academate's Cursor endpoint rejects unsigned receiver access with HTTP 401.
+A customer's Cursor endpoint rejects unsigned receiver access with HTTP 401.
 Hail already signs payloads, but Cursor also requires its own Authorization
 header. Add an optional, write-only `authorization` field to subscriptions.
 Encrypt it with the existing webhook SecretCipher and return only

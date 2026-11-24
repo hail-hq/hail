@@ -41,6 +41,7 @@ Go CLI module path is `github.com/hail-hq/hail/cli`. npm packages are published 
 - **OpenAPI is source of truth for the CLI.** After any API route change, regenerate `openapi/openapi.yaml` in the same PR.
 - **MCP docs ship with MCP changes.** Follow the [MCP documentation checklist](docs/public/contributing.md#updating-mcp-documentation) when changing the server or its tools.
 - **Secrets live only in `.env` / `.env.local`.** Only `.env.example` is committed. Adding a new env var? Update `.env.example` in the same commit, under the right provider section.
+- **The repo is public: no live security gaps in it.** Never write the current state of a weakness in production in any committed file, PR body or commit message: which path is unlocked, which check is off or not enforced, a security test result against production, a known bypass, real hostnames, trunk ids, account ids or phone numbers. Docs say how a protection works, how to set it up, how to test it, and what a result would mean. The current state of a gap goes to the owner in chat or a private note, never into a doc, runbook, plan or spec.
 - **`.env` mirrors `.env.example` line for line.** Same keys, same order, same comments; only the values differ. A branch that adds keys writes them, with real values, into the main checkout `.env` so it is deployment-ready at merge. Never add a key or comment to `.env` that its `.env.example` does not have.
 - **Provider adapters go in `core/hailhq/core/providers/<channel>/<name>.py`.** `api/` and `voicebot/` must not import provider SDKs directly; they go through `core`.
 - **Webhook events have one registry.** Add event names, labels, and channels in `core/hailhq/core/webhook_events.py`. The public `/v1/webhooks/event-types` catalog and subscription validation use this registry. Do not add a console event allowlist.
@@ -88,7 +89,7 @@ Internal runbooks (not published) live in `docs/operations/`:
 [first-number-call-test.md](docs/operations/first-number-call-test.md) (one test call to the first number of a new carrier, country or type),
 [call-record-deletion.md](docs/operations/call-record-deletion.md) (deleting one call, its recording and its charges from a workspace),
 [voice-llm.md](docs/operations/voice-llm.md) (the house LLM chain, Bedrock access and model ids),
-[inbound-trunk-lockdown.md](docs/operations/inbound-trunk-lockdown.md) (one LiveKit inbound trunk per carrier, locked by IP or password; cutover, negative test, weekly IP check),
+[inbound-trunk-lockdown.md](docs/operations/inbound-trunk-lockdown.md) (one LiveKit inbound trunk per carrier, locked by IP or password, plus the Twilio secret header; cutover, negative test, weekly IP check),
 [sms-trial-numbers.md](docs/operations/sms-trial-numbers.md) (the pool numbers that send US trial texts: mark, unmark, move, readiness),
 [knowledge-base.md](docs/operations/knowledge-base.md) (turning the knowledge base on for a workspace, limits, the embedding model and its benchmark, the size alert).
 

@@ -39,3 +39,47 @@ def test_shared_inbound_trunk_feeds_every_carrier(monkeypatch):
     assert config.livekit_didww_sip_inbound_trunk_id == "ST_shared"
     monkeypatch.setenv("LIVEKIT_DIDWW_SIP_INBOUND_TRUNK_ID", "ST_dw")
     assert Settings(_env_file=None).livekit_didww_sip_inbound_trunk_id == "ST_dw"
+
+
+@pytest.fixture
+def own_twilio_trunk(monkeypatch):
+    """A Twilio trunk apart from the shared one: the secret may be set."""
+    monkeypatch.setenv("LIVEKIT_SIP_INBOUND_TRUNK_ID", "ST_shared")
+    monkeypatch.setenv("LIVEKIT_TWILIO_SIP_INBOUND_TRUNK_ID", "ST_tw")
+
+
+@pytest.mark.parametrize("value", ["", "a" * 20, "Ab0_-" * 8])
+def test_sip_secret_accepts_empty_or_uri_safe(monkeypatch, own_twilio_trunk, value):
+    monkeypatch.setenv("HAIL_SIP_INBOUND_SECRET", value)
+    assert Settings(_env_file=None).hail_sip_inbound_secret == value
+
+
+SECRET = "a" * 32
+
+
+@pytest.mark.parametrize(
+    ("shared", "twilio", "value"),
+    [
+        ("", "", SECRET),
+        ("ST_shared", "", SECRET),
+        ("ST_shared", "ST_shared", SECRET),
+        ("ST_shared", "ST_tw", "short-but-ok"),
+        ("ST_shared", "ST_tw", "has a space-near-miss-secret"),
+        ("ST_shared", "ST_tw", "amp&er=sand" * 3),
+    ],
+    ids=[
+        "no_trunk",
+        "falls_back_to_shared",
+        "equals_shared",
+        "short",
+        "space",
+        "ampersand",
+    ],
+)
+def test_sip_secret_never_stops_startup(monkeypatch, shared, twilio, value):
+    """A secret that cannot work turns the check off at call time
+    (inbound_calls.py, with an ERROR log): services still start."""
+    monkeypatch.setenv("LIVEKIT_SIP_INBOUND_TRUNK_ID", shared)
+    monkeypatch.setenv("LIVEKIT_TWILIO_SIP_INBOUND_TRUNK_ID", twilio)
+    monkeypatch.setenv("HAIL_SIP_INBOUND_SECRET", value)
+    assert Settings(_env_file=None).hail_sip_inbound_secret == value

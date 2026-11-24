@@ -9,6 +9,9 @@ from __future__ import annotations
 import re
 import unicodedata
 
+import pytest
+from hailhq.core.agent_tools.registry import all_tools
+
 # Read-only tools: never change anything.
 _READ_ONLY = {
     "get_call",
@@ -218,3 +221,13 @@ async def test_open_world_writes(tools_by_name) -> None:
         and t.annotations.read_only_hint is False
     }
     assert got == _OPEN_WORLD_WRITES
+
+
+@pytest.mark.parametrize("tool", ["place_call", "create_agent", "update_agent"])
+async def test_tools_param_names_every_call_tool(tools_by_name, tool) -> None:
+    """The `tools` text names each tool every call keeps (on_every_call), so
+    it cannot drift from the flag."""
+    text = tools_by_name[tool].input_schema["properties"]["tools"]["description"]
+    for spec in all_tools():
+        if spec.on_every_call:
+            assert spec.name in text, (tool, spec.name)

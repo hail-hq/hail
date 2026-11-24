@@ -8,12 +8,12 @@
 
 **Tech Stack:** FastAPI + SQLAlchemy async + Alembic + Pydantic v2; FastMCP server; LiveKit Agents voicebot; pytest.
 
-**Spec:** `/Users/r/playground/hail-website/docs/superpowers/specs/2026-07-10-contacts-v2-design.md` (website repo). This is plan 1 of 2; plan 2 (website UI + seeding swap) is separate.
+**Spec:** `hail-website/docs/superpowers/specs/2026-07-10-contacts-v2-design.md` (website repo). This is plan 1 of 2; plan 2 (website UI + seeding swap) is separate.
 
 ## Global Constraints
 
 - **Git writes belong to the user.** Never run `git add`/`git commit`/`git stash`/`git rm`. Each "Commit" step means: hand the user the exact commands (one file per `git add` line) and continue.
-- Work in `/Users/r/playground/hail`. Tests: `cd api && uv run pytest tests/<file> -v` (likewise `cd mcp` / `cd voicebot`). Lint gate per task: `uv run ruff check --fix . && uv run black .` in the touched package.
+- Work in the repo root. Tests: `cd api && uv run pytest tests/<file> -v` (likewise `cd mcp` / `cd voicebot`). Lint gate per task: `uv run ruff check --fix . && uv run black .` in the touched package.
 - Migrations are Alembic, numbered files in `api/migrations/versions/` — this plan adds `0029` and `0030` (verify `ls api/migrations/versions | tail -1` is still `0028_*` first; renumber if the repo moved).
 - The `users` table is OWNED by better-auth (the website repo). We add one column and one minimal mapped model for it; never write any users column other than `phone_number`.
 - E.164 validation: reuse the existing pattern in `core/hailhq/core/schemas.py` (see `CallCreate`'s `to`/`from_` field_validator) — do not invent a new regex.

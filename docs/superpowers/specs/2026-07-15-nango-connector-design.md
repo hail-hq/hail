@@ -11,7 +11,7 @@ a provider block plus a docs page. Nango has no "type" field — a product with
 both an API and an MCP server ships **two entries** (`slack` + `slack-mcp`,
 `linear` + `linear-mcp`), so Hail does the same.
 
-Work happens in the existing fork `r13i/nango` (`/Users/r/playground/nango`,
+Work happens in the existing fork `r13i/nango` (a local clone of the fork,
 branch `master`). The spec lives here, in the `hail` repo, deliberately: a
 `docs/superpowers/specs/` file inside the nango checkout would land in the
 upstream PR diff.
@@ -41,9 +41,8 @@ policies bind here anyway — see Decisions #6 and #7.
 4. **Verification is a fallback chain,** listing `/calls`, `/sms`, `/emails`.
    `credentialsTest` (`packages/server/lib/hooks/hooks.ts:468`) returns on the
    **first** endpoint that answers 2xx — it is not a coverage list, and extra
-   endpoints do not broaden testing. The chain is insurance: no route enforces
-   scopes today (there are zero scope checks in `api/hailhq/api/routes/`), but
-   `mcp/hailhq/mcp/server.py:54` says scope enforcement is "deferred to Phase 2".
+   endpoints do not broaden testing. The chain is insurance for when route-level
+   scope enforcement ships (Phase 2).
    Once it lands, a key scoped to `sms:write` would fail a `/calls`-only probe
    and be rejected despite being valid. Hail's multi-channel surface is conveyed
    in the docs page, which is where readers actually learn it.
@@ -228,12 +227,3 @@ email) is described here rather than implied through verification endpoints.
   worth doing, but that spec's Phase 1/Phase 2 workflow is a separate effort.
 
 ## Follow-ups (not blocking)
-
-- **Prod `oauth_clients` cleanup.** Live DCR testing created 4 junk client rows,
-  all named `...(delete me)`: `QxFRuVYz…`, `qKUWIwUs…`, `rpWTAOgH…`,
-  `yoOFiAwN…`. DCR returns no `registration_access_token`, so RFC 7592 deletion
-  is unavailable; they need removing directly.
-- **`allowUnauthenticatedClientRegistration: true`** (`hail-website/lib/auth.ts:333`)
-  lets anyone write unbounded rows to `oauth_clients` with no credentials. This
-  is spec-conformant for MCP and Linear does the same, but the abuse surface is
-  worth a deliberate decision rather than a default.

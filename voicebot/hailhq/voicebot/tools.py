@@ -1,7 +1,8 @@
 """Adapt the core agent-tool registry to LiveKit function tools.
 
 Per-call filtering: the dispatch metadata's ``tools`` list (None ⇒ all,
-[] ⇒ none) then each spec's per-org ``is_available`` check. Send tools
+[] ⇒ only the tools every call keeps; HTTP tools stay on) then each spec's
+per-org ``is_available`` check. Send tools
 require HAIL_INTERNAL_SECRET (they call the API's internal agent routes);
 without it only local/read-only tools remain.
 
@@ -11,19 +12,21 @@ returns a speakable apology to the LLM.
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import math
 import time
 from typing import Any
 from uuid import UUID
 
-from hailhq.core.agent_tools import hail_help, transfer_call
+from hailhq.core.agent_tools import transfer_call
 from hailhq.core.agent_tools.client import AgentApiClient
 from hailhq.core.agent_tools.http_tool import Conversation, load_http_tool_specs
-from hailhq.core.agent_tools.registry import all_tools
+from hailhq.core.agent_tools.registry import call_tools
 from hailhq.core.agent_tools.spec import SPOKEN_FALLBACK, ToolContext, ToolSpec
 from hailhq.core.config import settings
 from hailhq.core.db import session_scope
+from hailhq.core.prompts import fit_to_tools
 from hailhq.voicebot.attachment_reader import inspect_tool_file
 from livekit.agents.llm import function_tool
 from livekit.agents.voice import RunContext
@@ -155,6 +158,52 @@ async def _http_tools(
     )
 
 
+def every_call_tools(
+    metadata: dict[str, Any],
+    *,
+    call_id: UUID,
+    hangup,
+    send_dtmf=None,
+    spoke_since=None,
+) -> list:
+    """The tools every call keeps (``ToolSpec.on_every_call``), for a call
+    whose other tools could not be built. They need no database, API or
+    organization, so a call can still hang up when those fail."""
+    try:
+        organization_id: UUID | None = UUID(str(metadata.get("organization_id")))
+    except ValueError:
+        organization_id = None
+    tctx = ToolContext(
+        call_id=call_id,
+        organization_id=organization_id,
+        api=None,
+        hangup=hangup,
+        send_dtmf=send_dtmf,
+        spoke_since=spoke_since,
+    )
+    return _wrap_fitted([s for s in call_tools() if s.on_every_call], tctx)
+
+
+def _wrap_fitted(specs: list[ToolSpec], tctx: ToolContext) -> list:
+    """Wrap ``specs`` with each built-in description fitted to this call's
+    tools: a description that names a tool the call lacks (see ToolLine)
+    would make the model write that name as text. A saved agent's HTTP tool
+    descriptions are the customer's words and stay as written."""
+    names = [s.name for s in specs]
+    hail_written = {s.name for s in call_tools()} | {transfer_call.CANCEL_SPEC.name}
+    return [
+        wrap_tool(
+            (
+                dataclasses.replace(s, description=fit_to_tools(s.description, names))
+                if s.name in hail_written
+                else s
+            ),
+            tctx,
+        )
+        for s in specs
+    ]
+
+
 async def build_agent_tools(
     metadata: dict[str, Any],
     *,
@@ -168,21 +217,34 @@ async def build_agent_tools(
 ) -> tuple[list, AgentApiClient | None]:
     """Build this call's LiveKit tools. Returns (tools, api_client).
 
-    The caller must ``aclose()`` the client at shutdown. Returns no tools
-    when the dispatch predates the ``organization_id`` field (rolling
-    deploy): no tools beats wrong-org tools.
+    The caller must ``aclose()`` the client at shutdown. Returns only the
+    every-call tools when the dispatch has no valid ``organization_id``
+    (rolling deploy): no org tools beats wrong-org tools.
     """
+
+    def fallback() -> tuple[list, None]:
+        tools = every_call_tools(
+            metadata,
+            call_id=call_id,
+            hangup=hangup,
+            send_dtmf=send_dtmf,
+            spoke_since=spoke_since,
+        )
+        return tools, None
+
     raw_org = metadata.get("organization_id")
     if raw_org is None:
-        logger.warning("dispatch metadata has no organization_id; agent tools disabled")
-        return [], None
+        logger.warning(
+            "dispatch metadata has no organization_id; only every-call tools"
+        )
+        return fallback()
     try:
         organization_id = UUID(str(raw_org))
     except ValueError:
         logger.warning(
-            "dispatch metadata has malformed organization_id; agent tools disabled"
+            "dispatch metadata has malformed organization_id; only every-call tools"
         )
-        return [], None
+        return fallback()
 
     allowed = metadata.get("tools")  # None ⇒ all available
     if allowed is not None and not isinstance(allowed, list):
@@ -191,13 +253,14 @@ async def build_agent_tools(
         # matching on a string instead of list membership. Fail closed,
         # matching the malformed-organization_id posture above.
         logger.warning(
-            "dispatch metadata 'tools' is not a list (%r); agent tools disabled",
+            "dispatch metadata 'tools' is not a list (%r); only every-call tools",
             type(allowed).__name__,
         )
-        return [], None
+        return fallback()
     specs: list[ToolSpec] = []
-    for s in all_tools():
-        if allowed is not None and s.name not in allowed:
+    for s in call_tools():
+        # A tool every call keeps ignores the `tools` list.
+        if allowed is not None and s.name not in allowed and not s.on_every_call:
             continue
         if s.bind is not None:
             # Per-call tools (transfer_call) shape themselves from the
@@ -211,18 +274,14 @@ async def build_agent_tools(
             # Its dial runs in the background: cancel_transfer stops the ring.
             # It comes with transfer_call, so a `tools` list never names it.
             specs.append(transfer_call.CANCEL_SPEC)
-    # The settings guide is loaded by tool, not carried in the prompt. No
-    # `tools` list names it, so every call gets it here, as cancel_transfer is.
-    if allowed != []:  # `tools: []` opts out of every tool
-        specs.append(hail_help.SPEC)
     # The agent's own HTTP tools are not built-ins: a `tools` list does not
     # name them, and they stay on with `tools: []`.
     specs.extend(await _http_tools(metadata, call_id, organization_id))
-    if not specs:
-        return [], None
-
+    # Every-call tools need no database or API: a call with only those
+    # (`tools: []`) opens neither.
+    checked = [s for s in specs if not s.on_every_call]
     api: AgentApiClient | None = None
-    if settings.hail_internal_secret:
+    if checked and settings.hail_internal_secret:
         api = AgentApiClient(settings.hail_api_url, settings.hail_internal_secret)
 
     tctx = ToolContext(
@@ -237,21 +296,36 @@ async def build_agent_tools(
         prompt=prompt,
     )
 
-    available: list[ToolSpec] = []
-    async with session_scope() as session:
-        for spec in specs:
-            try:
-                if await spec.is_available(organization_id, session):
-                    available.append(spec)
-            except Exception:
-                logger.exception("availability check failed for tool %s", spec.name)
-                # Load-bearing: a failed statement leaves the shared session's
-                # transaction aborted; without this rollback every later
-                # is_available check raises PendingRollbackError and gets
-                # swallowed too, silently disabling available tools.
-                await session.rollback()
-
-    return [wrap_tool(s, tctx) for s in available], api
+    passed: set[str] = set()
+    try:
+        await _check_availability(checked, organization_id, passed)
+        available = [s for s in specs if s.on_every_call or s.name in passed]
+        return _wrap_fitted(available, tctx), api
+    except BaseException:
+        # The caller gets no client on a failure, so close it here.
+        if api is not None:
+            await api.aclose()
+        raise
 
 
-__all__ = ["SPOKEN_TOOL_FAILURE", "build_agent_tools", "wrap_tool"]
+async def _check_availability(
+    checked: list[ToolSpec], organization_id: UUID, passed: set[str]
+) -> None:
+    """Add to ``passed`` the name of each spec available to the org."""
+    if checked:
+        async with session_scope() as session:
+            for spec in checked:
+                try:
+                    if await spec.is_available(organization_id, session):
+                        passed.add(spec.name)
+                except Exception:
+                    logger.exception("availability check failed for tool %s", spec.name)
+                    # Load-bearing: a failed statement leaves the shared
+                    # session's transaction aborted; without this rollback
+                    # every later is_available check raises
+                    # PendingRollbackError and gets swallowed too, silently
+                    # disabling available tools.
+                    await session.rollback()
+
+
+__all__ = ["SPOKEN_TOOL_FAILURE", "build_agent_tools", "every_call_tools", "wrap_tool"]

@@ -8,6 +8,28 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 - Knowledge base (early access): upload manuals, FAQs and part lists, and agents answer calls, texts and email from them, in any supported language (`/v1/knowledge`, `knowledge` on agents, CLI `hail knowledge`, SDK and MCP).
 
+## [0.38.0] (2026-11-24)
+
+Calls can always hang up: every call keeps `end_call` and `send_dtmf`, whatever
+its tools list says, so a bring-your-own model must support tool calling.
+Webhooks can send a test event before you save an endpoint.
+
+Component versions cut alongside this release:
+**`cli-v0.35.0`** (Homebrew + GitHub Releases). No database migrations.
+
+### Added
+
+- Webhooks: send a test event to an endpoint before you save it with `POST /v1/webhooks/test`, and see the receiver's answer.
+- Self-host: set `HAIL_SIP_INBOUND_SECRET` to refuse Twilio calls that lack the shared SIP header. Empty means no check.
+
+### Changed
+
+- `end_call` and `send_dtmf` stay on every call, so a bring-your-own model must support tool calling.
+
+### Fixed
+
+- Calls can always hang up, and call prompts never name a tool the call does not have.
+
 ## [0.37.0] (2026-11-23)
 
 A refused US texting registration now says why: Hail's fix first, then the
