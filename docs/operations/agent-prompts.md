@@ -50,16 +50,18 @@ Live behavior needs a separately authorized test call or a synthetic model evalu
 When an outbound call says the AI notice and then a first line, a greeting
 at the start of the first line ("Hi,", "Guten Tag,") is dropped, so the
 caller hears one greeting. The notice stays fixed and first. While the phone
-rings, Hail's own model counts the greeting words (`OPENING_FIT_INSTRUCTIONS`
-in `core/hailhq/core/prompts.py`), and code cuts at most three of them
-(`cut_greeting`). The model never writes the line, so no other word can
-change: a free rewrite could drop content or flip a sentence's meaning, and
-no check can catch that. A cut that would remove a digit or a code, an
-answer that is not a count, a failure or a late answer keeps the line as
-written. At pickup the greeting waits at most one second for the count. A
-workspace that uses its own model skips this, so its call content stays off
-Hail's models. Inbound calls skip it: the caller is already on the line, and
-the default inbound greeting holds the AI line inside it.
+rings, Hail's own model copies out the greeting that opens the line
+(`OPENING_FIT_INSTRUCTIONS` in `core/hailhq/core/prompts.py`), and code cuts
+it (`cut_greeting`) only when the line starts with exactly that text, it is
+at most three words with no digit or code, and punctuation follows it (or,
+after a one-word greeting, a capitalized name). The model never writes the
+line, so no other word can change: a free rewrite could drop content or flip
+a sentence's meaning, and no check can catch that. Any other answer, a
+failure or a late answer keeps the line as written. At pickup the greeting
+waits at most one second. A workspace that uses its own model skips this, so
+its call content stays off Hail's models. Inbound calls skip it: the caller
+is already on the line, and the default inbound greeting holds the AI line
+inside it.
 
 ## Closing calls
 
