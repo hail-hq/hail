@@ -998,13 +998,17 @@ def _say_first_message(session: Any, first_message: str, disclosure: str) -> Non
         except Exception:
             logger.exception("could not say the first message after a failed turn")
 
-    async def say_line_unless_replying() -> None:
-        # An interruption by noise leaves an empty turn that nothing answers;
-        # real speech gets a reply from the turn loop. Wait briefly, then say
-        # the line only if the agent is not already replying.
-        await asyncio.sleep(INTERRUPTED_GREETING_WAIT_SECONDS)
-        if getattr(session, "agent_state", "listening") not in ("thinking", "speaking"):
-            say_line()
+    async def keep_line_for_next_reply() -> None:
+        # The person spoke before any word: the turn loop is answering them.
+        # Put the line in the chat so that reply, or the next, says it,
+        # instead of talking over them.
+        try:
+            agent = session.current_agent
+            ctx = agent.chat_ctx.copy()
+            ctx.add_message(role="system", content=unsaid_line_note(first_message))
+            await agent.update_chat_ctx(ctx)
+        except Exception:
+            logger.exception("could not keep the unsaid first message")
 
     def on_done(done: Any) -> None:
         spoke = any(
@@ -1014,8 +1018,8 @@ def _say_first_message(session: Any, first_message: str, disclosure: str) -> Non
         )
         if spoke:
             return
-        if done.exception() is None and done.interrupted:
-            task = asyncio.ensure_future(say_line_unless_replying())
+        if done.interrupted:
+            task = asyncio.ensure_future(keep_line_for_next_reply())
             _BACKGROUND.add(task)
             task.add_done_callback(_BACKGROUND.discard)
             return
@@ -1024,11 +1028,18 @@ def _say_first_message(session: Any, first_message: str, disclosure: str) -> Non
     add_done(on_done)
 
 
-# An interrupted greeting turn that said nothing: how long to wait for the
-# turn loop's reply before saying the line as written.
-INTERRUPTED_GREETING_WAIT_SECONDS = 1.5
 # Keeps fire-and-forget tasks alive until they finish.
 _BACKGROUND: set[asyncio.Task[None]] = set()
+
+
+def unsaid_line_note(first_message: str) -> str:
+    """A chat note for an opening line the person talked over before it was
+    said: the next reply includes it, after answering them."""
+    return (
+        "Your opening line was not said yet because the person spoke first. "
+        "After answering them, say it, keeping its words: "
+        f"{json.dumps(first_message, ensure_ascii=False)}"
+    )
 
 
 def first_message_instructions(first_message: str, disclosure: str) -> str:
@@ -2658,7 +2669,10 @@ async def _run_call(
     other_party_task = asyncio.create_task(other_party(call_id))
     # A customer's own model may ignore Hail's greeting instruction: its
     # calls keep the literal greeting (see speak_greeting).
-    own_model = llm_cfg is not None or org_cfgs.get("llm") is not None
+    org_llm = org_cfgs.get("llm")
+    own_model = llm_cfg is not None or (
+        getattr(org_llm, "provider", None) == "openai-compatible"
+    )
     agent_tools, agent_api = await build_tools_safely(
         metadata,
         call_id,

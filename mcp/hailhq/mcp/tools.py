@@ -2252,7 +2252,7 @@ _AGENT_FIRST_MESSAGE = _d(
     "Greeting spoken after the AI disclosure. On outbound calls the agent says "
     "it as one greeting with the disclosure: word for word, except a hello the "
     "disclosure already said. Exact wording is not "
-    "guaranteed. Inbound calls, calls with a custom AI line, and calls on a customer's own model (workspace or per call), keep its "
+    "guaranteed. Inbound calls, calls with a custom AI line, calls after a phone menu, and calls on a customer's own model (workspace or per call) keep its "
     "words. Without one, an inbound agent waits for the caller."
 )
 _AGENT_AI_DISCLOSURE = _d("Speak the AI disclosure line first on every call.")
@@ -2385,7 +2385,7 @@ def register_tools(
                 "Line spoken on pickup, after the AI notice. The agent says it as "
                 "one greeting with the notice: word for word, except a hello the "
                 "notice already said. Exact wording is "
-                "not guaranteed. Without the AI notice, with a custom AI line, or on a customer's own model (workspace or per call), it "
+                "not guaranteed. Without the AI notice, with a custom AI line, after a phone menu, or on a customer's own model (workspace or per call), it "
                 "is said as written. "
                 "Without it, the agent reacts to the answer or silence."
             ),
