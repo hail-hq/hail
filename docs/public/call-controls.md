@@ -111,8 +111,8 @@ While the call runs:
 - Webhooks: `call.received` (inbound), `call.answered`, `call.transferred`.
 - `GET /v1/calls/{call_id}` returns `status` and the transcript turns so far.
   The transcript grows while the call runs.
-- `GET /v1/events?id=call:<call_id>` walks the call's events in order. Pass
-  `next_cursor` to keep reading.
+- `GET /v1/events?id=call:<call_id>` walks the call's events in order. Pass the
+  response's `next_cursor` as `cursor` to keep reading.
 
 After the call:
 
