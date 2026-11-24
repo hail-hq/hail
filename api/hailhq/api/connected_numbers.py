@@ -40,6 +40,7 @@ from hailhq.core.sip_connections import (
     CHECK_CODE_SECONDS,
     CHECK_RING_SECONDS,
     CHECKS_PER_DAY,
+    PBX_CHECK_LINE_SECONDS,
     UNVERIFIED_TTL,
     check_in_flight,
     check_outcomes,
@@ -640,8 +641,9 @@ class CheckResult:
     call_id: UUID | None
 
 
-# After a pass, how long the outbound leg stays up so the line can play.
-CHECK_LINE_SECONDS = 6
+# After a pass, how long the outbound leg stays up: the whole line, plus a
+# margin, so it is not cut off.
+CHECK_LINE_SECONDS = PBX_CHECK_LINE_SECONDS + 2
 # After the dial returns, how long to wait for the inbound side's result.
 CHECK_RESULT_WAIT_SECONDS = CHECK_CODE_SECONDS + 3
 # The check Call's max_duration_seconds, same as CHECK_WINDOW.

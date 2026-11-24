@@ -53,6 +53,7 @@ from hailhq.core.sip_connections import (
     CHECK_EVENT_KIND,
     CHECK_RING_SECONDS,
     CHECK_WINDOW,
+    PBX_CHECK_LINE_SECONDS,
     check_in_flight,
     decrypt_secret,
     hash_check_code,
@@ -1114,6 +1115,8 @@ def arrange(async_session, pbx_number, monkeypatch):
 
 def test_check_timing_fits_the_window():
     assert CHECK_RESULT_WAIT_SECONDS == CHECK_CODE_SECONDS + 3
+    # The outbound leg outlasts the whole line the voicebot may say.
+    assert CHECK_LINE_SECONDS >= PBX_CHECK_LINE_SECONDS + 2
     assert (
         CHECK_RING_SECONDS + CHECK_RESULT_WAIT_SECONDS + CHECK_LINE_SECONDS
         < CHECK_WINDOW.total_seconds()

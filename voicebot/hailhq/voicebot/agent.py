@@ -76,6 +76,7 @@ from hailhq.core.sip_connections import (
     CHECK_CODE_DIGITS,
     CHECK_CODE_SECONDS,
     CHECK_RING_SECONDS,
+    PBX_CHECK_LINE_SECONDS,
     carrier_caller,
     check_outcomes,
 )
@@ -1608,9 +1609,6 @@ async def open_inbound_from_room(
     return outcome.metadata
 
 
-# Ownership check of a connected number: how long the line after a pass may
-# take (the line is ``spoken_lines(...).pbx_check``).
-PBX_CHECK_LINE_SECONDS = 10
 
 
 async def collect_check_digits(
