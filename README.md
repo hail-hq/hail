@@ -274,7 +274,7 @@ A checked box is a released feature. Per-artifact changelogs (GitHub Releases fo
 ### Voice pipeline
 
 - Languages
-  - [x] 39 call languages with automatic STT routing and per-language turn detection — see [docs/languages.md](docs/languages.md)
+  - [x] 39 call languages with automatic STT routing and per-language turn detection — see [docs/public/languages.md](docs/public/languages.md)
 - STT
   - [x] Deepgram
   - [x] Speechmatics

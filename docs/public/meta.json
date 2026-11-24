@@ -3,6 +3,8 @@
     "README",
     "mcp",
     "agents",
+    "call-controls",
+    "languages",
     "webhooks",
     "email",
     "react-email",
