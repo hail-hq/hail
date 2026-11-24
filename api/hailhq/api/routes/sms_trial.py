@@ -102,7 +102,7 @@ async def get_sms_trial(
     """Read the workspace's US trial texting status.
 
     Shows whether trial texting is set up and can send now, the workspace's
-    trial phone and its status, and how many of the 25 trial texts are left.
+    trial phone and its status, and how many trial texts are left.
     """
     return await _trial_status(db, principal.organization_id)
 
@@ -161,7 +161,7 @@ async def start_sms_trial_phone(
     confirmed; until then the new phone shows as pending_phone. Asking
     again for the verified phone drops the waiting new phone. A
     workspace or a phone gets at most 5 codes in 24 hours. Code texts are
-    free and do not count toward the 25 trial texts. Console sessions only.
+    free and do not count as trial texts. Console sessions only.
     """
     _require_console(principal)
     number = await trial_sender(db)

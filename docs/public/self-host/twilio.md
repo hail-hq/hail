@@ -76,8 +76,8 @@ uv run python scripts/ops/sms_trial_numbers.py status
 The number sends once its toll-free verification is approved in the Twilio
 console: the API's verification pass (`HAIL_VERIFICATION_POLL_SECONDS`) asks
 Twilio and caches the answer on the row. A marked number is never used for
-calls. `pause --number <E.164> --yes` stops its trial texts at once. Each organization verifies one phone and sends up to 25 texts to it,
-ever. Verifying the phone needs a Hail console session, so on a self-host
+calls. `pause --number <E.164> --yes` stops its trial texts at once. Each organization verifies one phone and gets trial texts to it.
+Verifying the phone needs a Hail console session, so on a self-host
 without the console mark no number. Code:
 [`core/hailhq/core/sms_trial.py`](../../../core/hailhq/core/sms_trial.py).
 

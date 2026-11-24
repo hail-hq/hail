@@ -7,10 +7,13 @@ website.
 
 from __future__ import annotations
 
+import json
+import logging
 from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
 
 from hailhq.core.config import settings
-from hailhq.core.urls import join_url
+from hailhq.core.urls import join_url, url_variants
 
 TITLE = "Hail"
 
@@ -77,3 +80,24 @@ def server_version() -> str:
         return version("hailhq-mcp")
     except PackageNotFoundError:
         return "0.0.0"
+
+
+def registry_manifest_for(resource_url: str) -> bytes | None:
+    """Read the bundled registry manifest if it describes this MCP endpoint."""
+    path = Path(__file__).with_name("server.json")
+    try:
+        if not path.is_file():
+            # Editable installs use the registry file in the checkout.
+            path = Path(__file__).resolve().parents[2] / "server.json"
+        content = path.read_bytes()
+        resource_urls = url_variants(resource_url)
+        matches = any(
+            remote["url"] in resource_urls for remote in json.loads(content)["remotes"]
+        )
+    except (OSError, ValueError, KeyError, TypeError, RecursionError):
+        # A public probe can retry, so keep per-request failures at debug level.
+        logging.getLogger(__name__).debug(
+            "Could not load the MCP registry manifest", exc_info=True
+        )
+        return None
+    return content if matches else None
