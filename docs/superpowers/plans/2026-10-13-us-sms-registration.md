@@ -1508,7 +1508,7 @@ Add to `.env.example` after `TWILIO_SIP_TRUNK_SID=`:
 TWILIO_PRIMARY_PROFILE_SID=
 ```
 
-Then add the same key and comment to the worktree `.env` (value `BU67001392606cddd3e0a83fc874b2d157`) and run the masked diff from Global Constraints; it must print nothing.
+Then add the same key and comment to the worktree `.env` (the real `BU...` value) and run the masked diff from Global Constraints; it must print nothing.
 
 Register in `__init__.py` `_register_builtin`:
 

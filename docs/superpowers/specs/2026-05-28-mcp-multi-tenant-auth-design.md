@@ -28,7 +28,7 @@ What's actually missing for Phase 1:
 | MCP forwards the caller's bearer (drops `HAIL_API_KEY` server-side)            | **not done — 1c (the real long pole)**       |
 | Better Auth issues OAuth JWTs (for web Connectors that do DCR, not paste keys) | **not done — 1b**                            |
 | API validates JWTs (alongside API keys)                                        | **not done — small 1a extension**            |
-| Scope enforcement at routes (scopes parsed today but never checked)            | not done — deferred to Phase 2               |
+| Scope enforcement at routes                                                    | Phase 2                                      |
 
 ## Decisions locked
 

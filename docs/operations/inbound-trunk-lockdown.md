@@ -13,7 +13,7 @@ agent:
 - Apply and move: [`scripts/ops/sip_trunks.py`](../../scripts/ops/sip_trunks.py) (LiveKit API). Every command is a dry run until `--yes`.
 - Weekly IP check: [`sip-allowlist-check`](../../.github/workflows/sip-allowlist-check.yml), Monday 09:30 UTC ([order](../../costs/README.md#weekly-jobs-in-order)).
 - Negative test: [`scripts/ops/sip_invite_probe.py`](../../scripts/ops/sip_invite_probe.py).
-- Limit of the IP lock: Twilio and Telnyx send every customer's calls from the same signaling IPs. Another customer of that carrier can point their own SIP trunk at our LiveKit SIP host and reach a Hail number on that carrier. The lock stops every other address. DIDWW's password does not have this limit, and neither does the [Twilio secret header](#twilio-secret-header).
+- Limit of an IP list: a carrier that sends every customer's calls from the same signaling IPs needs a per-account check as well, a password (DIDWW) or a secret header (the [Twilio secret header](#twilio-secret-header)). An IP list alone admits any customer of that carrier.
 - Exception to "infrastructure is Terraform only" (owner decision): LiveKit SIP trunks have no Terraform provider, so a committed JSON file plus this script define them.
 
 How LiveKit picks a trunk ([`sip.go`](https://github.com/livekit/protocol/blob/main/sip/sip.go)):
@@ -161,7 +161,7 @@ LiveKit Cloud checks `allowed_addresses` only once LiveKit enables that check fo
 
 - Twilio: each origination URL of `TWILIO_SIP_TRUNK_SID` to a LiveKit SIP host (`*.sip.livekit.cloud`) ends in `?X-Hail-Secret=<HAIL_SIP_INBOUND_SECRET>`. Other URLs are left as they are (`skipped (not LiveKit)` in the plan). A skipped URL that reaches LiveKit by IP or CNAME sends no header, so Hail refuses its calls once the secret is on the VM: point it at the `*.sip.livekit.cloud` host. Twilio sends an `X-` header added to the origination URI on every call ([Origination URI X-headers](https://www.twilio.com/docs/sip-trunking#originationuri-x-headers)).
 - LiveKit: the Twilio trunk's `headers_to_attributes` maps `X-Hail-Secret` to the participant attribute `hail.sip_secret` ([`SIPInboundTrunkInfo`](https://docs.livekit.io/reference/telephony/sip-api/#sipinboundtrunkinfo)).
-- Hail: with `HAIL_SIP_INBOUND_SECRET` set, a call to a Twilio number is dropped unless the attribute equals the secret ([`inbound_calls.py`](../../core/hailhq/core/inbound_calls.py)). Empty = no check. Telnyx and DIDWW calls are not checked.
+- Hail: with `HAIL_SIP_INBOUND_SECRET` set, a call to a Twilio number is dropped unless the attribute equals the secret ([`inbound_calls.py`](../../core/hailhq/core/inbound_calls.py)). Empty = no check. The check applies to calls on the Twilio trunk only; each other carrier uses the lock in the table above.
   - This check runs before the trunk check. Only a call with a valid secret reaches the trunk check, which keeps a failed call row for real misrouting.
   - A refused call may be forged, on any trunk, so Hail writes no call row and sends no webhook. A failed row would let a forger put calls with any caller ID into a customer's call log.
   - It logs a warning `X-Hail-Secret header missing` or `wrong`. If the call arrived on the shared trunk, it also logs `Twilio number still on the shared trunk; move it` at INFO, once per number per voicebot process.
@@ -225,7 +225,7 @@ Run from the repo root of the main checkout. Values marked _(chat)_ are not writ
      --number +<E.164 number on the Twilio trunk>
    ```
 
-   It must print `DROPPED:`, a ring (`180 Ringing` or another 18x), then a final code (exit 0). Seen on production: `DROPPED: 180 Ringing, then 486 Rejected`, about 1.5 seconds after the INVITE. `DROPPED` alone proves nothing: LiveKit also ends a call nobody answers, after its ringing timeout, for example when the voicebot is down. The pass needs both:
+   It must print `DROPPED:`, a ring (`180 Ringing` or another 18x), then a final code (exit 0). Example: `DROPPED: 180 Ringing, then 486 Rejected`. `DROPPED` alone proves nothing: LiveKit also ends a call nobody answers, after its ringing timeout, for example when the voicebot is down. The pass needs both:
    - Logfire shows the warning `inbound call to +<number> refused: X-Hail-Secret header missing (carrier=twilio)`;
    - the workspace's call log shows NO new call from `+12025550100`.
 

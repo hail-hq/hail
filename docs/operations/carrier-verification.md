@@ -16,7 +16,7 @@ Some countries require the buyer of a phone number to be verified first (ID, add
 
 | Variable                                  | Default                                                                     | Where                                                                    | Effect                                                                                                                               |
 | ----------------------------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `HAIL_VERIFICATION_POLL_SECONDS`          | `600` (in [`core/hailhq/core/config.py`](../../core/hailhq/core/config.py)) | `.env` on the host running `api` (`/opt/hail/.env` on the production VM) | Seconds between background passes. `0` disables the pass.                                                                            |
+| `HAIL_VERIFICATION_POLL_SECONDS`          | `600` (in [`core/hailhq/core/config.py`](../../core/hailhq/core/config.py)) | `.env` on the host running `api` (the server `.env`) | Seconds between background passes. `0` disables the pass.                                                                            |
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` | empty                                                                       | same `.env`                                                              | Without both, no verification provider is configured and `POST /verifications` answers 404 `no verification provider is configured`. |
 
 Nothing else needs to be set. A `.env` without `HAIL_VERIFICATION_POLL_SECONDS` runs the pass every 600 seconds because the code default applies. The pass starts inside the API process at boot ([`api/hailhq/api/main.py`](../../api/hailhq/api/main.py), `VerificationWorker`); there is no separate container.
@@ -62,7 +62,7 @@ Rows created before `subject_name` existed have none. `python -m hailhq.core.ver
 It commits row by row and logs counts and row ids only, never a name. A carrier that is not configured, a record that is gone, or a lookup that fails leaves the row null; run it again later to retry. A live row whose name would duplicate another live row of the same kind stays null (counted as `duplicate`). Run it once after the deploy that adds the column, on the production VM:
 
 ```bash
-cd /opt/hail
+cd <repo checkout on the server>
 docker compose -f docker-compose.yml -f docker-compose.prod.yml \
   run --rm api python -m hailhq.core.verification_names
 ```

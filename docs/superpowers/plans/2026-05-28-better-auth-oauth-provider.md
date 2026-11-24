@@ -833,12 +833,3 @@ not code-fixed — revisit in 1c:
   one source. Add an end-to-end check in 1c where the MCP forwarder exercises
   a real token against the API; until then, Task 6's manual curl smoke is the
   gate.
-- **Unauthenticated DCR has no row cap.** Better Auth's default rate limit
-  (100 req/10s/IP, prod-only) throttles spam rate but leaves total
-  `oauth_clients` growth unbounded. A `rateLimit.customRules` entry was
-  _deliberately not added_: hail-website configures no shared rate-limit
-  storage, so on Vercel's multi-instance serverless the in-memory limiter is
-  per-instance and resets on cold start — a `customRules` rule would imply
-  protection it does not deliver. Real fixes for 1c: DB-backed rate-limit
-  storage (or `secondaryStorage`), and/or a periodic prune of clients with
-  zero consents/tokens older than N days.

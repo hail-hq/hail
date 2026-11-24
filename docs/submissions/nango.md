@@ -204,9 +204,8 @@ Field notes:
   entry rather than adding friction here.
 - `verification.endpoints`: a **fallback chain**, not a coverage list —
   `credentialsTest` (`packages/server/lib/hooks/hooks.ts:468`) returns on the
-  first 2xx. Listing three is insurance for when scope enforcement ships
-  (`mcp/hailhq/mcp/server.py:54`, "deferred to Phase 2"); today no route
-  enforces scopes, so `/calls` always answers.
+  first 2xx. Listing three is insurance for when route-level scope
+  enforcement ships (Phase 2).
 - `registration_params`: **mandatory.** Nango's DCR body
   (`packages/shared/lib/clients/mcp.client.ts:33-38`) omits `grant_types`
   unless `registration_params` supplies it, and Hail then registers the client

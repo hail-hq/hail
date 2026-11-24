@@ -1684,7 +1684,7 @@ UI requirements (from the spec):
 
 - [ ] **Step 5: Full check** — `pnpm vitest run && pnpm tsc --noEmit && pnpm lint`.
 
-- [ ] **Step 6: Commit** `git add -A && git commit -m "feat(console): hand over step and call drawer line"`, push, open PR in `r13i/hail-website` linking the hail PR. Merge order: hail PR first (migration 0053 + API field), then console.
+- [ ] **Step 6: Commit** `git add -A && git commit -m "feat(console): hand over step and call drawer line"`, push, open PR in the hail-website repo linking the hail PR. Merge order: hail PR first (migration 0053 + API field), then console.
 
 ---
 
