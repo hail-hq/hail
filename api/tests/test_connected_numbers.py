@@ -24,6 +24,7 @@ from hailhq.api.connected_numbers import (
     rotate_inbound_password,
     update_connection,
 )
+from hailhq.core.agent_tools.send_dtmf import DIGIT_DELAY_SECONDS
 from hailhq.core.billing import CALL_META_BILLED
 from hailhq.core.config import settings
 from hailhq.core.db import session_scope
@@ -47,11 +48,14 @@ from hailhq.core.models import (
 from hailhq.core.pool import CALL_META_FROM_POOL
 from hailhq.core.secret_cipher import SecretKeyMissing, generate_key
 from hailhq.core.sip_connections import (
+    CHECK_ARRIVAL_WAIT_SECONDS,
     CHECK_CALL_META,
+    CHECK_CODE_DIGITS,
     CHECK_CODE_META,
     CHECK_CODE_SECONDS,
     CHECK_EVENT_KIND,
     CHECK_RING_SECONDS,
+    CHECK_SEND_DELAY_SECONDS,
     CHECK_WINDOW,
     PBX_CHECK_LINE_SECONDS,
     check_in_flight,
@@ -1131,7 +1135,14 @@ def arrange(async_session, pbx_number, monkeypatch):
 
 
 def test_check_timing_fits_the_window():
-    assert CHECK_RESULT_WAIT_SECONDS == CHECK_CODE_SECONDS + 3
+    # From the answer: the sender waits for "arrived", waits its delay, sends
+    # 6 digits; the inbound side then has CHECK_CODE_SECONDS for them.
+    assert CHECK_RESULT_WAIT_SECONDS >= (
+        CHECK_ARRIVAL_WAIT_SECONDS
+        + CHECK_SEND_DELAY_SECONDS
+        + CHECK_CODE_DIGITS * DIGIT_DELAY_SECONDS
+        + CHECK_CODE_SECONDS
+    )
     # The outbound leg outlasts the whole line the voicebot may say.
     assert CHECK_LINE_SECONDS >= PBX_CHECK_LINE_SECONDS + 2
     assert (

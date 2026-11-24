@@ -27,8 +27,14 @@ CHECK_CODE_SECONDS = 15
 CHECKS_PER_DAY = 5
 # How long the voicebot may take to say the line after a pass.
 PBX_CHECK_LINE_SECONDS = 10
+# The outbound leg (voicebot sender): how long after the answer it waits for
+# the inbound side's "arrived", then how long after "arrived" it sends the
+# code (the inbound job is listening by then: it writes "arrived" just
+# before it listens).
+CHECK_ARRIVAL_WAIT_SECONDS = CHECK_CODE_SECONDS
+CHECK_SEND_DELAY_SECONDS = 1
 # A check call newer than this, not terminal, is in flight.
-# Ring 30 + result wait 18 + line 12 = 60 s, under 90.
+# Ring 30 + result wait about 35 + line 12 = about 77 s, under 90.
 CHECK_WINDOW = timedelta(seconds=90)
 UNVERIFIED_TTL = timedelta(days=7)
 # calls.metadata key on an ownership check call. Every check key starts with

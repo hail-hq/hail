@@ -1116,7 +1116,9 @@ async def test_handover_refuses_an_extension_longer_than_six(
     """A long "extension" can carry an outside number with a dial prefix:
     the route never dials it, even if a row ever holds one."""
     call, contact = await _seed_pbx(async_session)
-    long = HandoverPerson(str(contact.id), "Support line", None, None, "9011442079460000")
+    long = HandoverPerson(
+        str(contact.id), "Support line", None, None, "9011442079460000"
+    )
 
     async def linked(_db, _call, _wire_id):
         return long

@@ -73,9 +73,11 @@ from hailhq.core.providers.voice import TwilioVoiceProvider
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
 from hailhq.core.secret_cipher import SecretKeyMissing
 from hailhq.core.sip_connections import (
+    CHECK_ARRIVAL_WAIT_SECONDS,
     CHECK_CODE_DIGITS,
     CHECK_CODE_SECONDS,
     CHECK_RING_SECONDS,
+    CHECK_SEND_DELAY_SECONDS,
     PBX_CHECK_LINE_SECONDS,
     carrier_caller,
     check_outcomes,
@@ -1683,14 +1685,12 @@ async def run_check_leg(ctx: JobContext, arrived: CheckArrived) -> None:
 
 # Ownership check, outbound leg: it only sends the code as key presses, once.
 # Only the first 6 key presses count and a check call has one result, so a
-# second send could never help. It goes this long after the inbound side
-# reports "arrived": its job is listening by then (it writes "arrived" just
-# before it listens).
-CHECK_SEND_DELAY_SECONDS = 1
+# second send could never help. It waits CHECK_ARRIVAL_WAIT_SECONDS for
+# "arrived", then CHECK_SEND_DELAY_SECONDS (both in core: the API derives
+# its result wait from them).
 # How long the dialed leg may take to answer.
 CHECK_ANSWER_WAIT_SECONDS = CHECK_RING_SECONDS + 5
-# How long to wait for "arrived" after the answer, and how often to look.
-CHECK_ARRIVAL_WAIT_SECONDS = CHECK_CODE_SECONDS
+# How often to look for "arrived".
 CHECK_ARRIVAL_POLL_SECONDS = 0.25
 
 
