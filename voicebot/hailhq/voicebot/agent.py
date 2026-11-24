@@ -999,7 +999,9 @@ def _say_first_message(session: Any, first_message: str, disclosure: str) -> Non
             allow_interruptions=False,
         )
     except Exception as exc:
-        if not isinstance(exc, RuntimeError):  # RuntimeError: the call may have ended
+        if isinstance(exc, RuntimeError):  # often the call ended; say_line checks
+            logger.warning("could not start the greeting turn: %s", exc)
+        else:
             logger.exception("could not start the greeting turn")
         say_line()
         return
@@ -1025,8 +1027,8 @@ def first_message_instructions(first_message: str, disclosure: str) -> str:
     """The prompt for the opening turn that says the agent's ``first_message``
     right after the AI ``disclosure``, as one greeting with it. Both are
     quoted as JSON strings, so a quote inside them cannot end the quote. The
-    other party's pickup words stay out: they are untrusted. Words held
-    during the turn stay in the chat for the next reply."""
+    other party's pickup words stay out: they are untrusted. Words from a
+    turn that ended during the notice reach this turn through the chat."""
     return (
         f"You just said this introduction: {json.dumps(disclosure, ensure_ascii=False)}. "
         "Now say your opening line, below, so the two sound like one greeting. "
