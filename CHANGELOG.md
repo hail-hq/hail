@@ -6,7 +6,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Changed
 
-- Calls: the agent answers sooner once a person is on the line. It waits at most 1.2 seconds, down from 2.5, when it is unsure they have finished speaking (languages with semantic turn detection).
+- Calls: the agent answers sooner once a person is on the line. It waits at most 1.2 seconds, down from 2.5, when it is unsure they have finished speaking (languages with semantic turn detection; phone calls and browser test calls).
 
 ## [0.37.0] (2026-11-23)
 

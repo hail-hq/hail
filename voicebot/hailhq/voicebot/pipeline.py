@@ -810,11 +810,11 @@ def startup_capability_warnings() -> list[str]:
 
 
 # How long the agent waits after a person stops, when the end-of-turn check is
-# unsure they have finished. The SDK default is 2.5 s. On real calls the check
-# was unsure on most turns, also after one-word turns, so the agent answered
-# 2.5 s late most of the time. Lower answers sooner; too low answers someone
-# who only paused to think. It sets the turn end only with semantic turn
-# detection (turn_mode_for).
+# unsure they have finished. With semantic turn detection the SDK default is
+# 2.5 s. On real calls the check was unsure on most turns, also after one-word
+# turns, so the agent answered 2.5 s late most of the time. Lower answers
+# sooner; too low answers someone who only paused to think. Without semantic
+# turn detection (turn_mode_for) the SDK does not use this value to end a turn.
 MAX_TURN_END_WAIT = 1.2
 
 
@@ -823,13 +823,12 @@ def use_conversation_turn_wait(session: Any) -> None:
 
     Not at session start: answering machine detection, the pickup turn and
     phone menus are timed for the SDK default, and a recorded greeting or menu
-    pauses longer mid-sentence than a person does. Never costs the call.
+    pauses longer mid-sentence than a person does. It stays for the rest of
+    the call, also when the person transfers the call to a recording later.
+    Never costs the call.
     """
-    update = getattr(session, "update_options", None)
-    if update is None:
-        return
     try:
-        update(endpointing_opts={"max_delay": MAX_TURN_END_WAIT})
+        session.update_options(endpointing_opts={"max_delay": MAX_TURN_END_WAIT})
     except Exception:
         logger.exception("could not shorten the end-of-turn wait; continuing call")
 

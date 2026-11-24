@@ -25,7 +25,11 @@ from hailhq.core.models import Call
 from hailhq.core.prompts import BROWSER_VOICE_PREAMBLE
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
 from hailhq.voicebot.browser_tools import build_browser_tools
-from hailhq.voicebot.pipeline import build_session, resolve_org_configs
+from hailhq.voicebot.pipeline import (
+    build_session,
+    resolve_org_configs,
+    use_conversation_turn_wait,
+)
 from livekit.agents import Agent, AgentSession
 
 logger = logging.getLogger(__name__)
@@ -341,6 +345,8 @@ async def run_browser_session(
         if finished:
             await session.aclose()
             return
+        # A browser call has a person from the start: no detection, no menu.
+        use_conversation_turn_wait(session)
         media_started_at = datetime.now(timezone.utc)
 
         async def expire():

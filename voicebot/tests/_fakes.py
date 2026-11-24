@@ -141,6 +141,13 @@ class FakeAnnouncingSession:
         self.last_handle: FakeSpeechHandle | None = None
         # Utterances already spoken or requested at each clear_user_turn().
         self.cleared_after: list[int] = []
+        # (options, utterances spoken or requested before) per update_options().
+        self.option_updates: list[tuple[dict, int]] = []
+
+    def update_options(self, **options) -> None:
+        self.option_updates.append(
+            (options, len(self.say_calls) + len(self.generate_reply_calls))
+        )
 
     def clear_user_turn(self) -> None:
         self.cleared_after.append(len(self.say_calls) + len(self.generate_reply_calls))
