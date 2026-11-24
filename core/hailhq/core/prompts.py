@@ -634,7 +634,6 @@ TOOL_LINES: tuple[ToolLine, ...] = (
         " If they only ask you to send something, ask once: by text or by email?",
         frozenset({"send_sms", "send_email"}),
     ),
-    # Tool descriptions.
     # The email prompt (EMAIL_PREAMBLE). Without read_email the run sees the
     # whole thread instead.
     ToolLine(
@@ -652,6 +651,7 @@ TOOL_LINES: tuple[ToolLine, ...] = (
         "a second reply.",
         frozenset({"send_email", "read_email"}),
     ),
+    # Tool descriptions.
     ToolLine(" (use list_contacts to see who)", frozenset({"list_contacts"})),
     ToolLine(
         " Saved contacts are not listed, but send_email can reach them by name.",
@@ -779,7 +779,7 @@ def build_email_instructions(
     """The system message for an email reply. ``trust`` is what Hail proved
     about the sender. ``clock`` (see :func:`clock_section`) goes after the
     business instructions. ``tool_names`` as in :func:`fit_to_tools`."""
-    preamble = fit_to_tools(EMAIL_PREAMBLE, tool_names)
+    preamble = fit_to_tools(EMAIL_PREAMBLE, tool_names).rstrip()
     framing = f"{PLATFORM_PRIVACY}\n\n{preamble} {EMAIL_SENDER_LINES[trust]}"
     if sends_tried:
         framing = f"{framing} {EMAIL_SENDS_TRIED_LINE}"
