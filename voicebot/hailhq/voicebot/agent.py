@@ -975,13 +975,13 @@ def opening_instructions(
     return f"{base} They have not said anything yet."
 
 
-def first_message_instructions(
-    first_message: str, pickup_transcript: str | None = None
-) -> str:
+def first_message_instructions(first_message: str) -> str:
     """The prompt for the opening turn that says the agent's ``first_message``
     right after the AI notice: in the agent's own words, as one greeting with
-    the notice, which has already greeted and said who the agent is."""
-    base = (
+    the notice, which has already greeted and said who the agent is. The
+    other party's pickup words stay out of it: they are untrusted, and a
+    ``first_message`` opening does not answer them."""
+    return (
         "The spoken introduction has already greeted the person and said who "
         "you are and who you represent. Now say your opening line, below, so "
         "the two sound like one greeting: do not greet or introduce yourself "
@@ -990,10 +990,6 @@ def first_message_instructions(
         "the name you address them by, numbers and codes. Add nothing else, "
         f'then give them room to respond. Your opening line: "{first_message}"'
     )
-    heard = (pickup_transcript or "").strip()
-    if heard:
-        return f'{base} They answered the phone saying: "{heard}".'
-    return base
 
 
 # A sentence end followed by the next sentence. Chinese and Japanese marks
@@ -1176,10 +1172,7 @@ async def speak_greeting(
         heard = on_opened() if on_opened is not None else None
         if blended:
             session.generate_reply(
-                instructions=first_message_instructions(
-                    first_message,
-                    " ".join(filter(None, (pickup_transcript, heard))),
-                )
+                instructions=first_message_instructions(first_message)
             )
     # An inbound caller dialed in: with no ``first_message`` the agent waits
     # for them to speak (the documented ``first_message: null`` behavior). The

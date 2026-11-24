@@ -1132,10 +1132,11 @@ async def test_speak_greeting_first_message_replaces_the_generated_opening() -> 
     assert session.generate_reply_calls == []
 
 
-def test_first_message_instructions_carry_the_line_and_pickup_words() -> None:
-    text = first_message_instructions("Hi, about your order.", "Joe's Pizza?")
+def test_first_message_instructions_carry_the_line_but_not_pickup_words() -> None:
+    """The other party's words never go into instructions: they are
+    untrusted, and a first_message opening does not answer them."""
+    text = first_message_instructions("Hi, about your order.")
     assert '"Hi, about your order."' in text
-    assert "Joe's Pizza?" in text
     assert "do not greet or introduce yourself again" in text
 
 
