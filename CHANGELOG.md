@@ -4,9 +4,19 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+## [0.38.0] (2026-11-24)
+
+Calls can always hang up: every call keeps `end_call` and `send_dtmf`, whatever
+its tools list says, so a bring-your-own model must support tool calling.
+Webhooks can send a test event before you save an endpoint.
+
+Component versions cut alongside this release:
+**`cli-v0.35.0`** (Homebrew + GitHub Releases). No database migrations.
+
 ### Added
 
 - Webhooks: send a test event to an endpoint before you save it with `POST /v1/webhooks/test`, and see the receiver's answer.
+- Self-host: set `HAIL_SIP_INBOUND_SECRET` to refuse Twilio calls that lack the shared SIP header. Empty means no check.
 
 ### Changed
 
