@@ -38,6 +38,7 @@ from hailhq.core.sip_connections import (
     CHECK_CALL_META,
     CHECK_CODE_DIGITS,
     CHECK_CODE_META,
+    CHECK_EVENT_KIND,
     CHECK_LINE_SECONDS,
     CHECK_RESULT_WAIT_SECONDS,
     CHECK_RING_SECONDS,
@@ -863,18 +864,19 @@ async def check_connected_number(
                 type(exc).__name__,
             )
             failure = CallEndReason.UNKNOWN.value
+            # The call may still have been answered: the inbound side says.
+            stage = "result_wait"
+            outcomes = await _poll_check_result(db, call_id)
+            if outcomes & {"arrived", "passed", "code_not_received"}:
+                # It was: bill from the arrival, report the real outcome.
+                answered_at = await _arrived_at(db, call_id)
+                failure = None
+                if "passed" in outcomes:
+                    await asyncio.sleep(CHECK_LINE_SECONDS)
         else:
             answered_at = datetime.now(timezone.utc)
             stage = "result_wait"  # log label only: answered calls never fail
-            loop = asyncio.get_running_loop()
-            deadline = loop.time() + CHECK_RESULT_WAIT_SECONDS
-            outcomes: set[str] = set()
-            while True:
-                outcomes = await check_outcomes(db, call_id)
-                await db.commit()  # ends the read; the next one sees new events
-                if outcomes & set(_CHECK_FINAL) or loop.time() >= deadline:
-                    break
-                await asyncio.sleep(CHECK_POLL_SECONDS)
+            outcomes = await _poll_check_result(db, call_id)
             if "passed" in outcomes:
                 await asyncio.sleep(CHECK_LINE_SECONDS)
     except Exception as exc:
@@ -885,7 +887,7 @@ async def check_connected_number(
             stage,
             type(exc).__name__,
         )
-        if answered_at is None:
+        if answered_at is None and failure is None:
             failure = CallEndReason(f"{stage}_failed").value
     finally:
         try:
@@ -927,6 +929,33 @@ async def check_connected_number(
     if "not_authenticated" in outcomes:
         return CheckResult("unverified", "not_authenticated", call_id)
     return CheckResult("unverified", "no_call_arrived", call_id)
+
+
+async def _poll_check_result(db: AsyncSession, call_id: UUID) -> set[str]:
+    """The inbound side's outcomes for check call ``call_id``, polled until a
+    final one or ``CHECK_RESULT_WAIT_SECONDS``."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + CHECK_RESULT_WAIT_SECONDS
+    while True:
+        outcomes = await check_outcomes(db, call_id)
+        await db.commit()  # ends the read; the next one sees new events
+        if outcomes & set(_CHECK_FINAL) or loop.time() >= deadline:
+            return outcomes
+        await asyncio.sleep(CHECK_POLL_SECONDS)
+
+
+async def _arrived_at(db: AsyncSession, call_id: UUID) -> datetime:
+    """When the check call reached the connection's trunk (its first
+    ``arrived`` event); now when none is recorded."""
+    at = await db.scalar(
+        select(func.min(CallEvent.occurred_at)).where(
+            CallEvent.call_id == call_id,
+            CallEvent.kind == CHECK_EVENT_KIND,
+            CallEvent.payload["outcome"].astext == "arrived",
+        )
+    )
+    await db.commit()
+    return at or datetime.now(timezone.utc)
 
 
 async def _finish_check_call(

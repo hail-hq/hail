@@ -1477,6 +1477,44 @@ async def test_check_dial_outcome_unknown_still_counts(
     )
 
 
+def _says_then_times_out(*outcomes, activate=False):
+    """The inbound side writes ``outcomes``, then the dial request times out:
+    the call rang and was answered, but LiveKit's answer was lost."""
+
+    async def _dial(**kwargs):
+        call_id = _call_id_of(kwargs)
+        for outcome in outcomes:
+            await _write_outcome(call_id, outcome, activate and outcome == "passed")
+        raise TimeoutError()
+
+    return _dial
+
+
+async def test_check_unknown_dial_outcome_with_a_pass_is_active_and_billed(
+    async_session, check_lk, pbx_number, pool_number
+):
+    check_lk.create_sip_participant.side_effect = _says_then_times_out(
+        "arrived", "passed", activate=True
+    )
+    result = await check_connected_number(async_session, check_lk, pbx_number)
+    assert (result.state, result.reason) == ("active", None)
+    call = await _the_check_call(async_session, pbx_number.id)
+    assert (call.status, call.end_reason) == ("completed", "normal_hangup")
+    assert call.answered_at is not None
+    assert len(await usage_rows(result.call_id)) == 1
+
+
+async def test_check_unknown_dial_outcome_with_an_arrival_reports_it(
+    async_session, check_lk, pbx_number, pool_number
+):
+    check_lk.create_sip_participant.side_effect = _says_then_times_out("arrived")
+    result = await check_connected_number(async_session, check_lk, pbx_number)
+    assert (result.state, result.reason) == ("unverified", "code_not_received")
+    call = await _the_check_call(async_session, pbx_number.id)
+    assert call.answered_at is not None
+    assert len(await usage_rows(result.call_id)) == 1
+
+
 async def test_check_sip_refusal_counts_and_reports_no_call(
     async_session, check_lk, pbx_number, pool_number
 ):
