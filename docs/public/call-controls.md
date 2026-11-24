@@ -25,8 +25,8 @@ Schema: `CallCreate` in [`openapi/openapi.yaml`](../../openapi/openapi.yaml).
 Every field on `POST /v1/calls` applies to that call only.
 
 - `system_prompt`: the task and the rules for this call.
-- `first_message`: the opening line. Omitted on an outbound call, Hail's
-  model writes its own short opening after pickup. Omitted on an agent that
+- `first_message`: the opening line. Omitted on an outbound call, the agent's
+  model (Hail's, or yours with `llm`) writes a short opening after pickup. Omitted on an agent that
   answers inbound calls, the agent waits for the caller to speak.
 - `llm`: your own model for this call. See [below](#who-runs-the-conversation).
 - `tools`: the built-in tools the agent may use on this call, such as

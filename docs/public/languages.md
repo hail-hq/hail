@@ -24,7 +24,7 @@ its own provider for that call instead.
 
 | Code | Language   | Auto STT     | Turn detection | TTS fallback |
 | ---- | ---------- | ------------ | -------------- | ------------ |
-| ar   | Arabic     | speechmatics | STT-adaptive   | yes          |
+| ar   | Arabic     | deepgram     | semantic       | yes          |
 | bg   | Bulgarian  | speechmatics | STT-adaptive   | yes          |
 | bn   | Bengali    | speechmatics | STT-adaptive   | no           |
 | cs   | Czech      | speechmatics | STT-adaptive   | yes          |
@@ -52,7 +52,7 @@ its own provider for that call instead.
 | pl   | Polish     | speechmatics | STT-adaptive   | yes          |
 | pt   | Portuguese | deepgram     | semantic       | yes          |
 | ro   | Romanian   | speechmatics | STT-adaptive   | yes          |
-| ru   | Russian    | deepgram     | semantic       | yes          |
+| ru   | Russian    | speechmatics | STT-adaptive   | yes          |
 | sk   | Slovak     | speechmatics | STT-adaptive   | yes          |
 | sv   | Swedish    | speechmatics | STT-adaptive   | yes          |
 | ta   | Tamil      | speechmatics | STT-adaptive   | yes          |

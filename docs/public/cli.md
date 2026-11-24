@@ -56,7 +56,7 @@ To point a call at your own OpenAI-compatible endpoint, see [Bring your own LLM]
 
 Language support:
 
-- `--language` — one of 39 lowercase ISO 639-1 codes (e.g. `en`, `da`, `hi`). Hail auto-routes STT and turn detection per language (see [Languages](languages.md) for the full table). STT provider selection is console-BYO-only — there is no per-call flag to pin one.
+- `--language`: one of 39 lowercase ISO 639-1 codes (for example `en`, `da`, `hi`). Hail picks STT and turn detection per language (see [Languages](languages.md) for the full table). You choose an STT provider in the console only. No per-call flag pins one.
 
 ## SMS
 
