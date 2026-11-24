@@ -7,10 +7,9 @@ ends, and what your app hears while it runs.
 curl -X POST "$HAIL_API_URL/v1/calls" -H "Authorization: Bearer $HAIL_API_KEY" \
   -H 'Content-Type: application/json' -d '{
     "to": "+14155550100",
-    "agent_id": "a1b2...",
     "system_prompt": "Confirm order A1001 ships Friday. Do not offer refunds.",
     "first_message": "Hi, I am calling about your order.",
-    "tools": ["end_call", "send_sms"],
+    "tools": ["end_call", "send_sms", "send_dtmf"],
     "voice_config": {"language": "es"},
     "recording_enabled": false,
     "metadata": {"ticket": "T-1001"},
@@ -26,22 +25,28 @@ Schema: `CallCreate` in [`openapi/openapi.yaml`](../../openapi/openapi.yaml).
 Every field on `POST /v1/calls` applies to that call only.
 
 - `system_prompt`: the task and the rules for this call.
-- `first_message`: the opening line. Omit it and the agent waits for the
-  other person to speak.
+- `first_message`: the opening line. Omitted on an outbound call, Hail's
+  model writes its own short opening after pickup. Omitted on an agent that
+  answers inbound calls, the agent waits for the caller to speak.
 - `llm`: your own model for this call. See [below](#who-runs-the-conversation).
 - `tools`: the built-in tools the agent may use on this call, such as
   `end_call`, `send_sms` or `send_dtmf`. `[]` allows none. Omitted, the
-  agent's list applies, or every tool your workspace supports. The agent's
-  [HTTP tools](agents.md#call-your-api-http-tools) stay on either way.
+  agent's list applies, or every tool your workspace supports. A tool left
+  out of the list is off for the call, including `send_dtmf` and
+  `transfer_call`. The agent's [HTTP tools](agents.md#call-your-api-http-tools)
+  stay on either way.
 - `voice_config`: `voice_id` and `language` (one of the
   [39 languages](languages.md)).
 - `recording_enabled`: `true` or `false` for this call. Omitted, the agent
   and then the workspace setting decide.
 - `ai_disclosure`: speak the AI line first (default `true`).
-- `metadata`: any JSON object. Hail stores it and returns it on reads. The
+- `metadata`: a JSON object. Hail stores it and returns it on reads. The
   model does not see it. Put what the agent must know in `system_prompt`.
+  Keys that start with `recording_`, and the key `failure_code`, are
+  reserved and refused with `422`.
 - `agent_id`: start from a saved [agent](agents.md). Any field you send on
-  the call wins over the agent's value.
+  the call replaces the agent's value. `voice_config` is replaced as one
+  object: to change only the language, send the agent's `voice_id` too.
 
 These are set on the [agent](agents.md) or in the workspace call settings,
 not per call:
@@ -86,8 +91,9 @@ call audio to or from your app.
 - **The other person hangs up.** `end_reason` is `normal_hangup`.
 - **The time limit is reached.** At `max_duration_seconds` the agent says a
   short closing line and stops. `end_reason` is `soft_cap_reached`.
-- **Voicemail answers an outbound call.** Hail hangs up without leaving a
-  message. `status` is `no_answer` and `end_reason` is `voicemail_reached`.
+- **A machine answers an outbound call.** Hail hangs up without leaving a
+  message. `status` is `no_answer` and `end_reason` is `voicemail_reached`
+  or `machine_unavailable`.
   See [answering machine detection](architecture.md#answering-machine-detection-and-dtmf).
 - **Your own model keeps failing.** After three failed turns in a row on a
   per-call `llm`, Hail says goodbye and ends the call with
@@ -118,7 +124,7 @@ All event names and payloads: [Webhooks](webhooks.md#event-types).
 ## Phone menus, handover and voicemail
 
 - **Phone menus.** The agent presses keypad keys with `send_dtmf`, at any
-  point in the call. See [answering machine detection and DTMF](architecture.md#answering-machine-detection-and-dtmf).
+  point in the call, when the call's `tools` allow it. See [answering machine detection and DTMF](architecture.md#answering-machine-detection-and-dtmf).
 - **Handover.** With `handover_contacts` set, the agent passes a live call to
-  a person with `transfer_call`. See [Hand over to a person](agents.md#hand-over-to-a-person).
+  a person with `transfer_call`, when the call's `tools` allow it. See [Hand over to a person](agents.md#hand-over-to-a-person).
 - **Voicemail.** Outbound calls detect voicemail and hang up without a message.

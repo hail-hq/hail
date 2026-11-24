@@ -10,7 +10,8 @@ hail call +14155550100 --language es \
 ```
 
 The same field works on `POST /v1/calls`, on agents, and in the MCP
-`place_call` tool. Omitted, the call is in English. Hail picks the
+`place_call` tool. Omitted on a call, the agent's language applies, or
+English if the call has no agent. Hail picks the
 speech-to-text provider and turn detection for each language. The agent's
 built-in spoken lines, such as the AI line, are said in the call's language.
 
