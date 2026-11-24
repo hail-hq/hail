@@ -45,6 +45,16 @@ Use synthetic conversations; do not commit customer transcripts or recordings.
 String tests check prompt composition and required guidance, not model compliance.
 Live behavior needs a separately authorized test call or a synthetic model evaluation.
 
+## Opening line
+
+When a call says the AI notice and then a first line, the first line is
+reworded so the caller hears one greeting. The notice stays fixed and first.
+The rewrite (`OPENING_FIT_INSTRUCTIONS` in `core/hailhq/core/prompts.py`)
+runs on the call's own model while the phone rings, so it adds no delay at
+pickup. Names, numbers and codes stay as written. A late, empty or failed
+rewrite falls back to the line as written. An inbound greeting with the
+default AI line already holds the notice inside it, so it skips the rewrite.
+
 ## Closing calls
 
 Outbound conversational calls (tests, feedback, and welcome calls) finish the

@@ -4,6 +4,10 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+### Changed
+
+- Calls open with one greeting: the first line is reworded so it does not repeat the AI notice's greeting.
+
 ## [0.38.0] (2026-11-24)
 
 Calls can always hang up: every call keeps `end_call` and `send_dtmf`, whatever

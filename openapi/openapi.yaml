@@ -6671,8 +6671,9 @@ components:
             - type: "null"
           title: First Message
           description:
-            "Opening line spoken after the AI line. Omitted: the agent
-            waits for the other side to speak first."
+            "Opening line spoken after the AI line. It is reworded so it
+            does not repeat the AI line's greeting; names, numbers and codes stay
+            as written. Omitted: the agent waits for the other side to speak first."
         recording_enabled:
           anyOf:
             - type: boolean
@@ -7167,8 +7168,10 @@ components:
             - type: "null"
           title: First Message
           description:
-            "Opening line the agent speaks first. Omitted: the agent waits
-            for the callee to speak first."
+            "Opening line the agent speaks first. After the AI notice,
+            it is reworded so it does not repeat the notice's greeting; names, numbers
+            and codes stay as written. Omitted: the agent waits for the callee to
+            speak first."
         recording_enabled:
           anyOf:
             - type: boolean

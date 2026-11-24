@@ -262,8 +262,10 @@ class CallCreate(ConsentAttestationMixin):
     first_message: str | None = Field(
         default=None,
         description=(
-            "Opening line the agent speaks first. Omitted: the agent waits "
-            "for the callee to speak first."
+            "Opening line the agent speaks first. After the AI notice, it is "
+            "reworded so it does not repeat the notice's greeting; names, "
+            "numbers and codes stay as written. Omitted: the agent waits for "
+            "the callee to speak first."
         ),
     )
     recording_enabled: bool | None = Field(
@@ -1355,7 +1357,12 @@ class AgentCreate(BaseModel):
     first_message: str | None = Field(
         default=None,
         max_length=1000,
-        description="Opening line spoken after the AI line. Omitted: the agent waits for the other side to speak first.",
+        description=(
+            "Opening line spoken after the AI line. It is reworded so it does "
+            "not repeat the AI line's greeting; names, numbers and codes stay "
+            "as written. Omitted: the agent waits for the other side to speak "
+            "first."
+        ),
     )
     recording_enabled: bool | None = Field(
         default=None,

@@ -43,6 +43,7 @@ from hailhq.voicebot.agent import (
     build_tools_safely,
     disconnect_reason_to_status,
     entrypoint,
+    fitted_first_line,
     handle_sip_disconnect,
     is_sip_answer_signal,
     make_agent_bridge,
@@ -56,6 +57,7 @@ from hailhq.voicebot.agent import (
     soft_cap_announce_and_hangup,
     speak_greeting,
     speech_text,
+    start_first_line_fit,
 )
 from hailhq.voicebot.amd import IVR_TOOL_LINES, ivr_navigation_instructions
 from hailhq.voicebot.spoken_lines import SPOKEN_LINES
@@ -1079,6 +1081,98 @@ async def test_speak_greeting_speaks_disclosure_before_first_message() -> None:
     assert session.say_calls == [
         (f"{AI_DISCLOSURE_LINE} Hi, calling about your order.", True)
     ]
+
+
+async def test_speak_greeting_says_the_fitted_line_after_the_disclosure() -> None:
+    """The fitted first line follows the disclosure, which stays first and
+    unchanged."""
+    session = FakeAnnouncingSession()
+    fitted = asyncio.get_running_loop().create_future()
+    fitted.set_result("Calling about your order.")
+
+    await speak_greeting(
+        session,
+        {"first_message": "Hi, calling about your order."},
+        first_line=fitted,
+    )
+
+    assert session.say_calls == [
+        (f"{AI_DISCLOSURE_LINE} Calling about your order.", True)
+    ]
+
+
+async def test_speak_greeting_says_the_line_as_written_when_the_fit_is_late(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from hailhq.voicebot import agent as agent_mod
+
+    monkeypatch.setattr(agent_mod, "FIRST_LINE_WAIT_SECONDS", 0.01)
+    session = FakeAnnouncingSession()
+    late = asyncio.get_running_loop().create_future()
+
+    await speak_greeting(
+        session, {"first_message": "Hi, calling about your order."}, first_line=late
+    )
+
+    assert session.say_calls == [
+        (f"{AI_DISCLOSURE_LINE} Hi, calling about your order.", True)
+    ]
+    late.cancel()
+
+
+@pytest.mark.parametrize(
+    ("reply", "expected"),
+    [
+        ("Calling about your order.", "Calling about your order."),
+        ('"Calling about your order."', "Calling about your order."),
+        ("", "Hi, calling about your order."),
+        ("x" * 500, "Hi, calling about your order."),
+    ],
+)
+async def test_fitted_first_line_falls_back_to_the_line_as_written(reply, expected):
+    """An empty or runaway answer keeps the customer's line as written."""
+    line = await fitted_first_line(
+        FakeLLM(reply=reply),
+        AI_DISCLOSURE_LINE,
+        "Hi, calling about your order.",
+        UUID("11111111-2222-3333-4444-555555555555"),
+    )
+    assert line == expected
+
+
+async def test_fitted_first_line_keeps_the_line_when_the_model_fails() -> None:
+    class Broken(FakeLLM):
+        def chat(self, **_kwargs):
+            raise RuntimeError("model down")
+
+    line = await fitted_first_line(
+        Broken(),
+        AI_DISCLOSURE_LINE,
+        "Hi there.",
+        UUID("11111111-2222-3333-4444-555555555555"),
+    )
+    assert line == "Hi there."
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {},  # no first line
+        {"first_message": "Hi.", "ai_disclosure": False},  # no AI notice
+        # The inbound greeting already holds the AI line.
+        {"first_message": "Hi.", "direction": "inbound"},
+    ],
+)
+async def test_first_line_fit_runs_only_when_the_notice_precedes_the_line(metadata):
+    def no_model():
+        raise AssertionError("model built")
+
+    assert (
+        start_first_line_fit(
+            metadata, no_model, UUID("11111111-2222-3333-4444-555555555555")
+        )
+        is None
+    )
 
 
 async def test_speak_greeting_skips_disclosure_when_opted_out() -> None:

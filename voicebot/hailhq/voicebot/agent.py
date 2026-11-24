@@ -61,6 +61,7 @@ from hailhq.core.livekit import VOICE_READY_ATTRIBUTE
 from hailhq.core.models import Call, CallEvent, UsageEvent
 from hailhq.core.pool import CALL_META_FROM_POOL, release_pool_reservation
 from hailhq.core.prompts import (
+    OPENING_FIT_INSTRUCTIONS,
     VOICE_PREAMBLE,
     VOICE_PREAMBLE_INBOUND,
     build_voice_instructions,
@@ -97,11 +98,13 @@ from hailhq.voicebot.amd import (
 )
 from hailhq.voicebot.audio import prewarm_audio, room_options
 from hailhq.voicebot.browser import run_browser_session
+from hailhq.voicebot.chat_loop import run_chat
 from hailhq.voicebot.handover_watch import contact_speaks
 from hailhq.voicebot.ivr import PhoneMenu
 from hailhq.voicebot.leg_tracker import LegTracker
 from hailhq.voicebot.pipeline import (
     ProviderKeyError,
+    build_llm,
     build_session,
     decrypt_llm_metadata,
     resolve_org_configs,
@@ -114,7 +117,7 @@ from hailhq.voicebot.telemetry import connect_livekit_tracing
 from hailhq.voicebot.tools import SpeechTracker, build_agent_tools, every_call_tools
 from livekit import rtc
 from livekit.agents import Agent, JobContext, JobProcess, StopResponse
-from livekit.agents.llm import LLM, LLMError
+from livekit.agents.llm import LLM, FunctionToolCall, LLMError
 from livekit.agents.voice import AgentSession, ConversationItemAddedEvent
 from livekit.agents.voice.amd import AMDCategory
 from livekit.api import (
@@ -1037,6 +1040,99 @@ def greeting_with_ai_line(first_message: str, ai_line: str) -> str:
     return f"{head} {ai_line} {tail}"
 
 
+# Budget for fitting the first line. It runs while the phone rings, so it
+# rarely delays the greeting; the greeting waits at most FIRST_LINE_WAIT more.
+FIRST_LINE_FIT_SECONDS = 10.0
+FIRST_LINE_WAIT_SECONDS = 1.0
+
+
+async def _no_tools(call: FunctionToolCall) -> tuple[str, bool]:
+    # run_chat gets no tools, so the model cannot call one.
+    return "", False
+
+
+async def fitted_first_line(
+    llm: LLM, disclosure: str, first_message: str, call_id: UUID
+) -> str:
+    """``first_message`` reworded to follow the AI ``disclosure`` without
+    repeating its greeting (see :data:`OPENING_FIT_INSTRUCTIONS`). The
+    unchanged line on any failure, an empty answer or a much longer one."""
+    messages = [
+        {"role": "system", "content": OPENING_FIT_INSTRUCTIONS},
+        {
+            "role": "user",
+            "content": f"AI notice: {disclosure}\nFirst line: {first_message}",
+        },
+    ]
+    try:
+        text = await asyncio.wait_for(
+            run_chat(
+                llm,
+                messages,
+                [],
+                _no_tools,
+                max_rounds=1,
+                log_label=f"call_id={call_id}",
+            ),
+            timeout=FIRST_LINE_FIT_SECONDS,
+        )
+    except Exception as exc:
+        logger.warning(
+            "call_id=%s first line not fitted, saying it as written: %s",
+            call_id,
+            type(exc).__name__,
+        )
+        return first_message
+    text = text.strip().strip('"')
+    if not text or len(text) > 2 * len(first_message) + 40:
+        return first_message
+    return text
+
+
+def start_first_line_fit(
+    metadata: dict[str, Any],
+    llm: Callable[[], LLM],
+    call_id: UUID,
+    language: str | None = None,
+) -> asyncio.Task[str] | None:
+    """Start fitting the first message to the disclosure before it plays, or
+    None when the greeting does not join them (no first message, no
+    disclosure, or an inbound greeting that already holds the AI line)."""
+    first_message = metadata.get("first_message")
+    if not first_message or not metadata.get("ai_disclosure", True):
+        return None
+    inbound = metadata.get("direction") == "inbound"
+    if inbound and not (metadata.get("ai_disclosure_line") or "").strip():
+        return None
+    disclosure = disclosure_line(
+        metadata.get("org_name"),
+        metadata.get("direction"),
+        metadata.get("ai_disclosure_line"),
+        language,
+    )
+    try:
+        model = llm()
+    except Exception:
+        logger.warning("call_id=%s no model to fit the first line", call_id)
+        return None
+    return asyncio.create_task(
+        fitted_first_line(model, disclosure, first_message, call_id)
+    )
+
+
+async def _ready_first_line(first_line: asyncio.Task[str] | None, fallback: str) -> str:
+    """The fitted line when it is ready within FIRST_LINE_WAIT_SECONDS, else
+    the line as written. Never raises."""
+    if first_line is None:
+        return fallback
+    try:
+        return await asyncio.wait_for(
+            asyncio.shield(first_line), timeout=FIRST_LINE_WAIT_SECONDS
+        )
+    except Exception:
+        return fallback
+
+
 async def speak_greeting(
     session: AgentSession,
     metadata: dict[str, Any],
@@ -1045,8 +1141,12 @@ async def speak_greeting(
     generate_opening: bool = True,
     on_opened: Callable[[], str | None] | None = None,
     language: str | None = None,
+    first_line: asyncio.Task[str] | None = None,
 ) -> None:
     """Open the call: disclosure (unless opted out), then the first message.
+    ``first_line`` is the first message fitted to follow the disclosure (see
+    :func:`fitted_first_line`); without it, or when it is late, the first
+    message is said as written.
 
     The disclosure leads by default and can only be skipped, never
     customized or reordered: its template is not reachable via
@@ -1133,7 +1233,8 @@ async def speak_greeting(
                 # speaks over the greeting must still hear it.
                 interruptible = False
             else:
-                greeting = f"{disclosure} {first_message}"
+                line = await _ready_first_line(first_line, first_message)
+                greeting = f"{disclosure} {line}"
             await session.say(greeting, allow_interruptions=interruptible)
             return
         if disclosure:
@@ -1168,6 +1269,7 @@ def arm_deferred_greeting(
     on_machine: Callable[[AMDCategory], Awaitable[None]],
     classifier: LLM | None,
     language: str | None = None,
+    first_line: asyncio.Task[str] | None = None,
 ) -> None:
     """Release the greeting once completed speech is not a recorded menu.
 
@@ -1199,6 +1301,7 @@ def arm_deferred_greeting(
                 generate_opening=not text,
                 on_opened=agent.release_opening,
                 language=language,
+                first_line=first_line,
             )
         except Exception:
             # The session can close while the greeting plays.
@@ -2551,6 +2654,13 @@ async def _run_call(
         speech.on_state(getattr(ev, "new_state", None), time.monotonic())
 
     other_party_task = asyncio.create_task(other_party(call_id))
+    # Runs while the phone rings: the greeting reads it at pickup.
+    first_line = start_first_line_fit(
+        metadata,
+        lambda: build_llm(llm_cfg, org_cfgs.get("llm")),
+        call_id,
+        language,
+    )
     agent_tools, agent_api = await build_tools_safely(
         metadata,
         call_id,
@@ -2891,6 +3001,7 @@ async def _run_call(
             # AMD's classifier, built once per call (see build_amd_models).
             classifier=models.llm,
             language=language,
+            first_line=first_line,
         )
         session.generate_reply(
             instructions=ivr_navigation_instructions(amd_result.transcript, tool_names)
@@ -2908,6 +3019,7 @@ async def _run_call(
                 pickup_transcript=amd_result.transcript if amd_result else None,
                 on_opened=agent.release_opening,
                 language=language,
+                first_line=first_line,
             )
             recovery.start()
         except Exception:
