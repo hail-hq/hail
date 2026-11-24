@@ -77,18 +77,24 @@ class LiveKitClient:
         api_key: str | None = None,
         api_secret: str | None = None,
     ) -> None:
-        self._lkapi = api.LiveKitAPI(
+        self._args = (
             url or settings.livekit_url,
             api_key or settings.livekit_api_key,
             api_secret or settings.livekit_api_secret,
         )
+        self._lkapi = api.LiveKitAPI(*self._args)
+        # Made on first use: a client that never replays a request to
+        # another LiveKit region (see ``create_sip_participant``).
+        self._lkapi_once: api.LiveKitAPI | None = None
 
     async def aclose(self) -> None:
-        """Close the underlying aiohttp session.
+        """Close the underlying aiohttp sessions.
 
         Safe to call multiple times; ``LiveKitAPI.aclose`` is idempotent.
         """
         await self._lkapi.aclose()
+        if self._lkapi_once is not None:
+            await self._lkapi_once.aclose()
 
     async def list_egress(self, egress_id: str) -> list[api.EgressInfo]:
         """Current state of one Egress, or ``[]`` when LiveKit no longer has it."""
@@ -161,6 +167,7 @@ class LiveKitClient:
         headers: dict[str, str] | None = None,
         wait_until_answered: bool = False,
         ringing_timeout_seconds: int | None = None,
+        failover: bool = True,
     ) -> api.SIPParticipantInfo:
         """Place an outbound SIP call into ``room_name`` via LiveKit.
 
@@ -172,6 +179,10 @@ class LiveKitClient:
 
         LiveKit's SIP service issues the INVITE through the trunk pointed to
         by ``sip_trunk_id`` (which in v1 is a Twilio Elastic SIP Trunk).
+
+        ``failover=False`` sends the request once, never to another region:
+        an error then belongs to that one attempt (the SDK otherwise replays
+        a request after a timeout or a 5xx and raises only the last error).
         """
         request = api.CreateSIPParticipantRequest(
             sip_trunk_id=sip_trunk_id,
@@ -185,7 +196,12 @@ class LiveKitClient:
         )
         if ringing_timeout_seconds is not None:
             request.ringing_timeout.seconds = ringing_timeout_seconds
-        return await self._lkapi.sip.create_sip_participant(request)
+        lkapi = self._lkapi
+        if not failover:
+            if self._lkapi_once is None:
+                self._lkapi_once = api.LiveKitAPI(*self._args, failover=False)
+            lkapi = self._lkapi_once
+        return await lkapi.sip.create_sip_participant(request)
 
     async def wait_for_agent_ready(
         self,

@@ -141,6 +141,30 @@ async def test_dispatch_agent_serializes_metadata_and_returns_id(
     assert json.loads(req.metadata)["org_name"] is None
 
 
+async def test_create_sip_participant_without_failover_tries_once(
+    client: LiveKitClient,
+) -> None:
+    """``failover=False`` dials through a client that never replays the
+    request to another region, so an error means this one attempt failed."""
+    once = MagicMock()  # api.LiveKitAPI is patched by the fixture
+    once.sip.create_sip_participant = AsyncMock()
+    once.aclose = AsyncMock()
+    with patch("hailhq.core.livekit.api.LiveKitAPI", return_value=once) as made:
+        await client.create_sip_participant(
+            room_name=f"hail-{CALL_ID}",
+            to_e164="+14155559999",
+            from_e164="+14155551234",
+            sip_trunk_id="ST_trunk1",
+            participant_identity="pbx-check-1",
+            failover=False,
+        )
+    assert made.call_args.kwargs["failover"] is False
+    once.sip.create_sip_participant.assert_awaited_once()
+    client._lkapi.sip.create_sip_participant.assert_not_awaited()
+    await client.aclose()
+    once.aclose.assert_awaited_once()
+
+
 async def test_create_sip_participant_maps_to_e164_and_from_e164(
     client: LiveKitClient,
 ) -> None:

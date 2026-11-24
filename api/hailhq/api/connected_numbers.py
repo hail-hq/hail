@@ -696,6 +696,37 @@ _CHECK_SETUP_FAILURES = (
 )
 
 
+def _sent_no_invite(exc: BaseException) -> bool:
+    """True when ``exc`` proves no INVITE was sent: it and every exception in
+    its chain (``__cause__`` and ``__context__``) is a connect failure to
+    LiveKit or a pre-dial refusal. Anything else in the chain (a timeout, a
+    5xx or another LiveKit answer) means an attempt may have rung."""
+    seen: set[int] = set()
+    # (link, inside a connect failure): aiohttp raises a connect failure from
+    # the socket error that caused it (refused, unreachable, DNS).
+    todo: list[tuple[BaseException, bool]] = [(exc, False)]
+    while todo:
+        link, in_connect = todo.pop()
+        if id(link) in seen:
+            continue
+        seen.add(id(link))
+        connect = isinstance(link, aiohttp.ClientConnectorError)
+        refused = isinstance(link, ServerError) and link.code in _PRE_DIAL_CODES
+        socket_error = (
+            in_connect
+            and isinstance(link, OSError)
+            and not isinstance(link, TimeoutError)
+        )
+        if not (connect or refused or socket_error):
+            return False
+        todo.extend(
+            (x, connect or socket_error)
+            for x in (link.__cause__, link.__context__)
+            if x is not None
+        )
+    return True
+
+
 def _check_identity(call_id: UUID) -> str:
     return f"pbx-check-{call_id}"
 
@@ -841,6 +872,9 @@ async def check_connected_number(
                 participant_identity=_check_identity(call_id),
                 wait_until_answered=True,
                 ringing_timeout_seconds=CHECK_RING_SECONDS,
+                # One attempt only: a replay to another region after a
+                # timeout could ring the number twice and hide that it rang.
+                failover=False,
                 **({"headers": headers} if headers else {}),
             )
         except SipCallError as exc:
@@ -850,9 +884,7 @@ async def check_connected_number(
                 exc.sip_status_code,
             )
         except Exception as exc:
-            if isinstance(exc, aiohttp.ClientConnectorError) or (
-                isinstance(exc, ServerError) and exc.code in _PRE_DIAL_CODES
-            ):
+            if _sent_no_invite(exc):
                 # LiveKit refused the request, or Hail never reached LiveKit:
                 # no INVITE was sent, so a setup failure.
                 raise

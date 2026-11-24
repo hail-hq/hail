@@ -1418,8 +1418,13 @@ async def test_checks_today_skips_only_hail_setup_failures(
 
 
 def _connect_failed() -> aiohttp.ClientConnectorError:
+    """As aiohttp raises it: from the socket error that caused it."""
     key = SimpleNamespace(host="livekit.example.com", port=443, ssl=True)
-    return aiohttp.ClientConnectorError(key, OSError(61, "Connection refused"))
+    refused = ConnectionRefusedError(61, "Connection refused")
+    try:
+        raise aiohttp.ClientConnectorError(key, refused) from refused
+    except aiohttp.ClientConnectorError as exc:
+        return exc
 
 
 _PRE_DIAL = ("invalid_argument", "unauthenticated", "permission_denied")
@@ -1450,15 +1455,42 @@ async def test_check_dial_refused_before_the_invite_is_a_setup_failure(
     )
 
 
+def _connect_failed_after_a_timeout() -> aiohttp.ClientConnectorError:
+    """A connect failure raised while an earlier attempt's timeout was being
+    handled: that attempt may have reached LiveKit and rung the number."""
+    try:
+        try:
+            raise TimeoutError()
+        except TimeoutError:
+            raise _connect_failed()
+    except aiohttp.ClientConnectorError as exc:
+        return exc
+
+
+async def test_check_dials_once_without_failover(
+    async_session, check_lk, pbx_number, pool_number
+):
+    check_lk.create_sip_participant.side_effect = inbound_says("arrived")
+    await check_connected_number(async_session, check_lk, pbx_number)
+    assert check_lk.create_sip_participant.await_args.kwargs["failover"] is False
+
+
 @pytest.mark.parametrize(
     "error",
     [
+        _connect_failed_after_a_timeout(),
         TimeoutError(),
         ConnectionResetError("reset mid-request"),
         ServerError("deadline_exceeded", "slow", status=504),
         ServerError("internal", "boom", status=500),
     ],
-    ids=["timeout", "connection_reset", "deadline", "internal"],
+    ids=[
+        "connect_after_timeout",
+        "timeout",
+        "connection_reset",
+        "deadline",
+        "internal",
+    ],
 )
 async def test_check_dial_outcome_unknown_still_counts(
     async_session, check_lk, pbx_number, pool_number, error
