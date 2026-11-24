@@ -308,7 +308,7 @@ Connect your phone system
 
 ## Plan 2 must
 
-- Before any public route adds connected numbers, stop number squatting: cap unverified rows per org, and refuse numbers in Hail's carrier catalog (or let a verified owner or a purchase take precedence).
+- Before any public route adds connected numbers, stop number squatting (owner decision, 2026-11-24): unchecked claims give way. When a Hail purchase or another workspace's connection wants a number held only by an unverified claim, Hail takes the number off that claim's trunk, releases the claim, then goes ahead. LiveKit lists a number on one inbound trunk only, so two claims never exist side by side. The cap of 10 unverified numbers per workspace stays.
 
 ## Left to the builder
 
