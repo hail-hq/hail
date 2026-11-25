@@ -298,6 +298,7 @@ async def _audio(
                 cache.move_to_end(cache_key)
                 return cached[1]
             if has_backup and _line_failures.get(cache_key, 0) > time.monotonic():
+                _line_failures.move_to_end(cache_key)
                 raise ProviderKeyError("Speech synthesis recently failed.")
             try:
                 audio = (
