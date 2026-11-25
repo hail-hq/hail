@@ -309,13 +309,22 @@ async def test_validate_uses_the_stored_key(
         "hailhq.api.routes.internal.provider_config.validate_provider_key",
         fake_validate,
     )
-    await _save(client, auth, "stt", "deepgram", api_key="sk-good")
+    await _save(
+        client,
+        auth,
+        "tts",
+        "gemini",
+        api_key="sk-good",
+        params={"project": "saved-project", "location": "us"},
+    )
 
-    resp = await client.post("/providers/stt/validate", json={}, headers=auth)
+    resp = await client.post("/providers/tts/validate", json={}, headers=auth)
     assert resp.status_code == 200, resp.text
     assert resp.json() == {"status": "valid", "message": "checked"}
-    assert seen["provider"] == "deepgram"
+    assert seen["provider"] == "gemini"
     assert seen["api_key"] == "sk-good"
+    assert seen["params"]["project"] == "saved-project"
+    assert seen["params"]["location"] == "us"
 
 
 async def test_validate_accepts_an_unsaved_key(

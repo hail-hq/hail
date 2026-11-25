@@ -358,6 +358,11 @@ async def voice_catalogue(language: str, *, include_direct: bool = False) -> dic
     return {
         "voices": voices,
         "supported_providers": sorted(SUPPORTED_LANGUAGES[language].tts),
+        **(
+            {"available_direct_providers": [v["provider"] for v in direct]}
+            if include_direct
+            else {}
+        ),
         "languages": language_options(),
         "partial": partial,
         "default_voice": (

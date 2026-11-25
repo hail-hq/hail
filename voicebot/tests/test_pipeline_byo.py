@@ -355,6 +355,18 @@ def test_workspace_gemini_can_fall_back_to_house_credentials(monkeypatch):
     assert (house.speech.project, house.speech.api_key) == ("hail-speech", None)
 
 
+def test_workspace_gemini_tries_a_different_vendor_before_house_gemini(
+    monkeypatch, captured_plugins
+):
+    monkeypatch.setattr(settings, "hail_gemini_tts_enabled", True)
+    monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
+    org = ResolvedLayer("gemini", "customer-key", {"project": "customer-project"}, True)
+    customer, cartesia, house = build_tts(org, language="en")._tts_instances
+    assert customer.speech.project == "customer-project"
+    assert cartesia.label == "cartesia"
+    assert house.speech.project == "hail-speech"
+
+
 def test_disabling_inherited_gemini_default_keeps_an_explicit_selection(
     monkeypatch, captured_plugins
 ):

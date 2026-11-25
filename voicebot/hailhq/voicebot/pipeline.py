@@ -726,6 +726,9 @@ def build_tts(
                 language,
                 include_gemini=not uses_house_charon,
             )
+            if org.provider == "gemini" and house and isinstance(house[0], DirectTTS):
+                # A second Gemini configuration may share the failing endpoint.
+                house.append(house.pop(0))
             if house:
                 return agents_tts.FallbackAdapter([byo, *house])
         return byo
