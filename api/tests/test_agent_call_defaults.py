@@ -26,7 +26,7 @@ from hailhq.core.schemas import CallCreate
 def test_saved_agent_voice_settings_keep_outbound_calls_compatible(
     voice_config: dict, voice_id: str | None
 ) -> None:
-    agent = Agent(system_prompt="Help the caller.", voice_config=voice_config)
+    agent = Agent(system_prompt="Help the caller.", voice_config=voice_config.copy())
     request = CallCreate(to="+14155550123", agent_id=uuid4(), recipient_consent=True)
 
     body = apply_agent_defaults(request, agent)
