@@ -635,7 +635,7 @@ async def resolve_fallback_voice_provider(
         try:
             async with asyncio.timeout(0.8):
                 await validate_voice_language(provider, voice_id, model, key, language)
-        except (TimeoutError, httpx.HTTPError, ValueError):
+        except (TimeoutError, httpx.HTTPError, ValueError, AttributeError, TypeError):
             return None
         return provider
 

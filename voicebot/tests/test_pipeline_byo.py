@@ -390,4 +390,8 @@ async def test_language_fallback_verifies_the_override_without_synthesizing(
         org, voice_id_override="Kore", language="fr", fallback_voice_provider=chosen
     )
     assert captured_plugins["cartesia"][-1].kwargs["voice"] == "house-voice"
-    assert checks.await_count == 2
+    checks.side_effect = AttributeError("bad voice metadata")
+    assert (
+        await pipeline.resolve_fallback_voice_provider(org, "bad-voice", "fr") is None
+    )
+    assert checks.await_count == 3
