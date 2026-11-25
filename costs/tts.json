@@ -1157,7 +1157,7 @@
       "verification_method": "manual-confirmed",
       "verified_by": "r13i",
       "source_url": "https://speechify.ai/pricing",
-      "notes": "Starter costs $10/month and includes about 1.3 million Simba 3.5 characters. The published $15 per million rate applies to Starter top-ups. The Pro ($99/month) and Scale ($499/month) top-up rates are $12 and $10 per million. Free pauses after its included allowance. The API changelog confirms the model ID and rates (https://docs.speechify.ai/build/changelog/2026/11/9)."
+      "notes": "Starter costs $10/month. Its monthly credit is shared by all models and covers about 1.3 million characters when spent entirely on Simba 3.5. New subscriptions use this plan from November 12, 2026. Existing subscriptions move to it at their first renewal on or after November 22, 2026. The published $15 per million rate applies to Starter top-ups. The Pro ($99/month) and Scale ($499/month) top-up rates are $12 and $10 per million. Free pauses after its included allowance. The API changelog confirms the model ID and rates (https://docs.speechify.ai/build/changelog/2026/11/9)."
     }
   ]
 }
