@@ -343,3 +343,22 @@ def test_every_service_code_has_customer_copy() -> None:
         .split(",")
     )
     assert codes <= set(_ERRORS)
+
+
+async def test_unreadable_password_does_not_break_the_list(
+    client: httpx.AsyncClient, org_and_key: tuple, async_session: AsyncSession
+) -> None:
+    from hailhq.core.models import SipConnection
+    from sqlalchemy import update
+
+    _org, _key, plain = org_and_key
+    conn = await _create(client, plain)
+    await async_session.execute(
+        update(SipConnection)
+        .where(SipConnection.id == conn["id"])
+        .values(encrypted_inbound_password="not-a-fernet-token")
+    )
+    await async_session.commit()
+    resp = await client.get("/sip-connections", headers=_auth(plain))
+    assert resp.status_code == 200
+    assert resp.json()["items"][0]["password_last4"] == ""

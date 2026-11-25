@@ -11543,12 +11543,15 @@ components:
           type: string
           format: uuid
           title: Id
+          description: Unique identifier for this connection.
         label:
           type: string
           title: Label
+          description: Name of the connection.
         default_region:
           type: string
           title: Default Region
+          description: ISO alpha-2 country of the phone system.
         sip_host:
           type: string
           title: Sip Host
@@ -11568,24 +11571,32 @@ components:
             - type: string
             - type: "null"
           title: Pbx Host
+          description:
+            "Where Hail dials your phone system. Null: Hail only answers
+            calls."
         pbx_port:
           type: integer
           title: Pbx Port
+          description: SIP port of your phone system.
         pbx_transport:
           type: string
           title: Pbx Transport
+          description: "'auto', 'udp', 'tcp' or 'tls'."
         pbx_username:
           anyOf:
             - type: string
             - type: "null"
           title: Pbx Username
+          description: "Username Hail sends to your phone system. Null: none."
         pbx_password_set:
           type: boolean
           title: Pbx Password Set
+          description: True when Hail has a password to send to your phone system.
         created_at:
           type: string
           format: date-time
           title: Created At
+          description: When the connection was created.
         password:
           type: string
           title: Password
@@ -11613,6 +11624,7 @@ components:
             $ref: "#/components/schemas/SipConnectionResponse"
           type: array
           title: Items
+          description: Connections in this page, newest first.
         next_cursor:
           anyOf:
             - type: string
@@ -11642,6 +11654,7 @@ components:
               minLength: 1
             - type: "null"
           title: Label
+          description: New name.
         pbx_host:
           anyOf:
             - type: string
@@ -11658,6 +11671,7 @@ components:
               minimum: 1.0
             - type: "null"
           title: Pbx Port
+          description: New SIP port.
         pbx_transport:
           anyOf:
             - type: string
@@ -11668,16 +11682,19 @@ components:
                 - tls
             - type: "null"
           title: Pbx Transport
+          description: New SIP transport.
         pbx_username:
           anyOf:
             - type: string
             - type: "null"
           title: Pbx Username
+          description: New username Hail sends. Null removes it and the password.
         pbx_password:
           anyOf:
             - type: string
             - type: "null"
           title: Pbx Password
+          description: New password Hail sends. Stored encrypted.
       additionalProperties: false
       type: object
       title: SipConnectionPatch
@@ -11688,12 +11705,15 @@ components:
           type: string
           format: uuid
           title: Id
+          description: Unique identifier for this connection.
         label:
           type: string
           title: Label
+          description: Name of the connection.
         default_region:
           type: string
           title: Default Region
+          description: ISO alpha-2 country of the phone system.
         sip_host:
           type: string
           title: Sip Host
@@ -11713,24 +11733,32 @@ components:
             - type: string
             - type: "null"
           title: Pbx Host
+          description:
+            "Where Hail dials your phone system. Null: Hail only answers
+            calls."
         pbx_port:
           type: integer
           title: Pbx Port
+          description: SIP port of your phone system.
         pbx_transport:
           type: string
           title: Pbx Transport
+          description: "'auto', 'udp', 'tcp' or 'tls'."
         pbx_username:
           anyOf:
             - type: string
             - type: "null"
           title: Pbx Username
+          description: "Username Hail sends to your phone system. Null: none."
         pbx_password_set:
           type: boolean
           title: Pbx Password Set
+          description: True when Hail has a password to send to your phone system.
         created_at:
           type: string
           format: date-time
           title: Created At
+          description: When the connection was created.
       type: object
       required:
         - id

@@ -1020,7 +1020,9 @@ class SipConnectionPatch(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    label: str | None = Field(default=None, min_length=1, max_length=80)
+    label: str | None = Field(
+        default=None, min_length=1, max_length=80, description="New name."
+    )
     pbx_host: str | None = Field(
         default=None,
         description=(
@@ -1029,10 +1031,19 @@ class SipConnectionPatch(BaseModel):
             "pbx_username is set."
         ),
     )
-    pbx_port: int | None = Field(default=None, ge=1, le=65535)
-    pbx_transport: PbxTransport | None = None
-    pbx_username: str | None = None
-    pbx_password: str | None = None
+    pbx_port: int | None = Field(
+        default=None, ge=1, le=65535, description="New SIP port."
+    )
+    pbx_transport: PbxTransport | None = Field(
+        default=None, description="New SIP transport."
+    )
+    pbx_username: str | None = Field(
+        default=None,
+        description="New username Hail sends. Null removes it and the password.",
+    )
+    pbx_password: str | None = Field(
+        default=None, description="New password Hail sends. Stored encrypted."
+    )
 
     @model_validator(mode="after")
     def _not_null(self) -> "SipConnectionPatch":
@@ -1043,9 +1054,9 @@ class SipConnectionPatch(BaseModel):
 
 
 class SipConnectionResponse(BaseModel):
-    id: UUID
-    label: str
-    default_region: str
+    id: UUID = Field(description="Unique identifier for this connection.")
+    label: str = Field(description="Name of the connection.")
+    default_region: str = Field(description="ISO alpha-2 country of the phone system.")
     sip_host: str = Field(
         description="SIP server your phone system sends calls to (the trunk's host)."
     )
@@ -1053,12 +1064,18 @@ class SipConnectionResponse(BaseModel):
     password_last4: str = Field(
         description="Last 4 characters of the password. The full password shows once."
     )
-    pbx_host: str | None
-    pbx_port: int
-    pbx_transport: str
-    pbx_username: str | None
-    pbx_password_set: bool
-    created_at: datetime
+    pbx_host: str | None = Field(
+        description="Where Hail dials your phone system. Null: Hail only answers calls."
+    )
+    pbx_port: int = Field(description="SIP port of your phone system.")
+    pbx_transport: str = Field(description="'auto', 'udp', 'tcp' or 'tls'.")
+    pbx_username: str | None = Field(
+        description="Username Hail sends to your phone system. Null: none."
+    )
+    pbx_password_set: bool = Field(
+        description="True when Hail has a password to send to your phone system."
+    )
+    created_at: datetime = Field(description="When the connection was created.")
 
 
 class SipConnectionCreated(SipConnectionResponse):
@@ -1072,7 +1089,9 @@ class SipConnectionPassword(BaseModel):
 
 
 class SipConnectionListResponse(BaseModel):
-    items: list[SipConnectionResponse]
+    items: list[SipConnectionResponse] = Field(
+        description="Connections in this page, newest first."
+    )
     next_cursor: str | None = Field(
         default=None, description="Pass as cursor for the next page. Null at the end."
     )

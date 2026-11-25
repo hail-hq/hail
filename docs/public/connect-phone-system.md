@@ -54,7 +54,7 @@ Hail calls your number over the phone network. The call must come back to
 Hail through your connection and carry a code that Hail sends as key
 presses. A call you send yourself cannot pass.
 
-- Billed as a normal outbound call. 5 checks per number a day.
+- Billed as a normal outbound call.
 - `no_call_arrived`: check the trunk, the routing rule for this number, and the address.
 - `not_authenticated`: the call came without this connection's username and password, or not in `+` format.
 - `code_not_received`: turn on RFC 2833 key presses.

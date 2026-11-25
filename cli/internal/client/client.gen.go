@@ -3838,21 +3838,38 @@ type SipConnectionCreatePbxTransport string
 
 // SipConnectionCreated defines model for SipConnectionCreated.
 type SipConnectionCreated struct {
-	CreatedAt     time.Time          `json:"created_at"`
-	DefaultRegion string             `json:"default_region"`
-	Id            openapi_types.UUID `json:"id"`
-	Label         string             `json:"label"`
+	// CreatedAt When the connection was created.
+	CreatedAt time.Time `json:"created_at"`
+
+	// DefaultRegion ISO alpha-2 country of the phone system.
+	DefaultRegion string `json:"default_region"`
+
+	// Id Unique identifier for this connection.
+	Id openapi_types.UUID `json:"id"`
+
+	// Label Name of the connection.
+	Label string `json:"label"`
 
 	// Password Password your phone system sends to Hail. Shown only here.
 	Password string `json:"password"`
 
 	// PasswordLast4 Last 4 characters of the password. The full password shows once.
-	PasswordLast4  string  `json:"password_last4"`
-	PbxHost        *string `json:"pbx_host"`
-	PbxPasswordSet bool    `json:"pbx_password_set"`
-	PbxPort        int     `json:"pbx_port"`
-	PbxTransport   string  `json:"pbx_transport"`
-	PbxUsername    *string `json:"pbx_username"`
+	PasswordLast4 string `json:"password_last4"`
+
+	// PbxHost Where Hail dials your phone system. Null: Hail only answers calls.
+	PbxHost *string `json:"pbx_host"`
+
+	// PbxPasswordSet True when Hail has a password to send to your phone system.
+	PbxPasswordSet bool `json:"pbx_password_set"`
+
+	// PbxPort SIP port of your phone system.
+	PbxPort int `json:"pbx_port"`
+
+	// PbxTransport 'auto', 'udp', 'tcp' or 'tls'.
+	PbxTransport string `json:"pbx_transport"`
+
+	// PbxUsername Username Hail sends to your phone system. Null: none.
+	PbxUsername *string `json:"pbx_username"`
 
 	// SipHost SIP server your phone system sends calls to (the trunk's host).
 	SipHost string `json:"sip_host"`
@@ -3863,6 +3880,7 @@ type SipConnectionCreated struct {
 
 // SipConnectionListResponse defines model for SipConnectionListResponse.
 type SipConnectionListResponse struct {
+	// Items Connections in this page, newest first.
 	Items []SipConnectionResponse `json:"items"`
 
 	// NextCursor Pass as cursor for the next page. Null at the end.
@@ -3877,33 +3895,59 @@ type SipConnectionPassword struct {
 
 // SipConnectionPatch Fields left out stay as they are; “null“ clears a nullable field.
 type SipConnectionPatch struct {
+	// Label New name.
 	Label *string `json:"label,omitempty"`
 
 	// PbxHost New host. Null removes it: Hail then only answers calls. A new host, port or transport needs pbx_password again when a pbx_username is set.
-	PbxHost      *string                         `json:"pbx_host,omitempty"`
-	PbxPassword  *string                         `json:"pbx_password,omitempty"`
-	PbxPort      *int                            `json:"pbx_port,omitempty"`
+	PbxHost *string `json:"pbx_host,omitempty"`
+
+	// PbxPassword New password Hail sends. Stored encrypted.
+	PbxPassword *string `json:"pbx_password,omitempty"`
+
+	// PbxPort New SIP port.
+	PbxPort *int `json:"pbx_port,omitempty"`
+
+	// PbxTransport New SIP transport.
 	PbxTransport *SipConnectionPatchPbxTransport `json:"pbx_transport,omitempty"`
-	PbxUsername  *string                         `json:"pbx_username,omitempty"`
+
+	// PbxUsername New username Hail sends. Null removes it and the password.
+	PbxUsername *string `json:"pbx_username,omitempty"`
 }
 
-// SipConnectionPatchPbxTransport defines model for SipConnectionPatch.PbxTransport.
+// SipConnectionPatchPbxTransport New SIP transport.
 type SipConnectionPatchPbxTransport string
 
 // SipConnectionResponse defines model for SipConnectionResponse.
 type SipConnectionResponse struct {
-	CreatedAt     time.Time          `json:"created_at"`
-	DefaultRegion string             `json:"default_region"`
-	Id            openapi_types.UUID `json:"id"`
-	Label         string             `json:"label"`
+	// CreatedAt When the connection was created.
+	CreatedAt time.Time `json:"created_at"`
+
+	// DefaultRegion ISO alpha-2 country of the phone system.
+	DefaultRegion string `json:"default_region"`
+
+	// Id Unique identifier for this connection.
+	Id openapi_types.UUID `json:"id"`
+
+	// Label Name of the connection.
+	Label string `json:"label"`
 
 	// PasswordLast4 Last 4 characters of the password. The full password shows once.
-	PasswordLast4  string  `json:"password_last4"`
-	PbxHost        *string `json:"pbx_host"`
-	PbxPasswordSet bool    `json:"pbx_password_set"`
-	PbxPort        int     `json:"pbx_port"`
-	PbxTransport   string  `json:"pbx_transport"`
-	PbxUsername    *string `json:"pbx_username"`
+	PasswordLast4 string `json:"password_last4"`
+
+	// PbxHost Where Hail dials your phone system. Null: Hail only answers calls.
+	PbxHost *string `json:"pbx_host"`
+
+	// PbxPasswordSet True when Hail has a password to send to your phone system.
+	PbxPasswordSet bool `json:"pbx_password_set"`
+
+	// PbxPort SIP port of your phone system.
+	PbxPort int `json:"pbx_port"`
+
+	// PbxTransport 'auto', 'udp', 'tcp' or 'tls'.
+	PbxTransport string `json:"pbx_transport"`
+
+	// PbxUsername Username Hail sends to your phone system. Null: none.
+	PbxUsername *string `json:"pbx_username"`
 
 	// SipHost SIP server your phone system sends calls to (the trunk's host).
 	SipHost string `json:"sip_host"`

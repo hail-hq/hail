@@ -183,3 +183,8 @@ def test_release_claim(capsys, monkeypatch, released, out, code):
     assert main(["release-claim", "--number", "+1 415 555 0100"]) == code
     assert out in capsys.readouterr().out
     assert give_way.await_args.args[2] == "+14155550100"
+
+
+def test_release_claim_bad_number_is_an_argument_error(capsys):
+    assert main(["release-claim", "--number", "4155550100x"]) == 2
+    assert "not a phone number" in capsys.readouterr().err

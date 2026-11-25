@@ -69,11 +69,12 @@ NUMBER_SETUP_HELP_DETAIL = (
 
 
 class RetryableError(HTTPException):
-    """A 503 raised before any charge. The route does not cache it under the
-    idempotency key, so a same-key retry can succeed."""
+    """A refusal raised before any charge (503 unless said otherwise). The
+    route does not cache it under the idempotency key, so a same-key retry
+    can succeed."""
 
-    def __init__(self, detail: str) -> None:
-        super().__init__(status_code=503, detail=detail)
+    def __init__(self, detail: str, status_code: int = 503) -> None:
+        super().__init__(status_code=status_code, detail=detail)
 
 
 def catalog_capabilities(
@@ -531,7 +532,8 @@ async def _free_unchecked_claim(
         await give_way_unchecked_claim(db, lk, e164)
     except ConnectedNumberError as exc:
         if exc.code == "check_in_progress":
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
+            # Temporary: the same idempotency key must work once the check ends.
+            raise RetryableError(str(exc), status_code=409) from exc
         raise RetryableError(
             "The number could not be freed for this purchase; try again shortly"
         ) from exc
@@ -556,7 +558,6 @@ async def acquire_offer(
     to buy with (``pick_approval``). ``lk`` lets an unchecked connected-number
     claim on the quoted number give way first (without it, the claim keeps
     the number and the purchase is a 409)."""
-    await _free_unchecked_claim(db, org, quote_id, lk)
     await org_lock(db, org)
     row = await load_quote(db, org, quote_id)
     offer = CarrierOffer.model_validate(row.offer)
@@ -685,6 +686,10 @@ async def acquire_offer(
     offer.verification_row_id = approval.row_id if approval else None
     offer.verification_id = approval.verification_id if approval else None
     offer.address_id = approval.address_id if approval else None
+    # Every check has passed (quote, price, readiness, funds): only now may
+    # an unchecked connected-number claim give way. No transaction is open
+    # here, and this runs before the buyer's org lock.
+    await _free_unchecked_claim(db, org, quote_id, lk)
     await org_lock(db, org)
     row = await load_quote(db, org, quote_id)
     if row.number_id:

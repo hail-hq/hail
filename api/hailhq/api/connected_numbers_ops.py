@@ -37,6 +37,16 @@ def _region(value: str) -> str:
     return value
 
 
+def _e164(value: str) -> str:
+    try:
+        parsed = phonenumbers.parse(value, None)
+    except phonenumbers.NumberParseException as exc:
+        raise argparse.ArgumentTypeError("not a phone number; use +E.164") from exc
+    if not phonenumbers.is_possible_number(parsed):
+        raise argparse.ArgumentTypeError("not a phone number; use +E.164")
+    return phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
+
+
 def _uuid(value: str) -> UUID:
     try:
         return UUID(value)
@@ -81,7 +91,7 @@ def _parser() -> argparse.ArgumentParser:
         "release-claim",
         help="free a number held by an unchecked claim (before adding it by hand)",
     )
-    release.add_argument("--number", required=True)
+    release.add_argument("--number", required=True, type=_e164)
 
     dispatch = sub.add_parser(
         "dispatch-any", help="make a dispatch rule match any inbound trunk"
@@ -118,10 +128,7 @@ async def _run(args: argparse.Namespace) -> None:
                 print(f"rule id: {rule_id}")
                 print(f"trunks: {', '.join(trunks) or 'none'}")
             elif args.command == "release-claim":
-                e164 = phonenumbers.format_number(
-                    phonenumbers.parse(args.number, None),
-                    phonenumbers.PhoneNumberFormat.E164,
-                )
+                e164 = args.number
                 if not await give_way_unchecked_claim(db, lk, e164):
                     print("not an unchecked claim: nothing released")
                     raise SystemExit(1)

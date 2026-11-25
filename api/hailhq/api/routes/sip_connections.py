@@ -19,6 +19,7 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
+from cryptography.fernet import InvalidToken
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi import status as http_status
 from hailhq.api.audit import actor_of, write_audit_log
@@ -175,6 +176,10 @@ def _response(row: SipConnection) -> SipConnectionResponse:
         last4 = decrypt_secret(row.encrypted_inbound_password)[-4:]
     except SecretKeyMissing as exc:
         raise _not_configured() from exc
+    except (InvalidToken, TypeError, AttributeError):
+        # A rotated key or a damaged value: the connection still lists;
+        # rotate-password makes a new one.
+        last4 = ""
     return SipConnectionResponse(
         id=row.id,
         label=row.label,
