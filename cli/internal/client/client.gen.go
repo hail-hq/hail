@@ -3811,7 +3811,7 @@ type SenderIdResponse struct {
 
 // SipConnectionCreate defines model for SipConnectionCreate.
 type SipConnectionCreate struct {
-	// DefaultRegion Optional; most connections leave it out. Hail reads each caller with the country of the number that was called, then of the connection's other numbers. This country is tried last: set it only when the phone system is in a country none of its numbers are from.
+	// DefaultRegion Optional ISO alpha-2 country of the phone system; most connections leave it out. Set: Hail reads callers with it first. Left out: with the country of the number that was called, then of the connection's other numbers.
 	DefaultRegion *string `json:"default_region,omitempty"`
 
 	// Label A name, such as 'Main office'.
@@ -3841,7 +3841,7 @@ type SipConnectionCreated struct {
 	// CreatedAt When the connection was created.
 	CreatedAt time.Time `json:"created_at"`
 
-	// DefaultRegion Optional country tried last to read callers (see create). Null for most connections.
+	// DefaultRegion Optional country of the phone system, tried first to read callers (see create). Null for most connections.
 	DefaultRegion *string `json:"default_region"`
 
 	// Id Unique identifier for this connection.
@@ -3898,6 +3898,9 @@ type SipConnectionPassword struct {
 
 // SipConnectionPatch Fields left out stay as they are; “null“ clears a nullable field.
 type SipConnectionPatch struct {
+	// DefaultRegion New country of the phone system, tried first to read callers. Null clears it: Hail then uses the country of the number called.
+	DefaultRegion *string `json:"default_region,omitempty"`
+
 	// Label New name.
 	Label *string `json:"label,omitempty"`
 
@@ -3925,7 +3928,7 @@ type SipConnectionResponse struct {
 	// CreatedAt When the connection was created.
 	CreatedAt time.Time `json:"created_at"`
 
-	// DefaultRegion Optional country tried last to read callers (see create). Null for most connections.
+	// DefaultRegion Optional country of the phone system, tried first to read callers (see create). Null for most connections.
 	DefaultRegion *string `json:"default_region"`
 
 	// Id Unique identifier for this connection.

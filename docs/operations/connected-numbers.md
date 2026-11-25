@@ -28,7 +28,7 @@ Run on the API host, from the compose project directory:
 ```bash
 docker compose exec api python -m hailhq.api.connected_numbers_ops create \
   --org <org uuid> --label "Main office" \
-  [--pbx-host <host>] [--pbx-port 5060] [--pbx-transport auto]
+  [--region <phone system country, only when none of its numbers is from it>] [--pbx-host <host>] [--pbx-port 5060] [--pbx-transport auto]
 docker compose exec api python -m hailhq.api.connected_numbers_ops add \
   --connection <connection uuid> --number +14155550100
 docker compose exec api python -m hailhq.api.connected_numbers_ops check \

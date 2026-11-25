@@ -11565,10 +11565,10 @@ components:
             - type: "null"
           title: Default Region
           description:
-            "Optional; most connections leave it out. Hail reads each caller
-            with the country of the number that was called, then of the connection's
-            other numbers. This country is tried last: set it only when the phone
-            system is in a country none of its numbers are from."
+            "Optional ISO alpha-2 country of the phone system; most connections
+            leave it out. Set: Hail reads callers with it first. Left out: with the
+            country of the number that was called, then of the connection's other
+            numbers."
         pbx_host:
           anyOf:
             - type: string
@@ -11628,8 +11628,8 @@ components:
             - type: "null"
           title: Default Region
           description:
-            Optional country tried last to read callers (see create). Null
-            for most connections.
+            Optional country of the phone system, tried first to read callers
+            (see create). Null for most connections.
         sip_host:
           type: string
           title: Sip Host
@@ -11783,6 +11783,15 @@ components:
             - type: "null"
           title: Pbx Password
           description: New password Hail sends. Stored encrypted.
+        default_region:
+          anyOf:
+            - type: string
+              pattern: ^[A-Z]{2}$
+            - type: "null"
+          title: Default Region
+          description:
+            "New country of the phone system, tried first to read callers.
+            Null clears it: Hail then uses the country of the number called."
       additionalProperties: false
       type: object
       title: SipConnectionPatch
@@ -11804,8 +11813,8 @@ components:
             - type: "null"
           title: Default Region
           description:
-            Optional country tried last to read callers (see create). Null
-            for most connections.
+            Optional country of the phone system, tried first to read callers
+            (see create). Null for most connections.
         sip_host:
           type: string
           title: Sip Host

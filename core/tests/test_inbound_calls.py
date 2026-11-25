@@ -1230,10 +1230,17 @@ async def test_a_caller_the_called_numbers_country_cannot_read_tries_the_others(
     assert out == "+33123456789"
 
 
-async def test_the_connection_country_is_tried_last(async_session):
+@pytest.mark.parametrize(
+    "region,expected",
+    # "2079460018" is valid in both: a stated phone system country wins.
+    [(None, "+12079460018"), ("GB", "+442079460018")],
+)
+async def test_a_stated_phone_system_country_is_read_first(
+    async_session, region, expected
+):
     _org, _agent, number = await _pbx_seed(async_session, country_code="US")
     conn = await async_session.get(SipConnection, number.sip_connection_id)
-    conn.default_region = "GB"
+    conn.default_region = region
     await async_session.flush()
-    out = await inbound_calls._caller_of(async_session, number, "0033123456789")
-    assert out == "+33123456789"
+    out = await inbound_calls._caller_of(async_session, number, "2079460018")
+    assert out == expected

@@ -195,12 +195,12 @@ async def _refuse(
 
 
 async def _caller_of(db: AsyncSession, number: PhoneNumber, raw: str) -> str:
-    """A PBX caller is read first with the country of the number called: a
-    phone system writes local callers in its country's national form and
-    callers from abroad with that country's international prefix. When that
-    gives no valid number (a phone system in another country than the
-    number), the connection's other numbers' countries, then its optional
-    ``default_region``, are tried. A carrier caller only gets a leading ``+``."""
+    """A phone system writes local callers in its country's national form and
+    callers from abroad with that country's international prefix. Hail reads
+    a PBX caller with the connection's ``default_region`` first when it is set
+    (it names the phone system's country), else with the country of the
+    number called; when that gives no valid number, with the countries of the
+    connection's other numbers. A carrier caller only gets a leading ``+``."""
     if number.provider == "pbx":
         try:
             conn = await connection_of(db, number)
@@ -210,6 +210,11 @@ async def _caller_of(db: AsyncSession, number: PhoneNumber, raw: str) -> str:
             if raw.isascii() and raw.isdigit() and len(raw) <= 6:
                 return raw
             return carrier_caller(raw)
+        first = read_caller(raw, [conn.default_region, number.country_code])
+        if first.startswith("+"):
+            return first
+        # Not read yet (a phone system in another country than the number):
+        # the countries of the connection's other numbers.
         others = (
             await db.scalars(
                 select(PhoneNumber.country_code)
@@ -220,9 +225,7 @@ async def _caller_of(db: AsyncSession, number: PhoneNumber, raw: str) -> str:
                 .distinct()
             )
         ).all()
-        return read_caller(
-            raw, [number.country_code, *sorted(others), conn.default_region]
-        )
+        return read_caller(raw, sorted(c for c in others if c))
     return carrier_caller(raw)
 
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import re
 import sys
 from uuid import UUID
 
@@ -26,6 +27,14 @@ from hailhq.api.connected_numbers import (
 from hailhq.core.db import session_scope
 from hailhq.core.livekit import LiveKitClient
 from hailhq.core.models import PhoneNumber, SipConnection
+
+_REGION = re.compile(r"[A-Z]{2}")
+
+
+def _region(value: str) -> str:
+    if not _REGION.fullmatch(value):
+        raise argparse.ArgumentTypeError("use a 2-letter country code, like US")
+    return value
 
 
 def _e164(value: str) -> str:
@@ -58,6 +67,7 @@ def _parser() -> argparse.ArgumentParser:
     create = sub.add_parser("create", help="create a connection and its trunks")
     create.add_argument("--org", required=True, type=_uuid)
     create.add_argument("--label", required=True)
+    create.add_argument("--region", type=_region)
     create.add_argument("--pbx-host")
     create.add_argument("--pbx-port", type=int, default=5060)
     create.add_argument(
@@ -129,6 +139,7 @@ async def _run(args: argparse.Namespace) -> None:
                     lk,
                     organization_id=args.org,
                     label=args.label,
+                    default_region=args.region,
                     pbx_host=args.pbx_host,
                     pbx_port=args.pbx_port,
                     pbx_transport=args.pbx_transport,

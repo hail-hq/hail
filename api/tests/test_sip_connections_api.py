@@ -723,3 +723,19 @@ async def test_an_older_client_may_still_send_a_country(
     _org, _key, plain = org_and_key
     conn = await _create(client, plain, default_region="GB")
     assert conn["default_region"] == "GB"
+
+
+async def test_patch_sets_and_clears_the_phone_system_country(
+    client: httpx.AsyncClient, org_and_key: tuple
+) -> None:
+    _org, _key, plain = org_and_key
+    conn = await _create(client, plain)
+    url = f"/sip-connections/{conn['id']}"
+    resp = await client.patch(url, json={"default_region": "GB"}, headers=_auth(plain))
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["default_region"] == "GB"
+    resp = await client.patch(url, json={"default_region": None}, headers=_auth(plain))
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["default_region"] is None
+    bad = await client.patch(url, json={"default_region": "gb"}, headers=_auth(plain))
+    assert bad.status_code == 422
