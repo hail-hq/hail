@@ -340,6 +340,11 @@ async def voice_catalogue(language: str, *, provider_filter: str | None = None) 
         "voices": voices,
         "languages": language_options(),
         "partial": partial,
+        "provider_supports_language": (
+            provider_filter in SUPPORTED_LANGUAGES[language].tts
+            if provider_filter is not None
+            else None
+        ),
         "default_voice": (
             {"provider": default["provider"], "id": default["id"]} if default else None
         ),

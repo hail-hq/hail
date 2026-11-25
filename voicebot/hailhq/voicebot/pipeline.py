@@ -539,10 +539,14 @@ def build_llm(
 
 
 def _house_tts(
-    voice_id_override: str | None, language: str | None, *, skip: str | None = None
+    voice_id_override: str | None,
+    language: str | None,
+    *,
+    skip: str | None = None,
+    last: str | None = None,
 ) -> list[agents_tts.TTS]:
     allowed = tts_providers_for(language) - {skip}
-    instances: list[agents_tts.TTS] = []
+    instances: dict[str, agents_tts.TTS] = {}
     if settings.cartesia_api_key and "cartesia" in allowed:
         kwargs: dict[str, Any] = {
             "model": settings.cartesia_model,
@@ -550,7 +554,7 @@ def _house_tts(
         }
         if language:
             kwargs["language"] = language
-        instances.append(cartesia_plugin.TTS(**kwargs))
+        instances["cartesia"] = cartesia_plugin.TTS(**kwargs)
     if settings.eleven_api_key and "elevenlabs" in allowed:
         kwargs = {
             "voice_id": voice_id_override or settings.elevenlabs_voice_id,
@@ -558,8 +562,10 @@ def _house_tts(
         }
         if language:
             kwargs["language"] = elevenlabs_language(language)
-        instances.append(elevenlabs_plugin.TTS(**kwargs))
-    return instances
+        instances["elevenlabs"] = elevenlabs_plugin.TTS(**kwargs)
+    if last is not None and last in instances:
+        instances[last] = instances.pop(last)
+    return list(instances.values())
 
 
 def _org_tts(
@@ -660,6 +666,7 @@ def build_tts(
                     if not uses_workspace_config and voice_id_override == default_voice
                     else None
                 ),
+                last=voice_provider,
             )
             if fallback:
                 return agents_tts.FallbackAdapter([primary, *fallback])
