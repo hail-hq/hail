@@ -110,7 +110,7 @@ UPDATE knowledge_pieces SET embedding_refused = NULL, embedding_refused_at = NUL
 WHERE embedding_refused IS NOT NULL;
 ```
 
-While the 300 MB cap is reached (logged once), pieces without a vector wait with keyword search, and only vectors of another model are replaced, up to 30 MB past the cap (each replaced vector leaves a dead row until vacuum). Past that the pass waits; run `VACUUM FULL knowledge_pieces;` in a quiet hour to give the space back.
+The embedding pass never checks the size cap: every piece's vector is counted when its document is admitted, and the cap counts live rows only, so new vectors and a model change always finish.
 
 Search filters on the organization and the model; the HNSW index filters after its scan, so each nearest-piece query sets `hnsw.iterative_scan = strict_order` (pgvector 0.8.0 or later). Local Docker and CI use `pgvector/pgvector:0.8.0-pg16`.
 
@@ -118,11 +118,12 @@ A message made only of filler words ("okay, thank you", "Sorry?") is not searche
 
 ## Limits and alerts
 
-- All knowledge data together (both tables with indexes, `pg_total_relation_size`) is capped at 300 MB: new links and documents answer 409, and the worker refuses new pieces. A piece's vector takes about 3 KB, plus about as much in the HNSW index.
-- The abuse monitor emails `HAIL_SUPPORT_EMAIL` at most once a day while `pg_database_size` is over 200 MB (state in `platform_flags`, key `database_size_alert_day`). Check sizes:
+- All knowledge data together is capped at 300 MB of live data: each current piece's text bytes plus 6 KB for its vector (about 3 KB of `halfvec(1536)` and about as much in the HNSW index), counted whether or not the vector is written yet. Dead rows and table bloat do not count, so replacing vectors never moves it. Past it, new links and documents answer 409, and the worker refuses new pieces.
+- The abuse monitor emails `HAIL_SUPPORT_EMAIL` at most once a day while `pg_database_size` is over 200 MB (state in `platform_flags`, key `database_size_alert_day`). Check both:
 
 ```sql
-SELECT pg_size_pretty(pg_database_size(current_database())),
-       pg_size_pretty(pg_total_relation_size('knowledge_pieces')),
-       pg_size_pretty(pg_total_relation_size('knowledge_documents'));
+SELECT pg_size_pretty(pg_database_size(current_database())) AS database,
+       pg_size_pretty(coalesce(sum(octet_length(text)), 0)
+                      + count(*) * 6144) AS knowledge_live
+FROM knowledge_pieces;
 ```

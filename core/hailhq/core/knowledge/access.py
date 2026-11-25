@@ -9,9 +9,13 @@ and its agents answer without the knowledge base even when
 ``agents.knowledge`` is on.
 
 On top of every workspace's own limits, ``GLOBAL_MAX_BYTES`` caps all
-knowledge data together, measured as the on-disk size of the two knowledge
-tables (with their indexes and TOAST): past it, new uploads and documents
-are refused, and the ingest worker refuses to write more pieces.
+knowledge data together, counted from the live rows (``knowledge_bytes``):
+each piece's text bytes plus ``PIECE_VECTOR_BYTES`` for its vector, whether
+or not the vector is written yet. Dead rows and table bloat never count,
+so replacing vectors (a model change) never moves the count. Past the cap,
+new uploads and documents are refused, and the ingest worker refuses to
+write more pieces. The real database size has its own daily alert
+(``db_size_alert``).
 
 The caps are checked under ``knowledge_lock`` (an advisory lock per
 workspace), so two requests at once never both pass the last free slot.
@@ -44,6 +48,7 @@ __all__ = [
     "GLOBAL_MAX_BYTES",
     "KNOWLEDGE_OFF",
     "MEMORY_MAX_PIECES",
+    "PIECE_VECTOR_BYTES",
     "STORAGE_FULL",
     "FolderSweepFailed",
     "agent_uses_knowledge",
@@ -61,6 +66,9 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 GLOBAL_MAX_BYTES = 300 * 1024 * 1024
+# What one piece's vector counts toward ``GLOBAL_MAX_BYTES``: about 3 KB of
+# halfvec(1536) and about as much for its entry in the HNSW index.
+PIECE_VECTOR_BYTES = 6 * 1024
 # A workspace with more pieces than this is searched in SQL during calls
 # instead of being loaded into each call's memory (hailhq.voicebot.knowledge).
 # 5,000 pieces is about 7.5 MB of vectors plus their text per call.
@@ -89,23 +97,36 @@ async def knowledge_lock(db: AsyncSession, organization_id: UUID) -> None:
     await key_lock(db, f"knowledge:{organization_id}")
 
 
-async def knowledge_bytes(db: AsyncSession) -> int:
-    """All knowledge data on disk: both tables, their indexes and TOAST."""
+async def knowledge_bytes(
+    db: AsyncSession, *, excluding_document: UUID | None = None
+) -> int:
+    """The live knowledge data: every current piece's text bytes plus
+    ``PIECE_VECTOR_BYTES``, without the pieces of ``excluding_document``
+    (a document being read again replaces them)."""
     return int(
         (
             await db.execute(
                 text(
-                    "SELECT pg_total_relation_size('knowledge_pieces') "
-                    "+ pg_total_relation_size('knowledge_documents')"
-                )
+                    "SELECT coalesce(sum(octet_length(text)), 0) "
+                    "+ count(*) * :vector_bytes FROM knowledge_pieces "
+                    "WHERE document_id IS DISTINCT FROM :excluding"
+                ),
+                {"vector_bytes": PIECE_VECTOR_BYTES, "excluding": excluding_document},
             )
         ).scalar_one()
     )
 
 
-async def storage_full(db: AsyncSession, *, adding: int = 0) -> bool:
-    """True past ``GLOBAL_MAX_BYTES``, counting ``adding`` more bytes."""
-    return await knowledge_bytes(db) + adding >= GLOBAL_MAX_BYTES
+async def storage_full(
+    db: AsyncSession,
+    *,
+    adding: int = 0,
+    excluding_document: UUID | None = None,
+) -> bool:
+    """True when the live data plus ``adding`` bytes reaches
+    ``GLOBAL_MAX_BYTES``."""
+    used = await knowledge_bytes(db, excluding_document=excluding_document)
+    return used + adding >= GLOBAL_MAX_BYTES
 
 
 async def agent_uses_knowledge(

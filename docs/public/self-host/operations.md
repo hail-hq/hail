@@ -836,9 +836,10 @@ psql "$DATABASE_URL" -c \
   searches by keywords only.
 - The database needs pgvector 0.8.0 or later (`halfvec` and iterative
   index scans).
-- All knowledge data together is capped at 300 MB (new uploads answer 409
-  past it). The abuse monitor also emails `HAIL_SUPPORT_EMAIL` once a day
-  while the whole database is over 200 MB (needs `HAIL_MAIL_BASE_DOMAIN`).
+- All knowledge data together is capped at 300 MB of live data (each
+  piece's text plus 6 KB for its vector; new uploads answer 409 past it).
+  The abuse monitor also emails `HAIL_SUPPORT_EMAIL` once a day while the
+  whole database is over 200 MB (needs `HAIL_MAIL_BASE_DOMAIN`).
 
 ## Carry-forwards / open work
 

@@ -31,16 +31,16 @@ text: a refused probe means the setting (a bad key or width), and the pass
 backs off. Otherwise each piece is sent alone, and a piece refused alone
 is marked (``embedding_refused`` = the model, with the time) and leaves
 the queue, so it never holds up other pieces or other workspaces; it is
-tried again after ``REFUSED_RETRY`` or when the model changes. Each batch takes the first pieces of every workspace in
-turn, so one workspace's large file never fills every batch.
+tried again after ``REFUSED_RETRY`` or when the model changes. Each
+batch takes the first pieces of every workspace in turn, so one
+workspace's large file never fills every batch.
 
 No transaction stays open during an API request: pieces are read,
 embedded, then written only where they still lack a vector of the model.
-Before each batch the pass checks the global size cap with a batch of
-new vectors counted; while it is reached, pieces with no vector wait
-(keyword search) and only vectors of another model are replaced, up to
-``REEMBED_HEADROOM`` past the cap, so a model change can finish. The API runs one worker
-process; several would at worst embed a piece twice.
+The pass never checks the size cap: every piece's vector was counted when
+its document was admitted (``access.knowledge_bytes`` counts live rows,
+never dead ones), so new vectors and a model change always finish. The
+API runs one worker process; several would at worst embed a piece twice.
 
 A file that cannot be used (wrong type, no text, over a limit) is
 ``failed`` with a reason for the customer in ``error``. Anything else (the
@@ -75,6 +75,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 from hailhq.core.file_uploads import matches_declared_type
 from hailhq.core.isolated_process import run_isolated
 from hailhq.core.knowledge.access import (
+    PIECE_VECTOR_BYTES,
     STORAGE_FULL,
     FolderSweepFailed,
     delete_org_knowledge,
@@ -145,15 +146,8 @@ EMBED_BACKOFF = (30.0, 600.0)
 # A piece refused alone is tried again after this, in case the refusal was
 # a passing fault or the setting was fixed under the same model.
 REFUSED_RETRY = timedelta(days=1)
-# How far past the global cap replacing other-model vectors may go (each
-# UPDATE writes a new row and index entry until vacuum).
-REEMBED_HEADROOM = 30 * 1024 * 1024
 # Sent when a batch is refused: a refusal of this too means the setting.
 _PROBE_TEXT = "Opening hours"
-# What a piece's vector adds to the knowledge tables: about 3 KB of
-# halfvec(1536) and about as much in the HNSW index. Counted when a
-# document is admitted, since the embedding pass adds it later.
-_VECTOR_BYTES = 6 * 1024
 # Pieces written per INSERT.
 _INSERT_BATCH = 100
 
@@ -211,9 +205,6 @@ class KnowledgeIngestWorker:
         self._embed_failures = 0
         # The probe text passed in the current pass: not sent again.
         self._probe_ok = False
-        # The storage state last logged: "" (room), "full" (new vectors
-        # wait) or "over" (past the headroom, everything waits).
-        self._storage_state = ""
 
     def _get_s3(self) -> S3MailClient:
         if self._s3 is None:
@@ -253,9 +244,6 @@ class KnowledgeIngestWorker:
     async def _embed_pieces(self) -> int:
         """Embed pieces with no vector of the configured model, document by
         document. Returns how many were embedded."""
-        if self._storage_state == "over" and await self._storage() != "over":
-            # Space came back during a storage wait: no need to sit it out.
-            self._embed_after = 0.0
         if time.monotonic() < self._embed_after:
             return 0
         embedder = self._embedder()
@@ -264,11 +252,6 @@ class KnowledgeIngestWorker:
         self._probe_ok = False  # Each pass sends the probe again when needed.
         done = tried = 0
         while not self._stop.is_set() and tried < EMBED_PER_TICK:
-            state = await self._storage()
-            full, over = bool(state), state == "over"
-            if over:
-                self._embed_after = time.monotonic() + EMBED_BACKOFF[1]
-                break
             # Each workspace's pieces in turn (missing vectors first, then
             # those of another model), so no workspace fills every batch.
             turn = (
@@ -306,7 +289,6 @@ class KnowledgeIngestWorker:
                         )
                         < func.now() - REFUSED_RETRY,
                     ),
-                    *([KnowledgePiece.embedding_model.is_not(None)] if full else []),
                     KnowledgePiece.organization_id.in_(
                         select(OrganizationKnowledge.organization_id)
                     ),
@@ -321,8 +303,6 @@ class KnowledgeIngestWorker:
             async with self._session_factory() as db:
                 rows = (await db.execute(query)).all()
             if not rows:
-                if full:
-                    self._embed_after = time.monotonic() + EMBED_BACKOFF[1]
                 break
             tried += len(rows)
             pairs, refused, failure = await self._embed_rows(embedder, rows)
@@ -370,43 +350,6 @@ class KnowledgeIngestWorker:
         if done:
             logger.info("knowledge: embedded %d piece(s)", done)
         return done
-
-    async def _storage(self) -> str:
-        """The storage state, logged once per change: "" (room), "full"
-        (new vectors wait; other-model vectors are still replaced, within
-        ``REEMBED_HEADROOM`` past the cap, since each UPDATE writes a new
-        row until vacuum) or "over" (past that, every vector waits)."""
-        async with self._session_factory() as db:
-            full = await storage_full(db, adding=BATCH * _VECTOR_BYTES)
-            over = full and await storage_full(
-                db, adding=BATCH * _VECTOR_BYTES - REEMBED_HEADROOM
-            )
-        state = "over" if over else "full" if full else ""
-        before, self._storage_state = self._storage_state, state
-        if state == before:
-            return state
-        headroom = REEMBED_HEADROOM // (1024 * 1024)
-        if state == "over":
-            logger.warning(
-                "knowledge: storage is about %d MB past the cap; vectors wait "
-                "until VACUUM FULL knowledge_pieces gives space back",
-                headroom,
-            )
-        elif state == "full" and before == "over":
-            logger.info(
-                "knowledge: storage is back within %d MB of the cap; "
-                "other-model vectors are replaced again, new vectors still wait",
-                headroom,
-            )
-        elif state == "full":
-            logger.warning(
-                "knowledge: storage is full; new vectors wait (keyword search), "
-                "other-model vectors are replaced within %d MB",
-                headroom,
-            )
-        else:
-            logger.info("knowledge: storage has room again")
-        return state
 
     async def _embed_rows(
         self, embedder: Embedder, rows
@@ -732,9 +675,14 @@ class KnowledgeIngestWorker:
             if held + len(chunks) > limits.max_pieces:
                 await db.rollback()
                 raise _Refused(_too_many(limits.max_pieces, held))
-            # The vectors the embedding pass adds later count too, whether
-            # or not an embedding API is set up yet.
-            if await storage_full(db, adding=len(rows) * _VECTOR_BYTES):
+            # Live data only: the new pieces' text and vectors (counted
+            # whether or not an embedding API is set up yet), with this
+            # document's earlier pieces left out since they are replaced.
+            adding = (
+                sum(len(r["text"].encode()) for r in rows)
+                + len(rows) * PIECE_VECTOR_BYTES
+            )
+            if await storage_full(db, adding=adding, excluding_document=document_id):
                 await db.rollback()
                 raise _Refused(STORAGE_FULL)
             await db.execute(

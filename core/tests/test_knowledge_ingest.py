@@ -14,12 +14,15 @@ import pytest
 from botocore.exceptions import ClientError
 from hailhq.core.config import settings
 from hailhq.core.file_uploads import object_key
+from hailhq.core.knowledge import access as access_module
 from hailhq.core.knowledge import ingest as ingest_module
 from hailhq.core.knowledge.access import (
+    STORAGE_FULL,
     FolderSweepFailed,
     agent_uses_knowledge,
     delete_org_knowledge,
     involves_database,
+    knowledge_bytes,
     log_failure,
     short_cause,
 )
@@ -894,49 +897,6 @@ async def test_refused_first_pieces_never_stop_the_rest(
     assert marks == ["fake-embedding"] * 4 + [None] * 4
 
 
-async def test_storage_cap_counts_vectors_with_or_without_an_api(
-    async_session, session_factory, s3, fake, monkeypatch
-) -> None:
-    """Admission counts the vectors a file's pieces will get even when no
-    embedding API is set up; a key added later never embeds past the cap."""
-    added: list[int] = []
-    full = {"now": False}
-
-    async def fake_full(db, *, adding=0):
-        added.append(adding)
-        return full["now"]
-
-    monkeypatch.setattr(ingest_module, "storage_full", fake_full)
-    embedder: dict = {"api": None}
-
-    @asynccontextmanager
-    async def scope():
-        async with session_factory() as session:
-            yield session
-
-    worker = KnowledgeIngestWorker(
-        session_factory=scope,
-        s3_factory=lambda: s3,
-        embedder=lambda: embedder["api"],
-    )
-    org = uuid.uuid4()
-    await add_document(async_session, s3, org, NORTHGATE_MANUAL.encode())
-    assert await worker.tick() == 1
-    count = len(await pieces_of(async_session, org))
-    assert added == [count * ingest_module._VECTOR_BYTES]
-    # A key arrives, but the tables are full: no vector is written.
-    embedder["api"] = fake
-    full["now"] = True
-    await worker.tick()
-    assert fake.calls == 0
-    assert all(p.embedding is None for p in await pieces_of(async_session, org))
-    # Space again: the waiting pieces get their vectors.
-    full["now"] = False
-    worker._embed_after = 0.0
-    await worker.tick()
-    assert all(p.embedding is not None for p in await pieces_of(async_session, org))
-
-
 async def test_one_workspace_refused_pieces_never_stop_another(
     async_session, worker, s3, fake
 ) -> None:
@@ -984,53 +944,6 @@ async def test_one_workspace_refused_pieces_never_stop_another(
     assert all(p.embedding_model for p in await pieces_of(async_session, bad))
 
 
-async def test_model_change_finishes_when_storage_is_full(
-    async_session, worker, s3, fake, monkeypatch
-) -> None:
-    """While the store is full, pieces with no vector wait but vectors of
-    another model are still replaced, so a model change finishes."""
-    org, waiting = uuid.uuid4(), uuid.uuid4()
-    await add_document(async_session, s3, org, NORTHGATE_MANUAL.encode())
-    await worker.tick()
-    fake.fail = True
-    await add_document(async_session, s3, waiting, NORTHGATE_MANUAL.encode())
-    await worker.tick()
-    fake.fail = False
-    worker._embed_after = 0.0
-
-    async def always_full(db, *, adding=0):
-        # Full, but within the headroom for replacing vectors.
-        return adding > 0
-
-    monkeypatch.setattr(ingest_module, "storage_full", always_full)
-    fake.model = "fake-embedding-2"
-    await worker.tick()
-    pieces = await pieces_of(async_session, org)
-    assert pieces and all(p.embedding_model == "fake-embedding-2" for p in pieces)
-    assert all(p.embedding is None for p in await pieces_of(async_session, waiting))
-
-
-async def test_replacing_stops_past_the_headroom(
-    async_session, worker, s3, fake, monkeypatch
-) -> None:
-    """Past the cap and its headroom, nothing is embedded, not even a
-    replacement; the pass waits."""
-    org = uuid.uuid4()
-    await add_document(async_session, s3, org, NORTHGATE_MANUAL.encode())
-    await worker.tick()
-
-    async def over(db, *, adding=0):
-        return True
-
-    monkeypatch.setattr(ingest_module, "storage_full", over)
-    fake.model = "fake-embedding-2"
-    calls = fake.calls
-    await worker.tick()
-    assert fake.calls == calls and worker._embed_after > 0
-    pieces = await pieces_of(async_session, org)
-    assert all(p.embedding_model == "fake-embedding" for p in pieces)
-
-
 async def test_never_refused_pieces_go_before_refused_ones(
     async_session, worker, s3, fake, monkeypatch
 ) -> None:
@@ -1059,63 +972,82 @@ async def test_never_refused_pieces_go_before_refused_ones(
     assert second.embedding is not None and first.embedding is None
 
 
-async def test_past_headroom_warning_logs_once(
-    async_session, worker, s3, fake, monkeypatch, caplog
+async def test_live_data_counts_text_and_every_vector(
+    async_session, session_factory, s3, fake
 ) -> None:
+    """The cap counts each live piece's text plus one vector, whether the
+    vector is written yet or not, and a model change never moves it: old
+    vectors (dead rows) do not count."""
+    embedder: dict = {"api": None}
+
+    @asynccontextmanager
+    async def scope():
+        async with session_factory() as session:
+            yield session
+
+    worker = KnowledgeIngestWorker(
+        session_factory=scope,
+        s3_factory=lambda: s3,
+        embedder=lambda: embedder["api"],
+    )
     org = uuid.uuid4()
     await add_document(async_session, s3, org, NORTHGATE_MANUAL.encode())
     await worker.tick()
-
-    async def over(db, *, adding=0):
-        return True
-
-    async def room(db, *, adding=0):
-        return False
-
-    monkeypatch.setattr(ingest_module, "storage_full", over)
+    pieces = await pieces_of(async_session, org)
+    expected = (
+        sum(len(p.text.encode()) for p in pieces)
+        + len(pieces) * access_module.PIECE_VECTOR_BYTES
+    )
+    assert all(p.embedding is None for p in pieces)
+    assert await knowledge_bytes(async_session) == expected
+    embedder["api"] = fake
+    await worker.tick()
+    assert await knowledge_bytes(async_session) == expected
     fake.model = "fake-embedding-2"
-    with caplog.at_level(logging.INFO, logger="hailhq.core.knowledge.ingest"):
-        for _ in range(2):
-            worker._embed_after = 0.0
-            await worker.tick()
-        assert caplog.text.count("past the cap") == 1
-        # Space back during the wait: the next tick goes on at once.
-        monkeypatch.setattr(ingest_module, "storage_full", room)
-        await worker.tick()
-        await worker.tick()
-        assert caplog.text.count("room again") == 1
-        pieces = await pieces_of(async_session, org)
-        assert all(p.embedding_model == "fake-embedding-2" for p in pieces)
-    assert "replaced within" not in caplog.text
+    await worker.tick()
+    pieces = await pieces_of(async_session, org)
+    assert all(p.embedding_model == "fake-embedding-2" for p in pieces)
+    assert await knowledge_bytes(async_session) == expected
 
 
-async def test_storage_state_changes_log_once_each(
-    async_session, worker, s3, fake, monkeypatch, caplog
+async def test_model_change_past_the_cap_completes(
+    async_session, worker, s3, fake, monkeypatch
 ) -> None:
-    """full, full, over, full, room, room: one warning per new state, an
-    info line (not a warning) going from over back to full, and one "room
-    again" line."""
+    """Replacing vectors never needs room: with the cap already passed, a
+    model change still re-embeds every piece."""
     org = uuid.uuid4()
     await add_document(async_session, s3, org, NORTHGATE_MANUAL.encode())
     await worker.tick()
-    states = iter(["full", "full", "over", "full", "", ""])
-    current = {"state": ""}
+    monkeypatch.setattr(access_module, "GLOBAL_MAX_BYTES", 1)
+    fake.model = "fake-embedding-2"
+    await worker.tick()
+    pieces = await pieces_of(async_session, org)
+    assert pieces and all(p.embedding_model == "fake-embedding-2" for p in pieces)
 
-    async def fake_full(db, *, adding=0):
-        # The first call per check asks "full", the second "over".
-        if adding == ingest_module.BATCH * ingest_module._VECTOR_BYTES:
-            return current["state"] in ("full", "over")
-        return current["state"] == "over"
 
-    monkeypatch.setattr(ingest_module, "storage_full", fake_full)
-    with caplog.at_level(logging.INFO, logger="hailhq.core.knowledge.ingest"):
-        for state in states:
-            current["state"] = state
-            await worker._storage()
-    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
-    assert [r.getMessage().split(";")[0] for r in warnings] == [
-        "knowledge: storage is full",
-        "knowledge: storage is about 30 MB past the cap",
-    ]
-    assert caplog.text.count("back within") == 1
-    assert caplog.text.count("room again") == 1
+async def test_new_pieces_past_the_live_cap_are_refused(
+    async_session, worker, s3, fake, monkeypatch
+) -> None:
+    """A new file whose text and vectors would pass the live-data cap is
+    refused, even with no embedding API set up."""
+    org = uuid.uuid4()
+    await add_document(async_session, s3, org, NORTHGATE_MANUAL.encode())
+    await worker.tick()
+    used = await knowledge_bytes(async_session)
+    # Room for a little text, not for another piece's vector.
+    monkeypatch.setattr(
+        access_module, "GLOBAL_MAX_BYTES", used + access_module.PIECE_VECTOR_BYTES
+    )
+    doc_id = await add_document(async_session, s3, org, b"Opening hours nine to five.")
+    await worker.tick()
+    doc = await async_session.get(KnowledgeDocument, doc_id)
+    await async_session.refresh(doc)
+    assert doc.status == "failed" and doc.error == STORAGE_FULL
+    # Reading the same document again leaves its own pieces out of the count.
+    assert (
+        await knowledge_bytes(
+            async_session,
+            excluding_document=(await pieces_of(async_session, org))[0].document_id,
+        )
+        == 0
+    )
