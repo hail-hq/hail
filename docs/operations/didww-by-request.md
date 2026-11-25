@@ -24,7 +24,11 @@ no `e164` and a `quote_id`; `POST /numbers` refuses that offer.
    \<type\>**, pick the area, quantity 1, metered plan (0 channels). Link the
    customer's approved address when DIDWW asks. Note the DID id and the
    number DIDWW assigned.
-4. Add the number to the organization and charge setup + first month, in
+4. Free the number if a connected-number claim that is not checked yet
+   holds it (exits 1 when none does; go on either way):
+   `docker compose exec api python -m hailhq.api.connected_numbers_ops release-claim --number +<number>`
+   ([connected-numbers.md](connected-numbers.md#5-limits)).
+5. Add the number to the organization and charge setup + first month, in
    one transaction (same ledger rows as an API purchase,
    [`finish_order`](../../api/hailhq/api/number_orders.py)). Fill the seven
    values at the top. `kind` is the catalog `number_type` (`toll_free`, not
@@ -68,16 +72,16 @@ no `e164` and a `quote_id`; `POST /numbers` refuses that offer.
    the price the rater falls back to when the catalog row's price varies by
    area, as for an API purchase.
 
-5. Calls reach the number once it routes to an agent: Hail then assigns
+6. Calls reach the number once it routes to an agent: Hail then assigns
    the DID to the voice IN trunk and to the pay-per-minute capacity group
    ([didww.md](../public/self-host/didww.md#inbound-calls)). Until then the
    DIDWW panel shows it as not configured (Trunk "Voice: none", capacity 0).
    Unrouting clears the trunk only; the number stays in the capacity group,
    which costs nothing without calls.
-6. Tell the customer the number. It shows in **Console → Numbers**. The
+7. Tell the customer the number. It shows in **Console → Numbers**. The
    monthly fee renews like any other number; releasing
    it (`DELETE /v1/numbers/{id}`) terminates the DID.
-6. Run the first call test when this is the first number of its carrier,
+8. Run the first call test when this is the first number of its carrier,
    country or type ([first-number-call-test.md](first-number-call-test.md)).
 
 ## Routing a number by hand

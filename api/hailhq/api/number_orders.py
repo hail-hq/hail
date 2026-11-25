@@ -11,6 +11,7 @@ import httpx
 from fastapi import HTTPException
 from hailhq.api import sms_registration
 from hailhq.api.audit import write_audit_log
+from hailhq.api.connected_numbers import ConnectedNumberError, give_way_unchecked_claim
 from hailhq.api.deps import Principal
 from hailhq.api.errors import unprocessable
 from hailhq.api.funds import BILLING_URL
@@ -20,6 +21,7 @@ from hailhq.core.billing import get_balance_cents, monthly_fee_ref
 from hailhq.core.carrier_offer import Approval
 from hailhq.core.carrier_routing import Outcome, carrier
 from hailhq.core.db import org_lock, session_scope
+from hailhq.core.livekit import LiveKitClient
 from hailhq.core.models import (
     AccountCredit,
     CarrierVerification,
@@ -504,6 +506,29 @@ async def load_quote(db: AsyncSession, org: UUID, quote_id: UUID) -> NumberOffer
     return row
 
 
+async def _free_unchecked_claim(
+    db: AsyncSession, org: UUID, quote_id: UUID, lk: LiveKitClient | None
+) -> None:
+    """Let an unchecked connected-number claim on the quoted number give way.
+    Runs before the buyer's org lock: it may take the claim's org lock."""
+    offer = await db.scalar(
+        select(NumberOffer.offer).where(
+            NumberOffer.id == quote_id, NumberOffer.organization_id == org
+        )
+    )
+    e164 = (offer or {}).get("e164")
+    if not e164:
+        return
+    try:
+        await give_way_unchecked_claim(db, lk, e164)
+    except ConnectedNumberError as exc:
+        if exc.code == "check_in_progress":
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise RetryableError(
+            "The number could not be freed for this purchase; try again shortly"
+        ) from exc
+
+
 async def acquire_offer(
     db: AsyncSession,
     org: UUID,
@@ -515,11 +540,15 @@ async def acquire_offer(
     expected_total_cents: int | None = None,
     subject_type: str | None = None,
     verification_id: UUID | None = None,
+    lk: LiveKitClient | None = None,
 ) -> PhoneNumber:
     """Buy the quoted number. ``kind`` is the number type the client sent, or
     None to take it from the quote; a different explicit type is a 422.
     ``verification_id`` and ``subject_type`` pick the approved verification
-    to buy with (``pick_approval``)."""
+    to buy with (``pick_approval``). ``lk`` lets an unchecked connected-number
+    claim on the quoted number give way first (without it, the claim keeps
+    the number and the purchase is a 409)."""
+    await _free_unchecked_claim(db, org, quote_id, lk)
     await org_lock(db, org)
     row = await load_quote(db, org, quote_id)
     offer = CarrierOffer.model_validate(row.offer)
@@ -917,7 +946,10 @@ def pick_approval(
 
 
 async def purchase_number(
-    db: AsyncSession, principal: Principal, body: NumberAcquireRequest
+    db: AsyncSession,
+    principal: Principal,
+    body: NumberAcquireRequest,
+    lk: LiveKitClient | None = None,
 ) -> PhoneNumber:
     """The one purchase entry point for POST /numbers: it buys a quote.
 
@@ -935,6 +967,7 @@ async def purchase_number(
         expected_total_cents=body.expected_total_cents,
         subject_type=body.subject_type,
         verification_id=body.verification_id,
+        lk=lk,
     )
     if number.provisioning_state == "failed":
         # The hold was refunded; nothing is owed. Say so instead of a 201.

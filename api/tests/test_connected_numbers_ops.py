@@ -172,3 +172,14 @@ def test_password_is_in_no_log_record(caplog, capsys, monkeypatch):
     for record in caplog.records:
         assert password not in record.getMessage()
     assert password not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "released,out,code", [(True, "released", 0), (False, "not an unchecked claim", 1)]
+)
+def test_release_claim(capsys, monkeypatch, released, out, code):
+    give_way = AsyncMock(return_value=released)
+    monkeypatch.setattr(ops, "give_way_unchecked_claim", give_way)
+    assert main(["release-claim", "--number", "+1 415 555 0100"]) == code
+    assert out in capsys.readouterr().out
+    assert give_way.await_args.args[2] == "+14155550100"

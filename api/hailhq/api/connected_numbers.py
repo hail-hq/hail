@@ -19,6 +19,7 @@ from uuid import UUID, uuid4
 
 import aiohttp
 import phonenumbers
+from hailhq.api.audit import write_audit_log
 from hailhq.core.billing import CALL_META_BILLED, has_funds
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.carrier_routing import voice_route
@@ -484,6 +485,70 @@ async def delete_connection(
         raise
 
 
+CHECK_IN_PROGRESS_MESSAGE: Final = (
+    "This number is being checked. Try again in 2 minutes."
+)
+
+
+async def give_way_unchecked_claim(
+    db: AsyncSession,
+    lk: LiveKitClient | None,
+    e164: str,
+    *,
+    keep_connection_id: UUID | None = None,
+    now: datetime | None = None,
+) -> bool:
+    """Release an unchecked claim on ``e164`` so a purchase or another
+    connection can take the number. Returns True when a claim was released.
+
+    Call it before the caller takes any lock. With a claim to look at, it
+    takes the claim's org lock and ends the caller's transaction (a commit
+    when it writes nothing, so the caller's loaded rows stay usable). A claim with a running ownership check, an
+    ``active`` row, or a claim on ``keep_connection_id`` (the same
+    connection adding it again) stays; the caller's own unique checks then
+    decide."""
+    claim = await db.scalar(
+        select(PhoneNumber).where(
+            PhoneNumber.e164 == e164,
+            PhoneNumber.provider == "pbx",
+            PhoneNumber.provisioning_state == "unverified",
+        )
+    )
+    if (
+        claim is None
+        or lk is None
+        or (
+            keep_connection_id is not None
+            and claim.sip_connection_id == keep_connection_id
+        )
+    ):
+        return False  # read only, no lock: the caller's transaction goes on
+    org_id, number_id = claim.organization_id, claim.id
+    await org_lock(db, org_id)
+    await db.refresh(claim)
+    if claim.provisioning_state != "unverified":
+        await db.commit()  # nothing written; ends the transaction
+        return False
+    if await check_in_flight(db, number_id, now or datetime.now(timezone.utc)):
+        await db.commit()  # nothing written; ends the transaction
+        raise ConnectedNumberError(
+            "check_in_progress", "e164", CHECK_IN_PROGRESS_MESSAGE
+        )
+    # Same session and transaction: the org lock is re-entrant.
+    await remove_connected_number(db, lk, claim, only_state="unverified")
+    logger.info("unchecked claim %s on %s gave way", number_id, e164)
+    await write_audit_log(
+        org_id,
+        None,
+        "number.claim_released",
+        "phone_number",
+        number_id,
+        {"e164": e164},
+        actor_kind="system",
+    )
+    return True
+
+
 async def add_connected_number(
     db: AsyncSession, lk: LiveKitClient, connection: SipConnection, e164: str
 ) -> PhoneNumber:
@@ -500,6 +565,8 @@ async def add_connected_number(
     e164 = phonenumbers.format_number(
         phonenumbers.parse(e164, None), phonenumbers.PhoneNumberFormat.E164
     )
+    connection_id = connection.id
+    await give_way_unchecked_claim(db, lk, e164, keep_connection_id=connection_id)
     await org_lock(db, connection.organization_id)
     await db.refresh(connection)
     try:
