@@ -190,7 +190,7 @@ func TestContactsCreate_RequiresPhoneOrEmail(t *testing.T) {
 	if !errors.Is(err, errInvalidInputs) {
 		t.Fatalf("want errInvalidInputs, got %v", err)
 	}
-	if !strings.Contains(stderr, "--phone or --email") {
+	if !strings.Contains(stderr, "--phone, --email or --extension") {
 		t.Errorf("stderr missing reason: %q", stderr)
 	}
 	if got := atomic.LoadInt32(&srv.hits); got != 0 {
@@ -325,7 +325,7 @@ func TestContactsUpdate_RequiresAField(t *testing.T) {
 	if !errors.Is(err, errInvalidInputs) {
 		t.Fatalf("want errInvalidInputs, got %v", err)
 	}
-	if !strings.Contains(stderr, "--name, --phone, or --email") {
+	if !strings.Contains(stderr, "--name, --phone, --email, or --extension") {
 		t.Errorf("stderr missing reason: %q", stderr)
 	}
 	if got := atomic.LoadInt32(&srv.hits); got != 0 {
@@ -515,5 +515,46 @@ func TestContactsCreate_JSONOutput(t *testing.T) {
 	}
 	if got.Name != "Jane Doe" {
 		t.Errorf("Name = %q", got.Name)
+	}
+}
+
+func TestContactsCreateExtension(t *testing.T) {
+	srv := newFakeServer(t, http.StatusCreated, sampleManualContact())
+
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"contacts", "create", "Support line", "--extension", "800",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(srv.lastBody, &body); err != nil {
+		t.Fatalf("body parse: %v", err)
+	}
+	if body["extension"] != "800" {
+		t.Errorf("extension = %v; raw=%s", body["extension"], srv.lastBody)
+	}
+	if _, ok := body["phone_e164"]; ok {
+		t.Errorf("phone_e164 sent: %s", srv.lastBody)
+	}
+}
+
+func TestContactsUpdateExtension(t *testing.T) {
+	srv := newFakeServer(t, http.StatusOK, sampleManualContact())
+
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"contacts", "update", "11111111-1111-1111-1111-111111111111", "--extension", "*12#",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(srv.lastBody, &body); err != nil {
+		t.Fatalf("body parse: %v", err)
+	}
+	if body["extension"] != "*12#" {
+		t.Errorf("extension = %v; raw=%s", body["extension"], srv.lastBody)
 	}
 }

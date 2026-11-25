@@ -583,10 +583,11 @@ async def create_contact(
     name: str,
     phone_e164: str | None = None,
     email: str | None = None,
+    extension: str | None = None,
 ) -> dict[str, Any]:
     try:
         return await client.create_contact(
-            name=name, phone_e164=phone_e164, email=email
+            name=name, phone_e164=phone_e164, email=email, extension=extension
         )
     except ValidationError as exc:
         return {"error": _validation_error_message(exc)}
@@ -4613,19 +4614,33 @@ def register_tools(
             str | None,
             _d(
                 "The address to email this contact at, such as "
-                "``ana@example.com``. Give this, ``phone_e164``, or both."
+                "``ana@example.com``. Give this, ``phone_e164``, "
+                "``extension``, or several."
+            ),
+        ] = None,
+        extension: Annotated[
+            str | None,
+            Field(pattern=r"^[0-9*#]{1,6}$"),
+            _d(
+                "Extension on the workspace's connected phone system (1 to 6 "
+                "digits, * or #), such as ``800`` for a support queue. Used "
+                "for handover on calls to a connected number."
             ),
         ] = None,
     ) -> dict[str, Any]:
         """Save a manually managed contact for calls, texts or email.
 
         The contact appears in workspace contact searches and can be selected
-        for call handover if it has a phone number. A duplicate phone or email
-        returns 409."""
+        for call handover if it has a phone number, or an extension on a call
+        to a connected number. A duplicate phone or email returns 409."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await create_contact(
-                    client=client, name=name, phone_e164=phone_e164, email=email
+                    client=client,
+                    name=name,
+                    phone_e164=phone_e164,
+                    email=email,
+                    extension=extension,
                 )
         except RuntimeError as exc:
             return {"error": str(exc)}

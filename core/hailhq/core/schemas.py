@@ -3512,6 +3512,10 @@ class ContactEntry(BaseModel):
     email: str | None = Field(
         default=None, description="Email address. Null if none on file."
     )
+    extension: str | None = Field(
+        default=None,
+        description="Extension on your connected phone system. Null if none on file.",
+    )
     role: str | None = Field(
         default=None,
         description="Organization role (e.g. 'owner', 'admin', 'member') for kind='member'. Always null for kind='manual'.",
@@ -3528,11 +3532,20 @@ class ContactCreate(BaseModel):
     )
     phone_e164: str | None = Field(
         default=None,
-        description="Phone number, E.164 format. At least one of phone_e164 or email is required.",
+        description="Phone number, E.164 format. At least one of phone_e164, email or extension is required.",
     )
     email: str | None = Field(
         default=None,
-        description="Email address, stored lowercased. At least one of phone_e164 or email is required.",
+        description="Email address, stored lowercased. At least one of phone_e164, email or extension is required.",
+    )
+    extension: str | None = Field(
+        default=None,
+        pattern=r"^[0-9*#]{1,6}$",
+        description=(
+            "Extension on your connected phone system (1 to 6 digits, * or #), "
+            "for handover on calls to a connected number. At least one of "
+            "phone_e164, email or extension is required."
+        ),
     )
 
     _validate_phone = field_validator("phone_e164")(_e164_or_error)
@@ -3540,8 +3553,8 @@ class ContactCreate(BaseModel):
 
     @model_validator(mode="after")
     def _phone_or_email(self) -> "ContactCreate":
-        if self.phone_e164 is None and self.email is None:
-            raise ValueError("provide at least one of phone_e164 or email")
+        if self.phone_e164 is None and self.email is None and self.extension is None:
+            raise ValueError("provide at least one of phone_e164, email or extension")
         return self
 
 
@@ -3559,7 +3572,7 @@ class ContactPatch(BaseModel):
         description=(
             "New phone number, E.164 format. Omit to leave unchanged; "
             "explicit null clears it. The contact must keep at least one "
-            "of phone_e164 or email."
+            "of phone_e164, email or extension."
         ),
     )
     email: str | None = Field(
@@ -3567,7 +3580,16 @@ class ContactPatch(BaseModel):
         description=(
             "New email address, stored lowercased. Omit to leave "
             "unchanged; explicit null clears it. The contact must keep at "
-            "least one of phone_e164 or email."
+            "least one of phone_e164, email or extension."
+        ),
+    )
+    extension: str | None = Field(
+        default=None,
+        pattern=r"^[0-9*#]{1,6}$",
+        description=(
+            "New extension on your connected phone system (1 to 6 digits, * "
+            "or #). Omit to leave unchanged; explicit null clears it. The "
+            "contact must keep at least one of phone_e164, email or extension."
         ),
     )
 

@@ -2432,7 +2432,8 @@ paths:
             expected_total_cents differs from the quoted total, or the carrier rejected
             or failed the order. In the last case the credit hold is refunded and
             the detail gives the reason. Also returned when the quote's number was
-            released since it was bought.
+            released since it was bought, and while another workspace runs the ownership
+            check on that number as a connected number.
         "503":
           description:
             The carrier lookup or number price is unavailable, or no inventory
@@ -4551,10 +4552,13 @@ paths:
       tags:
         - contacts
       summary: Create Contact
-      description: "Create a manual contact with a phone and/or an email.
+      description:
+        "Create a manual contact with a phone, an email or an extension.
 
 
-        Requires at least one of phone_e164 or email. Fails with 409 if a
+        Requires at least one of phone_e164, email or extension (an extension
+
+        on your connected phone system, for handover). Fails with 409 if a
 
         contact with the same phone or email already exists in this
 
@@ -4618,8 +4622,8 @@ paths:
         "Update a manual contact's fields. Only fields present in the body\
         \ change.\n\nManual contacts only \u2014 a member: id (org members synced\
         \ from\nmembership) returns 422; edit those via the membership APIs instead.\n\
-        The contact must still have at least one of phone_e164 or email after\nthe\
-        \ update. Fails with 409 on a duplicate phone/email."
+        The contact must still have at least one of phone_e164, email or\nextension\
+        \ after the update. Fails with 409 on a duplicate phone/email."
       operationId: patch_contact_v1_contacts__contact_id__patch
       parameters:
         - name: contact_id
@@ -5288,8 +5292,8 @@ paths:
           description: The account keeps the most files allowed.
         "503":
           description:
-            "This server cannot store files for carrier reviewers (no mail bucket
-            or no public https URL), or storage failed for a moment: try again."
+            "This server cannot store files for carrier reviewers (no mail
+            bucket or no public https URL), or storage failed for a moment: try again."
         "422":
           description: Validation Error
           content:
@@ -7494,16 +7498,26 @@ components:
             - type: "null"
           title: Phone E164
           description:
-            Phone number, E.164 format. At least one of phone_e164 or email
-            is required.
+            Phone number, E.164 format. At least one of phone_e164, email
+            or extension is required.
         email:
           anyOf:
             - type: string
             - type: "null"
           title: Email
           description:
-            Email address, stored lowercased. At least one of phone_e164
-            or email is required.
+            Email address, stored lowercased. At least one of phone_e164,
+            email or extension is required.
+        extension:
+          anyOf:
+            - type: string
+              pattern: ^[0-9*#]{1,6}$
+            - type: "null"
+          title: Extension
+          description:
+            "Extension on your connected phone system (1 to 6 digits, *
+            or #), for handover on calls to a connected number. At least one of phone_e164,
+            email or extension is required."
       additionalProperties: false
       type: object
       required:
@@ -7542,6 +7556,12 @@ components:
             - type: "null"
           title: Email
           description: Email address. Null if none on file.
+        extension:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Extension
+          description: Extension on your connected phone system. Null if none on file.
         role:
           anyOf:
             - type: string
@@ -7599,7 +7619,8 @@ components:
           title: Phone E164
           description:
             New phone number, E.164 format. Omit to leave unchanged; explicit
-            null clears it. The contact must keep at least one of phone_e164 or email.
+            null clears it. The contact must keep at least one of phone_e164, email
+            or extension.
         email:
           anyOf:
             - type: string
@@ -7607,8 +7628,18 @@ components:
           title: Email
           description:
             New email address, stored lowercased. Omit to leave unchanged;
-            explicit null clears it. The contact must keep at least one of phone_e164
-            or email.
+            explicit null clears it. The contact must keep at least one of phone_e164,
+            email or extension.
+        extension:
+          anyOf:
+            - type: string
+              pattern: ^[0-9*#]{1,6}$
+            - type: "null"
+          title: Extension
+          description:
+            "New extension on your connected phone system (1 to 6 digits,
+            * or #). Omit to leave unchanged; explicit null clears it. The contact
+            must keep at least one of phone_e164, email or extension."
       additionalProperties: false
       type: object
       title: ContactPatch

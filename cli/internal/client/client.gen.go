@@ -2104,13 +2104,16 @@ type ConfirmRequest struct {
 
 // ContactCreate defines model for ContactCreate.
 type ContactCreate struct {
-	// Email Email address, stored lowercased. At least one of phone_e164 or email is required.
+	// Email Email address, stored lowercased. At least one of phone_e164, email or extension is required.
 	Email *string `json:"email,omitempty"`
+
+	// Extension Extension on your connected phone system (1 to 6 digits, * or #), for handover on calls to a connected number. At least one of phone_e164, email or extension is required.
+	Extension *string `json:"extension,omitempty"`
 
 	// Name Display name for the contact.
 	Name string `json:"name"`
 
-	// PhoneE164 Phone number, E.164 format. At least one of phone_e164 or email is required.
+	// PhoneE164 Phone number, E.164 format. At least one of phone_e164, email or extension is required.
 	PhoneE164 *string `json:"phone_e164,omitempty"`
 }
 
@@ -2120,6 +2123,9 @@ type ContactCreate struct {
 type ContactEntry struct {
 	// Email Email address. Null if none on file.
 	Email *string `json:"email,omitempty"`
+
+	// Extension Extension on your connected phone system. Null if none on file.
+	Extension *string `json:"extension,omitempty"`
 
 	// Id 'member:<user_id>' for an org member, or the contact row's UUID (as a string) for a manual contact.
 	Id string `json:"id"`
@@ -2151,13 +2157,16 @@ type ContactListResponse struct {
 
 // ContactPatch defines model for ContactPatch.
 type ContactPatch struct {
-	// Email New email address, stored lowercased. Omit to leave unchanged; explicit null clears it. The contact must keep at least one of phone_e164 or email.
+	// Email New email address, stored lowercased. Omit to leave unchanged; explicit null clears it. The contact must keep at least one of phone_e164, email or extension.
 	Email *string `json:"email,omitempty"`
+
+	// Extension New extension on your connected phone system (1 to 6 digits, * or #). Omit to leave unchanged; explicit null clears it. The contact must keep at least one of phone_e164, email or extension.
+	Extension *string `json:"extension,omitempty"`
 
 	// Name New display name. Omit to leave unchanged; cannot be set to null.
 	Name *string `json:"name,omitempty"`
 
-	// PhoneE164 New phone number, E.164 format. Omit to leave unchanged; explicit null clears it. The contact must keep at least one of phone_e164 or email.
+	// PhoneE164 New phone number, E.164 format. Omit to leave unchanged; explicit null clears it. The contact must keep at least one of phone_e164, email or extension.
 	PhoneE164 *string `json:"phone_e164,omitempty"`
 }
 
