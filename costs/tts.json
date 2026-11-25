@@ -1029,7 +1029,7 @@
       "verification_method": "manual-confirmed",
       "verified_by": "codex",
       "source_url": "https://elevenlabs.io/pricing/api",
-      "notes": "Direct pay-as-you-go rate is $0.04 per 1,000 characters. The October 2026 launch promotion has ended. The real-time model uses the Text to Dialogue WebSocket (https://elevenlabs.io/docs/eleven-api/guides/how-to/websockets/realtime-tdd). The ~100 ms first-audio figure is vendor-reported. Confidence is medium because the exact direct rate appears on the pricing page."
+      "notes": "Direct pay-as-you-go rate is $0.04 per 1,000 characters. The October 2026 launch promotion has ended. The real-time model uses the Text to Dialogue WebSocket (https://elevenlabs.io/docs/eleven-api/guides/how-to/websockets/realtime-tdd). The 100 ms figure is the vendor median server-side latency on a warm WebSocket, excluding network and playback (https://elevenlabs.io/docs/eleven-api/concepts/latency-methodology). Confidence is medium because the exact direct rate appears on the pricing page."
     },
     {
       "provider": "Mistral",
@@ -1081,7 +1081,6 @@
       "languages": ["en", "es", "fr", "de", "it", "pt"],
       "streaming_supported": true,
       "voice_cloning": true,
-      "time_to_first_byte_ms": 90,
       "deployment_options": ["native"],
       "confidence": "high",
       "last_verified": "2026-11-25",
@@ -1089,13 +1088,13 @@
       "verification_method": "manual-confirmed",
       "verified_by": "codex",
       "source_url": "https://www.assemblyai.com/pricing",
-      "notes": "Direct pay-as-you-go rate for input characters. US and EU processing and cloned voices cost the same. The ~90 ms first-audio figure is vendor-reported. The launch confirms the rate (https://www.assemblyai.com/blog/text-to-speech-api) and the OpenAI compatibility guide confirms the canonical model ID (https://www.assemblyai.com/blog/migrate-openai-tts-to-assemblyai)."
+      "notes": "Direct pay-as-you-go rate for input characters. US and EU processing and cloned voices cost the same. AssemblyAI reports ~90 ms to first audio in production and a 47 ms median time to first byte in its single-client benchmark. The launch confirms the rate (https://www.assemblyai.com/blog/text-to-speech-api) and the OpenAI compatibility guide confirms the canonical model ID (https://www.assemblyai.com/blog/migrate-openai-tts-to-assemblyai)."
     },
     {
       "provider": "SpeechifyAI",
       "provider_url": "https://speechify.ai",
       "model_id": "simba-3.5",
-      "display_name": "Simba 3.5",
+      "display_name": "Simba 3.5 (Starter, $10/mo)",
       "price_per_1m_chars_usd": "15",
       "voice_quality": "neural",
       "languages": [
@@ -1152,7 +1151,7 @@
       "streaming_supported": true,
       "voice_cloning": true,
       "deployment_options": ["native"],
-      "confidence": "high",
+      "confidence": "medium",
       "last_verified": "2026-11-25",
       "last_changed_at": "2026-11-25",
       "verification_method": "manual-confirmed",
