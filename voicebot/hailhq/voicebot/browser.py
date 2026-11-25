@@ -365,7 +365,7 @@ async def run_browser_session(
             None,
             ctx.proc.userdata["vad"],
             org_cfgs=configs,
-            voice_id_override=cfg.get("voice_id"),
+            voice_id_override=cfg.get("scoped_voice_id") or cfg.get("voice_id"),
             language=language,
             voice_provider=cfg.get("voice_provider"),
         )

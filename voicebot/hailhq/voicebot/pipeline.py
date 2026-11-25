@@ -647,8 +647,19 @@ def build_tts(
             uses_workspace_config = bool(
                 selected.api_key or selected.params.get("model")
             )
+            default_voice = (
+                settings.cartesia_voice_id
+                if voice_provider == "cartesia"
+                else settings.elevenlabs_voice_id
+            )
             fallback = _house_tts(
-                None, language, skip=None if uses_workspace_config else voice_provider
+                None,
+                language,
+                skip=(
+                    voice_provider
+                    if not uses_workspace_config and voice_id_override == default_voice
+                    else None
+                ),
             )
             if fallback:
                 return agents_tts.FallbackAdapter([primary, *fallback])

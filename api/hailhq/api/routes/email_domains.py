@@ -885,9 +885,13 @@ async def patch_email_domain(
     # ---- agent route (any kind) ----
     # Null clears the route, so "sent" is what counts here.
     expected_agent = "expected_email_agent_id" in body.model_fields_set
-    if expected_agent and "email_agent_id" not in body.model_fields_set:
+    if (
+        expected_agent
+        and "email_agent_id" not in body.model_fields_set
+        and body.email_agent_scope is None
+    ):
         raise unprocessable(
-            "send email_agent_id with its precondition",
+            "send email_agent_id or email_agent_scope with its precondition",
             loc=["body", "expected_email_agent_id"],
         )
     if "email_agent_id" in body.model_fields_set:
@@ -939,7 +943,10 @@ async def patch_email_domain(
         updates["email_agent_id"] = body.email_agent_id
         # A new agent starts at members: an old "anyone" was chosen for the
         # agent before it, and a cleared or deleted route leaves it on the row.
-        if body.email_agent_id not in (None, sd.email_agent_id):
+        previous_agent = (
+            body.expected_email_agent_id if expected_agent else sd.email_agent_id
+        )
+        if body.email_agent_id not in (None, previous_agent):
             updates["email_agent_scope"] = "members"
     if body.email_agent_scope is not None:
         updates["email_agent_scope"] = body.email_agent_scope

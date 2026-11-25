@@ -129,6 +129,17 @@ def test_agent_voice_respects_workspace_fallback_policy(captured_plugins) -> Non
     assert "elevenlabs" not in captured_plugins
 
 
+def test_scoped_house_voice_can_fall_back_to_the_default_voice(
+    captured_plugins,
+) -> None:
+    org = ResolvedLayer("cartesia", None, {}, True)
+    build_tts(org, "agent-voice", "th", voice_provider="cartesia")
+    assert [call.kwargs["voice"] for call in captured_plugins["cartesia"]] == [
+        "agent-voice",
+        "house-voice",
+    ]
+
+
 def test_agent_voice_retains_same_provider_fallback_for_a_byo_key(
     captured_plugins,
 ) -> None:

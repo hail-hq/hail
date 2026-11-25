@@ -9,22 +9,27 @@ from hailhq.core.schemas import AgentResponse, CallCreate, VoiceConfig
 
 
 @pytest.mark.parametrize(
-    ("voice_config", "voice_id"),
+    ("voice_config", "voice_id", "voice_provider"),
     [
-        ({"language": "it", "voice_id": "legacy"}, "legacy"),
-        ({"language": "it", "voice_id": "legacy", "voice_provider": None}, "legacy"),
+        ({"language": "it", "voice_id": "legacy"}, "legacy", None),
+        (
+            {"language": "it", "voice_id": "legacy", "voice_provider": None},
+            "legacy",
+            None,
+        ),
         (
             {
                 "language": "it",
                 "scoped_voice_id": "selected",
                 "voice_provider": "cartesia",
             },
-            None,
+            "selected",
+            "cartesia",
         ),
     ],
 )
 def test_saved_agent_voice_settings_keep_outbound_calls_compatible(
-    voice_config: dict, voice_id: str | None
+    voice_config: dict, voice_id: str, voice_provider: str | None
 ) -> None:
     agent = Agent(system_prompt="Help the caller.", voice_config=voice_config.copy())
     request = CallCreate(to="+14155550123", agent_id=uuid4(), recipient_consent=True)
@@ -33,6 +38,7 @@ def test_saved_agent_voice_settings_keep_outbound_calls_compatible(
 
     assert body.voice_config.language == "it"
     assert body.voice_config.voice_id == voice_id
+    assert body.voice_config.voice_provider == voice_provider
     public_config = AgentResponse._public_voice_config(agent.voice_config)
     assert VoiceConfig.model_validate(public_config) == body.voice_config
     assert agent.voice_config == voice_config

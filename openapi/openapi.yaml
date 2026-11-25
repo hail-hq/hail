@@ -8930,8 +8930,8 @@ components:
             - type: "null"
           title: Expected Email Agent Id
           description:
-            Optional precondition for changing email_agent_id. Null expects
-            no current agent. Returns 409 if another agent is assigned.
+            Optional precondition for changing email_agent_id or email_agent_scope.
+            Null expects no current agent. Returns 409 if another agent is assigned.
       additionalProperties: false
       type: object
       title: EmailDomainPatch

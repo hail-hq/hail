@@ -278,7 +278,7 @@ async def create_agent(
         ai_disclosure=body.ai_disclosure,
         recording_enabled=body.recording_enabled,
         ai_disclosure_line=body.ai_disclosure_line,
-        voice_config=body.voice_config.model_dump(mode="json"),
+        voice_config=body.voice_config.to_storage(),
         tools=_with_handover_tool(body.tools, bool(handover)),
         max_duration_seconds=body.max_duration_seconds,
         handover_max_duration_seconds=body.handover_max_duration_seconds,
@@ -391,13 +391,13 @@ async def update_agent(
             changes.pop(field)
     if "voice_config" in changes:
         voice = body.voice_config.model_dump(mode="json")
-        saved_voice = agent.voice_config or {}
+        saved_voice = VoiceConfig.public_dict(agent.voice_config or {})
         if any(
             voice[field] != saved_voice.get(field)
             for field in ("language", "voice_id", "voice_provider")
         ):
             await _check_scoped_voice(db, principal.organization_id, body.voice_config)
-        changes["voice_config"] = voice
+        changes["voice_config"] = body.voice_config.to_storage()
     # Validate before any attribute is set: the validation queries would
     # autoflush a pending name change outside the conflict handler below.
     items = None

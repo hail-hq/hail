@@ -200,15 +200,20 @@ class VoiceConfig(BaseModel):
             self.voice_provider = None
         return self
 
+    def to_storage(self) -> dict:
+        """Keep scoped IDs out of the legacy key read by older workers."""
+        config = self.model_dump(mode="json")
+        if self.voice_provider and self.voice_id:
+            config["scoped_voice_id"] = config.pop("voice_id")
+        return config
 
     @staticmethod
-    def legacy_agent_dict(config: dict) -> dict:
-        """Skip fields written by releases that support provider-specific voices."""
-        return {
-            key: value
-            for key, value in config.items()
-            if key not in {"scoped_voice_id", "voice_provider"}
-        }
+    def public_dict(config: dict) -> dict:
+        if "scoped_voice_id" not in config:
+            return config
+        public = dict(config)
+        public["voice_id"] = public.pop("scoped_voice_id")
+        return public
 
 
 class ConsentAttestationMixin(BaseModel):
@@ -1804,11 +1809,10 @@ class AgentResponse(BaseModel):
     created_at: datetime = Field(description="ISO 8601 timestamp.")
     updated_at: datetime = Field(description="ISO 8601 timestamp.")
 
-
     @field_validator("voice_config")
     @classmethod
     def _public_voice_config(cls, value: dict) -> dict:
-        return VoiceConfig.legacy_agent_dict(value)
+        return VoiceConfig.public_dict(value)
 
 
 class AgentListResponse(BaseModel):
@@ -2290,7 +2294,7 @@ class EmailDomainPatch(_PrefixNames):
     expected_email_agent_id: UUID | None = Field(
         default=None,
         description=(
-            "Optional precondition for changing email_agent_id. Null expects "
+            "Optional precondition for changing email_agent_id or email_agent_scope. Null expects "
             "no current agent. Returns 409 if another agent is assigned."
         ),
     )

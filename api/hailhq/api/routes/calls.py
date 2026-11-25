@@ -124,10 +124,7 @@ def apply_agent_defaults(body: CallCreate, agent: Agent) -> CallCreate:
             continue
         value = getattr(agent, field)
         if field == "voice_config":
-            # On rollback, keep the language and fall back to the workspace voice.
-            value = VoiceConfig.model_validate(
-                VoiceConfig.legacy_agent_dict(value or {})
-            )
+            value = VoiceConfig.model_validate(VoiceConfig.public_dict(value or {}))
         update[field] = value
     return body.model_copy(update=update)
 
@@ -585,7 +582,7 @@ async def create_call(
             )
         from_number = pool_number
 
-    voice_config = body.voice_config.model_dump()
+    voice_config = body.voice_config.to_storage()
 
     # 2. Insert the Call row. Pool path needs flush-then-bind: see
     #    claim_pool_number docstring for the FK dance.
