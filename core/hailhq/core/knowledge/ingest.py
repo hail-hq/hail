@@ -253,6 +253,9 @@ class KnowledgeIngestWorker:
     async def _embed_pieces(self) -> int:
         """Embed pieces with no vector of the configured model, document by
         document. Returns how many were embedded."""
+        if self._storage_state == "over" and await self._storage() != "over":
+            # Space came back during a storage wait: no need to sit it out.
+            self._embed_after = 0.0
         if time.monotonic() < self._embed_after:
             return 0
         embedder = self._embedder()
@@ -261,33 +264,8 @@ class KnowledgeIngestWorker:
         self._probe_ok = False  # Each pass sends the probe again when needed.
         done = tried = 0
         while not self._stop.is_set() and tried < EMBED_PER_TICK:
-            # New vectors (pieces stored with no key) must fit under the cap.
-            # Past it, only vectors of another model are replaced, within
-            # ``REEMBED_HEADROOM`` more (each UPDATE writes a new row until
-            # vacuum), so a model change can finish; past that, it waits.
-            async with self._session_factory() as db:
-                full = await storage_full(db, adding=BATCH * _VECTOR_BYTES)
-                over = full and await storage_full(
-                    db, adding=BATCH * _VECTOR_BYTES - REEMBED_HEADROOM
-                )
-            state = "over" if over else "full" if full else ""
-            if state and state != self._storage_state:
-                if over:
-                    logger.warning(
-                        "knowledge: storage is about %d MB past the cap; "
-                        "vectors wait until VACUUM FULL knowledge_pieces gives "
-                        "space back",
-                        REEMBED_HEADROOM // (1024 * 1024),
-                    )
-                else:
-                    logger.warning(
-                        "knowledge: storage is full; new vectors wait (keyword "
-                        "search), other-model vectors are replaced within %d MB",
-                        REEMBED_HEADROOM // (1024 * 1024),
-                    )
-            if not state and self._storage_state:
-                logger.info("knowledge: storage has room again; embedding goes on")
-            self._storage_state = state
+            state = await self._storage()
+            full, over = bool(state), state == "over"
             if over:
                 self._embed_after = time.monotonic() + EMBED_BACKOFF[1]
                 break
@@ -392,6 +370,43 @@ class KnowledgeIngestWorker:
         if done:
             logger.info("knowledge: embedded %d piece(s)", done)
         return done
+
+    async def _storage(self) -> str:
+        """The storage state, logged once per change: "" (room), "full"
+        (new vectors wait; other-model vectors are still replaced, within
+        ``REEMBED_HEADROOM`` past the cap, since each UPDATE writes a new
+        row until vacuum) or "over" (past that, every vector waits)."""
+        async with self._session_factory() as db:
+            full = await storage_full(db, adding=BATCH * _VECTOR_BYTES)
+            over = full and await storage_full(
+                db, adding=BATCH * _VECTOR_BYTES - REEMBED_HEADROOM
+            )
+        state = "over" if over else "full" if full else ""
+        before, self._storage_state = self._storage_state, state
+        if state == before:
+            return state
+        headroom = REEMBED_HEADROOM // (1024 * 1024)
+        if state == "over":
+            logger.warning(
+                "knowledge: storage is about %d MB past the cap; vectors wait "
+                "until VACUUM FULL knowledge_pieces gives space back",
+                headroom,
+            )
+        elif state == "full" and before == "over":
+            logger.info(
+                "knowledge: storage is back within %d MB of the cap; "
+                "other-model vectors are replaced again, new vectors still wait",
+                headroom,
+            )
+        elif state == "full":
+            logger.warning(
+                "knowledge: storage is full; new vectors wait (keyword search), "
+                "other-model vectors are replaced within %d MB",
+                headroom,
+            )
+        else:
+            logger.info("knowledge: storage has room again")
+        return state
 
     async def _embed_rows(
         self, embedder: Embedder, rows

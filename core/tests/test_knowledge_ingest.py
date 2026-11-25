@@ -1079,8 +1079,43 @@ async def test_past_headroom_warning_logs_once(
             worker._embed_after = 0.0
             await worker.tick()
         assert caplog.text.count("past the cap") == 1
+        # Space back during the wait: the next tick goes on at once.
         monkeypatch.setattr(ingest_module, "storage_full", room)
-        worker._embed_after = 0.0
         await worker.tick()
-        assert "room again" in caplog.text
+        await worker.tick()
+        assert caplog.text.count("room again") == 1
+        pieces = await pieces_of(async_session, org)
+        assert all(p.embedding_model == "fake-embedding-2" for p in pieces)
     assert "replaced within" not in caplog.text
+
+
+async def test_storage_state_changes_log_once_each(
+    async_session, worker, s3, fake, monkeypatch, caplog
+) -> None:
+    """full, full, over, full, room, room: one warning per new state, an
+    info line (not a warning) going from over back to full, and one "room
+    again" line."""
+    org = uuid.uuid4()
+    await add_document(async_session, s3, org, NORTHGATE_MANUAL.encode())
+    await worker.tick()
+    states = iter(["full", "full", "over", "full", "", ""])
+    current = {"state": ""}
+
+    async def fake_full(db, *, adding=0):
+        # The first call per check asks "full", the second "over".
+        if adding == ingest_module.BATCH * ingest_module._VECTOR_BYTES:
+            return current["state"] in ("full", "over")
+        return current["state"] == "over"
+
+    monkeypatch.setattr(ingest_module, "storage_full", fake_full)
+    with caplog.at_level(logging.INFO, logger="hailhq.core.knowledge.ingest"):
+        for state in states:
+            current["state"] = state
+            await worker._storage()
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert [r.getMessage().split(";")[0] for r in warnings] == [
+        "knowledge: storage is full",
+        "knowledge: storage is about 30 MB past the cap",
+    ]
+    assert caplog.text.count("back within") == 1
+    assert caplog.text.count("room again") == 1
