@@ -81,7 +81,6 @@ from hailhq.core.providers.tts.direct import (
     house_voice_ready,
 )
 from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
-from hailhq.core.voice_catalog import known_legacy_voice_ids
 from hailhq.voicebot.direct_tts import DirectTTS
 from livekit.agents import (
     AgentSession,
@@ -654,13 +653,21 @@ def build_tts(
                 org.provider,
                 language,
             )
-            # An unscoped override belongs to the workspace's provider by
-            # default. Keep it only if we can confirm it is also a house voice.
-            if (
-                org.provider in DIRECT_VOICES
-                and voice_id_override not in known_legacy_voice_ids(language)
-            ):
-                voice_id_override = None
+            if org.provider in DIRECT_VOICES and voice_id_override:
+                if voice_id_override in (
+                    org.params.get("voice_id"),
+                    DIRECT_VOICES[org.provider][1],
+                ):
+                    return build_tts(None, None, language)
+                # Legacy overrides carry no provider ID. Try the requested
+                # voice once and keep configured voices behind it in case
+                # the override belongs to the skipped provider.
+                override_chain = _house_tts(voice_id_override, language)
+                if override_chain:
+                    return agents_tts.FallbackAdapter(
+                        [*override_chain, *_house_tts(None, language)],
+                        max_retry_per_tts=0,
+                    )
             return build_tts(None, voice_id_override, language)
         try:
             byo = _org_tts(org, voice_id_override, language)

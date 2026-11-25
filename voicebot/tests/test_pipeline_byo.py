@@ -6,7 +6,7 @@ import uuid
 from dataclasses import dataclass
 
 import pytest
-from hailhq.core.config import VoicePreference, settings
+from hailhq.core.config import settings
 from hailhq.core.models import OrgProviderConfig
 from hailhq.core.secret_cipher import generate_key
 from hailhq.voicebot import pipeline
@@ -356,24 +356,15 @@ def test_removed_direct_key_uses_house_speech_only_with_consent(
         build_tts(strict, language="en")
 
 
-def test_language_fallback_preserves_only_known_legacy_voices(
-    monkeypatch, captured_plugins
+def test_language_fallback_keeps_house_default_behind_an_unscoped_override(
+    captured_plugins,
 ):
-    monkeypatch.setattr(
-        settings,
-        "voice_shortlist_preferences",
-        {
-            "fr": [
-                VoicePreference(
-                    provider="cartesia",
-                    voice_id="saved-french-voice",
-                    reason="French preview",
-                )
-            ],
-        },
-    )
     org = ResolvedLayer("gemini", "key", {"voice_id": "Charon"}, True)
-    build_tts(org, voice_id_override="saved-french-voice", language="fr")
-    assert captured_plugins["cartesia"][0].kwargs["voice"] == "saved-french-voice"
-    build_tts(org, voice_id_override="Kore", language="fr")
-    assert captured_plugins["cartesia"][1].kwargs["voice"] == "house-voice"
+    chain = build_tts(org, voice_id_override="saved-french-voice", language="fr")
+    assert len(chain._tts_instances) == 2
+    assert [call.kwargs["voice"] for call in captured_plugins["cartesia"]] == [
+        "saved-french-voice",
+        "house-voice",
+    ]
+    build_tts(org, voice_id_override="Charon", language="fr")
+    assert captured_plugins["cartesia"][-1].kwargs["voice"] == "house-voice"

@@ -20,7 +20,6 @@ from hailhq.core.languages import (
     CARTESIA_MODEL_LANGUAGES,
     SUPPORTED_LANGUAGES,
     elevenlabs_language,
-    tts_providers_for,
 )
 from hailhq.core.providers.tts.direct import DIRECT_VOICES, house_voice_ready
 
@@ -290,26 +289,6 @@ async def _provider_catalogue(provider: str, model: str, key: str) -> dict:
         return result
 
 
-def known_legacy_voice_ids(language: str | None) -> set[str]:
-    """Legacy voice IDs whose provider we can confirm without a network request."""
-    allowed = tts_providers_for(language)
-    defaults = {
-        provider: voice
-        for provider, key, voice in (
-            ("cartesia", settings.cartesia_api_key, settings.cartesia_voice_id),
-            ("elevenlabs", settings.eleven_api_key, settings.elevenlabs_voice_id),
-        )
-        if key and provider in allowed
-    }
-    ids = {voice for voice in defaults.values() if voice}
-    ids.update(
-        choice.voice_id
-        for choice in settings.voice_shortlist_preferences.get(language or "en", [])
-        if choice.provider in defaults
-    )
-    return ids
-
-
 async def voice_catalogue(language: str, *, include_direct: bool = False) -> dict:
     if language not in SUPPORTED_LANGUAGES:
         raise ValueError("Choose a supported language")
@@ -379,9 +358,6 @@ async def voice_catalogue(language: str, *, include_direct: bool = False) -> dic
     return {
         "voices": voices,
         "supported_providers": sorted(SUPPORTED_LANGUAGES[language].tts),
-        "known_legacy_voices": sorted(
-            known_legacy_voice_ids(language) & {v["id"] for v in voices}
-        ),
         "languages": language_options(),
         "partial": partial,
         "default_voice": (
