@@ -392,3 +392,18 @@ async def test_failed_vector_is_asked_again(async_session, fake) -> None:
     # Now cached: no third request.
     assert await knowledge.context_for(words)
     assert fake.calls == 2
+
+
+async def test_any_embedding_error_fails_open(async_session, monkeypatch) -> None:
+    class Broken(FakeEmbedder):
+        async def embed_query(self, text, *, timeout=0):
+            raise RuntimeError("unexpected")
+
+    broken = Broken()
+    monkeypatch.setattr(module, "get_embedder", lambda: broken)
+    org, agent_id = await seed(async_session)
+    knowledge = await loaded(org, agent_id)
+    section = await knowledge.context_for("what does error E 204 mean")
+    assert section and "E-204" in section
+    section = await reply_knowledge(org, agent_id, "What does error E-204 mean?")
+    assert section and "E-204" in section

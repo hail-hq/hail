@@ -315,6 +315,11 @@ class CallKnowledge:
             )
         except EmbeddingUnavailable as exc:
             logger.warning("knowledge: embedding API failed (%s); keyword search", exc)
+        except Exception as exc:
+            logger.warning(
+                "knowledge: question vector failed (%s); keyword search",
+                type(exc).__name__,
+            )
         return None
 
 
@@ -365,9 +370,14 @@ async def reply_knowledge(
         if embedder is not None:
             try:
                 vector = await embedder.embed_query(query)
-            except EmbeddingUnavailable as exc:
+            except Exception as exc:
                 logger.warning(
-                    "knowledge: embedding API failed (%s); keyword search", exc
+                    "knowledge: embedding API failed (%s); keyword search",
+                    (
+                        exc
+                        if isinstance(exc, EmbeddingUnavailable)
+                        else type(exc).__name__
+                    ),
                 )
         async with session_scope() as db:
             hits = await search_pieces(

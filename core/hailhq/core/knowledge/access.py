@@ -103,9 +103,9 @@ async def knowledge_bytes(db: AsyncSession) -> int:
     )
 
 
-async def storage_full(db: AsyncSession) -> bool:
-    """True past ``GLOBAL_MAX_BYTES``."""
-    return await knowledge_bytes(db) >= GLOBAL_MAX_BYTES
+async def storage_full(db: AsyncSession, *, adding: int = 0) -> bool:
+    """True past ``GLOBAL_MAX_BYTES``, counting ``adding`` more bytes."""
+    return await knowledge_bytes(db) + adding >= GLOBAL_MAX_BYTES
 
 
 async def agent_uses_knowledge(

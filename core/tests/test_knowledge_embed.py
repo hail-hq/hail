@@ -119,6 +119,30 @@ async def test_timeout_raises_unavailable(requests) -> None:
         await Embedder(CONFIG).embed_query("q")
 
 
+async def test_any_client_error_raises_unavailable(requests) -> None:
+    """A bad setting (a URL or key httpx cannot send) fails open too."""
+    _, state = requests
+
+    def broken(request):
+        raise ValueError("cannot send")
+
+    state["reply"] = broken
+    with pytest.raises(EmbeddingUnavailable, match="ValueError"):
+        await Embedder(CONFIG).embed_query("q")
+
+
+async def test_refused_input_is_marked(requests) -> None:
+    _, state = requests
+    state["reply"] = lambda r: httpx.Response(400, json={"error": "bad"})
+    with pytest.raises(EmbeddingUnavailable) as caught:
+        await Embedder(CONFIG).embed(["q"])
+    assert caught.value.refused
+    state["reply"] = lambda r: httpx.Response(429)
+    with pytest.raises(EmbeddingUnavailable) as caught:
+        await Embedder(CONFIG).embed(["q"])
+    assert not caught.value.refused
+
+
 def test_google_key_only_for_google_url(monkeypatch) -> None:
     monkeypatch.setattr(settings, "hail_embedding_api_key", "")
     monkeypatch.setattr(settings, "google_api_key", "google-key")

@@ -25,9 +25,9 @@ product as the cosine. Each piece stores the model that embedded it
 the current model, and the ingest worker re-embeds the rest
 (``ingest.KnowledgeIngestWorker``).
 
-Fails closed to the caller: any error or timeout raises
-``EmbeddingUnavailable``, which every caller turns into keyword search (a
-call, a text, an email reply, the search API) or a later retry (ingest).
+Fails open: any error or timeout raises ``EmbeddingUnavailable``, which
+every caller turns into keyword search (a call, a text, an email reply,
+the search API) or a later retry (ingest).
 Nothing here logs text or the key.
 """
 
@@ -58,7 +58,7 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-# The width of ``knowledge_pieces.embedding`` (migration 0093).
+# The width of ``knowledge_pieces.embedding`` (the knowledge base migration).
 DIMS = 1536
 # Texts per request: Gemini's OpenAI-compatible endpoint takes at most 100.
 BATCH = 100
@@ -74,14 +74,28 @@ BATCH_TIMEOUT = 30.0
 _GOOGLE_HOST = "generativelanguage.googleapis.com"
 
 
+# Answers that refuse the input itself (bad or too long); retrying the same
+# texts never helps. 401, 403, 404 and 429 are the account or the setting.
+_REFUSED = frozenset({400, 413, 422})
+
+
 class EmbeddingUnavailable(RuntimeError):
     """The API failed, timed out or answered something unusable. The
     message names the cause (a status code or an exception type), never
-    text. ``retry_after`` is the server's Retry-After, in seconds."""
+    text. ``retry_after`` is the server's Retry-After, in seconds.
+    ``refused``: the API refused these texts (a 400, 413 or 422, or a zero
+    vector), so the same texts will fail again."""
 
-    def __init__(self, message: str, *, retry_after: float | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        retry_after: float | None = None,
+        refused: bool = False,
+    ) -> None:
         super().__init__(message)
         self.retry_after = retry_after
+        self.refused = refused
 
 
 @dataclass(frozen=True)
@@ -130,7 +144,7 @@ def normalize(rows: np.ndarray) -> np.ndarray:
     rows = np.asarray(rows, dtype=np.float32)
     norms = np.linalg.norm(rows, axis=-1, keepdims=True)
     if not np.all(np.isfinite(norms)) or np.any(norms == 0):
-        raise EmbeddingUnavailable("a zero or invalid vector")
+        raise EmbeddingUnavailable("a zero or invalid vector", refused=True)
     return rows / norms
 
 
@@ -174,7 +188,9 @@ class Embedder:
                 headers={"Authorization": f"Bearer {self._config.api_key}"},
                 timeout=timeout,
             )
-        except httpx.HTTPError as exc:
+        except Exception as exc:
+            # Any failure, also a bad URL or key setting (httpx.InvalidURL,
+            # UnicodeEncodeError), never only network errors.
             raise EmbeddingUnavailable(type(exc).__name__) from None
         if response.status_code != 200:
             retry_after = None
@@ -183,7 +199,9 @@ class Embedder:
             except ValueError:
                 pass
             raise EmbeddingUnavailable(
-                f"HTTP {response.status_code}", retry_after=retry_after
+                f"HTTP {response.status_code}",
+                retry_after=retry_after,
+                refused=response.status_code in _REFUSED,
             )
         try:
             # Gemini leaves out ``"index": 0`` (a protobuf default).

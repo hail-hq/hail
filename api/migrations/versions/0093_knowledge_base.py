@@ -63,6 +63,20 @@ def upgrade() -> None:
         END
         $$;
         """)
+    # halfvec needs 0.7.0 and the searches' iterative index scans 0.8.0.
+    op.execute("""
+        DO $$
+        BEGIN
+          IF COALESCE((
+                SELECT string_to_array(
+                    regexp_replace(extversion, '[^0-9.].*$', ''), '.')::int[]
+                FROM pg_extension WHERE extname = 'vector'
+              ), ARRAY[0]) < ARRAY[0, 8, 0] THEN
+            RAISE EXCEPTION 'the knowledge base needs pgvector 0.8.0 or later';
+          END IF;
+        END
+        $$;
+        """)
     op.drop_constraint("file_uploads_purpose_check", "file_uploads", type_="check")
     op.create_check_constraint(
         "file_uploads_purpose_check",

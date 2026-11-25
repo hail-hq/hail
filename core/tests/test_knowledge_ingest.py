@@ -23,6 +23,7 @@ from hailhq.core.knowledge.access import (
     log_failure,
     short_cause,
 )
+from hailhq.core.knowledge.embed import EmbeddingUnavailable
 from hailhq.core.knowledge.index import MemoryIndex, Piece
 from hailhq.core.knowledge.ingest import MAX_ATTEMPTS, KnowledgeIngestWorker
 from hailhq.core.knowledge.search import search_pieces, vector_literal
@@ -820,3 +821,50 @@ async def test_vector_index_keeps_a_small_workspace_results(
     )
     assert [h.piece.text for h in hits] == ["opening hours nine to five"]
     await async_session.rollback()
+
+
+async def test_refused_piece_never_holds_up_the_others(
+    async_session, worker, s3, fake
+) -> None:
+    """A batch the API refuses is sent again one piece at a time: the
+    refused piece is skipped (keywords only), every other piece gets its
+    vector, and no backoff starts."""
+    org = uuid.uuid4()
+    rows = "Part,Name\n" + "\n".join(f"P-{i},Item {i}" for i in range(5))
+    await add_document(
+        async_session, s3, org, (rows + "\nP-9,poison\n").encode(), "text/csv"
+    )
+    fake.refuse = "poison"
+    await worker.tick()
+    pieces = await pieces_of(async_session, org)
+    assert [p.embedding_model is None for p in pieces] == [False] * 5 + [True]
+    assert worker._embed_after == 0.0
+    calls = fake.calls
+    await worker.tick()
+    assert fake.calls == calls
+
+
+def test_backoff_never_overflows(worker) -> None:
+    worker._embed_failures = 5000
+    worker._back_off(EmbeddingUnavailable("HTTP 401"), 1)
+    assert worker._embed_after > 0
+
+
+async def test_refused_everything_is_a_setting_error(
+    async_session, worker, s3, fake
+) -> None:
+    """When no piece passes alone (a bad key or width also answers 400),
+    nothing is skipped: the pass backs off and tries every piece later."""
+    org = uuid.uuid4()
+    rows = "Part,Name\n" + "\n".join(f"P-{i},Item {i}" for i in range(6))
+    await add_document(async_session, s3, org, rows.encode(), "text/csv")
+    fake.refuse = "Item"
+    await worker.tick()
+    assert worker._embed_after > 0 and not worker._embed_skip
+    # One batch request plus a few single-piece probes, not one per piece.
+    assert fake.calls <= 1 + 3
+    fake.refuse = None
+    worker._embed_after = 0.0
+    await worker.tick()
+    pieces = await pieces_of(async_session, org)
+    assert all(p.embedding_model == "fake-embedding" for p in pieces)

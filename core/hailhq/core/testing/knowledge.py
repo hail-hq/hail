@@ -13,12 +13,14 @@ from hailhq.core.knowledge.text import terms
 class FakeEmbedder:
     """Bag of words hashed into ``DIMS`` buckets: texts sharing words point
     the same way. Same interface as ``embed.Embedder``. ``fail`` makes
-    every request raise ``EmbeddingUnavailable``; ``calls`` counts
+    every request raise ``EmbeddingUnavailable``; a request with a text
+    holding ``refuse`` is refused like an HTTP 400; ``calls`` counts
     requests."""
 
     def __init__(self, model: str = "fake-embedding") -> None:
         self.model = model
         self.fail = False
+        self.refuse: str | None = None
         self.calls = 0
 
     def one(self, text: str) -> np.ndarray:
@@ -40,6 +42,8 @@ class FakeEmbedder:
 
     async def embed(self, texts: list[str], *, timeout: float = 0) -> np.ndarray:
         self._check()
+        if self.refuse and any(self.refuse in t for t in texts):
+            raise EmbeddingUnavailable("HTTP 400", refused=True)
         if not texts:
             return np.zeros((0, DIMS), dtype=np.float32)
         return np.stack([self.one(t) for t in texts])

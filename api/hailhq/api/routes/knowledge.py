@@ -350,8 +350,12 @@ async def search_knowledge(
     if embedder is not None:
         try:
             vector = await embedder.embed_query(body.query)
-        except EmbeddingUnavailable as exc:
-            logger.warning("knowledge search: embedding API failed (%s)", exc)
+        except Exception as exc:
+            # Any failure: keyword search alone, never a 500.
+            logger.warning(
+                "knowledge search: embedding API failed (%s)",
+                exc if isinstance(exc, EmbeddingUnavailable) else type(exc).__name__,
+            )
     hits = await search_pieces(
         db,
         org,
