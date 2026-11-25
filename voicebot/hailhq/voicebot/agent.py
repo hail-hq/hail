@@ -319,11 +319,13 @@ class SpeechSanitizingAgent(Agent):
         # A long reply leaves no room to speak: it is spoken in short parts
         # with a pause between them (reply_limit.py).
         rest = self.continuation
-        if rest is not None:
-            rest.drop()
+        if rest is None:
+            # Nothing could speak the rest: do not cut the reply.
+            return Agent.default.llm_node(self, chat_ctx, tools, model_settings)
+        rest.drop()
         return limit_reply(
             Agent.default.llm_node(self, chat_ctx, tools, model_settings),
-            on_rest=rest.keep if rest is not None else None,
+            on_rest=rest.keep,
         )
 
     async def tts_node(self, text: Any, model_settings: Any) -> Any:

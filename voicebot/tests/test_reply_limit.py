@@ -15,6 +15,7 @@ from hailhq.voicebot.reply_limit import (
     limit_reply,
     split_reply,
 )
+from livekit.agents.types import FlushSentinel
 
 from .test_recovery import Session
 
@@ -70,12 +71,22 @@ def test_full_stops_without_spaces_count():
     assert 0 < len(spoken) < len(text) and spoken.endswith("\u3002")
 
 
-async def test_a_reply_that_calls_a_tool_is_spoken_whole():
-    def chunk(content=None, tool_calls=None):
-        return SimpleNamespace(
-            delta=SimpleNamespace(content=content, tool_calls=tool_calls or [])
-        )
+def chunk(content=None, tool_calls=None, usage=None):
+    return SimpleNamespace(
+        delta=SimpleNamespace(content=content, tool_calls=tool_calls or []),
+        usage=usage,
+    )
 
+
+def text_of(seen):
+    return "".join(
+        c if isinstance(c, str) else (c.delta.content or "")
+        for c in seen
+        if isinstance(c, str) or getattr(c, "delta", None)
+    )
+
+
+async def test_a_reply_that_calls_a_tool_is_spoken_whole():
     async def stream():
         for piece in (LONG[:80], LONG[80:]):
             yield chunk(piece)
@@ -84,12 +95,10 @@ async def test_a_reply_that_calls_a_tool_is_spoken_whole():
         yield SimpleNamespace(delta=None, usage="tokens")
 
     kept = []
-    seen = [c async for c in limit_reply(stream(), kept.append)]
-    spoken = "".join(c.delta.content or "" for c in seen if c.delta)
-    assert spoken == LONG + " Goodbye for now."
-    assert [c.delta.tool_calls for c in seen if c.delta and c.delta.tool_calls] == [
-        ["end_call"]
-    ]
+    seen = [c async for c in limit_reply(stream(), lambda *a: kept.append(a))]
+    assert text_of(seen) == LONG + " Goodbye for now."
+    tools = [c.delta.tool_calls for c in seen if getattr(c, "delta", None)]
+    assert [t for t in tools if t] == [["end_call"]]
     assert seen[-1].usage == "tokens"
     assert kept == []  # nothing is continued after a tool call
 
@@ -99,7 +108,8 @@ async def test_plain_text_streams_are_limited_too():
         for i in range(0, len(LONG), 11):
             yield LONG[i : i + 11]
 
-    assert "".join([c async for c in limit_reply(stream())]) == TWO
+    seen = [c async for c in limit_reply(stream())]
+    assert text_of(seen) == TWO
 
 
 REST = (
@@ -108,14 +118,70 @@ REST = (
 )
 
 
-async def test_the_rest_of_a_cut_reply_is_handed_over():
+async def test_the_part_and_the_rest_of_a_cut_reply_are_handed_over():
     async def text():
         for i in range(0, len(LONG), 11):
             yield LONG[i : i + 11]
 
     kept = []
-    assert "".join([c async for c in limit_reply(text(), kept.append)]) == TWO
-    assert [k.strip() for k in kept] == [REST]
+    seen = [c async for c in limit_reply(text(), lambda *a: kept.append(a))]
+    assert text_of(seen) == TWO
+    assert [(part, rest) for part, rest in kept] == [(TWO, REST)]
+
+
+async def test_the_voice_is_told_the_part_ended_as_soon_as_it_is_cut():
+    """Without the flush, the voice waits for held-back text before it speaks
+    the last sentence of the part."""
+    order = []
+
+    async def stream():
+        for i in range(0, len(LONG), 11):
+            order.append("model")
+            yield chunk(LONG[i : i + 11])
+
+    async for c in limit_reply(stream()):
+        order.append("flush" if isinstance(c, FlushSentinel) else "out")
+    assert order.count("flush") == 1
+    after = order[order.index("flush") + 1 :]
+    assert "model" in after and "out" not in after  # the model was still writing
+
+
+async def test_leaked_tool_syntax_is_never_kept_for_a_later_part():
+    leaked = (
+        "Sure, I will send that to you right now. One moment please.\n"
+        '{"name": "send_email", "arguments": {"body": "Dear Sam. Your booking is '
+        'confirmed for Tuesday at three. Please arrive ten minutes early."}}'
+    )
+    fenced = TWO + " Here it is. ```json sent``` And one more sentence for you."
+
+    for reply in (leaked, fenced):
+
+        async def stream(reply=reply):
+            yield reply
+
+        kept = []
+        [c async for c in limit_reply(stream(), lambda *a, kept=kept: kept.append(a))]
+        assert all("{" not in rest and "`" not in rest for _, rest in kept), kept
+
+
+async def test_chunks_are_copied_and_usage_is_never_dropped():
+    class Chunk:
+        def __init__(self, content, usage=None):
+            self.delta = SimpleNamespace(content=content, tool_calls=[])
+            self.usage = usage
+
+        def model_copy(self, deep=False):
+            return Chunk(self.delta.content, self.usage)
+
+    originals = [Chunk(LONG), Chunk(" More text.", usage="tokens")]
+
+    async def stream():
+        for c in originals:
+            yield c
+
+    seen = [c async for c in limit_reply(stream())]
+    assert originals[0].delta.content == LONG  # the SDK reads the original too
+    assert [c.usage for c in seen if getattr(c, "usage", None)] == ["tokens"]
 
 
 @pytest.mark.parametrize(
@@ -152,12 +218,18 @@ def test_other_scripts_and_run_on_replies_are_cut_too():
 def test_split_reply_gives_the_next_part_and_what_is_left():
     assert split_reply(LONG) == (TWO, REST)
     assert split_reply("Yes.") == ("Yes.", "")
+    # "No." is a sentence, not an abbreviation.
+    closed = (
+        "No. We are closed on Sundays, and on all public holidays as well, "
+        "I am sorry. We open again on Monday at nine."
+    )
+    assert split_reply(closed)[1] == "We open again on Monday at nine."
 
 
 @pytest.fixture
 def quick(monkeypatch):
-    monkeypatch.setattr(reply_limit, "PAUSE", 0.01)
-    monkeypatch.setattr(reply_limit, "SETTLE", 0.01)
+    monkeypatch.setattr(reply_limit, "PAUSE", 0.02)
+    monkeypatch.setattr(reply_limit, "SETTLE", 0.02)
 
 
 def continuing(can_continue=lambda: True):
@@ -167,21 +239,23 @@ def continuing(can_continue=lambda: True):
     return session, ReplyContinuation(session, can_continue=can_continue)
 
 
-def said(role="assistant", interrupted=False):
-    return {"item": SimpleNamespace(role=role, interrupted=interrupted)}
+def said(text=TWO, role="assistant", interrupted=False):
+    return {
+        "item": SimpleNamespace(role=role, interrupted=interrupted, text_content=text)
+    }
 
 
 async def test_the_rest_is_spoken_after_a_pause_when_they_stay_quiet(quick):
     session, rest = continuing()
-    rest.keep(REST + " " + REST)
+    rest.keep(TWO, REST + " " + REST)
     session.emit("conversation_item_added", **said())
-    await asyncio.sleep(0.05)
+    await asyncio.sleep(0.08)
     session.say.assert_called_once_with(REST)
-    session.emit("conversation_item_added", **said())  # that part finished
-    await asyncio.sleep(0.05)
+    session.emit("conversation_item_added", **said(REST))  # that part finished
+    await asyncio.sleep(0.08)
     assert [c.args[0] for c in session.say.call_args_list] == [REST, REST]
-    session.emit("conversation_item_added", **said())
-    await asyncio.sleep(0.05)
+    session.emit("conversation_item_added", **said(REST))
+    await asyncio.sleep(0.08)
     assert session.say.call_count == 2  # nothing is left
 
 
@@ -189,43 +263,59 @@ async def test_the_turn_being_answered_does_not_drop_the_rest(quick):
     # With early generation the SDK adds the user's turn after the reply text
     # exists, and before the first part is spoken.
     session, rest = continuing()
-    rest.keep(REST)
-    session.emit("conversation_item_added", **said(role="user"))
+    rest.keep(TWO, REST)
+    session.emit("conversation_item_added", **said("Tell me.", role="user"))
     session.emit("conversation_item_added", **said())
-    await asyncio.sleep(0.05)
+    await asyncio.sleep(0.08)
+    session.say.assert_called_once_with(REST)
+
+
+async def test_other_speech_finishing_first_does_not_start_the_pause(quick):
+    """A wait message can end while the reply's first part is still to play."""
+    session, rest = continuing()
+    rest.keep(TWO, REST)
+    session.emit("conversation_item_added", **said("One moment, I am checking."))
+    await asyncio.sleep(0.08)
+    session.say.assert_not_called()
+    assert rest.rest == REST
+    session.emit("conversation_item_added", **said())
+    await asyncio.sleep(0.08)
     session.say.assert_called_once_with(REST)
 
 
 @pytest.mark.parametrize("how", ["turn", "words", "interrupted", "not allowed"])
 async def test_the_rest_is_dropped_when_they_speak_or_the_call_moved_on(quick, how):
     session, rest = continuing(can_continue=lambda: how != "not allowed")
-    rest.keep(REST)
+    rest.keep(TWO, REST)
     session.emit("conversation_item_added", **said(interrupted=how == "interrupted"))
     if how == "turn":
-        session.emit("conversation_item_added", **said(role="user"))
+        session.emit("conversation_item_added", **said("Wait.", role="user"))
     if how == "words":
+        session.emit("user_state_changed", new_state="speaking")
         session.emit("user_input_transcribed", transcript="wait")
-    await asyncio.sleep(0.05)
+    await asyncio.sleep(0.12)
     session.say.assert_not_called()
     assert rest.rest == ""
 
 
 async def test_a_sound_without_words_only_delays_the_rest(quick):
     session, rest = continuing()
-    rest.keep(REST)
+    rest.keep(TWO, REST)
     session.user_state = "speaking"
     session.emit("conversation_item_added", **said())
-    await asyncio.sleep(0.05)
+    await asyncio.sleep(0.08)
     session.say.assert_not_called()
     session.user_state = "listening"
-    await asyncio.sleep(0.2)
+    await asyncio.sleep(0.3)
     session.say.assert_called_once_with(REST)
 
 
-async def test_an_okay_during_a_part_does_not_drop_the_rest(quick):
+async def test_an_okay_said_during_the_part_does_not_drop_the_rest(quick):
+    """Its text can arrive before the part ends or in the pause after it."""
     session, rest = continuing()
-    rest.keep(REST)
-    session.emit("user_input_transcribed", transcript="okay")  # while it spoke
+    rest.keep(TWO, REST)
+    session.emit("user_input_transcribed", transcript="okay")
     session.emit("conversation_item_added", **said())
-    await asyncio.sleep(0.05)
+    session.emit("user_input_transcribed", transcript="mhm")  # late, no new speech
+    await asyncio.sleep(0.08)
     session.say.assert_called_once_with(REST)

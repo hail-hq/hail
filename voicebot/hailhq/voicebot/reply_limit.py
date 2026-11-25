@@ -5,6 +5,12 @@ of about two sentences. After each part the agent is silent for a moment: when
 the other party speaks, the rest is dropped and their turn is answered; when
 they stay quiet, the next part is spoken. A reply that calls a tool is spoken
 whole.
+
+Known limits:
+- The length limits count characters and are sized for Latin text. Chinese,
+  Japanese and Thai replies are cut later than they should be.
+- A short word said in the pause ("mhm") is a turn like any other: the rest is
+  dropped and the model answers it.
 """
 
 from __future__ import annotations
@@ -13,6 +19,8 @@ import asyncio
 import logging
 from collections.abc import AsyncIterable, AsyncIterator, Callable
 from typing import Any
+
+from livekit.agents.types import FlushSentinel
 
 logger = logging.getLogger("hailhq.voicebot")
 SENTENCES = 2
@@ -40,7 +48,6 @@ _ABBREVIATIONS = frozenset(
         "jr",
         "vs",
         "etc",
-        "no",
         "nr",
         "inc",
         "ltd",
@@ -158,39 +165,80 @@ def split_reply(text: str) -> tuple[str, str]:
     return part.strip(), limiter.rest.strip()
 
 
+# Tool-call syntax a model can leak into its text. Speech stops at the first
+# marker (agent._sanitize_tts_stream), so nothing after one is kept either.
+_SYNTAX_MARKERS = ("```", "\n{", "\n[")
+
+
+def _speakable_rest(rest: str) -> str:
+    rest = rest.strip()
+    if rest[:1] in ("{", "[", "`"):
+        return ""
+    cuts = [i for i in (rest.find(m) for m in _SYNTAX_MARKERS) if i != -1]
+    return rest[: min(cuts)].strip() if cuts else rest
+
+
+def _with_text(chunk: Any, text: str | None) -> Any:
+    """A copy of ``chunk`` with other text: the SDK also reads the original."""
+    copy = getattr(chunk, "model_copy", None)
+    out = copy(deep=True) if copy is not None else chunk
+    out.delta.content = text
+    return out
+
+
 async def limit_reply(
-    stream: AsyncIterable[Any], on_rest: Callable[[str], None] | None = None
+    stream: AsyncIterable[Any], on_rest: Callable[[str, str], None] | None = None
 ) -> AsyncIterator[Any]:
     """Pass a reply stream through, holding back text after the first part.
 
-    ``on_rest`` gets the held-back text. A reply that calls a tool is spoken
-    whole: its text may carry what the tool acts on (a goodbye before a
-    hang-up, a number before a text is sent), and nothing continues after it.
+    ``on_rest(part, rest)`` gets the spoken part and the held-back text. A
+    reply that calls a tool is spoken whole: its text may carry what the tool
+    acts on (a goodbye before a hang-up, a number before a text is sent), and
+    nothing continues after it.
     """
     limiter = ReplyLimiter()
     called_tool = False
+    flushed = False
+    spoken: list[str] = []
     async for chunk in stream:
         if isinstance(chunk, str):
             if text := limiter.feed(chunk):
+                spoken.append(text)
                 yield text
+        elif not hasattr(chunk, "delta"):
+            yield chunk  # a flush or another marker: not ours to change
             continue
-        delta = getattr(chunk, "delta", None)
-        content = getattr(delta, "content", None)
-        if getattr(delta, "tool_calls", None) and not called_tool:
-            called_tool = True
-            delta.content = (limiter.release() + (content or "")) or None
-            yield chunk
-            continue
-        if called_tool or not content:
-            yield chunk
-            continue
-        delta.content = limiter.feed(content) or None
-        if delta.content:
-            yield chunk
+        else:
+            delta = chunk.delta
+            content = getattr(delta, "content", None)
+            if getattr(delta, "tool_calls", None) and not called_tool:
+                called_tool = True
+                yield _with_text(chunk, (limiter.release() + (content or "")) or None)
+                continue
+            if called_tool or not content:
+                yield chunk
+                continue
+            text = limiter.feed(content) or None
+            if text:
+                spoken.append(text)
+            if text or getattr(chunk, "usage", None):
+                yield _with_text(chunk, text)
+        if limiter.done and not flushed and not called_tool:
+            # End this part's speech input now: the voice must not wait for
+            # text that is held back.
+            flushed = True
+            yield FlushSentinel()
     if tail := limiter.finish():
+        spoken.append(tail)
         yield tail
-    if on_rest is not None and not called_tool and limiter.rest.strip():
-        on_rest(limiter.rest)
+    if on_rest is not None and not called_tool:
+        rest = _speakable_rest(limiter.rest)
+        if rest and all(m not in "".join(spoken) for m in _SYNTAX_MARKERS):
+            on_rest("".join(spoken), rest)
+
+
+def _norm(text: str | None) -> str:
+    return " ".join((text or "").split())
 
 
 class ReplyContinuation:
@@ -205,45 +253,65 @@ class ReplyContinuation:
         self.session = session
         self.can_continue = can_continue
         self.rest = ""
-        self._heard = False
+        self._part = ""  # the part whose end starts the pause
         self._spoken = False  # a part of the kept reply has been spoken
+        self._in_pause = False
+        self._started = False  # they began to speak in the pause
+        self._heard = False  # and words of that speech arrived
         self._task: asyncio.Task | None = None
 
         @session.on("conversation_item_added")
         def item_added(event) -> None:
             item = getattr(event, "item", None)
             role = getattr(item, "role", None)
-            if getattr(item, "interrupted", False):
-                self.drop()
-            elif role == "user":
+            if role == "user":
                 # Before any part is spoken, this is the turn the reply
                 # answers: with early generation the SDK adds it after the
                 # reply text exists. After a part, they took a new turn.
                 if self._spoken:
                     self.drop()
-            elif role == "assistant" and self.rest and self._task is None:
-                self._spoken = True
-                # Only words said in the pause count: an "okay" during the
-                # part is not a turn.
-                self._heard = False
-                self._task = asyncio.create_task(self._continue(), name="reply_rest")
+                return
+            if role != "assistant" or not self.rest or self._task is not None:
+                return
+            # Other speech can finish first (a wait message, a spoken line):
+            # only the kept reply's own part starts the pause.
+            text = _norm(getattr(item, "text_content", None))
+            if not self._part or not text.startswith(self._part[:60]):
+                return
+            if getattr(item, "interrupted", False):
+                self.drop()
+                return
+            self._spoken = True
+            # The pause starts now, not when the task first runs.
+            self._started = self._heard = False
+            self._in_pause = True
+            self._task = asyncio.create_task(self._continue(), name="reply_rest")
+
+        @session.on("user_state_changed")
+        def user_state(event) -> None:
+            if self._in_pause and getattr(event, "new_state", None) == "speaking":
+                self._started = True
 
         @session.on("user_input_transcribed")
         def heard(event) -> None:
-            if (getattr(event, "transcript", "") or "").strip():
+            # Only speech that began in the pause counts: the text of an
+            # "okay" said during the part can arrive in the pause.
+            if self._started and (getattr(event, "transcript", "") or "").strip():
                 self._heard = True
 
         @session.on("close")
         def closed(_) -> None:
             self.drop()
 
-    def keep(self, rest: str) -> None:
+    def keep(self, part: str, rest: str) -> None:
         self.rest = rest.strip()
-        self._heard = False
+        self._part = _norm(part)
         self._spoken = False
 
     def drop(self) -> None:
         self.rest = ""
+        self._part = ""
+        self._in_pause = False
         task, self._task = self._task, None
         if task is not None and task is not asyncio.current_task():
             task.cancel()
@@ -254,11 +322,13 @@ class ReplyContinuation:
     async def _continue(self) -> None:
         try:
             await asyncio.sleep(PAUSE)
-            if self._user_speaking():
+            if self._started or self._user_speaking():
+                self._started = True
                 # A sound is not yet a turn: give its words time to arrive.
                 while self._user_speaking():
                     await asyncio.sleep(0.1)
                 await asyncio.sleep(SETTLE)
+            self._in_pause = False
             if (
                 self._heard
                 or not self.rest
@@ -269,6 +339,7 @@ class ReplyContinuation:
                 return
             part, self.rest = split_reply(self.rest)
             if part:
+                self._part = _norm(part)
                 self.session.say(part)
         except asyncio.CancelledError:
             raise
@@ -276,4 +347,5 @@ class ReplyContinuation:
             logger.exception("could not continue the reply; waiting for them")
             self.rest = ""
         finally:
+            self._in_pause = False
             self._task = None
