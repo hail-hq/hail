@@ -100,7 +100,7 @@ func TestSipConnectionsVerifyNoCallArrived(t *testing.T) {
 	if err == nil {
 		t.Fatal("want an error (exit 1)")
 	}
-	if !strings.Contains(err.Error(), "No call arrived. Check the SIP trunk and the routing rule.") {
+	if !strings.Contains(err.Error(), "No call arrived. Check the SIP trunk and its username and password, and that a routing rule sends this number to Hail with + and the country code.") {
 		t.Errorf("err = %v", err)
 	}
 }
