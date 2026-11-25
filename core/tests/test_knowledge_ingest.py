@@ -853,18 +853,36 @@ def test_backoff_never_overflows(worker) -> None:
 async def test_refused_everything_is_a_setting_error(
     async_session, worker, s3, fake
 ) -> None:
-    """When no piece passes alone (a bad key or width also answers 400),
-    nothing is skipped: the pass backs off and tries every piece later."""
+    """When the probe text is refused too (a bad key or width also answers
+    400), nothing is skipped: the pass backs off and tries every piece
+    later."""
     org = uuid.uuid4()
     rows = "Part,Name\n" + "\n".join(f"P-{i},Item {i}" for i in range(6))
     await add_document(async_session, s3, org, rows.encode(), "text/csv")
-    fake.refuse = "Item"
+    fake.refuse = ""  # every text holds the empty string: all refused
     await worker.tick()
     assert worker._embed_after > 0 and not worker._embed_skip
-    # One batch request plus a few single-piece probes, not one per piece.
-    assert fake.calls <= 1 + 3
+    # One batch request and the probe, not one per piece.
+    assert fake.calls == 2
     fake.refuse = None
     worker._embed_after = 0.0
     await worker.tick()
     pieces = await pieces_of(async_session, org)
     assert all(p.embedding_model == "fake-embedding" for p in pieces)
+
+
+async def test_refused_first_pieces_never_stop_the_rest(
+    async_session, worker, s3, fake
+) -> None:
+    """Refused pieces at the front of the queue are skipped; the rest get
+    their vectors in the same pass."""
+    org = uuid.uuid4()
+    rows = "Part,Name\n" + "\n".join(
+        f"P-{i},{'poison' if i < 4 else 'Item'} {i}" for i in range(8)
+    )
+    await add_document(async_session, s3, org, rows.encode(), "text/csv")
+    fake.refuse = "poison"
+    await worker.tick()
+    pieces = await pieces_of(async_session, org)
+    assert [p.embedding_model is None for p in pieces] == [True] * 4 + [False] * 4
+    assert worker._embed_after == 0.0 and len(worker._embed_skip) == 4

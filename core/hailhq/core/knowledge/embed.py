@@ -111,7 +111,14 @@ def embedding_config() -> EmbeddingConfig | None:
     key, or a width the column cannot hold). The reason is logged once."""
     base_url = settings.hail_embedding_base_url
     api_key = settings.hail_embedding_api_key
-    if not api_key and urlsplit(base_url).hostname == _GOOGLE_HOST:
+    try:
+        host = urlsplit(base_url).hostname
+    except ValueError:
+        _warn_once(
+            "knowledge base: HAIL_EMBEDDING_BASE_URL is not a URL; keywords only"
+        )
+        return None
+    if not api_key and host == _GOOGLE_HOST:
         api_key = settings.google_api_key
     model, dims = settings.hail_embedding_model, settings.hail_embedding_dimensions
     if not api_key or not model:

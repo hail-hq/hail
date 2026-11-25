@@ -25,11 +25,11 @@ everything after a model change; meanwhile search uses keywords for those
 pieces. An API error or timeout never fails a document: the pass logs a
 warning and waits (the server's Retry-After, or 30 s doubling up to 10
 minutes) before it tries again. A batch the API refuses (a 400, 413 or
-422) is sent again one piece at a time; a piece refused alone, while
-others pass, is skipped until the model changes or the process restarts,
-so it never holds up the others. When no piece passes alone, the setting
-is wrong (a bad key or width also answers 400): the pass backs off like
-any failure. No transaction stays open during an API request: pieces are
+422) first sends a short probe text: when the API refuses that too, the
+setting is wrong (a bad key or width also answers 400) and the pass backs
+off like any failure. Otherwise the batch is sent again one piece at a
+time, and a piece refused alone is skipped until the model changes or the
+process restarts, so it never holds up the others. No transaction stays open during an API request: pieces are
 read, embedded, then written only where they still lack a vector of the
 model. The API runs one worker process; several would at worst embed a
 piece twice.
@@ -136,9 +136,8 @@ EMBED_PER_TICK = 1000
 EMBED_BACKOFF = (30.0, 600.0)
 # Most pieces kept in the skip list; past it, refused pieces back off.
 _SKIP_MAX = 1000
-# Single-piece retries of a refused batch that must all be refused, with
-# none passing, before the refusal counts as a setting error.
-_REFUSED_PROBES = 3
+# Sent when a batch is refused: a refusal of this too means the setting.
+_PROBE_TEXT = "Opening hours"
 # What a piece's vector adds to the knowledge tables: about 3 KB of
 # halfvec(1536) and about as much in the HNSW index. Counted when a
 # document is admitted, since the embedding pass adds it later.
@@ -301,36 +300,37 @@ class KnowledgeIngestWorker:
         self, embedder: Embedder, rows
     ) -> tuple[list, EmbeddingUnavailable | None]:
         """The (row, vector) pairs for ``rows``, and the failure that stopped
-        it, if any. A refused batch is sent again one piece at a time; a
-        piece refused alone joins ``_embed_skip`` once another piece passed.
-        Vectors already made are kept when a later request fails."""
+        it, if any. A refused batch is checked with a probe text, then sent
+        again one piece at a time; a piece refused alone joins
+        ``_embed_skip``. Vectors already made are kept when a later request
+        fails."""
         try:
             vectors = await embedder.embed([r.text for r in rows])
             return list(zip(rows, vectors, strict=True)), None
         except EmbeddingUnavailable as exc:
             if not exc.refused:
                 return [], exc
+            batch_refusal = exc
+        try:
+            await embedder.embed([_PROBE_TEXT])
+        except EmbeddingUnavailable as exc:
+            # The probe fails too: the setting, not the pieces.
+            return [], exc if not exc.refused else batch_refusal
         pairs: list = []
-        refused: list = []
         for row in rows:
             try:
                 pairs.append((row, (await embedder.embed([row.text]))[0]))
             except EmbeddingUnavailable as exc:
                 if not exc.refused:
                     return pairs, exc
-                refused.append(row)
-                if not pairs and len(refused) >= _REFUSED_PROBES:
-                    # Nothing passes: the setting, not the pieces.
+                if len(self._embed_skip) >= _SKIP_MAX:
                     return pairs, exc
-        if not pairs or len(self._embed_skip) + len(refused) > _SKIP_MAX:
-            return pairs, EmbeddingUnavailable("HTTP 400", refused=True)
-        for row in refused:
-            self._embed_skip.add(row.id)
-            logger.warning(
-                "knowledge: the embedding API refused piece %s; it keeps keyword "
-                "search",
-                row.id,
-            )
+                self._embed_skip.add(row.id)
+                logger.warning(
+                    "knowledge: the embedding API refused piece %s; it keeps "
+                    "keyword search",
+                    row.id,
+                )
         return pairs, None
 
     def _back_off(self, exc: EmbeddingUnavailable, pieces: int) -> None:
@@ -626,15 +626,10 @@ class KnowledgeIngestWorker:
             if held + len(chunks) > limits.max_pieces:
                 await db.rollback()
                 raise _Refused(_too_many(limits.max_pieces, held))
-            # Vectors still owed (this file's and earlier ones') count too.
-            owed = (
-                await db.execute(
-                    select(func.count())
-                    .select_from(KnowledgePiece)
-                    .where(KnowledgePiece.embedding.is_(None))
-                )
-            ).scalar_one()
-            if await storage_full(db, adding=(owed + len(rows)) * _VECTOR_BYTES):
+            # The vectors the embedding pass adds later count too, when
+            # there is an embedding API to make them.
+            owed = len(rows) * _VECTOR_BYTES if self._embedder() is not None else 0
+            if await storage_full(db, adding=owed):
                 await db.rollback()
                 raise _Refused(STORAGE_FULL)
             await db.execute(

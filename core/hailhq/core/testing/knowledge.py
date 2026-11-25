@@ -42,7 +42,7 @@ class FakeEmbedder:
 
     async def embed(self, texts: list[str], *, timeout: float = 0) -> np.ndarray:
         self._check()
-        if self.refuse and any(self.refuse in t for t in texts):
+        if self.refuse is not None and any(self.refuse in t for t in texts):
             raise EmbeddingUnavailable("HTTP 400", refused=True)
         if not texts:
             return np.zeros((0, DIMS), dtype=np.float32)
