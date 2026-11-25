@@ -12,6 +12,7 @@ returns a speakable apology to the LLM.
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import logging
 import math
@@ -28,6 +29,7 @@ from hailhq.core.config import settings
 from hailhq.core.db import session_scope
 from hailhq.core.prompts import fit_to_tools
 from hailhq.voicebot.attachment_reader import inspect_tool_file
+from hailhq.voicebot.busy_sound import BusySound
 from livekit.agents.llm import function_tool
 from livekit.agents.voice import RunContext
 
@@ -74,7 +76,11 @@ class SpeechTracker:
         return self._long_ended >= since
 
 
-def _make_handler(spec: ToolSpec, tctx: ToolContext):
+def _make_handler(spec: ToolSpec, tctx: ToolContext, sound: BusySound | None = None):
+    # Call control (hang up, keys, transfer, hold) is quick or has its own
+    # audio: only lookups and sends get the busy sound.
+    busy = sound is not None and spec.risk_tier != "session_control"
+
     async def handler(raw_arguments: dict[str, Any], context: RunContext) -> str | None:
         try:
             if spec.uninterruptible:
@@ -110,7 +116,8 @@ def _make_handler(spec: ToolSpec, tctx: ToolContext):
                         spec.name,
                     )
             # None means no reply turn (a transfer that started ringing).
-            result = await spec.execute(tctx, raw_arguments)
+            async with sound.during() if busy else contextlib.nullcontext():
+                result = await spec.execute(tctx, raw_arguments)
             if spec.name in ("read_email", "read_browser_inbox"):
                 result = await inspect_tool_file(result, context.session.llm)
             return result
@@ -123,10 +130,10 @@ def _make_handler(spec: ToolSpec, tctx: ToolContext):
     return handler
 
 
-def wrap_tool(spec: ToolSpec, tctx: ToolContext):
+def wrap_tool(spec: ToolSpec, tctx: ToolContext, sound: BusySound | None = None):
     """One core tool as a LiveKit function tool bound to ``tctx``."""
     return function_tool(
-        _make_handler(spec, tctx),
+        _make_handler(spec, tctx, sound),
         raw_schema={
             "name": spec.name,
             "description": spec.description,
@@ -165,6 +172,7 @@ def every_call_tools(
     hangup,
     send_dtmf=None,
     spoke_since=None,
+    hold=None,
 ) -> list:
     """The tools every call keeps (``ToolSpec.on_every_call``), for a call
     whose other tools could not be built. They need no database, API or
@@ -180,11 +188,14 @@ def every_call_tools(
         hangup=hangup,
         send_dtmf=send_dtmf,
         spoke_since=spoke_since,
+        hold=hold,
     )
     return _wrap_fitted([s for s in call_tools() if s.on_every_call], tctx)
 
 
-def _wrap_fitted(specs: list[ToolSpec], tctx: ToolContext) -> list:
+def _wrap_fitted(
+    specs: list[ToolSpec], tctx: ToolContext, sound: BusySound | None = None
+) -> list:
     """Wrap ``specs`` with each built-in description fitted to this call's
     tools: a description that names a tool the call lacks (see ToolLine)
     would make the model write that name as text. A saved agent's HTTP tool
@@ -199,6 +210,7 @@ def _wrap_fitted(specs: list[ToolSpec], tctx: ToolContext) -> list:
                 else s
             ),
             tctx,
+            sound,
         )
         for s in specs
     ]
@@ -214,6 +226,8 @@ async def build_agent_tools(
     spoke_since=None,
     cancel_bridge=None,
     prompt=None,
+    hold=None,
+    sound: BusySound | None = None,
 ) -> tuple[list, AgentApiClient | None]:
     """Build this call's LiveKit tools. Returns (tools, api_client).
 
@@ -229,6 +243,7 @@ async def build_agent_tools(
             hangup=hangup,
             send_dtmf=send_dtmf,
             spoke_since=spoke_since,
+            hold=hold,
         )
         return tools, None
 
@@ -294,13 +309,14 @@ async def build_agent_tools(
         spoke_since=spoke_since,
         cancel_bridge=cancel_bridge,
         prompt=prompt,
+        hold=hold,
     )
 
     passed: set[str] = set()
     try:
         await _check_availability(checked, organization_id, passed)
         available = [s for s in specs if s.on_every_call or s.name in passed]
-        return _wrap_fitted(available, tctx), api
+        return _wrap_fitted(available, tctx, sound), api
     except BaseException:
         # The caller gets no client on a failure, so close it here.
         if api is not None:

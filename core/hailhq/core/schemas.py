@@ -1048,6 +1048,7 @@ RESERVED_TOOL_NAMES = frozenset(
         "send_sms",
         "thread_history",
         "transfer_call",
+        "wait_for_other_party",
     }
 )
 HTTP_TOOLS_MAX = 10

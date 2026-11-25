@@ -109,7 +109,9 @@ from hailhq.voicebot.amd import (
 )
 from hailhq.voicebot.audio import prewarm_audio, room_options
 from hailhq.voicebot.browser import run_browser_session
+from hailhq.voicebot.busy_sound import BusySound
 from hailhq.voicebot.handover_watch import contact_speaks
+from hailhq.voicebot.hold import HOLD_ENDED_NOTE, Hold
 from hailhq.voicebot.ivr import PhoneMenu
 from hailhq.voicebot.leg_tracker import LegTracker
 from hailhq.voicebot.pipeline import (
@@ -122,6 +124,7 @@ from hailhq.voicebot.pipeline import (
 )
 from hailhq.voicebot.recording import start_recording, stop_recording
 from hailhq.voicebot.recovery import ConversationRecovery
+from hailhq.voicebot.spell import group_spelled_stream
 from hailhq.voicebot.spoken_lines import spoken_lines
 from hailhq.voicebot.telemetry import connect_livekit_tracing
 from hailhq.voicebot.tools import SpeechTracker, build_agent_tools, every_call_tools
@@ -243,6 +246,7 @@ class SpeechSanitizingAgent(Agent):
         self._opening_pending = opening_pending
         self._held_words: list[str] = []
         self.phone_menu: PhoneMenu | None = None
+        self.hold: Hold | None = None
 
     def release_opening(self) -> str | None:
         """Let replies through. Returns what the person said while held."""
@@ -276,13 +280,7 @@ class SpeechSanitizingAgent(Agent):
                 # records them.
                 if text := (new_message.text_content or "").strip():
                     self._held_words.append(text)
-                chat_ctx = self.chat_ctx.copy()
-                chat_ctx.items.append(new_message)
-                await self.update_chat_ctx(chat_ctx)
-                self.session.emit(
-                    "conversation_item_added",
-                    ConversationItemAddedEvent(item=new_message),
-                )
+                await self._keep_unanswered(new_message)
             raise StopResponse()
         if self.phone_menu is not None and self.phone_menu.active:
             self.release_opening()
@@ -297,9 +295,36 @@ class SpeechSanitizingAgent(Agent):
                 # The SDK copied turn_ctx before this hook, so it lacks the
                 # greeting just spoken. Add it, or the reply introduces us again.
                 known = {item.id for item in turn_ctx.items}
-                turn_ctx.items.extend(
+                added = [
                     item for item in self.chat_ctx.copy().items if item.id not in known
-                )
+                ]
+                turn_ctx.items.extend(added)
+                if added and new_message is not None:
+                    # LiveKit inserts the words by creation time, which is
+                    # before the greeting. Put them after it: the request
+                    # must end with them, as Claude refuses a request that
+                    # ends with the agent's own line (no prefill).
+                    new_message.created_at = (
+                        max(item.created_at for item in added) + 0.001
+                    )
+            return
+        if self.hold is not None and self.hold.active and new_message is not None:
+            if await self.hold.keep_holding(new_message.text_content or ""):
+                # A recorded hold announcement: keep it, say nothing.
+                await self._keep_unanswered(new_message)
+                raise StopResponse()
+            turn_ctx.add_message(role="system", content=HOLD_ENDED_NOTE)
+
+    async def _keep_unanswered(self, message: Any) -> None:
+        """StopResponse drops a turn: keep its words in the chat and the
+        transcript."""
+        chat_ctx = self.chat_ctx.copy()
+        chat_ctx.items.append(message)
+        await self.update_chat_ctx(chat_ctx)
+        self.session.emit(
+            "conversation_item_added",
+            ConversationItemAddedEvent(item=message),
+        )
 
     async def llm_node(self, chat_ctx: Any, tools: Any, model_settings: Any) -> Any:
         if self._opening_pending:
@@ -318,7 +343,9 @@ class SpeechSanitizingAgent(Agent):
     async def tts_node(self, text: Any, model_settings: Any) -> Any:
         if self.phone_menu is not None and self.phone_menu.active:
             return None
-        return Agent.default.tts_node(self, _sanitize_tts_stream(text), model_settings)
+        return Agent.default.tts_node(
+            self, group_spelled_stream(_sanitize_tts_stream(text)), model_settings
+        )
 
 
 def build_instructions(
@@ -913,6 +940,8 @@ async def build_tools_safely(
     spoke_since: Callable[[float], bool] | None = None,
     cancel_bridge: Callable[[], Awaitable[bool]] | None = None,
     prompt: Callable[[str], Awaitable[None]] | None = None,
+    hold: Callable[[], Awaitable[None]] | None = None,
+    sound: BusySound | None = None,
 ) -> tuple[list, AgentApiClient | None]:
     """Build this call's agent tools, degrading to the tools every call
     keeps on any failure.
@@ -932,6 +961,8 @@ async def build_tools_safely(
             spoke_since=spoke_since,
             cancel_bridge=cancel_bridge,
             prompt=prompt,
+            hold=hold,
+            sound=sound,
         )
     except Exception:
         logger.exception(
@@ -946,6 +977,7 @@ async def build_tools_safely(
                 hangup=hangup,
                 send_dtmf=send_dtmf,
                 spoke_since=spoke_since,
+                hold=hold,
             )
         except Exception:
             logger.exception("call_id=%s every-call tools fallback failed", call_id)
@@ -1170,6 +1202,25 @@ async def speak_greeting(
 DTMF_TOOL_NAME = "send_dtmf"
 
 
+async def stop_menu_prompts(session: AgentSession, call_id: UUID) -> None:
+    """Stop LiveKit's phone-menu helper once a person is on the line.
+
+    The helper (``IVRActivity``, started for a ``machine-ivr`` verdict) asks
+    for a reply after 5 s of silence, so a person who stops to look something
+    up hears the agent again and again. LiveKit closes it only with the
+    session. Closing it only stops its silence and loop checks: its keypad
+    tool stays. Private in livekit-agents 1.8.8; test_opening_order.py fails
+    if it moves.
+    """
+    activity = getattr(session, "_ivr_activity", None)
+    if activity is None:
+        return
+    try:
+        await activity.aclose()
+    except Exception:
+        logger.exception("call_id=%s could not stop the phone-menu helper", call_id)
+
+
 def arm_deferred_greeting(
     session: AgentSession,
     metadata: dict[str, Any],
@@ -1198,6 +1249,11 @@ def arm_deferred_greeting(
 
     async def greet(text: str) -> None:
         agent._opening_pending = True
+        # A person is on the line now: no more prompts on menu silence, and
+        # a "please hold" from the menu no longer applies.
+        await stop_menu_prompts(session, call_id)
+        if agent.hold is not None:
+            agent.hold.stop()
         marker = asyncio.create_task(write_call_event(call_id, "person_detected", {}))
         tasks.add(marker)
         marker.add_done_callback(tasks.discard)
@@ -2711,6 +2767,29 @@ async def _run_call(
     agent_hangup = make_agent_hangup(ctx, captured, bridge_state)
     # Whether the other party talked over the goodbye, for end_call.
     speech = SpeechTracker()
+    # Set in _shutdown_body; read by the recovery and hold checks.
+    shutting_down = False
+    # AMD's clients. Its classifier also backs the phone menu check and the
+    # hold check, so it closes only at shutdown, after the last check ends.
+    amd_models: AMDModels | None = None
+
+    def may_prompt() -> bool:
+        """The agent may speak up on its own: the call is not ending, and no
+        handover contact has picked up (the agent is muted then)."""
+        return (
+            not shutting_down
+            and captured["end_reason"] is None
+            and not bridge_state.get("picked_up")
+            and not bridge_state.get("connected")
+        )
+
+    hold = Hold(
+        session,
+        classifier=lambda: amd_models.llm if amd_models is not None else None,
+        can_speak=may_prompt,
+        call_id=call_id,
+    )
+    sound = BusySound(can_play=lambda: may_prompt() and not bridge_state.get("ending"))
 
     @session.on("user_state_changed")
     def _on_speech_state(ev: Any) -> None:
@@ -2736,6 +2815,8 @@ async def _run_call(
         spoke_since=lambda t: speech.talked_since(t, time.monotonic()),
         cancel_bridge=make_bridge_cancel(ctx, call_id, bridge_state),
         prompt=lambda text: _prompt_agent(session, bridge_state, text),
+        hold=hold.start,
+        sound=sound,
     )
     tool_names = [t.info.name for t in agent_tools]
     if agent_tools:
@@ -2766,6 +2847,7 @@ async def _run_call(
         ),
         tools=agent_tools,
     )
+    agent.hold = hold
     event_tasks = attach_event_handlers(
         session,
         call_id,
@@ -2782,6 +2864,7 @@ async def _run_call(
         # https://docs.livekit.io/reference/python/livekit/agents/
         session_host=False,
     )
+    await sound.start(ctx.room, session)
 
     async def record_answered_call() -> None:
         # Do not consume recording allowance during ringing or on unanswered calls.
@@ -2859,24 +2942,15 @@ async def _run_call(
     # the entrypoint; `shutting_down` stops a late start after `_shutdown_body`
     # has run (both run on the same event loop, so the check is atomic).
     text_watch_task: asyncio.Task[None] | None = None
-    shutting_down = False
     recovery = ConversationRecovery(
         session,
         on_exhausted=agent_hangup,
-        can_recover=lambda: (
-            not shutting_down
-            and captured["end_reason"] is None
-            # While it rings the agent still talks with the caller; once the
-            # phone picks up the agent is muted.
-            and not bridge_state.get("picked_up")
-            and not bridge_state.get("connected")
-        ),
+        # While a handover rings the agent still talks with the caller; once
+        # the phone picks up the agent is muted. A hold pauses recovery: the
+        # other party asked the agent to wait.
+        can_recover=lambda: may_prompt() and not hold.active,
         call_id=call_id,
     )
-
-    # AMD's clients. Its classifier also backs the phone menu check, so it
-    # closes only at shutdown, after AMD and the last check end.
-    amd_models: AMDModels | None = None
 
     async def _shutdown_body() -> None:
         nonlocal shutting_down
@@ -2884,6 +2958,8 @@ async def _run_call(
         legs_recorded = False
         try:
             await recovery.aclose()
+            await hold.aclose()
+            await sound.aclose()
             # Never close the classifier under a running check: let the
             # menu finish its check first.
             if agent.phone_menu is not None:

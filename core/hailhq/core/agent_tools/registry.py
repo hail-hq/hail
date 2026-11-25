@@ -12,6 +12,7 @@ from hailhq.core.agent_tools import (
     send_sms,
     thread_history,
     transfer_call,
+    wait_for_other_party,
 )
 from hailhq.core.agent_tools.spec import ToolSpec
 
@@ -31,8 +32,8 @@ def all_tools() -> tuple[ToolSpec, ...]:
 
 def call_tools() -> tuple[ToolSpec, ...]:
     """Every built-in tool a call can have: the tools a `tools` list may
-    name, plus the settings guide, which no list names."""
-    return (*all_tools(), hail_help.SPEC)
+    name, plus the settings guide and the hold tool, which no list names."""
+    return (*all_tools(), hail_help.SPEC, wait_for_other_party.SPEC)
 
 
 __all__ = ["all_tools", "call_tools"]

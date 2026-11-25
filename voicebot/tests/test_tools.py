@@ -20,7 +20,12 @@ from hailhq.voicebot.tools import (
 )
 
 # The tools every call keeps, in build order.
-EVERY_CALL = ["end_call", "send_dtmf", "hail_settings_help"]
+EVERY_CALL = [
+    "end_call",
+    "send_dtmf",
+    "hail_settings_help",
+    "wait_for_other_party",
+]
 
 
 class FakeRunContext:
