@@ -3874,7 +3874,7 @@ type SipConnectionCreated struct {
 	// SipHost SIP server your phone system sends calls to (the trunk's host). Shows only its first characters when sip_host_masked is true.
 	SipHost string `json:"sip_host"`
 
-	// SipHostMasked True: sip_host shows only its first characters. Hail's support team sends you the full address (hi@hail.so).
+	// SipHostMasked True: sip_host shows only its first characters. Support sends you the full address.
 	SipHostMasked bool `json:"sip_host_masked"`
 
 	// Username Username your phone system sends to Hail.
@@ -3955,7 +3955,7 @@ type SipConnectionResponse struct {
 	// SipHost SIP server your phone system sends calls to (the trunk's host). Shows only its first characters when sip_host_masked is true.
 	SipHost string `json:"sip_host"`
 
-	// SipHostMasked True: sip_host shows only its first characters. Hail's support team sends you the full address (hi@hail.so).
+	// SipHostMasked True: sip_host shows only its first characters. Support sends you the full address.
 	SipHostMasked bool `json:"sip_host_masked"`
 
 	// Username Username your phone system sends to Hail.

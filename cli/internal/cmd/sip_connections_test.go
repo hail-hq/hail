@@ -222,7 +222,7 @@ func TestSipConnectionsMaskedHostSaysWhereToGetIt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(stdout, "examp… (Hail's support team sends the full address: hi@hail.so)") {
+	if !strings.Contains(stdout, "examp… (ask support for the full address)") {
 		t.Errorf("masked host line: %q", stdout)
 	}
 }

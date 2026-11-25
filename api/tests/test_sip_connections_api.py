@@ -679,6 +679,25 @@ async def test_staff_and_a_self_hosted_operator_see_the_full_host(
     assert one["sip_host_masked"] is False
 
 
+def test_the_routes_ship_open_to_every_workspace() -> None:
+    # The autouse fixture patches the switch; this reads the shipped line.
+    import inspect
+
+    import hailhq.api.routes.sip_connections as routes
+
+    source = inspect.getsource(routes)
+    assert "\nOPEN_TO_ALL_WORKSPACES: Final = True\n" in source
+
+
+async def test_a_short_host_is_shown_in_full_and_not_flagged(
+    client: httpx.AsyncClient, org_and_key: tuple, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "livekit_sip_host", "sip.x")
+    _org, _key, plain = org_and_key
+    body = await _create(client, plain)
+    assert (body["sip_host"], body["sip_host_masked"]) == ("sip.x", False)
+
+
 def test_a_short_host_is_not_masked_into_nothing() -> None:
     from hailhq.api.routes.sip_connections import _masked_host
 

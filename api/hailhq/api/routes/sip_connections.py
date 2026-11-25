@@ -77,11 +77,15 @@ OPEN_TO_ALL_WORKSPACES: Final = True
 MASKED_HOST_CHARS: Final = 5
 
 
+def _is_staff(principal: Principal) -> bool:
+    """A staff console session: a JWT the website minted with superadmin."""
+    return principal.auth_kind == "jwt" and principal.superadmin
+
+
 def _sees_full_host(principal: Principal) -> bool:
-    """Hail staff (a staff console session) and a self-hosted operator (the
-    shared key) see the full SIP server; every workspace sees its start."""
-    staff = principal.auth_kind == "jwt" and principal.superadmin
-    return staff or principal.auth_kind == "shared"
+    """Staff and the operator (the shared key) see the full SIP server; every
+    workspace sees its start, and support sends the full address."""
+    return _is_staff(principal) or principal.auth_kind == "shared"
 
 
 def _masked_host(host: str) -> str:
@@ -92,8 +96,7 @@ async def connections_principal(
     principal: Annotated[Principal, Depends(get_current_principal)],
 ) -> Principal:
     """The caller, when connected phone systems are open to it."""
-    staff = principal.auth_kind == "jwt" and principal.superadmin
-    if not OPEN_TO_ALL_WORKSPACES and not staff:
+    if not OPEN_TO_ALL_WORKSPACES and not _is_staff(principal):
         raise HTTPException(status_code=404, detail="Not Found")
     return principal
 
@@ -214,17 +217,14 @@ def _response(row: SipConnection, principal: Principal) -> SipConnectionResponse
         # A rotated key or a damaged value: the connection still lists;
         # rotate-password makes a new one.
         last4 = ""
-    full_host = _sees_full_host(principal)
+    host = settings.livekit_sip_host
+    shown = host if _sees_full_host(principal) else _masked_host(host)
     return SipConnectionResponse(
         id=row.id,
         label=row.label,
         default_region=row.default_region,
-        sip_host=(
-            settings.livekit_sip_host
-            if full_host
-            else _masked_host(settings.livekit_sip_host)
-        ),
-        sip_host_masked=not full_host,
+        sip_host=shown,
+        sip_host_masked=shown != host,
         username=row.inbound_username,
         password_last4=last4,
         pbx_host=row.pbx_host,

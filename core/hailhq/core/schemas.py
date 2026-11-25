@@ -1065,8 +1065,8 @@ class SipConnectionResponse(BaseModel):
     )
     sip_host_masked: bool = Field(
         description=(
-            "True: sip_host shows only its first characters. Hail's support "
-            "team sends you the full address (hi@hail.so)."
+            "True: sip_host shows only its first characters. Support sends "
+            "you the full address."
         )
     )
     username: str = Field(description="Username your phone system sends to Hail.")

@@ -109,7 +109,7 @@ func newSipConnectionsCreateCmd(opts *Options) *cobra.Command {
 				return printJSON(opts.Stdout, resp.JSON201)
 			}
 			c := resp.JSON201
-			fmt.Fprintln(opts.Stderr, "Put the password in your phone system's trunk. Admins can read it again in the console.")
+			fmt.Fprintln(opts.Stderr, "Put the password in your phone system's trunk. You can read it again later.")
 			fmt.Fprintf(opts.Stdout, "✓ Connection %s: %s\n", c.Label, c.Id)
 			fmt.Fprintf(opts.Stdout, "  SIP server:    %s\n", sipHostText(c.SipHost, c.SipHostMasked))
 			fmt.Fprintf(opts.Stdout, "  Username:      %s\n", c.Username)
@@ -193,7 +193,7 @@ func newSipConnectionsListCmd(opts *Options) *cobra.Command {
 // sipHostText is the SIP server line: a masked server says where to get it.
 func sipHostText(host string, masked bool) string {
 	if masked {
-		return host + " (Hail's support team sends the full address: hi@hail.so)"
+		return host + " (ask support for the full address)"
 	}
 	return host
 }
