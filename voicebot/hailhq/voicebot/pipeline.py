@@ -81,6 +81,7 @@ from hailhq.core.providers.tts.direct import (
     house_voice_ready,
 )
 from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
+from hailhq.core.voice_catalog import known_legacy_voice_ids
 from hailhq.voicebot.direct_tts import DirectTTS
 from livekit.agents import (
     AgentSession,
@@ -653,9 +654,11 @@ def build_tts(
                 org.provider,
                 language,
             )
-            if org.provider in DIRECT_VOICES and voice_id_override in (
-                org.params.get("voice_id"),
-                DIRECT_VOICES[org.provider][1],
+            # An unscoped override belongs to the workspace's provider by
+            # default. Keep it only if we can confirm it is also a house voice.
+            if (
+                org.provider in DIRECT_VOICES
+                and voice_id_override not in known_legacy_voice_ids(language)
             ):
                 voice_id_override = None
             return build_tts(None, voice_id_override, language)
