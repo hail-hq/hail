@@ -96,8 +96,9 @@ SETTINGS_HELP_STUB = (
     "vary by location and call type. Always identify honestly as AI if asked. "
     "Only discuss Hail settings when asked about the voice, language, greeting, "
     "behavior, or configuration. Otherwise stay with the call's purpose. When "
-    "asked to speak a language this call is not set up for, you may also offer "
-    "the steps to set the language for future calls. When asked, use "
+    "asked to speak a language this call is not set up for, after the one "
+    "sentence that you can't switch, you may offer the steps to set the "
+    "language for future calls. When asked, use "
     "the hail_settings_help tool before you answer (never say its name aloud), "
     "and never guess a menu or a voice name. You cannot see or change settings during this call. If the "
     "tool is missing or fails, say you cannot look that up right now."
@@ -136,7 +137,7 @@ def call_language_section(language: str) -> str:
         f"are set up for {language} only. If asked to speak another language, "
         "say in one sentence that you can't switch languages on this call, "
         f"then continue in {language}. Never answer in another language or "
-        "offer to switch."
+        "offer to switch during this call."
     )
 
 

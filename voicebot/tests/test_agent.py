@@ -220,7 +220,11 @@ def test_build_instructions_present_without_caller_prompt() -> None:
     This is the exact condition behind the bug: no caller framing → the model
     defaulted to a generic chat-assistant self-concept.
     """
-    expected = f"{VOICE_PREAMBLE}\n\n{PRIVACY_REMINDER}"
+    # A call with no language runs in English (call_language_section).
+    expected = (
+        f"{VOICE_PREAMBLE}\n\n{call_language_section('English')}"
+        f"\n\n{PRIVACY_REMINDER}"
+    )
     assert build_instructions(None) == expected
     assert build_instructions("") == expected
     assert VOICE_PREAMBLE.strip(), "preamble must be non-empty"
@@ -2242,8 +2246,13 @@ async def test_member_on_line_ignores_the_name_and_fails_closed(monkeypatch):
         seen["number"] = number
         return True
 
+    async def unnamed(_session, _org, _number):
+        return None  # no name on the member: find_by_phone names nobody
+
     monkeypatch.setattr(agent_mod, "session_scope", scope)
+    monkeypatch.setattr(agent_mod, "find_by_phone", unnamed)
     monkeypatch.setattr(agent_mod, "has_member_phone", has_member)
+    assert await agent_mod.line_party(UUID(int=1)) == (None, True)
     assert await agent_mod.member_on_line(UUID(int=1)) is True
     assert seen["number"] == "+12025550123"
 

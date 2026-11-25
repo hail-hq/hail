@@ -680,7 +680,8 @@ def test_build_tts_byo_cartesia_with_fallback_and_cartesia_only_language() -> No
     tts = build_tts(org=org, language="th")
     assert isinstance(tts, agents_tts.FallbackAdapter)
     inner = tts._tts_instances
-    assert len(inner) == 2, "BYO + house fallback should have 2 instances"
+    # BYO, then the house Thai voice, then the configured house voice.
+    assert len(inner) == 3, "BYO + two house Cartesia voices"
     assert all(isinstance(inst, cartesia_plugin.TTS) for inst in inner)
 
 

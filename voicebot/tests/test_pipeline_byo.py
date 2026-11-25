@@ -235,8 +235,9 @@ def test_build_tts_org_incapable_with_fallback_uses_house_only(
     )
     tts = build_tts(org, language="th")
     assert "elevenlabs" not in captured_plugins
-    assert len(captured_plugins["cartesia"]) == 1
-    assert "api_key" not in captured_plugins["cartesia"][0].kwargs
+    # House Cartesia only: the Thai voice, then the configured voice.
+    assert len(captured_plugins["cartesia"]) == 2
+    assert all("api_key" not in c.kwargs for c in captured_plugins["cartesia"])
     assert tts is not None
 
 

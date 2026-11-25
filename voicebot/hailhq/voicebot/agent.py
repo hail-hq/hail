@@ -451,9 +451,13 @@ async def _line_number(session: Any, call_id: UUID) -> tuple[UUID, str] | None:
     return (organization_id, number) if number else None
 
 
-async def other_party(call_id: UUID) -> DirectoryEntry | None:
-    """The directory entry of the person on the line when their number is
-    in the org's directory. A lookup failure or timeout returns None."""
+async def line_party(call_id: UUID) -> tuple[DirectoryEntry | None, bool]:
+    """Who is on the line, in one database session: their directory entry
+    when their number is in the org's directory, and whether they are a
+    workspace member (their number is a member's profile number, which
+    decides who hears setup steps). A lookup failure or timeout gives
+    ``(None, False)``: a customer must never hear the workspace's setup,
+    and a member can retry the call."""
     try:
         async with (
             asyncio.timeout(_OTHER_PARTY_TIMEOUT_SECONDS),
@@ -461,29 +465,25 @@ async def other_party(call_id: UUID) -> DirectoryEntry | None:
         ):
             line = await _line_number(session, call_id)
             if line is None:
-                return None
+                return None, False
             entry = await find_by_phone(session, *line)
+            member = (entry is not None and entry.source == "member") or (
+                await has_member_phone(session, *line)
+            )
     except Exception:
         logger.warning("call_id=%s other-party lookup failed", call_id, exc_info=True)
-        return None
-    return entry
+        return None, False
+    return entry, member
+
+
+async def other_party(call_id: UUID) -> DirectoryEntry | None:
+    """The directory entry of the person on the line (see :func:`line_party`)."""
+    return (await line_party(call_id))[0]
 
 
 async def member_on_line(call_id: UUID) -> bool:
-    """The person on the line is a workspace member (their number is a
-    member's profile number). Decides who hears setup steps. A lookup
-    failure or timeout counts as not a member: a customer must never hear
-    the workspace's setup, and a member can retry the call."""
-    try:
-        async with (
-            asyncio.timeout(_OTHER_PARTY_TIMEOUT_SECONDS),
-            session_scope() as session,
-        ):
-            line = await _line_number(session, call_id)
-            return line is not None and await has_member_phone(session, *line)
-    except Exception:
-        logger.warning("call_id=%s member lookup failed", call_id, exc_info=True)
-        return False
+    """The person on the line is a workspace member (see :func:`line_party`)."""
+    return (await line_party(call_id))[1]
 
 
 # Proactive AI disclosure, spoken by default as the first thing on every
@@ -2803,8 +2803,7 @@ async def _run_call(
     def _on_speech_state(ev: Any) -> None:
         speech.on_state(getattr(ev, "new_state", None), time.monotonic())
 
-    other_party_task = asyncio.create_task(other_party(call_id))
-    member_task = asyncio.create_task(member_on_line(call_id))
+    party_task = asyncio.create_task(line_party(call_id))
     voice_task = asyncio.create_task(
         foreign_voice(voice_id_override, org_tts, language)
     )
@@ -2828,9 +2827,9 @@ async def _run_call(
         cancel_bridge=make_bridge_cancel(ctx, call_id, bridge_state),
         prompt=lambda text: _prompt_agent(session, bridge_state, text),
     )
-    known = await other_party_task
+    known, member = await party_task
     # Setup help is for the workspace's own members, not its customers.
-    agent_tools = for_other_party(agent_tools, member=await member_task)
+    agent_tools = for_other_party(agent_tools, member=member)
     tool_names = [t.info.name for t in agent_tools]
     if agent_tools:
         logger.info("call_id=%s agent tools enabled: %s", call_id, tool_names)
