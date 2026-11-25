@@ -7555,8 +7555,8 @@ components:
             - type: "null"
           description:
             New TTS voice and language settings. Repeating the saved voice
-            ID without voice_provider keeps its provider. Send null for voice_provider
-            to clear the provider while keeping the same ID.
+            ID keeps its provider if voice_provider is omitted. To clear the provider,
+            send the saved voice ID and set voice_provider to null.
         tools:
           anyOf:
             - items:
