@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock
 import hailhq.voicebot.tools as tools_mod
 import pytest
 from hailhq.core.agent_tools import http_tool
+from hailhq.core.agent_tools.registry import call_tools
 from hailhq.core.config import settings
 from hailhq.core.models import Agent, AgentHttpTool
 from hailhq.core.secret_cipher import SecretCipher, generate_key
@@ -20,7 +21,12 @@ from hailhq.voicebot.tools import (
 )
 
 # The tools every call keeps, in build order.
-EVERY_CALL = ["end_call", "send_dtmf", "hail_settings_help"]
+EVERY_CALL = [
+    "end_call",
+    "send_dtmf",
+    "hail_settings_help",
+    "wait_for_other_party",
+]
 
 
 class FakeRunContext:
@@ -491,3 +497,36 @@ async def test_failed_availability_check_closes_the_api_client(monkeypatch):
             send_dtmf=None,
         )
     assert closed == [True]
+
+
+async def test_an_http_tool_with_a_built_in_name_is_skipped(monkeypatch):
+    """A tool saved before Hail took its name must not put two tools with
+    one name on the call: Hail's own tool wins."""
+    clash = dataclasses.replace(
+        call_tools()[0], name="wait_for_other_party", description="Old."
+    )
+    monkeypatch.setattr(tools_mod, "_http_tools", AsyncMock(return_value=[clash]))
+    meta = {"organization_id": str(uuid.uuid4()), "tools": []}
+    tools, api = await build_agent_tools(
+        meta, call_id=uuid.uuid4(), hangup=None, send_dtmf=None
+    )
+    assert [t.info.name for t in tools] == EVERY_CALL
+    assert tools[-1].info.raw_schema["description"] != "Old."
+    assert api is None
+
+
+async def test_two_http_tools_with_one_name_keep_only_the_first(monkeypatch):
+    first = dataclasses.replace(
+        call_tools()[0], name="lookup_order", description="First."
+    )
+    second = dataclasses.replace(first, description="Second.")
+    monkeypatch.setattr(
+        tools_mod, "_http_tools", AsyncMock(return_value=[first, second])
+    )
+    meta = {"organization_id": str(uuid.uuid4()), "tools": []}
+    tools, api = await build_agent_tools(
+        meta, call_id=uuid.uuid4(), hangup=None, send_dtmf=None
+    )
+    assert [t.info.name for t in tools] == [*EVERY_CALL, "lookup_order"]
+    assert tools[-1].info.raw_schema["description"] == "First."
+    assert api is None

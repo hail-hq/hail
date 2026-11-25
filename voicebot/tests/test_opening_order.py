@@ -7,6 +7,7 @@ import pytest
 from hailhq.voicebot.agent import SpeechSanitizingAgent, speak_greeting
 from livekit.agents import AgentSession, StopResponse
 from livekit.agents.llm import ChatContext, ChatMessage
+from livekit.agents.voice.amd import AMDCategory
 
 from ._fakes import FakeAnnouncingSession, FakeLLM
 
@@ -190,3 +191,69 @@ async def test_outbound_opening_cancels_the_pending_end_of_turn(
     cancelled_after: list[int] = []
     await speak_greeting(session, metadata, generate_opening=generate_opening)
     assert cancelled_after == ([0] if cancelled else [])
+
+
+async def test_reply_after_menu_greeting_ends_with_the_persons_words():
+    """On the phone-menu path the greeting is spoken inside the turn hook,
+    after the person's words were captured. The reply request must still
+    end with their words: Claude models refuse a request that ends with the
+    agent's own line (no prefill)."""
+    agent = SpeechSanitizingAgent(instructions="test")
+    words = ChatMessage(role="user", content=["Northgate Dental, how can I help?"])
+
+    async def observe(_text):
+        greeting = ChatMessage(role="assistant", content=["Hi, this is an AI."])
+        agent._chat_ctx.items.append(greeting)
+        return AMDCategory.HUMAN
+
+    agent.phone_menu = Mock(active=True, observe=observe)
+    turn_ctx = ChatContext()
+    await agent.on_user_turn_completed(turn_ctx, words)
+    # LiveKit inserts the new message by creation time before the request.
+    request = turn_ctx.copy()
+    request.insert(words)
+    assert [m.role for m in request.messages()] == ["assistant", "user"]
+    assert request.messages()[-1] is words
+
+
+async def test_a_person_on_the_line_stops_the_menu_silence_prompts():
+    """LiveKit's phone-menu helper asks for a reply after a few seconds of
+    silence, and LiveKit closes it only with the session. Once a person
+    answers, Hail stops it. Private in livekit-agents 1.8.8: this fails if
+    the attribute or the helper moves."""
+    import inspect
+    from types import SimpleNamespace
+
+    from hailhq.voicebot.agent import stop_menu_prompts
+    from livekit import rtc
+    from livekit.agents.voice.ivr import IVRActivity
+
+    assert "self._ivr_activity = IVRActivity(self)" in inspect.getsource(AgentSession)
+
+    class Session(rtc.EventEmitter):
+        def __init__(self):
+            super().__init__()
+            self.generate_reply = Mock()
+
+    session = Session()
+    activity = IVRActivity(session, max_silence_duration=0.02)
+    await activity.start()
+    session._ivr_activity = activity
+    session.emit("user_state_changed", SimpleNamespace(new_state="listening"))
+    session.emit("agent_state_changed", SimpleNamespace(new_state="listening"))
+    await asyncio.sleep(0.05)
+    session.generate_reply.assert_called_once()  # the helper is live
+
+    await stop_menu_prompts(session, call_id=None)
+    session.emit("user_state_changed", SimpleNamespace(new_state="speaking"))
+    session.emit("user_state_changed", SimpleNamespace(new_state="listening"))
+    await asyncio.sleep(0.05)
+    session.generate_reply.assert_called_once()
+    # LiveKit closes it again with the session: that must stay harmless.
+    await activity.aclose()
+
+
+async def test_stop_menu_prompts_without_a_helper_is_a_no_op():
+    from hailhq.voicebot.agent import stop_menu_prompts
+
+    await stop_menu_prompts(Mock(spec=[]), call_id=None)

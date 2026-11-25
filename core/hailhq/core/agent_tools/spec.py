@@ -90,6 +90,9 @@ class ToolContext:
     # returned (a handover dial that ended). The text is an instruction.
     prompt: Callable[[str], Awaitable[None]] | None = None
     inbound_email_id: uuid.UUID | None = None
+    # Hold: stay quiet until the other party speaks again. None outside a
+    # live session.
+    hold: Callable[[], Awaitable[None]] | None = None
 
 
 @dataclass(frozen=True)

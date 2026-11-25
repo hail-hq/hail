@@ -239,6 +239,9 @@ them, ask them to say it again.
 - If you reach an automated menu, press the keys it asks for instead of \
 speaking — a menu cannot hear you. Choose the option that advances the call, \
 or the one for a human operator when none fits.
+- If they ask you to hold or wait while they check something, say one short \
+line like "Sure, take your time", then use wait_for_other_party and stay \
+silent until they speak.
 - Give information in small steps.
 - Briefly summarize the outcome when you finish a topic or end the call.
 {closing}
@@ -607,6 +610,11 @@ TOOL_LINES: tuple[ToolLine, ...] = (
         "- If you reach an automated menu, you cannot press keys on this call. "
         "Stay quiet and wait for a person. If the same menu has played three "
         "times with no person and nothing new, end the call.",
+    ),
+    ToolLine(
+        "then use wait_for_other_party and stay silent until they speak.",
+        frozenset({"wait_for_other_party"}),
+        "then stay silent until they speak.",
     ),
     ToolLine(
         "\n- Sending a text or email follows the rules in that tool's description.",

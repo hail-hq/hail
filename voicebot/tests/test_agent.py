@@ -1556,7 +1556,12 @@ async def test_build_tools_safely_degrades_on_failure(
         return None
 
     call_id = UUID("11111111-2222-3333-4444-555555555557")
-    expected_tools = ["end_call", "send_dtmf", "hail_settings_help"]
+    expected_tools = [
+        "end_call",
+        "send_dtmf",
+        "hail_settings_help",
+        "wait_for_other_party",
+    ]
     # Must not raise.
     tools, api = await build_tools_safely({}, call_id, _hangup, _send_dtmf)
 
@@ -1590,6 +1595,7 @@ async def test_build_tools_safely_passes_through_on_success(
         spoke_since: object = None,
         cancel_bridge: object = None,
         prompt: object = None,
+        hold: object = None,
     ) -> tuple:
         return sentinel_tools, sentinel_api
 

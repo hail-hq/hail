@@ -4,9 +4,15 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- Calls: when the other person asks the agent to hold, it stays quiet until they speak again, and checks in once after two minutes of silence.
+
 ### Fixed
 
 - Webhooks: a delivery that cannot reach its endpoint shows a short reason, such as a TLS or connection failure.
+- Calls: after a phone menu hands over to a person, the agent no longer speaks every few seconds of silence.
+- Calls: long numbers inside a spelled code are read in groups of three or four digits.
 
 ## [0.38.0] (2026-11-24)
 

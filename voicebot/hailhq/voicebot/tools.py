@@ -27,6 +27,7 @@ from hailhq.core.agent_tools.spec import SPOKEN_FALLBACK, ToolContext, ToolSpec
 from hailhq.core.config import settings
 from hailhq.core.db import session_scope
 from hailhq.core.prompts import fit_to_tools
+from hailhq.core.schemas import RESERVED_TOOL_NAMES
 from hailhq.voicebot.attachment_reader import inspect_tool_file
 from livekit.agents.llm import function_tool
 from livekit.agents.voice import RunContext
@@ -165,6 +166,7 @@ def every_call_tools(
     hangup,
     send_dtmf=None,
     spoke_since=None,
+    hold=None,
 ) -> list:
     """The tools every call keeps (``ToolSpec.on_every_call``), for a call
     whose other tools could not be built. They need no database, API or
@@ -180,6 +182,7 @@ def every_call_tools(
         hangup=hangup,
         send_dtmf=send_dtmf,
         spoke_since=spoke_since,
+        hold=hold,
     )
     return _wrap_fitted([s for s in call_tools() if s.on_every_call], tctx)
 
@@ -214,6 +217,7 @@ async def build_agent_tools(
     spoke_since=None,
     cancel_bridge=None,
     prompt=None,
+    hold=None,
 ) -> tuple[list, AgentApiClient | None]:
     """Build this call's LiveKit tools. Returns (tools, api_client).
 
@@ -229,6 +233,7 @@ async def build_agent_tools(
             hangup=hangup,
             send_dtmf=send_dtmf,
             spoke_since=spoke_since,
+            hold=hold,
         )
         return tools, None
 
@@ -276,7 +281,19 @@ async def build_agent_tools(
             specs.append(transfer_call.CANCEL_SPEC)
     # The agent's own HTTP tools are not built-ins: a `tools` list does not
     # name them, and they stay on with `tools: []`.
-    specs.extend(await _http_tools(metadata, call_id, organization_id))
+    taken = {s.name for s in specs} | RESERVED_TOOL_NAMES
+    for http in await _http_tools(metadata, call_id, organization_id):
+        if http.name in taken:
+            # Saved before Hail took the name (or twice): two tools with one
+            # name would break the call, so the first one wins.
+            logger.warning(
+                "call_id=%s http tool %s skipped: the call has a tool with that name",
+                call_id,
+                http.name,
+            )
+            continue
+        taken.add(http.name)
+        specs.append(http)
     # Every-call tools need no database or API: a call with only those
     # (`tools: []`) opens neither.
     checked = [s for s in specs if not s.on_every_call]
@@ -294,6 +311,7 @@ async def build_agent_tools(
         spoke_since=spoke_since,
         cancel_bridge=cancel_bridge,
         prompt=prompt,
+        hold=hold,
     )
 
     passed: set[str] = set()

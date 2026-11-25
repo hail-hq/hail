@@ -63,7 +63,7 @@ Existing duration limits and interruption handling still apply.
 
 A tool spec with `on_every_call=True` stays on every call, whatever the
 `tools` list says, and is kept when building the other tools fails. Today
-that is `end_call`, `send_dtmf` and the settings guide. Such a tool must need no
+that is `end_call`, `send_dtmf`, `wait_for_other_party` and the settings guide. Such a tool must need no
 database or API.
 
 A prompt sentence that names a tool, or relies on one, is a `ToolLine`:

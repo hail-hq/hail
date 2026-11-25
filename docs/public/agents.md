@@ -31,7 +31,8 @@ CLI: `hail agents create "Front desk" --prompt-file ./front-desk.md`, then
 Restrict tools with `hail agents update <id> --tools send_sms`; allow
 all again with `hail agents update <id> --all-tools`. Some tools stay on
 every call, whatever the list says: `end_call` (hang up), `send_dtmf`
-(keypad presses) and Hail's settings guide.
+(keypad presses), `wait_for_other_party` (stay quiet while the other
+person checks something) and Hail's settings guide.
 MCP: `list_agents`, `get_agent`, `create_agent`, `update_agent`, `delete_agent`, `route_number`, and `place_call(agent_id=...)`.
 SDK: `client.agents.create(...)`, `client.numbers.route(...)`.
 
