@@ -12,9 +12,9 @@ Menu names are from 3CX V20 Update 10. Lines marked "(forum)" come from 3CX foru
 
 **Trunk** (Admin > Voice & Chat > Add Trunk > the template "Generic SIP Trunk (IP Based)"). Whatever the template's name, enter the connection's username and password: Hail refuses a call without them.
 
-- Use the generic template, never a carrier's (Twilio or a local carrier): those register with that carrier.
+- Use the generic template, never a phone carrier's: those register with that carrier.
 - Registrar/Server: the SIP server's hostname from the connection, port 5060, Outbound Proxy empty. Enter the hostname only, never its IP addresses: they change, and Hail matches calls by username and password, not by address.
-- Authentication ID and password: the connection's username and password. Seen working on one install with type of authentication `Do not require – IP based` (3CX still answered LiveKit's digest challenge); not checked in 3CX's docs. If calls never reach Hail, try a type that authenticates.
+- Authentication ID and password: the connection's username and password. Seen working on one install with type of authentication `Do not require – IP based` (3CX still answered the SIP server's password challenge); not checked in 3CX's docs. If calls never reach Hail, try a type that authenticates.
 - Main Trunk Number is required. 3CX sends it as the caller on every call through the trunk (see caller ID below).
 - DTMF: RFC 2833.
 - DIDs on the trunk: none. The business's number already belongs to its carrier trunk, and the same DID on 2 trunks confuses inbound routing.
