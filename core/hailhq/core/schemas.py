@@ -1113,10 +1113,11 @@ class ConnectedNumberCheck(BaseModel):
         default=None,
         description=(
             "Why the check failed. 'no_call_arrived': no call reached this "
-            "connection; check the trunk, and that a routing rule sends this "
-            "number to Hail with + and the country code. "
-            "'not_authenticated': the call came without this connection's "
-            "username and password, or to another trunk. 'code_not_received': "
+            "connection; check the trunk and its username and password, and "
+            "that a routing rule sends this number to Hail with + and the "
+            "country code. 'not_authenticated': the call came in on another "
+            "connection's trunk, for example with another connection's "
+            "username and password. 'code_not_received': "
             "the check code did not come through; turn on RFC 2833 key presses."
         ),
     )
