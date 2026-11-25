@@ -120,18 +120,16 @@ class LineIn(PreviewIn):
 
 
 async def _catalogue_model(body: PreviewIn) -> str:
-    catalogue = await voice_catalogue(body.language)
-    choice = next(
-        (
-            v
-            for v in catalogue["voices"]
-            if v["id"] == body.voice_id and v["provider"] == body.provider
-        ),
-        None,
-    )
-    if choice is None:
-        raise HTTPException(422, "Choose one of the suggested voices.")
-    return choice["model"]
+    for provider_filter in (None, body.provider):
+        catalogue = (
+            await voice_catalogue(body.language, provider_filter=provider_filter)
+            if provider_filter
+            else await voice_catalogue(body.language)
+        )
+        for voice in catalogue["voices"]:
+            if voice["id"] == body.voice_id and voice["provider"] == body.provider:
+                return voice["model"]
+    raise HTTPException(422, "Choose one of the suggested voices.")
 
 
 def _wav(audio: bytes) -> Response:
