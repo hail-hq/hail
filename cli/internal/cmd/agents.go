@@ -288,6 +288,9 @@ func (f *agentFlags) body(cmd *cobra.Command, create bool, voice map[string]any)
 			}
 		}
 		if changed("voice") {
+			if _, scoped := vc["voice_provider"]; scoped && vc["voice_id"] != f.voiceID {
+				vc["voice_provider"] = nil
+			}
 			if f.voiceID == "" {
 				vc["voice_id"] = nil
 			} else {

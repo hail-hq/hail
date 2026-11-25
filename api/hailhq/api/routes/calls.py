@@ -75,7 +75,11 @@ from hailhq.core.pool import (
     claim_pool_number,
     release_pool_reservation,
 )
-from hailhq.core.provider_config import load_org_provider_configs, provider_cipher
+from hailhq.core.provider_config import (
+    load_org_provider_configs,
+    provider_cipher,
+    voice_override_conflict,
+)
 from hailhq.core.recordings import recording_call_metadata
 from hailhq.core.schemas import (
     TERMINAL_CALL_STATUSES,
@@ -120,10 +124,7 @@ def apply_agent_defaults(body: CallCreate, agent: Agent) -> CallCreate:
             continue
         value = getattr(agent, field)
         if field == "voice_config":
-            # On rollback, keep the language and fall back to the workspace voice.
-            value = VoiceConfig.model_validate(
-                VoiceConfig.legacy_agent_dict(value or {})
-            )
+            value = VoiceConfig.model_validate(VoiceConfig.public_dict(value or {}))
         update[field] = value
     return body.model_copy(update=update)
 
@@ -354,6 +355,7 @@ async def create_call(
     # Saved agent: fills every field the request left out (explicit fields
     # win), stamps calls.agent_id, and may carry its own AI line and cap.
     agent: Agent | None = None
+    sent_voice_config = "voice_config" in body.model_fields_set
     if body.agent_id is not None:
         agent = (
             await db.execute(
@@ -446,6 +448,23 @@ async def create_call(
     lang = body.voice_config.language or (
         default_tts.params.get("language") if default_tts else None
     )
+    if body.voice_config.voice_provider and (
+        error := voice_override_conflict(
+            body.voice_config.voice_provider, lang, default_tts
+        )
+    ):
+        if sent_voice_config:
+            raise await cache_failure(
+                idem,
+                unprocessable(error, loc=["body", "voice_config", "voice_provider"]),
+            )
+        body = body.model_copy(
+            update={
+                "voice_config": body.voice_config.model_copy(
+                    update={"voice_id": None, "voice_provider": None}
+                )
+            }
+        )
     if lang is not None:
         body = body.model_copy(
             update={
@@ -563,7 +582,7 @@ async def create_call(
             )
         from_number = pool_number
 
-    voice_config = body.voice_config.model_dump()
+    voice_config = body.voice_config.to_storage()
 
     # 2. Insert the Call row. Pool path needs flush-then-bind: see
     #    claim_pool_number docstring for the FK dance.

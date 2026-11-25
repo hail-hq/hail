@@ -255,6 +255,20 @@ async def test_catalogue_cache_is_reused_and_invalidated_by_model(monkeypatch):
         assert all(call.request.method == "GET" for call in mock.calls)
 
 
+async def test_catalogue_uses_only_the_requested_provider(monkeypatch):
+    monkeypatch.setattr(settings, "eleven_api_key", "eleven-key")
+    with respx.mock as mock:
+        mock.get("https://api.cartesia.ai/voices").mock(
+            return_value=httpx.Response(
+                200, json={"data": [cart_row()], "has_more": False}
+            )
+        )
+        result = await catalog.voice_catalogue("en", provider_filter="cartesia")
+        assert result["voices"]
+        assert {voice["provider"] for voice in result["voices"]} == {"cartesia"}
+        assert not result["partial"]
+
+
 async def test_retained_voice_validation_checks_supported_language_without_synthesis():
     with respx.mock as mock:
         mock.get("https://api.cartesia.ai/voices/custom").mock(

@@ -539,10 +539,14 @@ def build_llm(
 
 
 def _house_tts(
-    voice_id_override: str | None, language: str | None
+    voice_id_override: str | None,
+    language: str | None,
+    *,
+    skip: str | None = None,
+    last: str | None = None,
 ) -> list[agents_tts.TTS]:
-    allowed = tts_providers_for(language)
-    instances: list[agents_tts.TTS] = []
+    allowed = tts_providers_for(language) - {skip}
+    instances: dict[str, agents_tts.TTS] = {}
     if settings.cartesia_api_key and "cartesia" in allowed:
         kwargs: dict[str, Any] = {
             "model": settings.cartesia_model,
@@ -550,7 +554,7 @@ def _house_tts(
         }
         if language:
             kwargs["language"] = language
-        instances.append(cartesia_plugin.TTS(**kwargs))
+        instances["cartesia"] = cartesia_plugin.TTS(**kwargs)
     if settings.eleven_api_key and "elevenlabs" in allowed:
         kwargs = {
             "voice_id": voice_id_override or settings.elevenlabs_voice_id,
@@ -558,8 +562,10 @@ def _house_tts(
         }
         if language:
             kwargs["language"] = elevenlabs_language(language)
-        instances.append(elevenlabs_plugin.TTS(**kwargs))
-    return instances
+        instances["elevenlabs"] = elevenlabs_plugin.TTS(**kwargs)
+    if last is not None and last in instances:
+        instances[last] = instances.pop(last)
+    return list(instances.values())
 
 
 def _org_tts(
@@ -593,10 +599,29 @@ def _org_tts(
     raise ProviderKeyError(f"unknown org tts provider '{org.provider}'")
 
 
+def _matches_house_tts(org: ResolvedLayer, voice: str | None) -> bool:
+    if org.provider == "cartesia":
+        key = settings.cartesia_api_key
+        model = settings.cartesia_model
+        house_voice = settings.cartesia_voice_id
+    else:
+        key = settings.eleven_api_key
+        model = settings.elevenlabs_model
+        house_voice = settings.elevenlabs_voice_id
+    return (
+        bool(key and voice)
+        and org.api_key in (None, key)
+        and (org.params.get("model") or model) == model
+        and voice == house_voice
+    )
+
+
 def build_tts(
     org: ResolvedLayer | None = None,
     voice_id_override: str | None = None,
     language: str | None = None,
+    *,
+    voice_provider: str | None = None,
 ) -> agents_tts.TTS:
     """Construct the TTS for one call.
 
@@ -623,6 +648,52 @@ def build_tts(
     voicebot ever sees it; this is defense-in-depth for direct LiveKit
     dispatches that bypass the API.
     """
+    if voice_provider and voice_id_override:
+        if voice_provider not in tts_providers_for(language) or (
+            org and org.provider != voice_provider and not org.fallback_enabled
+        ):
+            # Workspace settings or the effective language may have changed
+            # since this agent was saved. Never pass the ID to a different provider.
+            return build_tts(org, None, language)
+        selected = (
+            org
+            if org and org.provider == voice_provider
+            else ResolvedLayer(voice_provider, None, {}, True)
+        )
+        try:
+            primary = _org_tts(selected, voice_id_override, language)
+        except ProviderKeyError:
+            if selected.fallback_enabled:
+                return build_tts(org, None, language)
+            raise
+        if selected.fallback_enabled:
+            fallback = _house_tts(
+                None,
+                language,
+                skip=(
+                    voice_provider
+                    if _matches_house_tts(selected, voice_id_override)
+                    else None
+                ),
+                last=voice_provider,
+            )
+            if (
+                org
+                and org.provider != voice_provider
+                and org.provider in tts_providers_for(language)
+                and not _matches_house_tts(org, org.params.get("voice_id"))
+            ):
+                try:
+                    fallback.insert(0, _org_tts(org, None, language))
+                except ProviderKeyError:
+                    logger.warning("Workspace TTS unavailable for agent voice fallback")
+            if fallback:
+                # Try each voice once before moving on. Retries on a slow
+                # provider can delay the caller's first line by tens of seconds.
+                return agents_tts.FallbackAdapter(
+                    [primary, *fallback], max_retry_per_tts=0
+                )
+        return primary
     if org is not None:
         if language is not None and org.provider not in tts_providers_for(language):
             if not org.fallback_enabled:
@@ -815,6 +886,8 @@ def build_session(
     org_cfgs: dict[str, ResolvedLayer] | None = None,
     voice_id_override: str | None = None,
     language: str | None = None,
+    *,
+    voice_provider: str | None = None,
 ) -> AgentSession:
     """Build the :class:`AgentSession` for one job.
 
@@ -901,7 +974,12 @@ def build_session(
     return AgentSession(
         vad=vad,
         stt=build_stt(org_stt, language, provider, stt_drives_turns=(mode == "stt")),
-        tts=build_tts(org_cfgs.get("tts"), voice_id_override, language),
+        tts=build_tts(
+            org_cfgs.get("tts"),
+            voice_id_override,
+            language,
+            voice_provider=voice_provider,
+        ),
         llm=build_llm(llm_cfg, org_cfgs.get("llm"), retry_on_chunk_sent=True),
         turn_handling=TurnHandlingOptions(
             turn_detection=turn_detection,

@@ -55,7 +55,7 @@ Every tool sets the MCP hints `readOnlyHint`, `destructiveHint`, `idempotentHint
 | `list_agents`                   | List saved agents.                                                                                                              |
 | `get_agent`                     | Fetch one saved agent.                                                                                                          |
 | `create_agent`                  | Save an agent that answers calls and texts.                                                                                     |
-| `update_agent`                  | Change an agent. `clear_fields` removes optional values.                                                                        |
+| `update_agent`                  | Change an agent. `clear_fields` removes optional values. A different voice ID uses the workspace voice provider.                |
 | `delete_agent`                  | Delete an agent. Destructive. Needs `confirm_name`.                                                                             |
 | `route_number`                  | Choose which agent answers a number.                                                                                            |
 | `route_email_domain`            | Choose which agent answers an email address, and who it answers.                                                                |

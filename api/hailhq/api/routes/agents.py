@@ -19,6 +19,8 @@ from datetime import datetime, timezone
 from typing import Annotated
 from uuid import UUID
 
+import httpx
+from cryptography.fernet import InvalidToken
 from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi import status as http_status
 from hailhq.api.audit import actor_of, write_audit_log
@@ -28,6 +30,7 @@ from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.api.routes.calls import get_livekit_optional
 from hailhq.core import inbound_routing
 from hailhq.core.agent_tools.registry import all_tools
+from hailhq.core.config import settings
 from hailhq.core.db import get_session, org_lock
 from hailhq.core.handover import (
     HandoverInvalid,
@@ -45,7 +48,11 @@ from hailhq.core.http_tools import (
 )
 from hailhq.core.livekit import LiveKitClient
 from hailhq.core.models import Agent, EmailDomain, PhoneNumber
-from hailhq.core.provider_config import provider_cipher
+from hailhq.core.provider_config import (
+    load_org_provider_configs,
+    provider_cipher,
+    voice_override_conflict,
+)
 from hailhq.core.schemas import (
     AgentCreate,
     AgentListResponse,
@@ -53,26 +60,79 @@ from hailhq.core.schemas import (
     AgentUpdate,
     HandoverContactOut,
     HttpToolIn,
+    VoiceConfig,
 )
 from hailhq.core.secret_cipher import SecretKeyMissing
 from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
+from hailhq.core.voice_catalog import validate_voice_language
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
+
+async def _check_scoped_voice(
+    db: AsyncSession, org_id: UUID, voice: VoiceConfig
+) -> None:
+    if voice.voice_provider is None:
+        return
+    org_tts = (await load_org_provider_configs(db, org_id)).get("tts")
+    language = voice.language or (org_tts.params.get("language") if org_tts else None)
+    if error := voice_override_conflict(voice.voice_provider, language, org_tts):
+        raise unprocessable(error, loc=["body", "voice_config", "voice_provider"])
+    if org_tts is None or org_tts.provider != voice.voice_provider:
+        return
+    custom_key = org_tts.encrypted_api_key
+    custom_model = org_tts.params.get("model")
+    if not custom_key and not custom_model:
+        return
+    cartesia = voice.voice_provider == "cartesia"
+    try:
+        key = (
+            provider_cipher().decrypt(custom_key)
+            if custom_key
+            else settings.cartesia_api_key if cartesia else settings.eleven_api_key
+        )
+        model = custom_model or (
+            settings.cartesia_model if cartesia else settings.elevenlabs_model
+        )
+        await validate_voice_language(
+            voice.voice_provider, voice.voice_id, model, key, language or "en"
+        )
+    except ValueError as exc:
+        raise unprocessable(
+            "This voice could not be verified for your workspace call settings.",
+            loc=["body", "voice_config", "voice_id"],
+        ) from exc
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        if 400 <= status < 500 and status not in (401, 403, 408, 429):
+            raise unprocessable(
+                "Choose a voice available with your workspace call settings.",
+                loc=["body", "voice_config", "voice_id"],
+            ) from exc
+        raise HTTPException(
+            503, "Voice support could not be checked. Try again."
+        ) from exc
+    except (InvalidToken, SecretKeyMissing, httpx.HTTPError) as exc:
+        raise HTTPException(
+            503, "Voice support could not be checked. Try again."
+        ) from exc
+
+
 router = APIRouter(
     prefix="/agents", tags=["agents"], responses=GENERAL_RATE_LIMITED_RESPONSES
 )
 
-_CONFLICT = {
+_SAVE_RESPONSES = {
     409: {
         "description": (
             "An agent with this name already exists, or a handover contact "
             "changed while saving."
         )
-    }
+    },
+    503: {"description": "The selected voice could not be verified. Try again."},
 }
 
 
@@ -195,7 +255,7 @@ def _save_conflict(exc: IntegrityError) -> HTTPException:
     "",
     response_model=AgentResponse,
     status_code=http_status.HTTP_201_CREATED,
-    responses=_CONFLICT,
+    responses=_SAVE_RESPONSES,
 )
 async def create_agent(
     body: AgentCreate,
@@ -205,6 +265,7 @@ async def create_agent(
     """Create an agent. Route numbers to it with PATCH /numbers/{id}, or
     place calls with it via ``agent_id`` on POST /calls."""
     _check_tools(body.tools)
+    await _check_scoped_voice(db, principal.organization_id, body.voice_config)
     await _check_http_tools(body.http_tools)
     handover = await _check_handover(
         db, principal.organization_id, body.handover_contacts
@@ -217,7 +278,7 @@ async def create_agent(
         ai_disclosure=body.ai_disclosure,
         recording_enabled=body.recording_enabled,
         ai_disclosure_line=body.ai_disclosure_line,
-        voice_config=body.voice_config.model_dump(mode="json"),
+        voice_config=body.voice_config.to_storage(),
         tools=_with_handover_tool(body.tools, bool(handover)),
         max_duration_seconds=body.max_duration_seconds,
         handover_max_duration_seconds=body.handover_max_duration_seconds,
@@ -294,7 +355,7 @@ async def get_agent(
     return (await _respond(db, [agent]))[0]
 
 
-@router.patch("/{agent_id}", response_model=AgentResponse, responses=_CONFLICT)
+@router.patch("/{agent_id}", response_model=AgentResponse, responses=_SAVE_RESPONSES)
 async def update_agent(
     agent_id: UUID,
     body: AgentUpdate,
@@ -329,20 +390,23 @@ async def update_agent(
             # read of the agent and every call it answers.
             changes.pop(field)
     if "voice_config" in changes:
-        config = body.voice_config.model_dump(mode="json")
-        if "voice_id" not in body.voice_config.model_fields_set:
-            # Read after concurrent voice edits before copying a newer override.
-            await db.refresh(
-                agent,
-                attribute_names=["voice_config"],
-                with_for_update={"key_share": True},
+        voice_config = body.voice_config
+        saved_voice = VoiceConfig.public_dict(agent.voice_config or {})
+        if (
+            "voice_provider" not in voice_config.model_fields_set
+            and voice_config.voice_id
+            and voice_config.voice_id == saved_voice.get("voice_id")
+            and saved_voice.get("voice_provider")
+        ):
+            voice_config = voice_config.model_copy(
+                update={"voice_provider": saved_voice["voice_provider"]}
             )
-            saved = agent.voice_config or {}
-            if saved.get("scoped_voice_id"):
-                config.pop("voice_id")
-                config["scoped_voice_id"] = saved["scoped_voice_id"]
-                config["voice_provider"] = saved.get("voice_provider")
-        changes["voice_config"] = config
+        if any(
+            getattr(voice_config, field) != saved_voice.get(field)
+            for field in ("language", "voice_id", "voice_provider")
+        ):
+            await _check_scoped_voice(db, principal.organization_id, voice_config)
+        changes["voice_config"] = voice_config.to_storage()
     # Validate before any attribute is set: the validation queries would
     # autoflush a pending name change outside the conflict handler below.
     items = None

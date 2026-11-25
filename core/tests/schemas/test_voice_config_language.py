@@ -13,6 +13,19 @@ def test_supported_language_accepted() -> None:
     assert VoiceConfig(language="da").language == "da"
 
 
+def test_scoped_voice_uses_a_separate_worker_key() -> None:
+    voice = VoiceConfig(
+        language="fr", voice_id="agent-voice", voice_provider="elevenlabs"
+    )
+    stored = voice.to_storage()
+    assert stored.get("voice_id") is None
+    assert stored["scoped_voice_id"] == "agent-voice"
+    assert VoiceConfig.public_dict(stored) == voice.model_dump()
+    legacy = VoiceConfig(voice_id="legacy").to_storage()
+    assert legacy["voice_id"] == "legacy"
+    assert "voice_provider" not in legacy
+
+
 def test_unsupported_language_rejected() -> None:
     with pytest.raises(ValidationError):
         VoiceConfig(language="ka")  # excluded: Whisper-only STT

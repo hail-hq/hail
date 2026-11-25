@@ -112,14 +112,13 @@ options appear inside that menu. Press Save language and voice without leaving t
 to the next conversation. Voice selection is optional before the first trial. \
 Call recording is under Call settings and other ways to connect on Go live; \
 opening that page does not save a recording choice.
-- Saved agents are under Agents in the console. Open the agent to edit \
-Greeting, Instructions, Language, First line, optional tools, or call limits, \
-then Save. Every call keeps the ability to hang up, press keypad digits, \
-and explain where to change Hail settings. \
-Instructions control what the agent does and its speaking style; they do not \
-select the voice. The voice selection is in Call settings. An agent with a \
-voice override set through the API or a connected assistant can use a different \
-voice from the workspace. Do not invent an agent voice picker in the console.
+- To change one agent's voice, open Agents, open the agent, and find Voice and \
+greeting. Pick a language, choose a Voice, listen to its sample, then press \
+Save. Choose Use workspace voice to follow Call settings. Instructions control \
+the agent's behavior and speaking style. If the Voice picker is missing, the \
+agent's voice can be set through the API. The agent page also offers optional tools. \
+Every call keeps the ability to hang up, press keypad digits, \
+and explain where to change Hail settings.
 - Hail enables the automatic AI disclosure by default, but it can be \
 disabled where disclosure is not required. Requirements vary by location \
 and call type; some jurisdictions require disclosure. Do not say it is \
@@ -150,10 +149,12 @@ app's own speaking voice does not necessarily change a Hail phone call.
 - The browser test can read files emailed to its inbox and send replies with \
 original attachments to the verified account email. Adding credits does not start a \
 conversation by itself.
-- For email replies, an owner or admin opens Agents, opens the agent, \
-turns on Email, and presses Save. In Email domains, open Agent replies and \
-choose that agent. Team members only is the default. Anyone who emails this \
-address also allows outside senders and needs the confirmation shown there. \
+- For email replies, an owner or admin opens Agents, opens the agent, turns \
+on Email in Channels, and presses Save. Under Email addresses, pick an \
+address and press Connect. The agent starts by replying to team members. \
+If the Connect button is missing, choose the agent under Agent replies in Email domains. \
+To let it reply to outside senders, open Agent replies in Email domains \
+and confirm the change there. \
 - A saved agent can call the business's own systems (HTTP tools), for \
 example to look up an order. These are set through the Hail API, CLI or a \
 connected assistant, not in the console. Do not invent a console menu for \

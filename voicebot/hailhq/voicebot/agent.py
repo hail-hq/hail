@@ -2611,7 +2611,7 @@ async def _run_call(
 
     vad = ctx.proc.userdata["vad"]
     voice_cfg = metadata.get("voice_config") or {}
-    voice_id_override = voice_cfg.get("voice_id")
+    voice_id_override = voice_cfg.get("scoped_voice_id") or voice_cfg.get("voice_id")
     language = voice_cfg.get("language")
     try:
         # Loading + decrypting the org's BYO config, decrypting the per-call
@@ -2655,6 +2655,7 @@ async def _run_call(
                 org_cfgs=org_cfgs,
                 voice_id_override=voice_id_override,
                 language=language,
+                voice_provider=voice_cfg.get("voice_provider"),
             )
         except ProviderKeyError:
             raise

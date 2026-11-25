@@ -88,6 +88,33 @@ async def test_preview_is_fixed_text_cached_and_rejects_arbitrary_voices(
             assert synthesis.call_count == 1
 
 
+async def test_preview_accepts_a_voice_from_a_provider_only_shortlist(voice_app):
+    def shortlist(language, *, provider_filter=None):
+        assert language == "fr"
+        return {
+            "voices": (
+                [{"id": "allowed", "provider": "cartesia", "model": "sonic-3.5"}]
+                if provider_filter == "cartesia"
+                else []
+            )
+        }
+
+    voices.voice_catalogue.side_effect = shortlist
+    body = b'{"voice_id":"allowed","provider":"cartesia","language":"fr"}'
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=voice_app), base_url="http://test"
+    ) as client:
+        with respx.mock:
+            respx.post("https://api.cartesia.ai/tts/bytes").mock(
+                return_value=httpx.Response(200, content=b"RIFF-sample")
+            )
+            response = await client.post(
+                "/internal/voices/preview", content=body, headers=_signed(body)
+            )
+            assert response.status_code == 200
+            assert response.content == b"RIFF-sample"
+
+
 async def test_preview_provider_failure_returns_retryable_error(voice_app):
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=voice_app), base_url="http://test"

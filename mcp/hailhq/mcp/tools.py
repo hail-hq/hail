@@ -1745,6 +1745,13 @@ async def update_agent(
     elif language is not None:
         fields["voice_config"] = {}
     if "voice_config" in fields:
+        config = fields["voice_config"]
+        if (
+            voice_id is not None
+            and "voice_provider" in config
+            and voice_id != config.get("voice_id")
+        ):
+            config["voice_provider"] = None
         for key, value in (("language", language), ("voice_id", voice_id)):
             if value is not None:
                 fields["voice_config"][key] = value
@@ -4396,6 +4403,7 @@ def register_tools(
         Pausing the agent or disabling a channel stops new replies on that channel.
         Omitted fields retain their values.
         Updating language or voice alone preserves the other setting.
+        Changing only the voice ID to a different ID uses the workspace voice provider.
         ``clear_fields`` resets the named settings and cannot be combined with a new
         value for the same field. Clearing the greeting lets the inbound caller speak
         first. Other resets use workspace defaults, except the handover limit resets

@@ -176,6 +176,14 @@ class VoiceConfig(BaseModel):
             "environment's default voice."
         ),
     )
+    voice_provider: str | None = Field(
+        default=None,
+        pattern=r"^[a-z][a-z0-9_-]{0,31}$",
+        description=(
+            "Provider for voice_id. The selected voice is only used with this "
+            "provider. Omit to keep the existing unscoped voice_id behavior."
+        ),
+    )
     language: Language | None = Field(
         default=None,
         description=(
@@ -186,14 +194,28 @@ class VoiceConfig(BaseModel):
         ),
     )
 
+    @model_validator(mode="after")
+    def _clear_provider_without_voice(self) -> "VoiceConfig":
+        if self.voice_provider and not self.voice_id:
+            self.voice_provider = None
+        return self
+
+    def to_storage(self) -> dict:
+        """Keep scoped IDs out of the legacy key read by older workers."""
+        config = self.model_dump(mode="json")
+        if self.voice_provider and self.voice_id:
+            config["scoped_voice_id"] = config.pop("voice_id")
+        else:
+            config.pop("voice_provider")
+        return config
+
     @staticmethod
-    def legacy_agent_dict(config: dict) -> dict:
-        """Skip fields written by releases that support provider-specific voices."""
-        return {
-            key: value
-            for key, value in config.items()
-            if key not in {"scoped_voice_id", "voice_provider"}
-        }
+    def public_dict(config: dict) -> dict:
+        if "scoped_voice_id" not in config:
+            return config
+        public = dict(config)
+        public["voice_id"] = public.pop("scoped_voice_id")
+        return public
 
 
 class ConsentAttestationMixin(BaseModel):
@@ -1677,8 +1699,9 @@ class AgentUpdate(BaseModel):
     voice_config: VoiceConfig | None = Field(
         default=None,
         description=(
-            "New TTS voice and language settings. Omit voice_id to keep any "
-            "saved provider-specific voice. Send null for voice_id to clear it."
+            "New TTS voice and language settings. Repeating the saved voice ID "
+            "keeps its provider if voice_provider is omitted. To clear the "
+            "provider, send the saved voice ID and set voice_provider to null."
         ),
     )
     tools: list[str] | None = Field(
@@ -1792,7 +1815,7 @@ class AgentResponse(BaseModel):
     @field_validator("voice_config")
     @classmethod
     def _public_voice_config(cls, value: dict) -> dict:
-        return VoiceConfig.legacy_agent_dict(value)
+        return VoiceConfig.public_dict(value)
 
 
 class AgentListResponse(BaseModel):
@@ -1923,8 +1946,7 @@ DEPRECATED_PREFIX_FIELDS = {
 }
 
 _PREFIX_RULE = (
-    "must be 1–20 chars of lowercase a–z, 0–9, or '-', "
-    "with no leading or trailing '-'"
+    "must be 1–20 chars of lowercase a–z, 0–9, or '-', with no leading or trailing '-'"
 )
 
 
@@ -2269,6 +2291,22 @@ class EmailDomainPatch(_PrefixNames):
             "make the agent use its tools. Mail without a DMARC pass gets no "
             "reply. Omit to leave unchanged, except that a new agent starts at "
             "'members'."
+        ),
+    )
+    expected_email_agent_id: UUID | None = Field(
+        default=None,
+        description=(
+            "Optional precondition for changing email_agent_id or email_agent_scope. Null expects "
+            "no current agent. Returns 409 if another agent is assigned."
+        ),
+    )
+
+    expected_domain: str | None = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "Optional address or domain precondition for editing the agent route. "
+            "Returns 409 if the address or domain has changed."
         ),
     )
 

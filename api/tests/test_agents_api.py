@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import dataclasses
 import uuid
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import httpx
 import pytest
+from fastapi import HTTPException
 from hailhq.core import carrier_routing
 from hailhq.core.config import settings
-from hailhq.core.models import AuditLog, EmailDomain, PhoneNumber
+from hailhq.core.models import Agent, AuditLog, EmailDomain, PhoneNumber
+from hailhq.core.schemas import VoiceConfig
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -55,6 +58,94 @@ def inbound_hooks(monkeypatch: pytest.MonkeyPatch) -> dict[str, AsyncMock]:
         ),
     )
     return {"attach": attach, "detach": detach}
+
+
+@pytest.mark.parametrize(("provider_status", "api_status"), [(404, 422), (408, 503)])
+async def test_scoped_voice_checks_the_workspace_model(
+    monkeypatch: pytest.MonkeyPatch, provider_status: int, api_status: int
+):
+    from hailhq.api.routes import agents
+
+    org_id = uuid.uuid4()
+    monkeypatch.setattr(settings, "cartesia_api_key", "test-key")
+    config = SimpleNamespace(
+        provider="cartesia",
+        fallback_enabled=False,
+        encrypted_api_key=None,
+        params={"model": "workspace-model", "language": "fr"},
+    )
+    monkeypatch.setattr(
+        agents, "load_org_provider_configs", AsyncMock(return_value={"tts": config})
+    )
+    request = httpx.Request("GET", "https://provider.example/voices/test")
+    validate = AsyncMock(
+        side_effect=httpx.HTTPStatusError(
+            "check failed",
+            request=request,
+            response=httpx.Response(provider_status, request=request),
+        )
+    )
+    monkeypatch.setattr(agents, "validate_voice_language", validate)
+
+    with pytest.raises(HTTPException) as error:
+        await agents._check_scoped_voice(
+            AsyncMock(spec=AsyncSession),
+            org_id,
+            VoiceConfig(voice_id="test", voice_provider="cartesia"),
+        )
+    assert error.value.status_code == api_status
+    validate.assert_awaited_once_with(
+        "cartesia", "test", "workspace-model", "test-key", "fr"
+    )
+
+
+async def test_scoped_voice_round_trips_without_exposing_it_to_old_workers(
+    client,
+    org,
+    async_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from hailhq.api.routes import agents
+
+    _, headers = org
+    requested = {"voice_id": "test", "voice_provider": "cartesia", "language": "fr"}
+    created = await client.post(
+        "/v1/agents",
+        headers=headers,
+        json={
+            "name": "Front desk",
+            "system_prompt": "Help callers.",
+            "voice_config": requested,
+        },
+    )
+    assert created.status_code == 201, created.text
+    agent_id = created.json()["id"]
+    stored = await async_session.get(Agent, uuid.UUID(agent_id))
+    assert stored.voice_config.get("voice_id") is None
+    assert stored.voice_config["scoped_voice_id"] == "test"
+    public = created.json()["voice_config"]
+    assert {field: public[field] for field in requested} == requested
+    assert "scoped_voice_id" not in public
+
+    check_voice = AsyncMock(side_effect=AssertionError("unchanged voice revalidated"))
+    monkeypatch.setattr(agents, "_check_scoped_voice", check_voice)
+    updated = await client.patch(
+        f"/v1/agents/{agent_id}",
+        headers=headers,
+        json={"name": "New name", "voice_config": public},
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["voice_config"] == public
+    check_voice.assert_not_awaited()
+
+    updated = await client.patch(
+        f"/v1/agents/{agent_id}",
+        headers=headers,
+        json={"voice_config": {"language": "fr", "voice_id": "test"}},
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["voice_config"] == public
+    check_voice.assert_not_awaited()
 
 
 async def test_recording_override_can_return_to_workspace_default(client, org):

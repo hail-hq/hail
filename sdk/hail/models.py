@@ -50,6 +50,8 @@ class VoiceConfig(BaseModel):
     tts: Literal["cartesia"] = "cartesia"
     vad: Literal["silero"] = "silero"
     turn_detection: Literal["livekit"] = "livekit"
+    voice_id: str | None = None
+    voice_provider: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_-]{0,31}$")
     # Spoken language for the call (lowercase ISO 639-1, e.g. "da").
     # The *server* enforces the supported set (39 codes — see
     # docs/languages.md and the OpenAPI enum); the SDK deliberately stays
@@ -820,6 +822,7 @@ class EmailDomainPatch(BaseModel):
     forward_rate_per_hour: int | None = None
     email_agent_id: UUID | None = None
     email_agent_scope: EmailAgentScope | None = None
+    expected_email_agent_id: UUID | None = None
 
     @field_validator("local_prefix_workspace", "local_prefix_name")
     @classmethod

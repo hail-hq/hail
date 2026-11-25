@@ -68,6 +68,8 @@ paths:
           description:
             An agent with this name already exists, or a handover contact
             changed while saving.
+        "503":
+          description: The selected voice could not be verified. Try again.
         "422":
           description: Validation Error
           content:
@@ -250,6 +252,8 @@ paths:
           description:
             An agent with this name already exists, or a handover contact
             changed while saving.
+        "503":
+          description: The selected voice could not be verified. Try again.
         "422":
           description: Validation Error
           content:
@@ -2030,6 +2034,8 @@ paths:
               description: Seconds until the current window resets.
               schema:
                 type: integer
+        "409":
+          description: The address or agent assignment has changed.
         "422":
           description: Validation Error
           content:
@@ -7548,8 +7554,9 @@ components:
             - $ref: "#/components/schemas/VoiceConfig"
             - type: "null"
           description:
-            New TTS voice and language settings. Omit voice_id to keep
-            any saved provider-specific voice. Send null for voice_id to clear it.
+            New TTS voice and language settings. Repeating the saved voice
+            ID keeps its provider if voice_provider is omitted. To clear the provider,
+            send the saved voice ID and set voice_provider to null.
         tools:
           anyOf:
             - items:
@@ -8917,6 +8924,24 @@ components:
             passes DMARC and the spam and header rules; such a sender can make the
             agent use its tools. Mail without a DMARC pass gets no reply. Omit to
             leave unchanged, except that a new agent starts at 'members'."
+        expected_email_agent_id:
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
+          title: Expected Email Agent Id
+          description:
+            Optional precondition for changing email_agent_id or email_agent_scope.
+            Null expects no current agent. Returns 409 if another agent is assigned.
+        expected_domain:
+          anyOf:
+            - type: string
+              minLength: 1
+            - type: "null"
+          title: Expected Domain
+          description:
+            Optional address or domain precondition for editing the agent
+            route. Returns 409 if the address or domain has changed.
       additionalProperties: false
       type: object
       title: EmailDomainPatch
@@ -13192,6 +13217,15 @@ components:
             "Per-call TTS voice override, applied to whichever TTS provider
             serves the call. Omitted: the organization's or environment's default
             voice."
+        voice_provider:
+          anyOf:
+            - type: string
+              pattern: ^[a-z][a-z0-9_-]{0,31}$
+            - type: "null"
+          title: Voice Provider
+          description:
+            Provider for voice_id. The selected voice is only used with
+            this provider. Omit to keep the existing unscoped voice_id behavior.
         language:
           anyOf:
             - type: string

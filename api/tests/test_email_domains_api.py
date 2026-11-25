@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import httpx
@@ -12,7 +13,7 @@ from hailhq.api.main import app
 from hailhq.core.config import settings
 from hailhq.core.hail_mail import default_workspace_prefix, org_prefix_from_id
 from hailhq.core.models import ApiKey, EmailDomain, RetiredHailMailAddress
-from hailhq.core.schemas import EmailDomainResponse
+from hailhq.core.schemas import EmailDomainPatch, EmailDomainResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -1654,6 +1655,61 @@ async def test_patch_routes_an_address_to_an_agent(
     assert resp.json()["email_agent_id"] is None
 
 
+async def test_patch_rejects_stale_agent_assignment(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    domain_id, agent_id = await _hail_mail_and_agent(client, headers, monkeypatch)
+    url = f"/email-domains/{domain_id}"
+    assigned = await client.patch(
+        url,
+        json={"email_agent_id": agent_id, "expected_email_agent_id": None},
+        headers=headers,
+    )
+    assert assigned.status_code == 200, assigned.text
+    stale = await client.patch(
+        url,
+        json={"email_agent_id": None, "expected_email_agent_id": None},
+        headers=headers,
+    )
+    assert stale.status_code == 409, stale.text
+    stale_scope = await client.patch(
+        url,
+        json={"email_agent_scope": "anyone", "expected_email_agent_id": None},
+        headers=headers,
+    )
+    assert stale_scope.status_code == 409, stale_scope.text
+    old_address = assigned.json()["domain"]
+    renamed = await client.patch(
+        url, json={"local_prefix_name": "renamed"}, headers=headers
+    )
+    assert renamed.status_code == 200, renamed.text
+    assert renamed.json()["domain"] != old_address
+    stale_address = await client.patch(
+        url,
+        json={
+            "email_agent_id": None,
+            "expected_email_agent_id": agent_id,
+            "expected_domain": old_address,
+        },
+        headers=headers,
+    )
+    assert stale_address.status_code == 409, stale_address.text
+    current = await client.get(url, headers=headers)
+    assert current.json()["email_agent_id"] == agent_id
+    assert current.json()["email_agent_scope"] == "members"
+    cleared = await client.patch(
+        url,
+        json={"email_agent_id": None, "expected_email_agent_id": agent_id},
+        headers=headers,
+    )
+    assert cleared.status_code == 200, cleared.text
+    assert cleared.json()["email_agent_id"] is None
+
+
 async def test_a_new_route_starts_at_members(
     client: httpx.AsyncClient,
     org_and_key: tuple,
@@ -1696,6 +1752,69 @@ async def test_a_new_route_starts_at_members(
         headers=headers,
     )
     assert resp.json()["email_agent_scope"] == "anyone"
+
+
+async def test_guarded_email_move_resets_scope_from_the_expected_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from hailhq.api.deps import Principal
+    from hailhq.api.routes import email_domains
+
+    previous, target, domain_id, org_id = (uuid.uuid4() for _ in range(4))
+    now = datetime.now(timezone.utc)
+    domain = EmailDomainResponse(
+        id=domain_id,
+        organization_id=org_id,
+        kind="hail_mail",
+        domain="acme+support@mail.hail.so",
+        local_prefix_workspace="acme",
+        local_prefix_name="support",
+        verification_status="verified",
+        dns_records=[],
+        mail_from_domain=None,
+        provider="ses",
+        verified_at=now,
+        email_agent_id=target,
+        email_agent_scope="anyone",
+        created_at=now,
+        updated_at=now,
+    )
+    principal = Principal(
+        auth_kind="shared",
+        api_key_id=None,
+        user_id=None,
+        organization_id=org_id,
+        scopes=[],
+    )
+    db = AsyncMock(spec=AsyncSession)
+    # The old snapshot shows the target. The conditional write succeeds against
+    # the previous owner after another assignment commits.
+    db.execute.side_effect = [
+        SimpleNamespace(scalar_one_or_none=lambda: domain),
+        SimpleNamespace(
+            scalar_one_or_none=lambda: SimpleNamespace(
+                status="live", email_enabled=True
+            )
+        ),
+        SimpleNamespace(scalar_one_or_none=lambda: domain_id),
+    ]
+    monkeypatch.setattr(email_domains, "write_audit_log", AsyncMock())
+
+    await email_domains.patch_email_domain(
+        domain_id,
+        EmailDomainPatch(
+            email_agent_id=target,
+            expected_email_agent_id=previous,
+            expected_domain="acme+old-address@mail.hail.so",
+        ),
+        principal,
+        db,
+    )
+
+    values = db.execute.await_args.args[0].compile().params
+    assert values["email_agent_scope"] == "members"
+    assert previous in values.values()
+    assert "acme+old-address@mail.hail.so" in values.values()
 
 
 async def test_a_new_address_defaults_to_members(

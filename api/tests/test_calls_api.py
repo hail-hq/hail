@@ -1873,17 +1873,34 @@ async def test_post_calls_twilio_number_without_trunk_fails_before_room(
     assert call.end_reason == "carrier_route_failed"
 
 
+@pytest.mark.parametrize(
+    ("provider", "locked"), [(None, False), ("elevenlabs", False), ("elevenlabs", True)]
+)
 async def test_post_calls_with_agent_id_fills_defaults(
     client: httpx.AsyncClient,
     async_session: AsyncSession,
     org_and_key: tuple[str, ApiKey, str],
     livekit_mock: AsyncMock,
     add_phone_number,
+    provider: str | None,
+    locked: bool,
 ) -> None:
     from hailhq.core.models import Agent
+    from hailhq.core.schemas import VoiceConfig
 
     org_id, _, plain = org_and_key
     await add_phone_number(async_session, org_id)
+    if locked:
+        async_session.add(
+            OrgProviderConfig(
+                organization_id=org_id,
+                layer="tts",
+                provider="cartesia",
+                params={},
+                fallback_enabled=False,
+                is_active=True,
+            )
+        )
     agent = Agent(
         organization_id=org_id,
         name="Recruiter",
@@ -1891,7 +1908,9 @@ async def test_post_calls_with_agent_id_fills_defaults(
         first_message="Hi, is now a good time?",
         ai_disclosure=False,
         ai_disclosure_line="AI for {org}.",
-        voice_config={"voice_id": "v9"},
+        voice_config=VoiceConfig(
+            voice_id="v9", voice_provider=provider, language="it"
+        ).to_storage(),
         tools=["end_call"],
         max_duration_seconds=900,
     )
@@ -1917,7 +1936,12 @@ async def test_post_calls_with_agent_id_fills_defaults(
     assert md["ai_disclosure"] is False
     assert md["ai_disclosure_line"] == "AI for {org}."
     assert md["tools"] == ["end_call"]
-    assert md["voice_config"]["voice_id"] == "v9"
+    assert md["voice_config"].get("voice_id") == ("v9" if provider is None else None)
+    assert md["voice_config"].get("scoped_voice_id") == (
+        "v9" if provider and not locked else None
+    )
+    assert md["voice_config"].get("voice_provider") == (None if locked else provider)
+    assert md["voice_config"]["language"] == "it"
     assert md["max_duration_seconds"] == 900
     assert md["handover_targets"] == []
 

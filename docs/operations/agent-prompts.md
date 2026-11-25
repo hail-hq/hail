@@ -24,7 +24,7 @@ Check actual controls in the `hail-website` repository:
 - [`schemas.py`](../../core/hailhq/core/schemas.py): API agent and call overrides.
 
 Check labels, routes, roles, configuration precedence, and when changes take effect.
-The console has no per-agent voice picker. API or connected-assistant overrides can select an agent voice.
+In Agents, open the agent and go to Voice and greeting. Choose a language and voice, or choose Use workspace voice to follow Call settings.
 Do not infer a current voice name from a default: call overrides and fallback behavior can differ.
 Never promise to inspect or edit settings from a phone call without an authorized capability.
 

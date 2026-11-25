@@ -797,14 +797,17 @@ async def dns_check_email_domain(
 @router.patch(
     "/{domain_id}",
     response_model=EmailDomainResponse,
-    responses=merge_rate_limited_responses(
-        {
-            429: {
-                "description": "The organization reached its daily confirm-mail limit for new forward addresses."
-            }
-        },
-        GENERAL_RATE_LIMITED_RESPONSES,
-    ),
+    responses={
+        409: {"description": "The address or agent assignment has changed."},
+        **merge_rate_limited_responses(
+            {
+                429: {
+                    "description": "The organization reached its daily confirm-mail limit for new forward addresses."
+                },
+            },
+            GENERAL_RATE_LIMITED_RESPONSES,
+        ),
+    },
 )
 async def patch_email_domain(
     domain_id: UUID,
@@ -881,6 +884,20 @@ async def patch_email_domain(
 
     # ---- agent route (any kind) ----
     # Null clears the route, so "sent" is what counts here.
+    expected_agent = "expected_email_agent_id" in body.model_fields_set
+    guarded = expected_agent or body.expected_domain is not None
+    if (
+        guarded
+        and "email_agent_id" not in body.model_fields_set
+        and body.email_agent_scope is None
+    ):
+        raise unprocessable(
+            "send email_agent_id or email_agent_scope with its precondition",
+            loc=[
+                "body",
+                "expected_email_agent_id" if expected_agent else "expected_domain",
+            ],
+        )
     if "email_agent_id" in body.model_fields_set:
         if body.email_agent_id is not None:
             agent = (
@@ -930,7 +947,10 @@ async def patch_email_domain(
         updates["email_agent_id"] = body.email_agent_id
         # A new agent starts at members: an old "anyone" was chosen for the
         # agent before it, and a cleared or deleted route leaves it on the row.
-        if body.email_agent_id not in (None, sd.email_agent_id):
+        previous_agent = (
+            body.expected_email_agent_id if expected_agent else sd.email_agent_id
+        )
+        if body.email_agent_id not in (None, previous_agent):
             updates["email_agent_scope"] = "members"
     if body.email_agent_scope is not None:
         updates["email_agent_scope"] = body.email_agent_scope
@@ -985,9 +1005,22 @@ async def patch_email_domain(
             )
 
     try:
-        await db.execute(
-            update(EmailDomain).where(EmailDomain.id == sd.id).values(**updates)
-        )
+        change = update(EmailDomain).where(EmailDomain.id == sd.id)
+        if expected_agent:
+            change = change.where(
+                EmailDomain.email_agent_id == body.expected_email_agent_id
+            )
+        if body.expected_domain is not None:
+            change = change.where(EmailDomain.domain == body.expected_domain)
+        changed = (
+            await db.execute(change.values(**updates).returning(EmailDomain.id))
+        ).scalar_one_or_none()
+        if guarded and changed is None:
+            await db.rollback()
+            raise HTTPException(
+                status_code=http_status.HTTP_409_CONFLICT,
+                detail="The email assignment changed. Pick the address again.",
+            )
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
