@@ -28,13 +28,6 @@
     "icon": "https://hail.so/assets/third-party/badges/tessl.svg"
   },
   {
-    "id": "fazier",
-    "href": "https://fazier.com",
-    "alt": "Visit Fazier",
-    "name": "Fazier",
-    "reciprocal": true
-  },
-  {
     "id": "twelve-tools",
     "href": "https://twelve.tools",
     "alt": "Visit Twelve Tools",
