@@ -397,13 +397,14 @@ async def validate_voice_language(
         )
 
 
-# (voice id, language) -> (when it failed, or None for a real answer; the
-# voice's own language when it cannot speak that language, or None). Voice
-# metadata rarely changes, and a call should not wait on the same lookup
-# twice. A failed lookup is kept for _FOREIGN_RETRY_SECONDS, so a slow
-# provider delays one call, not every call.
-_foreign_cache: dict[tuple[str, str], tuple[float | None, str | None]] = {}
+# (voice id, language) -> (when, whether the lookup failed, the voice's own
+# language when it cannot speak that language, or None). Voice metadata
+# rarely changes, and a call should not wait on the same lookup twice. An
+# answer is kept for _FOREIGN_KEEP_SECONDS; a failed lookup for
+# _FOREIGN_RETRY_SECONDS, so a slow provider delays one call, not every call.
+_foreign_cache: dict[tuple[str, str], tuple[float, bool, str | None]] = {}
 _FOREIGN_RETRY_SECONDS = 300.0
+_FOREIGN_KEEP_SECONDS = 6 * 3600.0
 
 
 async def foreign_voice_language(
@@ -421,8 +422,9 @@ async def foreign_voice_language(
         return own if own != language else None
     cache_key = (voice_id, language)
     if (cached := _foreign_cache.get(cache_key)) is not None:
-        failed_at, result = cached
-        if failed_at is None or time.monotonic() - failed_at < _FOREIGN_RETRY_SECONDS:
+        when, failed, result = cached
+        keep = _FOREIGN_RETRY_SECONDS if failed else _FOREIGN_KEEP_SECONDS
+        if time.monotonic() - when < keep:
             return result
     if not key:
         return None
@@ -439,6 +441,7 @@ async def foreign_voice_language(
         _remember(cache_key, None, failed=True)
         return None
     if not isinstance(row, dict):
+        _remember(cache_key, None, failed=True)
         return None
     own = row.get("language")
     result = (
@@ -455,6 +458,6 @@ async def foreign_voice_language(
 def _remember(
     cache_key: tuple[str, str], result: str | None, *, failed: bool = False
 ) -> None:
-    _foreign_cache[cache_key] = (time.monotonic() if failed else None, result)
+    _foreign_cache[cache_key] = (time.monotonic(), failed, result)
     if len(_foreign_cache) > 256:
         del _foreign_cache[next(iter(_foreign_cache))]

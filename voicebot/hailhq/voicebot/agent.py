@@ -459,31 +459,27 @@ async def line_party(call_id: UUID) -> tuple[DirectoryEntry | None, bool]:
     ``(None, False)``: a customer must never hear the workspace's setup,
     and a member can retry the call."""
     try:
-        async with (
-            asyncio.timeout(_OTHER_PARTY_TIMEOUT_SECONDS),
-            session_scope() as session,
-        ):
-            line = await _line_number(session, call_id)
-            if line is None:
-                return None, False
-            entry = await find_by_phone(session, *line)
-            member = (entry is not None and entry.source == "member") or (
-                await has_member_phone(session, *line)
-            )
+        async with session_scope() as session:
+            async with asyncio.timeout(_OTHER_PARTY_TIMEOUT_SECONDS):
+                line = await _line_number(session, call_id)
+                if line is None:
+                    return None, False
+                entry = await find_by_phone(session, *line)
+            if entry is not None and entry.source == "member":
+                return entry, True
+            # Its own budget and failure: a slow member check never costs
+            # the entry (the name section and STT keyterms).
+            try:
+                async with asyncio.timeout(_OTHER_PARTY_TIMEOUT_SECONDS):
+                    return entry, await has_member_phone(session, *line)
+            except Exception:
+                logger.warning(
+                    "call_id=%s member lookup failed", call_id, exc_info=True
+                )
+                return entry, False
     except Exception:
         logger.warning("call_id=%s other-party lookup failed", call_id, exc_info=True)
         return None, False
-    return entry, member
-
-
-async def other_party(call_id: UUID) -> DirectoryEntry | None:
-    """The directory entry of the person on the line (see :func:`line_party`)."""
-    return (await line_party(call_id))[0]
-
-
-async def member_on_line(call_id: UUID) -> bool:
-    """The person on the line is a workspace member (see :func:`line_party`)."""
-    return (await line_party(call_id))[1]
 
 
 # Proactive AI disclosure, spoken by default as the first thing on every

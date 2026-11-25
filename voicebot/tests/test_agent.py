@@ -2216,12 +2216,15 @@ async def test_other_party_finds_the_caller(monkeypatch):
 
     monkeypatch.setattr(agent_mod, "session_scope", scope)
     monkeypatch.setattr(agent_mod, "find_by_phone", find)
-    entry = await agent_mod.other_party(UUID(int=1))
+    entry, member = await agent_mod.line_party(UUID(int=1))
+    assert member is True
     assert seen["number"] == "+46700000000"
     assert entry.name == "Sam" and entry.source == "member"
 
 
-async def test_member_on_line_ignores_the_name_and_fails_closed(monkeypatch):
+async def test_line_party_member_check_ignores_the_name_and_fails_closed(
+    monkeypatch,
+):
     """Any member with the number gets setup help, named or not; a failed
     lookup counts as a customer."""
     from contextlib import asynccontextmanager
@@ -2253,7 +2256,6 @@ async def test_member_on_line_ignores_the_name_and_fails_closed(monkeypatch):
     monkeypatch.setattr(agent_mod, "find_by_phone", unnamed)
     monkeypatch.setattr(agent_mod, "has_member_phone", has_member)
     assert await agent_mod.line_party(UUID(int=1)) == (None, True)
-    assert await agent_mod.member_on_line(UUID(int=1)) is True
     assert seen["number"] == "+12025550123"
 
     @asynccontextmanager
@@ -2262,7 +2264,41 @@ async def test_member_on_line_ignores_the_name_and_fails_closed(monkeypatch):
         yield
 
     monkeypatch.setattr(agent_mod, "session_scope", refused)
-    assert await agent_mod.member_on_line(UUID(int=1)) is False
+    assert await agent_mod.line_party(UUID(int=1)) == (None, False)
+
+
+async def test_a_failed_member_check_keeps_the_entry(monkeypatch):
+    from contextlib import asynccontextmanager
+
+    from hailhq.core.directory import DirectoryEntry
+    from hailhq.voicebot import agent as agent_mod
+
+    class Result:
+        def one_or_none(self):
+            return ("org", "inbound", "+12025550123", "+12025550100")
+
+    class Session:
+        async def execute(self, _stmt):
+            return Result()
+
+    @asynccontextmanager
+    async def scope():
+        yield Session()
+
+    contact = DirectoryEntry(
+        name="Sam", has_email=False, has_phone=True, source="contact"
+    )
+
+    async def find(_session, _org, _number):
+        return contact
+
+    async def broken(_session, _org, _number):
+        raise RuntimeError("member table gone")
+
+    monkeypatch.setattr(agent_mod, "session_scope", scope)
+    monkeypatch.setattr(agent_mod, "find_by_phone", find)
+    monkeypatch.setattr(agent_mod, "has_member_phone", broken)
+    assert await agent_mod.line_party(UUID(int=1)) == (contact, False)
 
 
 async def test_other_party_is_none_on_any_failure(monkeypatch):
@@ -2276,7 +2312,7 @@ async def test_other_party_is_none_on_any_failure(monkeypatch):
         yield
 
     monkeypatch.setattr(agent_mod, "session_scope", refused)
-    assert await agent_mod.other_party(UUID(int=1)) is None
+    assert await agent_mod.line_party(UUID(int=1)) == (None, False)
 
     class Session:
         async def execute(self, _stmt):
@@ -2288,7 +2324,7 @@ async def test_other_party_is_none_on_any_failure(monkeypatch):
 
     monkeypatch.setattr(agent_mod, "session_scope", stuck)
     monkeypatch.setattr(agent_mod, "_OTHER_PARTY_TIMEOUT_SECONDS", 0.01)
-    assert await agent_mod.other_party(UUID(int=1)) is None
+    assert await agent_mod.line_party(UUID(int=1)) == (None, False)
 
 
 async def test_known_name_reaches_the_stt_as_a_keyterm():
