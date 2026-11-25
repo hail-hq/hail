@@ -62,6 +62,8 @@
       "WebFetch(domain:*.smallest.ai)",
       "WebFetch(domain:soniox.com)",
       "WebFetch(domain:*.soniox.com)",
+      "WebFetch(domain:speechify.ai)",
+      "WebFetch(domain:*.speechify.ai)",
       "WebFetch(domain:speechmatics.com)",
       "WebFetch(domain:*.speechmatics.com)",
       "WebFetch(domain:telnyx.com)",
