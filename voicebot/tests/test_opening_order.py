@@ -180,6 +180,8 @@ async def test_outbound_opening_cancels_the_pending_end_of_turn(
     assert "self._activity" in inspect.getsource(AgentSession.__init__)
     assert "self._audio_recognition" in inspect.getsource(AgentActivity.__init__)
     assert "self._end_of_turn_task" in inspect.getsource(AudioRecognition.__init__)
+    # speak_greeting reads the pickup words from here (_heard_so_far).
+    assert isinstance(AudioRecognition._current_transcript, property)
     session = FakeAnnouncingSession()
     session._activity = Mock()
     task = session._activity._audio_recognition._end_of_turn_task
