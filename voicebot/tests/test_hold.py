@@ -151,7 +151,7 @@ async def test_more_audio_right_after_a_quiet_burst_postpones_the_prompt(line):
 async def test_a_late_transcript_cancels_the_cant_hear_line(line):
     held, session, now, _ = line
     await held.start()
-    speak(session, now, 3)
+    speak(session, now, 3, pause=0.1)
     session.emit("user_input_transcribed", transcript="got it", is_final=True)
     await settle()
     session.generate_reply.assert_not_called()
@@ -274,14 +274,73 @@ async def test_music_right_after_please_hold_is_music(line):
     await held.aclose()
 
 
-async def test_an_interim_guess_on_music_does_not_make_it_speech(line):
+async def test_an_interim_guess_on_one_music_burst_does_not_hide_the_music(line):
     held, session, now, _ = line
     await held.start()
     session.emit("user_state_changed", new_state="speaking")
     session.emit("user_input_transcribed", transcript="you", is_final=False)
-    now[0] += MUSIC_SECONDS
+    now[0] += 3
     session.emit("user_state_changed", new_state="listening")
+    now[0] += 0.2
+    for _ in range(4):
+        speak(session, now, 3, pause=0.2)
     await settle()
     assert held._music
     assert held.active
+    # A later wordless stretch in the same hold is music too.
+    now[0] += 5
+    speak(session, now, 4)
+    await settle()
+    assert held.active
+    session.generate_reply.assert_not_called()
+    await held.aclose()
+
+
+async def test_speech_with_only_interims_is_not_a_quiet_voice(line):
+    held, session, now, _ = line
+    await held.start()
+    session.emit("user_state_changed", new_state="speaking")
+    session.emit("user_input_transcribed", transcript="okay I", is_final=False)
+    now[0] += 3
+    session.emit("user_state_changed", new_state="listening")
+    await settle()  # the final transcript has not come yet
+    session.generate_reply.assert_not_called()
+    assert held.active
+    await held.aclose()
+
+
+async def test_the_rest_of_please_hold_is_not_a_quiet_voice(line):
+    held, session, now, _ = line
+    session.emit("user_state_changed", new_state="speaking")
+    session.emit("user_input_transcribed", transcript="please hold", is_final=True)
+    now[0] += 1
+    await held.start()  # they keep talking to a colleague
+    now[0] += 3
+    session.emit("user_state_changed", new_state="listening")
+    await settle()
+    session.generate_reply.assert_not_called()
+    assert held.active
+    await held.aclose()
+
+
+async def test_long_speech_is_not_music(line):
+    held, session, now, _ = line
+    await held.start()
+    speak(session, now, MUSIC_SECONDS + 2, words="the reference is ...")
+    await settle()
+    assert not held._music
+    await held.aclose()
+
+
+async def test_a_late_transcript_takes_back_a_long_burst(line):
+    held, session, now, _ = line
+    await held.start()
+    session.emit("user_state_changed", new_state="speaking")
+    now[0] += MUSIC_SECONDS + 2
+    session.emit("user_state_changed", new_state="listening")
+    now[0] += 0.4
+    session.emit("user_input_transcribed", transcript="the reference is", is_final=True)
+    await settle()
+    assert not held._music
+    session.generate_reply.assert_not_called()
     await held.aclose()

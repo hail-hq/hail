@@ -316,7 +316,9 @@ class SpeechSanitizingAgent(Agent):
             # The early reply was made before we knew whether to answer.
             self._drop_early_reply()
             if await self.hold.keep_holding(new_message.text_content or ""):
-                # A recorded hold announcement: keep it, say nothing.
+                # A recorded hold announcement: keep it, say nothing. Also drop
+                # an early reply LiveKit started while the check ran.
+                self._drop_early_reply()
                 await self._keep_unanswered(new_message)
                 raise StopResponse()
             turn_ctx.add_message(role="system", content=HOLD_ENDED_NOTE)

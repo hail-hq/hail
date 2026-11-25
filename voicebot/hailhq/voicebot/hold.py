@@ -10,7 +10,8 @@ holding, conversation recovery is paused and nothing prompts the agent:
 - Audio with no words for ``MUSIC_SECONDS`` or longer is hold music. It
   keeps the hold, and later wordless audio in that hold is music too.
 - VAD splits music and chatter into bursts: bursts less than ``GAP_SECONDS``
-  apart count as one stretch of audio.
+  apart count as one stretch, judged once it ends. Any transcript, interim
+  or final, marks its burst as speech.
 - After ``HOLD_SECONDS`` of silence, the agent asks once whether they are
   still there, and normal recovery resumes.
 
@@ -79,13 +80,17 @@ class Hold:
         self.active = False
         self._music = False
         self._last_audio = clock()
+        # One VAD burst of audio, and the stretch of bursts it belongs to.
         self._burst_started: float | None = None
-        self._stretch_started: float | None = None
-        self._stretch_words = False
+        self._burst_text = False
         self._last_end = -math.inf
-        self._words_at = -math.inf
+        # Wordless seconds of the last burst; a late transcript takes them back.
+        self._last_wordless = 0.0
+        self._stretch_started: float | None = None
+        self._stretch_text = False
+        self._stretch_wordless = 0.0
         self._task: asyncio.Task[None] | None = None
-        self._quiet_task: asyncio.Task[None] | None = None
+        self._settle_task: asyncio.Task[None] | None = None
         self._closed = False
 
         @session.on("user_state_changed")
@@ -95,18 +100,13 @@ class Hold:
         @session.on("user_input_transcribed")
         def on_transcript(event) -> None:
             if event.transcript.strip():
-                # An interim guess can be music; only a final transcript
-                # makes a stretch speech. Any text still means words may come.
-                if event.is_final:
-                    self._stretch_words = True
-                self._words_at = self._clock()
-                self._last_audio = self._clock()
+                self._on_text()
 
         @session.on("close")
         def on_close(_event) -> None:
             self._closed = True
             self.active = False
-            for task in (self._task, self._quiet_task):
+            for task in (self._task, self._settle_task):
                 if task is not None:
                     task.cancel()
 
@@ -114,15 +114,23 @@ class Hold:
         """The ``wait_for_other_party`` tool: hold from now."""
         if self._closed:
             return
+        now = self._clock()
         self.active = True
         self._music = False
-        self._last_audio = self._clock()
-        # Audio heard before the hold (their "please hold") is not part of it.
-        self._stretch_started = self._burst_started
-        self._stretch_words = False
+        self._last_audio = now
+        # Audio before the hold (their "please hold") is not part of it. The
+        # rest of a burst still going on is them talking, not music.
+        ongoing = self._burst_started is not None
+        if ongoing:
+            self._burst_started = now
+            self._burst_text = True
+        self._stretch_started = now if ongoing else None
+        self._stretch_text = ongoing
+        self._stretch_wordless = 0.0
+        self._last_wordless = 0.0
         self._last_end = -math.inf
-        if self._quiet_task is not None:
-            self._quiet_task.cancel()
+        if self._settle_task is not None:
+            self._settle_task.cancel()
         logger.info("call_id=%s holding", self._call_id)
         if self._task is None or self._task.done():
             self._task = asyncio.create_task(self._run(), name="hold")
@@ -146,39 +154,64 @@ class Hold:
         self.active = False
         return False
 
+    def _on_text(self) -> None:
+        """Any transcript, interim or final: this audio has words."""
+        now = self._clock()
+        self._last_audio = now
+        if self._stretch_started is None:
+            return
+        if self._burst_started is not None:
+            self._burst_text = True
+            self._stretch_text = True
+        elif now - self._last_end <= GAP_SECONDS:
+            # A late transcript of the burst that just ended.
+            self._stretch_text = True
+            self._stretch_wordless -= self._last_wordless
+            self._last_wordless = 0.0
+
     def _on_user_state(self, state: str | None) -> None:
         now = self._clock()
         if state == "speaking":
             if self._stretch_started is None or now - self._last_end > GAP_SECONDS:
+                if self._settle_task is not None and not self._settle_task.done():
+                    # The last stretch is over: judge it now.
+                    self._settle_task.cancel()
+                    self._decide(self._last_end)
                 self._stretch_started = now
-                self._stretch_words = False
+                self._stretch_text = False
+                self._stretch_wordless = 0.0
             self._burst_started = now
+            self._burst_text = False
             self._last_audio = now
             return
         if self._burst_started is None:
             return
+        length = now - self._burst_started
         self._burst_started = None
         self._last_end = self._last_audio = now
-        if not self.active or self._stretch_words or self._stretch_started is None:
-            return
-        length = now - self._stretch_started
-        if length >= MUSIC_SECONDS:
-            self._music = True
-        elif length >= QUIET_VOICE_SECONDS and not self._music:
-            if self._quiet_task is not None:
-                self._quiet_task.cancel()
-            self._quiet_task = asyncio.create_task(self._quiet_voice(now))
+        self._last_wordless = 0.0 if self._burst_text else length
+        self._stretch_wordless += self._last_wordless
+        if self.active:
+            if self._settle_task is not None:
+                self._settle_task.cancel()
+            self._settle_task = asyncio.create_task(self._settle(now))
 
-    async def _quiet_voice(self, ended: float) -> None:
-        # More audio can continue the stretch, and a transcript can still come.
+    async def _settle(self, ended: float) -> None:
+        """Decide what a stretch of audio was, once it is over: more audio
+        can continue it, and a late transcript can still come."""
         await asyncio.sleep(GAP_SECONDS)
-        if (
-            not self.active
-            or self._music
-            or self._burst_started is not None
-            or self._last_end > ended
-            or self._words_at >= ended
-        ):
+        if self._burst_started is None and self._last_end <= ended:
+            self._decide(ended)
+
+    def _decide(self, ended: float) -> None:
+        if not self.active or self._stretch_started is None:
+            return
+        if self._stretch_wordless >= MUSIC_SECONDS:
+            self._music = True
+            return
+        if self._music or self._stretch_text:
+            return
+        if ended - self._stretch_started < QUIET_VOICE_SECONDS:
             return
         self.active = False
         logger.info("call_id=%s hold ended: voice without words", self._call_id)
@@ -216,7 +249,7 @@ class Hold:
     async def aclose(self) -> None:
         self._closed = True
         self.active = False
-        tasks = [t for t in (self._task, self._quiet_task) if t is not None]
+        tasks = [t for t in (self._task, self._settle_task) if t is not None]
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
