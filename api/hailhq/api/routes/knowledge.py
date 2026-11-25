@@ -17,7 +17,6 @@ slot. Every query filters on the caller's organization.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Annotated
 from uuid import UUID
@@ -37,7 +36,7 @@ from hailhq.core.knowledge.access import (
     knowledge_lock,
     storage_full,
 )
-from hailhq.core.knowledge.embed import get_embedder
+from hailhq.core.knowledge.embed import EmbeddingUnavailable, get_embedder
 from hailhq.core.knowledge.search import search_pieces
 from hailhq.core.models import FileUpload, KnowledgeDocument, OrganizationKnowledge
 from hailhq.core.s3_mail import S3MailClient
@@ -347,10 +346,20 @@ async def search_knowledge(
     org = principal.organization_id
     await _limits(db, org)
     vector = None
-    embedder = await asyncio.to_thread(get_embedder)
+    embedder = get_embedder()
     if embedder is not None:
-        vector = await asyncio.to_thread(embedder.embed_query, body.query)
-    hits = await search_pieces(db, org, body.query, vector, body.limit)
+        try:
+            vector = await embedder.embed_query(body.query)
+        except EmbeddingUnavailable as exc:
+            logger.warning("knowledge search: embedding API failed (%s)", exc)
+    hits = await search_pieces(
+        db,
+        org,
+        body.query,
+        vector,
+        body.limit,
+        model=embedder.model if embedder is not None else None,
+    )
     return KnowledgeSearchResponse(
         results=[
             KnowledgeSearchResult(

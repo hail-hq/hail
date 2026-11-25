@@ -6,6 +6,7 @@ from hailhq.core.knowledge.text import (
     Block,
     chunk_blocks,
     compact_id,
+    estimate_tokens,
     query_terms,
     terms,
 )
@@ -130,3 +131,22 @@ def test_small_limits_never_pass_max_tokens() -> None:
     ]
     chunks = chunk_blocks(blocks, _words, target=80, max_tokens=100, overlap=70)
     assert chunks and all(_words(c.text) <= 100 for c in chunks)
+
+
+def test_token_estimate_counts_dense_scripts_per_character() -> None:
+    assert estimate_tokens("") == 0
+    # English: about four characters a token, at least one a word.
+    assert estimate_tokens("The inverter has a ten year warranty.") == 10
+    # Japanese and Chinese: one per character, even inside a word that also
+    # holds a mark of another script (the long vowel mark "ー", counted
+    # with the word's other letters).
+    assert estimate_tokens("インバーター") == 5
+    assert estimate_tokens("价格？") == 3
+
+
+def test_estimated_pieces_stay_under_the_model_limit() -> None:
+    """Pieces cut with the estimate stay far under 2,048 tokens even when a
+    script takes three times more tokens than estimated."""
+    text = " ".join(["Gewährleistungsbedingungen"] * 2000)
+    chunks = chunk_blocks([Block(text)], estimate_tokens)
+    assert all(estimate_tokens(c.text) * 3 < 2048 for c in chunks)

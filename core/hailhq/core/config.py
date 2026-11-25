@@ -376,11 +376,22 @@ class Settings(BaseSettings):
     # Background pass over carrier verifications: retry unsent drafts and pull
     # the carrier's decision for submitted ones. 0 disables the worker.
     hail_verification_poll_seconds: int = 600
-    # Knowledge base: the folder holding the embedding model (model.onnx and
-    # sentencepiece.bpe.model). The API and voicebot images carry it here; a checkout
-    # without it runs with the knowledge base off for calls and with ingest
-    # retrying (docs/operations/knowledge-base.md). Code default only.
-    hail_embedding_model_dir: str = "/app/models/embedding"
+    # Knowledge base embeddings: any OpenAI-compatible /embeddings API
+    # (hailhq.core.knowledge.embed). Code defaults only. An empty key uses
+    # GOOGLE_API_KEY while the base URL is Google's; no key at all leaves the
+    # knowledge base on keyword search. The width must match the
+    # knowledge_pieces column (halfvec(1536)): another one needs a migration
+    # and a re-embed (docs/operations/knowledge-base.md).
+    hail_embedding_base_url: str = (
+        "https://generativelanguage.googleapis.com/v1beta/openai"
+    )
+    hail_embedding_api_key: str = ""
+    hail_embedding_model: str = "gemini-embedding-001"
+    hail_embedding_dimensions: int = 1536
+    # Cosine floor for a piece found by meaning only. Each model scores on
+    # its own scale: 0.5 fits gemini-embedding-001, about 0.2 OpenAI's
+    # text-embedding-3 models (measurements in the ops doc).
+    hail_embedding_min_similarity: float = 0.5
     # Poll cadence (seconds) of the knowledge ingest worker. 0 disables it.
     hail_knowledge_poll_seconds: int = 5
 

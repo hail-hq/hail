@@ -1,24 +1,27 @@
 """Test helpers for the knowledge base: a fake embedder and a sample
-document. The real model runs in the Docker image check (CI ``docker`` job,
-``python -m hailhq.core.knowledge.selftest``)."""
+document. The hosted embedding API is never called in tests."""
 
 from __future__ import annotations
 
 import hashlib
 
 import numpy as np
-from hailhq.core.knowledge.embed import DIMS
+from hailhq.core.knowledge.embed import DIMS, EmbeddingUnavailable
 from hailhq.core.knowledge.text import terms
 
 
 class FakeEmbedder:
     """Bag of words hashed into ``DIMS`` buckets: texts sharing words point
-    the same way. Same interface as ``Embedder``."""
+    the same way. Same interface as ``embed.Embedder``. ``fail`` makes
+    every request raise ``EmbeddingUnavailable``; ``calls`` counts
+    requests."""
 
-    def count_tokens(self, text: str) -> int:
-        return len(text.split())
+    def __init__(self, model: str = "fake-embedding") -> None:
+        self.model = model
+        self.fail = False
+        self.calls = 0
 
-    def _one(self, text: str) -> np.ndarray:
+    def one(self, text: str) -> np.ndarray:
         vector = np.zeros(DIMS, dtype=np.float32)
         for word in terms(text):
             bucket = int.from_bytes(hashlib.sha256(word.encode()).digest()[:4], "big")
@@ -26,13 +29,20 @@ class FakeEmbedder:
         norm = np.linalg.norm(vector)
         return vector / norm if norm else vector
 
-    def embed_query(self, text: str) -> np.ndarray:
-        return self._one(text)
+    def _check(self) -> None:
+        self.calls += 1
+        if self.fail:
+            raise EmbeddingUnavailable("HTTP 503")
 
-    def embed_passages(self, texts: list[str]) -> np.ndarray:
+    async def embed_query(self, text: str, *, timeout: float = 0) -> np.ndarray:
+        self._check()
+        return self.one(text)
+
+    async def embed(self, texts: list[str], *, timeout: float = 0) -> np.ndarray:
+        self._check()
         if not texts:
             return np.zeros((0, DIMS), dtype=np.float32)
-        return np.stack([self._one(t) for t in texts])
+        return np.stack([self.one(t) for t in texts])
 
 
 # An invented product manual (no real company or product).

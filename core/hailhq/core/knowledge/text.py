@@ -19,7 +19,10 @@
 
 ``chunk_blocks`` cuts prose into pieces of about 300 to 500 tokens on
 headings and paragraphs, with about 50 tokens of overlap, keeping the page
-each piece starts on.
+each piece starts on. Tokens are estimated (``estimate_tokens``), not
+counted with the hosted model's tokenizer; a piece stays far under the
+model's input limit (2,048 tokens for gemini-embedding-001) in every
+script.
 """
 
 from __future__ import annotations
@@ -39,6 +42,7 @@ __all__ = [
     "Chunk",
     "chunk_blocks",
     "compact_id",
+    "estimate_tokens",
     "query_terms",
     "terms",
 ]
@@ -57,6 +61,14 @@ _MAX_WORD_CHARS = 100
 _NO_SPACE = r"\p{Han}\p{Hiragana}\p{Katakana}\p{Thai}\p{Lao}\p{Khmer}\p{Myanmar}"
 _TOKEN = regex.compile(rf"(?P<run>[{_NO_SPACE}]+)|(?P<word>[\p{{L}}\p{{N}}\p{{M}}]+)")
 _LATIN = regex.compile(r"[\p{Latin}\p{N}\p{M}]+")
+# For ``estimate_tokens``: words (any letters, digits and marks), any
+# other mark, and the no-space-script characters inside a word.
+_ESTIMATE = regex.compile(r"(?P<word>[\p{L}\p{N}\p{M}]+)|\S")
+_NO_SPACE_CHAR = regex.compile(rf"[{_NO_SPACE}]")
+# Characters per token assumed for a word: about 4 in English. Some
+# scripts take two or three times more tokens, which still keeps a piece of
+# ``MAX_PIECE_TOKENS`` far under the model's 2,048.
+_CHARS_PER_TOKEN = 4
 # The parts of an ID: letters and digits, apart by at most one of these.
 _ID_PART = regex.compile(r"[\p{L}\p{N}]+")
 _ID_SEPARATORS = frozenset(" -./_")
@@ -78,6 +90,23 @@ def _fold(word: str) -> str:
             if not unicodedata.combining(c)
         )
     return word
+
+
+def estimate_tokens(text: str) -> int:
+    """About how many model tokens ``text`` takes: one per character in
+    scripts written without spaces (Chinese, Japanese, Thai), one per 4
+    characters of a word elsewhere (at least one), one per other mark."""
+    count = 0
+    for match in _ESTIMATE.finditer(text):
+        word = match.group("word")
+        if word is None:
+            count += 1
+            continue
+        # Each no-space character, plus the rest by length (at least 1).
+        dense = len(_NO_SPACE_CHAR.findall(word))
+        rest = len(word) - dense
+        count += dense + (-(-rest // _CHARS_PER_TOKEN) if rest or not dense else 0)
+    return count
 
 
 def compact_id(text: str) -> str:

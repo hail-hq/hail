@@ -2545,9 +2545,10 @@ class CarrierVerification(Base):
     )
 
 
-class Vector(UserDefinedType):
-    """pgvector's ``vector(n)``. Bound and read as its text form
-    (``[0.1,0.2]``), so it needs no driver codec (asyncpg or psycopg)."""
+class HalfVector(UserDefinedType):
+    """pgvector's ``halfvec(n)``: half-precision floats (pgvector 0.7.0 or
+    later). Bound and read as its text form (``[0.1,0.2]``), so it needs no
+    driver codec (asyncpg or psycopg)."""
 
     cache_ok = True
 
@@ -2555,7 +2556,7 @@ class Vector(UserDefinedType):
         self.dims = dims
 
     def get_col_spec(self, **kw) -> str:
-        return f"vector({self.dims})"
+        return f"halfvec({self.dims})"
 
     def bind_processor(self, dialect):
         def process(value):
@@ -2574,8 +2575,8 @@ class Vector(UserDefinedType):
         return process
 
 
-# The embedding model's output size (hailhq.core.knowledge.embed).
-EMBEDDING_DIMS = 384
+# The width of a stored embedding (hailhq.core.knowledge.embed.DIMS).
+EMBEDDING_DIMS = 1536
 
 
 class OrganizationKnowledge(Base):
@@ -2724,9 +2725,15 @@ class KnowledgePiece(Base):
     # row under the header). Null for other files.
     page: Mapped[int | None] = mapped_column(Integer, nullable=True)
     csv_row: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    embedding: Mapped[list[float]] = mapped_column(
-        Vector(EMBEDDING_DIMS), nullable=False
+    # The unit vector and the model id that made it, both set or both null.
+    # Null until the ingest worker's embedding pass reaches the piece; a
+    # vector of another model than the configured one is replaced by that
+    # pass and ignored by search meanwhile. Keyword search finds the piece
+    # either way.
+    embedding: Mapped[list[float] | None] = mapped_column(
+        HalfVector(EMBEDDING_DIMS), nullable=True
     )
+    embedding_model: Mapped[str | None] = mapped_column(Text, nullable=True)
     terms: Mapped[str] = mapped_column(TSVECTOR, nullable=False)
 
     __table_args__ = (
@@ -2736,6 +2743,16 @@ class KnowledgePiece(Base):
         CheckConstraint(
             "page IS NULL OR csv_row IS NULL", name="knowledge_pieces_locator_check"
         ),
+        CheckConstraint(
+            "(embedding IS NULL) = (embedding_model IS NULL)",
+            name="knowledge_pieces_embedding_check",
+        ),
         Index("knowledge_pieces_org_idx", "organization_id"),
         Index("knowledge_pieces_terms_idx", "terms", postgresql_using="gin"),
+        Index(
+            "knowledge_pieces_embedding_idx",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_ops={"embedding": "halfvec_cosine_ops"},
+        ),
     )

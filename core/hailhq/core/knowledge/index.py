@@ -4,9 +4,11 @@ A call loads its workspace's pieces once (``hailhq.voicebot.knowledge``) and
 asks this index on every caller turn: cosine similarity over the
 embeddings, plus BM25 over ``text.terms`` (the same words the SQL search
 uses), merged with reciprocal rank fusion (``fuse``). Both lists keep only
-pieces that clear a floor (``MIN_SIMILARITY``, ``MIN_BM25``). The meaning
+pieces that clear a floor (``min_similarity``, ``MIN_BM25``). The meaning
 floor drops only clear junk, so most questions bring their best pieces and
-the model is told to use them only when they answer (``prompts``). Filler
+the model is told to use them only when they answer (``prompts``). A piece
+with no vector of the current model (a zero row) is found by keywords
+only. Filler
 messages are not searched at all, in calls, texts or email
 (``hailhq.voicebot.knowledge.worth_searching``).
 
@@ -22,33 +24,35 @@ from dataclasses import dataclass
 from uuid import UUID
 
 import numpy as np
+from hailhq.core.config import settings
 from hailhq.core.knowledge.text import query_terms, terms
 
 __all__ = [
     "CANDIDATES",
     "MIN_BM25",
     "MIN_IDF_PIECES",
-    "MIN_SIMILARITY",
     "RRF_K",
     "Hit",
     "MemoryIndex",
     "Piece",
     "fuse",
+    "min_similarity",
 ]
 
 # Each list's best pieces taken into the fusion.
 CANDIDATES = 20
 # Reciprocal rank fusion constant (Cormack et al. 2009).
 RRF_K = 60
-# Cosine floor for a piece found by meaning only. E5 scores even unrelated
-# text high. Measured with the shipped model on an invented manual (25
-# questions, 7 languages): right sections 0.77 to 0.90 (the lowest two in
-# Italian and French), right 400-token pieces from 0.73, off-topic
-# questions' best match 0.72 to 0.81. So the floor sits below every right
-# piece; it drops only clear junk, and most off-topic questions still bring
-# pieces, which the model is told to ignore when they do not answer
-# (docs/operations/knowledge-base.md).
-MIN_SIMILARITY = 0.72
+
+
+def min_similarity() -> float:
+    """The cosine floor for a piece found by meaning only
+    (``hail_embedding_min_similarity``). Each model scores on its own
+    scale, so the floor follows the configured model; the measurements are
+    in docs/operations/knowledge-base.md."""
+    return settings.hail_embedding_min_similarity
+
+
 # BM25 floor: about one fairly rare word in common.
 MIN_BM25 = 1.5
 # The idf counts at least this many pieces, so a workspace with a handful of
@@ -88,13 +92,19 @@ def fuse(ranked: Sequence[Sequence[UUID]], limit: int) -> list[tuple[UUID, float
 
 
 class MemoryIndex:
-    """Pieces with their unit embeddings (one row each), searchable."""
+    """Pieces with their unit embeddings (one row each; a zero row for a
+    piece with no current vector), searchable."""
 
     def __init__(self, pieces: Sequence[Piece], vectors: np.ndarray) -> None:
         if len(pieces) != len(vectors):
             raise ValueError("one vector per piece")
         self.pieces = list(pieces)
         self._vectors = np.asarray(vectors, dtype=np.float32)
+        self._has_vector = (
+            np.any(self._vectors != 0, axis=1)
+            if len(self.pieces)
+            else np.zeros(0, dtype=bool)
+        )
         self._postings: dict[str, list[tuple[int, int]]] = {}
         self._lengths = np.zeros(len(self.pieces), dtype=np.float32)
         for i, piece in enumerate(self.pieces):
@@ -125,14 +135,16 @@ class MemoryIndex:
         if query_vector is None or not len(self.pieces):
             return []
         sims = self._vectors @ np.asarray(query_vector, dtype=np.float32)
+        sims[~self._has_vector] = -np.inf
         top = np.argsort(-sims)[:CANDIDATES]
-        return [int(i) for i in top if sims[i] >= MIN_SIMILARITY]
+        floor = min_similarity()
+        return [int(i) for i in top if sims[i] >= floor]
 
     def search(
         self, query: str, query_vector: np.ndarray | None, limit: int
     ) -> list[Hit]:
-        """The best ``limit`` pieces for ``query``. With no vector (the model
-        did not load), keyword search alone."""
+        """The best ``limit`` pieces for ``query``. With no vector (the
+        embedding API failed or is not set up), keyword search alone."""
         by_id = {p.id: p for p in self.pieces}
         ranked = [
             [self.pieces[i].id for i in self._cosine(query_vector)],

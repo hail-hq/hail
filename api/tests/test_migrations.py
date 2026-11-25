@@ -1118,7 +1118,13 @@ def test_0092_knowledge_tables(empty_db: str) -> None:
             "SELECT format_type(atttypid, atttypmod) FROM pg_attribute "
             "WHERE attrelid = 'knowledge_pieces'::regclass AND attname = 'embedding'"
         ).fetchone()
-        assert embedding is not None and embedding[0] == "vector(384)"
+        assert embedding is not None and embedding[0] == "halfvec(1536)"
+        method = conn.execute(
+            "SELECT am.amname FROM pg_class c JOIN pg_am am ON am.oid = c.relam "
+            "WHERE c.relname = 'knowledge_pieces_embedding_idx'"
+        ).fetchone()
+        assert method == ("hnsw",)
+        assert _constraint_exists(conn, "knowledge_pieces_embedding_check")
         assert "knowledge_document" in (
             _constraint_src(conn, "file_uploads_purpose_check") or ""
         )
@@ -1163,7 +1169,12 @@ def test_0092_uses_an_extensions_schema(empty_db: str) -> None:
                 "WHERE extname = 'vector'"
             ).fetchone()
             assert schema == ("extensions",)
-            conn.execute("SELECT '[1,2]'::vector <=> '[2,1]'::vector").fetchone()
+            conn.execute("SELECT '[1,2]'::halfvec <=> '[2,1]'::halfvec").fetchone()
+            method = conn.execute(
+                "SELECT am.amname FROM pg_class c JOIN pg_am am ON am.oid = c.relam "
+                "WHERE c.relname = 'knowledge_pieces_embedding_idx'"
+            ).fetchone()
+            assert method == ("hnsw",)
     finally:
         with psycopg.connect(url, autocommit=True) as conn:
             conn.execute(f'ALTER DATABASE "{database}" RESET search_path')

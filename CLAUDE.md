@@ -91,7 +91,7 @@ Internal runbooks (not published) live in `docs/operations/`:
 [voice-llm.md](docs/operations/voice-llm.md) (the house LLM chain, Bedrock access and model ids),
 [inbound-trunk-lockdown.md](docs/operations/inbound-trunk-lockdown.md) (one LiveKit inbound trunk per carrier, locked by IP or password, plus the Twilio secret header; cutover, negative test, weekly IP check),
 [sms-trial-numbers.md](docs/operations/sms-trial-numbers.md) (the pool numbers that send US trial texts: mark, unmark, move, readiness),
-[knowledge-base.md](docs/operations/knowledge-base.md) (turning the knowledge base on for a workspace, limits, the embedding model and its benchmark, the size alert).
+[knowledge-base.md](docs/operations/knowledge-base.md) (turning the knowledge base on for a workspace, limits, the hosted embedding model and changing it, the size alert).
 
 ## Order of work
 

@@ -27,13 +27,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# The knowledge base's local embedding model (hailhq.core.knowledge.embed):
-# onnxruntime (MIT), SentencePiece (Apache-2.0), numpy (BSD-3).
+# The knowledge base's vector math (hailhq.core.knowledge): numpy (BSD-3).
 # The API and the voicebot install it; the MCP server does not need it.
 knowledge = [
     "numpy>=2",
-    "onnxruntime>=1.20",
-    "sentencepiece>=0.2",
 ]
 dev = [
     "pytest",

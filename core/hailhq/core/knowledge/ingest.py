@@ -9,17 +9,26 @@ SKIP LOCKED`` (several API processes never take the same row), marks it
 2. checks its first bytes match its declared type;
 3. decodes it in a credential-free child process (``decode``, run by
    ``run_isolated`` under CPU, memory and time limits);
-4. cuts prose into pieces (``text.chunk_blocks``, tokens counted with the
-   model's own tokenizer) or takes one piece per CSV row;
-5. embeds the pieces on one CPU thread, off the event loop;
-6. in one transaction under the workspace's knowledge lock: checks the
+4. cuts prose into pieces (``text.chunk_blocks``, tokens estimated) or
+   takes one piece per CSV row;
+5. in one transaction under the workspace's knowledge lock: checks the
    document is still there and still this claim's, checks the workspace's
-   piece limit and the global size cap, writes the pieces and marks it
-   ``ready``.
+   piece limit and the global size cap, writes the pieces (no vectors yet)
+   and marks it ``ready``. Keyword search finds them from here on.
+
+Then the embedding pass (``_embed_pieces``) sends every piece of a
+workspace with the knowledge base on whose vector is missing or was made
+by another model than the configured one to the embedding API
+(``embed``), ``embed.BATCH`` per request, and stores vector and model id.
+The same pass embeds new pieces, retries failed ones, and re-embeds
+everything after a model change; meanwhile search uses keywords for those
+pieces. An API error or timeout never fails a document: the pass logs a
+warning and waits (the server's Retry-After, or 30 s doubling up to 10
+minutes) before it tries again.
 
 A file that cannot be used (wrong type, no text, over a limit) is
 ``failed`` with a reason for the customer in ``error``. Anything else (the
-bucket, the model, the database) puts the row back to ``pending`` for a
+bucket, the database) puts the row back to ``pending`` for a
 later tick, up to ``MAX_ATTEMPTS`` claims; a ``processing`` row whose claim
 is older than ``LEASE`` is taken again (a crashed worker). A document
 deleted while it is read is simply skipped at step 6.
@@ -40,6 +49,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 from datetime import datetime, timedelta, timezone
@@ -58,9 +68,20 @@ from hailhq.core.knowledge.access import (
     storage_full,
 )
 from hailhq.core.knowledge.decode import MAX_TEXT_BYTES
-from hailhq.core.knowledge.embed import Embedder, EmbedderUnavailable, load_embedder
+from hailhq.core.knowledge.embed import (
+    BATCH,
+    Embedder,
+    EmbeddingUnavailable,
+    get_embedder,
+)
 from hailhq.core.knowledge.search import vector_literal
-from hailhq.core.knowledge.text import Block, Chunk, chunk_blocks, terms
+from hailhq.core.knowledge.text import (
+    Block,
+    Chunk,
+    chunk_blocks,
+    estimate_tokens,
+    terms,
+)
 from hailhq.core.models import (
     FileUpload,
     KnowledgeDocument,
@@ -98,10 +119,13 @@ _STALE = "Hail could not read the file in time; delete it and add it again"
 LEASE = timedelta(minutes=15)
 # Wall-clock limit of one decode. The child also has a 30 s CPU limit.
 DECODE_SECONDS = 60.0
-# Most pieces one file may give, whatever the workspace limit: it must be
-# read well within ``LEASE``. About 280 s per 1,000 pieces with the shipped
-# int8 model and 410 s with fp32, plus up to 60 s of decoding.
+# Most pieces one file may give, whatever the workspace limit, so one file
+# never holds the embedding pass for long.
 MAX_DOCUMENT_PIECES = 1500
+# Pieces embedded in one tick at most; the rest wait for the next tick.
+EMBED_PER_TICK = 1000
+# Waits after an embedding API failure: doubling from the first to the last.
+EMBED_BACKOFF = (30.0, 600.0)
 # Pieces written per INSERT.
 _INSERT_BATCH = 100
 
@@ -113,8 +137,8 @@ class _Refused(Exception):
 
 
 class _Unavailable(Exception):
-    """The bucket or the model is down: not the file's fault, so the try
-    does not count toward ``MAX_ATTEMPTS``."""
+    """The bucket is down: not the file's fault, so the try does not count
+    toward ``MAX_ATTEMPTS``."""
 
 
 def _claimable(now: datetime):
@@ -141,7 +165,7 @@ class KnowledgeIngestWorker:
         *,
         session_factory: SessionFactory,
         s3_factory: Callable[[], S3MailClient],
-        embedder: Callable[[], Embedder] = load_embedder,
+        embedder: Callable[[], Embedder | None] = get_embedder,
         poll_interval: float = 5.0,
     ) -> None:
         self._session_factory = session_factory
@@ -153,6 +177,10 @@ class KnowledgeIngestWorker:
         # Closed orgs whose delete failed already: logged at error level
         # once, then as a warning on each retry.
         self._reported: set[UUID] = set()
+        # The embedding pass waits until this ``time.monotonic()`` after a
+        # failure; ``_embed_failures`` failures in a row so far.
+        self._embed_after = 0.0
+        self._embed_failures = 0
 
     def _get_s3(self) -> S3MailClient:
         if self._s3 is None:
@@ -174,8 +202,9 @@ class KnowledgeIngestWorker:
         self._stop.set()
 
     async def tick(self) -> int:
-        """Delete closed accounts' knowledge, then ingest documents until
-        none is waiting. Returns how many documents were finished."""
+        """Delete closed accounts' knowledge, ingest documents until none is
+        waiting, then embed pieces. Returns how many documents were
+        finished."""
         await self._forget_closed_orgs()
         await self._fail_spent()
         done = 0
@@ -185,6 +214,76 @@ class KnowledgeIngestWorker:
                 break
             await self._ingest(*claimed)
             done += 1
+        await self._embed_pieces()
+        return done
+
+    async def _embed_pieces(self) -> int:
+        """Embed pieces with no vector of the configured model, oldest
+        documents first. Returns how many were embedded."""
+        if time.monotonic() < self._embed_after:
+            return 0
+        embedder = self._embedder()
+        if embedder is None:
+            return 0
+        done = 0
+        while not self._stop.is_set() and done < EMBED_PER_TICK:
+            async with self._session_factory() as db:
+                rows = (
+                    await db.execute(
+                        select(KnowledgePiece.id, KnowledgePiece.text)
+                        .where(
+                            KnowledgePiece.embedding_model.is_distinct_from(
+                                embedder.model
+                            ),
+                            KnowledgePiece.organization_id.in_(
+                                select(OrganizationKnowledge.organization_id)
+                            ),
+                        )
+                        # Missing vectors first, then those of another model.
+                        .order_by(
+                            KnowledgePiece.embedding_model.is_not(None),
+                            KnowledgePiece.document_id,
+                            KnowledgePiece.ordinal,
+                        )
+                        .limit(BATCH)
+                    )
+                ).all()
+            if not rows:
+                break
+            try:
+                vectors = await embedder.embed([r.text for r in rows])
+            except EmbeddingUnavailable as exc:
+                self._embed_failures += 1
+                low, high = EMBED_BACKOFF
+                wait = min(
+                    high, exc.retry_after or low * 2 ** (self._embed_failures - 1)
+                )
+                self._embed_after = time.monotonic() + wait
+                logger.warning(
+                    "knowledge: embedding API failed (%s); %d piece(s) keep "
+                    "keyword search, next try in %.0f s",
+                    exc,
+                    len(rows),
+                    wait,
+                )
+                return done
+            self._embed_failures = 0
+            async with self._session_factory() as db:
+                await db.execute(
+                    _SET_EMBEDDING,
+                    [
+                        {
+                            "id": r.id,
+                            "embedding": vector_literal(v),
+                            "model": embedder.model,
+                        }
+                        for r, v in zip(rows, vectors, strict=True)
+                    ],
+                )
+                await db.commit()
+            done += len(rows)
+        if done:
+            logger.info("knowledge: embedded %d piece(s)", done)
         return done
 
     async def _forget_closed_orgs(self) -> None:
@@ -390,13 +489,9 @@ class KnowledgeIngestWorker:
         decoded = await self._decode(row.content_type, data)
         del data
 
-        try:
-            embedder = await asyncio.to_thread(self._embedder)
-        except EmbedderUnavailable as exc:
-            raise _Unavailable("embedding model") from exc
         # Cutting 8 MB of text counts tokens many times: off the event loop.
         cap = min(limits.max_pieces, MAX_DOCUMENT_PIECES)
-        chunks = await asyncio.to_thread(_chunks, decoded, embedder, cap)
+        chunks = await asyncio.to_thread(_chunks, decoded, cap)
         if not chunks:
             raise _Refused("the file has no text")
         if len(chunks) > cap:
@@ -406,10 +501,7 @@ class KnowledgeIngestWorker:
                     "smaller files"
                 )
             raise _Refused(_too_many(cap))
-        vectors = await asyncio.to_thread(
-            embedder.embed_passages, [c.text for c in chunks]
-        )
-        await self._store(document_id, attempt, org_id, chunks, vectors)
+        await self._store(document_id, attempt, org_id, chunks)
 
     async def _decode(self, content_type: str, data: bytes) -> dict:
         try:
@@ -435,12 +527,9 @@ class KnowledgeIngestWorker:
         attempt: int,
         org_id: UUID,
         chunks: list[Chunk],
-        vectors,
     ) -> None:
         # Search words for every piece: before the lock, off the event loop.
-        rows = await asyncio.to_thread(
-            _piece_rows, document_id, org_id, chunks, vectors
-        )
+        rows = await asyncio.to_thread(_piece_rows, document_id, org_id, chunks)
         async with self._session_factory() as db:
             await knowledge_lock(db, org_id)
             doc = (
@@ -494,16 +583,20 @@ class KnowledgeIngestWorker:
 
 _INSERT_PIECES = text("""
     INSERT INTO knowledge_pieces
-        (document_id, organization_id, ordinal, text, page, csv_row, embedding, terms)
+        (document_id, organization_id, ordinal, text, page, csv_row, terms)
     VALUES
         (:document_id, :organization_id, :ordinal, :text, :page, :csv_row,
-         CAST(:embedding AS vector), array_to_tsvector(CAST(:terms AS text[])))
+         array_to_tsvector(CAST(:terms AS text[])))
+    """)
+
+_SET_EMBEDDING = text("""
+    UPDATE knowledge_pieces
+    SET embedding = CAST(:embedding AS halfvec), embedding_model = :model
+    WHERE id = :id
     """)
 
 
-def _piece_rows(
-    document_id: UUID, org_id: UUID, chunks: list[Chunk], vectors
-) -> list[dict]:
+def _piece_rows(document_id: UUID, org_id: UUID, chunks: list[Chunk]) -> list[dict]:
     return [
         {
             "document_id": document_id,
@@ -512,10 +605,9 @@ def _piece_rows(
             "text": chunk.text,
             "page": chunk.page,
             "csv_row": chunk.csv_row,
-            "embedding": vector_literal(vector),
             "terms": list(dict.fromkeys(terms(chunk.text))) or ["_"],
         }
-        for i, (chunk, vector) in enumerate(zip(chunks, vectors, strict=True))
+        for i, chunk in enumerate(chunks)
     ]
 
 
@@ -531,7 +623,7 @@ def _too_many(limit: int, held: int = 0) -> str:
     )
 
 
-def _chunks(decoded: dict, embedder: Embedder, max_pieces: int) -> list[Chunk]:
+def _chunks(decoded: dict, max_pieces: int) -> list[Chunk]:
     if "rows" in decoded:
         return [
             Chunk(text=r["t"], csv_row=int(r["r"]))
@@ -541,4 +633,4 @@ def _chunks(decoded: dict, embedder: Embedder, max_pieces: int) -> list[Chunk]:
         Block(text=b["t"], page=b.get("p"), heading=bool(b.get("h")))
         for b in decoded.get("blocks", [])
     ]
-    return chunk_blocks(blocks, embedder.count_tokens, max_pieces=max_pieces)
+    return chunk_blocks(blocks, estimate_tokens, max_pieces=max_pieces)

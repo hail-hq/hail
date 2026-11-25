@@ -72,26 +72,11 @@ COPY --from=deps --chown=hail:hail /app/.venv /app/.venv
 # Pre-baked model weights. uv's download cache stays in the deps stage
 # (UV_CACHE_DIR above): XDG_CACHE_HOME would otherwise put it here too.
 COPY --from=deps --chown=hail:hail /app/.cache /app/.cache
-# The knowledge base's embedding model (hailhq.core.knowledge.embed):
-# intfloat/multilingual-e5-small (MIT), its own int8 ONNX export, pinned to
-# one revision and checked by sha256. Baked in so no call downloads it.
-ADD --checksum=sha256:dd476dd0c2514e9b9be83aeb3853fac0763e0bdf4a71645407587d77c48a2d88 \
-    --chown=hail:hail \
-    https://huggingface.co/intfloat/multilingual-e5-small/resolve/614241f622f53c4eeff9890bdc4f31cfecc418b3/onnx/model_qint8_avx512_vnni.onnx \
-    /app/models/embedding/model.onnx
-ADD --checksum=sha256:cfc8146abe2a0488e9e2a0c56de7952f7c11ab059eca145a0a727afce0db2865 \
-    --chown=hail:hail \
-    https://huggingface.co/intfloat/multilingual-e5-small/resolve/614241f622f53c4eeff9890bdc4f31cfecc418b3/sentencepiece.bpe.model \
-    /app/models/embedding/sentencepiece.bpe.model
-
 COPY --from=builder --chown=hail:hail /app/own/ /app/.venv/lib/python3.12/site-packages/
 
 USER hail
 
 # Check the final runtime too, after copying dependencies out of the builder.
 RUN --network=none python -c "import hailhq.voicebot.main"
-# The embedding model loads and finds an English manual's sections from
-# Italian, German and Japanese questions, offline.
-RUN --network=none python -m hailhq.core.knowledge.selftest
 
 CMD ["python", "-m", "hailhq.voicebot.main", "start"]

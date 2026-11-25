@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -31,11 +32,15 @@ from sqlalchemy import text
 
 
 @pytest.fixture(autouse=True)
-def fake_model(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(module, "get_embedder", FakeEmbedder)
+def fake(monkeypatch: pytest.MonkeyPatch) -> FakeEmbedder:
+    embedder = FakeEmbedder()
+    monkeypatch.setattr(module, "get_embedder", lambda: embedder)
+    return embedder
 
 
-async def seed(session, *, enabled=True, agent_knowledge=True, body=None):
+async def seed(
+    session, *, enabled=True, agent_knowledge=True, body=None, model="fake-embedding"
+):
     org = uuid.uuid4()
     agent = Agent(
         organization_id=org, name="a", system_prompt="p", knowledge=agent_knowledge
@@ -71,14 +76,16 @@ async def seed(session, *, enabled=True, agent_knowledge=True, body=None):
     await session.execute(
         text(
             "INSERT INTO knowledge_pieces (document_id, organization_id, ordinal, "
-            "text, page, embedding, terms) VALUES (:d, :o, 0, :t, 4, "
-            "CAST(:e AS vector), array_to_tsvector(CAST(:w AS text[])))"
+            "text, page, embedding, embedding_model, terms) VALUES (:d, :o, 0, "
+            ":t, 4, CAST(:e AS halfvec), :m, "
+            "array_to_tsvector(CAST(:w AS text[])))"
         ),
         {
             "d": doc.id,
             "o": org,
             "t": body,
-            "e": vector_literal(FakeEmbedder().embed_query(body)),
+            "e": vector_literal(FakeEmbedder().one(body)),
+            "m": model,
             "w": list(dict.fromkeys(terms(body))),
         },
     )
@@ -284,3 +291,104 @@ async def test_llm_node_adds_pieces_to_a_copy_only(async_session, monkeypatch) -
     assert sent is not history
     assert any("E-204" in (m.text_content or "") for m in sent.items)
     assert len(history.items) == 1
+
+
+async def test_call_compares_only_the_current_model(async_session, fake) -> None:
+    """Vectors of another model are not loaded; the piece stays findable
+    by its words."""
+    org, agent_id = await seed(async_session, model="old-model")
+    knowledge = await loaded(org, agent_id)
+    assert knowledge._index is not None
+    assert not knowledge._index._has_vector.any()
+    section = await knowledge.context_for("what does error E 204 mean")
+    assert section and "E-204" in section
+    org, agent_id = await seed(async_session)
+    knowledge = await loaded(org, agent_id)
+    assert knowledge._index._has_vector.all()
+
+
+@pytest.mark.parametrize("in_sql", [False, True])
+async def test_embedding_api_error_fails_open_in_calls(
+    async_session, fake, monkeypatch, in_sql
+) -> None:
+    if in_sql:
+        monkeypatch.setattr(module, "MEMORY_MAX_PIECES", 0)
+    org, agent_id = await seed(async_session)
+    knowledge = await loaded(org, agent_id)
+    fake.fail = True
+    section = await knowledge.context_for("what does error E 204 mean")
+    assert section and "E-204" in section
+
+
+async def test_embedding_api_error_fails_open_in_replies(async_session, fake):
+    org, agent_id = await seed(async_session)
+    fake.fail = True
+    section = await reply_knowledge(org, agent_id, "What does error E-204 mean?")
+    assert section and "E-204" in section
+
+
+class SlowEmbedder(FakeEmbedder):
+    """Answers only when ``go`` is set."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.go = asyncio.Event()
+
+    async def embed_query(self, text, *, timeout=0):
+        self.calls += 1
+        await self.go.wait()
+        return self.one(text)
+
+
+async def test_early_turn_request_is_reused_after_cancel(
+    async_session, monkeypatch
+) -> None:
+    """The preemptive reply starts the request; it is cancelled while the
+    request runs; the confirmed turn with the same words reuses it. Other
+    words send a new one."""
+    slow = SlowEmbedder()
+    monkeypatch.setattr(module, "get_embedder", lambda: slow)
+    org, agent_id = await seed(async_session)
+    knowledge = await loaded(org, agent_id)
+    words = "what does error E 204 mean"
+    early = asyncio.create_task(knowledge.context_for(words))
+    await asyncio.sleep(0.01)
+    assert slow.calls == 1
+    early.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await early
+    slow.go.set()
+    section = await knowledge.context_for(words)
+    assert section and "E-204" in section
+    assert slow.calls == 1
+    await knowledge.context_for("what does error E 310 mean")
+    assert slow.calls == 2
+
+
+async def test_slow_embedding_falls_back_to_keywords(
+    async_session, monkeypatch
+) -> None:
+    slow = SlowEmbedder()
+    monkeypatch.setattr(module, "get_embedder", lambda: slow)
+    monkeypatch.setattr(module, "CALL_EMBED_WAIT", 0.01)
+    org, agent_id = await seed(async_session)
+    knowledge = await loaded(org, agent_id)
+    section = await knowledge.context_for("what does error E 204 mean")
+    assert section and "E-204" in section
+    slow.go.set()
+
+
+async def test_failed_vector_is_asked_again(async_session, fake) -> None:
+    """A turn that fell back to keywords is not reused: the same words
+    again send a new request."""
+    org, agent_id = await seed(async_session)
+    knowledge = await loaded(org, agent_id)
+    words = "what does error E 204 mean"
+    fake.fail = True
+    assert await knowledge.context_for(words)
+    fake.fail = False
+    assert await knowledge.context_for(words)
+    assert fake.calls == 2
+    # Now cached: no third request.
+    assert await knowledge.context_for(words)
+    assert fake.calls == 2

@@ -6,9 +6,13 @@ calls whose workspace is too large to hold in memory
 (``index``):
 
 * Meaning: the ``CANDIDATES`` nearest pieces by cosine distance
-  (``<=>``), kept when the similarity clears ``index.MIN_SIMILARITY``. An
-  exact scan of the workspace's pieces (no vector index), so the
-  organization filter never drops a result.
+  (``<=>``) among those embedded by the current model, kept when the
+  similarity clears ``index.min_similarity``. The HNSW index
+  (``knowledge_pieces_embedding_idx``) filters after its scan, so the
+  statement turns on pgvector 0.8.0's ``hnsw.iterative_scan``: the scan
+  goes on until enough rows pass the organization and model filters.
+  Pieces with no current vector (just added, or of an earlier model) are
+  found by words only.
 * Words: ``knowledge_pieces.terms`` holds each piece's ``text.terms`` as
   lexemes (``array_to_tsvector``: no parser, so Chinese bigrams and IDs
   are kept as they are). A piece scores the sum of the inverse document
@@ -26,13 +30,14 @@ from collections.abc import Sequence
 from uuid import UUID
 
 import numpy as np
+from hailhq.core.knowledge.embed import DIMS
 from hailhq.core.knowledge.index import (
     CANDIDATES,
     MIN_IDF_PIECES,
-    MIN_SIMILARITY,
     Hit,
     Piece,
     fuse,
+    min_similarity,
 )
 from hailhq.core.knowledge.text import query_terms
 from sqlalchemy import text
@@ -43,11 +48,14 @@ __all__ = ["MIN_KEYWORD_SCORE", "search_pieces", "vector_literal"]
 # About one fairly rare word in common (no term counts in SQL).
 MIN_KEYWORD_SCORE = 1.5
 
-_NEAREST = text("""
-    SELECT id, 1 - (embedding <=> CAST(:vector AS vector)) AS similarity
+# strict_order: results stay in exact distance order.
+_ITERATIVE_SCAN = text("SET LOCAL hnsw.iterative_scan = strict_order")
+
+_NEAREST = text(f"""
+    SELECT id, 1 - (embedding <=> CAST(:vector AS halfvec({DIMS}))) AS similarity
     FROM knowledge_pieces
-    WHERE organization_id = :org
-    ORDER BY embedding <=> CAST(:vector AS vector)
+    WHERE organization_id = :org AND embedding_model = :model
+    ORDER BY embedding <=> CAST(:vector AS halfvec({DIMS}))
     LIMIT :limit
     """)
 
@@ -99,20 +107,27 @@ async def search_pieces(
     query: str,
     query_vector: np.ndarray | None,
     limit: int,
+    *,
+    model: str | None = None,
 ) -> list[Hit]:
-    """The workspace's best ``limit`` pieces for ``query``. With no vector
-    (the model did not load), keyword search alone."""
+    """The workspace's best ``limit`` pieces for ``query``. ``query_vector``
+    was made by ``model`` and is compared only with pieces of that model.
+    With no vector (the embedding API failed or is not set up), keyword
+    search alone."""
     ranked: list[list[UUID]] = []
-    if query_vector is not None:
+    if query_vector is not None and model:
+        await db.execute(_ITERATIVE_SCAN)
         rows = await db.execute(
             _NEAREST,
             {
                 "vector": vector_literal(query_vector),
                 "org": organization_id,
+                "model": model,
                 "limit": CANDIDATES,
             },
         )
-        ranked.append([r.id for r in rows if r.similarity >= MIN_SIMILARITY])
+        floor = min_similarity()
+        ranked.append([r.id for r in rows if r.similarity >= floor])
     words = query_terms(query)
     if words:
         rows = await db.execute(

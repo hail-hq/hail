@@ -65,18 +65,6 @@ COPY --chown=hail:hail api/migrations  /app/api/migrations
 COPY --chown=hail:hail costs /app/costs
 ENV HAIL_TELEPHONY_CATALOG_DIR=/app/costs
 
-# The knowledge base's embedding model (hailhq.core.knowledge.embed):
-# intfloat/multilingual-e5-small (MIT), its own int8 ONNX export, pinned to
-# one revision and checked by sha256. Baked in so no call downloads it.
-ADD --checksum=sha256:dd476dd0c2514e9b9be83aeb3853fac0763e0bdf4a71645407587d77c48a2d88 \
-    --chown=hail:hail \
-    https://huggingface.co/intfloat/multilingual-e5-small/resolve/614241f622f53c4eeff9890bdc4f31cfecc418b3/onnx/model_qint8_avx512_vnni.onnx \
-    /app/models/embedding/model.onnx
-ADD --checksum=sha256:cfc8146abe2a0488e9e2a0c56de7952f7c11ab059eca145a0a727afce0db2865 \
-    --chown=hail:hail \
-    https://huggingface.co/intfloat/multilingual-e5-small/resolve/614241f622f53c4eeff9890bdc4f31cfecc418b3/sentencepiece.bpe.model \
-    /app/models/embedding/sentencepiece.bpe.model
-
 # Our code last: it changes on almost every release, and the layers above
 # stay cached when it does.
 COPY --from=builder --chown=hail:hail /app/own/ /app/.venv/lib/python3.12/site-packages/
@@ -86,9 +74,6 @@ USER hail
 
 # Import the application with production dependencies before publishing the image.
 RUN --network=none python -c "from hailhq.api.main import app"
-# The embedding model loads and finds an English manual's sections from
-# Italian, German and Japanese questions, offline.
-RUN --network=none python -m hailhq.core.knowledge.selftest
 
 EXPOSE 8080
 CMD ["uvicorn", "hailhq.api.main:app", "--host", "0.0.0.0", "--port", "8080"]

@@ -1,7 +1,7 @@
 """Knowledge base: documents, their searchable pieces, per-workspace limits,
 and the agent switch.
 
-* ``pgvector`` for the piece embeddings. On Supabase the extension goes into
+* ``pgvector`` (0.8.0 or later) for the piece embeddings. On Supabase the extension goes into
   the ``extensions`` schema (which is on the role's search path); elsewhere
   into the default schema.
 * ``file_uploads`` takes a new purpose, ``knowledge_document``: the bytes of
@@ -25,9 +25,13 @@ Tables checked:
 * Nothing holds text passages with embeddings, so ``knowledge_pieces`` is
   new, linked to its document with ON DELETE CASCADE.
 
-No vector index: every search filters on one organization and scans its
-pieces exactly (``knowledge_pieces_org_idx``), which is exact and costs no
-index storage at the early-access limits.
+Embeddings come from a hosted API (``hailhq.core.knowledge.embed``):
+``halfvec(1536)`` (half precision, pgvector 0.7.0 or later; searches use
+0.8.0's iterative index scans) with the id of the model that made each
+vector, both null until the ingest worker embeds the piece. An HNSW index
+(cosine) serves the nearest-piece search; ``hnsw.iterative_scan`` keeps
+the organization and model filters from dropping results. Another width
+needs a new migration and a re-embed.
 
 Revision ID: 0092
 Revises: 0091
@@ -154,7 +158,7 @@ def upgrade() -> None:
         ["created_at"],
         postgresql_where=sa.text("status IN ('pending', 'processing')"),
     )
-    # The vector type is found through the search path (``extensions`` is on
+    # The halfvec type is found through the search path (``extensions`` is on
     # Supabase's), like the queries that use it.
     op.execute("""
         CREATE TABLE knowledge_pieces (
@@ -167,12 +171,15 @@ def upgrade() -> None:
             text text NOT NULL,
             page integer,
             csv_row integer,
-            embedding vector(384) NOT NULL,
+            embedding halfvec(1536),
+            embedding_model text,
             terms tsvector NOT NULL,
             CONSTRAINT knowledge_pieces_document_ordinal_uq
                 UNIQUE (document_id, ordinal),
             CONSTRAINT knowledge_pieces_locator_check
-                CHECK (page IS NULL OR csv_row IS NULL)
+                CHECK (page IS NULL OR csv_row IS NULL),
+            CONSTRAINT knowledge_pieces_embedding_check
+                CHECK ((embedding IS NULL) = (embedding_model IS NULL))
         )
         """)
     op.create_index("knowledge_pieces_org_idx", "knowledge_pieces", ["organization_id"])
@@ -181,6 +188,13 @@ def upgrade() -> None:
         "knowledge_pieces",
         ["terms"],
         postgresql_using="gin",
+    )
+    op.create_index(
+        "knowledge_pieces_embedding_idx",
+        "knowledge_pieces",
+        ["embedding"],
+        postgresql_using="hnsw",
+        postgresql_ops={"embedding": "halfvec_cosine_ops"},
     )
 
 

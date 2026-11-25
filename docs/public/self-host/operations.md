@@ -827,14 +827,15 @@ psql "$DATABASE_URL" -c \
 - The API reads uploaded files in its ingest worker (needs `HAIL_MAIL_BUCKET`:
   files live under `knowledge-documents/` in the mail bucket; the Terraform
   module grants it).
-- The embedding model (`intfloat/multilingual-e5-small`, MIT) is baked into
-  the API and voicebot images at `/app/models/embedding` and checked at build
-  time with `python -m hailhq.core.knowledge.selftest`. Outside Docker, put
-  `model.onnx` and `sentencepiece.bpe.model` in a folder and point
-  `HAIL_EMBEDDING_MODEL_DIR` at it; without it, calls go without the
-  knowledge base and searches use keywords only.
-- A loaded model holds about 260 MB in each process that uses it: the API,
-  the voicebot's text worker, and each call whose agent has `knowledge` on.
+- Embeddings come from a hosted, OpenAI-compatible `/embeddings` API. The
+  default is Gemini's (`gemini-embedding-001`, 1536 dimensions) with
+  `GOOGLE_API_KEY`. Another provider: set `HAIL_EMBEDDING_BASE_URL`,
+  `HAIL_EMBEDDING_API_KEY`, `HAIL_EMBEDDING_MODEL` and
+  `HAIL_EMBEDDING_MIN_SIMILARITY`; the ingest worker re-embeds every piece,
+  and keyword search works meanwhile. With no key, the knowledge base
+  searches by keywords only.
+- The database needs pgvector 0.8.0 or later (`halfvec` and iterative
+  index scans).
 - All knowledge data together is capped at 300 MB (new uploads answer 409
   past it). The abuse monitor also emails `HAIL_SUPPORT_EMAIL` once a day
   while the whole database is over 200 MB (needs `HAIL_MAIL_BASE_DOMAIN`).

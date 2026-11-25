@@ -12,10 +12,9 @@ from datetime import datetime, timedelta, timezone
 import numpy as np
 import pytest
 from botocore.exceptions import ClientError
+from hailhq.core.config import settings
 from hailhq.core.file_uploads import object_key
-from hailhq.core.knowledge import index as index_module
 from hailhq.core.knowledge import ingest as ingest_module
-from hailhq.core.knowledge import search as search_module
 from hailhq.core.knowledge.access import (
     FolderSweepFailed,
     agent_uses_knowledge,
@@ -26,7 +25,7 @@ from hailhq.core.knowledge.access import (
 )
 from hailhq.core.knowledge.index import MemoryIndex, Piece
 from hailhq.core.knowledge.ingest import MAX_ATTEMPTS, KnowledgeIngestWorker
-from hailhq.core.knowledge.search import search_pieces
+from hailhq.core.knowledge.search import search_pieces, vector_literal
 from hailhq.core.models import (
     Agent,
     FileUpload,
@@ -36,7 +35,7 @@ from hailhq.core.models import (
     OrgClosure,
 )
 from hailhq.core.testing.knowledge import NORTHGATE_MANUAL, FakeEmbedder
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import OperationalError, StatementError
 
 
@@ -70,14 +69,32 @@ def s3() -> FakeS3:
 
 
 @pytest.fixture()
-def worker(session_factory, s3) -> KnowledgeIngestWorker:
+def fake() -> FakeEmbedder:
+    return FakeEmbedder()
+
+
+@pytest.fixture()
+def worker(session_factory, s3, fake) -> KnowledgeIngestWorker:
     @asynccontextmanager
     async def scope():
         async with session_factory() as session:
             yield session
 
     return KnowledgeIngestWorker(
-        session_factory=scope, s3_factory=lambda: s3, embedder=FakeEmbedder
+        session_factory=scope, s3_factory=lambda: s3, embedder=lambda: fake
+    )
+
+
+async def pieces_of(session, org: uuid.UUID) -> list[KnowledgePiece]:
+    session.expire_all()
+    return list(
+        (
+            await session.execute(
+                select(KnowledgePiece)
+                .where(KnowledgePiece.organization_id == org)
+                .order_by(KnowledgePiece.ordinal)
+            )
+        ).scalars()
     )
 
 
@@ -137,7 +154,10 @@ async def test_markdown_becomes_ready_pieces(async_session, worker, s3) -> None:
         .all()
     )
     assert len(pieces) == doc.piece_count >= 1
-    assert len(pieces[0].embedding) == 384
+    # Half precision, unit length, with the model that made it.
+    assert len(pieces[0].embedding) == 1536
+    assert pieces[0].embedding_model == "fake-embedding"
+    assert abs(np.linalg.norm(pieces[0].embedding) - 1) < 1e-2
 
 
 async def test_csv_rows_and_keyword_search(async_session, worker, s3) -> None:
@@ -155,10 +175,15 @@ async def test_search_never_crosses_workspaces(async_session, worker, s3) -> Non
     await add_document(async_session, s3, mine, b"# Hours\n\nOpen nine to five.\n")
     await add_document(async_session, s3, theirs, NORTHGATE_MANUAL.encode())
     await worker.tick()
-    vector = FakeEmbedder().embed_query("error E-204 grid voltage")
-    hits = await search_pieces(async_session, mine, "error E-204", vector, 5)
+    vector = FakeEmbedder().one("error E-204 grid voltage")
+    model = "fake-embedding"
+    hits = await search_pieces(
+        async_session, mine, "error E-204", vector, 5, model=model
+    )
     assert all(h.piece.text.find("E-204") < 0 for h in hits)
-    hits = await search_pieces(async_session, theirs, "error E-204", vector, 5)
+    hits = await search_pieces(
+        async_session, theirs, "error E-204", vector, 5, model=model
+    )
     assert hits and "E-204" in hits[0].piece.text
 
 
@@ -168,11 +193,14 @@ async def test_vector_hits_need_the_floor(
     org = uuid.uuid4()
     await add_document(async_session, s3, org, NORTHGATE_MANUAL.encode())
     await worker.tick()
-    vector = FakeEmbedder().embed_query("warranty ten year purchase")
-    monkeypatch.setattr(search_module, "MIN_SIMILARITY", -1.0)
-    assert await search_pieces(async_session, org, "zzz", vector, 2)
-    monkeypatch.setattr(search_module, "MIN_SIMILARITY", 1.01)
-    assert not await search_pieces(async_session, org, "zzz", vector, 2)
+    vector = FakeEmbedder().one("warranty ten year purchase")
+    model = "fake-embedding"
+    monkeypatch.setattr(settings, "hail_embedding_min_similarity", -1.0)
+    assert await search_pieces(async_session, org, "zzz", vector, 2, model=model)
+    # Another model's vectors are never compared.
+    assert not await search_pieces(async_session, org, "zzz", vector, 2, model="m2")
+    monkeypatch.setattr(settings, "hail_embedding_min_similarity", 1.01)
+    assert not await search_pieces(async_session, org, "zzz", vector, 2, model=model)
 
 
 async def test_piece_limit_refuses_the_file(async_session, worker, s3) -> None:
@@ -220,20 +248,12 @@ async def test_bucket_error_waits_without_using_a_try(
 
 
 async def test_other_errors_use_tries_then_fail(
-    async_session, session_factory, s3
+    async_session, worker, s3, monkeypatch
 ) -> None:
-    class Broken(FakeEmbedder):
-        def embed_passages(self, texts):
-            raise RuntimeError("model crashed")
+    def broken(decoded, cap):
+        raise RuntimeError("chunking crashed")
 
-    @asynccontextmanager
-    async def scope():
-        async with session_factory() as session:
-            yield session
-
-    worker = KnowledgeIngestWorker(
-        session_factory=scope, s3_factory=lambda: s3, embedder=Broken
-    )
+    monkeypatch.setattr(ingest_module, "_chunks", broken)
     org = uuid.uuid4()
     doc_id = await add_document(async_session, s3, org, b"Hello there.")
     for attempt in range(1, MAX_ATTEMPTS):
@@ -320,13 +340,28 @@ def test_memory_index_hybrid(monkeypatch) -> None:
         "Mount it on a vertical wall.",
     ]
     pieces = [Piece(uuid.uuid4(), uuid.uuid4(), "m.md", t) for t in texts]
-    index = MemoryIndex(pieces, fake.embed_passages(texts))
-    hits = index.search("what does e 204 mean", fake.embed_query("e 204"), 3)
+    index = MemoryIndex(pieces, np.stack([fake.one(t) for t in texts]))
+    hits = index.search("what does e 204 mean", fake.one("e 204"), 3)
     assert hits[0].piece.text.startswith("Error E-204")
-    assert index.search("yes thanks", fake.embed_query("yes thanks"), 3) == []
-    monkeypatch.setattr(index_module, "MIN_SIMILARITY", -1.0)
-    hits = index.search("zzz", np.asarray(fake.embed_query("warranty")), 1)
+    assert index.search("yes thanks", fake.one("yes thanks"), 3) == []
+    monkeypatch.setattr(settings, "hail_embedding_min_similarity", -1.0)
+    hits = index.search("zzz", fake.one("warranty"), 1)
     assert hits[0].piece.text.startswith("The inverter")
+
+
+def test_memory_index_piece_without_vector_is_found_by_words(monkeypatch) -> None:
+    """A zero row (no vector of the current model) never matches by meaning,
+    even with no floor, but its words still find it."""
+    fake = FakeEmbedder()
+    texts = ["The inverter has a ten year warranty.", "Mount it on a wall."]
+    pieces = [Piece(uuid.uuid4(), uuid.uuid4(), "m.md", t) for t in texts]
+    vectors = np.stack([np.zeros(1536, np.float32), fake.one(texts[1])])
+    index = MemoryIndex(pieces, vectors)
+    monkeypatch.setattr(settings, "hail_embedding_min_similarity", -1.0)
+    hits = index.search("zzz", fake.one("warranty"), 2)
+    assert [h.piece.text for h in hits] == [texts[1]]
+    hits = index.search("ten year warranty", None, 2)
+    assert hits[0].piece.text == texts[0]
 
 
 async def test_closed_workspace_with_only_uploads_is_cleaned(
@@ -620,3 +655,168 @@ def test_log_failure_shows_group_members_and_their_causes(caplog) -> None:
         log_failure(log, "step failed", group)
     assert "[RuntimeError" in caplog.text and "KeyError" in caplog.text
     assert "secret" not in caplog.text
+
+
+async def test_embedding_api_failure_keeps_keywords_then_retries(
+    async_session, worker, s3, fake
+) -> None:
+    """An embedding API error never fails the document: its pieces are
+    ready and found by words, and a later pass (after the backoff) embeds
+    them."""
+    org = uuid.uuid4()
+    doc_id = await add_document(async_session, s3, org, NORTHGATE_MANUAL.encode())
+    fake.fail = True
+    assert await worker.tick() == 1
+    doc = await async_session.get(KnowledgeDocument, doc_id)
+    await async_session.refresh(doc)
+    assert doc.status == "ready"
+    pieces = await pieces_of(async_session, org)
+    assert pieces and all(p.embedding is None for p in pieces)
+    assert all(p.embedding_model is None for p in pieces)
+    hits = await search_pieces(async_session, org, "error E-204", None, 3)
+    assert hits and "E-204" in hits[0].piece.text
+    # Waiting: the next tick sends nothing.
+    fake.fail = False
+    calls = fake.calls
+    await worker.tick()
+    assert fake.calls == calls
+    worker._embed_after = 0.0
+    await worker.tick()
+    pieces = await pieces_of(async_session, org)
+    assert all(p.embedding_model == "fake-embedding" for p in pieces)
+
+
+async def test_model_change_reembeds_every_piece(
+    async_session, worker, s3, fake, monkeypatch
+) -> None:
+    """After the configured model changes, search compares only vectors of
+    the new model, and the embedding pass replaces the old ones."""
+    monkeypatch.setattr(settings, "hail_embedding_min_similarity", -1.0)
+    org = uuid.uuid4()
+    await add_document(async_session, s3, org, NORTHGATE_MANUAL.encode())
+    await worker.tick()
+    vector = fake.one("warranty")
+    assert await search_pieces(
+        async_session, org, "zzz", vector, 3, model="fake-embedding"
+    )
+    fake.model = "fake-embedding-2"
+    # Before the pass: no vector of the new model, keywords still work.
+    assert not await search_pieces(
+        async_session, org, "zzz", vector, 3, model="fake-embedding-2"
+    )
+    assert await search_pieces(
+        async_session, org, "warranty", vector, 3, model="fake-embedding-2"
+    )
+    await worker.tick()
+    pieces = await pieces_of(async_session, org)
+    assert pieces and all(p.embedding_model == "fake-embedding-2" for p in pieces)
+    assert await search_pieces(
+        async_session, org, "zzz", vector, 3, model="fake-embedding-2"
+    )
+
+
+async def test_embedding_pass_skips_workspaces_turned_off(
+    async_session, worker, s3, fake
+) -> None:
+    org = uuid.uuid4()
+    fake.fail = True
+    await add_document(async_session, s3, org, b"# Hours\n\nOpen nine to five.\n")
+    await worker.tick()
+    await async_session.delete(await async_session.get(OrganizationKnowledge, org))
+    await async_session.commit()
+    fake.fail = False
+    worker._embed_after = 0.0
+    calls = fake.calls
+    await worker.tick()
+    assert fake.calls == calls
+    assert all(p.embedding is None for p in await pieces_of(async_session, org))
+
+
+async def test_no_embedding_api_means_keyword_search(
+    async_session, session_factory, s3
+) -> None:
+    @asynccontextmanager
+    async def scope():
+        async with session_factory() as session:
+            yield session
+
+    worker = KnowledgeIngestWorker(
+        session_factory=scope, s3_factory=lambda: s3, embedder=lambda: None
+    )
+    org = uuid.uuid4()
+    await add_document(async_session, s3, org, NORTHGATE_MANUAL.encode())
+    assert await worker.tick() == 1
+    assert all(p.embedding is None for p in await pieces_of(async_session, org))
+    hits = await search_pieces(async_session, org, "warranty purchase", None, 3)
+    assert hits and "warranty" in hits[0].piece.text
+
+
+async def test_vector_index_keeps_a_small_workspace_results(
+    async_session, monkeypatch
+) -> None:
+    """The HNSW index filters after its scan; with many nearer pieces of
+    another workspace, the small workspace still gets its own piece."""
+    monkeypatch.setattr(settings, "hail_embedding_min_similarity", -1.0)
+    fake = FakeEmbedder()
+    big, small = uuid.uuid4(), uuid.uuid4()
+    query = fake.one("warranty ten year purchase")
+    rows = []
+    for org, count, body in (
+        (big, 300, "warranty ten year purchase"),
+        (small, 1, "opening hours nine to five"),
+    ):
+        upload = FileUpload(
+            id=uuid.uuid4(),
+            organization_id=org,
+            purpose="knowledge_document",
+            filename="f.md",
+            content_type="text/markdown",
+            s3_key=f"k/{org}",
+            size_bytes=1,
+        )
+        doc = KnowledgeDocument(
+            organization_id=org,
+            file_upload_id=upload.id,
+            name="f.md",
+            content_type="text/markdown",
+            size_bytes=1,
+            status="ready",
+        )
+        async_session.add(upload)
+        await async_session.flush()
+        async_session.add(doc)
+        await async_session.flush()
+        for i in range(count):
+            vector = fake.one(f"{body} {i}" if org == big else body)
+            rows.append(
+                KnowledgePiece(
+                    document_id=doc.id,
+                    organization_id=org,
+                    ordinal=i,
+                    text=body,
+                    embedding=vector_literal(vector),
+                    embedding_model="fake-embedding",
+                    terms="x",
+                )
+            )
+    async_session.add_all(rows)
+    await async_session.commit()
+    # Make the planner use the HNSW index: no other way to the rows in
+    # this transaction (rolled back below).
+    await async_session.execute(text("DROP INDEX knowledge_pieces_org_idx"))
+    await async_session.execute(text("SET LOCAL enable_seqscan = off"))
+    await async_session.execute(text("SET LOCAL hnsw.ef_search = 10"))
+    plan = await async_session.execute(
+        text(
+            "EXPLAIN SELECT id FROM knowledge_pieces WHERE organization_id = :o "
+            "AND embedding_model = 'fake-embedding' ORDER BY embedding <=> "
+            "CAST(:v AS halfvec(1536)) LIMIT 20"
+        ),
+        {"o": small, "v": vector_literal(query)},
+    )
+    assert "knowledge_pieces_embedding_idx" in "\n".join(r[0] for r in plan)
+    hits = await search_pieces(
+        async_session, small, "zzz", query, 3, model="fake-embedding"
+    )
+    assert [h.piece.text for h in hits] == ["opening hours nine to five"]
+    await async_session.rollback()

@@ -21,7 +21,7 @@ psql "${DATABASE_URL/postgresql+psycopg:/postgresql:}" -c \
 
 Planned: when paid plans ship, the limits move from a document count to total size (Pro 100 MB, Business 1 GB, 20 MB per file). The table holds no total size yet; the per-file default is already 20 MB.
 
-Allowed ranges (CHECK constraints): documents 1 to 1,000, file bytes up to 25 MB, pieces up to 100,000. One file gives at most 1,500 pieces whatever the workspace limit: it must be read within the worker's 15-minute lease (about 280 s per 1,000 pieces with int8, 410 s with fp32). The workspace total can be higher. Over 5,000 pieces, calls search in SQL instead of memory.
+Allowed ranges (CHECK constraints): documents 1 to 1,000, file bytes up to 25 MB, pieces up to 100,000. One file gives at most 1,500 pieces whatever the workspace limit. The workspace total can be higher. Over 5,000 pieces, calls search in SQL instead of memory.
 
 Turn it off (agents stop using it at once; adding and search answer 403; listing, reading and deleting still work):
 
@@ -51,42 +51,65 @@ Without it, uploads answer 503 and stored files are refused with 403, which fail
 
 ## What runs where
 
-| Step                                  | Process                      | Notes                                                                                      |
-| ------------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------ |
-| Upload link and PUT                   | API                          | `knowledge-documents/<org>/<id>.<attempt>` in the mail bucket; type sniffed at PUT         |
-| Ingest (`pending` → `ready`/`failed`) | API, `KnowledgeIngestWorker` | Decode in a child process (no credentials, 30 s CPU, 1 GB, 60 s); chunk; embed on 1 thread |
-| Search API, text and email replies    | API, voicebot text worker    | SQL: pgvector cosine + idf over `terms`, fused by rank                                     |
-| Calls                                 | Each call process            | Loads pieces + model during the greeting; top 3 pieces per turn, before the model call     |
+| Step                                  | Process                      | Notes                                                                                    |
+| ------------------------------------- | ---------------------------- | ---------------------------------------------------------------------------------------- |
+| Upload link and PUT                   | API                          | `knowledge-documents/<org>/<id>.<attempt>` in the mail bucket; type sniffed at PUT       |
+| Ingest (`pending` → `ready`/`failed`) | API, `KnowledgeIngestWorker` | Decode in a child process (no credentials, 30 s CPU, 1 GB, 60 s); chunk; store pieces    |
+| Embedding pass                        | API, `KnowledgeIngestWorker` | Every tick: pieces with no vector of the configured model, 100 per API request           |
+| Search API, text and email replies    | API, voicebot text worker    | SQL: pgvector cosine (HNSW) + idf over `terms`, fused by rank                            |
+| Calls                                 | Each call process            | Loads pieces + vectors during the greeting; top 3 pieces per turn, before the model call |
 
 The worker polls every 5 s (`HAIL_KNOWLEDGE_POLL_SECONDS`, code default; 0 turns it off). Untouched uploads are deleted after 24 hours (upload sweep). A document not ready one day after it was added fails. A workspace with more than 5,000 pieces is searched in SQL during calls instead of in memory.
 
-## Model
+## Embedding model
 
-`intfloat/multilingual-e5-small` (MIT), its own int8 ONNX file (`onnx/model_qint8_avx512_vnni.onnx`, revision `614241f6`), SentencePiece tokenizer. Baked into the API and voicebot images by sha256; each build runs `python -m hailhq.core.knowledge.selftest` offline (Italian, German and Japanese questions against an English manual). `HAIL_EMBEDDING_MODEL_DIR` (code default `/app/models/embedding`) points elsewhere for a checkout outside Docker.
+A hosted, OpenAI-compatible `/embeddings` API ([`embed.py`](../../core/hailhq/core/knowledge/embed.py)). Settings (code defaults, nothing in `.env`):
 
-Measured 2026-11-21 (CPU only, 1 thread):
+- `HAIL_EMBEDDING_BASE_URL`: `https://generativelanguage.googleapis.com/v1beta/openai` (Gemini). Requests go to `<base>/embeddings`.
+- `HAIL_EMBEDDING_API_KEY`: empty, so `GOOGLE_API_KEY` is used while the base URL is Google's. A Google key is never sent to another host. No key at all: keyword search only, one warning per process.
+- `HAIL_EMBEDDING_MODEL`: `gemini-embedding-001`.
+- `HAIL_EMBEDDING_DIMENSIONS`: `1536`, the width of `knowledge_pieces.embedding` (`halfvec(1536)`).
+- `HAIL_EMBEDDING_MIN_SIMILARITY`: `0.5`, the cosine floor for a piece found by meaning only. Set it with the model (table below).
 
-|                                                             | int8 (shipped)                                | fp32                    |
-| ----------------------------------------------------------- | --------------------------------------------- | ----------------------- |
-| Memory per process after load                               | about 180 MB more (about 260 to 280 MB total) | about 400 MB more       |
-| Question embed, x86 (GitHub runner, AMD EPYC, AVX-512 VNNI) | p50 2.9 ms, p95 3.5 ms                        | p50 8.7 ms, p95 10.1 ms |
-| Ingest, 500-token pieces, x86                               | about 280 s per 1,000 pieces                  | about 410 s             |
-| Load                                                        | about 0.5 s                                   | about 1 s               |
-| Agreement with fp32 (cosine)                                | 0.996 min                                     |                         |
+The request is `{"model", "input", "dimensions"}`. Every vector is L2-normalized in our code, whatever the provider (Gemini returns unnormalized vectors below 3,072 dimensions). Gemini's OpenAI-compatible endpoint takes at most 100 texts per request and refuses any other field (a task type such as `RETRIEVAL_QUERY` answers 400), so none is sent. Input over 2,048 tokens is cut by Gemini without an error; pieces stay far under it (about 500 estimated tokens, CSV rows at most 2,000 characters).
 
-Quality on an invented 26-section manual, 25 questions in 7 languages: e5 found the right ~400-token piece 18 times out of 25, `paraphrase-multilingual-MiniLM-L12-v2` 9 to 11 (it reads only the first 128 tokens), so e5 was chosen. Cosine scores of right pieces were 0.73 to 0.92, off-topic best matches 0.72 to 0.81: the floor (0.72) sits below every right piece and only drops clear junk; keyword search carries IDs. A message made only of filler words ("okay, thank you", "Sorry?") is not searched. Hold-the-line turns ("one second", "wait, what?") are not searched either. Otherwise a call turn needs two non-filler words, three spoken words, or one word with a question mark; a text or email needs two words. Any ID is always searched.
+Measured 2026-11-24 with 6 invented manual sections and 14 questions in 7 languages, 1536 dimensions:
 
-The int8 file is tuned for CPUs with VNNI. On an x86 CPU without it (AVX2 only), int8 math can saturate. Check the VM once:
+| Model                    | Endpoint                                                     | Right piece first | Right piece cosine | Off-topic best | Floor to set |
+| ------------------------ | ------------------------------------------------------------ | ----------------- | ------------------ | -------------- | ------------ |
+| `gemini-embedding-001`   | `generativelanguage.googleapis.com/v1beta/openai/embeddings` | 9 of 10           | 0.61 to 0.82       | 0.45 to 0.48   | 0.5          |
+| `text-embedding-3-small` | `api.openai.com/v1/embeddings`                               | 10 of 10          | 0.29 to 0.70       | 0.05 to 0.17   | 0.2          |
+| `text-embedding-3-large` | `api.openai.com/v1/embeddings`                               | 9 of 10           | 0.33 to 0.66       | 0.03 to 0.21   | 0.2          |
 
-```bash
-grep -o -E 'avx2|avx512_vnni|avx_vnni' /proc/cpuinfo | sort -u
+One request takes 0.3 to 0.5 s from Europe. A question in one language finds an English piece with no word in common.
+
+### Where the latency goes in a call
+
+LiveKit's preemptive generation (on by default) runs the reply on the caller's words as soon as speech-to-text has them, while the session still waits to confirm the end of the turn. The question's embedding request starts there, in its own task keyed by the text. The confirmed turn with the same words reuses it, even when the early reply was cancelled. A turn waits at most 1 s for the vector, then searches by keywords alone.
+
+### Changing the model or the provider
+
+1. Add `HAIL_EMBEDDING_BASE_URL`, `HAIL_EMBEDDING_API_KEY` (unless Gemini), `HAIL_EMBEDDING_MODEL` and `HAIL_EMBEDDING_MIN_SIMILARITY` with the new values to `.env.example` and `.env` (same lines in both), copy `.env` to the server, and restart the API and the voicebot.
+2. Searches compare only vectors of the new model (`knowledge_pieces.embedding_model`). Until a piece is re-embedded, keywords still find it.
+3. The ingest worker re-embeds every piece, 100 per request, at most 1,000 per tick. Watch it:
+
+```sql
+SELECT embedding_model, count(*) FROM knowledge_pieces GROUP BY 1;
 ```
 
-If neither VNNI flag shows, switch both Dockerfiles to `onnx/model.onnx` (fp32, sha256 `ca456c06…8665`), at about 220 MB more per process.
+Another width needs a migration (column type and HNSW index) plus a re-embed; until then the API logs a warning and searches by keywords only.
+
+### Failures
+
+An API error or timeout never breaks a call, a text or an email reply: that search uses keywords and logs a warning (status code or exception type, never text). Ingest never fails a document for it: pieces are `ready` and keyword-searchable at once; the embedding pass waits (the server's `Retry-After`, or 30 s doubling up to 10 minutes) and tries again.
+
+Search filters on the organization and the model; the HNSW index filters after its scan, so each nearest-piece query sets `hnsw.iterative_scan = strict_order` (pgvector 0.8.0 or later). Local Docker and CI use `pgvector/pgvector:0.8.0-pg16`.
+
+A message made only of filler words ("okay, thank you", "Sorry?") is not searched. Hold-the-line turns ("one second", "wait, what?") are not searched either. Otherwise a call turn needs two non-filler words, three spoken words, or one word with a question mark; a text or email needs two words. Any ID is always searched.
 
 ## Limits and alerts
 
-- All knowledge data together (both tables with indexes, `pg_total_relation_size`) is capped at 300 MB: new links and documents answer 409, and the worker refuses new pieces.
+- All knowledge data together (both tables with indexes, `pg_total_relation_size`) is capped at 300 MB: new links and documents answer 409, and the worker refuses new pieces. A piece's vector takes about 3 KB, plus about as much in the HNSW index.
 - The abuse monitor emails `HAIL_SUPPORT_EMAIL` at most once a day while `pg_database_size` is over 200 MB (state in `platform_flags`, key `database_size_alert_day`). Check sizes:
 
 ```sql

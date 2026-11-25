@@ -41,8 +41,10 @@ def s3(monkeypatch: pytest.MonkeyPatch):
 
 
 @pytest.fixture(autouse=True)
-def fake_model(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(knowledge_routes, "get_embedder", FakeEmbedder)
+def fake(monkeypatch: pytest.MonkeyPatch) -> FakeEmbedder:
+    embedder = FakeEmbedder()
+    monkeypatch.setattr(knowledge_routes, "get_embedder", lambda: embedder)
+    return embedder
 
 
 def _auth(plain: str) -> dict[str, str]:
@@ -95,7 +97,8 @@ async def _piece(session, org, doc_id, body: str, ordinal: int = 0) -> None:
     await session.execute(
         text(
             "INSERT INTO knowledge_pieces (document_id, organization_id, ordinal, "
-            "text, embedding, terms) VALUES (:d, :o, :n, :t, CAST(:e AS vector), "
+            "text, embedding, embedding_model, terms) VALUES (:d, :o, :n, :t, "
+            "CAST(:e AS halfvec), 'fake-embedding', "
             "array_to_tsvector(CAST(:w AS text[])))"
         ),
         {
@@ -103,7 +106,7 @@ async def _piece(session, org, doc_id, body: str, ordinal: int = 0) -> None:
             "o": org,
             "n": ordinal,
             "t": body,
-            "e": vector_literal(FakeEmbedder().embed_query(body)),
+            "e": vector_literal(FakeEmbedder().one(body)),
             "w": list(dict.fromkeys(terms(body))),
         },
     )
@@ -283,6 +286,27 @@ async def test_workspaces_never_see_each_other(
         headers=_auth(other_plain),
     )
     assert theirs.json()["results"][0]["text"].startswith("Error E-204")
+
+
+async def test_search_falls_back_to_keywords_on_embedding_error(
+    client, async_session, org_and_key, fake
+) -> None:
+    org, _, plain = org_and_key
+    await _turn_on(async_session, org)
+    upload = await _stored_upload(async_session, org)
+    resp = await client.post(
+        "/v1/knowledge/documents",
+        json={"upload_id": str(upload.id)},
+        headers=_auth(plain),
+    )
+    await _piece(async_session, org, resp.json()["id"], "Error E-204 means grid.")
+    fake.fail = True
+    found = await client.post(
+        "/v1/knowledge/search", json={"query": "error E-204"}, headers=_auth(plain)
+    )
+    assert found.status_code == 200
+    assert found.json()["results"][0]["text"].startswith("Error E-204")
+    assert fake.calls == 1
 
 
 async def test_agent_knowledge_switch(client, async_session, org_and_key) -> None:
