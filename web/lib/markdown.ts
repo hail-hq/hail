@@ -1,6 +1,6 @@
 import 'server-only';
 import type { LLMRow, STTRow, TTSRow, CostsFile } from './types';
-import { formatCloning, langs, mostRecent, rowPrice, rowRange } from './format';
+import { formatCloning, langs, mostRecent, rowPrice, rowRange, ttsPrice } from './format';
 
 function tableRow(cells: (string | number | undefined)[]): string {
   return `| ${cells.map((c) => (c === undefined || c === null ? '—' : String(c))).join(' | ')} |`;
@@ -74,7 +74,7 @@ function ttsTable(rows: TTSRow[]): string {
   const header = tableRow([
     'Provider',
     'Model',
-    'Price/1M chars',
+    'Price',
     'Quality',
     'Cloning',
     'Languages',
@@ -95,8 +95,8 @@ function ttsTable(rows: TTSRow[]): string {
           : formatCloning(r.voice_cloning, 'yes');
     return tableRow([
       r.provider,
-      `${r.display_name} (\`${r.model_id}\`)`,
-      rowPrice(r, 'price_per_1m_chars_usd', 2),
+      `${r.display_name} (\`${r.api_endpoint ? new URL(r.api_endpoint).pathname : r.model_id}\`)`,
+      ttsPrice(r),
       r.voice_quality,
       cloning,
       langs(r.languages),
