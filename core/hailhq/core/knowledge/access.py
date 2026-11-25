@@ -22,11 +22,12 @@ write more pieces. The real database size has its own daily alert
 (``db_size_alert``).
 
 Each workspace's own limits are checked under ``knowledge_lock`` (an
-advisory lock per workspace). Where pieces are written (``ingest``), the
+advisory lock per workspace) when a link or a document is created; the
+upload body check takes no lock and only refuses early. Where pieces are written (``ingest``), the
 global byte cap is checked under one ``knowledge:global-cap`` advisory
 lock held until commit, so two workspaces never both take the last room.
-The API's checks (upload links, documents) are early refusals with no
-bytes added and without that lock.
+The API's checks (upload links, upload bodies, documents) are early
+refusals with no bytes added and without that lock.
 """
 
 from __future__ import annotations
