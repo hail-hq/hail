@@ -24,15 +24,21 @@ The same pass embeds new pieces, retries failed ones, and re-embeds
 everything after a model change; meanwhile search uses keywords for those
 pieces. An API error or timeout never fails a document: the pass logs a
 warning and waits (the server's Retry-After, or 30 s doubling up to 10
-minutes) before it tries again. A batch the API refuses (a 400, 413 or
-422) first sends a short probe text: when the API refuses that too, the
-setting is wrong (a bad key or width also answers 400) and the pass backs
-off like any failure. Otherwise the batch is sent again one piece at a
-time, and a piece refused alone is skipped until the model changes or the
-process restarts, so it never holds up the others. No transaction stays open during an API request: pieces are
-read, embedded, then written only where they still lack a vector of the
-model. The API runs one worker process; several would at worst embed a
-piece twice.
+minutes) before it tries again.
+
+A batch the API refuses (a 400, 413 or 422) is a setting error, and the
+pass backs off, when a short probe text is refused too (a bad key or
+width) or when no piece of the batch passes alone (an input limit too
+small for our pieces). Otherwise a piece refused alone is skipped (the
+newest ``_SKIP_MAX``, until the model changes or the process restarts), so
+it never holds up the others.
+
+No transaction stays open during an API request: pieces are read,
+embedded, then written only where they still lack a vector of the model.
+Before each batch the pass checks the global size cap with the batch's
+vectors counted, so pieces stored while no API was set up (or under
+another model) never push the tables past it. The API runs one worker
+process; several would at worst embed a piece twice.
 
 A file that cannot be used (wrong type, no text, over a limit) is
 ``failed`` with a reason for the customer in ``error``. Anything else (the
@@ -198,9 +204,10 @@ class KnowledgeIngestWorker:
         self._embed_after = 0.0
         self._embed_failures = 0
         # Pieces the API refused on their own, and for which model: not sent
-        # again by this process (at most ``_SKIP_MAX``).
-        self._embed_skip: set[UUID] = set()
+        # again by this process (the newest ``_SKIP_MAX``, oldest first).
+        self._embed_skip: dict[UUID, None] = {}
         self._embed_skip_model: str | None = None
+        self._probe_ok = False
 
     def _get_s3(self) -> S3MailClient:
         if self._s3 is None:
@@ -246,7 +253,9 @@ class KnowledgeIngestWorker:
         if embedder is None:
             return 0
         if self._embed_skip_model != embedder.model:
-            self._embed_skip, self._embed_skip_model = set(), embedder.model
+            self._embed_skip, self._embed_skip_model = {}, embedder.model
+        # The probe text passed in this pass: not sent again.
+        self._probe_ok = False
         done = tried = 0
         while not self._stop.is_set() and tried < EMBED_PER_TICK:
             query = (
@@ -266,12 +275,24 @@ class KnowledgeIngestWorker:
                 .limit(BATCH)
             )
             if self._embed_skip:
-                query = query.where(KnowledgePiece.id.not_in(self._embed_skip))
+                query = query.where(KnowledgePiece.id.not_in(list(self._embed_skip)))
             async with self._session_factory() as db:
                 rows = (await db.execute(query)).all()
             if not rows:
                 break
             tried += len(rows)
+            # Vectors of pieces stored before (with no key, or another
+            # model) must still fit under the cap.
+            async with self._session_factory() as db:
+                full = await storage_full(db, adding=len(rows) * _VECTOR_BYTES)
+            if full:
+                self._embed_after = time.monotonic() + EMBED_BACKOFF[1]
+                logger.warning(
+                    "knowledge: storage is full; %d piece(s) keep keyword search "
+                    "without vectors",
+                    len(rows),
+                )
+                break
             pairs, failure = await self._embed_rows(embedder, rows)
             if pairs:
                 async with self._session_factory() as db:
@@ -311,27 +332,38 @@ class KnowledgeIngestWorker:
             if not exc.refused:
                 return [], exc
             batch_refusal = exc
-        try:
-            await embedder.embed([_PROBE_TEXT])
-        except EmbeddingUnavailable as exc:
-            # The probe fails too: the setting, not the pieces.
-            return [], exc if not exc.refused else batch_refusal
+        if not self._probe_ok:
+            try:
+                await embedder.embed([_PROBE_TEXT])
+            except EmbeddingUnavailable as exc:
+                # The probe fails too: the setting, not the pieces.
+                return [], exc if not exc.refused else batch_refusal
+            self._probe_ok = True
         pairs: list = []
+        refused: list = []
+        stop: EmbeddingUnavailable | None = None
         for row in rows:
             try:
                 pairs.append((row, (await embedder.embed([row.text]))[0]))
             except EmbeddingUnavailable as exc:
                 if not exc.refused:
-                    return pairs, exc
-                if len(self._embed_skip) >= _SKIP_MAX:
-                    return pairs, exc
-                self._embed_skip.add(row.id)
-                logger.warning(
-                    "knowledge: the embedding API refused piece %s; it keeps "
-                    "keyword search",
-                    row.id,
-                )
-        return pairs, None
+                    stop = exc
+                    break
+                refused.append(row)
+                stop_refusal = exc
+        if refused and not pairs and stop is None:
+            # No piece passes alone: an input limit, not the pieces.
+            return [], stop_refusal
+        for row in refused:
+            self._embed_skip[row.id] = None
+            while len(self._embed_skip) > _SKIP_MAX:
+                self._embed_skip.pop(next(iter(self._embed_skip)))
+            logger.warning(
+                "knowledge: the embedding API refused piece %s; it keeps "
+                "keyword search",
+                row.id,
+            )
+        return pairs, stop
 
     def _back_off(self, exc: EmbeddingUnavailable, pieces: int) -> None:
         self._embed_failures += 1
@@ -626,10 +658,9 @@ class KnowledgeIngestWorker:
             if held + len(chunks) > limits.max_pieces:
                 await db.rollback()
                 raise _Refused(_too_many(limits.max_pieces, held))
-            # The vectors the embedding pass adds later count too, when
-            # there is an embedding API to make them.
-            owed = len(rows) * _VECTOR_BYTES if self._embedder() is not None else 0
-            if await storage_full(db, adding=owed):
+            # The vectors the embedding pass adds later count too, whether
+            # or not an embedding API is set up yet.
+            if await storage_full(db, adding=len(rows) * _VECTOR_BYTES):
                 await db.rollback()
                 raise _Refused(STORAGE_FULL)
             await db.execute(

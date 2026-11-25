@@ -165,3 +165,14 @@ def test_other_width_needs_a_migration(monkeypatch, caplog) -> None:
     monkeypatch.setattr(embed, "_warned", set())
     assert get_embedder() is None
     assert "migration" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "url", ["generativelanguage.googleapis.com/v1beta/openai", "http://[::1/v1"]
+)
+def test_base_url_must_be_http(monkeypatch, caplog, url) -> None:
+    monkeypatch.setattr(settings, "hail_embedding_api_key", "k")
+    monkeypatch.setattr(settings, "hail_embedding_base_url", url)
+    monkeypatch.setattr(embed, "_warned", set())
+    assert get_embedder() is None
+    assert "http(s) URL" in caplog.text

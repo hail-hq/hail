@@ -886,3 +886,56 @@ async def test_refused_first_pieces_never_stop_the_rest(
     pieces = await pieces_of(async_session, org)
     assert [p.embedding_model is None for p in pieces] == [True] * 4 + [False] * 4
     assert worker._embed_after == 0.0 and len(worker._embed_skip) == 4
+
+
+async def test_storage_cap_counts_vectors_with_or_without_an_api(
+    async_session, session_factory, s3, fake, monkeypatch
+) -> None:
+    """Admission counts the vectors a file's pieces will get even when no
+    embedding API is set up; a key added later never embeds past the cap."""
+    added: list[int] = []
+    full = {"now": False}
+
+    async def fake_full(db, *, adding=0):
+        added.append(adding)
+        return full["now"]
+
+    monkeypatch.setattr(ingest_module, "storage_full", fake_full)
+    embedder: dict = {"api": None}
+
+    @asynccontextmanager
+    async def scope():
+        async with session_factory() as session:
+            yield session
+
+    worker = KnowledgeIngestWorker(
+        session_factory=scope,
+        s3_factory=lambda: s3,
+        embedder=lambda: embedder["api"],
+    )
+    org = uuid.uuid4()
+    await add_document(async_session, s3, org, NORTHGATE_MANUAL.encode())
+    assert await worker.tick() == 1
+    count = len(await pieces_of(async_session, org))
+    assert added == [count * ingest_module._VECTOR_BYTES]
+    # A key arrives, but the tables are full: no vector is written.
+    embedder["api"] = fake
+    full["now"] = True
+    await worker.tick()
+    assert fake.calls == 0
+    assert all(p.embedding is None for p in await pieces_of(async_session, org))
+    assert worker._embed_after > 0
+
+
+async def test_every_piece_refused_alone_is_a_setting_error(
+    async_session, worker, s3, fake, monkeypatch
+) -> None:
+    """The probe passes but no piece passes alone (an input limit smaller
+    than our pieces): nothing is skipped, the pass backs off."""
+    org = uuid.uuid4()
+    rows = "Part,Name\n" + "\n".join(f"P-{i},Item {i}" for i in range(4))
+    await add_document(async_session, s3, org, rows.encode(), "text/csv")
+    fake.refuse = "Item"
+    await worker.tick()
+    assert worker._embed_after > 0 and not worker._embed_skip
+    assert all(p.embedding is None for p in await pieces_of(async_session, org))

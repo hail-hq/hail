@@ -112,10 +112,14 @@ def embedding_config() -> EmbeddingConfig | None:
     base_url = settings.hail_embedding_base_url
     api_key = settings.hail_embedding_api_key
     try:
-        host = urlsplit(base_url).hostname
+        parts = urlsplit(base_url)
+        host = parts.hostname if parts.scheme in ("http", "https") else None
     except ValueError:
+        host = None
+    if not host:
         _warn_once(
-            "knowledge base: HAIL_EMBEDDING_BASE_URL is not a URL; keywords only"
+            "knowledge base: HAIL_EMBEDDING_BASE_URL is not an http(s) URL; "
+            "search uses keywords only"
         )
         return None
     if not api_key and host == _GOOGLE_HOST:
