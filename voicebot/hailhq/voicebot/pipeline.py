@@ -62,6 +62,7 @@ from collections.abc import AsyncIterable
 from typing import Any
 from uuid import UUID
 
+import httpx
 from hailhq.core.config import settings
 from hailhq.core.db import session_scope
 from hailhq.core.languages import (
@@ -81,6 +82,7 @@ from hailhq.core.providers.tts.direct import (
     house_voice_ready,
 )
 from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
+from hailhq.core.voice_catalog import validate_voice_language
 from hailhq.voicebot.direct_tts import DirectTTS
 from livekit.agents import (
     AgentSession,
@@ -611,10 +613,45 @@ def _org_tts(
     raise ProviderKeyError(f"unknown org tts provider '{org.provider}'")
 
 
+async def resolve_fallback_voice_provider(
+    org: ResolvedLayer | None, voice_id: str | None, language: str | None
+) -> str | None:
+    """Resolve an unscoped override once when a direct provider is skipped."""
+    if (
+        org is None
+        or org.provider not in DIRECT_VOICES
+        or not org.fallback_enabled
+        or not language
+        or language not in SUPPORTED_LANGUAGES
+        or not voice_id
+        or org.provider in tts_providers_for(language)
+        or voice_id in (org.params.get("voice_id"), DIRECT_VOICES[org.provider][1])
+    ):
+        return None
+
+    async def compatible(provider: str, model: str, key: str) -> str | None:
+        if not key or provider not in tts_providers_for(language):
+            return None
+        try:
+            async with asyncio.timeout(0.8):
+                await validate_voice_language(provider, voice_id, model, key, language)
+        except (TimeoutError, httpx.HTTPError, ValueError):
+            return None
+        return provider
+
+    providers = await asyncio.gather(
+        compatible("cartesia", settings.cartesia_model, settings.cartesia_api_key),
+        compatible("elevenlabs", settings.elevenlabs_model, settings.eleven_api_key),
+    )
+    return next((provider for provider in providers if provider), None)
+
+
 def build_tts(
     org: ResolvedLayer | None = None,
     voice_id_override: str | None = None,
     language: str | None = None,
+    *,
+    fallback_voice_provider: str | None = None,
 ) -> agents_tts.TTS:
     """Construct the TTS for one call.
 
@@ -653,21 +690,17 @@ def build_tts(
                 org.provider,
                 language,
             )
-            if org.provider in DIRECT_VOICES and voice_id_override:
-                if voice_id_override in (
-                    org.params.get("voice_id"),
-                    DIRECT_VOICES[org.provider][1],
-                ):
-                    return build_tts(None, None, language)
-                # Legacy overrides carry no provider ID. Try the requested
-                # voice once and keep configured voices behind it in case
-                # the override belongs to the skipped provider.
-                override_chain = _house_tts(voice_id_override, language)
-                if override_chain:
-                    return agents_tts.FallbackAdapter(
-                        [*override_chain, *_house_tts(None, language)],
-                        max_retry_per_tts=0,
+            if org.provider in DIRECT_VOICES:
+                if voice_id_override and fallback_voice_provider:
+                    preferred = _org_tts(
+                        ResolvedLayer(fallback_voice_provider, None, {}, False),
+                        voice_id_override,
+                        language,
                     )
+                    return agents_tts.FallbackAdapter(
+                        [preferred, *_house_tts(None, language)]
+                    )
+                return build_tts(None, None, language)
             return build_tts(None, voice_id_override, language)
         try:
             byo = _org_tts(org, voice_id_override, language)
@@ -860,6 +893,8 @@ def build_session(
     org_cfgs: dict[str, ResolvedLayer] | None = None,
     voice_id_override: str | None = None,
     language: str | None = None,
+    *,
+    fallback_voice_provider: str | None = None,
 ) -> AgentSession:
     """Build the :class:`AgentSession` for one job.
 
@@ -946,7 +981,12 @@ def build_session(
     return AgentSession(
         vad=vad,
         stt=build_stt(org_stt, language, provider, stt_drives_turns=(mode == "stt")),
-        tts=build_tts(org_cfgs.get("tts"), voice_id_override, language),
+        tts=build_tts(
+            org_cfgs.get("tts"),
+            voice_id_override,
+            language,
+            fallback_voice_provider=fallback_voice_provider,
+        ),
         llm=build_llm(llm_cfg, org_cfgs.get("llm"), retry_on_chunk_sent=True),
         turn_handling=TurnHandlingOptions(
             turn_detection=turn_detection,

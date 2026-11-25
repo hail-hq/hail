@@ -356,15 +356,38 @@ def test_removed_direct_key_uses_house_speech_only_with_consent(
         build_tts(strict, language="en")
 
 
-def test_language_fallback_keeps_house_default_behind_an_unscoped_override(
-    captured_plugins,
+async def test_language_fallback_verifies_the_override_without_synthesizing(
+    monkeypatch, captured_plugins
 ):
+    from unittest.mock import AsyncMock
+
+    async def validate(provider, voice_id, model, key, language):
+        if voice_id == "Kore":
+            raise ValueError("not a house voice")
+
+    checks = AsyncMock(side_effect=validate)
+    monkeypatch.setattr(pipeline, "validate_voice_language", checks)
     org = ResolvedLayer("gemini", "key", {"voice_id": "Charon"}, True)
-    chain = build_tts(org, voice_id_override="saved-french-voice", language="fr")
+    chosen = await pipeline.resolve_fallback_voice_provider(
+        org, "saved-french-voice", "fr"
+    )
+    assert chosen == "cartesia"
+    chain = build_tts(
+        org,
+        voice_id_override="saved-french-voice",
+        language="fr",
+        fallback_voice_provider=chosen,
+    )
     assert len(chain._tts_instances) == 2
+    assert chain._max_retry_per_tts > 0
     assert [call.kwargs["voice"] for call in captured_plugins["cartesia"]] == [
         "saved-french-voice",
         "house-voice",
     ]
-    build_tts(org, voice_id_override="Charon", language="fr")
+    chosen = await pipeline.resolve_fallback_voice_provider(org, "Kore", "fr")
+    assert chosen is None
+    build_tts(
+        org, voice_id_override="Kore", language="fr", fallback_voice_provider=chosen
+    )
     assert captured_plugins["cartesia"][-1].kwargs["voice"] == "house-voice"
+    assert checks.await_count == 2
