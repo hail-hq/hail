@@ -11,8 +11,16 @@ made because we never invoke ``.chat()``.
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import pytest
-from hailhq.voicebot.pipeline import ResolvedLayer, build_llm, build_session, build_stt
+from hailhq.voicebot.pipeline import (
+    TURN_MAX_DELAY_SECONDS,
+    ResolvedLayer,
+    build_llm,
+    build_session,
+    build_stt,
+)
 from livekit.agents import AgentSession
 from livekit.agents.llm import FallbackAdapter
 from livekit.agents.stt import FallbackAdapter as stt_fallback
@@ -250,19 +258,15 @@ def test_build_session_smoke_constructs_full_pipeline() -> None:
     assert isinstance(session, AgentSession)
 
 
-def test_build_session_caps_turn_end_wait() -> None:
-    """The turn detector's longest wait is Hail's cap, not LiveKit's 2.5 s;
-    the shortest wait keeps LiveKit's turn-detector default."""
-    from unittest.mock import MagicMock
-
-    from hailhq.voicebot.pipeline import TURN_MAX_DELAY_SECONDS
-
-    session = build_session(None, MagicMock(), language="en")
-    endpointing = session.options.turn_handling["endpointing"]
-    assert endpointing["max_delay"] == TURN_MAX_DELAY_SECONDS == 1.5
-    assert endpointing["min_delay"] == 0.3
-    assert endpointing["mode"] == "fixed"
-    assert session.options.turn_handling["interruption"]["min_words"] == 1
+@pytest.mark.parametrize("language", ["en", "ru"])
+def test_build_session_caps_turn_end_wait(language: str) -> None:
+    """The longest end-of-turn wait is Hail's cap in every turn mode ("en"
+    runs the turn detector, "ru" does not), and interruptions still need a
+    word."""
+    session = build_session(None, MagicMock(), language=language)
+    turn_handling = session.options.turn_handling
+    assert turn_handling["endpointing"]["max_delay"] == TURN_MAX_DELAY_SECONDS
+    assert turn_handling["interruption"]["min_words"] == 1
 
 
 def test_build_tts_both_keys_returns_fallback_adapter() -> None:
