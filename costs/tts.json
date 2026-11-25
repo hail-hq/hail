@@ -1163,7 +1163,7 @@
       "provider": "LiveKit",
       "provider_url": "https://livekit.com",
       "model_id": "fishaudio/s2.1-pro",
-      "display_name": "Fish Audio S2.1 Pro (LiveKit Inference)",
+      "display_name": "Fish Audio S2.1 Pro (LiveKit Ship $50/mo)",
       "price_per_1m_chars_usd": "15",
       "voice_quality": "neural",
       "languages": [
@@ -1185,16 +1185,16 @@
       "confidence": "medium",
       "last_verified": "2026-11-25",
       "last_changed_at": "2026-11-25",
-      "verification_method": "manual-confirmed",
+      "verification_method": "community-pr",
       "verified_by": "r13i",
       "source_url": "https://livekit.com/pricing/inference",
-      "notes": "LiveKit Inference Build and Ship list usage rate per million characters. The published usage rate is the same on the listed plans. LiveKit documents the hosted identifier, languages and transport at https://docs.livekit.io/agents/models/inference/."
+      "notes": "LiveKit Inference Build and Ship list usage rate per million characters. Build has $2.50 in shared Inference credits and stops serving requests when they run out. Ship costs $50 per month and includes $5 in shared Inference credits before usage charges (https://livekit.com/pricing). The exact hosted usage rate comes from the LiveKit Inference price page. The published usage rate is the same on the listed plans. LiveKit documents the hosted identifier, languages and transport at https://docs.livekit.io/agents/models/inference/."
     },
     {
       "provider": "LiveKit",
       "provider_url": "https://livekit.com",
       "model_id": "fishaudio/drama-3",
-      "display_name": "Fish Audio Drama 3 (LiveKit Inference)",
+      "display_name": "Fish Audio Drama 3 (LiveKit Ship $50/mo, list rate, $10/M promo seen Nov 25)",
       "price_per_1m_chars_usd": "50",
       "voice_quality": "neural",
       "languages": [
@@ -1216,16 +1216,16 @@
       "confidence": "medium",
       "last_verified": "2026-11-25",
       "last_changed_at": "2026-11-25",
-      "verification_method": "manual-confirmed",
+      "verification_method": "community-pr",
       "verified_by": "r13i",
       "source_url": "https://livekit.com/pricing/inference",
-      "notes": "LiveKit Inference Build and Ship list usage rate per million characters. The published list rate is the same on the listed plans. LiveKit also shows a discounted rate of $10 per million characters without a published end date on its pricing page. LiveKit documents the hosted identifier, languages and transport at https://docs.livekit.io/agents/models/inference/."
+      "notes": "LiveKit Inference Build and Ship list usage rate per million characters. Build has $2.50 in shared Inference credits and stops serving requests when they run out. Ship costs $50 per month and includes $5 in shared Inference credits before usage charges (https://livekit.com/pricing). The exact hosted usage rate comes from the LiveKit Inference price page. The published list rate is the same on the listed plans. LiveKit also shows a discounted rate of $10 per million characters without a published end date on its pricing page. LiveKit documents the hosted identifier, languages and transport at https://docs.livekit.io/agents/models/inference/."
     },
     {
       "provider": "LiveKit",
       "provider_url": "https://livekit.com",
       "model_id": "gradium/default",
-      "display_name": "Gradium TTS (LiveKit Inference)",
+      "display_name": "Gradium TTS (LiveKit Ship $50/mo)",
       "price_per_1m_chars_usd": "48",
       "voice_quality": "neural",
       "languages": ["en", "fr", "de", "es", "pt"],
@@ -1233,16 +1233,16 @@
       "confidence": "medium",
       "last_verified": "2026-11-25",
       "last_changed_at": "2026-11-25",
-      "verification_method": "manual-confirmed",
+      "verification_method": "community-pr",
       "verified_by": "r13i",
       "source_url": "https://livekit.com/pricing/inference",
-      "notes": "LiveKit Inference Build and Ship list usage rate per million characters. Scale and Enterprise list $36 per million characters. LiveKit documents the hosted identifier, languages and transport at https://docs.livekit.io/agents/models/inference/."
+      "notes": "LiveKit Inference Build and Ship list usage rate per million characters. Build has $2.50 in shared Inference credits and stops serving requests when they run out. Ship costs $50 per month and includes $5 in shared Inference credits before usage charges (https://livekit.com/pricing). The exact hosted usage rate comes from the LiveKit Inference price page. Scale and Enterprise list $36 per million characters. LiveKit documents the hosted identifier, languages and transport at https://docs.livekit.io/agents/models/inference/."
     },
     {
       "provider": "LiveKit",
       "provider_url": "https://livekit.com",
       "model_id": "gradium/gradium-tts-beta",
-      "display_name": "Gradium TTS Beta (LiveKit Inference)",
+      "display_name": "Gradium TTS Beta (LiveKit Ship $50/mo)",
       "price_per_1m_chars_usd": "48",
       "voice_quality": "neural",
       "languages": ["en", "fr", "de", "es", "pt"],
@@ -1250,16 +1250,16 @@
       "confidence": "medium",
       "last_verified": "2026-11-25",
       "last_changed_at": "2026-11-25",
-      "verification_method": "manual-confirmed",
+      "verification_method": "community-pr",
       "verified_by": "r13i",
       "source_url": "https://livekit.com/pricing/inference",
-      "notes": "LiveKit Inference Build and Ship list usage rate per million characters. Scale and Enterprise list $36 per million characters. The model is in beta. LiveKit documents the hosted identifier, languages and transport at https://docs.livekit.io/agents/models/inference/."
+      "notes": "LiveKit Inference Build and Ship list usage rate per million characters. Build has $2.50 in shared Inference credits and stops serving requests when they run out. Ship costs $50 per month and includes $5 in shared Inference credits before usage charges (https://livekit.com/pricing). The exact hosted usage rate comes from the LiveKit Inference price page. Scale and Enterprise list $36 per million characters. The model is in beta. LiveKit documents the hosted identifier, languages and transport at https://docs.livekit.io/agents/models/inference/."
     },
     {
       "provider": "LiveKit",
       "provider_url": "https://livekit.com",
       "model_id": "google/gemini-3.8-flash-tts",
-      "display_name": "Gemini 3.8 Flash TTS (LiveKit Inference)",
+      "display_name": "Gemini 3.8 Flash TTS (LiveKit Ship $50/mo)",
       "price_per_1m_chars_usd": "24",
       "voice_quality": "neural",
       "languages": "100+",
@@ -1267,16 +1267,16 @@
       "confidence": "medium",
       "last_verified": "2026-11-25",
       "last_changed_at": "2026-11-25",
-      "verification_method": "manual-confirmed",
+      "verification_method": "community-pr",
       "verified_by": "r13i",
       "source_url": "https://livekit.com/pricing/inference",
-      "notes": "LiveKit Inference Build and Ship list usage rate per million characters. The published usage rate is the same on the listed plans. Direct Gemini API billing uses text and audio tokens. LiveKit documents the hosted identifier, languages and transport at https://docs.livekit.io/agents/models/inference/."
+      "notes": "LiveKit Inference Build and Ship list usage rate per million characters. Build has $2.50 in shared Inference credits and stops serving requests when they run out. Ship costs $50 per month and includes $5 in shared Inference credits before usage charges (https://livekit.com/pricing). The exact hosted usage rate comes from the LiveKit Inference price page. The published usage rate is the same on the listed plans. Direct Gemini API billing uses text and audio tokens. LiveKit documents the hosted identifier, languages and transport at https://docs.livekit.io/agents/models/inference/."
     },
     {
       "provider": "LiveKit",
       "provider_url": "https://livekit.com",
       "model_id": "xai/tts-1",
-      "display_name": "xAI Text to Speech (LiveKit Inference)",
+      "display_name": "xAI Text to Speech (LiveKit Ship $50/mo)",
       "price_per_1m_chars_usd": "15",
       "voice_quality": "neural",
       "languages": [
@@ -1301,10 +1301,10 @@
       "confidence": "medium",
       "last_verified": "2026-11-25",
       "last_changed_at": "2026-11-25",
-      "verification_method": "manual-confirmed",
+      "verification_method": "community-pr",
       "verified_by": "r13i",
       "source_url": "https://livekit.com/pricing/inference",
-      "notes": "LiveKit Inference Build and Ship list usage rate per million characters. The published usage rate is the same on the listed plans. LiveKit documents the hosted identifier, languages and transport at https://docs.livekit.io/agents/models/inference/."
+      "notes": "LiveKit Inference Build and Ship list usage rate per million characters. Build has $2.50 in shared Inference credits and stops serving requests when they run out. Ship costs $50 per month and includes $5 in shared Inference credits before usage charges (https://livekit.com/pricing). The exact hosted usage rate comes from the LiveKit Inference price page. The published usage rate is the same on the listed plans. LiveKit documents the hosted identifier, languages and transport at https://docs.livekit.io/agents/models/inference/."
     }
   ]
 }
