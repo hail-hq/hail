@@ -11565,9 +11565,9 @@ components:
             - type: "null"
           title: Default Region
           description:
-            Optional. ISO alpha-2 country of the phone system; Hail reads
-            national caller numbers with it. The first number you add sets it to that
-            number's country.
+            "Optional. ISO alpha-2 country of the phone system; Hail reads
+            national caller numbers with it. Left out: the first number you add fills
+            it with that number's country. A country given here is kept."
         pbx_host:
           anyOf:
             - type: string
@@ -11622,15 +11622,20 @@ components:
           title: Label
           description: Name of the connection.
         default_region:
-          type: string
+          anyOf:
+            - type: string
+            - type: "null"
           title: Default Region
-          description: ISO alpha-2 country of the phone system.
+          description:
+            ISO alpha-2 country of the phone system. Null until the first
+            number fills it.
         sip_host:
           type: string
           title: Sip Host
           description:
-            SIP server your phone system sends calls to (the trunk's host).
-            Shows only its first characters when sip_host_masked is true.
+            "SIP server your phone system sends calls to (the trunk's host).\
+            \ When sip_host_masked is true it shows only its first characters, followed\
+            \ by '\u2022' characters that are not part of the host."
         sip_host_masked:
           type: boolean
           title: Sip Host Masked
@@ -11793,15 +11798,20 @@ components:
           title: Label
           description: Name of the connection.
         default_region:
-          type: string
+          anyOf:
+            - type: string
+            - type: "null"
           title: Default Region
-          description: ISO alpha-2 country of the phone system.
+          description:
+            ISO alpha-2 country of the phone system. Null until the first
+            number fills it.
         sip_host:
           type: string
           title: Sip Host
           description:
-            SIP server your phone system sends calls to (the trunk's host).
-            Shows only its first characters when sip_host_masked is true.
+            "SIP server your phone system sends calls to (the trunk's host).\
+            \ When sip_host_masked is true it shows only its first characters, followed\
+            \ by '\u2022' characters that are not part of the host."
         sip_host_masked:
           type: boolean
           title: Sip Host Masked

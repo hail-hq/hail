@@ -702,10 +702,10 @@ def test_a_short_host_is_not_masked_into_nothing() -> None:
     from hailhq.api.routes.sip_connections import _masked_host
 
     assert _masked_host("abc") == "abc"
-    assert _masked_host("abcdef.example") == "abcde…"
+    assert _masked_host("abcdef.example") == "abcde" + "•" * 12
 
 
-async def test_the_first_number_sets_the_connection_country(
+async def test_the_first_number_fills_an_empty_country_once(
     client: httpx.AsyncClient, org_and_key: tuple
 ) -> None:
     _org, _key, plain = org_and_key
@@ -714,6 +714,7 @@ async def test_the_first_number_sets_the_connection_country(
     )
     assert resp.status_code == 201, resp.text
     conn = resp.json()
+    assert conn["default_region"] is None
     for e164 in ("+442079460018", "+14155550100"):
         added = await client.post(
             f"/sip-connections/{conn['id']}/numbers",
@@ -724,5 +725,22 @@ async def test_the_first_number_sets_the_connection_country(
     one = (
         await client.get(f"/sip-connections/{conn['id']}", headers=_auth(plain))
     ).json()
-    # The first number (GB) decides; the second (US) does not change it.
+    # The first number (GB) fills it; the second (US) does not change it.
+    assert one["default_region"] == "GB"
+
+
+async def test_a_country_given_on_purpose_is_kept(
+    client: httpx.AsyncClient, org_and_key: tuple
+) -> None:
+    _org, _key, plain = org_and_key
+    conn = await _create(client, plain, default_region="GB")
+    added = await client.post(
+        f"/sip-connections/{conn['id']}/numbers",
+        json={"e164": "+14155550100"},
+        headers=_auth(plain),
+    )
+    assert added.status_code == 201, added.text
+    one = (
+        await client.get(f"/sip-connections/{conn['id']}", headers=_auth(plain))
+    ).json()
     assert one["default_region"] == "GB"

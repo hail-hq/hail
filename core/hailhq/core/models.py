@@ -902,8 +902,9 @@ class SipConnection(Base):
     )
     pbx_username: Mapped[str | None] = mapped_column(Text, nullable=True)
     encrypted_pbx_password: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # ISO country, to read national caller numbers.
-    default_region: Mapped[str] = mapped_column(Text, nullable=False)
+    # ISO country, to read national caller numbers. NULL until the first
+    # number fills it (a country given on purpose is kept).
+    default_region: Mapped[str | None] = mapped_column(Text, nullable=True)
     livekit_inbound_trunk_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     livekit_outbound_trunk_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(

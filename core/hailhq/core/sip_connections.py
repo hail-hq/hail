@@ -98,7 +98,7 @@ def carrier_caller(raw: str) -> str:
     return raw
 
 
-def normalize_caller(raw: str, default_region: str) -> str:
+def normalize_caller(raw: str, default_region: str | None) -> str:
     """A PBX caller as E.164 where possible. An extension (1 to 6 digits) and
     anything that is not a number (``anonymous``) stay as given."""
     raw = (raw or "").strip()

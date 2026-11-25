@@ -179,7 +179,7 @@ func newSipConnectionsListCmd(opts *Options) *cobra.Command {
 				if c.PbxHost != nil {
 					host = *c.PbxHost
 				}
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", c.Id, c.Label, c.DefaultRegion, host)
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", c.Id, c.Label, regionText(c.DefaultRegion), host)
 			}
 			return w.Flush()
 		},
@@ -188,6 +188,14 @@ func newSipConnectionsListCmd(opts *Options) *cobra.Command {
 	cmd.Flags().StringVar(&cursor, "cursor", "", "Resume from a previous next_cursor")
 	cmd.Flags().BoolVar(&all, "all", false, "Walk every page")
 	return cmd
+}
+
+// regionText is the connection's country, or what fills it when it is empty.
+func regionText(region *string) string {
+	if region == nil || *region == "" {
+		return "set by the first number"
+	}
+	return *region
 }
 
 // sipHostText is the SIP server line: a masked server says where to get it.
@@ -206,7 +214,7 @@ func printSipConnection(opts *Options, c *client.SipConnectionResponse) error {
 	fmt.Fprintf(opts.Stdout, "  SIP server: %s\n", sipHostText(c.SipHost, c.SipHostMasked))
 	fmt.Fprintf(opts.Stdout, "  Username:   %s\n", c.Username)
 	fmt.Fprintf(opts.Stdout, "  Password:   ••••%s\n", c.PasswordLast4)
-	fmt.Fprintf(opts.Stdout, "  Region:     %s\n", c.DefaultRegion)
+	fmt.Fprintf(opts.Stdout, "  Region:     %s\n", regionText(c.DefaultRegion))
 	if c.PbxHost != nil {
 		fmt.Fprintf(opts.Stdout, "  PBX:        %s:%d (%s)\n", *c.PbxHost, c.PbxPort, c.PbxTransport)
 	} else {

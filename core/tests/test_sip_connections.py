@@ -144,6 +144,9 @@ async def test_connection_of_refuses_carrier_number(async_session, twilio_number
         ("5550199", "US", "5550199"),
         ("anonymous", "US", "anonymous"),
         ("", "US", ""),
+        # No country yet: a + number still reads, a national one stays as given.
+        ("+442079460000", None, "+442079460000"),
+        ("02079460000", None, "02079460000"),
     ],
 )
 def test_normalize_caller_keeps_extension(raw, region, out):

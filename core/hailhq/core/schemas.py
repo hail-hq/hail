@@ -994,8 +994,9 @@ class SipConnectionCreate(BaseModel):
         pattern=r"^[A-Z]{2}$",
         description=(
             "Optional. ISO alpha-2 country of the phone system; Hail reads "
-            "national caller numbers with it. The first number you add sets it "
-            "to that number's country."
+            "national caller numbers with it. Left out: the first number you "
+            "add fills it with that number's country. A country given here is "
+            "kept."
         ),
     )
     pbx_host: str | None = Field(
@@ -1058,11 +1059,17 @@ class SipConnectionPatch(BaseModel):
 class SipConnectionResponse(BaseModel):
     id: UUID = Field(description="Unique identifier for this connection.")
     label: str = Field(description="Name of the connection.")
-    default_region: str = Field(description="ISO alpha-2 country of the phone system.")
+    default_region: str | None = Field(
+        description=(
+            "ISO alpha-2 country of the phone system. Null until the first "
+            "number fills it."
+        )
+    )
     sip_host: str = Field(
         description=(
             "SIP server your phone system sends calls to (the trunk's host). "
-            "Shows only its first characters when sip_host_masked is true."
+            "When sip_host_masked is true it shows only its first characters, "
+            "followed by '•' characters that are not part of the host."
         )
     )
     sip_host_masked: bool = Field(

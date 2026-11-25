@@ -99,7 +99,7 @@ hail numbers register-sms --subject-type business --field legal_name="Acme Inc" 
 Connect your own phone system: it sends the calls you choose to a Hail agent over a SIP trunk. Setup: [Connect your phone system](connect-phone-system.md).
 
 ```bash
-hail sip-connections create --label "Main office" --region US   # SIP server, username and password (shown once)
+hail sip-connections create --label "Main office"   # SIP server, username and password (shown once); the first number sets the country
 hail sip-connections list
 hail sip-connections get <connection_id>
 hail sip-connections update <connection_id> --label "Front desk"

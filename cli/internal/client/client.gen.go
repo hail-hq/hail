@@ -3811,7 +3811,7 @@ type SenderIdResponse struct {
 
 // SipConnectionCreate defines model for SipConnectionCreate.
 type SipConnectionCreate struct {
-	// DefaultRegion Optional. ISO alpha-2 country of the phone system; Hail reads national caller numbers with it. The first number you add sets it to that number's country.
+	// DefaultRegion Optional. ISO alpha-2 country of the phone system; Hail reads national caller numbers with it. Left out: the first number you add fills it with that number's country. A country given here is kept.
 	DefaultRegion *string `json:"default_region,omitempty"`
 
 	// Label A name, such as 'Main office'.
@@ -3841,8 +3841,8 @@ type SipConnectionCreated struct {
 	// CreatedAt When the connection was created.
 	CreatedAt time.Time `json:"created_at"`
 
-	// DefaultRegion ISO alpha-2 country of the phone system.
-	DefaultRegion string `json:"default_region"`
+	// DefaultRegion ISO alpha-2 country of the phone system. Null until the first number fills it.
+	DefaultRegion *string `json:"default_region"`
 
 	// Id Unique identifier for this connection.
 	Id openapi_types.UUID `json:"id"`
@@ -3871,7 +3871,7 @@ type SipConnectionCreated struct {
 	// PbxUsername Username Hail sends to your phone system. Null: none.
 	PbxUsername *string `json:"pbx_username"`
 
-	// SipHost SIP server your phone system sends calls to (the trunk's host). Shows only its first characters when sip_host_masked is true.
+	// SipHost SIP server your phone system sends calls to (the trunk's host). When sip_host_masked is true it shows only its first characters, followed by '•' characters that are not part of the host.
 	SipHost string `json:"sip_host"`
 
 	// SipHostMasked True: sip_host shows only its first characters. Support sends you the full address.
@@ -3925,8 +3925,8 @@ type SipConnectionResponse struct {
 	// CreatedAt When the connection was created.
 	CreatedAt time.Time `json:"created_at"`
 
-	// DefaultRegion ISO alpha-2 country of the phone system.
-	DefaultRegion string `json:"default_region"`
+	// DefaultRegion ISO alpha-2 country of the phone system. Null until the first number fills it.
+	DefaultRegion *string `json:"default_region"`
 
 	// Id Unique identifier for this connection.
 	Id openapi_types.UUID `json:"id"`
@@ -3952,7 +3952,7 @@ type SipConnectionResponse struct {
 	// PbxUsername Username Hail sends to your phone system. Null: none.
 	PbxUsername *string `json:"pbx_username"`
 
-	// SipHost SIP server your phone system sends calls to (the trunk's host). Shows only its first characters when sip_host_masked is true.
+	// SipHost SIP server your phone system sends calls to (the trunk's host). When sip_host_masked is true it shows only its first characters, followed by '•' characters that are not part of the host.
 	SipHost string `json:"sip_host"`
 
 	// SipHostMasked True: sip_host shows only its first characters. Support sends you the full address.
