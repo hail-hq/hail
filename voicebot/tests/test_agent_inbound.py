@@ -377,7 +377,7 @@ async def test_caller_who_left_before_the_agent_joined_closes_the_row(
 def test_inbound_instructions_say_the_agent_answers_the_call() -> None:
     """The outbound preamble tells the model it placed the call and must say it
     is "calling on someone's behalf"; an inbound caller must not hear that."""
-    from hailhq.core.prompts import PRIVACY_REMINDER
+    from hailhq.core.prompts import PRIVACY_REMINDER, call_language_section
     from hailhq.voicebot.agent import (
         VOICE_PREAMBLE,
         VOICE_PREAMBLE_INBOUND,
@@ -392,8 +392,10 @@ def test_inbound_instructions_say_the_agent_answers_the_call() -> None:
     assert build_instructions("Book it.", "inbound").startswith(VOICE_PREAMBLE_INBOUND)
     assert build_instructions("Book it.", "outbound").startswith(VOICE_PREAMBLE)
     assert build_instructions("Book it.").startswith(VOICE_PREAMBLE)
+    # A call with no language runs in English (call_language_section).
     assert build_instructions(None, "inbound") == (
-        f"{VOICE_PREAMBLE_INBOUND}\n\n{PRIVACY_REMINDER}"
+        f"{VOICE_PREAMBLE_INBOUND}\n\n{call_language_section('English')}"
+        f"\n\n{PRIVACY_REMINDER}"
     )
 
 
