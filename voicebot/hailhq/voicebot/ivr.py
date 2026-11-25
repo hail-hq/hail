@@ -34,6 +34,7 @@ Examples:
 "To book a new vacation, press one." -> machine-ivr
 "Please stay on the line for the next available expert." -> machine-ivr
 "Hi, my name is Kimberly. Who am I speaking with?" -> human
+"Thanks for holding, this is Sam. How can I help you?" -> human
 "Bona tarda, recepció, digui?" -> human
 "Please leave a message after the tone." -> machine-vm
 "This mailbox is full and cannot accept messages." -> machine-unavailable

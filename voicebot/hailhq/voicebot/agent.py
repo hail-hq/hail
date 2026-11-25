@@ -253,16 +253,21 @@ class SpeechSanitizingAgent(Agent):
         self._opening_pending = False
         # An early (preemptive) reply started while held is empty, because
         # llm_node returned None. Drop it so the next turn is generated fresh
-        # instead of reusing it. Private in livekit-agents 1.8.8;
-        # test_opening_order.py fails if it moves.
+        # instead of reusing it.
+        self._drop_early_reply()
+        heard, self._held_words = " ".join(self._held_words), []
+        return heard or None
+
+    def _drop_early_reply(self) -> None:
+        """Drop LiveKit's early (preemptive) reply to a turn we will not
+        answer. Private in livekit-agents 1.8.8; test_opening_order.py fails
+        if it moves."""
         cancel = getattr(self._activity, "_cancel_preemptive_generation", None)
         if cancel is not None:
             try:
                 cancel()
             except Exception:
                 logger.exception("could not drop the held early reply")
-        heard, self._held_words = " ".join(self._held_words), []
-        return heard or None
 
     async def on_user_turn_completed(self, turn_ctx: Any, new_message: Any) -> None:
         if new_message is not None and not (new_message.text_content or "").strip():
@@ -311,6 +316,7 @@ class SpeechSanitizingAgent(Agent):
         if self.hold is not None and self.hold.active and new_message is not None:
             if await self.hold.keep_holding(new_message.text_content or ""):
                 # A recorded hold announcement: keep it, say nothing.
+                self._drop_early_reply()
                 await self._keep_unanswered(new_message)
                 raise StopResponse()
             turn_ctx.add_message(role="system", content=HOLD_ENDED_NOTE)
@@ -2864,7 +2870,7 @@ async def _run_call(
         # https://docs.livekit.io/reference/python/livekit/agents/
         session_host=False,
     )
-    await sound.start(ctx.room, session)
+    sound.start_soon(ctx.room, session)
 
     async def record_answered_call() -> None:
         # Do not consume recording allowance during ringing or on unanswered calls.

@@ -69,6 +69,7 @@ async def test_a_sound_that_cannot_start_never_breaks_the_call():
     sound = await started(player)
     # The half-started player is closed at once; the call goes on silent.
     player.aclose.assert_awaited_once()
+    assert sound._player is None
     async with sound.during():
         await asyncio.sleep(0.05)
     player.play.assert_not_called()
@@ -115,3 +116,28 @@ async def test_only_lookups_and_sends_get_the_sound(risk_tier, plays):
     handler = _make_handler(_spec(risk_tier), tctx, sound)
     assert await handler({}, Mock()) == "done"
     assert player.play.called is plays
+
+
+async def test_a_track_published_before_a_failed_start_is_removed():
+    player = Player()
+    player.start.side_effect = TimeoutError
+    player.publication = Mock(sid="TR_1")
+    room = Mock()
+    room.local_participant.unpublish_track = AsyncMock()
+    sound = BusySound(player_factory=lambda: player)
+    await sound.start(room, Mock())
+    room.local_participant.unpublish_track.assert_awaited_once_with("TR_1")
+
+
+async def test_start_soon_never_blocks_and_close_stops_it():
+    gate = asyncio.Event()
+    player = Player()
+
+    async def slow_start(**_kwargs):
+        await gate.wait()
+
+    player.start.side_effect = slow_start
+    sound = BusySound(player_factory=lambda: player)
+    sound.start_soon(Mock(), Mock())
+    await sound.aclose()
+    player.play.assert_not_called()

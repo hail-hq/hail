@@ -48,6 +48,11 @@ class BusySound:
         self._player_factory = player_factory
         self._player: Any = None
         self._session: AgentSession | None = None
+        self._start_task: asyncio.Task[None] | None = None
+
+    def start_soon(self, room: rtc.Room, session: AgentSession) -> None:
+        """Start in the background: the call never waits for the track."""
+        self._start_task = asyncio.create_task(self.start(room, session))
 
     async def start(self, room: rtc.Room, session: AgentSession) -> None:
         player = None
@@ -57,10 +62,7 @@ class BusySound:
         except Exception:
             logger.warning("busy sound unavailable", exc_info=True)
             if player is not None:
-                try:
-                    await player.aclose()
-                except Exception:
-                    logger.warning("busy sound close failed", exc_info=True)
+                await _discard(player, room)
             return
         self._player, self._session = player, session
 
@@ -99,6 +101,9 @@ class BusySound:
                 logger.warning("busy sound did not stop", exc_info=True)
 
     async def aclose(self) -> None:
+        if self._start_task is not None:
+            self._start_task.cancel()
+            await asyncio.gather(self._start_task, return_exceptions=True)
         player, self._player = self._player, None
         if player is None:
             return
@@ -106,3 +111,19 @@ class BusySound:
             await player.aclose()
         except Exception:
             logger.warning("busy sound close failed", exc_info=True)
+
+
+async def _discard(player: Any, room: rtc.Room) -> None:
+    """Close a player that failed to start. Its close does nothing before the
+    mixer runs, so also take its track off the call if it was published."""
+    try:
+        await player.aclose()
+    except Exception:
+        logger.warning("busy sound close failed", exc_info=True)
+    publication = getattr(player, "publication", None)
+    if publication is None:
+        return
+    try:
+        await room.local_participant.unpublish_track(publication.sid)
+    except Exception:
+        logger.warning("busy sound track not removed", exc_info=True)

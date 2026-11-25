@@ -9,6 +9,8 @@ holding, conversation recovery is paused and nothing prompts the agent:
   ends the hold: the agent says it can't quite hear them.
 - Audio with no words for ``MUSIC_SECONDS`` or longer is hold music. It
   keeps the hold, and later wordless audio in that hold is music too.
+- VAD splits music and chatter into bursts: bursts less than ``GAP_SECONDS``
+  apart count as one stretch of audio.
 - After ``HOLD_SECONDS`` of silence, the agent asks once whether they are
   still there, and normal recovery resumes.
 
@@ -21,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import time
 from collections.abc import Callable
 from uuid import UUID
@@ -38,8 +41,9 @@ HOLD_SECONDS = 120.0
 QUIET_VOICE_SECONDS = 2.0
 # Wordless audio this long is music, not a person.
 MUSIC_SECONDS = 10.0
-# Time for a late final transcript after speech ends.
-TRANSCRIPT_GRACE_SECONDS = 1.5
+# Bursts closer than this are one stretch of audio. It is also the time a
+# late transcript gets after the audio ends.
+GAP_SECONDS = 2.5
 
 CANT_HEAR = (
     "In the conversation's language, briefly tell them you can't quite hear "
@@ -76,8 +80,10 @@ class Hold:
         self._music = False
         self._last_audio = clock()
         self._burst_started: float | None = None
-        self._burst_words = False
-        self._words_at = -1.0
+        self._stretch_started: float | None = None
+        self._stretch_words = False
+        self._last_end = -math.inf
+        self._words_at = -math.inf
         self._task: asyncio.Task[None] | None = None
         self._quiet_task: asyncio.Task[None] | None = None
         self._closed = False
@@ -89,7 +95,7 @@ class Hold:
         @session.on("user_input_transcribed")
         def on_transcript(event) -> None:
             if event.transcript.strip():
-                self._burst_words = True
+                self._stretch_words = True
                 self._words_at = self._clock()
                 self._last_audio = self._clock()
 
@@ -134,30 +140,36 @@ class Hold:
     def _on_user_state(self, state: str | None) -> None:
         now = self._clock()
         if state == "speaking":
+            if self._stretch_started is None or now - self._last_end > GAP_SECONDS:
+                self._stretch_started = now
+                self._stretch_words = False
             self._burst_started = now
-            self._burst_words = False
             self._last_audio = now
             return
         if self._burst_started is None:
             return
-        length = now - self._burst_started
         self._burst_started = None
-        self._last_audio = now
-        if not self.active or self._burst_words:
+        self._last_end = self._last_audio = now
+        if not self.active or self._stretch_words or self._stretch_started is None:
             return
+        length = now - self._stretch_started
         if length >= MUSIC_SECONDS:
             self._music = True
-        elif (
-            length >= QUIET_VOICE_SECONDS
-            and not self._music
-            and (self._quiet_task is None or self._quiet_task.done())
-        ):
+        elif length >= QUIET_VOICE_SECONDS and not self._music:
+            if self._quiet_task is not None:
+                self._quiet_task.cancel()
             self._quiet_task = asyncio.create_task(self._quiet_voice(now))
 
     async def _quiet_voice(self, ended: float) -> None:
-        # A final transcript can arrive just after the speech ends.
-        await asyncio.sleep(TRANSCRIPT_GRACE_SECONDS)
-        if not self.active or self._words_at >= ended or self._music:
+        # More audio can continue the stretch, and a transcript can still come.
+        await asyncio.sleep(GAP_SECONDS)
+        if (
+            not self.active
+            or self._music
+            or self._burst_started is not None
+            or self._last_end > ended
+            or self._words_at >= ended
+        ):
             return
         self.active = False
         logger.info("call_id=%s hold ended: voice without words", self._call_id)

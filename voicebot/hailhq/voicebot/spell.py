@@ -4,7 +4,8 @@ The prompt wraps codes in ``<spell>...</spell>`` (core prompts, Output rules).
 A run of digits in one tag is read as one fast stream, so callers ask to hear
 it again. A digit-only run longer than ``MAX_GROUP`` becomes groups of three,
 the last group two to four digits, one tag each: 2015550134 is read as
-201, 555, 0134. Codes with letters or separators are left as written.
+201, 555, 0134. A leading "+" is kept. Codes with letters or separators are
+left as written.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ OPEN, CLOSE = "<spell>", "</spell>"
 MAX_GROUP = 4
 # An open tag held longer than this is not waited for: speech goes on.
 MAX_HELD = 64
-_DIGIT_TAG = re.compile(rf"<spell>(\d{{{MAX_GROUP + 1},}})</spell>")
+_DIGIT_TAG = re.compile(rf"<spell>(\+?)(\d{{{MAX_GROUP + 1},}})</spell>")
 
 
 def digit_groups(digits: str) -> list[str]:
@@ -31,10 +32,15 @@ def digit_groups(digits: str) -> list[str]:
 
 
 def group_spelled_digits(text: str) -> str:
-    return _DIGIT_TAG.sub(
-        lambda m: ", ".join(f"{OPEN}{g}{CLOSE}" for g in digit_groups(m.group(1))),
-        text,
-    )
+    """A leading "+" stays with the first group: <spell>+12015550134</spell>
+    is read as +120, 155, 501, 34."""
+
+    def grouped(match: re.Match[str]) -> str:
+        groups = digit_groups(match.group(2))
+        groups[0] = match.group(1) + groups[0]
+        return ", ".join(f"{OPEN}{g}{CLOSE}" for g in groups)
+
+    return _DIGIT_TAG.sub(grouped, text)
 
 
 def _ready(buf: str) -> int:

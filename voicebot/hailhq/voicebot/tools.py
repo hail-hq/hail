@@ -28,6 +28,7 @@ from hailhq.core.agent_tools.spec import SPOKEN_FALLBACK, ToolContext, ToolSpec
 from hailhq.core.config import settings
 from hailhq.core.db import session_scope
 from hailhq.core.prompts import fit_to_tools
+from hailhq.core.schemas import RESERVED_TOOL_NAMES
 from hailhq.voicebot.attachment_reader import inspect_tool_file
 from hailhq.voicebot.busy_sound import BusySound
 from livekit.agents.llm import function_tool
@@ -118,8 +119,8 @@ def _make_handler(spec: ToolSpec, tctx: ToolContext, sound: BusySound | None = N
             # None means no reply turn (a transfer that started ringing).
             async with sound.during() if busy else contextlib.nullcontext():
                 result = await spec.execute(tctx, raw_arguments)
-            if spec.name in ("read_email", "read_browser_inbox"):
-                result = await inspect_tool_file(result, context.session.llm)
+                if spec.name in ("read_email", "read_browser_inbox"):
+                    result = await inspect_tool_file(result, context.session.llm)
             return result
         except Exception:
             logger.exception(
@@ -291,7 +292,18 @@ async def build_agent_tools(
             specs.append(transfer_call.CANCEL_SPEC)
     # The agent's own HTTP tools are not built-ins: a `tools` list does not
     # name them, and they stay on with `tools: []`.
-    specs.extend(await _http_tools(metadata, call_id, organization_id))
+    built_in = {s.name for s in specs} | RESERVED_TOOL_NAMES
+    for http in await _http_tools(metadata, call_id, organization_id):
+        if http.name in built_in:
+            # Saved before Hail took the name: two tools with one name would
+            # break the call, so Hail's own tool wins.
+            logger.warning(
+                "call_id=%s http tool %s skipped: Hail has a tool with that name",
+                call_id,
+                http.name,
+            )
+            continue
+        specs.append(http)
     # Every-call tools need no database or API: a call with only those
     # (`tools: []`) opens neither.
     checked = [s for s in specs if not s.on_every_call]

@@ -17,6 +17,7 @@ from hailhq.voicebot.hold import (
     MUSIC_SECONDS,
     Hold,
 )
+from hailhq.voicebot.ivr import REMOTE_SPEECH_PROMPT
 from hailhq.voicebot.recovery import ConversationRecovery
 from livekit.agents import StopResponse
 from livekit.agents.llm import ChatContext, ChatMessage
@@ -44,7 +45,7 @@ class Session:
 
 @pytest.fixture
 def line(monkeypatch):
-    monkeypatch.setattr(hold_mod, "TRANSCRIPT_GRACE_SECONDS", 0)
+    monkeypatch.setattr(hold_mod, "GAP_SECONDS", 0.5)
     session = Session()
     now = [0.0]
     classifier = Mock()
@@ -52,12 +53,18 @@ def line(monkeypatch):
     return held, session, now, classifier
 
 
-def speak(session, now, seconds, *, words=""):
+def speak(session, now, seconds, *, words="", pause=1.0):
     session.emit("user_state_changed", new_state="speaking")
     if words:
         session.emit("user_input_transcribed", transcript=words, is_final=True)
     now[0] += seconds
     session.emit("user_state_changed", new_state="listening")
+    now[0] += pause
+
+
+async def settle():
+    # Longer than the patched GAP_SECONDS (real time: the wait is a sleep).
+    await asyncio.sleep(0.6)
 
 
 async def test_wait_tool_starts_the_hold_and_asks_for_no_reply():
@@ -97,9 +104,8 @@ async def test_music_keeps_the_hold_and_restarts_the_silence_clock(line):
     now[0] = HOLD_SECONDS - 5
     speak(session, now, MUSIC_SECONDS)
     # Later short wordless bursts in the same hold are music too.
-    speak(session, now, 3)
-    await asyncio.sleep(0)
-    await asyncio.sleep(0)
+    speak(session, now, 3, pause=0)
+    await settle()
     assert held.active
     now[0] += HOLD_SECONDS - 1
     held.check()
@@ -111,8 +117,7 @@ async def test_a_voice_without_words_ends_the_hold(line):
     held, session, now, _ = line
     await held.start()
     speak(session, now, 3)
-    await asyncio.sleep(0)
-    await asyncio.sleep(0)
+    await settle()
     assert not held.active
     session.generate_reply.assert_called_once_with(
         instructions=CANT_HEAR, tool_choice="none"
@@ -120,13 +125,51 @@ async def test_a_voice_without_words_ends_the_hold(line):
     await held.aclose()
 
 
+async def test_music_split_into_short_bursts_keeps_the_hold(line):
+    held, session, now, _ = line
+    await held.start()
+    # VAD cuts music into 3 s bursts with short gaps: together they are music.
+    for _ in range(5):
+        speak(session, now, 3, pause=0.2)
+    await settle()
+    assert held.active
+    session.generate_reply.assert_not_called()
+    await held.aclose()
+
+
+async def test_more_audio_right_after_a_quiet_burst_postpones_the_prompt(line):
+    held, session, now, _ = line
+    await held.start()
+    speak(session, now, 3, pause=0.1)
+    session.emit("user_state_changed", new_state="speaking")
+    await settle()
+    session.generate_reply.assert_not_called()
+    assert held.active
+    await held.aclose()
+
+
+async def test_a_late_transcript_cancels_the_cant_hear_line(line):
+    held, session, now, _ = line
+    await held.start()
+    speak(session, now, 3)
+    session.emit("user_input_transcribed", transcript="got it", is_final=True)
+    await settle()
+    session.generate_reply.assert_not_called()
+    await held.aclose()
+
+
+def test_the_classifier_knows_a_live_rep_after_a_hold():
+    assert 'Thanks for holding, this is Sam. How can I help you?" -> human' in (
+        REMOTE_SPEECH_PROMPT
+    )
+
+
 async def test_short_noise_and_words_do_not_trigger_the_cant_hear_line(line):
     held, session, now, _ = line
     await held.start()
     speak(session, now, 1)  # a click or a cough
     speak(session, now, 3, words="one second")
-    await asyncio.sleep(0)
-    await asyncio.sleep(0)
+    await settle()
     session.generate_reply.assert_not_called()
     assert held.active
     await held.aclose()

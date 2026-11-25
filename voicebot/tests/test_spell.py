@@ -26,6 +26,13 @@ def test_groups_of_three_with_a_last_group_of_two_to_four(digits, groups):
     assert "".join(groups) == digits
 
 
+def test_a_leading_plus_stays_with_the_first_group():
+    assert group_spelled_digits("<spell>+12015550134</spell>") == (
+        "<spell>+120</spell>, <spell>155</spell>, <spell>501</spell>, "
+        "<spell>34</spell>"
+    )
+
+
 def test_only_digit_runs_change():
     text = (
         "Call <spell>2015550134</spell>, code <spell>AB12CD</spell>, "
