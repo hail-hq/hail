@@ -299,13 +299,16 @@ async def test_english_gemini_default_and_published_provider_capabilities(monkey
     monkeypatch.setattr(settings, "hail_gemini_tts_enabled", True)
     monkeypatch.setattr(settings, "xai_tts_api_key", "xai-key")
     monkeypatch.setattr(settings, "assemblyai_tts_api_key", "assembly-key")
-    english = await catalog.voice_catalogue("en")
+    legacy = await catalog.voice_catalogue("en")
+    assert legacy["voices"] == []
+    assert legacy["default_voice"] is None
+    english = await catalog.voice_catalogue("en", include_direct=True)
     assert english["default_voice"] == {"provider": "gemini", "id": "Charon"}
     assert [voice["id"] for voice in english["voices"]] == [
         "Charon",
         "ara",
         "aai-audrey",
     ]
-    french = await catalog.voice_catalogue("fr")
+    french = await catalog.voice_catalogue("fr", include_direct=True)
     assert "gemini" not in french["supported_providers"]
     assert french["default_voice"] is None

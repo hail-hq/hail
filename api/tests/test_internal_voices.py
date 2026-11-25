@@ -51,7 +51,7 @@ async def test_catalogue_requires_signature_and_valid_language(voice_app):
             "/internal/voices?language=fr", headers=_signed(b"")
         )
         assert response.status_code == 200
-        voices.voice_catalogue.assert_awaited_once_with("fr")
+        voices.voice_catalogue.assert_awaited_once_with("fr", include_direct=False)
         assert response.json()["languages"][1]["code"] == "fr"
 
 

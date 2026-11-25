@@ -653,12 +653,21 @@ def build_tts(
                 org.provider,
                 language,
             )
-            return build_tts(
-                None,
-                None if org.provider in DIRECT_VOICES else voice_id_override,
-                language,
+            if org.provider in DIRECT_VOICES and voice_id_override in (
+                org.params.get("voice_id"),
+                DIRECT_VOICES[org.provider][1],
+            ):
+                voice_id_override = None
+            return build_tts(None, voice_id_override, language)
+        try:
+            byo = _org_tts(org, voice_id_override, language)
+        except ValueError:
+            if org.provider not in DIRECT_VOICES or not org.fallback_enabled:
+                raise
+            logger.warning(
+                "Could not configure %s speech. Using the house chain.", org.provider
             )
-        byo = _org_tts(org, voice_id_override, language)
+            return build_tts(None, None, language)
         if org.fallback_enabled:
             house = _house_tts(
                 None if org.provider in DIRECT_VOICES else voice_id_override,

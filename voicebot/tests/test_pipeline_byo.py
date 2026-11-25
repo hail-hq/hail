@@ -342,3 +342,23 @@ def test_disabling_inherited_gemini_default_keeps_an_explicit_selection(
     assert build_tts(org, language="en").model == "gemini-3.8-flash-tts"
     build_tts(language="en")
     assert len(captured_plugins["cartesia"]) == 1
+
+
+def test_removed_direct_key_uses_house_speech_only_with_consent(
+    monkeypatch, captured_plugins
+):
+    monkeypatch.setattr(settings, "xai_tts_api_key", "")
+    org = ResolvedLayer("xai", None, {"voice_id": "ara"}, True)
+    build_tts(org, language="en")
+    assert captured_plugins["cartesia"][0].kwargs["voice"] == "house-voice"
+    strict = ResolvedLayer("xai", None, {"voice_id": "ara"}, False)
+    with pytest.raises(ValueError, match="No workspace or Hail key"):
+        build_tts(strict, language="en")
+
+
+def test_language_fallback_preserves_an_explicit_legacy_voice(captured_plugins):
+    org = ResolvedLayer("xai", "key", {"voice_id": "ara"}, True)
+    build_tts(org, voice_id_override="saved-french-voice", language="fr")
+    assert captured_plugins["cartesia"][0].kwargs["voice"] == "saved-french-voice"
+    build_tts(org, voice_id_override="ara", language="fr")
+    assert captured_plugins["cartesia"][1].kwargs["voice"] == "house-voice"

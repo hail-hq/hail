@@ -289,7 +289,7 @@ async def _provider_catalogue(provider: str, model: str, key: str) -> dict:
         return result
 
 
-async def voice_catalogue(language: str) -> dict:
+async def voice_catalogue(language: str, *, include_direct: bool = False) -> dict:
     if language not in SUPPORTED_LANGUAGES:
         raise ValueError("Choose a supported language")
     providers = [
@@ -328,7 +328,7 @@ async def voice_catalogue(language: str) -> dict:
             "accent": None,
         }
         for provider, (model, voice_id, name, gender) in DIRECT_VOICES.items()
-        if language == "en" and house_voice_ready(provider)
+        if include_direct and language == "en" and house_voice_ready(provider)
     ]
     voices = [*direct, *voices]
     default = next(

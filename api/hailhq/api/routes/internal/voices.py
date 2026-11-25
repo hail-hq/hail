@@ -96,9 +96,9 @@ _HELLO = {
 
 
 @router.get("")
-async def list_voices(language: Language = "en") -> dict:
+async def list_voices(language: Language = "en", include_direct: bool = False) -> dict:
     try:
-        return await voice_catalogue(language)
+        return await voice_catalogue(language, include_direct=include_direct)
     except (httpx.HTTPError, ValueError) as exc:
         raise HTTPException(
             503, "Voice choices could not load. Try again or keep your current voice."
@@ -125,7 +125,9 @@ class LineIn(PreviewIn):
 
 
 async def _catalogue_model(body: PreviewIn) -> str:
-    catalogue = await voice_catalogue(body.language)
+    catalogue = await voice_catalogue(
+        body.language, include_direct=body.provider in DIRECT_VOICES
+    )
     choice = next(
         (
             v
