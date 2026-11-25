@@ -23,11 +23,11 @@ from hailhq.core.db import session_scope
 from hailhq.core.languages import SUPPORTED_LANGUAGES
 from hailhq.core.models import Call
 from hailhq.core.prompts import BROWSER_VOICE_PREAMBLE
+from hailhq.core.providers.tts.routing import resolve_fallback_voice_provider
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
 from hailhq.voicebot.browser_tools import build_browser_tools
 from hailhq.voicebot.pipeline import (
     build_session,
-    resolve_fallback_voice_provider,
     resolve_org_configs,
 )
 from livekit.agents import Agent, AgentSession

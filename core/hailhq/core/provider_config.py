@@ -10,6 +10,7 @@ pair works, never a hardcoded list.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import Literal
 from urllib.parse import urlsplit
 from uuid import UUID
@@ -26,6 +27,7 @@ __all__ = [
     "LAYERS",
     "PARAMS_BY_LAYER",
     "LLMParams",
+    "ResolvedLayer",
     "STTParams",
     "TTSParams",
     "last4",
@@ -136,6 +138,23 @@ def provider_cipher() -> SecretCipher:
 
 def last4(key: str) -> str:
     return key[-4:]
+
+
+@dataclass(frozen=True)
+class ResolvedLayer:
+    provider: str
+    api_key: str | None = field(repr=False)
+    params: dict
+    fallback_enabled: bool
+
+    @classmethod
+    def from_row(cls, row: OrgProviderConfig) -> ResolvedLayer:
+        key = (
+            provider_cipher().decrypt(row.encrypted_api_key)
+            if row.encrypted_api_key is not None
+            else None
+        )
+        return cls(row.provider, key, dict(row.params), row.fallback_enabled)
 
 
 async def load_org_provider_configs(

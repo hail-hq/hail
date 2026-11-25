@@ -1,14 +1,12 @@
 """Authenticated catalogue, fixed-text samples, and first-line playback.
 
-Previews speak fixed text only: one greeting per language, for the current
-three recommendations. They are shared in memory across orgs for one hour
-(at most three per supported language).
+Catalogue previews speak one fixed greeting per language in each suggested
+voice. Samples are shared in memory across workspaces for one hour.
 
-The line route speaks only a workspace's own first line, at most 400
-characters, in a catalogue voice. The website calls it after it checks the
-session, org membership, and a per-user rate limit. Lines are cached in
-memory for one hour, at most 256 at a time. No provider key reaches the
-browser.
+Saved-line playback uses the same initial speech route as a call. The website
+loads the line after checking the session, workspace, and per-user rate limit.
+Lines of up to 400 characters are cached in memory for one hour, at most 256
+at a time. Playback uses Hail credentials.
 """
 
 from __future__ import annotations
@@ -22,20 +20,39 @@ import wave
 from collections import OrderedDict
 from contextlib import aclosing
 from typing import Annotated
+from uuid import UUID
 
 import httpx
+from cryptography.fernet import InvalidToken
 from fastapi import APIRouter, Depends, HTTPException, Response
 from hailhq.api.routes.internal.auth import verify_internal_request
-from hailhq.core.config import settings
+from hailhq.core.db import get_session
 from hailhq.core.languages import (
     SUPPORTED_LANGUAGES,
     Language,
     TTSProvider,
     elevenlabs_language,
 )
-from hailhq.core.providers.tts.direct import DIRECT_VOICES, SAMPLE_RATE, DirectSpeech
+from hailhq.core.provider_config import ResolvedLayer, load_org_provider_configs
+from hailhq.core.providers.tts.direct import DIRECT_VOICES, SAMPLE_RATE
+from hailhq.core.providers.tts.routing import (
+    ProviderKeyError,
+    SpeechRoute,
+    VoiceLanguageError,
+    resolve_fallback_voice_provider,
+    resolve_provider_voice,
+    resolve_tts_routes,
+)
+from hailhq.core.secret_cipher import SecretKeyMissing
 from hailhq.core.voice_catalog import HEADERS_VERSION, voice_catalogue
-from pydantic import BaseModel, Field, StringConstraints, field_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    StringConstraints,
+    ValidationError,
+    field_validator,
+)
+from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(
     prefix="/internal/voices",
@@ -99,7 +116,7 @@ _HELLO = {
 async def list_voices(language: Language = "en", include_direct: bool = False) -> dict:
     try:
         return await voice_catalogue(language, include_direct=include_direct)
-    except (httpx.HTTPError, ValueError) as exc:
+    except (httpx.HTTPError, ValueError, ProviderKeyError) as exc:
         raise HTTPException(
             503, "Voice choices could not load. Try again or keep your current voice."
         ) from exc
@@ -111,7 +128,7 @@ class PreviewIn(BaseModel):
     voice_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
 
 
-class LineIn(PreviewIn):
+class LineText(BaseModel):
     text: Annotated[
         str, StringConstraints(strip_whitespace=True, min_length=1, max_length=400)
     ]
@@ -119,9 +136,19 @@ class LineIn(PreviewIn):
     @field_validator("text")
     @classmethod
     def _no_control_characters(cls, text: str) -> str:
-        if any(unicodedata.category(char) == "Cc" for char in text):
+        if any(unicodedata.category(char) in {"Cc", "Zl", "Zp"} for char in text):
             raise ValueError("Use one line of text without control characters.")
         return text
+
+
+class LineIn(PreviewIn, LineText):
+    pass
+
+
+class WorkspaceLineIn(LineText):
+    organization_id: UUID
+    language: Language | None = None
+    voice_id: str | None = None
 
 
 async def _catalogue_model(body: PreviewIn) -> str:
@@ -156,7 +183,7 @@ async def preview_voice(body: PreviewIn) -> Response:
         text = _HELLO[body.language]
         cap = 3 * len(SUPPORTED_LANGUAGES) + len(DIRECT_VOICES)
         return _wav(await _audio(body, model, text, _samples, cap))
-    except (httpx.HTTPError, ValueError) as exc:
+    except (httpx.HTTPError, ValueError, ProviderKeyError) as exc:
         raise HTTPException(503, "This sample could not play. Try again.") from exc
 
 
@@ -165,12 +192,70 @@ async def speak_line(body: LineIn) -> Response:
     try:
         model = await _catalogue_model(body)
         return _wav(await _audio(body, model, body.text, _lines, _LINE_CAP))
-    except (httpx.HTTPError, ValueError) as exc:
+    except (httpx.HTTPError, ValueError, ProviderKeyError) as exc:
         raise HTTPException(503, "This line could not play. Try again.") from exc
 
 
+@router.post("/workspace-line")
+async def speak_workspace_line(
+    body: WorkspaceLineIn,
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> Response:
+    rows = await load_org_provider_configs(db, body.organization_id)
+    row = rows.get("tts")
+    try:
+        org = ResolvedLayer.from_row(row) if row is not None else None
+    except (SecretKeyMissing, InvalidToken) as exc:
+        raise HTTPException(503, "This line could not play. Try again.") from exc
+
+    language = body.language or (org.params.get("language") if org else None) or "en"
+    if language not in SUPPORTED_LANGUAGES:
+        raise HTTPException(409, "No voice is available for this language.")
+    fallback = await resolve_fallback_voice_provider(org, body.voice_id, language)
+    try:
+        route = resolve_tts_routes(
+            org, body.voice_id, language, fallback_voice_provider=fallback
+        )[0]
+    except VoiceLanguageError as exc:
+        raise HTTPException(
+            409, "The saved provider cannot speak this language."
+        ) from exc
+    except (ValueError, ProviderKeyError) as exc:
+        raise HTTPException(409, "No voice is available for this language.") from exc
+
+    if route.uses_workspace_key:
+        raise HTTPException(
+            409, "Playback is not available for a voice on your own provider key."
+        )
+    try:
+        preview = PreviewIn(
+            language=language, provider=route.provider, voice_id=route.voice_id
+        )
+    except ValidationError as exc:
+        detail = (
+            "Playback is not available for this agent's saved voice."
+            if body.voice_id
+            else "Choose an available voice in Call settings to preview this line."
+        )
+        raise HTTPException(409, detail) from exc
+
+    try:
+        audio = await _audio(
+            preview, route.model, body.text, _lines, _LINE_CAP, route=route
+        )
+    except (httpx.HTTPError, ValueError, ProviderKeyError) as exc:
+        raise HTTPException(503, "This line could not play. Try again.") from exc
+    return _wav(audio)
+
+
 async def _audio(
-    body: PreviewIn, model: str, text: str, cache: _Cache, cap: int
+    body: PreviewIn,
+    model: str,
+    text: str,
+    cache: _Cache,
+    cap: int,
+    *,
+    route: SpeechRoute | None = None,
 ) -> bytes:
     digest = hashlib.sha256(text.encode()).hexdigest()
     cache_key = (body.provider, model, body.language, body.voice_id, digest)
@@ -182,7 +267,11 @@ async def _audio(
             if cached and time.monotonic() - cached[0] < 3600:
                 cache.move_to_end(cache_key)
                 return cached[1]
-            audio = await _synthesize(body, model, text)
+            audio = (
+                await _synthesize_route(route, text)
+                if route is not None
+                else await _synthesize(body, model, text)
+            )
             cache[cache_key] = (time.monotonic(), audio)
             cache.move_to_end(cache_key)
             while len(cache) > cap:
@@ -197,11 +286,16 @@ async def _audio(
 
 
 async def _synthesize(body: PreviewIn, model: str, text: str) -> bytes:
+    route = resolve_provider_voice(
+        body.provider, body.language, {"model": model}, voice_id=body.voice_id
+    )
+    return await _synthesize_route(route, text)
+
+
+async def _synthesize_route(route: SpeechRoute, text: str) -> bytes:
     async with httpx.AsyncClient(timeout=20) as client:
-        if body.provider in DIRECT_VOICES:
-            speech = DirectSpeech.resolve(
-                body.provider, {"model": model}, voice=body.voice_id
-            )
+        if route.direct:
+            speech = route.direct
             output = io.BytesIO()
             async with aclosing(speech.pcm(client, text)) as chunks:
                 with wave.open(output, "wb") as wav:
@@ -213,18 +307,18 @@ async def _synthesize(body: PreviewIn, model: str, text: str) -> bytes:
             if output.getbuffer().nbytes <= 44:
                 raise ValueError("No sample audio was returned.")
             return output.getvalue()
-        if body.provider == "cartesia":
+        if route.provider == "cartesia":
             response = await client.post(
                 "https://api.cartesia.ai/tts/bytes",
                 headers={
-                    "Authorization": f"Bearer {settings.cartesia_api_key}",
+                    "Authorization": f"Bearer {route.api_key}",
                     "Cartesia-Version": HEADERS_VERSION,
                 },
                 json={
-                    "model_id": model,
+                    "model_id": route.model,
                     "transcript": text,
-                    "language": body.language,
-                    "voice": body.voice_id,
+                    "language": route.language or "en",
+                    "voice": route.voice_id,
                     "output_format": {
                         "container": "wav",
                         "encoding": "pcm_s16le",
@@ -235,13 +329,13 @@ async def _synthesize(body: PreviewIn, model: str, text: str) -> bytes:
             response.raise_for_status()
             return response.content
         response = await client.post(
-            f"https://api.elevenlabs.io/v1/text-to-speech/{body.voice_id}",
-            headers={"xi-api-key": settings.eleven_api_key},
+            f"https://api.elevenlabs.io/v1/text-to-speech/{route.voice_id}",
+            headers={"xi-api-key": route.api_key or ""},
             params={"output_format": "pcm_24000"},
             json={
-                "model_id": model,
+                "model_id": route.model,
                 "text": text,
-                "language_code": elevenlabs_language(body.language),
+                "language_code": elevenlabs_language(route.language or "en"),
             },
         )
         response.raise_for_status()

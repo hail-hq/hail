@@ -114,7 +114,10 @@ async def test_provider_identity_prevents_cross_provider_preview(voice_app):
         assert response.status_code == 422
 
 
-async def test_elevenlabs_preview_uses_verified_model_and_wav_envelope(voice_app):
+async def test_elevenlabs_preview_uses_verified_model_and_wav_envelope(
+    voice_app, monkeypatch
+):
+    monkeypatch.setattr(settings, "eleven_api_key", "house-eleven")
     import io
     import json
     import wave
@@ -273,7 +276,8 @@ async def test_line_cache_stays_bounded(monkeypatch):
     assert len(voices._lines) == voices._LINE_CAP
 
 
-async def test_elevenlabs_line_sends_text(voice_app):
+async def test_elevenlabs_line_sends_text(voice_app, monkeypatch):
+    monkeypatch.setattr(settings, "eleven_api_key", "house-eleven")
     voices._lines.clear()
     voices.voice_catalogue.return_value["voices"] = [
         {"id": "known", "provider": "elevenlabs", "model": "verified-model"}
@@ -352,3 +356,52 @@ async def test_line_provider_failure_returns_retryable_error(voice_app):
             assert response.status_code == 503
             assert response.json()["detail"] == "This line could not play. Try again."
     assert voices._lines == {}
+
+
+async def test_workspace_line_uses_saved_voice_and_model_outside_shortlist(monkeypatch):
+    from types import SimpleNamespace
+
+    from hailhq.core.db import get_session
+
+    monkeypatch.setattr(settings, "cartesia_api_key", "house-key")
+    monkeypatch.setattr(
+        voices,
+        "load_org_provider_configs",
+        AsyncMock(
+            return_value={
+                "tts": SimpleNamespace(
+                    provider="cartesia",
+                    encrypted_api_key=None,
+                    params={
+                        "language": "fr",
+                        "voice_id": "saved",
+                        "model": "saved-model",
+                    },
+                    fallback_enabled=False,
+                )
+            }
+        ),
+    )
+    app = FastAPI()
+    app.include_router(voices.router)
+    app.dependency_overrides[get_session] = lambda: None
+    body = (
+        b'{"organization_id":"00000000-0000-0000-0000-000000000001","text":"Bonjour."}'
+    )
+
+    with respx.mock as mock:
+        synthesis = mock.post("https://api.cartesia.ai/tts/bytes").mock(
+            return_value=httpx.Response(200, content=b"RIFF-sample")
+        )
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            response = await client.post(
+                "/internal/voices/workspace-line", content=body, headers=_signed(body)
+            )
+
+        assert response.status_code == 200, response.text
+        payload = json.loads(synthesis.calls[0].request.content)
+        assert payload["voice"] == "saved"
+        assert payload["model_id"] == "saved-model"
+        assert payload["language"] == "fr"

@@ -69,6 +69,7 @@ from hailhq.core.prompts import (
     other_party_section,
     safe_clock_section,
 )
+from hailhq.core.providers.tts.routing import resolve_fallback_voice_provider
 from hailhq.core.providers.voice import TwilioVoiceProvider
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
 from hailhq.core.secret_cipher import SecretKeyMissing
@@ -117,7 +118,6 @@ from hailhq.voicebot.pipeline import (
     build_session,
     build_tts,
     decrypt_llm_metadata,
-    resolve_fallback_voice_provider,
     resolve_org_configs,
     stt_takes_keyterms,
 )

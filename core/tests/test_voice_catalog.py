@@ -292,7 +292,7 @@ def test_elevenlabs_tagalog_uses_the_filipino_provider_code():
     assert [c["language"] for c in choices] == ["tl"]
 
 
-async def test_english_gemini_default_and_published_provider_capabilities(monkeypatch):
+async def test_english_gemini_default_uses_the_call_route(monkeypatch):
     monkeypatch.setattr(settings, "cartesia_api_key", "")
     monkeypatch.setattr(settings, "eleven_api_key", "")
     monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
@@ -304,15 +304,16 @@ async def test_english_gemini_default_and_published_provider_capabilities(monkey
     assert legacy["default_voice"] is None
     english = await catalog.voice_catalogue("en", include_direct=True)
     assert english["default_voice"] == {"provider": "gemini", "id": "Charon"}
-    assert english["available_direct_providers"] == ["gemini", "xai", "assemblyai"]
     assert [voice["id"] for voice in english["voices"]] == [
         "Charon",
         "ara",
         "aai-audrey",
     ]
     french = await catalog.voice_catalogue("fr", include_direct=True)
-    assert "gemini" not in french["supported_providers"]
-    assert french["available_direct_providers"] == []
+    assert all(
+        voice["provider"] not in {"gemini", "xai", "assemblyai"}
+        for voice in french["voices"]
+    )
     assert french["default_voice"] is None
 
 

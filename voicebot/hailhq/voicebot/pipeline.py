@@ -56,13 +56,11 @@ https://docs.livekit.io/agents/logic/turns/turn-detector/
 from __future__ import annotations
 
 import asyncio
-import dataclasses
 import logging
 from collections.abc import AsyncIterable
 from typing import Any
 from uuid import UUID
 
-import httpx
 from hailhq.core.config import settings
 from hailhq.core.db import session_scope
 from hailhq.core.languages import (
@@ -70,19 +68,22 @@ from hailhq.core.languages import (
     default_stt_for,
     elevenlabs_language,
     resolve_stt_provider,
-    tts_providers_for,
     turn_mode_for,
 )
-from hailhq.core.provider_config import load_org_provider_configs, provider_cipher
+from hailhq.core.provider_config import (
+    ResolvedLayer,
+    load_org_provider_configs,
+    provider_cipher,
+)
 from hailhq.core.providers.llm.bedrock import bedrock_client, is_bedrock_client
 from hailhq.core.providers.llm.thinking import thinking_off
-from hailhq.core.providers.tts.direct import (
-    DIRECT_VOICES,
-    DirectSpeech,
-    house_voice_ready,
+from hailhq.core.providers.tts.routing import (
+    ProviderKeyError,
+    SpeechRoute,
+    house_credentials_available,
+    resolve_tts_routes,
 )
 from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
-from hailhq.core.voice_catalog import validate_voice_language
 from hailhq.voicebot.direct_tts import DirectTTS
 from livekit.agents import (
     AgentSession,
@@ -140,23 +141,6 @@ __all__ = [
 ]
 
 
-class ProviderKeyError(RuntimeError):
-    """A BYO layer could not be built and fallback is disabled.
-
-    agent.py maps this to end_reason='provider_key_error' (fail-fast by
-    design - the org chose BYO deliberately; silently substituting Hail's
-    keys would defeat the point unless they opted in).
-    """
-
-
-@dataclasses.dataclass(frozen=True)
-class ResolvedLayer:
-    provider: str
-    api_key: str | None
-    params: dict
-    fallback_enabled: bool
-
-
 async def resolve_org_configs(
     organization_id: UUID | None,
     *,
@@ -187,10 +171,8 @@ async def resolve_org_configs(
     for layer, row in rows.items():
         if layer == "llm" and skip_llm:
             continue
-        api_key: str | None = None
-        if row.encrypted_api_key is not None:
-            api_key = provider_cipher().decrypt(row.encrypted_api_key)
-        params = dict(row.params)
+        config = ResolvedLayer.from_row(row)
+        params = config.params
         if layer == "llm" and row.provider == "openai-compatible":
             stored_base_url = params.get("base_url")
             if not stored_base_url:
@@ -203,12 +185,7 @@ async def resolve_org_configs(
                 raise ProviderKeyError(
                     f"org llm base_url is not permitted: {exc}"
                 ) from exc
-        resolved[layer] = ResolvedLayer(
-            provider=row.provider,
-            api_key=api_key,
-            params=params,
-            fallback_enabled=row.fallback_enabled,
-        )
+        resolved[layer] = config
     return resolved
 
 
@@ -546,107 +523,22 @@ def build_llm(
     return _house_llm(retry_on_chunk_sent=retry_on_chunk_sent)
 
 
-def _house_tts(
-    voice_id_override: str | None, language: str | None, *, include_gemini: bool = True
-) -> list[agents_tts.TTS]:
-    allowed = tts_providers_for(language)
-    instances: list[agents_tts.TTS] = []
-    charon_on_gemini_only = voice_id_override == DIRECT_VOICES["gemini"][1] and not (
-        settings.cartesia_api_key or settings.eleven_api_key
-    )
-    if (
-        include_gemini
-        and settings.hail_gemini_tts_enabled
-        and (not voice_id_override or charon_on_gemini_only)
-        and "gemini" in allowed
-        and house_voice_ready("gemini")
-    ):
-        instances.append(DirectTTS(DirectSpeech.resolve("gemini")))
-    if settings.cartesia_api_key and "cartesia" in allowed:
-        kwargs: dict[str, Any] = {
-            "model": settings.cartesia_model,
-            "voice": voice_id_override or settings.cartesia_voice_id,
-        }
-        if language:
-            kwargs["language"] = language
-        instances.append(cartesia_plugin.TTS(**kwargs))
-    if settings.eleven_api_key and "elevenlabs" in allowed:
-        kwargs = {
-            "voice_id": voice_id_override or settings.elevenlabs_voice_id,
-            "model": settings.elevenlabs_model,
-        }
-        if language:
-            kwargs["language"] = elevenlabs_language(language)
-        instances.append(elevenlabs_plugin.TTS(**kwargs))
-    return instances
-
-
-def _org_tts(
-    org: ResolvedLayer, voice_id_override: str | None, language: str | None
-) -> agents_tts.TTS:
-    voice = voice_id_override or org.params.get("voice_id")
-    if org.provider in DIRECT_VOICES:
-        return DirectTTS(
-            DirectSpeech.resolve(org.provider, org.params, org.api_key, voice)
-        )
-    if org.provider == "cartesia":
-        kwargs: dict[str, Any] = {
-            "model": org.params.get("model") or settings.cartesia_model
-        }
-        if org.api_key is not None:
-            kwargs["api_key"] = org.api_key
-        elif not settings.cartesia_api_key:
-            raise ProviderKeyError("no org or house cartesia key available")
-        if voice:
-            kwargs["voice"] = voice
-        if language:
-            kwargs["language"] = language
+def _tts_adapter(route: SpeechRoute) -> agents_tts.TTS:
+    if route.direct:
+        return DirectTTS(route.direct)
+    kwargs: dict[str, Any] = {"model": route.model, "api_key": route.api_key}
+    if route.provider == "cartesia":
+        if route.voice_id:
+            kwargs["voice"] = route.voice_id
+        if route.language:
+            kwargs["language"] = route.language
         return cartesia_plugin.TTS(**kwargs)
-    if org.provider == "elevenlabs":
-        kwargs = {"model": org.params.get("model") or settings.elevenlabs_model}
-        if org.api_key is not None:
-            kwargs["api_key"] = org.api_key
-        elif not settings.eleven_api_key:
-            raise ProviderKeyError("no org or house elevenlabs key available")
-        if voice:
-            kwargs["voice_id"] = voice
-        if language:
-            kwargs["language"] = elevenlabs_language(language)
-        return elevenlabs_plugin.TTS(**kwargs)
-    raise ProviderKeyError(f"unknown org tts provider '{org.provider}'")
 
-
-async def resolve_fallback_voice_provider(
-    org: ResolvedLayer | None, voice_id: str | None, language: str | None
-) -> str | None:
-    """Resolve an unscoped override once when a direct provider is skipped."""
-    if (
-        org is None
-        or org.provider not in DIRECT_VOICES
-        or not org.fallback_enabled
-        or not language
-        or language not in SUPPORTED_LANGUAGES
-        or not voice_id
-        or org.provider in tts_providers_for(language)
-        or voice_id in (org.params.get("voice_id"), DIRECT_VOICES[org.provider][1])
-    ):
-        return None
-
-    async def compatible(provider: str, model: str, key: str) -> str | None:
-        if not key or provider not in tts_providers_for(language):
-            return None
-        try:
-            async with asyncio.timeout(0.8):
-                await validate_voice_language(provider, voice_id, model, key, language)
-        except (TimeoutError, httpx.HTTPError, ValueError, AttributeError, TypeError):
-            return None
-        return provider
-
-    providers = await asyncio.gather(
-        compatible("cartesia", settings.cartesia_model, settings.cartesia_api_key),
-        compatible("elevenlabs", settings.elevenlabs_model, settings.eleven_api_key),
-    )
-    return next((provider for provider in providers if provider), None)
+    if route.voice_id:
+        kwargs["voice_id"] = route.voice_id
+    if route.language:
+        kwargs["language"] = elevenlabs_language(route.language)
+    return elevenlabs_plugin.TTS(**kwargs)
 
 
 def build_tts(
@@ -656,97 +548,13 @@ def build_tts(
     *,
     fallback_voice_provider: str | None = None,
 ) -> agents_tts.TTS:
-    """Construct the TTS for one call.
-
-    ``org`` present (mode C): the org's provider is used, with Hail's house
-    TTS instances appended as a fallback only if ``org.fallback_enabled``.
-    Inherited English voices use Gemini first when it is enabled.
-    Existing voice IDs and other languages keep the legacy house chain.
-    A configured provider remains eligible when it is the only one available.
-
-    ``language`` is the per-call ``voice_config.language`` (ISO 639-1); it is
-    applied to every instance built here, BYO and house fallbacks alike,
-    so a provider failover never silently switches the call's language back
-    to English. ``None`` keeps each plugin's default (English).
-
-    ``fallback_enabled`` on the org row is consent to house-provider
-    rerouting: if the org's BYO provider can't speak ``language`` at all,
-    consent means skip the incapable BYO instance and build the house
-    chain only (this recurses into the ``org is None`` branch below, so it
-    shares that branch's single-instance/adapter shape and its
-    empty-chain ``ProviderKeyError``). Without consent it's a hard error,
-    the API gate (``routes/calls.py``) is meant to catch this before the
-    voicebot ever sees it; this is defense-in-depth for direct LiveKit
-    dispatches that bypass the API.
-    """
-    if org is not None:
-        if language is not None and org.provider not in tts_providers_for(language):
-            if not org.fallback_enabled:
-                raise ProviderKeyError(
-                    f"org tts provider '{org.provider}' does not support "
-                    f"language '{language}' and fallback is disabled"
-                )
-            logger.warning(
-                "org tts provider %r does not support language %r; "
-                "skipping the BYO instance and using the house chain only "
-                "(fallback consented)",
-                org.provider,
-                language,
-            )
-            if org.provider in DIRECT_VOICES:
-                if voice_id_override and fallback_voice_provider:
-                    preferred = _org_tts(
-                        ResolvedLayer(fallback_voice_provider, None, {}, False),
-                        voice_id_override,
-                        language,
-                    )
-                    return agents_tts.FallbackAdapter(
-                        [preferred, *_house_tts(None, language)]
-                    )
-                return build_tts(None, None, language)
-            return build_tts(None, voice_id_override, language)
-        try:
-            byo = _org_tts(org, voice_id_override, language)
-        except ValueError:
-            if org.provider not in DIRECT_VOICES or not org.fallback_enabled:
-                raise
-            logger.warning(
-                "Could not configure %s speech. Using the house chain.", org.provider
-            )
-            return build_tts(None, None, language)
-        if org.fallback_enabled:
-            uses_house_charon = (
-                isinstance(byo, DirectTTS)
-                and byo.provider == "gemini"
-                and byo.speech.api_key is None
-                and byo.speech.voice == DIRECT_VOICES["gemini"][1]
-            )
-            house = _house_tts(
-                None if org.provider in DIRECT_VOICES else voice_id_override,
-                language,
-                include_gemini=not uses_house_charon,
-            )
-            if org.provider == "gemini" and house and isinstance(house[0], DirectTTS):
-                # A second Gemini configuration may share the failing endpoint.
-                house.append(house.pop(0))
-            if house:
-                return agents_tts.FallbackAdapter([byo, *house])
-        return byo
-    instances = _house_tts(voice_id_override, language)
-    if not instances:
-        # Distinguish between no keys configured vs. language filtering all keys out.
-        if settings.cartesia_api_key or settings.eleven_api_key:
-            # Keys exist but the language filtered them all out. (Every
-            # supported language has at least Cartesia, so `providers` is
-            # never empty here.)
-            providers = tts_providers_for(language)
-            raise ProviderKeyError(
-                f"Configured TTS providers cannot speak language '{language}'; "
-                f"language requires: {', '.join(sorted(providers))}."
-            )
-        raise ProviderKeyError(
-            "No TTS provider configured: enable Google Cloud speech or set CARTESIA_API_KEY or ELEVEN_API_KEY."
-        )
+    routes = resolve_tts_routes(
+        org,
+        voice_id_override,
+        language,
+        fallback_voice_provider=fallback_voice_provider,
+    )
+    instances = [_tts_adapter(route) for route in routes]
     if len(instances) == 1:
         return instances[0]
     return agents_tts.FallbackAdapter(instances)
@@ -863,7 +671,7 @@ def startup_capability_warnings() -> list[str]:
     if not settings.cartesia_api_key:
         # Determine which TTS providers are available
         available_tts_providers = set()
-        if settings.hail_gemini_tts_enabled and house_voice_ready("gemini"):
+        if settings.hail_gemini_tts_enabled and house_credentials_available("gemini"):
             available_tts_providers.add("gemini")
         if settings.eleven_api_key:
             available_tts_providers.add("elevenlabs")

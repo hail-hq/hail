@@ -13,15 +13,23 @@ import hashlib
 import logging
 import time
 from collections import defaultdict
+from typing import get_args
 
 import httpx
 from hailhq.core.config import settings
 from hailhq.core.languages import (
     CARTESIA_MODEL_LANGUAGES,
     SUPPORTED_LANGUAGES,
+    TTSProvider,
     elevenlabs_language,
 )
-from hailhq.core.providers.tts.direct import DIRECT_VOICES, house_voice_ready
+from hailhq.core.providers.tts.direct import DIRECT_VOICES
+from hailhq.core.providers.tts.routing import (
+    ProviderKeyError,
+    house_credentials_available,
+    resolve_provider_voice,
+    resolve_tts_routes,
+)
 
 log = logging.getLogger(__name__)
 HEADERS_VERSION = "2026-08-14"
@@ -178,8 +186,13 @@ def elevenlabs_choices(
     return choices
 
 
-def shortlist(choices: list[dict], language: str) -> list[dict]:
-    """Up to three compatible choices; curation, current default, then variety."""
+def shortlist(
+    choices: list[dict],
+    language: str,
+    *,
+    preferred_voices: tuple[tuple[str, str], ...] = (),
+) -> list[dict]:
+    """Rank the rollout shortlist, configured preferences, and three other voices."""
 
     def identity(voice):
         return voice["provider"], voice["id"]
@@ -187,8 +200,11 @@ def shortlist(choices: list[dict], language: str) -> list[dict]:
     available = {identity(v): v for v in choices if v["language"] == language}
     selected: list[dict] = []
     preferred = [
-        (p.provider, p.voice_id)
-        for p in settings.voice_shortlist_preferences.get(language, [])
+        *preferred_voices,
+        *(
+            (p.provider, p.voice_id)
+            for p in settings.voice_shortlist_preferences.get(language, [])
+        ),
     ]
     # Preserve a compatible configured default without pinning any voice ID.
     preferred.extend(
@@ -197,10 +213,15 @@ def shortlist(choices: list[dict], language: str) -> list[dict]:
             ("elevenlabs", settings.elevenlabs_voice_id),
         ]
     )
+    capacity = 3 + len(preferred_voices)
     for key in preferred:
-        if key in available and available[key] not in selected and len(selected) < 3:
+        if (
+            key in available
+            and available[key] not in selected
+            and len(selected) < capacity
+        ):
             selected.append(available[key])
-    while len(selected) < 3:
+    while len(selected) < capacity:
         candidates = [v for v in available.values() if v not in selected]
         if not candidates:
             break
@@ -289,85 +310,81 @@ async def _provider_catalogue(provider: str, model: str, key: str) -> dict:
         return result
 
 
+async def _catalogue_choices(provider: str, language: str) -> list[dict]:
+    route = resolve_provider_voice(provider, language, {}, use_house_defaults=True)
+    if route.direct:
+        _, _, name, gender = DIRECT_VOICES[provider]
+        return [
+            {
+                "provider": provider,
+                "model": route.model,
+                "id": route.voice_id,
+                "name": name,
+                "gender": gender,
+                "language": language,
+                "description": "",
+                "accent": None,
+            }
+        ]
+    if not route.model or not route.api_key:
+        return []
+    result = await _provider_catalogue(provider, route.model, route.api_key)
+    if provider == "cartesia":
+        return cartesia_choices(result["rows"], language, route.model)
+    return elevenlabs_choices(result["rows"], result["models"], language, route.model)
+
+
 async def voice_catalogue(language: str, *, include_direct: bool = False) -> dict:
     if language not in SUPPORTED_LANGUAGES:
         raise ValueError("Choose a supported language")
+
+    # The flag keeps older consoles, which validate two provider IDs, working
+    # while the API and console roll out independently.
     providers = [
-        (p, model, key)
-        for p, model, key in [
-            ("cartesia", settings.cartesia_model, settings.cartesia_api_key),
-            ("elevenlabs", settings.elevenlabs_model, settings.eleven_api_key),
-        ]
-        if key and model and p in SUPPORTED_LANGUAGES[language].tts
+        provider
+        for provider in get_args(TTSProvider)
+        if provider in SUPPORTED_LANGUAGES[language].tts
+        and house_credentials_available(provider)
+        and (include_direct or provider not in DIRECT_VOICES)
     ]
     results = await asyncio.gather(
-        *[_provider_catalogue(*p) for p in providers], return_exceptions=True
+        *(_catalogue_choices(provider, language) for provider in providers),
+        return_exceptions=True,
     )
     choices, partial = [], False
-    for (provider, model, _), result in zip(providers, results, strict=True):
+    for provider, result in zip(providers, results, strict=True):
         if isinstance(result, Exception):
             log.warning("Voice catalogue could not load for %s", provider)
             partial = True
-            continue
-        if provider == "cartesia":
-            choices.extend(cartesia_choices(result["rows"], language, model))
         else:
-            choices.extend(
-                elevenlabs_choices(result["rows"], result["models"], language, model)
-            )
-    voices = shortlist(choices, language)
-    direct = [
-        {
-            "provider": provider,
-            "model": model,
-            "id": voice_id,
-            "name": name,
-            "gender": gender,
-            "language": language,
-            "description": "",
-            "accent": None,
-        }
-        for provider, (model, voice_id, name, gender) in DIRECT_VOICES.items()
-        if include_direct and language == "en" and house_voice_ready(provider)
-    ]
-    voices = [*direct, *voices]
+            choices.extend(result)
+
+    rollout_choices = tuple(
+        (provider, voice_id)
+        for provider, (_, voice_id, _, _) in DIRECT_VOICES.items()
+        if any(v["provider"] == provider and v["id"] == voice_id for v in choices)
+    )
+    voices = shortlist(choices, language, preferred_voices=rollout_choices)
+    try:
+        house = resolve_tts_routes(None, None, language)
+    except ProviderKeyError:
+        house = []
+    primary = next((route for route in house if route.provider in providers), None)
     default = next(
         (
-            v
-            for v in voices
-            if v["provider"] == "cartesia" and v["id"] == settings.cartesia_voice_id
+            {"provider": voice["provider"], "id": voice["id"]}
+            for voice in voices
+            if primary
+            and (voice["provider"], voice["id"], voice["model"])
+            == (primary.provider, primary.voice_id, primary.model)
         ),
         None,
     )
-    if not default and not settings.cartesia_api_key:
-        default = next(
-            (
-                v
-                for v in voices
-                if v["provider"] == "elevenlabs"
-                and v["id"] == settings.elevenlabs_voice_id
-            ),
-            None,
-        )
-    if (
-        settings.hail_gemini_tts_enabled
-        and direct
-        and direct[0]["provider"] == "gemini"
-    ):
-        default = direct[0]
     return {
         "voices": voices,
-        "supported_providers": sorted(SUPPORTED_LANGUAGES[language].tts),
-        **(
-            {"available_direct_providers": [v["provider"] for v in direct]}
-            if include_direct
-            else {}
-        ),
         "languages": language_options(),
         "partial": partial,
-        "default_voice": (
-            {"provider": default["provider"], "id": default["id"]} if default else None
-        ),
+        "default_voice": default,
     }
 
 
