@@ -6922,11 +6922,11 @@ paths:
         "Add a number your phone system holds. It starts ``unverified``:
         send
 
-        its incoming calls to Hail, then run the ownership check (verify). An
+        its incoming calls to Hail, then run the ownership check (verify) soon:
 
-        unchecked number is removed after 7 days, or when someone else buys or
+        until it passes, someone else can buy or connect the number, and Hail
 
-        connects it."
+        removes numbers left unchecked."
       operationId: add_sip_connection_number_v1_sip_connections__connection_id__numbers_post
       parameters:
         - name: connection_id

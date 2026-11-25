@@ -194,3 +194,17 @@ func TestSipConnectionsCreatePasswordFromStdin(t *testing.T) {
 		t.Errorf("pbx_password = %v", body["pbx_password"])
 	}
 }
+
+func TestSipConnectionsUpdateRefusesSetAndClear(t *testing.T) {
+	srv := newFakeServer(t, http.StatusOK, sampleSipConnection(false))
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"sip-connections", "update", testConnID, "--pbx-host", "pbx.example.com", "--clear-pbx-host",
+	)
+	if err == nil {
+		t.Fatal("want an error for --pbx-host with --clear-pbx-host")
+	}
+	if srv.hits != 0 {
+		t.Fatalf("server called %d times", srv.hits)
+	}
+}

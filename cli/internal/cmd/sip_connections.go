@@ -22,7 +22,7 @@ func newSipConnectionsCmd(opts *Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "sip-connections",
 		Short: "Connect your phone system (PBX) to Hail agents",
-		Long: `hail sip-connections — connect your own phone system (PBX).
+		Long: `hail sip-connections: connect your own phone system (PBX).
 
 1. create        gives the SIP server, username and password for a generic
                  SIP trunk on your phone system. The password shows once.
@@ -249,7 +249,7 @@ func newSipConnectionsUpdateCmd(opts *Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "update <connection_id>",
 		Short: "Change the label or where Hail dials your phone system",
-		Long: `hail sip-connections update — flags left unset stay as they are.
+		Long: `hail sip-connections update: flags left unset stay as they are.
 
 --clear-pbx-host stops calls out and handover; calls in keep working.
 A new host, port or transport needs --pbx-password again when a username is set.`,
@@ -317,6 +317,9 @@ A new host, port or transport needs --pbx-password again when a username is set.
 	cmd.Flags().StringVar(&f.username, "pbx-username", "", "New username Hail sends")
 	cmd.Flags().StringVar(&f.password, "pbx-password", "", "New password Hail sends; \"-\" reads it from stdin (keeps it out of shell history)")
 	cmd.Flags().BoolVar(&f.clearUsername, "clear-pbx-username", false, "Remove the username and password")
+	cmd.MarkFlagsMutuallyExclusive("pbx-host", "clear-pbx-host")
+	cmd.MarkFlagsMutuallyExclusive("pbx-username", "clear-pbx-username")
+	cmd.MarkFlagsMutuallyExclusive("pbx-password", "clear-pbx-username")
 	return cmd
 }
 

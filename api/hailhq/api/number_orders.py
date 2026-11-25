@@ -686,9 +686,10 @@ async def acquire_offer(
     offer.verification_row_id = approval.row_id if approval else None
     offer.verification_id = approval.verification_id if approval else None
     offer.address_id = approval.address_id if approval else None
-    # Every check has passed (quote, price, readiness, funds): only now may
-    # an unchecked connected-number claim give way. No transaction is open
-    # here, and this runs before the buyer's org lock.
+    # Every check before the order has passed (quote, price, readiness,
+    # funds): only now may an unchecked connected-number claim give way. The
+    # carrier can still refuse the order after this; the claim stays released.
+    # No transaction is open here, and this runs before the buyer's org lock.
     await _free_unchecked_claim(db, org, quote_id, lk)
     await org_lock(db, org)
     row = await load_quote(db, org, quote_id)

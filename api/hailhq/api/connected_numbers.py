@@ -586,8 +586,9 @@ async def add_connected_number(
         phonenumbers.parse(e164, None), phonenumbers.PhoneNumberFormat.E164
     )
     connection_id, org_id = connection.id, connection.organization_id
-    # Free another claim only for a request that can still succeed: the same
-    # checks run again under the org lock below.
+    # Free another claim only for a request that passes its own checks first
+    # (they run again under the org lock below). A later failure (LiveKit,
+    # the unique index) leaves that claim released: claims give way first.
     _live(connection)
     if await _unverified_count(db, org_id) >= UNVERIFIED_PER_ORG:
         raise _too_many_unverified()

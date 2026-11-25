@@ -139,8 +139,8 @@ Examples:
 			return runContactsCreate(cmd.Context(), cmd, opts, f, args[0])
 		},
 	}
-	cmd.Flags().StringVar(&f.phone, "phone", "", "E.164 phone number — one of --phone/--email/--extension required")
-	cmd.Flags().StringVar(&f.email, "email", "", "Email address — one of --phone/--email/--extension required")
+	cmd.Flags().StringVar(&f.phone, "phone", "", "E.164 phone number (one of --phone/--email/--extension is required)")
+	cmd.Flags().StringVar(&f.email, "email", "", "Email address (one of --phone/--email/--extension is required)")
 	cmd.Flags().StringVar(&f.extension, "extension", "", "Extension on your connected phone system (1-6 digits, * or #)")
 	cmd.Flags().StringVar(&f.idemKey, "idempotency-key", "", "Defaults to a fresh UUID")
 	markOneOfRequired(cmd, "contact-info", "phone", "email", "extension")

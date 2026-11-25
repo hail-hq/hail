@@ -58,7 +58,7 @@ presses. A call you send yourself cannot pass.
 - `no_call_arrived`: check the trunk, the routing rule for this number, and the address.
 - `not_authenticated`: the call came without this connection's username and password, or not in `+` format.
 - `code_not_received`: turn on RFC 2833 key presses.
-- A number that is not checked within 7 days is removed. Until it passes, someone else can buy or connect it.
+- Run the check soon after you add a number. Until it passes, someone else can buy or connect the number, and Hail removes numbers left unchecked.
 
 ## Calls out and handover
 

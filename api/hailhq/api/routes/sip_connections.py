@@ -393,9 +393,9 @@ async def add_sip_connection_number(
     lk: Annotated[LiveKitClient | None, Depends(get_livekit_optional)],
 ) -> PhoneNumberResponse:
     """Add a number your phone system holds. It starts ``unverified``: send
-    its incoming calls to Hail, then run the ownership check (verify). An
-    unchecked number is removed after 7 days, or when someone else buys or
-    connects it."""
+    its incoming calls to Hail, then run the ownership check (verify) soon:
+    until it passes, someone else can buy or connect the number, and Hail
+    removes numbers left unchecked."""
     lk = _livekit_or_503(lk)
     row = await _connection_or_404(db, principal.organization_id, connection_id)
     try:
@@ -427,6 +427,12 @@ async def verify_sip_connection_number(
     lk = _livekit_or_503(lk)
     row = await _connection_or_404(db, principal.organization_id, connection_id)
     number = await _number_or_404(db, row, number_id)
+    if number.provisioning_state == "released":
+        # Removed by the customer, after 7 days, or because another
+        # workspace bought or connected it.
+        raise HTTPException(
+            status_code=409, detail="This number was removed from Hail. Add it again."
+        )
     try:
         result = await check_connected_number(db, lk, number)
     except ConnectedNumberError as exc:

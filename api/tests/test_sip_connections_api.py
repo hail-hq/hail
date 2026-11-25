@@ -362,3 +362,31 @@ async def test_unreadable_password_does_not_break_the_list(
     resp = await client.get("/sip-connections", headers=_auth(plain))
     assert resp.status_code == 200
     assert resp.json()["items"][0]["password_last4"] == ""
+
+
+async def test_verify_a_removed_number_says_so(
+    client: httpx.AsyncClient, org_and_key: tuple, async_session: AsyncSession
+) -> None:
+    from sqlalchemy import update
+
+    _org, _key, plain = org_and_key
+    conn = await _create(client, plain)
+    number = (
+        await client.post(
+            f"/sip-connections/{conn['id']}/numbers",
+            json={"e164": "+14155550100"},
+            headers=_auth(plain),
+        )
+    ).json()
+    await async_session.execute(
+        update(PhoneNumber)
+        .where(PhoneNumber.id == number["id"])
+        .values(provisioning_state="released")
+    )
+    await async_session.commit()
+    resp = await client.post(
+        f"/sip-connections/{conn['id']}/numbers/{number['id']}/verify",
+        headers=_auth(plain),
+    )
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "This number was removed from Hail. Add it again."
