@@ -95,7 +95,10 @@ class Hold:
         @session.on("user_input_transcribed")
         def on_transcript(event) -> None:
             if event.transcript.strip():
-                self._stretch_words = True
+                # An interim guess can be music; only a final transcript
+                # makes a stretch speech. Any text still means words may come.
+                if event.is_final:
+                    self._stretch_words = True
                 self._words_at = self._clock()
                 self._last_audio = self._clock()
 
@@ -114,6 +117,12 @@ class Hold:
         self.active = True
         self._music = False
         self._last_audio = self._clock()
+        # Audio heard before the hold (their "please hold") is not part of it.
+        self._stretch_started = self._burst_started
+        self._stretch_words = False
+        self._last_end = -math.inf
+        if self._quiet_task is not None:
+            self._quiet_task.cancel()
         logger.info("call_id=%s holding", self._call_id)
         if self._task is None or self._task.done():
             self._task = asyncio.create_task(self._run(), name="hold")

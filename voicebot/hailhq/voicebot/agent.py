@@ -109,7 +109,6 @@ from hailhq.voicebot.amd import (
 )
 from hailhq.voicebot.audio import prewarm_audio, room_options
 from hailhq.voicebot.browser import run_browser_session
-from hailhq.voicebot.busy_sound import BusySound
 from hailhq.voicebot.handover_watch import contact_speaks
 from hailhq.voicebot.hold import HOLD_ENDED_NOTE, Hold
 from hailhq.voicebot.ivr import PhoneMenu
@@ -314,9 +313,10 @@ class SpeechSanitizingAgent(Agent):
                     )
             return
         if self.hold is not None and self.hold.active and new_message is not None:
+            # The early reply was made before we knew whether to answer.
+            self._drop_early_reply()
             if await self.hold.keep_holding(new_message.text_content or ""):
                 # A recorded hold announcement: keep it, say nothing.
-                self._drop_early_reply()
                 await self._keep_unanswered(new_message)
                 raise StopResponse()
             turn_ctx.add_message(role="system", content=HOLD_ENDED_NOTE)
@@ -947,7 +947,6 @@ async def build_tools_safely(
     cancel_bridge: Callable[[], Awaitable[bool]] | None = None,
     prompt: Callable[[str], Awaitable[None]] | None = None,
     hold: Callable[[], Awaitable[None]] | None = None,
-    sound: BusySound | None = None,
 ) -> tuple[list, AgentApiClient | None]:
     """Build this call's agent tools, degrading to the tools every call
     keeps on any failure.
@@ -968,7 +967,6 @@ async def build_tools_safely(
             cancel_bridge=cancel_bridge,
             prompt=prompt,
             hold=hold,
-            sound=sound,
         )
     except Exception:
         logger.exception(
@@ -2795,7 +2793,6 @@ async def _run_call(
         can_speak=may_prompt,
         call_id=call_id,
     )
-    sound = BusySound(can_play=lambda: may_prompt() and not bridge_state.get("ending"))
 
     @session.on("user_state_changed")
     def _on_speech_state(ev: Any) -> None:
@@ -2822,7 +2819,6 @@ async def _run_call(
         cancel_bridge=make_bridge_cancel(ctx, call_id, bridge_state),
         prompt=lambda text: _prompt_agent(session, bridge_state, text),
         hold=hold.start,
-        sound=sound,
     )
     tool_names = [t.info.name for t in agent_tools]
     if agent_tools:
@@ -2870,7 +2866,6 @@ async def _run_call(
         # https://docs.livekit.io/reference/python/livekit/agents/
         session_host=False,
     )
-    sound.start_soon(ctx.room, session)
 
     async def record_answered_call() -> None:
         # Do not consume recording allowance during ringing or on unanswered calls.
@@ -2965,7 +2960,6 @@ async def _run_call(
         try:
             await recovery.aclose()
             await hold.aclose()
-            await sound.aclose()
             # Never close the classifier under a running check: let the
             # menu finish its check first.
             if agent.phone_menu is not None:

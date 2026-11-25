@@ -259,3 +259,29 @@ async def test_agent_drops_a_held_announcement_and_notes_a_hold_end(monkeypatch)
 
 async def test_hold_note_names_a_tool_every_call_has():
     assert WAIT_SPEC.name in HOLD_ENDED_NOTE
+
+
+async def test_music_right_after_please_hold_is_music(line):
+    held, session, now, _ = line
+    speak(session, now, 2, words="One moment, please hold.", pause=0.5)
+    await held.start()
+    for _ in range(5):
+        speak(session, now, 3, pause=0.2)
+    await settle()
+    assert held.active
+    assert held._music
+    session.generate_reply.assert_not_called()
+    await held.aclose()
+
+
+async def test_an_interim_guess_on_music_does_not_make_it_speech(line):
+    held, session, now, _ = line
+    await held.start()
+    session.emit("user_state_changed", new_state="speaking")
+    session.emit("user_input_transcribed", transcript="you", is_final=False)
+    now[0] += MUSIC_SECONDS
+    session.emit("user_state_changed", new_state="listening")
+    await settle()
+    assert held._music
+    assert held.active
+    await held.aclose()

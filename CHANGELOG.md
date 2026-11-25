@@ -7,7 +7,6 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 ### Added
 
 - Calls: when the other person asks the agent to hold, it stays quiet until they speak again, and checks in once after two minutes of silence.
-- Calls: a soft typing sound plays while a slow lookup runs.
 
 ### Fixed
 

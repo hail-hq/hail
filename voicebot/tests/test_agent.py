@@ -1596,7 +1596,6 @@ async def test_build_tools_safely_passes_through_on_success(
         cancel_bridge: object = None,
         prompt: object = None,
         hold: object = None,
-        sound: object = None,
     ) -> tuple:
         return sentinel_tools, sentinel_api
 
