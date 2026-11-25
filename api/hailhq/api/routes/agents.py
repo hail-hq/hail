@@ -329,7 +329,16 @@ async def update_agent(
             # read of the agent and every call it answers.
             changes.pop(field)
     if "voice_config" in changes:
-        changes["voice_config"] = body.voice_config.model_dump(mode="json")
+        config = body.voice_config.model_dump(mode="json")
+        saved = agent.voice_config or {}
+        if "voice_id" not in body.voice_config.model_fields_set and saved.get(
+            "scoped_voice_id"
+        ):
+            # Language-only edits on this release must keep a newer saved voice.
+            config.pop("voice_id")
+            config["scoped_voice_id"] = saved["scoped_voice_id"]
+            config["voice_provider"] = saved.get("voice_provider")
+        changes["voice_config"] = config
     # Validate before any attribute is set: the validation queries would
     # autoflush a pending name change outside the conflict handler below.
     items = None
