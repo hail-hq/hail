@@ -10,8 +10,11 @@ holding, conversation recovery is paused and nothing prompts the agent:
 - Audio with no words for ``MUSIC_SECONDS`` or longer is hold music. It
   keeps the hold, and later wordless audio in that hold is music too.
 - VAD splits music and chatter into bursts: bursts less than ``GAP_SECONDS``
-  apart are one stretch, measured with its pauses and judged once it ends.
-  Any transcript in it, interim or final, makes it speech.
+  apart are one stretch, judged once it ends. Only wordless audio counts
+  toward music, so pauses between short noises do not. Any transcript,
+  interim or final, makes its burst speech: one stray word in a long run of
+  music does not hide the music, but any words keep a stretch from being a
+  quiet voice.
 - After ``HOLD_SECONDS`` of silence, the agent asks once whether they are
   still there, and normal recovery resumes.
 
@@ -80,12 +83,15 @@ class Hold:
         self.active = False
         self._music = False
         self._last_audio = clock()
+        # One VAD burst of audio, and the stretch of bursts it belongs to.
         self._burst_started: float | None = None
+        self._burst_words = False
         self._last_end = -math.inf
-        # Start of the current stretch of audio: VAD bursts less than
-        # GAP_SECONDS apart, pauses included.
+        # Wordless seconds of the last burst; a late transcript takes them back.
+        self._last_wordless = 0.0
         self._stretch_started: float | None = None
-        self._words_at = -math.inf
+        self._stretch_words = False
+        self._stretch_wordless = 0.0
         self._task: asyncio.Task[None] | None = None
         self._settle_task: asyncio.Task[None] | None = None
         self._closed = False
@@ -96,9 +102,8 @@ class Hold:
 
         @session.on("user_input_transcribed")
         def on_transcript(event) -> None:
-            # Any transcript, interim or final, means words.
             if event.transcript.strip():
-                self._words_at = self._last_audio = self._clock()
+                self._on_words()
 
         @session.on("close")
         def on_close(_event) -> None:
@@ -116,8 +121,17 @@ class Hold:
         self.active = True
         self._music = False
         self._last_audio = now
-        # Audio before the hold (their "please hold") is not part of it.
-        self._stretch_started = now if self._burst_started is not None else None
+        # Audio before the hold (their "please hold") is not part of it. If
+        # they are still talking, that is talk, not a quiet voice; it only
+        # counts as music if it runs on without words for MUSIC_SECONDS.
+        ongoing = self._burst_started is not None
+        if ongoing:
+            self._burst_started = now
+            self._burst_words = False
+        self._stretch_started = now if ongoing else None
+        self._stretch_words = ongoing
+        self._stretch_wordless = 0.0
+        self._last_wordless = 0.0
         self._last_end = -math.inf
         if self._settle_task is not None:
             self._settle_task.cancel()
@@ -144,19 +158,44 @@ class Hold:
         self.active = False
         return False
 
+    def _on_words(self) -> None:
+        """Any transcript, interim or final: this audio has words."""
+        now = self._clock()
+        self._last_audio = now
+        if self._stretch_started is None:
+            return
+        if self._burst_started is not None:
+            self._burst_words = True
+            self._stretch_words = True
+        elif now - self._last_end <= GAP_SECONDS:
+            # A late transcript of the burst that just ended.
+            self._stretch_words = True
+            self._stretch_wordless -= self._last_wordless
+            self._last_wordless = 0.0
+
     def _on_user_state(self, state: str | None) -> None:
         now = self._clock()
         if state == "speaking":
-            if self._stretch_started is None or now - self._last_end > GAP_SECONDS:
-                self._stretch_started = now
-            if self._settle_task is not None:
+            pending = self._settle_task is not None and not self._settle_task.done()
+            if pending:
                 self._settle_task.cancel()
+            if self._stretch_started is None or now - self._last_end > GAP_SECONDS:
+                if pending:
+                    # The last stretch is over (its timer ran late): judge it now.
+                    self._decide()
+                self._stretch_started = now
+                self._stretch_words = False
+                self._stretch_wordless = 0.0
             self._burst_started = self._last_audio = now
+            self._burst_words = False
             return
         if self._burst_started is None:
             return
+        length = now - self._burst_started
         self._burst_started = None
         self._last_end = self._last_audio = now
+        self._last_wordless = 0.0 if self._burst_words else length
+        self._stretch_wordless += self._last_wordless
         if self.active:
             self._settle_task = asyncio.create_task(self._settle(now))
 
@@ -164,16 +203,18 @@ class Hold:
         """Judge a stretch of audio once it is over: more audio can continue
         it, and a late transcript can still come."""
         await asyncio.sleep(GAP_SECONDS)
-        started = self._stretch_started
-        if not self.active or self._burst_started is not None or started is None:
+        if self._burst_started is None and self._last_end <= ended:
+            self._decide()
+
+    def _decide(self) -> None:
+        if not self.active or self._stretch_started is None:
             return
-        if self._words_at >= started:
-            return  # words: the turn itself ends or keeps the hold
-        length = ended - started
-        if length >= MUSIC_SECONDS:
+        if self._stretch_wordless >= MUSIC_SECONDS:
             self._music = True
             return
-        if self._music or length < QUIET_VOICE_SECONDS:
+        if self._music or self._stretch_words:
+            return  # words: the turn itself ends or keeps the hold
+        if self._stretch_wordless < QUIET_VOICE_SECONDS:
             return
         self.active = False
         logger.info("call_id=%s hold ended: voice without words", self._call_id)

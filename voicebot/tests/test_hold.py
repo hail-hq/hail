@@ -280,6 +280,76 @@ async def test_music_right_after_please_hold_is_music(line):
     await held.aclose()
 
 
+async def test_an_interim_guess_on_one_music_burst_does_not_hide_the_music(line):
+    held, session, now, _ = line
+    await held.start()
+    session.emit("user_state_changed", new_state="speaking")
+    session.emit("user_input_transcribed", transcript="you", is_final=False)
+    now[0] += 3
+    session.emit("user_state_changed", new_state="listening")
+    now[0] += 0.2
+    for _ in range(4):
+        speak(session, now, 3, pause=0.2)
+    await settle()
+    assert held._music
+    assert held.active
+    # A later wordless stretch in the same hold is music too.
+    now[0] += 5
+    speak(session, now, 4)
+    await settle()
+    assert held.active
+    session.generate_reply.assert_not_called()
+    await held.aclose()
+
+
+async def test_a_stretch_is_judged_even_when_its_timer_runs_late(line):
+    held, session, now, _ = line
+    await held.start()
+    speak(session, now, MUSIC_SECONDS + 2, pause=0.6)
+    # The next burst starts after the gap, before the settle timer woke up.
+    session.emit("user_state_changed", new_state="speaking")
+    assert held._music
+    now[0] += 4
+    session.emit("user_state_changed", new_state="listening")
+    await settle()
+    assert held.active
+    session.generate_reply.assert_not_called()
+    await held.aclose()
+
+
+async def test_short_spaced_noise_is_not_music(line):
+    held, session, now, _ = line
+    await held.start()
+    # Clicks with pauses just under the gap: a long stretch, little audio.
+    for _ in range(25):
+        speak(session, now, 0.05, pause=0.45)
+    await settle()
+    assert not held._music
+    assert held.active
+    # So a soft voice afterwards still gets the speak-up prompt.
+    now[0] += 1
+    speak(session, now, 5)
+    await settle()
+    assert not held.active
+    session.generate_reply.assert_called_once()
+    assert session.generate_reply.call_args.kwargs["instructions"] == CANT_HEAR
+    await held.aclose()
+
+
+async def test_the_rest_of_please_hold_is_not_a_quiet_voice(line):
+    held, session, now, _ = line
+    session.emit("user_state_changed", new_state="speaking")
+    session.emit("user_input_transcribed", transcript="please hold", is_final=True)
+    now[0] += 1
+    await held.start()  # they keep talking to a colleague, no new transcript
+    now[0] += 3
+    session.emit("user_state_changed", new_state="listening")
+    await settle()
+    session.generate_reply.assert_not_called()
+    assert held.active
+    await held.aclose()
+
+
 async def test_music_with_long_soft_pauses_is_still_music(line):
     held, session, now, _ = line
     await held.start()
