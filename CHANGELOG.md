@@ -4,6 +4,16 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+## [0.39.0] (2026-11-25)
+
+Connect your phone system: keep your number and your phone system (PBX), and
+send the calls you choose to a Hail agent. Hail's team sets it up with you.
+Contacts can be phone system extensions, for handover.
+
+Component versions cut alongside this release:
+**`cli-v0.36.0`** (Homebrew + GitHub Releases), **`sdk-v0.26.0`** (PyPI),
+MCP registry **0.3.0**. One database migration (connected phone systems).
+
 ### Added
 
 - Connect your phone system: keep your number and phone system, and send its calls to a Hail agent. Hail's team sets it up with you.
