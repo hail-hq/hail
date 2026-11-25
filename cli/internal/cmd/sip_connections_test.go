@@ -176,3 +176,21 @@ func TestSipConnectionsListPrintsNoPassword(t *testing.T) {
 		t.Errorf("stdout = %q", stdout)
 	}
 }
+
+func TestSipConnectionsCreatePasswordFromStdin(t *testing.T) {
+	srv := newFakeServer(t, http.StatusCreated, sampleSipConnection(true))
+	_, _, err := runRootStdin(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"s3cret-from-stdin\n",
+		"sip-connections", "create", "--label", "Main office", "--region", "US",
+		"--pbx-host", "pbx.example.com", "--pbx-username", "hail", "--pbx-password", "-",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var body map[string]any
+	_ = json.Unmarshal(srv.lastBody, &body)
+	if body["pbx_password"] != "s3cret-from-stdin" {
+		t.Errorf("pbx_password = %v", body["pbx_password"])
+	}
+}

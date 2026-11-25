@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/google/uuid"
@@ -73,12 +75,16 @@ func newSipConnectionsCreateCmd(opts *Options) *cobra.Command {
 			if f.label == "" || f.region == "" {
 				return requireInputs(cmd, "--label and --region")
 			}
+			password, err := readSecretFlag(f.password, "--pbx-password", cmd.InOrStdin())
+			if err != nil {
+				return err
+			}
 			body := client.SipConnectionCreate{
 				Label:         f.label,
 				DefaultRegion: f.region,
 				PbxHost:       strPtr(f.host),
 				PbxUsername:   strPtr(f.username),
-				PbxPassword:   strPtr(f.password),
+				PbxPassword:   strPtr(password),
 			}
 			if cmd.Flags().Changed("pbx-port") {
 				body.PbxPort = &f.port
@@ -120,7 +126,7 @@ func newSipConnectionsCreateCmd(opts *Options) *cobra.Command {
 	cmd.Flags().IntVar(&f.port, "pbx-port", 5060, "SIP port of the phone system")
 	cmd.Flags().StringVar(&f.transport, "pbx-transport", "", "auto, udp, tcp or tls (default auto)")
 	cmd.Flags().StringVar(&f.username, "pbx-username", "", "Username Hail sends when the phone system asks")
-	cmd.Flags().StringVar(&f.password, "pbx-password", "", "Password Hail sends with --pbx-username")
+	cmd.Flags().StringVar(&f.password, "pbx-password", "", "Password Hail sends with --pbx-username; \"-\" reads it from stdin (keeps it out of shell history)")
 	return cmd
 }
 
@@ -266,7 +272,13 @@ A new host, port or transport needs --pbx-password again when a username is set.
 			set("pbx-port", "pbx_port", f.port)
 			set("pbx-transport", "pbx_transport", f.transport)
 			set("pbx-username", "pbx_username", f.username)
-			set("pbx-password", "pbx_password", f.password)
+			if cmd.Flags().Changed("pbx-password") {
+				password, err := readSecretFlag(f.password, "--pbx-password", cmd.InOrStdin())
+				if err != nil {
+					return err
+				}
+				patch["pbx_password"] = password
+			}
 			if f.clearHost {
 				patch["pbx_host"] = nil
 			}
@@ -303,7 +315,7 @@ A new host, port or transport needs --pbx-password again when a username is set.
 	cmd.Flags().IntVar(&f.port, "pbx-port", 5060, "New SIP port")
 	cmd.Flags().StringVar(&f.transport, "pbx-transport", "", "auto, udp, tcp or tls")
 	cmd.Flags().StringVar(&f.username, "pbx-username", "", "New username Hail sends")
-	cmd.Flags().StringVar(&f.password, "pbx-password", "", "New password Hail sends")
+	cmd.Flags().StringVar(&f.password, "pbx-password", "", "New password Hail sends; \"-\" reads it from stdin (keeps it out of shell history)")
 	cmd.Flags().BoolVar(&f.clearUsername, "clear-pbx-username", false, "Remove the username and password")
 	return cmd
 }
@@ -409,6 +421,23 @@ func newSipConnectionsAddNumberCmd(opts *Options) *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// readSecretFlag returns the flag's value; "-" reads the whole of stdin, so
+// the secret stays out of shell history and the process table.
+func readSecretFlag(flag, name string, stdin io.Reader) (string, error) {
+	if flag != "-" {
+		return flag, nil
+	}
+	raw, err := readAll(stdin)
+	if err != nil {
+		return "", fmt.Errorf("read %s from stdin: %w", name, err)
+	}
+	value := strings.TrimRight(raw, "\r\n")
+	if value == "" {
+		return "", fmt.Errorf("%s - given but stdin was empty", name)
+	}
+	return value, nil
 }
 
 // checkReasons turns a failed check's reason into the next step.
