@@ -42,6 +42,12 @@ def no_io(monkeypatch):
     return db
 
 
+def test_bad_region_is_an_argument_error():
+    assert (
+        main(["create", "--org", ORG, "--label", "Main office", "--region", "usa"]) == 2
+    )
+
+
 def test_create_prints_password_once(capsys, monkeypatch):
     conn = fake_conn()
     create = AsyncMock(return_value=(conn, "P" * 32))

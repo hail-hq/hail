@@ -67,11 +67,12 @@ from hailhq.core.sip_connections import (
     check_code_matches,
     check_in_flight,
     connection_of,
+    looks_like_phone_number,
     read_caller,
 )
 from hailhq.core.sms_ingest import active_dedicated_number
 from hailhq.core.webhook_fanout import call_event_data, fanout_call_event
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -210,22 +211,32 @@ async def _caller_of(db: AsyncSession, number: PhoneNumber, raw: str) -> str:
             if raw.isascii() and raw.isdigit() and len(raw) <= 6:
                 return raw
             return carrier_caller(raw)
-        first = read_caller(raw, [conn.default_region, number.country_code])
-        if first.startswith("+"):
+        tried = [conn.default_region, number.country_code]
+        first = read_caller(raw, tried)
+        if first.startswith("+") or not looks_like_phone_number(raw):
+            # Read, or an extension, "anonymous" or empty: no country changes it.
             return first
         # Not read yet (a phone system in another country than the number):
-        # the countries of the connection's other numbers.
+        # the countries of the connection's other numbers, the country with
+        # the most numbers first, then the one added first.
         others = (
             await db.scalars(
                 select(PhoneNumber.country_code)
                 .where(
                     PhoneNumber.sip_connection_id == conn.id,
+                    PhoneNumber.id != number.id,
                     PhoneNumber.provisioning_state.not_in(("released", "failed")),
+                    PhoneNumber.country_code.not_in([c for c in tried if c]),
                 )
-                .distinct()
+                .group_by(PhoneNumber.country_code)
+                .order_by(
+                    func.count().desc(),
+                    func.min(PhoneNumber.created_at),
+                    PhoneNumber.country_code,
+                )
             )
         ).all()
-        return read_caller(raw, sorted(c for c in others if c))
+        return read_caller(raw, list(others))
     return carrier_caller(raw)
 
 

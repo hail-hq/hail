@@ -103,6 +103,7 @@ hail sip-connections create --label "Main office"   # SIP server, username and p
 hail sip-connections list
 hail sip-connections get <connection_id>
 hail sip-connections update <connection_id> --label "Front desk"
+hail sip-connections update <connection_id> --region GB        # only when the phone system is in a country none of its numbers is from; --clear-region undoes it
 hail sip-connections rotate-password <connection_id>
 hail sip-connections add-number <connection_id> +14155550100   # unverified until the check passes
 hail sip-connections verify <connection_id> <number_id>        # Hail calls the number (up to 2 minutes)

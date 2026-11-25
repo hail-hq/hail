@@ -286,7 +286,11 @@ A new host, port or transport needs --pbx-password again when a username is set.
 			}
 			set("label", "label", f.label)
 			if cmd.Flags().Changed("region") {
-				patch["default_region"] = strings.ToUpper(strings.TrimSpace(f.region))
+				region := strings.ToUpper(strings.TrimSpace(f.region))
+				if region == "" {
+					return fmt.Errorf("--region needs a 2-letter country; use --clear-region to remove it")
+				}
+				patch["default_region"] = region
 			}
 			if f.clearRegion {
 				patch["default_region"] = nil
@@ -343,6 +347,7 @@ A new host, port or transport needs --pbx-password again when a username is set.
 	cmd.Flags().StringVar(&f.password, "pbx-password", "", "New password Hail sends; \"-\" reads it from stdin (keeps it out of shell history)")
 	cmd.Flags().BoolVar(&f.clearUsername, "clear-pbx-username", false, "Remove the username and password")
 	cmd.MarkFlagsMutuallyExclusive("pbx-host", "clear-pbx-host")
+	cmd.MarkFlagsMutuallyExclusive("region", "clear-region")
 	cmd.MarkFlagsMutuallyExclusive("pbx-username", "clear-pbx-username")
 	cmd.MarkFlagsMutuallyExclusive("pbx-password", "clear-pbx-username")
 	return cmd

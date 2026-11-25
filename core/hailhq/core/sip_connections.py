@@ -116,6 +116,12 @@ def normalize_caller(raw: str, default_region: str | None) -> str:
     return phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
 
 
+def looks_like_phone_number(raw: str) -> bool:
+    """More than an extension: 7 or more digits, with or without ``+``."""
+    digits = (raw or "").strip().removeprefix("+")
+    return _ascii_digits(digits) and len(digits) > 6
+
+
 def read_caller(raw: str, regions: list[str | None]) -> str:
     """A PBX caller read with the first of ``regions`` that gives a valid
     number; as given when none does. Non-ISO regions (``001``) are skipped."""
