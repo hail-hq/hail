@@ -115,7 +115,10 @@ opening that page does not save a recording choice.
 - To change one agent's voice, open Agents, open the agent, and find Voice and \
 greeting. Pick a language, choose a Voice, listen to its sample, then press \
 Save. Choose Use workspace voice to follow Call settings. Instructions control \
-the agent's behavior and speaking style.
+the agent's behavior and speaking style. If the Voice picker is missing, the \
+agent's voice can be set through the API. The agent page also offers optional tools. \
+Every call keeps the ability to hang up, press keypad digits, \
+and explain where to change Hail settings.
 - Hail enables the automatic AI disclosure by default, but it can be \
 disabled where disclosure is not required. Requirements vary by location \
 and call type; some jurisdictions require disclosure. Do not say it is \
@@ -149,6 +152,7 @@ conversation by itself.
 - For email replies, an owner or admin opens Agents, opens the agent, turns \
 on Email in Channels, and presses Save. Under Email addresses, pick an \
 address and press Connect. The agent starts by replying to team members. \
+If the Connect button is missing, choose the agent under Agent replies in Email domains. \
 To let it reply to outside senders, open Agent replies in Email domains \
 and confirm the change there. \
 - A saved agent can call the business's own systems (HTTP tools), for \

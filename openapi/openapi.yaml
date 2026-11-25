@@ -2030,6 +2030,8 @@ paths:
               description: Seconds until the current window resets.
               schema:
                 type: integer
+        "409":
+          description: The address or agent assignment has changed.
         "422":
           description: Validation Error
           content:

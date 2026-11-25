@@ -38,7 +38,7 @@ def test_privacy_and_help_stub_apply_to_every_call() -> None:
     guide = prompts.VOICE_CONFIGURATION_HELP
     assert "Calls, then Call settings, then Language and voice" in guide
     assert "Save language and voice" in guide
-    assert "Do not invent an agent voice picker" in guide
+    assert "Choose Use workspace voice to follow Call settings" in guide
     assert "future calls, not the call already in progress" in guide
     assert "Do not guess another app's menus" in guide
     assert "Do not invent a console menu for" in guide  # HTTP tools
@@ -172,7 +172,7 @@ def test_prompt_text_is_pinned() -> None:
         "37e9a0b5058e8c60355db926a963a8fba59c0fc4dd43d9ede4c7116e464e9e8b"
     )
     assert _sha(prompts.VOICE_CONFIGURATION_HELP) == (
-        "949d9b1e099e90adbf6a72cdcb261998659ad5a665b586e9f03cd1fac390995b"
+        "3eab69069175fe382afd4c75ea88138bed55f0b5b93f43affc5b6e5fba2a6fec"
     )
 
 

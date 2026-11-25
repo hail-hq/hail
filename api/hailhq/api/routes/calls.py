@@ -358,6 +358,7 @@ async def create_call(
     # Saved agent: fills every field the request left out (explicit fields
     # win), stamps calls.agent_id, and may carry its own AI line and cap.
     agent: Agent | None = None
+    sent_voice_config = "voice_config" in body.model_fields_set
     if body.agent_id is not None:
         agent = (
             await db.execute(
@@ -455,8 +456,17 @@ async def create_call(
             body.voice_config.voice_provider, lang, default_tts
         )
     ):
-        raise await cache_failure(
-            idem, unprocessable(error, loc=["body", "voice_config", "voice_provider"])
+        if sent_voice_config:
+            raise await cache_failure(
+                idem,
+                unprocessable(error, loc=["body", "voice_config", "voice_provider"]),
+            )
+        body = body.model_copy(
+            update={
+                "voice_config": body.voice_config.model_copy(
+                    update={"voice_id": None, "voice_provider": None}
+                )
+            }
         )
     if lang is not None:
         body = body.model_copy(

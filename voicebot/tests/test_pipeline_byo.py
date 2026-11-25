@@ -129,6 +129,18 @@ def test_agent_voice_respects_workspace_fallback_policy(captured_plugins) -> Non
     assert "elevenlabs" not in captured_plugins
 
 
+def test_agent_voice_retains_same_provider_fallback_for_a_byo_key(
+    captured_plugins,
+) -> None:
+    org = ResolvedLayer("cartesia", "org-key", {"voice_id": "org-voice"}, True)
+    build_tts(org, "agent-voice", "th", voice_provider="cartesia")
+    byo, fallback = [call.kwargs for call in captured_plugins["cartesia"]]
+    assert byo["voice"] == "agent-voice"
+    assert byo["api_key"] == "org-key"
+    assert fallback["voice"] == "house-voice"
+    assert "api_key" not in fallback
+
+
 def test_llm_org_anthropic(captured_plugins) -> None:
     org = ResolvedLayer(
         provider="anthropic",

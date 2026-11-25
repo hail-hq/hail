@@ -19,6 +19,8 @@ from datetime import datetime, timezone
 from typing import Annotated
 from uuid import UUID
 
+import httpx
+from cryptography.fernet import InvalidToken
 from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi import status as http_status
 from hailhq.api.audit import actor_of, write_audit_log
@@ -28,6 +30,7 @@ from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.api.routes.calls import get_livekit_optional
 from hailhq.core import inbound_routing
 from hailhq.core.agent_tools.registry import all_tools
+from hailhq.core.config import settings
 from hailhq.core.db import get_session, org_lock
 from hailhq.core.handover import (
     HandoverInvalid,
@@ -61,6 +64,7 @@ from hailhq.core.schemas import (
 )
 from hailhq.core.secret_cipher import SecretKeyMissing
 from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
+from hailhq.core.voice_catalog import validate_voice_language
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -77,6 +81,34 @@ async def _check_scoped_voice(
     language = voice.language or (org_tts.params.get("language") if org_tts else None)
     if error := voice_override_conflict(voice.voice_provider, language, org_tts):
         raise unprocessable(error, loc=["body", "voice_config", "voice_provider"])
+    if org_tts is None or org_tts.provider != voice.voice_provider:
+        return
+    custom_key = org_tts.encrypted_api_key
+    custom_model = org_tts.params.get("model")
+    if not custom_key and not custom_model:
+        return
+    cartesia = voice.voice_provider == "cartesia"
+    try:
+        key = (
+            provider_cipher().decrypt(custom_key)
+            if custom_key
+            else settings.cartesia_api_key if cartesia else settings.eleven_api_key
+        )
+        model = custom_model or (
+            settings.cartesia_model if cartesia else settings.elevenlabs_model
+        )
+        await validate_voice_language(
+            voice.voice_provider, voice.voice_id, model, key, language or "en"
+        )
+    except ValueError as exc:
+        raise unprocessable(
+            "This voice could not be verified for your workspace call settings.",
+            loc=["body", "voice_config", "voice_id"],
+        ) from exc
+    except (InvalidToken, SecretKeyMissing, httpx.HTTPError) as exc:
+        raise HTTPException(
+            503, "Voice support could not be checked. Try again."
+        ) from exc
 
 
 router = APIRouter(

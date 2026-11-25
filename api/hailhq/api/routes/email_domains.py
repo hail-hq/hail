@@ -797,15 +797,17 @@ async def dns_check_email_domain(
 @router.patch(
     "/{domain_id}",
     response_model=EmailDomainResponse,
-    responses=merge_rate_limited_responses(
-        {
-            409: {"description": "The address or agent assignment has changed."},
-            429: {
-                "description": "The organization reached its daily confirm-mail limit for new forward addresses."
+    responses={
+        409: {"description": "The address or agent assignment has changed."},
+        **merge_rate_limited_responses(
+            {
+                429: {
+                    "description": "The organization reached its daily confirm-mail limit for new forward addresses."
+                },
             },
-        },
-        GENERAL_RATE_LIMITED_RESPONSES,
-    ),
+            GENERAL_RATE_LIMITED_RESPONSES,
+        ),
+    },
 )
 async def patch_email_domain(
     domain_id: UUID,

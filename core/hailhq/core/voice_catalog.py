@@ -288,7 +288,7 @@ async def _provider_catalogue(provider: str, model: str, key: str) -> dict:
         return result
 
 
-async def voice_catalogue(language: str) -> dict:
+async def voice_catalogue(language: str, *, provider_filter: str | None = None) -> dict:
     if language not in SUPPORTED_LANGUAGES:
         raise ValueError("Choose a supported language")
     providers = [
@@ -297,7 +297,10 @@ async def voice_catalogue(language: str) -> dict:
             ("cartesia", settings.cartesia_model, settings.cartesia_api_key),
             ("elevenlabs", settings.elevenlabs_model, settings.eleven_api_key),
         ]
-        if key and model and p in SUPPORTED_LANGUAGES[language].tts
+        if key
+        and model
+        and p in SUPPORTED_LANGUAGES[language].tts
+        and (provider_filter is None or provider_filter == p)
     ]
     results = await asyncio.gather(
         *[_provider_catalogue(*p) for p in providers], return_exceptions=True

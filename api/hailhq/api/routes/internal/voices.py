@@ -89,8 +89,10 @@ _HELLO = {
 
 
 @router.get("")
-async def list_voices(language: Language = "en") -> dict:
+async def list_voices(language: Language = "en", provider: str | None = None) -> dict:
     try:
+        if provider is not None:
+            return await voice_catalogue(language, provider_filter=provider)
         return await voice_catalogue(language)
     except (httpx.HTTPError, ValueError) as exc:
         raise HTTPException(
