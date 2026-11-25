@@ -26,12 +26,13 @@ pieces. An API error or timeout never fails a document: the pass logs a
 warning and waits (the server's Retry-After, or 30 s doubling up to 10
 minutes) before it tries again.
 
-A batch the API refuses (a 400, 413 or 422) is a setting error, and the
-pass backs off, when a short probe text is refused too (a bad key or
-width) or when no piece of the batch passes alone (an input limit too
-small for our pieces). Otherwise a piece refused alone is skipped (the
-newest ``_SKIP_MAX``, until the model changes or the process restarts), so
-it never holds up the others.
+A batch the API refuses (a 400, 413 or 422) is checked with a short probe
+text: a refused probe means the setting (a bad key or width), and the pass
+backs off. Otherwise each piece is sent alone, and a piece refused alone
+is marked (``embedding_refused`` = the model) and leaves the queue, so it
+never holds up other pieces or other workspaces; it is tried again when
+the model changes. Each batch takes the first pieces of every workspace in
+turn, so one workspace's large file never fills every batch.
 
 No transaction stays open during an API request: pieces are read,
 embedded, then written only where they still lack a vector of the model.
@@ -140,8 +141,6 @@ MAX_DOCUMENT_PIECES = 1500
 EMBED_PER_TICK = 1000
 # Waits after an embedding API failure: doubling from the first to the last.
 EMBED_BACKOFF = (30.0, 600.0)
-# Most pieces kept in the skip list; past it, refused pieces back off.
-_SKIP_MAX = 1000
 # Sent when a batch is refused: a refusal of this too means the setting.
 _PROBE_TEXT = "Opening hours"
 # What a piece's vector adds to the knowledge tables: about 3 KB of
@@ -203,11 +202,10 @@ class KnowledgeIngestWorker:
         # failure; ``_embed_failures`` failures in a row so far.
         self._embed_after = 0.0
         self._embed_failures = 0
-        # Pieces the API refused on their own, and for which model: not sent
-        # again by this process (the newest ``_SKIP_MAX``, oldest first).
-        self._embed_skip: dict[UUID, None] = {}
-        self._embed_skip_model: str | None = None
+        # The probe text passed in the current pass: not sent again.
         self._probe_ok = False
+        # "storage is full" was logged; not again until it clears.
+        self._full_warned = False
 
     def _get_s3(self) -> S3MailClient:
         if self._s3 is None:
@@ -252,48 +250,79 @@ class KnowledgeIngestWorker:
         embedder = self._embedder()
         if embedder is None:
             return 0
-        if self._embed_skip_model != embedder.model:
-            self._embed_skip, self._embed_skip_model = {}, embedder.model
-        # The probe text passed in this pass: not sent again.
-        self._probe_ok = False
+        self._probe_ok = False  # Each pass sends the probe again when needed.
         done = tried = 0
         while not self._stop.is_set() and tried < EMBED_PER_TICK:
-            query = (
-                select(KnowledgePiece.id, KnowledgePiece.text)
+            # Each workspace's pieces in turn (missing vectors first, then
+            # those of another model), so no workspace fills every batch.
+            turn = (
+                func.row_number()
+                .over(
+                    partition_by=KnowledgePiece.organization_id,
+                    order_by=(
+                        KnowledgePiece.embedding_model.is_not(None),
+                        KnowledgePiece.document_id,
+                        KnowledgePiece.ordinal,
+                    ),
+                )
+                .label("turn")
+            )
+            queue = (
+                select(
+                    KnowledgePiece.id,
+                    KnowledgePiece.text,
+                    KnowledgePiece.embedding_model,
+                    turn,
+                )
                 .where(
                     KnowledgePiece.embedding_model.is_distinct_from(embedder.model),
+                    KnowledgePiece.embedding_refused.is_distinct_from(embedder.model),
                     KnowledgePiece.organization_id.in_(
                         select(OrganizationKnowledge.organization_id)
                     ),
                 )
-                # Missing vectors first, then those of another model.
-                .order_by(
-                    KnowledgePiece.embedding_model.is_not(None),
-                    KnowledgePiece.document_id,
-                    KnowledgePiece.ordinal,
-                )
+                .subquery()
+            )
+            query = (
+                select(queue.c.id, queue.c.text, queue.c.embedding_model)
+                .order_by(queue.c.turn, queue.c.id)
                 .limit(BATCH)
             )
-            if self._embed_skip:
-                query = query.where(KnowledgePiece.id.not_in(list(self._embed_skip)))
             async with self._session_factory() as db:
                 rows = (await db.execute(query)).all()
             if not rows:
                 break
             tried += len(rows)
-            # Vectors of pieces stored before (with no key, or another
-            # model) must still fit under the cap.
+            # New vectors (pieces stored with no key) must still fit under
+            # the cap; replacing another model's vector adds nothing.
+            new = sum(1 for r in rows if r.embedding_model is None)
             async with self._session_factory() as db:
-                full = await storage_full(db, adding=len(rows) * _VECTOR_BYTES)
+                full = new and await storage_full(db, adding=new * _VECTOR_BYTES)
             if full:
                 self._embed_after = time.monotonic() + EMBED_BACKOFF[1]
-                logger.warning(
-                    "knowledge: storage is full; %d piece(s) keep keyword search "
-                    "without vectors",
-                    len(rows),
-                )
+                if not self._full_warned:
+                    self._full_warned = True
+                    logger.warning(
+                        "knowledge: storage is full; pieces without a vector "
+                        "keep keyword search"
+                    )
                 break
-            pairs, failure = await self._embed_rows(embedder, rows)
+            self._full_warned = False
+            pairs, refused, failure = await self._embed_rows(embedder, rows)
+            if refused:
+                async with self._session_factory() as db:
+                    await db.execute(
+                        update(KnowledgePiece)
+                        .where(KnowledgePiece.id.in_([r.id for r in refused]))
+                        .values(embedding_refused=embedder.model)
+                    )
+                    await db.commit()
+                for row in refused:
+                    logger.warning(
+                        "knowledge: the embedding API refused piece %s; it keeps "
+                        "keyword search",
+                        row.id,
+                    )
             if pairs:
                 async with self._session_factory() as db:
                     await db.execute(
@@ -310,7 +339,7 @@ class KnowledgeIngestWorker:
                     await db.commit()
                 done += len(pairs)
             if failure is not None:
-                self._back_off(failure, len(rows) - len(pairs))
+                self._back_off(failure, len(rows) - len(pairs) - len(refused))
                 break
             self._embed_failures = 0
         if done:
@@ -319,51 +348,34 @@ class KnowledgeIngestWorker:
 
     async def _embed_rows(
         self, embedder: Embedder, rows
-    ) -> tuple[list, EmbeddingUnavailable | None]:
-        """The (row, vector) pairs for ``rows``, and the failure that stopped
-        it, if any. A refused batch is checked with a probe text, then sent
-        again one piece at a time; a piece refused alone joins
-        ``_embed_skip``. Vectors already made are kept when a later request
-        fails."""
+    ) -> tuple[list, list, EmbeddingUnavailable | None]:
+        """The (row, vector) pairs for ``rows``, the rows the API refused on
+        their own, and the failure that stopped it, if any. A refused batch
+        is checked with a probe text (refused too: the setting, returned as
+        the failure), then sent again one piece at a time. Vectors already
+        made are kept when a later request fails."""
         try:
             vectors = await embedder.embed([r.text for r in rows])
-            return list(zip(rows, vectors, strict=True)), None
+            return list(zip(rows, vectors, strict=True)), [], None
         except EmbeddingUnavailable as exc:
             if not exc.refused:
-                return [], exc
-            batch_refusal = exc
+                return [], [], exc
         if not self._probe_ok:
             try:
                 await embedder.embed([_PROBE_TEXT])
             except EmbeddingUnavailable as exc:
-                # The probe fails too: the setting, not the pieces.
-                return [], exc if not exc.refused else batch_refusal
+                return [], [], exc
             self._probe_ok = True
         pairs: list = []
         refused: list = []
-        stop: EmbeddingUnavailable | None = None
         for row in rows:
             try:
                 pairs.append((row, (await embedder.embed([row.text]))[0]))
             except EmbeddingUnavailable as exc:
                 if not exc.refused:
-                    stop = exc
-                    break
+                    return pairs, refused, exc
                 refused.append(row)
-                stop_refusal = exc
-        if refused and not pairs and stop is None:
-            # No piece passes alone: an input limit, not the pieces.
-            return [], stop_refusal
-        for row in refused:
-            self._embed_skip[row.id] = None
-            while len(self._embed_skip) > _SKIP_MAX:
-                self._embed_skip.pop(next(iter(self._embed_skip)))
-            logger.warning(
-                "knowledge: the embedding API refused piece %s; it keeps "
-                "keyword search",
-                row.id,
-            )
-        return pairs, stop
+        return pairs, refused, None
 
     def _back_off(self, exc: EmbeddingUnavailable, pieces: int) -> None:
         self._embed_failures += 1
@@ -689,7 +701,8 @@ _INSERT_PIECES = text("""
 # may have written it meanwhile); a deleted piece updates nothing.
 _SET_EMBEDDING = text("""
     UPDATE knowledge_pieces
-    SET embedding = CAST(:embedding AS halfvec), embedding_model = :model
+    SET embedding = CAST(:embedding AS halfvec), embedding_model = :model,
+        embedding_refused = NULL
     WHERE id = :id AND embedding_model IS DISTINCT FROM :model
     """)
 

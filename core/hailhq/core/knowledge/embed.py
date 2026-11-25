@@ -113,6 +113,7 @@ def embedding_config() -> EmbeddingConfig | None:
     api_key = settings.hail_embedding_api_key
     try:
         parts = urlsplit(base_url)
+        parts.port  # noqa: B018 (raises ValueError on a bad port)
         host = parts.hostname if parts.scheme in ("http", "https") else None
     except ValueError:
         host = None

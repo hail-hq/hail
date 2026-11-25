@@ -103,6 +103,14 @@ Another width needs a migration (column type and HNSW index) plus a re-embed; un
 
 An API error or timeout never breaks a call, a text or an email reply: that search uses keywords and logs a warning (status code or exception type, never text). Ingest never fails a document for it: pieces are `ready` and keyword-searchable at once; the embedding pass waits (the server's `Retry-After`, or 30 s doubling up to 10 minutes) and tries again.
 
+A batch the API refuses (400, 413, 422) is checked with a short probe text. A refused probe means the setting (key, model, width): the pass waits. Otherwise each piece is sent alone, and a piece refused alone gets `embedding_refused` set to the model and stays keyword-only until the model changes. Each batch takes every workspace's pieces in turn. To try refused pieces again under the same model:
+
+```sql
+UPDATE knowledge_pieces SET embedding_refused = NULL WHERE embedding_refused IS NOT NULL;
+```
+
+The embedding pass stops while the 300 MB cap is reached (logged once); pieces without a vector keep keyword search. Replacing another model's vector adds nothing, so a model change always finishes.
+
 Search filters on the organization and the model; the HNSW index filters after its scan, so each nearest-piece query sets `hnsw.iterative_scan = strict_order` (pgvector 0.8.0 or later). Local Docker and CI use `pgvector/pgvector:0.8.0-pg16`.
 
 A message made only of filler words ("okay, thank you", "Sorry?") is not searched. Hold-the-line turns ("one second", "wait, what?") are not searched either. Otherwise a call turn needs two non-filler words, three spoken words, or one word with a question mark; a text or email needs two words. Any ID is always searched.

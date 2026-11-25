@@ -168,7 +168,12 @@ def test_other_width_needs_a_migration(monkeypatch, caplog) -> None:
 
 
 @pytest.mark.parametrize(
-    "url", ["generativelanguage.googleapis.com/v1beta/openai", "http://[::1/v1"]
+    "url",
+    [
+        "generativelanguage.googleapis.com/v1beta/openai",
+        "http://[::1/v1",
+        "https://api.example.com:80a/v1",
+    ],
 )
 def test_base_url_must_be_http(monkeypatch, caplog, url) -> None:
     monkeypatch.setattr(settings, "hail_embedding_api_key", "k")

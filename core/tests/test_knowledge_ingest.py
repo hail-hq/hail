@@ -764,7 +764,9 @@ async def test_vector_index_keeps_a_small_workspace_results(
     rows = []
     for org, count, body in (
         (big, 300, "warranty ten year purchase"),
-        (small, 1, "opening hours nine to five"),
+        # Shares a word with the question, so it is reachable in the graph,
+        # but every piece of the other workspace is nearer.
+        (small, 1, "warranty desk opening hours nine to five"),
     ):
         upload = FileUpload(
             id=uuid.uuid4(),
@@ -819,7 +821,7 @@ async def test_vector_index_keeps_a_small_workspace_results(
     hits = await search_pieces(
         async_session, small, "zzz", query, 3, model="fake-embedding"
     )
-    assert [h.piece.text for h in hits] == ["opening hours nine to five"]
+    assert [h.piece.text for h in hits] == ["warranty desk opening hours nine to five"]
     await async_session.rollback()
 
 
@@ -861,7 +863,9 @@ async def test_refused_everything_is_a_setting_error(
     await add_document(async_session, s3, org, rows.encode(), "text/csv")
     fake.refuse = ""  # every text holds the empty string: all refused
     await worker.tick()
-    assert worker._embed_after > 0 and not worker._embed_skip
+    assert worker._embed_after > 0
+    pieces = await pieces_of(async_session, org)
+    assert all(p.embedding_refused is None for p in pieces)
     # One batch request and the probe, not one per piece.
     assert fake.calls == 2
     fake.refuse = None
@@ -885,7 +889,9 @@ async def test_refused_first_pieces_never_stop_the_rest(
     await worker.tick()
     pieces = await pieces_of(async_session, org)
     assert [p.embedding_model is None for p in pieces] == [True] * 4 + [False] * 4
-    assert worker._embed_after == 0.0 and len(worker._embed_skip) == 4
+    assert worker._embed_after == 0.0
+    marks = [p.embedding_refused for p in pieces]
+    assert marks == ["fake-embedding"] * 4 + [None] * 4
 
 
 async def test_storage_cap_counts_vectors_with_or_without_an_api(
@@ -927,15 +933,49 @@ async def test_storage_cap_counts_vectors_with_or_without_an_api(
     assert worker._embed_after > 0
 
 
-async def test_every_piece_refused_alone_is_a_setting_error(
+async def test_one_workspace_refused_pieces_never_stop_another(
+    async_session, worker, s3, fake
+) -> None:
+    """One workspace's pieces that the API refuses alone are marked and
+    leave the queue; another workspace's pieces get their vectors in the
+    same pass, and the refused ones are not sent again."""
+    bad, good = uuid.uuid4(), uuid.uuid4()
+    rows = "Part,Name\n" + "\n".join(f"P-{i},poison {i}" for i in range(120))
+    await add_document(async_session, s3, bad, rows.encode(), "text/csv")
+    await add_document(async_session, s3, good, NORTHGATE_MANUAL.encode())
+    fake.refuse = "poison"
+    await worker.tick()
+    good_pieces = await pieces_of(async_session, good)
+    assert good_pieces and all(p.embedding_model for p in good_pieces)
+    bad_pieces = await pieces_of(async_session, bad)
+    assert all(p.embedding_refused == "fake-embedding" for p in bad_pieces)
+    assert worker._embed_after == 0.0
+    calls = fake.calls
+    await worker.tick()
+    assert fake.calls == calls
+    # Keywords still find the refused pieces.
+    hits = await search_pieces(async_session, bad, "poison 7", None, 3)
+    assert hits
+    # A new model tries them again.
+    fake.model, fake.refuse = "fake-embedding-2", None
+    await worker.tick()
+    assert all(p.embedding_model for p in await pieces_of(async_session, bad))
+
+
+async def test_model_change_finishes_when_storage_is_full(
     async_session, worker, s3, fake, monkeypatch
 ) -> None:
-    """The probe passes but no piece passes alone (an input limit smaller
-    than our pieces): nothing is skipped, the pass backs off."""
+    """Replacing another model's vector adds no bytes, so a full store
+    never stops a re-embed."""
     org = uuid.uuid4()
-    rows = "Part,Name\n" + "\n".join(f"P-{i},Item {i}" for i in range(4))
-    await add_document(async_session, s3, org, rows.encode(), "text/csv")
-    fake.refuse = "Item"
+    await add_document(async_session, s3, org, NORTHGATE_MANUAL.encode())
     await worker.tick()
-    assert worker._embed_after > 0 and not worker._embed_skip
-    assert all(p.embedding is None for p in await pieces_of(async_session, org))
+
+    async def always_full(db, *, adding=0):
+        return True
+
+    monkeypatch.setattr(ingest_module, "storage_full", always_full)
+    fake.model = "fake-embedding-2"
+    await worker.tick()
+    pieces = await pieces_of(async_session, org)
+    assert pieces and all(p.embedding_model == "fake-embedding-2" for p in pieces)
