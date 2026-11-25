@@ -989,11 +989,14 @@ class SipConnectionCreate(BaseModel):
     label: str = Field(
         min_length=1, max_length=80, description="A name, such as 'Main office'."
     )
-    default_region: str = Field(
+    default_region: str | None = Field(
+        default=None,
         pattern=r"^[A-Z]{2}$",
         description=(
-            "ISO alpha-2 country of the phone system. Hail reads national "
-            "caller numbers with it."
+            "Optional ISO alpha-2 country of the phone system; most connections "
+            "leave it out. Set: Hail reads callers with it first. Left out: "
+            "with the country of the number that was called, then of the "
+            "connection's other numbers."
         ),
     )
     pbx_host: str | None = Field(
@@ -1044,6 +1047,14 @@ class SipConnectionPatch(BaseModel):
     pbx_password: str | None = Field(
         default=None, description="New password Hail sends. Stored encrypted."
     )
+    default_region: str | None = Field(
+        default=None,
+        pattern=r"^[A-Z]{2}$",
+        description=(
+            "New country of the phone system, tried first to read callers. "
+            "Null clears it: Hail then uses the country of the number called."
+        ),
+    )
 
     @model_validator(mode="after")
     def _not_null(self) -> "SipConnectionPatch":
@@ -1056,11 +1067,17 @@ class SipConnectionPatch(BaseModel):
 class SipConnectionResponse(BaseModel):
     id: UUID = Field(description="Unique identifier for this connection.")
     label: str = Field(description="Name of the connection.")
-    default_region: str = Field(description="ISO alpha-2 country of the phone system.")
+    default_region: str | None = Field(
+        description=(
+            "Optional country of the phone system, tried first to read "
+            "callers (see create). Null for most connections."
+        )
+    )
     sip_host: str = Field(
         description=(
             "SIP server your phone system sends calls to (the trunk's host). "
-            "Shows only its first characters when sip_host_masked is true."
+            "When sip_host_masked is true it shows only its first characters, "
+            "followed by '•' characters that are not part of the host."
         )
     )
     sip_host_masked: bool = Field(

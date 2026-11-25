@@ -89,7 +89,10 @@ def _sees_full_host(principal: Principal) -> bool:
 
 
 def _masked_host(host: str) -> str:
-    return host[:MASKED_HOST_CHARS] + "…" if len(host) > MASKED_HOST_CHARS else host
+    """The start of the host, then dots like a masked password."""
+    if len(host) <= MASKED_HOST_CHARS:
+        return host
+    return host[:MASKED_HOST_CHARS] + "•" * 12
 
 
 async def connections_principal(

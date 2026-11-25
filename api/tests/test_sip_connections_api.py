@@ -50,7 +50,7 @@ async def test_create_connection_returns_password_once(
     assert len(body["password"]) >= 24
     assert body["password_last4"] == body["password"][-4:]
     # A workspace sees only the start of the SIP server.
-    assert body["sip_host"] == "examp…"
+    assert body["sip_host"] == "examp••••••••••••"
     assert body["sip_host_masked"] is True
     assert SIP_HOST not in str(body)
     assert body["username"]
@@ -651,7 +651,7 @@ async def test_every_workspace_reaches_the_routes_with_the_host_masked(
     finally:
         app.dependency_overrides.pop(get_current_principal, None)
     for body in (created, listed, one, patched):
-        assert body["sip_host"] == "examp…"
+        assert body["sip_host"] == "examp••••••••••••"
         assert body["sip_host_masked"] is True
         assert SIP_HOST not in str(body)
 
@@ -702,4 +702,40 @@ def test_a_short_host_is_not_masked_into_nothing() -> None:
     from hailhq.api.routes.sip_connections import _masked_host
 
     assert _masked_host("abc") == "abc"
-    assert _masked_host("abcdef.example") == "abcde…"
+    assert _masked_host("abcdef.example") == "abcde" + "•" * 12
+
+
+async def test_a_connection_needs_no_country(
+    client: httpx.AsyncClient, org_and_key: tuple
+) -> None:
+    _org, _key, plain = org_and_key
+    resp = await client.post(
+        "/sip-connections", json={"label": "Main office"}, headers=_auth(plain)
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["default_region"] is None
+
+
+async def test_an_older_client_may_still_send_a_country(
+    client: httpx.AsyncClient, org_and_key: tuple
+) -> None:
+    # Deprecated and unused, but accepted so older CLIs keep working.
+    _org, _key, plain = org_and_key
+    conn = await _create(client, plain, default_region="GB")
+    assert conn["default_region"] == "GB"
+
+
+async def test_patch_sets_and_clears_the_phone_system_country(
+    client: httpx.AsyncClient, org_and_key: tuple
+) -> None:
+    _org, _key, plain = org_and_key
+    conn = await _create(client, plain)
+    url = f"/sip-connections/{conn['id']}"
+    resp = await client.patch(url, json={"default_region": "GB"}, headers=_auth(plain))
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["default_region"] == "GB"
+    resp = await client.patch(url, json={"default_region": None}, headers=_auth(plain))
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["default_region"] is None
+    bad = await client.patch(url, json={"default_region": "gb"}, headers=_auth(plain))
+    assert bad.status_code == 422
