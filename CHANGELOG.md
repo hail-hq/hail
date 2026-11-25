@@ -7,6 +7,8 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 ### Added
 
 - Knowledge base (early access): upload manuals, FAQs and part lists, and agents answer calls, texts and email from them, in any supported language (`/v1/knowledge`, `knowledge` on agents, CLI `hail knowledge`, SDK and MCP).
+- Connect your phone system: keep your number and phone system, and send its calls to a Hail agent. Hail's team sets it up with you.
+- Contacts can be phone system extensions, for handover.
 
 ### Fixed
 

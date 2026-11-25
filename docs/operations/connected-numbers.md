@@ -1,6 +1,6 @@
 # Connected numbers
 
-A customer's phone system (PBX) connects to Hail over a SIP trunk. Each connection has its own LiveKit inbound and outbound trunk. Until the public routes exist, an operator sets everything up with one command.
+A customer's phone system (PBX) connects to Hail over a SIP trunk. Each connection has its own LiveKit inbound and outbound trunk. Customers set it up in the console or with [`/v1/sip-connections`](../public/connect-phone-system.md); the API needs `LIVEKIT_SIP_HOST` set (empty: the routes answer 503). The operator command below is for support.
 
 ## 1. Before any connected number exists
 
@@ -16,7 +16,10 @@ A customer's phone system (PBX) connects to Hail over a SIP trunk. Each connecti
    - `lk sip dispatch update --trunks ""` does not work (lk 2.16.3: "unsupported list update operation"). Use the command above.
    - Verify: `lk sip dispatch list` shows `<any>` under SipTrunks for `hail-inbound`.
    - Never add a trunk to the rule after this. A rule that lists one trunk matches only the trunks it lists, and connection trunks stop being answered. `scripts/ops/sip_trunks.py apply` already skips the add on an empty list; skip it in the [inbound trunk runbook](inbound-trunk-lockdown.md) rollback too.
+
 3. Do this before the first connection is created, and after the per-carrier trunks of the [inbound trunk runbook](inbound-trunk-lockdown.md) are applied.
+
+Who can use it: staff console sessions only while `OPEN_TO_ALL_WORKSPACES` is `False` in `api/hailhq/api/routes/sip_connections.py` (everyone else gets 404), with the console feature `connectedPhoneSystems` in hail-website `lib/console-features.ts`. Open both together. Once open, the API shows the LiveKit project's SIP host to every workspace that connects a phone system.
 
 ## 2. Commands
 
@@ -34,14 +37,17 @@ docker compose exec api python -m hailhq.api.connected_numbers_ops remove \
   --number-id <number uuid>
 docker compose exec api python -m hailhq.api.connected_numbers_ops delete \
   --connection <connection uuid>
+docker compose exec api python -m hailhq.api.connected_numbers_ops release-claim \
+  --number +14155550100
 ```
 
 - `create` prints the connection id, the inbound username and the inbound password. The password is shown once. Hail does not log it.
 - `add` prints the number id and its state (`unverified`).
 - `check` prints the state, the reason and the check call id.
 - `delete` works only when the connection has no numbers.
+- `release-claim` frees a number held by an unchecked claim (section 5), for a number added by hand. It prints `released`, or exits 1 when the number has no unchecked claim.
 - Exit codes: 0 done, 1 refused (prints the error `code` and `field`), 2 bad arguments.
-- Limits: `create` has no `--pbx-username` or `--pbx-password`, and there is no update or rotate command. If an inbound password is lost, remove the numbers, delete the connection and create it again. Plan 2 adds these.
+- The command has no update or rotate: use `PATCH /v1/sip-connections/{id}` and `POST /v1/sip-connections/{id}/rotate-password` (or the console).
 
 ## 3. What the customer enters in their PBX
 
@@ -65,6 +71,7 @@ The check calls the number from a Hail line and sends a 6-digit code as key pres
 - PBX host: Hail refuses an IP address in a private, loopback, link-local or reserved range, and names such as `localhost` or ones ending in `.local` or `.internal`. Hail does not resolve the name. LiveKit's SIP service resolves it and dials from its own network (LiveKit Cloud's network, not Hail's). A self-hosted LiveKit SIP service must not be able to reach internal ranges: block its egress to them with a firewall.
 - 5 checks per number per 24 hours.
 - `unverified` numbers are removed after 7 days. One workspace holds at most 10 at a time (`too_many_unverified`).
+- Unchecked claims give way. When a purchase (`POST /v1/numbers`) or another connection wants a number that is only `unverified` on a connection, Hail takes it off that connection's trunk, releases the claim (audit `number.claim_released` on the claim's workspace), then goes ahead. A claim whose check is running keeps the number for that check: the other side gets 409 "This number is being checked. Try again in 2 minutes." The same connection adding its own number again gets `number_taken`.
 - The check call is billed as a normal outbound call.
 
 ## 6. Manual LiveKit probe

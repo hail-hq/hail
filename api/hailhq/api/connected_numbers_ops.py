@@ -1,4 +1,5 @@
-"""Operator command for connected numbers, until the public routes exist.
+"""Operator command for connected numbers (support and ops; customers use
+the console or /v1/sip-connections).
 
 Run on the API host:
 ``docker compose exec api python -m hailhq.api.connected_numbers_ops <command>``.
@@ -13,12 +14,14 @@ import re
 import sys
 from uuid import UUID
 
+import phonenumbers
 from hailhq.api.connected_numbers import (
     ConnectedNumberError,
     add_connected_number,
     check_connected_number,
     create_connection,
     delete_connection,
+    give_way_unchecked_claim,
     remove_connected_number,
 )
 from hailhq.core.db import session_scope
@@ -32,6 +35,16 @@ def _region(value: str) -> str:
     if not _REGION.fullmatch(value):
         raise argparse.ArgumentTypeError("use a 2-letter country code, like US")
     return value
+
+
+def _e164(value: str) -> str:
+    try:
+        parsed = phonenumbers.parse(value, None)
+    except phonenumbers.NumberParseException as exc:
+        raise argparse.ArgumentTypeError("not a phone number; use +E.164") from exc
+    if not phonenumbers.is_possible_number(parsed):
+        raise argparse.ArgumentTypeError("not a phone number; use +E.164")
+    return phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
 
 
 def _uuid(value: str) -> UUID:
@@ -74,6 +87,12 @@ def _parser() -> argparse.ArgumentParser:
     delete = sub.add_parser("delete", help="delete a connection with no numbers")
     delete.add_argument("--connection", required=True, type=_uuid)
 
+    release = sub.add_parser(
+        "release-claim",
+        help="free a number held by an unchecked claim (before adding it by hand)",
+    )
+    release.add_argument("--number", required=True, type=_e164)
+
     dispatch = sub.add_parser(
         "dispatch-any", help="make a dispatch rule match any inbound trunk"
     )
@@ -108,6 +127,12 @@ async def _run(args: argparse.Namespace) -> None:
                 rule_id, trunks = found
                 print(f"rule id: {rule_id}")
                 print(f"trunks: {', '.join(trunks) or 'none'}")
+            elif args.command == "release-claim":
+                e164 = args.number
+                if not await give_way_unchecked_claim(db, lk, e164):
+                    print("not an unchecked claim: nothing released")
+                    raise SystemExit(1)
+                print("released")
             elif args.command == "create":
                 row, password = await create_connection(
                     db,
@@ -149,6 +174,8 @@ def main(argv: list[str] | None = None) -> int:
         return exc.code if isinstance(exc.code, int) else 2
     try:
         asyncio.run(_run(args))
+    except SystemExit as exc:
+        return exc.code if isinstance(exc.code, int) else 1
     except ConnectedNumberError as exc:
         print(f"error: {exc.code} field: {exc.field or 'none'}")
         return 1

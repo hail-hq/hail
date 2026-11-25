@@ -2458,7 +2458,8 @@ paths:
             expected_total_cents differs from the quoted total, or the carrier rejected
             or failed the order. In the last case the credit hold is refunded and
             the detail gives the reason. Also returned when the quote's number was
-            released since it was bought.
+            released since it was bought, and while another workspace runs the ownership
+            check on that number as a connected number.
         "503":
           description:
             The carrier lookup or number price is unavailable, or no inventory
@@ -4577,10 +4578,13 @@ paths:
       tags:
         - contacts
       summary: Create Contact
-      description: "Create a manual contact with a phone and/or an email.
+      description:
+        "Create a manual contact with a phone, an email or an extension.
 
 
-        Requires at least one of phone_e164 or email. Fails with 409 if a
+        Requires at least one of phone_e164, email or extension (an extension
+
+        on your connected phone system, for handover). Fails with 409 if a
 
         contact with the same phone or email already exists in this
 
@@ -4644,8 +4648,8 @@ paths:
         "Update a manual contact's fields. Only fields present in the body\
         \ change.\n\nManual contacts only \u2014 a member: id (org members synced\
         \ from\nmembership) returns 422; edit those via the membership APIs instead.\n\
-        The contact must still have at least one of phone_e164 or email after\nthe\
-        \ update. Fails with 409 on a duplicate phone/email."
+        The contact must still have at least one of phone_e164, email or\nextension\
+        \ after the update. Fails with 409 on a duplicate phone/email."
       operationId: patch_contact_v1_contacts__contact_id__patch
       parameters:
         - name: contact_id
@@ -6976,6 +6980,480 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
+  /v1/sip-connections:
+    post:
+      tags:
+        - sip-connections
+      summary: Create Sip Connection
+      description:
+        "Connect your phone system (PBX). Add the returned SIP server,
+        username
+
+        and password to it as a generic SIP trunk. The password is shown only in
+
+        this response; rotate it to get a new one. With ``pbx_host``, agents can
+
+        also call out and hand calls over through your phone system."
+      operationId: create_sip_connection_v1_sip_connections_post
+      parameters:
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SipConnectionCreate"
+      responses:
+        "201":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SipConnectionCreated"
+        "429":
+          description: The number used all its checks for today.
+        "402":
+          description: Not enough credit for the check call.
+        "404":
+          description: The connection or number does not exist here.
+        "409":
+          description: The request conflicts with the current state.
+        "422":
+          description: A field is not valid.
+        "502":
+          description: Hail could not reach its call service.
+        "503":
+          description: Connected phone systems are not set up on this server.
+    get:
+      tags:
+        - sip-connections
+      summary: List Sip Connections
+      description:
+        "List your connected phone systems, newest first. Passwords show
+        only
+
+        their last 4 characters."
+      operationId: list_sip_connections_v1_sip_connections_get
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Cursor
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 100
+            minimum: 1
+            default: 50
+            title: Limit
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SipConnectionListResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /v1/sip-connections/{connection_id}:
+    get:
+      tags:
+        - sip-connections
+      summary: Get Sip Connection
+      description: Read one connected phone system.
+      operationId: get_sip_connection_v1_sip_connections__connection_id__get
+      parameters:
+        - name: connection_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Connection Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SipConnectionResponse"
+        "429":
+          description: The number used all its checks for today.
+        "402":
+          description: Not enough credit for the check call.
+        "404":
+          description: The connection or number does not exist here.
+        "409":
+          description: The request conflicts with the current state.
+        "422":
+          description: A field is not valid.
+        "502":
+          description: Hail could not reach its call service.
+        "503":
+          description: Connected phone systems are not set up on this server.
+    patch:
+      tags:
+        - sip-connections
+      summary: Update Sip Connection
+      description:
+        "Change the label, or where and how Hail dials your phone system.
+
+        Fields left out stay as they are. ``pbx_host: null`` stops calls out and
+
+        handover through it; calls in keep working."
+      operationId: update_sip_connection_v1_sip_connections__connection_id__patch
+      parameters:
+        - name: connection_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Connection Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SipConnectionPatch"
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SipConnectionResponse"
+        "429":
+          description: The number used all its checks for today.
+        "402":
+          description: Not enough credit for the check call.
+        "404":
+          description: The connection or number does not exist here.
+        "409":
+          description: The request conflicts with the current state.
+        "422":
+          description: A field is not valid.
+        "502":
+          description: Hail could not reach its call service.
+        "503":
+          description: Connected phone systems are not set up on this server.
+    delete:
+      tags:
+        - sip-connections
+      summary: Delete Sip Connection
+      description: Delete a connected phone system. Remove its numbers first.
+      operationId: delete_sip_connection_v1_sip_connections__connection_id__delete
+      parameters:
+        - name: connection_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Connection Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "204":
+          description: Successful Response
+        "429":
+          description: The number used all its checks for today.
+        "402":
+          description: Not enough credit for the check call.
+        "404":
+          description: The connection or number does not exist here.
+        "409":
+          description: The request conflicts with the current state.
+        "422":
+          description: A field is not valid.
+        "502":
+          description: Hail could not reach its call service.
+        "503":
+          description: Connected phone systems are not set up on this server.
+  /v1/sip-connections/{connection_id}/rotate-password:
+    post:
+      tags:
+        - sip-connections
+      summary: Rotate Sip Connection Password
+      description:
+        "Make a new password for your phone system to send. The old one
+        stops
+
+        working at once: put the new one in your phone system's trunk."
+      operationId: rotate_sip_connection_password_v1_sip_connections__connection_id__rotate_password_post
+      parameters:
+        - name: connection_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Connection Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SipConnectionPassword"
+        "429":
+          description: The number used all its checks for today.
+        "402":
+          description: Not enough credit for the check call.
+        "404":
+          description: The connection or number does not exist here.
+        "409":
+          description: The request conflicts with the current state.
+        "422":
+          description: A field is not valid.
+        "502":
+          description: Hail could not reach its call service.
+        "503":
+          description: Connected phone systems are not set up on this server.
+  /v1/sip-connections/{connection_id}/numbers:
+    post:
+      tags:
+        - sip-connections
+      summary: Add Sip Connection Number
+      description:
+        "Add a number your phone system holds. It starts ``unverified``:
+        send
+
+        its incoming calls to Hail, then run the ownership check (verify) soon:
+
+        until it passes, someone else can buy or connect the number, and Hail
+
+        removes numbers left unchecked."
+      operationId: add_sip_connection_number_v1_sip_connections__connection_id__numbers_post
+      parameters:
+        - name: connection_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Connection Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConnectedNumberCreate"
+      responses:
+        "201":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PhoneNumberResponse"
+        "429":
+          description: The number used all its checks for today.
+        "402":
+          description: Not enough credit for the check call.
+        "404":
+          description: The connection or number does not exist here.
+        "409":
+          description: The request conflicts with the current state.
+        "422":
+          description: A field is not valid.
+        "502":
+          description: Hail could not reach its call service.
+        "503":
+          description: Connected phone systems are not set up on this server.
+  /v1/sip-connections/{connection_id}/numbers/{number_id}/verify:
+    post:
+      tags:
+        - sip-connections
+      summary: Verify Sip Connection Number
+      description:
+        "Prove you own the number: Hail calls it over the phone network,
+        and
+
+        the call must come back through this connection with a code sent as key
+
+        presses. Takes up to 2 minutes. Billed as a normal outbound call. A
+
+        failed check is a 200 with ``state: unverified`` and a ``reason``."
+      operationId: verify_sip_connection_number_v1_sip_connections__connection_id__numbers__number_id__verify_post
+      parameters:
+        - name: connection_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Connection Id
+        - name: number_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Number Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConnectedNumberCheck"
+        "429":
+          description: The number used all its checks for today.
+        "402":
+          description: Not enough credit for the check call.
+        "404":
+          description: The connection or number does not exist here.
+        "409":
+          description: The request conflicts with the current state.
+        "422":
+          description: A field is not valid.
+        "502":
+          description: Hail could not reach its call service.
+        "503":
+          description: Connected phone systems are not set up on this server.
+  /v1/sip-connections/{connection_id}/numbers/{number_id}:
+    delete:
+      tags:
+        - sip-connections
+      summary: Remove Sip Connection Number
+      description:
+        "Remove a number from Hail. It stays with your phone system and
+        your
+
+        provider; calls stop reaching Hail agents."
+      operationId: remove_sip_connection_number_v1_sip_connections__connection_id__numbers__number_id__delete
+      parameters:
+        - name: connection_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Connection Id
+        - name: number_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Number Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "204":
+          description: Successful Response
+        "429":
+          description: The number used all its checks for today.
+        "402":
+          description: Not enough credit for the check call.
+        "404":
+          description: The connection or number does not exist here.
+        "409":
+          description: The request conflicts with the current state.
+        "422":
+          description: A field is not valid.
+        "502":
+          description: Hail could not reach its call service.
+        "503":
+          description: Connected phone systems are not set up on this server.
   /healthz:
     get:
       summary: Healthz
@@ -7875,6 +8353,51 @@ components:
       required:
         - code
       title: ConfirmRequest
+    ConnectedNumberCheck:
+      properties:
+        state:
+          type: string
+          enum:
+            - active
+            - unverified
+          title: State
+          description: "'active': the number passed and can be routed to an agent."
+        reason:
+          anyOf:
+            - type: string
+              enum:
+                - no_call_arrived
+                - not_authenticated
+                - code_not_received
+            - type: "null"
+          title: Reason
+          description: "Why the check failed. 'no_call_arrived': no call reached
+            this connection; check the trunk and the routing rule. 'not_authenticated':
+            the call came without this connection's username and password, or to
+            another trunk. 'code_not_received': the check code did not come through;
+            turn on RFC 2833 key presses."
+        call_id:
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
+          title: Call Id
+          description: The check call, billed as an outbound call.
+      type: object
+      required:
+        - state
+      title: ConnectedNumberCheck
+    ConnectedNumberCreate:
+      properties:
+        e164:
+          type: string
+          title: E164
+          description: Your number with its country code, such as +14155550100.
+      additionalProperties: false
+      type: object
+      required:
+        - e164
+      title: ConnectedNumberCreate
     ContactCreate:
       properties:
         name:
@@ -7889,16 +8412,26 @@ components:
             - type: "null"
           title: Phone E164
           description:
-            Phone number, E.164 format. At least one of phone_e164 or email
-            is required.
+            Phone number, E.164 format. At least one of phone_e164, email
+            or extension is required.
         email:
           anyOf:
             - type: string
             - type: "null"
           title: Email
           description:
-            Email address, stored lowercased. At least one of phone_e164
-            or email is required.
+            Email address, stored lowercased. At least one of phone_e164,
+            email or extension is required.
+        extension:
+          anyOf:
+            - type: string
+              pattern: ^[0-9*#]{1,6}$
+            - type: "null"
+          title: Extension
+          description:
+            "Extension on your connected phone system (1 to 6 digits, *
+            or #), for handover on calls to a connected number. At least one of phone_e164,
+            email or extension is required."
       additionalProperties: false
       type: object
       required:
@@ -7937,6 +8470,12 @@ components:
             - type: "null"
           title: Email
           description: Email address. Null if none on file.
+        extension:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Extension
+          description: Extension on your connected phone system. Null if none on file.
         role:
           anyOf:
             - type: string
@@ -7994,7 +8533,8 @@ components:
           title: Phone E164
           description:
             New phone number, E.164 format. Omit to leave unchanged; explicit
-            null clears it. The contact must keep at least one of phone_e164 or email.
+            null clears it. The contact must keep at least one of phone_e164, email
+            or extension.
         email:
           anyOf:
             - type: string
@@ -8002,8 +8542,18 @@ components:
           title: Email
           description:
             New email address, stored lowercased. Omit to leave unchanged;
-            explicit null clears it. The contact must keep at least one of phone_e164
-            or email.
+            explicit null clears it. The contact must keep at least one of phone_e164,
+            email or extension.
+        extension:
+          anyOf:
+            - type: string
+              pattern: ^[0-9*#]{1,6}$
+            - type: "null"
+          title: Extension
+          description:
+            "New extension on your connected phone system (1 to 6 digits,
+            * or #). Omit to leave unchanged; explicit null clears it. The contact
+            must keep at least one of phone_e164, email or extension."
       additionalProperties: false
       type: object
       title: ContactPatch
@@ -10997,7 +11547,29 @@ components:
         provisioning_state:
           type: string
           title: Provisioning State
-          description: "'pending', 'active', 'failed', or 'released'."
+          description:
+            "'pending', 'active', 'failed', or 'released'. A connected
+            number is 'unverified' until it passes its ownership check (POST /sip-connections/{id}/numbers/{number_id}/verify)."
+        source:
+          type: string
+          enum:
+            - purchased
+            - connected
+          title: Source
+          description: "'purchased': bought through Hail. 'connected': a number
+            on your own phone system, connected with POST /sip-connections/{id}/numbers.
+            Removing a connected number takes it off Hail only; it stays with your
+            phone system and provider."
+          default: purchased
+        sip_connection_id:
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
+          title: Sip Connection Id
+          description:
+            The phone system connection of a connected number. Null for
+            a purchased number.
         is_dedicated:
           type: boolean
           title: Is Dedicated
@@ -11489,6 +12061,301 @@ components:
       required:
         - custom_sender_id
       title: SenderIdResponse
+    SipConnectionCreate:
+      properties:
+        label:
+          type: string
+          maxLength: 80
+          minLength: 1
+          title: Label
+          description: A name, such as 'Main office'.
+        default_region:
+          type: string
+          pattern: ^[A-Z]{2}$
+          title: Default Region
+          description:
+            ISO alpha-2 country of the phone system. Hail reads national
+            caller numbers with it.
+        pbx_host:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Pbx Host
+          description:
+            "Public host name or IP address where Hail dials your phone
+            system for outbound calls and handover. Null: Hail only answers calls."
+        pbx_port:
+          type: integer
+          maximum: 65535.0
+          minimum: 1.0
+          title: Pbx Port
+          description: SIP port.
+          default: 5060
+        pbx_transport:
+          type: string
+          enum:
+            - auto
+            - udp
+            - tcp
+            - tls
+          title: Pbx Transport
+          description: SIP transport.
+          default: auto
+        pbx_username:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Pbx Username
+          description: Username Hail sends when your phone system asks for one.
+        pbx_password:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Pbx Password
+          description: Password Hail sends with pbx_username. Stored encrypted.
+      additionalProperties: false
+      type: object
+      required:
+        - label
+        - default_region
+      title: SipConnectionCreate
+    SipConnectionCreated:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+          description: Unique identifier for this connection.
+        label:
+          type: string
+          title: Label
+          description: Name of the connection.
+        default_region:
+          type: string
+          title: Default Region
+          description: ISO alpha-2 country of the phone system.
+        sip_host:
+          type: string
+          title: Sip Host
+          description: SIP server your phone system sends calls to (the trunk's host).
+        username:
+          type: string
+          title: Username
+          description: Username your phone system sends to Hail.
+        password_last4:
+          type: string
+          title: Password Last4
+          description:
+            Last 4 characters of the password. The full password shows
+            once.
+        pbx_host:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Pbx Host
+          description:
+            "Where Hail dials your phone system. Null: Hail only answers
+            calls."
+        pbx_port:
+          type: integer
+          title: Pbx Port
+          description: SIP port of your phone system.
+        pbx_transport:
+          type: string
+          title: Pbx Transport
+          description: "'auto', 'udp', 'tcp' or 'tls'."
+        pbx_username:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Pbx Username
+          description: "Username Hail sends to your phone system. Null: none."
+        pbx_password_set:
+          type: boolean
+          title: Pbx Password Set
+          description: True when Hail has a password to send to your phone system.
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+          description: When the connection was created.
+        password:
+          type: string
+          title: Password
+          description: Password your phone system sends to Hail. Shown only here.
+      type: object
+      required:
+        - id
+        - label
+        - default_region
+        - sip_host
+        - username
+        - password_last4
+        - pbx_host
+        - pbx_port
+        - pbx_transport
+        - pbx_username
+        - pbx_password_set
+        - created_at
+        - password
+      title: SipConnectionCreated
+    SipConnectionListResponse:
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/SipConnectionResponse"
+          type: array
+          title: Items
+          description: Connections in this page, newest first.
+        next_cursor:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Next Cursor
+          description: Pass as cursor for the next page. Null at the end.
+      type: object
+      required:
+        - items
+      title: SipConnectionListResponse
+    SipConnectionPassword:
+      properties:
+        password:
+          type: string
+          title: Password
+          description: The new password. Shown only here.
+      type: object
+      required:
+        - password
+      title: SipConnectionPassword
+    SipConnectionPatch:
+      properties:
+        label:
+          anyOf:
+            - type: string
+              maxLength: 80
+              minLength: 1
+            - type: "null"
+          title: Label
+          description: New name.
+        pbx_host:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Pbx Host
+          description:
+            "New host. Null removes it: Hail then only answers calls. A
+            new host, port or transport needs pbx_password again when a pbx_username
+            is set."
+        pbx_port:
+          anyOf:
+            - type: integer
+              maximum: 65535.0
+              minimum: 1.0
+            - type: "null"
+          title: Pbx Port
+          description: New SIP port.
+        pbx_transport:
+          anyOf:
+            - type: string
+              enum:
+                - auto
+                - udp
+                - tcp
+                - tls
+            - type: "null"
+          title: Pbx Transport
+          description: New SIP transport.
+        pbx_username:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Pbx Username
+          description: New username Hail sends. Null removes it and the password.
+        pbx_password:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Pbx Password
+          description: New password Hail sends. Stored encrypted.
+      additionalProperties: false
+      type: object
+      title: SipConnectionPatch
+      description: Fields left out stay as they are; ``null`` clears a nullable field.
+    SipConnectionResponse:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+          description: Unique identifier for this connection.
+        label:
+          type: string
+          title: Label
+          description: Name of the connection.
+        default_region:
+          type: string
+          title: Default Region
+          description: ISO alpha-2 country of the phone system.
+        sip_host:
+          type: string
+          title: Sip Host
+          description: SIP server your phone system sends calls to (the trunk's host).
+        username:
+          type: string
+          title: Username
+          description: Username your phone system sends to Hail.
+        password_last4:
+          type: string
+          title: Password Last4
+          description:
+            Last 4 characters of the password. The full password shows
+            once.
+        pbx_host:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Pbx Host
+          description:
+            "Where Hail dials your phone system. Null: Hail only answers
+            calls."
+        pbx_port:
+          type: integer
+          title: Pbx Port
+          description: SIP port of your phone system.
+        pbx_transport:
+          type: string
+          title: Pbx Transport
+          description: "'auto', 'udp', 'tcp' or 'tls'."
+        pbx_username:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Pbx Username
+          description: "Username Hail sends to your phone system. Null: none."
+        pbx_password_set:
+          type: boolean
+          title: Pbx Password Set
+          description: True when Hail has a password to send to your phone system.
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+          description: When the connection was created.
+      type: object
+      required:
+        - id
+        - label
+        - default_region
+        - sip_host
+        - username
+        - password_last4
+        - pbx_host
+        - pbx_port
+        - pbx_transport
+        - pbx_username
+        - pbx_password_set
+        - created_at
+      title: SipConnectionResponse
     SmsApplicationAmendRequest:
       properties:
         fields:

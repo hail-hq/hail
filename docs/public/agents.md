@@ -91,6 +91,9 @@ MCP: `create_agent(handover_contacts=[{"contact_id": "...", "note": "..."}])` se
   contacts adds `transfer_call` to it and clearing them removes it; `null`
   (all tools) stays `null`. The agent never sees a phone number.
 - The contact sees your Hail number as caller ID.
+- On a call to a [connected phone system](connect-phone-system.md), a contact
+  can be an extension (`extension` on [`POST /contacts`](../../openapi/openapi.yaml)).
+  Hail dials it through your phone system, and the person sees the caller's own number.
 - The contact has 30 seconds to answer. If not, the agent comes back and
   offers to take a message. While it rings the agent keeps listening: the
   caller can say stop, or ask for someone else, and the agent hangs up the

@@ -280,11 +280,12 @@ class HailClient:
         name: str,
         phone_e164: str | None = None,
         email: str | None = None,
+        extension: str | None = None,
     ) -> dict[str, Any]:
         """POST /contacts — save a manual contact.
 
         Builds the body from :class:`ContactCreate` (which enforces a
-        non-empty name and phone_e164-or-email). Construction raises
+        non-empty name and one of phone_e164, email or extension). Construction raises
         ``pydantic.ValidationError`` before any HTTP on bad input.
         """
         fields: dict[str, Any] = {"name": name}
@@ -292,6 +293,8 @@ class HailClient:
             fields["phone_e164"] = phone_e164
         if email is not None:
             fields["email"] = email
+        if extension is not None:
+            fields["extension"] = extension
         body = ContactCreate.model_validate(fields).model_dump(
             mode="json", exclude_unset=True
         )

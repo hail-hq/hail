@@ -916,7 +916,24 @@ class PhoneNumberResponse(BaseModel):
         description="Channels this number supports, e.g. ['voice'], ['sms'], or both."
     )
     provisioning_state: str = Field(
-        description="'pending', 'active', 'failed', or 'released'."
+        description=(
+            "'pending', 'active', 'failed', or 'released'. A connected number "
+            "is 'unverified' until it passes its ownership check "
+            "(POST /sip-connections/{id}/numbers/{number_id}/verify)."
+        )
+    )
+    source: Literal["purchased", "connected"] = Field(
+        default="purchased",
+        description=(
+            "'purchased': bought through Hail. 'connected': a number on your "
+            "own phone system, connected with POST /sip-connections/{id}/numbers. "
+            "Removing a connected number takes it off Hail only; it stays "
+            "with your phone system and provider."
+        ),
+    )
+    sip_connection_id: UUID | None = Field(
+        default=None,
+        description="The phone system connection of a connected number. Null for a purchased number.",
     )
     is_dedicated: bool = Field(
         description="True if this number is owned by the organization. False for shared-pool numbers."
@@ -957,6 +974,156 @@ class PhoneNumberResponse(BaseModel):
             "number is for. Null when no verification was used or the name "
             "is unknown."
         ),
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Connected phone systems (/sip-connections)
+# --------------------------------------------------------------------------- #
+
+PbxTransport = Literal["auto", "udp", "tcp", "tls"]
+
+
+class SipConnectionCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    label: str = Field(
+        min_length=1, max_length=80, description="A name, such as 'Main office'."
+    )
+    default_region: str = Field(
+        pattern=r"^[A-Z]{2}$",
+        description=(
+            "ISO alpha-2 country of the phone system. Hail reads national "
+            "caller numbers with it."
+        ),
+    )
+    pbx_host: str | None = Field(
+        default=None,
+        description=(
+            "Public host name or IP address where Hail dials your phone system "
+            "for outbound calls and handover. Null: Hail only answers calls."
+        ),
+    )
+    pbx_port: int = Field(default=5060, ge=1, le=65535, description="SIP port.")
+    pbx_transport: PbxTransport = Field(default="auto", description="SIP transport.")
+    pbx_username: str | None = Field(
+        default=None,
+        description="Username Hail sends when your phone system asks for one.",
+    )
+    pbx_password: str | None = Field(
+        default=None,
+        description="Password Hail sends with pbx_username. Stored encrypted.",
+    )
+
+
+class SipConnectionPatch(BaseModel):
+    """Fields left out stay as they are; ``null`` clears a nullable field."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    label: str | None = Field(
+        default=None, min_length=1, max_length=80, description="New name."
+    )
+    pbx_host: str | None = Field(
+        default=None,
+        description=(
+            "New host. Null removes it: Hail then only answers calls. A new "
+            "host, port or transport needs pbx_password again when a "
+            "pbx_username is set."
+        ),
+    )
+    pbx_port: int | None = Field(
+        default=None, ge=1, le=65535, description="New SIP port."
+    )
+    pbx_transport: PbxTransport | None = Field(
+        default=None, description="New SIP transport."
+    )
+    pbx_username: str | None = Field(
+        default=None,
+        description="New username Hail sends. Null removes it and the password.",
+    )
+    pbx_password: str | None = Field(
+        default=None, description="New password Hail sends. Stored encrypted."
+    )
+
+    @model_validator(mode="after")
+    def _not_null(self) -> "SipConnectionPatch":
+        for name in ("label", "pbx_port", "pbx_transport"):
+            if name in self.model_fields_set and getattr(self, name) is None:
+                raise ValueError(f"{name} cannot be null")
+        return self
+
+
+class SipConnectionResponse(BaseModel):
+    id: UUID = Field(description="Unique identifier for this connection.")
+    label: str = Field(description="Name of the connection.")
+    default_region: str = Field(description="ISO alpha-2 country of the phone system.")
+    sip_host: str = Field(
+        description="SIP server your phone system sends calls to (the trunk's host)."
+    )
+    username: str = Field(description="Username your phone system sends to Hail.")
+    password_last4: str = Field(
+        description="Last 4 characters of the password. The full password shows once."
+    )
+    pbx_host: str | None = Field(
+        description="Where Hail dials your phone system. Null: Hail only answers calls."
+    )
+    pbx_port: int = Field(description="SIP port of your phone system.")
+    pbx_transport: str = Field(description="'auto', 'udp', 'tcp' or 'tls'.")
+    pbx_username: str | None = Field(
+        description="Username Hail sends to your phone system. Null: none."
+    )
+    pbx_password_set: bool = Field(
+        description="True when Hail has a password to send to your phone system."
+    )
+    created_at: datetime = Field(description="When the connection was created.")
+
+
+class SipConnectionCreated(SipConnectionResponse):
+    password: str = Field(
+        description="Password your phone system sends to Hail. Shown only here."
+    )
+
+
+class SipConnectionPassword(BaseModel):
+    password: str = Field(description="The new password. Shown only here.")
+
+
+class SipConnectionListResponse(BaseModel):
+    items: list[SipConnectionResponse] = Field(
+        description="Connections in this page, newest first."
+    )
+    next_cursor: str | None = Field(
+        default=None, description="Pass as cursor for the next page. Null at the end."
+    )
+
+
+class ConnectedNumberCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    e164: str = Field(
+        description="Your number with its country code, such as +14155550100."
+    )
+
+
+class ConnectedNumberCheck(BaseModel):
+    state: Literal["active", "unverified"] = Field(
+        description="'active': the number passed and can be routed to an agent."
+    )
+    reason: (
+        Literal["no_call_arrived", "not_authenticated", "code_not_received"] | None
+    ) = Field(
+        default=None,
+        description=(
+            "Why the check failed. 'no_call_arrived': no call reached this "
+            "connection; check the trunk and the routing rule. "
+            "'not_authenticated': the call came without this connection's "
+            "username and password, or to another trunk. 'code_not_received': "
+            "the check code did not come through; turn on RFC 2833 key presses."
+        ),
+    )
+    call_id: UUID | None = Field(
+        default=None, description="The check call, billed as an outbound call."
     )
 
 
@@ -3546,6 +3713,10 @@ class ContactEntry(BaseModel):
     email: str | None = Field(
         default=None, description="Email address. Null if none on file."
     )
+    extension: str | None = Field(
+        default=None,
+        description="Extension on your connected phone system. Null if none on file.",
+    )
     role: str | None = Field(
         default=None,
         description="Organization role (e.g. 'owner', 'admin', 'member') for kind='member'. Always null for kind='manual'.",
@@ -3562,11 +3733,20 @@ class ContactCreate(BaseModel):
     )
     phone_e164: str | None = Field(
         default=None,
-        description="Phone number, E.164 format. At least one of phone_e164 or email is required.",
+        description="Phone number, E.164 format. At least one of phone_e164, email or extension is required.",
     )
     email: str | None = Field(
         default=None,
-        description="Email address, stored lowercased. At least one of phone_e164 or email is required.",
+        description="Email address, stored lowercased. At least one of phone_e164, email or extension is required.",
+    )
+    extension: str | None = Field(
+        default=None,
+        pattern=r"^[0-9*#]{1,6}$",
+        description=(
+            "Extension on your connected phone system (1 to 6 digits, * or #), "
+            "for handover on calls to a connected number. At least one of "
+            "phone_e164, email or extension is required."
+        ),
     )
 
     _validate_phone = field_validator("phone_e164")(_e164_or_error)
@@ -3574,8 +3754,8 @@ class ContactCreate(BaseModel):
 
     @model_validator(mode="after")
     def _phone_or_email(self) -> "ContactCreate":
-        if self.phone_e164 is None and self.email is None:
-            raise ValueError("provide at least one of phone_e164 or email")
+        if self.phone_e164 is None and self.email is None and self.extension is None:
+            raise ValueError("provide at least one of phone_e164, email or extension")
         return self
 
 
@@ -3593,7 +3773,7 @@ class ContactPatch(BaseModel):
         description=(
             "New phone number, E.164 format. Omit to leave unchanged; "
             "explicit null clears it. The contact must keep at least one "
-            "of phone_e164 or email."
+            "of phone_e164, email or extension."
         ),
     )
     email: str | None = Field(
@@ -3601,7 +3781,16 @@ class ContactPatch(BaseModel):
         description=(
             "New email address, stored lowercased. Omit to leave "
             "unchanged; explicit null clears it. The contact must keep at "
-            "least one of phone_e164 or email."
+            "least one of phone_e164, email or extension."
+        ),
+    )
+    extension: str | None = Field(
+        default=None,
+        pattern=r"^[0-9*#]{1,6}$",
+        description=(
+            "New extension on your connected phone system (1 to 6 digits, * "
+            "or #). Omit to leave unchanged; explicit null clears it. The "
+            "contact must keep at least one of phone_e164, email or extension."
         ),
     )
 

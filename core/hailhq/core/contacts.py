@@ -39,6 +39,7 @@ def contact_to_entry(row: Contact) -> ContactEntry:
         name=row.name,
         phone_e164=row.phone_e164,
         email=row.email,
+        extension=row.extension,
         role=None,
     )
 
@@ -57,7 +58,7 @@ def contacts_union_stmt(org_id: UUID, q: str | None = None):
       codec (``core.schemas.decode_cursor``) does a raw ``UUID(...)`` parse
       on the id half of the cursor — that fails on a ``"member:"``-prefixed
       string. Only the paginated route touches this column.
-    * ``kind``, ``name``, ``phone_e164``, ``email``, ``role`` — the
+    * ``kind``, ``name``, ``phone_e164``, ``email``, ``extension``, ``role`` — the
       ``ContactEntry`` fields.
     * ``kind_rank`` — 0 for members, 1 for manual; lets a listing (no ``q``)
       order members first without a second sort key.
@@ -83,6 +84,7 @@ def contacts_union_stmt(org_id: UUID, q: str | None = None):
             User.name.label("name"),
             User.phone_number.label("phone_e164"),
             User.email.label("email"),
+            literal(None, type_=Text).label("extension"),
             OrganizationMember.role.label("role"),
             literal(0).label("kind_rank"),
             OrganizationMember.created_at.label("created_at"),
@@ -106,6 +108,7 @@ def contacts_union_stmt(org_id: UUID, q: str | None = None):
         Contact.name.label("name"),
         Contact.phone_e164.label("phone_e164"),
         Contact.email.label("email"),
+        Contact.extension.label("extension"),
         literal(None, type_=Text).label("role"),
         literal(1).label("kind_rank"),
         Contact.created_at.label("created_at"),
@@ -158,6 +161,7 @@ async def search_contacts(
             name=row.name,
             phone_e164=row.phone_e164,
             email=row.email,
+            extension=row.extension,
             role=row.role,
         )
         for row in rows

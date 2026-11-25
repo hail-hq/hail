@@ -255,6 +255,10 @@ class Settings(BaseSettings):
     livekit_twilio_sip_inbound_trunk_id: str = ""
     livekit_telnyx_sip_inbound_trunk_id: str = ""
     livekit_didww_sip_inbound_trunk_id: str = ""
+    # The LiveKit project's SIP host (``<project>.sip.livekit.cloud``): where
+    # a customer's phone system sends calls (connected numbers). Shown in the
+    # API and console. Empty: the /sip-connections routes answer 503.
+    livekit_sip_host: str = ""
 
     # Optional recording: deploy capability, separately from workspace consent.
     hail_recording_enabled: bool = False

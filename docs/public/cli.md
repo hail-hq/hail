@@ -179,7 +179,7 @@ hail contacts set-phone me --phone +15551234567
 hail contacts clear-phone me
 ```
 
-`create` requires one of `--phone` / `--email`. `list` takes `--q`, `--limit`, `--cursor`, `--all`.
+`create` requires one of `--phone` / `--email` / `--extension` (an extension on your connected phone system, 1 to 6 digits, `*` or `#`, for handover). `list` takes `--q`, `--limit`, `--cursor`, `--all`.
 
 ## Knowledge base
 

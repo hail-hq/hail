@@ -583,10 +583,11 @@ async def create_contact(
     name: str,
     phone_e164: str | None = None,
     email: str | None = None,
+    extension: str | None = None,
 ) -> dict[str, Any]:
     try:
         return await client.create_contact(
-            name=name, phone_e164=phone_e164, email=email
+            name=name, phone_e164=phone_e164, email=email, extension=extension
         )
     except ValidationError as exc:
         return {"error": _validation_error_message(exc)}
@@ -3364,7 +3365,9 @@ def register_tools(
         voice can change carrier and LiveKit routing; text-only changes leave it unchanged.
         Clearing the voice route stops AI call answers; clearing the text route stops
         agent replies to texts. Restoring a route does not recover missed interactions.
-        Omitted settings retain their current values.
+        Omitted settings retain their current values. A connected number
+        (``source`` ``connected``) in state ``unverified`` returns an error
+        until its ownership check succeeds in the console or the API.
         Returns the updated number record or an error."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
@@ -3627,7 +3630,10 @@ def register_tools(
         """List dedicated workspace phone numbers, newest first.
 
         The records show capabilities, provisioning state and assigned agents,
-        so they can be used to select an existing number for sending or routing."""
+        so they can be used to select an existing number for sending or routing.
+        ``source`` is ``purchased`` (bought through Hail) or ``connected`` (a
+        number on the customer's own phone system, voice only). Hail's team
+        connects phone systems with the customer; no tool does it."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await list_numbers(client=client, limit=limit, cursor=cursor)
@@ -3674,6 +3680,8 @@ def register_tools(
     ) -> dict[str, Any]:
         """Read a workspace number's state, capabilities and assigned agents.
 
+        ``source`` ``connected`` marks a number on the customer's own phone
+        system; its state is ``unverified`` until its ownership check passes.
         Returns the number record or an error."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
@@ -3709,6 +3717,8 @@ def register_tools(
         Current and previous monthly fees remain due, without a refund.
         Pending orders cannot be released and return 409.
         A failed order was not purchased; this operation only dismisses it from the list.
+        A connected number (``source`` ``connected``) is only removed from Hail:
+        it stays with the customer's phone system and provider.
         Returns ``released`` or ``dismissed``, plus ``number_id`` and ``e164``, or an error.
         """
         try:
@@ -4846,19 +4856,33 @@ def register_tools(
             str | None,
             _d(
                 "The address to email this contact at, such as "
-                "``ana@example.com``. Give this, ``phone_e164``, or both."
+                "``ana@example.com``. Give this, ``phone_e164``, "
+                "``extension``, or several."
+            ),
+        ] = None,
+        extension: Annotated[
+            str | None,
+            Field(pattern=r"^[0-9*#]{1,6}$"),
+            _d(
+                "Extension on the workspace's connected phone system (1 to 6 "
+                "digits, * or #), such as ``800`` for a support queue. Used "
+                "for handover on calls to a connected number."
             ),
         ] = None,
     ) -> dict[str, Any]:
         """Save a manually managed contact for calls, texts or email.
 
         The contact appears in workspace contact searches and can be selected
-        for call handover if it has a phone number. A duplicate phone or email
-        returns 409."""
+        for call handover if it has a phone number, or an extension on a call
+        to a connected number. A duplicate phone or email returns 409."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await create_contact(
-                    client=client, name=name, phone_e164=phone_e164, email=email
+                    client=client,
+                    name=name,
+                    phone_e164=phone_e164,
+                    email=email,
+                    extension=extension,
                 )
         except RuntimeError as exc:
             return {"error": str(exc)}

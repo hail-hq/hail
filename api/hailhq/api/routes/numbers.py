@@ -151,7 +151,9 @@ async def _get_org_number_or_404(
                 "expected_total_cents differs from the quoted total, or the "
                 "carrier rejected or failed the order. In the last case the credit "
                 "hold is refunded and the detail gives the reason. Also returned "
-                "when the quote's number was released since it was bought."
+                "when the quote's number was released since it was bought, "
+                "and while another workspace runs the ownership check on that "
+                "number as a connected number."
             ),
         },
         503: {
@@ -168,6 +170,7 @@ async def acquire_number(
     request: Request,
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
+    lk: Annotated[LiveKitClient | None, Depends(get_livekit_optional)],
     idem: Annotated[IdempotencyContext | None, Depends(idempotency_dep)] = None,
 ) -> PhoneNumberResponse:
     """Buy a dedicated phone number for the caller's organization.
@@ -189,7 +192,7 @@ async def acquire_number(
         return PhoneNumberResponse.model_validate(cached)
 
     try:
-        number = await purchase_number(db, principal, body)
+        number = await purchase_number(db, principal, body, lk)
     except RetryableError:
         # Transient (no charge was made): release the in-flight sentinel
         # instead of caching, so a same-key retry can succeed once the carrier

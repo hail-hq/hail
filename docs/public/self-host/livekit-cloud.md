@@ -147,3 +147,12 @@ or an internal name, but it does not resolve the name: LiveKit does, from
 its own network. If you run your own LiveKit SIP service, firewall its
 egress so it cannot reach internal ranges (private, loopback, link-local,
 and your cloud's metadata address).
+
+Set `LIVEKIT_SIP_HOST` in `.env` to your project's SIP host
+(`<project>.sip.livekit.cloud`, LiveKit Cloud → Settings → SIP URI). The API
+and console show it as the trunk's SIP server. Empty: the
+`/v1/sip-connections` routes answer 503. The routes answer only staff
+console sessions until `OPEN_TO_ALL_WORKSPACES` is `True` in
+`api/hailhq/api/routes/sip_connections.py`; set it to use them with API keys.
+Customer setup:
+[Connect your phone system](../connect-phone-system.md).
