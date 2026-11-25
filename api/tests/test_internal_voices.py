@@ -191,7 +191,7 @@ async def test_preview_locks_serialize_one_sample_and_never_outlive_requests(
     second = asyncio.create_task(voices._audio(*args))
     await asyncio.sleep(0)
     digest = hashlib.sha256(b"hello").hexdigest()
-    key = ((("cartesia", "sonic-3.5", "en", "known"),), digest)
+    key = ("cartesia", "sonic-3.5", "en", "known", digest)
     assert voices._sample_locks[key][1] == 2
     release.set()
     assert await asyncio.gather(first, second) == [b"audio", b"audio"]
@@ -434,6 +434,8 @@ async def test_workspace_line_can_play_saved_voice_on_legacy_fallback(
 ):
     monkeypatch.setattr(settings, "cartesia_api_key", "house-cartesia")
     monkeypatch.setattr(settings, "eleven_api_key", "house-eleven")
+    current_time = 100.0
+    monkeypatch.setattr(voices, "time", SimpleNamespace(monotonic=lambda: current_time))
     voices.load_org_provider_configs.return_value = {
         "tts": SimpleNamespace(
             provider="cartesia",
@@ -461,8 +463,27 @@ async def test_workspace_line_can_play_saved_voice_on_legacy_fallback(
                 )
                 assert response.status_code == 200
                 assert response.content.startswith(b"RIFF")
-        assert first.call_count == 1
-        assert backup.call_count == 1
+            assert first.call_count == 1
+            assert backup.call_count == 1
+
+            current_time += 30
+            first.respond(200, content=b"RIFF-primary")
+            response = await client.post(
+                "/internal/voices/workspace-line", content=body, headers=_signed(body)
+            )
+            assert response.content == b"RIFF-primary"
+            assert first.call_count == 2
+
+            voices.load_org_provider_configs.return_value["tts"].fallback_enabled = (
+                False
+            )
+            first.respond(503)
+            response = await client.post(
+                "/internal/voices/workspace-line", content=body, headers=_signed(body)
+            )
+            assert response.content == b"RIFF-primary"
+            assert first.call_count == 2
+            assert backup.call_count == 1
 
 
 async def test_workspace_line_explains_when_saved_provider_is_unavailable(
