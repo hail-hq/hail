@@ -32,7 +32,7 @@ func newSipConnectionsCmd(opts *Options) *cobra.Command {
 4. hail numbers route <number_id> --calls <agent_id>
 
 Example:
-  hail sip-connections create --label "Main office" --region US --pbx-host pbx.example.com
+  hail sip-connections create --label "Main office" --pbx-host pbx.example.com
   hail sip-connections add-number <connection_id> +14155550100
   hail sip-connections verify <connection_id> <number_id>`,
 	}
@@ -72,8 +72,8 @@ func newSipConnectionsCreateCmd(opts *Options) *cobra.Command {
 		Short: "Connect a phone system; prints the SIP trunk settings",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if f.label == "" || f.region == "" {
-				return requireInputs(cmd, "--label and --region")
+			if f.label == "" {
+				return requireInputs(cmd, "--label")
 			}
 			password, err := readSecretFlag(f.password, "--pbx-password", cmd.InOrStdin())
 			if err != nil {
@@ -81,7 +81,7 @@ func newSipConnectionsCreateCmd(opts *Options) *cobra.Command {
 			}
 			body := client.SipConnectionCreate{
 				Label:         f.label,
-				DefaultRegion: f.region,
+				DefaultRegion: strPtr(f.region),
 				PbxHost:       strPtr(f.host),
 				PbxUsername:   strPtr(f.username),
 				PbxPassword:   strPtr(password),
@@ -121,7 +121,7 @@ func newSipConnectionsCreateCmd(opts *Options) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&f.label, "label", "", "Name, such as \"Main office\" (required)")
-	cmd.Flags().StringVar(&f.region, "region", "", "2-letter country of the phone system, such as US (required)")
+	cmd.Flags().StringVar(&f.region, "region", "", "2-letter country of the phone system, such as US (optional: the first number you add sets it)")
 	cmd.Flags().StringVar(&f.host, "pbx-host", "", "Public address Hail dials for calls out and handover")
 	cmd.Flags().IntVar(&f.port, "pbx-port", 5060, "SIP port of the phone system")
 	cmd.Flags().StringVar(&f.transport, "pbx-transport", "", "auto, udp, tcp or tls (default auto)")

@@ -110,6 +110,10 @@ def _clean_label(label: Any) -> str:
     return label.strip()
 
 
+# A connection's country before its first number (see create_connection).
+PLACEHOLDER_REGION: Final = "US"
+
+
 def _check_region(region: Any) -> str:
     if region not in phonenumbers.SUPPORTED_REGIONS:
         raise _invalid("default_region")
@@ -181,7 +185,7 @@ async def create_connection(
     *,
     organization_id: UUID,
     label: str,
-    default_region: str,
+    default_region: str | None = None,
     pbx_host: str | None = None,
     pbx_port: int = 5060,
     pbx_transport: str = "auto",
@@ -191,7 +195,9 @@ async def create_connection(
     """Create a connection and its trunks. Returns the row and the inbound
     password in plain text."""
     label = _clean_label(label)
-    _check_region(default_region)
+    # Until its first number sets it (add_connected_number). No call reaches
+    # a connection before it has a number, so this is never used to read one.
+    default_region = _check_region(default_region or PLACEHOLDER_REGION)
     pbx_host = _check_host(pbx_host)
     _check_port(pbx_port)
     _check_transport(pbx_transport)
@@ -485,6 +491,20 @@ async def delete_connection(
         raise
 
 
+async def _has_numbers(db: AsyncSession, connection_id: UUID) -> bool:
+    """Any number still on the connection (released and failed ones are gone)."""
+    return bool(
+        await db.scalar(
+            select(func.count())
+            .select_from(PhoneNumber)
+            .where(
+                PhoneNumber.sip_connection_id == connection_id,
+                PhoneNumber.provisioning_state.not_in(("released", "failed")),
+            )
+        )
+    )
+
+
 async def _unverified_count(db: AsyncSession, org_id: UUID) -> int:
     return await db.scalar(
         select(func.count())
@@ -603,6 +623,10 @@ async def add_connected_number(
         await db.rollback()
         raise
     trunk_id = connection.livekit_inbound_trunk_id
+    # The first number sets the connection's country: Hail reads the national
+    # caller numbers the phone system sends with it.
+    if not await _has_numbers(db, connection.id):
+        connection.default_region = country
     number = PhoneNumber(
         organization_id=connection.organization_id,
         e164=e164,

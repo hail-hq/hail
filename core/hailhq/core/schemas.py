@@ -989,11 +989,13 @@ class SipConnectionCreate(BaseModel):
     label: str = Field(
         min_length=1, max_length=80, description="A name, such as 'Main office'."
     )
-    default_region: str = Field(
+    default_region: str | None = Field(
+        default=None,
         pattern=r"^[A-Z]{2}$",
         description=(
-            "ISO alpha-2 country of the phone system. Hail reads national "
-            "caller numbers with it."
+            "Optional. ISO alpha-2 country of the phone system; Hail reads "
+            "national caller numbers with it. The first number you add sets it "
+            "to that number's country."
         ),
     )
     pbx_host: str | None = Field(

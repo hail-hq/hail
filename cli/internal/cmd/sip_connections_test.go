@@ -212,7 +212,7 @@ func TestSipConnectionsUpdateRefusesSetAndClear(t *testing.T) {
 
 func TestSipConnectionsMaskedHostSaysWhereToGetIt(t *testing.T) {
 	c := sampleSipConnection(false)
-	c["sip_host"] = "examp…"
+	c["sip_host"] = "examp••••••••••••"
 	c["sip_host_masked"] = true
 	srv := newFakeServer(t, http.StatusOK, c)
 	stdout, _, err := runRoot(t,
@@ -222,7 +222,7 @@ func TestSipConnectionsMaskedHostSaysWhereToGetIt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(stdout, "examp… (ask support for the full address)") {
+	if !strings.Contains(stdout, "examp•••••••••••• (ask support for the full address)") {
 		t.Errorf("masked host line: %q", stdout)
 	}
 }

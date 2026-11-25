@@ -11559,12 +11559,15 @@ components:
           title: Label
           description: A name, such as 'Main office'.
         default_region:
-          type: string
-          pattern: ^[A-Z]{2}$
+          anyOf:
+            - type: string
+              pattern: ^[A-Z]{2}$
+            - type: "null"
           title: Default Region
           description:
-            ISO alpha-2 country of the phone system. Hail reads national
-            caller numbers with it.
+            Optional. ISO alpha-2 country of the phone system; Hail reads
+            national caller numbers with it. The first number you add sets it to that
+            number's country.
         pbx_host:
           anyOf:
             - type: string
@@ -11606,7 +11609,6 @@ components:
       type: object
       required:
         - label
-        - default_region
       title: SipConnectionCreate
     SipConnectionCreated:
       properties:

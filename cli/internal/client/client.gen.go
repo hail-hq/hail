@@ -3811,8 +3811,8 @@ type SenderIdResponse struct {
 
 // SipConnectionCreate defines model for SipConnectionCreate.
 type SipConnectionCreate struct {
-	// DefaultRegion ISO alpha-2 country of the phone system. Hail reads national caller numbers with it.
-	DefaultRegion string `json:"default_region"`
+	// DefaultRegion Optional. ISO alpha-2 country of the phone system; Hail reads national caller numbers with it. The first number you add sets it to that number's country.
+	DefaultRegion *string `json:"default_region,omitempty"`
 
 	// Label A name, such as 'Main office'.
 	Label string `json:"label"`

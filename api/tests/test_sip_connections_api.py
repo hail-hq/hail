@@ -50,7 +50,7 @@ async def test_create_connection_returns_password_once(
     assert len(body["password"]) >= 24
     assert body["password_last4"] == body["password"][-4:]
     # A workspace sees only the start of the SIP server.
-    assert body["sip_host"] == "examp…"
+    assert body["sip_host"] == "examp••••••••••••"
     assert body["sip_host_masked"] is True
     assert SIP_HOST not in str(body)
     assert body["username"]
@@ -651,7 +651,7 @@ async def test_every_workspace_reaches_the_routes_with_the_host_masked(
     finally:
         app.dependency_overrides.pop(get_current_principal, None)
     for body in (created, listed, one, patched):
-        assert body["sip_host"] == "examp…"
+        assert body["sip_host"] == "examp••••••••••••"
         assert body["sip_host_masked"] is True
         assert SIP_HOST not in str(body)
 
@@ -703,3 +703,26 @@ def test_a_short_host_is_not_masked_into_nothing() -> None:
 
     assert _masked_host("abc") == "abc"
     assert _masked_host("abcdef.example") == "abcde…"
+
+
+async def test_the_first_number_sets_the_connection_country(
+    client: httpx.AsyncClient, org_and_key: tuple
+) -> None:
+    _org, _key, plain = org_and_key
+    resp = await client.post(
+        "/sip-connections", json={"label": "Main office"}, headers=_auth(plain)
+    )
+    assert resp.status_code == 201, resp.text
+    conn = resp.json()
+    for e164 in ("+442079460018", "+14155550100"):
+        added = await client.post(
+            f"/sip-connections/{conn['id']}/numbers",
+            json={"e164": e164},
+            headers=_auth(plain),
+        )
+        assert added.status_code == 201, added.text
+    one = (
+        await client.get(f"/sip-connections/{conn['id']}", headers=_auth(plain))
+    ).json()
+    # The first number (GB) decides; the second (US) does not change it.
+    assert one["default_region"] == "GB"
