@@ -397,10 +397,12 @@ async def validate_voice_language(
         )
 
 
-# (voice id, language) -> the voice's own language when it cannot speak that
-# language, or None when it can. Voice metadata rarely changes, and a call
-# should not wait on the same lookup twice.
-_foreign_cache: dict[tuple[str, str], str | None] = {}
+# (voice id, language) -> (when, the voice's own language when it cannot
+# speak that language, or None). Voice metadata rarely changes, and a call
+# should not wait on the same lookup twice. A failed lookup is kept for
+# _FOREIGN_RETRY_SECONDS, so a slow provider delays one call, not every call.
+_foreign_cache: dict[tuple[str, str], tuple[float, str | None]] = {}
+_FOREIGN_RETRY_SECONDS = 300.0
 
 
 async def foreign_voice_language(
@@ -409,14 +411,22 @@ async def foreign_voice_language(
     """The language a Cartesia voice was made for, when it does not support
     ``language`` (see :func:`cartesia_voice_speaks`). None when it supports
     it, or when that is unknown: a missing key, an unknown voice id, a
-    timeout or a provider error. Never raises."""
+    timeout or a provider error. Never raises. ``CARTESIA_VOICE_ID`` is the
+    English voice (see .env.example), so English calls with it need no
+    lookup."""
+    if not isinstance(voice_id, str) or not isinstance(language, str):
+        return None
+    if voice_id == settings.cartesia_voice_id and language == "en":
+        return None
     if language in SUPPORTED_LANGUAGES and voice_id == house_cartesia_voice(language):
         return None
     if (own := house_voice_language(voice_id)) is not None:
         return own if own != language else None
     cache_key = (voice_id, language)
-    if cache_key in _foreign_cache:
-        return _foreign_cache[cache_key]
+    if (cached := _foreign_cache.get(cache_key)) is not None:
+        when, result = cached
+        if result is not None or time.monotonic() - when < _FOREIGN_RETRY_SECONDS:
+            return result
     if not key:
         return None
     headers = {"Authorization": f"Bearer {key}", "Cartesia-Version": HEADERS_VERSION}
@@ -429,6 +439,7 @@ async def foreign_voice_language(
         row = response.json()
     except Exception:
         log.warning("voice language lookup failed", exc_info=True)
+        _remember(cache_key, None)
         return None
     if not isinstance(row, dict):
         return None
@@ -440,7 +451,11 @@ async def foreign_voice_language(
         and not cartesia_voice_speaks(row, language)
         else None
     )
-    _foreign_cache[cache_key] = result
+    _remember(cache_key, result)
+    return result
+
+
+def _remember(cache_key: tuple[str, str], result: str | None) -> None:
+    _foreign_cache[cache_key] = (time.monotonic(), result)
     if len(_foreign_cache) > 256:
         del _foreign_cache[next(iter(_foreign_cache))]
-    return result

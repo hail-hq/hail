@@ -354,6 +354,19 @@ def test_house_cartesia_speaks_with_a_voice_made_for_the_language() -> None:
     assert cartesia_voice(build_tts(language="en")) == "ct-voice-id"
     assert cartesia_voice(build_tts()) == "ct-voice-id"
     assert cartesia_voice(build_tts(None, "chosen", "de")) == "chosen"
+    # A retired language voice falls back to the configured voice.
+    voices = [
+        i._opts.voice
+        for i in build_tts(language="de")._tts_instances
+        if isinstance(i, cartesia_plugin.TTS)
+    ]
+    assert voices == [CARTESIA_LANGUAGE_VOICES["de"], "ct-voice-id"]
+    single = [
+        i
+        for i in build_tts(None, "chosen", "de")._tts_instances
+        if isinstance(i, cartesia_plugin.TTS)
+    ]
+    assert len(single) == 1
 
 
 def test_org_cartesia_without_a_voice_uses_the_language_voice() -> None:
@@ -638,7 +651,9 @@ def test_house_tts_trims_elevenlabs_for_cartesia_only_language() -> None:
     from livekit.plugins import cartesia as cartesia_plugin
 
     tts = build_tts(language="th")  # th: no elevenlabs support
-    assert isinstance(tts, cartesia_plugin.TTS)  # single instance, no adapter
+    # The Thai voice, then the configured voice: Cartesia only.
+    assert all(isinstance(i, cartesia_plugin.TTS) for i in tts._tts_instances)
+    assert len(tts._tts_instances) == 2
 
 
 def test_house_tts_keeps_fallback_for_dual_provider_language() -> None:

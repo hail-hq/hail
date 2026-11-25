@@ -79,6 +79,12 @@ has a native accent. English uses `CARTESIA_VOICE_ID`. The table is
 [`core/hailhq/core/house_voices.py`](../core/hailhq/core/house_voices.py).
 A chosen voice always wins. When it was made for another language, the
 agent knows, and says so in one sentence if the person mentions its accent.
+If a language's voice fails, the call falls back to `CARTESIA_VOICE_ID`.
+Self-hosting with your own multilingual voice: choose it in Call settings
+(Language and voice) so it wins over the per-language defaults.
+
+A call speaks one language. Asked to switch, the agent says it can't on this
+call and continues in the call's language.
 
 Canonical data: [`core/hailhq/core/languages.py`](../core/hailhq/core/languages.py)
 (provider doc sources in its docstring). Voice routing:

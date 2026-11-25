@@ -402,3 +402,39 @@ async def test_catalogue_default_is_the_house_voice_for_the_language():
         result = await catalog.voice_catalogue("de")
     assert result["default_voice"] == {"provider": "cartesia", "id": german}
     assert result["voices"][0]["id"] == german
+
+
+async def test_foreign_voice_language_skips_the_english_default(
+    no_foreign_cache,
+):
+    with respx.mock(assert_all_called=False) as mock:
+        any_request = mock.route().mock(return_value=httpx.Response(500))
+        assert (
+            await catalog.foreign_voice_language("current", "en", key="k", timeout=1)
+            is None
+        )
+        assert not any_request.called
+
+
+async def test_foreign_voice_language_rejects_odd_input_and_retries_later(
+    no_foreign_cache, monkeypatch
+):
+    assert (
+        await catalog.foreign_voice_language([0.1, 0.2], "de", key="k", timeout=1)
+        is None
+    )
+    now = [1000.0]
+    monkeypatch.setattr(catalog.time, "monotonic", lambda: now[0])
+    with respx.mock as mock:
+        route = mock.get("https://api.cartesia.ai/voices/flaky").mock(
+            side_effect=httpx.ConnectTimeout("slow")
+        )
+        for _ in range(2):
+            assert (
+                await catalog.foreign_voice_language("flaky", "de", key="k", timeout=1)
+                is None
+            )
+        assert route.call_count == 1  # a failure is not retried at once
+        now[0] += catalog._FOREIGN_RETRY_SECONDS + 1
+        await catalog.foreign_voice_language("flaky", "de", key="k", timeout=1)
+        assert route.call_count == 2

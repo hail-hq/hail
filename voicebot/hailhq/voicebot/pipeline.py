@@ -545,17 +545,28 @@ def _house_tts(
     allowed = tts_providers_for(language)
     instances: list[agents_tts.TTS] = []
     if settings.cartesia_api_key and "cartesia" in allowed:
-        kwargs: dict[str, Any] = {
-            "model": settings.cartesia_model,
-            # With no chosen voice, a voice made for the call's language:
-            # one voice for every language gives a foreign accent.
-            "voice": voice_id_override
-            or house_cartesia_voice(language)
-            or settings.cartesia_voice_id,
-        }
-        if language:
-            kwargs["language"] = language
-        instances.append(cartesia_plugin.TTS(**kwargs))
+        # With no chosen voice, a voice made for the call's language (one
+        # voice for every language gives a foreign accent), then the
+        # configured voice in case the provider retires the language's.
+        voices = (
+            [voice_id_override]
+            if voice_id_override
+            else list(
+                dict.fromkeys(
+                    v
+                    for v in (
+                        house_cartesia_voice(language),
+                        settings.cartesia_voice_id,
+                    )
+                    if v
+                )
+            )
+        )
+        for voice in voices or [settings.cartesia_voice_id]:
+            kwargs: dict[str, Any] = {"model": settings.cartesia_model, "voice": voice}
+            if language:
+                kwargs["language"] = language
+            instances.append(cartesia_plugin.TTS(**kwargs))
     if settings.eleven_api_key and "elevenlabs" in allowed:
         kwargs = {
             "voice_id": voice_id_override or settings.elevenlabs_voice_id,

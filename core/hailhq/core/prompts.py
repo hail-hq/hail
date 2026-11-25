@@ -43,6 +43,7 @@ question or continues speaking during your goodbye, listen and answer \
 before ending the call."""
 
 __all__ = [
+    "CALL_LANGUAGE_HEADING",
     "CALL_SUMMARY_INSTRUCTIONS",
     "EMAIL_PREAMBLE",
     "EMAIL_SENDS_TRIED_LINE",
@@ -62,6 +63,7 @@ __all__ = [
     "build_email_instructions",
     "build_text_instructions",
     "build_voice_instructions",
+    "call_language_section",
     "clock_section",
     "fit_to_tools",
     "number_with_one_zone",
@@ -92,8 +94,10 @@ SETTINGS_HELP_STUB = (
     "The automatic AI introduction is enabled by default but configurable; "
     "do not promise to announce it on every call. Disclosure requirements "
     "vary by location and call type. Always identify honestly as AI if asked. "
-    "Only discuss Hail settings when asked about the voice, greeting, behavior, "
-    "or configuration. Otherwise stay with the call's purpose. When asked, use "
+    "Only discuss Hail settings when asked about the voice, language, greeting, "
+    "behavior, or configuration. Otherwise stay with the call's purpose. When "
+    "asked to speak a language this call is not set up for, you may also offer "
+    "the steps to set the language for future calls. When asked, use "
     "the hail_settings_help tool before you answer (never say its name aloud), "
     "and never guess a menu or a voice name. You cannot see or change settings during this call. If the "
     "tool is missing or fails, say you cannot look that up right now."
@@ -106,15 +110,34 @@ SETTINGS_HELP_OUTSIDER = (
     "# Questions about how you are set up\n\n"
     "The person on this call does not manage your setup. Always identify "
     "honestly as AI if asked. If they comment on your voice, accent or how "
-    "you were set up, apologize briefly in one sentence, then continue with "
-    "the call's purpose. Never mention Hail, a console, menus or settings, "
-    "and never guess how you were set up."
+    "you were set up, answer in one short sentence: apologize, and when the "
+    "Your voice section says your voice was made for another language, say "
+    "that. Then continue with the call's purpose. Never mention Hail, a "
+    "console, menus or settings, never offer to change your setup, and never "
+    "guess how you were set up."
 )
 
 # The voice was made for another language than the call's (see
 # voice_language_section). Without it the model hears "you sound strange" and
 # guesses at a cause.
 VOICE_LANGUAGE_HEADING = "# Your voice"
+
+
+CALL_LANGUAGE_HEADING = "# Call language"
+
+
+def call_language_section(language: str) -> str:
+    """The call's one language (a language name, e.g. "German"; English when
+    the call sets none). Speech recognition and the voice work in it only, so
+    the model must not offer to switch."""
+    return (
+        f"{CALL_LANGUAGE_HEADING}\n\n"
+        f"Speak in {language} for this call. Speech recognition and your voice "
+        f"are set up for {language} only. If asked to speak another language, "
+        "say in one sentence that you can't switch languages on this call, "
+        f"then continue in {language}. Never answer in another language or "
+        "offer to switch."
+    )
 
 
 def voice_language_section(voice_language: str) -> str:
@@ -142,6 +165,12 @@ Hail console under Calls, Call settings, then Language and voice for the \
 workspace, or by setting voice_id for a saved agent or a one-off call through \
 the API or a connected assistant. A call in a language with no chosen voice \
 uses a voice made for that language.
+- A call speaks one language, set before it starts: speech recognition and \
+the voice work only in it, so you cannot switch during the call. To change \
+it for future calls, an owner or admin opens Calls, then Call settings, then \
+Language and voice for the workspace, or opens Agents, opens the agent, sets \
+Language, then Save. A connected assistant or the API can set \
+voice_config.language for a saved agent or a one-off call.
 - For the workspace voice, direct an owner or admin to the Hail console, \
 Calls, then Call settings, then Language and voice. They can choose a \
 language, listen to samples, select a voice, and press Save language and voice. \
@@ -653,8 +682,16 @@ TOOL_LINES: tuple[ToolLine, ...] = (
         frozenset({"send_sms", "send_email"}),
         any_of=True,
     ),
-    # The whole settings section: only a workspace member on the line gets
-    # the settings help tool (ToolSpec.members_only).
+    # The settings sentences: only a workspace member on the line gets the
+    # settings help tool (ToolSpec.members_only). Text and email prompts are
+    # not fitted, so they keep PLATFORM_PRIVACY whole.
+    ToolLine(
+        "You may help users write their own instructions and explain supported "
+        "settings. If asked for private details, briefly decline that part and "
+        "offer help with the setting they want to change.",
+        frozenset({"hail_settings_help"}),
+        "If asked for private details, briefly decline that part.",
+    ),
     ToolLine(
         SETTINGS_HELP_STUB,
         frozenset({"hail_settings_help"}),

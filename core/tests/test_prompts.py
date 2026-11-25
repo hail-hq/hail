@@ -64,6 +64,11 @@ def test_callers_who_are_not_members_hear_no_setup_steps() -> None:
         assert prompts.SETTINGS_HELP_OUTSIDER in text
         assert "hail_settings_help" not in text
         assert "Call settings" not in text
+        # The privacy rule keeps its private-details refusal, without the
+        # offer to explain settings.
+        assert "explain supported settings" not in text
+        assert "offer help with the setting" not in text
+        assert "briefly decline that part." in text
         member = prompts.build_voice_instructions(
             "Be kind.", direction, tool_names=[*have, "hail_settings_help"]
         )
@@ -71,6 +76,27 @@ def test_callers_who_are_not_members_hear_no_setup_steps() -> None:
         assert prompts.SETTINGS_HELP_OUTSIDER not in member
     assert "Always identify honestly as AI if asked." in prompts.SETTINGS_HELP_OUTSIDER
     assert "Never mention Hail" in prompts.SETTINGS_HELP_OUTSIDER
+
+
+def test_call_language_section_keeps_the_call_in_its_language() -> None:
+    text = prompts.call_language_section("German")
+    assert text.startswith(prompts.CALL_LANGUAGE_HEADING)
+    assert "Speak in German for this call." in text
+    assert "can't switch languages on this call" in text
+    assert "then continue in German" in text
+    assert "Hail" not in text
+
+
+def test_members_get_steps_to_set_the_call_language() -> None:
+    """Only the member version of the settings section (with the help tool)
+    offers the steps; the guide has them."""
+    assert "language this call is not set up for" in prompts.SETTINGS_HELP_STUB
+    assert "set the language" not in prompts.SETTINGS_HELP_OUTSIDER
+    assert "never offer to change your setup" in prompts.SETTINGS_HELP_OUTSIDER
+    guide = prompts.VOICE_CONFIGURATION_HELP
+    assert "you cannot switch during the call" in guide
+    assert "voice_config.language" in guide
+    assert "Language, then Save" in guide
 
 
 def test_voice_language_section_names_the_voice_language_only() -> None:
@@ -181,15 +207,15 @@ def _sha(text: str) -> str:
 
 # Any change here changes what every agent is told: update on purpose only.
 _VOICE = {
-    (None, None): "9d3cfa6c40e03f696bff169884718a670482829d61bdec8cb7231ded68e4fa52",
+    (None, None): "6ed625f04d4ec7c58814eedb629a1618a17fd5d05fc6380011c4ab6ecd0ec4d3",
     (None, "inbound"): (
-        "54675424df2c5d9c9c6a7e211f166fd83aaf8be38acbc01c084c927b9fc4ca93"
+        "09a48dfc2729ab6958bf4d19a61e36826427848858b0ad34dfc4f2b621cd6207"
     ),
     ("Be kind.", None): (
-        "656057cf6e43f33771c73bc1d4aee1c5cb862b1a4713a49a057f8c7ea04469c1"
+        "9fdec286b66d0fb713d8f61d2cdeee274f0ad7366879a42688c3044241b015b6"
     ),
     ("Be kind.", "inbound"): (
-        "f849abfde4b790926e7339319db3a4d92b82f73196fe572fca4abe2ee63e911d"
+        "7274ef14e924cfcf8d935ce33c655f5345c74a4ecf737b5dcb2b6598265298bb"
     ),
 }
 
@@ -203,7 +229,7 @@ def test_prompt_text_is_pinned() -> None:
         "37e9a0b5058e8c60355db926a963a8fba59c0fc4dd43d9ede4c7116e464e9e8b"
     )
     assert _sha(prompts.VOICE_CONFIGURATION_HELP) == (
-        "b62c31712a5fbcbcfd72478de82170885d6741c96c2c27e9a1dad7bb2efe8b1c"
+        "7a9afafbdce0ba9d8564ed57db2d1310ef79a2f24ab14152e5d380458acf82db"
     )
 
 

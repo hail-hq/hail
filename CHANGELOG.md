@@ -4,6 +4,12 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+### Changed
+
+- Calls in a language other than English speak with a voice made for that language when no voice is chosen.
+- A call with `agent_id` merges `voice_config` key by key: sending only `language` keeps the agent's `voice_id`.
+- Setup help on a call is for workspace members; other callers get a short apology. The agent no longer offers to switch to a language the call is not set up for.
+
 ### Fixed
 
 - Webhooks: a delivery that cannot reach its endpoint shows a short reason, such as a TLS or connection failure.

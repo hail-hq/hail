@@ -46,7 +46,7 @@ from hailhq.core.call_failures import DESTINATION_NOT_ALLOWED, call_failure_mess
 from hailhq.core.call_legs import record_call_legs
 from hailhq.core.config import settings
 from hailhq.core.db import session_scope
-from hailhq.core.directory import DirectoryEntry, find_by_phone
+from hailhq.core.directory import DirectoryEntry, find_by_phone, has_member_phone
 from hailhq.core.disclosure import after_greeting_text, disclosure_text
 from hailhq.core.handover import HANDOVER_DEFAULT_MAX_SECONDS
 from hailhq.core.house_voices import house_cartesia_voice
@@ -59,7 +59,7 @@ from hailhq.core.inbound_calls import (
     open_inbound_call,
 )
 from hailhq.core.internal_webhook import notify_usage_event_recorded
-from hailhq.core.languages import SUPPORTED_LANGUAGES
+from hailhq.core.languages import SUPPORTED_LANGUAGES, tts_providers_for
 from hailhq.core.livekit import VOICE_READY_ATTRIBUTE
 from hailhq.core.models import Call, CallEvent, UsageEvent
 from hailhq.core.pool import CALL_META_FROM_POOL, release_pool_reservation
@@ -67,6 +67,7 @@ from hailhq.core.prompts import (
     VOICE_PREAMBLE,
     VOICE_PREAMBLE_INBOUND,
     build_voice_instructions,
+    call_language_section,
     other_party_section,
     safe_clock_section,
     voice_language_section,
@@ -346,11 +347,12 @@ def build_instructions(
     text, and the voice would read it aloud. ``voice_language`` (a language
     name) is set when the call's voice was made for another language (see
     :func:`foreign_voice`)."""
-    # The language line goes before the privacy reminder, which stays last.
-    spoken = (
-        f"Speak in {SUPPORTED_LANGUAGES[language].name} for this call."
+    # The language section goes before the privacy reminder, which stays
+    # last. A call with no language runs English speech recognition and voice.
+    spoken = call_language_section(
+        SUPPORTED_LANGUAGES[language].name
         if language in SUPPORTED_LANGUAGES
-        else None
+        else SUPPORTED_LANGUAGES["en"].name
     )
     voice = voice_language_section(voice_language) if voice_language else None
     tail = (
@@ -372,15 +374,30 @@ async def foreign_voice(
     when another provider than Cartesia speaks, or when that is unknown.
     Picks the voice the same way the TTS does (``pipeline._house_tts`` and
     ``_org_tts``)."""
+    if (
+        org_tts is not None
+        and language is not None
+        and org_tts.provider not in tts_providers_for(language)
+    ):
+        # build_tts speaks with the house chain then (fallback consented).
+        org_tts = None
     if org_tts is not None and org_tts.provider != "cartesia":
         return None
     language = language or "en"
-    voice = (
-        voice_id_override
-        or (org_tts.params.get("voice_id") if org_tts is not None else None)
-        or house_cartesia_voice(language)
-        or settings.cartesia_voice_id
-    )
+    if org_tts is not None:
+        # A workspace Cartesia row: with no voice and no house voice for the
+        # language, the plugin's own default speaks, which is unknown here.
+        voice = (
+            voice_id_override
+            or org_tts.params.get("voice_id")
+            or house_cartesia_voice(language)
+        )
+    else:
+        voice = (
+            voice_id_override
+            or house_cartesia_voice(language)
+            or settings.cartesia_voice_id
+        )
     if not voice:
         return None
     key = (org_tts.api_key if org_tts is not None else None) or (
@@ -413,36 +430,60 @@ def _call_clock(metadata: dict[str, Any], inbound: bool) -> str | None:
 _OTHER_PARTY_TIMEOUT_SECONDS = 1.0
 
 
+async def _line_number(session: Any, call_id: UUID) -> tuple[UUID, str] | None:
+    """(organization id, number of the person on the line): the caller on an
+    inbound call, the callee on an outbound one. None when either is
+    missing."""
+    row = (
+        await session.execute(
+            select(
+                Call.organization_id,
+                Call.direction,
+                Call.from_e164,
+                Call.to_e164,
+            ).where(Call.id == call_id)
+        )
+    ).one_or_none()
+    if row is None:
+        return None
+    organization_id, direction, from_e164, to_e164 = row
+    number = from_e164 if direction == "inbound" else to_e164
+    return (organization_id, number) if number else None
+
+
 async def other_party(call_id: UUID) -> DirectoryEntry | None:
-    """The directory entry of the person on the line (the caller on an
-    inbound call, the callee on an outbound one) when their number is in the
-    org's directory. A lookup failure or timeout returns None."""
+    """The directory entry of the person on the line when their number is
+    in the org's directory. A lookup failure or timeout returns None."""
     try:
         async with (
             asyncio.timeout(_OTHER_PARTY_TIMEOUT_SECONDS),
             session_scope() as session,
         ):
-            row = (
-                await session.execute(
-                    select(
-                        Call.organization_id,
-                        Call.direction,
-                        Call.from_e164,
-                        Call.to_e164,
-                    ).where(Call.id == call_id)
-                )
-            ).one_or_none()
-            if row is None:
+            line = await _line_number(session, call_id)
+            if line is None:
                 return None
-            organization_id, direction, from_e164, to_e164 = row
-            number = from_e164 if direction == "inbound" else to_e164
-            if not number:
-                return None
-            entry = await find_by_phone(session, organization_id, number)
+            entry = await find_by_phone(session, *line)
     except Exception:
         logger.warning("call_id=%s other-party lookup failed", call_id, exc_info=True)
         return None
     return entry
+
+
+async def member_on_line(call_id: UUID) -> bool:
+    """The person on the line is a workspace member (their number is a
+    member's profile number). Decides who hears setup steps. A lookup
+    failure or timeout counts as not a member: a customer must never hear
+    the workspace's setup, and a member can retry the call."""
+    try:
+        async with (
+            asyncio.timeout(_OTHER_PARTY_TIMEOUT_SECONDS),
+            session_scope() as session,
+        ):
+            line = await _line_number(session, call_id)
+            return line is not None and await has_member_phone(session, *line)
+    except Exception:
+        logger.warning("call_id=%s member lookup failed", call_id, exc_info=True)
+        return False
 
 
 # Proactive AI disclosure, spoken by default as the first thing on every
@@ -2763,6 +2804,7 @@ async def _run_call(
         speech.on_state(getattr(ev, "new_state", None), time.monotonic())
 
     other_party_task = asyncio.create_task(other_party(call_id))
+    member_task = asyncio.create_task(member_on_line(call_id))
     voice_task = asyncio.create_task(
         foreign_voice(voice_id_override, org_tts, language)
     )
@@ -2788,9 +2830,7 @@ async def _run_call(
     )
     known = await other_party_task
     # Setup help is for the workspace's own members, not its customers.
-    agent_tools = for_other_party(
-        agent_tools, member=known is not None and known.source == "member"
-    )
+    agent_tools = for_other_party(agent_tools, member=await member_task)
     tool_names = [t.info.name for t in agent_tools]
     if agent_tools:
         logger.info("call_id=%s agent tools enabled: %s", call_id, tool_names)

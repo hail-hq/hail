@@ -29,6 +29,7 @@ from hailhq.core.prompts import (
     PRIVACY_REMINDER,
     TOOL_LINES,
     VOICE_LANGUAGE_HEADING,
+    call_language_section,
     fit_to_tools,
     other_party_section,
     voice_language_section,
@@ -116,7 +117,22 @@ def test_build_instructions_uses_the_selected_spoken_language() -> None:
     assert "Speak in French for this call." in build_instructions(
         "Welcome the user", language="fr"
     )
-    assert "Speak in" not in build_instructions("Welcome the user", language="invalid")
+    # No (or an unknown) language: the call runs in English.
+    for language in (None, "invalid"):
+        out = build_instructions("Welcome the user", language=language)
+        assert call_language_section("English") in out
+
+
+def test_build_instructions_never_offers_another_language() -> None:
+    """The call speaks one language: asked for another, the agent says it
+    can't switch and stays in it, on every call (members and customers)."""
+    for tools in (["end_call"], ["end_call", "hail_settings_help"]):
+        out = build_instructions("Welcome the user", language="de", tool_names=tools)
+        section = call_language_section("German")
+        assert section in out
+        assert "can't switch languages on this call" in section
+        assert out.endswith(PRIVACY_REMINDER)
+    assert "Hail" not in call_language_section("German")
 
 
 def test_build_instructions_keeps_privacy_reminder_last_with_language() -> None:
@@ -177,6 +193,14 @@ async def test_foreign_voice_checks_the_voice_the_call_speaks_with(
     other = org("elevenlabs", {"voice_id": "english-voice"})
     assert await agent_mod.foreign_voice(None, other, "de") is None
     assert len(asked) == count
+    # A workspace Cartesia row with no voice on an English call: the
+    # plugin's default speaks, which is unknown, so nothing is asked.
+    assert await agent_mod.foreign_voice(None, org("cartesia", {}), "en") is None
+    assert len(asked) == count
+    # A workspace provider that cannot speak the language: the house chain
+    # speaks, so the house voice is checked.
+    assert await agent_mod.foreign_voice("english-voice", other, "th") == "English"
+    assert asked[-1] == ("english-voice", "th", "house-key")
 
 
 def test_build_instructions_prepends_preamble_to_caller_prompt() -> None:
@@ -2191,6 +2215,45 @@ async def test_other_party_finds_the_caller(monkeypatch):
     entry = await agent_mod.other_party(UUID(int=1))
     assert seen["number"] == "+46700000000"
     assert entry.name == "Sam" and entry.source == "member"
+
+
+async def test_member_on_line_ignores_the_name_and_fails_closed(monkeypatch):
+    """Any member with the number gets setup help, named or not; a failed
+    lookup counts as a customer."""
+    from contextlib import asynccontextmanager
+
+    from hailhq.voicebot import agent as agent_mod
+
+    class Result:
+        def one_or_none(self):
+            return ("org", "outbound", "+12025550100", "+12025550123")
+
+    class Session:
+        async def execute(self, _stmt):
+            return Result()
+
+    @asynccontextmanager
+    async def scope():
+        yield Session()
+
+    seen = {}
+
+    async def has_member(_session, org, number):
+        seen["number"] = number
+        return True
+
+    monkeypatch.setattr(agent_mod, "session_scope", scope)
+    monkeypatch.setattr(agent_mod, "has_member_phone", has_member)
+    assert await agent_mod.member_on_line(UUID(int=1)) is True
+    assert seen["number"] == "+12025550123"
+
+    @asynccontextmanager
+    async def refused():
+        raise ConnectionRefusedError
+        yield
+
+    monkeypatch.setattr(agent_mod, "session_scope", refused)
+    assert await agent_mod.member_on_line(UUID(int=1)) is False
 
 
 async def test_other_party_is_none_on_any_failure(monkeypatch):

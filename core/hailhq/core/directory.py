@@ -218,6 +218,30 @@ async def find_by_phone(
     )
 
 
+async def has_member_phone(
+    session: AsyncSession, organization_id: uuid.UUID, phone_e164: str
+) -> bool:
+    """A member of the organization has ``phone_e164`` as their profile
+    number, whatever their name and however many members share it. Decides
+    who may hear the workspace's setup steps on a call;
+    :func:`find_by_phone` decides who "me" is, which needs one named member."""
+    stmt = (
+        select(OrganizationMember.user_id)
+        .join(User, OrganizationMember.user_id == User.id)
+        .where(
+            OrganizationMember.organization_id == organization_id,
+            User.phone_number == phone_e164,
+        )
+        .limit(1)
+    )
+    try:
+        async with session.begin_nested():
+            return (await session.execute(stmt)).first() is not None
+    except ProgrammingError as exc:
+        _reraise_unless_no_member_tables(exc)
+        return False
+
+
 async def entry_email(
     session: AsyncSession,
     organization_id: uuid.UUID,
@@ -253,6 +277,7 @@ __all__ = [
     "DirectoryEntry",
     "entry_email",
     "find_by_phone",
+    "has_member_phone",
     "is_verified_member",
     "list_directory",
     "resolve_contact_emails",
