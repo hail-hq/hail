@@ -4,6 +4,9 @@ Keep your number, your phone provider and your phone system (PBX). Your
 phone system sends the calls you choose to a Hail agent over a SIP trunk:
 all calls, after hours, overflow, or one menu option.
 
+Hail's team sets up the connection with you: email hi@hail.so. The steps
+below show what the setup does.
+
 ```bash
 # 1. Create a connection. The password is shown once.
 curl -X POST "$HAIL_API_URL/v1/sip-connections" -H "Authorization: Bearer $HAIL_API_KEY" \
