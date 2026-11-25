@@ -15657,6 +15657,7 @@ type ReadSipConnectionPasswordV1SipConnectionsConnectionIdPasswordGetResponse st
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *SipConnectionPassword
+	JSON422      *HTTPValidationError
 }
 
 // Status returns HTTPResponse.Status
@@ -19660,6 +19661,13 @@ func ParseReadSipConnectionPasswordV1SipConnectionsConnectionIdPasswordGetRespon
 			return nil, err
 		}
 		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
 
 	}
 

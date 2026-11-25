@@ -1,6 +1,6 @@
 """Connected phone systems: a customer's PBX sends calls to Hail agents.
 
-POST   /sip-connections                                   create (password shown once)
+POST   /sip-connections                                   create (returns the password)
 GET    /sip-connections                                   list, newest first
 GET    /sip-connections/{id}                              one connection
 PATCH  /sip-connections/{id}                              label, PBX address, credentials
@@ -41,9 +41,9 @@ from hailhq.api.pagination import fetch_cursor_page
 from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.api.routes.calls import get_livekit_optional
 from hailhq.core.config import settings
-from hailhq.core.db import get_session
+from hailhq.core.db import get_session, independent_session_scope
 from hailhq.core.livekit import LiveKitClient
-from hailhq.core.models import PhoneNumber, SipConnection
+from hailhq.core.models import AuditLog, PhoneNumber, SipConnection
 from hailhq.core.schemas import (
     ConnectedNumberCheck,
     ConnectedNumberCreate,
@@ -232,6 +232,26 @@ async def _audit(
     )
 
 
+async def record_password_read(principal: Principal, connection_id: UUID) -> None:
+    """The audit row of a password read, committed before the password is
+    returned. Raises on failure (``write_audit_log`` never does)."""
+    actor_user_id, actor_kind = actor_of(principal)
+    async with independent_session_scope() as session:
+        session.add(
+            AuditLog(
+                organization_id=principal.organization_id,
+                api_key_id=principal.api_key_id,
+                action="sip_connection.read_password",
+                resource_type="sip_connection",
+                resource_id=connection_id,
+                payload={},
+                actor_user_id=actor_user_id,
+                actor_kind=actor_kind,
+            )
+        )
+        await session.commit()
+
+
 @router.post(
     "",
     response_model=SipConnectionCreated,
@@ -240,13 +260,14 @@ async def _audit(
 )
 async def create_sip_connection(
     body: SipConnectionCreate,
+    response: Response,
     principal: Annotated[Principal, Depends(connections_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
     lk: Annotated[LiveKitClient | None, Depends(get_livekit_optional)],
 ) -> SipConnectionCreated:
     """Connect your phone system (PBX). Add the returned SIP server, username
-    and password to it as a generic SIP trunk. The password is shown only in
-    this response; rotate it to get a new one. With ``pbx_host``, agents can
+    and password to it as a generic SIP trunk. Read the password again with
+    GET /sip-connections/{id}/password, or rotate it to get a new one. With ``pbx_host``, agents can
     also call out and hand calls over through your phone system."""
     lk = _livekit_or_503(lk)
     try:
@@ -273,6 +294,7 @@ async def create_sip_connection(
         row.id,
         {"label": row.label},
     )
+    response.headers["Cache-Control"] = "no-store"
     return SipConnectionCreated(**_response(row).model_dump(), password=password)
 
 
@@ -355,6 +377,7 @@ async def update_sip_connection(
 )
 async def rotate_sip_connection_password(
     connection_id: UUID,
+    response: Response,
     principal: Annotated[Principal, Depends(connections_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
     lk: Annotated[LiveKitClient | None, Depends(get_livekit_optional)],
@@ -372,13 +395,23 @@ async def rotate_sip_connection_password(
     await _audit(
         principal, "sip_connection.rotate_password", "sip_connection", row.id, {}
     )
+    response.headers["Cache-Control"] = "no-store"
     return SipConnectionPassword(password=password)
 
 
 @router.get(
     "/{connection_id}/password",
     response_model=SipConnectionPassword,
-    responses=_ERROR_RESPONSES,
+    responses={
+        404: _ERROR_RESPONSES[404],
+        409: {"description": "This password cannot be read. Make a new one."},
+        503: {
+            "description": (
+                "Connected phone systems are not set up on this server, or "
+                "the read could not be recorded. No password is returned."
+            )
+        },
+    },
 )
 async def read_sip_connection_password(
     connection_id: UUID,
@@ -398,10 +431,14 @@ async def read_sip_connection_password(
             status_code=409,
             detail="This password cannot be read. Make a new one.",
         ) from exc
+    try:
+        await record_password_read(principal, row.id)
+    except Exception as exc:
+        # Every read is recorded: no record, no password.
+        raise HTTPException(
+            status_code=503, detail="The password could not be read. Try again."
+        ) from exc
     response.headers["Cache-Control"] = "no-store"
-    await _audit(
-        principal, "sip_connection.read_password", "sip_connection", row.id, {}
-    )
     return SipConnectionPassword(password=password)
 
 

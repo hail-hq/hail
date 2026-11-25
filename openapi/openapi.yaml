@@ -6616,9 +6616,10 @@ paths:
         "Connect your phone system (PBX). Add the returned SIP server,
         username
 
-        and password to it as a generic SIP trunk. The password is shown only in
+        and password to it as a generic SIP trunk. Read the password again with
 
-        this response; rotate it to get a new one. With ``pbx_host``, agents can
+        GET /sip-connections/{id}/password, or rotate it to get a new one. With ``pbx_host``,
+        agents can
 
         also call out and hand calls over through your phone system."
       operationId: create_sip_connection_v1_sip_connections_post
@@ -6948,19 +6949,40 @@ paths:
               schema:
                 $ref: "#/components/schemas/SipConnectionPassword"
         "429":
-          description: The number used all its checks for today.
-        "402":
-          description: Not enough credit for the check call.
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
         "404":
           description: The connection or number does not exist here.
         "409":
-          description: The request conflicts with the current state.
-        "422":
-          description: A field is not valid.
-        "502":
-          description: Hail could not reach its call service.
+          description: This password cannot be read. Make a new one.
         "503":
-          description: Connected phone systems are not set up on this server.
+          description:
+            Connected phone systems are not set up on this server, or the
+            read could not be recorded. No password is returned.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
   /v1/sip-connections/{connection_id}/numbers:
     post:
       tags:

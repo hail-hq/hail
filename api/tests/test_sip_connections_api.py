@@ -10,7 +10,7 @@ import pytest
 from hailhq.api import connected_numbers
 from hailhq.api.connected_numbers import CheckResult, ConnectedNumberError
 from hailhq.core.config import settings
-from hailhq.core.models import IdempotencyKey, PhoneNumber
+from hailhq.core.models import AuditLog, IdempotencyKey, PhoneNumber
 from hailhq.core.secret_cipher import generate_key
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -514,8 +514,6 @@ async def test_staff_only_needs_a_jwt_even_with_the_staff_flag(
 async def test_read_password_returns_the_current_one_and_is_audited(
     client: httpx.AsyncClient, org_and_key: tuple, async_session: AsyncSession
 ) -> None:
-    from hailhq.core.models import AuditLog
-
     org, _key, plain = org_and_key
     conn = await _create(client, plain)
     resp = await client.get(
@@ -546,4 +544,69 @@ async def test_read_password_returns_the_current_one_and_is_audited(
         .all()
     )
     assert len(logs) == 2
-    assert all(conn["password"] not in str(log.payload) for log in logs)
+    assert all(
+        conn["password"] not in str(log.payload) and rotated not in str(log.payload)
+        for log in logs
+    )
+
+
+async def test_password_responses_are_never_cached(
+    client: httpx.AsyncClient, org_and_key: tuple
+) -> None:
+    _org, _key, plain = org_and_key
+    resp = await client.post(
+        "/sip-connections",
+        json={"label": "Main office", "default_region": "US"},
+        headers=_auth(plain),
+    )
+    assert resp.headers["cache-control"] == "no-store"
+    rotated = await client.post(
+        f"/sip-connections/{resp.json()['id']}/rotate-password", headers=_auth(plain)
+    )
+    assert rotated.headers["cache-control"] == "no-store"
+
+
+async def test_unreadable_password_is_409_and_not_audited(
+    client: httpx.AsyncClient, org_and_key: tuple, async_session: AsyncSession
+) -> None:
+    from hailhq.core.models import SipConnection
+    from sqlalchemy import update
+
+    _org, _key, plain = org_and_key
+    conn = await _create(client, plain)
+    await async_session.execute(
+        update(SipConnection)
+        .where(SipConnection.id == conn["id"])
+        .values(encrypted_inbound_password="not-a-fernet-token")
+    )
+    await async_session.commit()
+    resp = await client.get(
+        f"/sip-connections/{conn['id']}/password", headers=_auth(plain)
+    )
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "This password cannot be read. Make a new one."
+    reads = await async_session.scalar(
+        select(func.count())
+        .select_from(AuditLog)
+        .where(AuditLog.action == "sip_connection.read_password")
+    )
+    assert reads == 0
+
+
+async def test_no_password_without_its_audit_row(
+    client: httpx.AsyncClient, org_and_key: tuple, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _org, _key, plain = org_and_key
+    conn = await _create(client, plain)
+
+    async def broken(*args, **kwargs):
+        raise RuntimeError("audit store down")
+
+    monkeypatch.setattr(
+        "hailhq.api.routes.sip_connections.record_password_read", broken
+    )
+    resp = await client.get(
+        f"/sip-connections/{conn['id']}/password", headers=_auth(plain)
+    )
+    assert resp.status_code == 503
+    assert conn["password"] not in resp.text

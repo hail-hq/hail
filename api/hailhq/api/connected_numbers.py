@@ -189,7 +189,7 @@ async def create_connection(
     pbx_password: str | None = None,
 ) -> tuple[SipConnection, str]:
     """Create a connection and its trunks. Returns the row and the inbound
-    password in plain text (shown once)."""
+    password in plain text."""
     label = _clean_label(label)
     _check_region(default_region)
     pbx_host = _check_host(pbx_host)

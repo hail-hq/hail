@@ -166,7 +166,7 @@ def test_password_is_in_no_log_record(caplog, capsys, monkeypatch):
     with caplog.at_level("DEBUG"):
         assert main(["create", "--org", ORG, "--label", "x", "--region", "US"]) == 0
     out = capsys.readouterr().out
-    password = out.split("(shown once): ")[1].split()[0]
+    password = out.split("inbound password: ")[1].split()[0]
     assert len(password) >= 24
     assert caplog.records
     for record in caplog.records:

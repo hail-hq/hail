@@ -61,7 +61,7 @@ func TestSipConnectionsCreatePrintsPasswordOnce(t *testing.T) {
 	if !strings.Contains(stdout, "example.sip.livekit.cloud") || !strings.Contains(stdout, "hail-user-1") {
 		t.Errorf("stdout missing trunk fields: %q", stdout)
 	}
-	if !strings.Contains(stderr, "shown once") {
+	if !strings.Contains(stderr, "phone system's trunk") {
 		t.Errorf("stderr missing shown-once note: %q", stderr)
 	}
 }
