@@ -308,12 +308,19 @@ async def _audio(
                 )
             except (httpx.HTTPError, ValueError, ProviderKeyError):
                 if has_backup:
-                    _line_failures[cache_key] = (
-                        time.monotonic() + _SYNTHESIS_RETRY_SECONDS
-                    )
+                    failed_at = time.monotonic()
+                    _line_failures[cache_key] = failed_at + _SYNTHESIS_RETRY_SECONDS
                     _line_failures.move_to_end(cache_key)
                     if len(_line_failures) > _LINE_CAP:
-                        _line_failures.popitem(last=False)
+                        evicted = next(
+                            (
+                                key
+                                for key, expires_at in _line_failures.items()
+                                if expires_at <= failed_at
+                            ),
+                            next(iter(_line_failures)),
+                        )
+                        del _line_failures[evicted]
                 raise
             if cache is _lines:
                 _line_failures.pop(cache_key, None)
