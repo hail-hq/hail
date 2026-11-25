@@ -932,6 +932,7 @@ async def test_storage_cap_counts_vectors_with_or_without_an_api(
     assert all(p.embedding is None for p in await pieces_of(async_session, org))
     # Space again: the waiting pieces get their vectors.
     full["now"] = False
+    worker._embed_after = 0.0
     await worker.tick()
     assert all(p.embedding is not None for p in await pieces_of(async_session, org))
 
@@ -969,8 +970,15 @@ async def test_one_workspace_refused_pieces_never_stop_another(
     )
     await async_session.commit()
     calls = fake.calls
+    before = {p.id: p.embedding_refused_at for p in bad_pieces}
     await worker.tick()
     assert fake.calls > calls
+    again = await pieces_of(async_session, bad)
+    assert all(p.embedding_refused_at > before[p.id] for p in again)
+    # Refused again today: no request on the next tick.
+    calls = fake.calls
+    await worker.tick()
+    assert fake.calls == calls
     fake.model, fake.refuse = "fake-embedding-2", None
     await worker.tick()
     assert all(p.embedding_model for p in await pieces_of(async_session, bad))
@@ -991,7 +999,8 @@ async def test_model_change_finishes_when_storage_is_full(
     worker._embed_after = 0.0
 
     async def always_full(db, *, adding=0):
-        return True
+        # Full, but within the headroom for replacing vectors.
+        return adding > 0
 
     monkeypatch.setattr(ingest_module, "storage_full", always_full)
     fake.model = "fake-embedding-2"

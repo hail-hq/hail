@@ -38,8 +38,8 @@ No transaction stays open during an API request: pieces are read,
 embedded, then written only where they still lack a vector of the model.
 Before each batch the pass checks the global size cap with a batch of
 new vectors counted; while it is reached, pieces with no vector wait
-(keyword search) and only vectors of another model are replaced, so a
-model change still finishes. The API runs one worker
+(keyword search) and only vectors of another model are replaced, up to
+``REEMBED_HEADROOM`` past the cap, so a model change can finish. The API runs one worker
 process; several would at worst embed a piece twice.
 
 A file that cannot be used (wrong type, no text, over a limit) is
@@ -145,6 +145,9 @@ EMBED_BACKOFF = (30.0, 600.0)
 # A piece refused alone is tried again after this, in case the refusal was
 # a passing fault or the setting was fixed under the same model.
 REFUSED_RETRY = timedelta(days=1)
+# How far past the global cap replacing other-model vectors may go (each
+# UPDATE writes a new row and index entry until vacuum).
+REEMBED_HEADROOM = 30 * 1024 * 1024
 # Sent when a batch is refused: a refusal of this too means the setting.
 _PROBE_TEXT = "Opening hours"
 # What a piece's vector adds to the knowledge tables: about 3 KB of
@@ -257,17 +260,25 @@ class KnowledgeIngestWorker:
         self._probe_ok = False  # Each pass sends the probe again when needed.
         done = tried = 0
         while not self._stop.is_set() and tried < EMBED_PER_TICK:
-            # New vectors (pieces stored with no key, or while full) must
-            # fit under the cap; while it is reached, only vectors of another
-            # model are replaced (dead rows go back to autovacuum).
+            # New vectors (pieces stored with no key) must fit under the cap.
+            # Past it, only vectors of another model are replaced, within
+            # ``REEMBED_HEADROOM`` more (each UPDATE writes a new row until
+            # vacuum), so a model change can finish; past that, it waits.
             async with self._session_factory() as db:
                 full = await storage_full(db, adding=BATCH * _VECTOR_BYTES)
+                over = full and await storage_full(
+                    db, adding=BATCH * _VECTOR_BYTES - REEMBED_HEADROOM
+                )
             if full and not self._full_warned:
                 logger.warning(
-                    "knowledge: storage is full; pieces without a vector keep "
-                    "keyword search"
+                    "knowledge: storage is full; new vectors wait (keyword "
+                    "search), other-model vectors are replaced within %d MB",
+                    REEMBED_HEADROOM // (1024 * 1024),
                 )
             self._full_warned = full
+            if over:
+                self._embed_after = time.monotonic() + EMBED_BACKOFF[1]
+                break
             # Each workspace's pieces in turn (missing vectors first, then
             # those of another model), so no workspace fills every batch.
             turn = (
@@ -275,6 +286,8 @@ class KnowledgeIngestWorker:
                 .over(
                     partition_by=KnowledgePiece.organization_id,
                     order_by=(
+                        # Pieces refused a day ago go last.
+                        KnowledgePiece.embedding_refused.is_not(None),
                         KnowledgePiece.embedding_model.is_not(None),
                         KnowledgePiece.document_id,
                         KnowledgePiece.ordinal,
@@ -295,7 +308,10 @@ class KnowledgeIngestWorker:
                         KnowledgePiece.embedding_refused.is_distinct_from(
                             embedder.model
                         ),
-                        KnowledgePiece.embedding_refused_at
+                        func.coalesce(
+                            KnowledgePiece.embedding_refused_at,
+                            text("'-infinity'::timestamptz"),
+                        )
                         < func.now() - REFUSED_RETRY,
                     ),
                     *([KnowledgePiece.embedding_model.is_not(None)] if full else []),
@@ -313,6 +329,8 @@ class KnowledgeIngestWorker:
             async with self._session_factory() as db:
                 rows = (await db.execute(query)).all()
             if not rows:
+                if full:
+                    self._embed_after = time.monotonic() + EMBED_BACKOFF[1]
                 break
             tried += len(rows)
             pairs, refused, failure = await self._embed_rows(embedder, rows)
