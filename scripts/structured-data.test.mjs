@@ -99,9 +99,15 @@ test("TTS prices keep character and token rates in their original units", () => 
     ttsPrice(xai),
     `$${Number(xai.price_per_1m_chars_usd).toFixed(2)} / 1M characters`,
   );
-  const xaiProduct = modelProduct(xai, "tts", "https://hail.so/costs");
+  const { "@graph": [, xaiProduct, product] } = modelComparisonSchema({
+    models: [xai, gemini],
+    category: "tts",
+    path: "/costs/compare/tts-vs-gemini-3.8-flash-tts",
+    origin: "https://hail.so",
+  });
   assert.equal(xaiProduct.model, undefined);
-  const product = modelProduct(gemini, "tts", "https://hail.so/costs");
+  assert.equal(xaiProduct.identifier, xai.api_endpoint);
+  assert.equal(product.model, gemini.model_id);
   assert.deepEqual(
     product.offers.map(({ priceSpecification: { price, unitText } }) => [price, unitText]),
     [
@@ -260,7 +266,7 @@ test("every featured model gets a factual Product when new comparisons are gener
         ]);
         for (const product of [a, b]) {
           assert.equal(product["@type"], "Product");
-          assert.ok(product.brand.name && product.description && product.model);
+          assert.ok(product.brand.name && product.description && (product.model || product.identifier));
           assert.ok(
             !product.image && !product.aggregateRating && !product.review,
           );
@@ -330,7 +336,7 @@ for (const [zone, key] of [
           assert.equal(products.length, 2, `${path}: two model products`);
           for (const product of products) {
             assert.ok(
-              product.name && product.model && product.brand && product.url,
+              product.name && (product.model || product.identifier) && product.brand && product.url,
             );
             assert.ok(
               !product.image && !product.aggregateRating && !product.review,

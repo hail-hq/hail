@@ -72,7 +72,9 @@ export function modelProduct(
     "@id": `${pageUrl}#model-${encodeURIComponent(model.model_id)}`,
     url: pageUrl,
     name: model.display_name,
-    ...(!fields.api_endpoint ? { model: model.model_id } : {}),
+    ...(typeof fields.api_endpoint === "string"
+      ? { identifier: fields.api_endpoint }
+      : { model: model.model_id }),
     category: categories[category],
     brand: { "@type": "Brand", name: model.provider },
     description: `${model.display_name}: ${categories[category].toLowerCase()} from ${model.provider}.`,

@@ -16,6 +16,7 @@
       "WebFetch(domain:cloud.google.com)",
       "WebFetch(domain:docs.cloud.google.com)",
       "WebFetch(domain:ai.google.dev)",
+      "WebFetch(domain:aistudio.google.com)",
       "WebFetch(domain:platform.claude.com)",
       "WebFetch(domain:docs.anthropic.com)",
       "WebFetch(domain:www.anthropic.com)",
