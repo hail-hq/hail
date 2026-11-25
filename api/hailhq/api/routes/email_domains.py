@@ -885,14 +885,18 @@ async def patch_email_domain(
     # ---- agent route (any kind) ----
     # Null clears the route, so "sent" is what counts here.
     expected_agent = "expected_email_agent_id" in body.model_fields_set
+    guarded = expected_agent or body.expected_domain is not None
     if (
-        expected_agent
+        guarded
         and "email_agent_id" not in body.model_fields_set
         and body.email_agent_scope is None
     ):
         raise unprocessable(
             "send email_agent_id or email_agent_scope with its precondition",
-            loc=["body", "expected_email_agent_id"],
+            loc=[
+                "body",
+                "expected_email_agent_id" if expected_agent else "expected_domain",
+            ],
         )
     if "email_agent_id" in body.model_fields_set:
         if body.email_agent_id is not None:
@@ -1006,10 +1010,12 @@ async def patch_email_domain(
             change = change.where(
                 EmailDomain.email_agent_id == body.expected_email_agent_id
             )
+        if body.expected_domain is not None:
+            change = change.where(EmailDomain.domain == body.expected_domain)
         changed = (
             await db.execute(change.values(**updates).returning(EmailDomain.id))
         ).scalar_one_or_none()
-        if expected_agent and changed is None:
+        if guarded and changed is None:
             await db.rollback()
             raise HTTPException(
                 status_code=http_status.HTTP_409_CONFLICT,

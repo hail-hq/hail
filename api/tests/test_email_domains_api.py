@@ -1682,6 +1682,22 @@ async def test_patch_rejects_stale_agent_assignment(
         headers=headers,
     )
     assert stale_scope.status_code == 409, stale_scope.text
+    old_address = assigned.json()["domain"]
+    renamed = await client.patch(
+        url, json={"local_prefix_name": "renamed"}, headers=headers
+    )
+    assert renamed.status_code == 200, renamed.text
+    assert renamed.json()["domain"] != old_address
+    stale_address = await client.patch(
+        url,
+        json={
+            "email_agent_id": None,
+            "expected_email_agent_id": agent_id,
+            "expected_domain": old_address,
+        },
+        headers=headers,
+    )
+    assert stale_address.status_code == 409, stale_address.text
     current = await client.get(url, headers=headers)
     assert current.json()["email_agent_id"] == agent_id
     assert current.json()["email_agent_scope"] == "members"
@@ -1786,7 +1802,11 @@ async def test_guarded_email_move_resets_scope_from_the_expected_owner(
 
     await email_domains.patch_email_domain(
         domain_id,
-        EmailDomainPatch(email_agent_id=target, expected_email_agent_id=previous),
+        EmailDomainPatch(
+            email_agent_id=target,
+            expected_email_agent_id=previous,
+            expected_domain="acme+old-address@mail.hail.so",
+        ),
         principal,
         db,
     )
@@ -1794,6 +1814,7 @@ async def test_guarded_email_move_resets_scope_from_the_expected_owner(
     values = db.execute.await_args.args[0].compile().params
     assert values["email_agent_scope"] == "members"
     assert previous in values.values()
+    assert "acme+old-address@mail.hail.so" in values.values()
 
 
 async def test_a_new_address_defaults_to_members(

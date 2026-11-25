@@ -668,6 +668,15 @@ def build_tts(
                 ),
                 last=voice_provider,
             )
+            if (
+                org
+                and org.provider != voice_provider
+                and org.provider in tts_providers_for(language)
+            ):
+                try:
+                    fallback.insert(0, _org_tts(org, None, language))
+                except ProviderKeyError:
+                    logger.warning("Workspace TTS unavailable for agent voice fallback")
             if fallback:
                 # Try each voice once before moving on. Retries on a slow
                 # provider can delay the caller's first line by tens of seconds.

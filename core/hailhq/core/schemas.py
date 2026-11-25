@@ -205,6 +205,8 @@ class VoiceConfig(BaseModel):
         config = self.model_dump(mode="json")
         if self.voice_provider and self.voice_id:
             config["scoped_voice_id"] = config.pop("voice_id")
+        else:
+            config.pop("voice_provider")
         return config
 
     @staticmethod
@@ -1943,8 +1945,7 @@ DEPRECATED_PREFIX_FIELDS = {
 }
 
 _PREFIX_RULE = (
-    "must be 1–20 chars of lowercase a–z, 0–9, or '-', "
-    "with no leading or trailing '-'"
+    "must be 1–20 chars of lowercase a–z, 0–9, or '-', with no leading or trailing '-'"
 )
 
 
@@ -2296,6 +2297,15 @@ class EmailDomainPatch(_PrefixNames):
         description=(
             "Optional precondition for changing email_agent_id or email_agent_scope. Null expects "
             "no current agent. Returns 409 if another agent is assigned."
+        ),
+    )
+
+    expected_domain: str | None = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "Optional address or domain precondition for editing the agent route. "
+            "Returns 409 if the address or domain has changed."
         ),
     )
 

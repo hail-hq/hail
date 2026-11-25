@@ -138,6 +138,15 @@ async def test_scoped_voice_round_trips_without_exposing_it_to_old_workers(
     assert updated.json()["voice_config"] == public
     check_voice.assert_not_awaited()
 
+    updated = await client.patch(
+        f"/v1/agents/{agent_id}",
+        headers=headers,
+        json={"voice_config": {"language": "fr", "voice_id": "test"}},
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["voice_config"] == public
+    check_voice.assert_not_awaited()
+
 
 async def test_recording_override_can_return_to_workspace_default(client, org):
     _, headers = org
