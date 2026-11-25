@@ -30,7 +30,7 @@ from hailhq.core.knowledge.embed import EmbeddingUnavailable
 from hailhq.core.knowledge.index import MemoryIndex, Piece
 from hailhq.core.knowledge.ingest import MAX_ATTEMPTS, KnowledgeIngestWorker
 from hailhq.core.knowledge.search import search_pieces, vector_literal
-from hailhq.core.knowledge.text import terms
+from hailhq.core.knowledge.text import Chunk
 from hailhq.core.models import (
     Agent,
     FileUpload,
@@ -996,8 +996,12 @@ async def test_live_data_counts_text_and_every_vector(
     await worker.tick()
     pieces = await pieces_of(async_session, org)
     expected = sum(
-        access_module.piece_bytes(p.text, list(dict.fromkeys(terms(p.text))))
-        for p in pieces
+        access_module.piece_bytes(row["text"], row["terms"])
+        for row in ingest_module._piece_rows(
+            pieces[0].document_id,
+            org,
+            [Chunk(p.text, page=p.page, csv_row=p.csv_row) for p in pieces],
+        )
     )
     assert expected > sum(len(p.text.encode()) for p in pieces) + len(pieces) * (
         access_module.PIECE_VECTOR_BYTES
@@ -1074,3 +1078,21 @@ async def test_reading_a_document_again_at_the_cap_is_not_refused(
     assert await worker.tick() == 1
     await async_session.refresh(doc)
     assert doc.status == "ready"
+
+
+async def test_cap_check_takes_the_global_lock(
+    async_session, worker, s3, monkeypatch
+) -> None:
+    """The cap check runs under one lock for every workspace, so two
+    stores never both take the last room."""
+    keys: list[str] = []
+    real = ingest_module.key_lock
+
+    async def recording(db, key):
+        keys.append(key)
+        await real(db, key)
+
+    monkeypatch.setattr(ingest_module, "key_lock", recording)
+    await add_document(async_session, s3, uuid.uuid4(), NORTHGATE_MANUAL.encode())
+    await worker.tick()
+    assert keys == ["knowledge:global-cap"]

@@ -13,8 +13,12 @@ SKIP LOCKED`` (several API processes never take the same row), marks it
    takes one piece per CSV row;
 5. in one transaction under the workspace's knowledge lock: checks the
    document is still there and still this claim's, checks the workspace's
-   piece limit and the global size cap, writes the pieces (no vectors yet)
-   and marks it ``ready``. Keyword search finds them from here on.
+   piece limit, then under one global lock (``knowledge:global-cap``, held
+   until commit, so stores from all workspaces finish one at a time)
+   checks the global cap (the sum of ``knowledge_documents.stored_bytes``
+   with this file's pieces counted by ``access.piece_bytes``), writes the
+   pieces (no vectors yet), records their bytes in ``stored_bytes`` and
+   marks it ``ready``. Keyword search finds them from here on.
 
 Then the embedding pass (``_embed_pieces``) sends every piece of a
 workspace with the knowledge base on whose vector is missing or was made
@@ -38,8 +42,8 @@ workspace's large file never fills every batch.
 No transaction stays open during an API request: pieces are read,
 embedded, then written only where they still lack a vector of the model.
 The pass never checks the size cap: every piece's vector was counted when
-its document was admitted (``access.knowledge_bytes`` counts live rows,
-never dead ones), so new vectors and a model change always finish. The
+its document was admitted (the cap sums each document's live
+``stored_bytes``, never dead rows), so new vectors and a model change always finish. The
 API runs one worker process; several would at worst embed a piece twice.
 
 A file that cannot be used (wrong type, no text, over a limit) is
