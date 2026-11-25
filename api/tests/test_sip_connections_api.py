@@ -49,7 +49,10 @@ async def test_create_connection_returns_password_once(
     body = await _create(client, plain, pbx_host="pbx.example.com")
     assert len(body["password"]) >= 24
     assert body["password_last4"] == body["password"][-4:]
-    assert body["sip_host"] == SIP_HOST
+    # A workspace sees only the start of the SIP server.
+    assert body["sip_host"] == "examp…"
+    assert body["sip_host_masked"] is True
+    assert SIP_HOST not in str(body)
     assert body["username"]
     assert (body["pbx_host"], body["pbx_port"], body["pbx_transport"]) == (
         "pbx.example.com",
@@ -610,3 +613,93 @@ async def test_no_password_without_its_audit_row(
     )
     assert resp.status_code == 503
     assert conn["password"] not in resp.text
+
+
+def _console(org, *, superadmin: bool, auth_kind: str = "jwt"):
+    from hailhq.api.deps import Principal
+
+    return lambda: Principal(
+        auth_kind=auth_kind,
+        api_key_id=None,
+        user_id=None,
+        organization_id=org,
+        scopes=[],
+        superadmin=superadmin,
+        console_session=auth_kind == "jwt",
+    )
+
+
+async def test_every_workspace_reaches_the_routes_with_the_host_masked(
+    client: httpx.AsyncClient, org_and_key: tuple
+) -> None:
+    from hailhq.api.deps import get_current_principal
+    from hailhq.api.main import app
+
+    org, _key, plain = org_and_key
+    created = await _create(client, plain)
+    # An API key and a customer console session both get the masked host,
+    # in create, list, get and update.
+    app.dependency_overrides[get_current_principal] = _console(org, superadmin=False)
+    try:
+        listed = (await client.get("/sip-connections")).json()["items"][0]
+        one = (await client.get(f"/sip-connections/{created['id']}")).json()
+        patched = (
+            await client.patch(
+                f"/sip-connections/{created['id']}", json={"label": "Front desk"}
+            )
+        ).json()
+    finally:
+        app.dependency_overrides.pop(get_current_principal, None)
+    for body in (created, listed, one, patched):
+        assert body["sip_host"] == "examp…"
+        assert body["sip_host_masked"] is True
+        assert SIP_HOST not in str(body)
+
+
+@pytest.mark.parametrize("auth_kind,superadmin", [("jwt", True), ("shared", False)])
+async def test_staff_and_a_self_hosted_operator_see_the_full_host(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    auth_kind: str,
+    superadmin: bool,
+) -> None:
+    from hailhq.api.deps import get_current_principal
+    from hailhq.api.main import app
+
+    org, _key, plain = org_and_key
+    created = await _create(client, plain)
+    app.dependency_overrides[get_current_principal] = _console(
+        org, superadmin=superadmin, auth_kind=auth_kind
+    )
+    try:
+        one = (await client.get(f"/sip-connections/{created['id']}")).json()
+    finally:
+        app.dependency_overrides.pop(get_current_principal, None)
+    assert one["sip_host"] == SIP_HOST
+    assert one["sip_host_masked"] is False
+
+
+def test_the_routes_ship_open_to_every_workspace() -> None:
+    # The autouse fixture patches the switch; this reads the shipped line.
+    import inspect
+
+    import hailhq.api.routes.sip_connections as routes
+
+    source = inspect.getsource(routes)
+    assert "\nOPEN_TO_ALL_WORKSPACES: Final = True\n" in source
+
+
+async def test_a_short_host_is_shown_in_full_and_not_flagged(
+    client: httpx.AsyncClient, org_and_key: tuple, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "livekit_sip_host", "sip.x")
+    _org, _key, plain = org_and_key
+    body = await _create(client, plain)
+    assert (body["sip_host"], body["sip_host_masked"]) == ("sip.x", False)
+
+
+def test_a_short_host_is_not_masked_into_nothing() -> None:
+    from hailhq.api.routes.sip_connections import _masked_host
+
+    assert _masked_host("abc") == "abc"
+    assert _masked_host("abcdef.example") == "abcde…"

@@ -22,8 +22,6 @@ func newSipConnectionsCmd(opts *Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "sip-connections",
 		Short: "Connect your phone system (PBX) to Hail agents",
-		// Hidden from help while the API opens these routes to staff only.
-		Hidden: true,
 		Long: `hail sip-connections: connect your own phone system (PBX).
 
 1. create        gives the SIP server, username and password for a generic
@@ -31,7 +29,7 @@ func newSipConnectionsCmd(opts *Options) *cobra.Command {
 2. add-number    adds a number your phone system holds (state unverified).
 3. verify        Hail calls the number to prove you own it (up to 2 minutes,
                  billed as a normal outbound call).
-4. hail numbers update <number_id> --voice-agent <agent_id>
+4. hail numbers route <number_id> --calls <agent_id>
 
 Example:
   hail sip-connections create --label "Main office" --region US --pbx-host pbx.example.com
@@ -111,9 +109,9 @@ func newSipConnectionsCreateCmd(opts *Options) *cobra.Command {
 				return printJSON(opts.Stdout, resp.JSON201)
 			}
 			c := resp.JSON201
-			fmt.Fprintln(opts.Stderr, "Put the password in your phone system's trunk. Staff can read it again in the console.")
+			fmt.Fprintln(opts.Stderr, "Put the password in your phone system's trunk. You can read it again later.")
 			fmt.Fprintf(opts.Stdout, "✓ Connection %s: %s\n", c.Label, c.Id)
-			fmt.Fprintf(opts.Stdout, "  SIP server:    %s\n", c.SipHost)
+			fmt.Fprintf(opts.Stdout, "  SIP server:    %s\n", sipHostText(c.SipHost, c.SipHostMasked))
 			fmt.Fprintf(opts.Stdout, "  Username:      %s\n", c.Username)
 			fmt.Fprintf(opts.Stdout, "  Password:      %s\n", c.Password)
 			fmt.Fprintln(opts.Stdout, "  Audio:         G.711 (PCMU or PCMA)")
@@ -192,12 +190,20 @@ func newSipConnectionsListCmd(opts *Options) *cobra.Command {
 	return cmd
 }
 
+// sipHostText is the SIP server line: a masked server says where to get it.
+func sipHostText(host string, masked bool) string {
+	if masked {
+		return host + " (ask support for the full address)"
+	}
+	return host
+}
+
 func printSipConnection(opts *Options, c *client.SipConnectionResponse) error {
 	if opts.JSON {
 		return printJSON(opts.Stdout, c)
 	}
 	fmt.Fprintf(opts.Stdout, "Connection %s: %s\n", c.Label, c.Id)
-	fmt.Fprintf(opts.Stdout, "  SIP server: %s\n", c.SipHost)
+	fmt.Fprintf(opts.Stdout, "  SIP server: %s\n", sipHostText(c.SipHost, c.SipHostMasked))
 	fmt.Fprintf(opts.Stdout, "  Username:   %s\n", c.Username)
 	fmt.Fprintf(opts.Stdout, "  Password:   ••••%s\n", c.PasswordLast4)
 	fmt.Fprintf(opts.Stdout, "  Region:     %s\n", c.DefaultRegion)

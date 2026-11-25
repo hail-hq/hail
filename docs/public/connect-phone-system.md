@@ -11,7 +11,7 @@ what your phone system needs and what the setup does.
 
 Add a generic SIP trunk with:
 
-- **SIP server**: from Hail's setup.
+- **SIP server**: Hail's team sends you the full address. The console and the API show its first characters.
 - **Username and password**: from Hail's setup. Lost the password? Hail makes a new one.
 - **Audio**: G.711 (PCMU or PCMA).
 - **Key presses**: RFC 2833 / RFC 4733 (telephone events). The ownership check needs them.

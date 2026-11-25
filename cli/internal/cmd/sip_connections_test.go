@@ -20,6 +20,7 @@ func sampleSipConnection(withPassword bool) map[string]any {
 		"label":            "Main office",
 		"default_region":   "US",
 		"sip_host":         "example.sip.livekit.cloud",
+		"sip_host_masked":  false,
 		"username":         "hail-user-1",
 		"password_last4":   "wxyz",
 		"pbx_host":         "pbx.example.com",
@@ -206,5 +207,32 @@ func TestSipConnectionsUpdateRefusesSetAndClear(t *testing.T) {
 	}
 	if srv.hits != 0 {
 		t.Fatalf("server called %d times", srv.hits)
+	}
+}
+
+func TestSipConnectionsMaskedHostSaysWhereToGetIt(t *testing.T) {
+	c := sampleSipConnection(false)
+	c["sip_host"] = "examp…"
+	c["sip_host_masked"] = true
+	srv := newFakeServer(t, http.StatusOK, c)
+	stdout, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"sip-connections", "get", testConnID,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout, "examp… (ask support for the full address)") {
+		t.Errorf("masked host line: %q", stdout)
+	}
+}
+
+func TestSipConnectionsShowsInHelp(t *testing.T) {
+	stdout, _, err := runRoot(t, map[string]string{"HAIL_API_KEY": "sk_test"}, "--help")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout, "sip-connections") {
+		t.Errorf("sip-connections missing from help: %q", stdout)
 	}
 }

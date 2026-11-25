@@ -3871,8 +3871,11 @@ type SipConnectionCreated struct {
 	// PbxUsername Username Hail sends to your phone system. Null: none.
 	PbxUsername *string `json:"pbx_username"`
 
-	// SipHost SIP server your phone system sends calls to (the trunk's host).
+	// SipHost SIP server your phone system sends calls to (the trunk's host). Shows only its first characters when sip_host_masked is true.
 	SipHost string `json:"sip_host"`
+
+	// SipHostMasked True: sip_host shows only its first characters. Support sends you the full address.
+	SipHostMasked bool `json:"sip_host_masked"`
 
 	// Username Username your phone system sends to Hail.
 	Username string `json:"username"`
@@ -3949,8 +3952,11 @@ type SipConnectionResponse struct {
 	// PbxUsername Username Hail sends to your phone system. Null: none.
 	PbxUsername *string `json:"pbx_username"`
 
-	// SipHost SIP server your phone system sends calls to (the trunk's host).
+	// SipHost SIP server your phone system sends calls to (the trunk's host). Shows only its first characters when sip_host_masked is true.
 	SipHost string `json:"sip_host"`
+
+	// SipHostMasked True: sip_host shows only its first characters. Support sends you the full address.
+	SipHostMasked bool `json:"sip_host_masked"`
 
 	// Username Username your phone system sends to Hail.
 	Username string `json:"username"`
