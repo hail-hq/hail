@@ -267,13 +267,14 @@ async def test_disconnect_before_sdk_close_keeps_explicit_error(
 ):
     from hailhq.core.models import Call
     from hailhq.voicebot import browser
+    from hailhq.voicebot.pipeline import ResolvedLayer
 
     call = Call(
         organization_id=uuid.uuid4(),
         transport="browser",
         direction="inbound",
         provider="browser",
-        voice_config={},
+        voice_config={"language": "fr", "voice_id": "saved-french-voice"},
         max_duration_seconds=60,
         metadata_={"browser_trial": True},
         status="queued",
@@ -321,10 +322,23 @@ async def test_disconnect_before_sdk_close_keeps_explicit_error(
         delete_room=AsyncMock(),
         shutdown=lambda **kw: None,
     )
-    monkeypatch.setattr(browser, "resolve_org_configs", AsyncMock(return_value={}))
-    monkeypatch.setattr(browser, "build_session", lambda *a, **kw: session)
+    tts = ResolvedLayer("gemini", "workspace-key", {"voice_id": "Charon"}, True)
+    monkeypatch.setattr(
+        browser, "resolve_org_configs", AsyncMock(return_value={"tts": tts})
+    )
+    resolve_fallback = AsyncMock(return_value="cartesia")
+    monkeypatch.setattr(browser, "resolve_fallback_voice_provider", resolve_fallback)
+    build_args = {}
+
+    def build(*args, **kwargs):
+        build_args.update(kwargs)
+        return session
+
+    monkeypatch.setattr(browser, "build_session", build)
     monkeypatch.setattr(browser, "build_browser_tools", lambda *a: ([], None))
     await browser.run_browser_session(ctx, call.id, attach_handlers=lambda *a: set())
+    resolve_fallback.assert_awaited_once_with(tts, "saved-french-voice", "fr")
+    assert build_args["fallback_voice_provider"] == "cartesia"
     room_handlers["participant_disconnected"](SimpleNamespace(identity="visitor"))
     await callbacks[0]()
     await async_session.refresh(call)

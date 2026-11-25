@@ -312,3 +312,15 @@ async def test_english_gemini_default_and_published_provider_capabilities(monkey
     french = await catalog.voice_catalogue("fr", include_direct=True)
     assert "gemini" not in french["supported_providers"]
     assert french["default_voice"] is None
+
+
+@pytest.mark.parametrize("response_body", ["not json", "[]"])
+async def test_malformed_voice_metadata_is_an_upstream_error(response_body):
+    with respx.mock as mock:
+        mock.get("https://api.cartesia.ai/voices/custom").mock(
+            return_value=httpx.Response(200, text=response_body)
+        )
+        with pytest.raises(httpx.DecodingError):
+            await catalog.validate_voice_language(
+                "cartesia", "custom", "sonic-3.5", "customer-key", "en"
+            )

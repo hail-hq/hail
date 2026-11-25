@@ -366,6 +366,13 @@ async def voice_catalogue(language: str, *, include_direct: bool = False) -> dic
     }
 
 
+def _voice_metadata(response: httpx.Response):
+    try:
+        return response.json()
+    except ValueError as exc:
+        raise httpx.DecodingError("Invalid voice metadata from provider.") from exc
+
+
 async def validate_voice_language(
     provider: str, voice_id: str, model: str, key: str, language: str
 ) -> None:
@@ -389,9 +396,9 @@ async def validate_voice_language(
         if provider == "cartesia":
             response = await client.get(f"https://api.cartesia.ai/voices/{voice_id}")
             response.raise_for_status()
-            voice = response.json()
+            voice = _voice_metadata(response)
             if not isinstance(voice, dict):
-                raise ValueError("Cartesia returned invalid voice metadata.")
+                raise httpx.DecodingError("Cartesia returned invalid voice metadata.")
             choices = cartesia_choices([voice], language, model, allow_private=True)
         elif provider == "elevenlabs":
             response = await client.get(
@@ -400,14 +407,14 @@ async def validate_voice_language(
             response.raise_for_status()
             models = await client.get("https://api.elevenlabs.io/v1/models")
             models.raise_for_status()
-            voice = response.json()
-            model_rows = models.json()
+            voice = _voice_metadata(response)
+            model_rows = _voice_metadata(models)
             if (
                 not isinstance(voice, dict)
                 or not isinstance(model_rows, list)
                 or not all(isinstance(row, dict) for row in model_rows)
             ):
-                raise ValueError("ElevenLabs returned invalid voice metadata.")
+                raise httpx.DecodingError("ElevenLabs returned invalid voice metadata.")
             choices = elevenlabs_choices(
                 [voice], model_rows, language, model, allow_private=True
             )
