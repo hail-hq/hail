@@ -165,6 +165,45 @@ func (e CallTranscriptTurnRole) Valid() bool {
 	}
 }
 
+// Defines values for ConnectedNumberCheckReason.
+const (
+	CodeNotReceived  ConnectedNumberCheckReason = "code_not_received"
+	NoCallArrived    ConnectedNumberCheckReason = "no_call_arrived"
+	NotAuthenticated ConnectedNumberCheckReason = "not_authenticated"
+)
+
+// Valid indicates whether the value is a known member of the ConnectedNumberCheckReason enum.
+func (e ConnectedNumberCheckReason) Valid() bool {
+	switch e {
+	case CodeNotReceived:
+		return true
+	case NoCallArrived:
+		return true
+	case NotAuthenticated:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ConnectedNumberCheckState.
+const (
+	ConnectedNumberCheckStateActive     ConnectedNumberCheckState = "active"
+	ConnectedNumberCheckStateUnverified ConnectedNumberCheckState = "unverified"
+)
+
+// Valid indicates whether the value is a known member of the ConnectedNumberCheckState enum.
+func (e ConnectedNumberCheckState) Valid() bool {
+	switch e {
+	case ConnectedNumberCheckStateActive:
+		return true
+	case ConnectedNumberCheckStateUnverified:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ContactEntryKind.
 const (
 	Manual ContactEntryKind = "manual"
@@ -978,6 +1017,54 @@ func (e QuoteOfferSubjectTypes) Valid() bool {
 	}
 }
 
+// Defines values for SipConnectionCreatePbxTransport.
+const (
+	SipConnectionCreatePbxTransportAuto SipConnectionCreatePbxTransport = "auto"
+	SipConnectionCreatePbxTransportTcp  SipConnectionCreatePbxTransport = "tcp"
+	SipConnectionCreatePbxTransportTls  SipConnectionCreatePbxTransport = "tls"
+	SipConnectionCreatePbxTransportUdp  SipConnectionCreatePbxTransport = "udp"
+)
+
+// Valid indicates whether the value is a known member of the SipConnectionCreatePbxTransport enum.
+func (e SipConnectionCreatePbxTransport) Valid() bool {
+	switch e {
+	case SipConnectionCreatePbxTransportAuto:
+		return true
+	case SipConnectionCreatePbxTransportTcp:
+		return true
+	case SipConnectionCreatePbxTransportTls:
+		return true
+	case SipConnectionCreatePbxTransportUdp:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SipConnectionPatchPbxTransport.
+const (
+	SipConnectionPatchPbxTransportAuto SipConnectionPatchPbxTransport = "auto"
+	SipConnectionPatchPbxTransportTcp  SipConnectionPatchPbxTransport = "tcp"
+	SipConnectionPatchPbxTransportTls  SipConnectionPatchPbxTransport = "tls"
+	SipConnectionPatchPbxTransportUdp  SipConnectionPatchPbxTransport = "udp"
+)
+
+// Valid indicates whether the value is a known member of the SipConnectionPatchPbxTransport enum.
+func (e SipConnectionPatchPbxTransport) Valid() bool {
+	switch e {
+	case SipConnectionPatchPbxTransportAuto:
+		return true
+	case SipConnectionPatchPbxTransportTcp:
+		return true
+	case SipConnectionPatchPbxTransportTls:
+		return true
+	case SipConnectionPatchPbxTransportUdp:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for SmsApplicationResponseSubjectType.
 const (
 	SmsApplicationResponseSubjectTypeBusiness SmsApplicationResponseSubjectType = "business"
@@ -1532,16 +1619,16 @@ func (e WebhookSubscriptionPatchStatus) Valid() bool {
 
 // Defines values for WebhookSubscriptionResponseStatus.
 const (
-	WebhookSubscriptionResponseStatusActive   WebhookSubscriptionResponseStatus = "active"
-	WebhookSubscriptionResponseStatusDisabled WebhookSubscriptionResponseStatus = "disabled"
+	Active   WebhookSubscriptionResponseStatus = "active"
+	Disabled WebhookSubscriptionResponseStatus = "disabled"
 )
 
 // Valid indicates whether the value is a known member of the WebhookSubscriptionResponseStatus enum.
 func (e WebhookSubscriptionResponseStatus) Valid() bool {
 	switch e {
-	case WebhookSubscriptionResponseStatusActive:
+	case Active:
 		return true
-	case WebhookSubscriptionResponseStatusDisabled:
+	case Disabled:
 		return true
 	default:
 		return false
@@ -2118,6 +2205,30 @@ type CallTranscriptTurnRole string
 type ConfirmRequest struct {
 	// Code The code the carrier texted to the person's mobile.
 	Code string `json:"code"`
+}
+
+// ConnectedNumberCheck defines model for ConnectedNumberCheck.
+type ConnectedNumberCheck struct {
+	// CallId The check call, billed as an outbound call.
+	CallId *openapi_types.UUID `json:"call_id,omitempty"`
+
+	// Reason Why the check failed. 'no_call_arrived': no call reached this connection; check the trunk and the routing rule. 'not_authenticated': the call came without this connection's username and password, or to another trunk. 'code_not_received': the check code did not come through; turn on RFC 2833 key presses.
+	Reason *ConnectedNumberCheckReason `json:"reason,omitempty"`
+
+	// State 'active': the number passed and can be routed to an agent.
+	State ConnectedNumberCheckState `json:"state"`
+}
+
+// ConnectedNumberCheckReason Why the check failed. 'no_call_arrived': no call reached this connection; check the trunk and the routing rule. 'not_authenticated': the call came without this connection's username and password, or to another trunk. 'code_not_received': the check code did not come through; turn on RFC 2833 key presses.
+type ConnectedNumberCheckReason string
+
+// ConnectedNumberCheckState 'active': the number passed and can be routed to an agent.
+type ConnectedNumberCheckState string
+
+// ConnectedNumberCreate defines model for ConnectedNumberCreate.
+type ConnectedNumberCreate struct {
+	// E164 Your number with its country code, such as +14155550100.
+	E164 string `json:"e164"`
 }
 
 // ContactCreate defines model for ContactCreate.
@@ -3698,6 +3809,109 @@ type SenderIdResponse struct {
 	EffectiveDefault *string `json:"effective_default,omitempty"`
 }
 
+// SipConnectionCreate defines model for SipConnectionCreate.
+type SipConnectionCreate struct {
+	// DefaultRegion ISO alpha-2 country of the phone system. Hail reads national caller numbers with it.
+	DefaultRegion string `json:"default_region"`
+
+	// Label A name, such as 'Main office'.
+	Label string `json:"label"`
+
+	// PbxHost Public host name or IP address where Hail dials your phone system for outbound calls and handover. Null: Hail only answers calls.
+	PbxHost *string `json:"pbx_host,omitempty"`
+
+	// PbxPassword Password Hail sends with pbx_username. Stored encrypted.
+	PbxPassword *string `json:"pbx_password,omitempty"`
+
+	// PbxPort SIP port.
+	PbxPort *int `json:"pbx_port,omitempty"`
+
+	// PbxTransport SIP transport.
+	PbxTransport *SipConnectionCreatePbxTransport `json:"pbx_transport,omitempty"`
+
+	// PbxUsername Username Hail sends when your phone system asks for one.
+	PbxUsername *string `json:"pbx_username,omitempty"`
+}
+
+// SipConnectionCreatePbxTransport SIP transport.
+type SipConnectionCreatePbxTransport string
+
+// SipConnectionCreated defines model for SipConnectionCreated.
+type SipConnectionCreated struct {
+	CreatedAt     time.Time          `json:"created_at"`
+	DefaultRegion string             `json:"default_region"`
+	Id            openapi_types.UUID `json:"id"`
+	Label         string             `json:"label"`
+
+	// Password Password your phone system sends to Hail. Shown only here.
+	Password string `json:"password"`
+
+	// PasswordLast4 Last 4 characters of the password. The full password shows once.
+	PasswordLast4  string  `json:"password_last4"`
+	PbxHost        *string `json:"pbx_host"`
+	PbxPasswordSet bool    `json:"pbx_password_set"`
+	PbxPort        int     `json:"pbx_port"`
+	PbxTransport   string  `json:"pbx_transport"`
+	PbxUsername    *string `json:"pbx_username"`
+
+	// SipHost SIP server your phone system sends calls to (the trunk's host).
+	SipHost string `json:"sip_host"`
+
+	// Username Username your phone system sends to Hail.
+	Username string `json:"username"`
+}
+
+// SipConnectionListResponse defines model for SipConnectionListResponse.
+type SipConnectionListResponse struct {
+	Items []SipConnectionResponse `json:"items"`
+
+	// NextCursor Pass as cursor for the next page. Null at the end.
+	NextCursor *string `json:"next_cursor,omitempty"`
+}
+
+// SipConnectionPassword defines model for SipConnectionPassword.
+type SipConnectionPassword struct {
+	// Password The new password. Shown only here.
+	Password string `json:"password"`
+}
+
+// SipConnectionPatch Fields left out stay as they are; “null“ clears a nullable field.
+type SipConnectionPatch struct {
+	Label *string `json:"label,omitempty"`
+
+	// PbxHost New host. Null removes it: Hail then only answers calls. A new host, port or transport needs pbx_password again when a pbx_username is set.
+	PbxHost      *string                         `json:"pbx_host,omitempty"`
+	PbxPassword  *string                         `json:"pbx_password,omitempty"`
+	PbxPort      *int                            `json:"pbx_port,omitempty"`
+	PbxTransport *SipConnectionPatchPbxTransport `json:"pbx_transport,omitempty"`
+	PbxUsername  *string                         `json:"pbx_username,omitempty"`
+}
+
+// SipConnectionPatchPbxTransport defines model for SipConnectionPatch.PbxTransport.
+type SipConnectionPatchPbxTransport string
+
+// SipConnectionResponse defines model for SipConnectionResponse.
+type SipConnectionResponse struct {
+	CreatedAt     time.Time          `json:"created_at"`
+	DefaultRegion string             `json:"default_region"`
+	Id            openapi_types.UUID `json:"id"`
+	Label         string             `json:"label"`
+
+	// PasswordLast4 Last 4 characters of the password. The full password shows once.
+	PasswordLast4  string  `json:"password_last4"`
+	PbxHost        *string `json:"pbx_host"`
+	PbxPasswordSet bool    `json:"pbx_password_set"`
+	PbxPort        int     `json:"pbx_port"`
+	PbxTransport   string  `json:"pbx_transport"`
+	PbxUsername    *string `json:"pbx_username"`
+
+	// SipHost SIP server your phone system sends calls to (the trunk's host).
+	SipHost string `json:"sip_host"`
+
+	// Username Username your phone system sends to Hail.
+	Username string `json:"username"`
+}
+
 // SmsApplicationAmendRequest Complete replacement answers for an existing sender's missing evidence.
 type SmsApplicationAmendRequest struct {
 	// Address Original sender address; changing it requires support.
@@ -4838,6 +5052,53 @@ type DeleteProviderParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
+// ListSipConnectionsV1SipConnectionsGetParams defines parameters for ListSipConnectionsV1SipConnectionsGet.
+type ListSipConnectionsV1SipConnectionsGetParams struct {
+	Cursor        *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit         *int    `form:"limit,omitempty" json:"limit,omitempty"`
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// CreateSipConnectionV1SipConnectionsPostParams defines parameters for CreateSipConnectionV1SipConnectionsPost.
+type CreateSipConnectionV1SipConnectionsPostParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// DeleteSipConnectionV1SipConnectionsConnectionIdDeleteParams defines parameters for DeleteSipConnectionV1SipConnectionsConnectionIdDelete.
+type DeleteSipConnectionV1SipConnectionsConnectionIdDeleteParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// GetSipConnectionV1SipConnectionsConnectionIdGetParams defines parameters for GetSipConnectionV1SipConnectionsConnectionIdGet.
+type GetSipConnectionV1SipConnectionsConnectionIdGetParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// UpdateSipConnectionV1SipConnectionsConnectionIdPatchParams defines parameters for UpdateSipConnectionV1SipConnectionsConnectionIdPatch.
+type UpdateSipConnectionV1SipConnectionsConnectionIdPatchParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// AddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostParams defines parameters for AddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPost.
+type AddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// RemoveSipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdDeleteParams defines parameters for RemoveSipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdDelete.
+type RemoveSipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdDeleteParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// VerifySipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdVerifyPostParams defines parameters for VerifySipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdVerifyPost.
+type VerifySipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdVerifyPostParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// RotateSipConnectionPasswordV1SipConnectionsConnectionIdRotatePasswordPostParams defines parameters for RotateSipConnectionPasswordV1SipConnectionsConnectionIdRotatePasswordPost.
+type RotateSipConnectionPasswordV1SipConnectionsConnectionIdRotatePasswordPostParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
 // ListSmsV1SmsGetParams defines parameters for ListSmsV1SmsGet.
 type ListSmsV1SmsGetParams struct {
 	Cursor        *string                      `form:"cursor,omitempty" json:"cursor,omitempty"`
@@ -5128,6 +5389,15 @@ type ActivateProviderJSONRequestBody = ProviderActivateRequest
 
 // ValidateProviderJSONRequestBody defines body for ValidateProvider for application/json ContentType.
 type ValidateProviderJSONRequestBody = ProviderValidateRequest
+
+// CreateSipConnectionV1SipConnectionsPostJSONRequestBody defines body for CreateSipConnectionV1SipConnectionsPost for application/json ContentType.
+type CreateSipConnectionV1SipConnectionsPostJSONRequestBody = SipConnectionCreate
+
+// UpdateSipConnectionV1SipConnectionsConnectionIdPatchJSONRequestBody defines body for UpdateSipConnectionV1SipConnectionsConnectionIdPatch for application/json ContentType.
+type UpdateSipConnectionV1SipConnectionsConnectionIdPatchJSONRequestBody = SipConnectionPatch
+
+// AddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostJSONRequestBody defines body for AddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPost for application/json ContentType.
+type AddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostJSONRequestBody = ConnectedNumberCreate
 
 // CreateSmsV1SmsPostJSONRequestBody defines body for CreateSmsV1SmsPost for application/json ContentType.
 type CreateSmsV1SmsPostJSONRequestBody = SmsCreate
@@ -5722,6 +5992,39 @@ type ClientInterface interface {
 
 	// DeleteProvider request
 	DeleteProvider(ctx context.Context, layer string, provider string, params *DeleteProviderParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListSipConnectionsV1SipConnectionsGet request
+	ListSipConnectionsV1SipConnectionsGet(ctx context.Context, params *ListSipConnectionsV1SipConnectionsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateSipConnectionV1SipConnectionsPostWithBody request with any body
+	CreateSipConnectionV1SipConnectionsPostWithBody(ctx context.Context, params *CreateSipConnectionV1SipConnectionsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	CreateSipConnectionV1SipConnectionsPost(ctx context.Context, params *CreateSipConnectionV1SipConnectionsPostParams, body CreateSipConnectionV1SipConnectionsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DeleteSipConnectionV1SipConnectionsConnectionIdDelete request
+	DeleteSipConnectionV1SipConnectionsConnectionIdDelete(ctx context.Context, connectionId openapi_types.UUID, params *DeleteSipConnectionV1SipConnectionsConnectionIdDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetSipConnectionV1SipConnectionsConnectionIdGet request
+	GetSipConnectionV1SipConnectionsConnectionIdGet(ctx context.Context, connectionId openapi_types.UUID, params *GetSipConnectionV1SipConnectionsConnectionIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// UpdateSipConnectionV1SipConnectionsConnectionIdPatchWithBody request with any body
+	UpdateSipConnectionV1SipConnectionsConnectionIdPatchWithBody(ctx context.Context, connectionId openapi_types.UUID, params *UpdateSipConnectionV1SipConnectionsConnectionIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	UpdateSipConnectionV1SipConnectionsConnectionIdPatch(ctx context.Context, connectionId openapi_types.UUID, params *UpdateSipConnectionV1SipConnectionsConnectionIdPatchParams, body UpdateSipConnectionV1SipConnectionsConnectionIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// AddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostWithBody request with any body
+	AddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostWithBody(ctx context.Context, connectionId openapi_types.UUID, params *AddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	AddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPost(ctx context.Context, connectionId openapi_types.UUID, params *AddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostParams, body AddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RemoveSipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdDelete request
+	RemoveSipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdDelete(ctx context.Context, connectionId openapi_types.UUID, numberId openapi_types.UUID, params *RemoveSipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// VerifySipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdVerifyPost request
+	VerifySipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdVerifyPost(ctx context.Context, connectionId openapi_types.UUID, numberId openapi_types.UUID, params *VerifySipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdVerifyPostParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RotateSipConnectionPasswordV1SipConnectionsConnectionIdRotatePasswordPost request
+	RotateSipConnectionPasswordV1SipConnectionsConnectionIdRotatePasswordPost(ctx context.Context, connectionId openapi_types.UUID, params *RotateSipConnectionPasswordV1SipConnectionsConnectionIdRotatePasswordPostParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListSmsV1SmsGet request
 	ListSmsV1SmsGet(ctx context.Context, params *ListSmsV1SmsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -6667,6 +6970,150 @@ func (c *Client) ValidateProvider(ctx context.Context, layer string, params *Val
 
 func (c *Client) DeleteProvider(ctx context.Context, layer string, provider string, params *DeleteProviderParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewDeleteProviderRequest(c.Server, layer, provider, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListSipConnectionsV1SipConnectionsGet(ctx context.Context, params *ListSipConnectionsV1SipConnectionsGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListSipConnectionsV1SipConnectionsGetRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreateSipConnectionV1SipConnectionsPostWithBody(ctx context.Context, params *CreateSipConnectionV1SipConnectionsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateSipConnectionV1SipConnectionsPostRequestWithBody(c.Server, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreateSipConnectionV1SipConnectionsPost(ctx context.Context, params *CreateSipConnectionV1SipConnectionsPostParams, body CreateSipConnectionV1SipConnectionsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateSipConnectionV1SipConnectionsPostRequest(c.Server, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) DeleteSipConnectionV1SipConnectionsConnectionIdDelete(ctx context.Context, connectionId openapi_types.UUID, params *DeleteSipConnectionV1SipConnectionsConnectionIdDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteSipConnectionV1SipConnectionsConnectionIdDeleteRequest(c.Server, connectionId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetSipConnectionV1SipConnectionsConnectionIdGet(ctx context.Context, connectionId openapi_types.UUID, params *GetSipConnectionV1SipConnectionsConnectionIdGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetSipConnectionV1SipConnectionsConnectionIdGetRequest(c.Server, connectionId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) UpdateSipConnectionV1SipConnectionsConnectionIdPatchWithBody(ctx context.Context, connectionId openapi_types.UUID, params *UpdateSipConnectionV1SipConnectionsConnectionIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpdateSipConnectionV1SipConnectionsConnectionIdPatchRequestWithBody(c.Server, connectionId, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) UpdateSipConnectionV1SipConnectionsConnectionIdPatch(ctx context.Context, connectionId openapi_types.UUID, params *UpdateSipConnectionV1SipConnectionsConnectionIdPatchParams, body UpdateSipConnectionV1SipConnectionsConnectionIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpdateSipConnectionV1SipConnectionsConnectionIdPatchRequest(c.Server, connectionId, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) AddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostWithBody(ctx context.Context, connectionId openapi_types.UUID, params *AddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewAddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostRequestWithBody(c.Server, connectionId, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) AddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPost(ctx context.Context, connectionId openapi_types.UUID, params *AddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostParams, body AddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewAddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostRequest(c.Server, connectionId, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) RemoveSipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdDelete(ctx context.Context, connectionId openapi_types.UUID, numberId openapi_types.UUID, params *RemoveSipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRemoveSipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdDeleteRequest(c.Server, connectionId, numberId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) VerifySipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdVerifyPost(ctx context.Context, connectionId openapi_types.UUID, numberId openapi_types.UUID, params *VerifySipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdVerifyPostParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewVerifySipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdVerifyPostRequest(c.Server, connectionId, numberId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) RotateSipConnectionPasswordV1SipConnectionsConnectionIdRotatePasswordPost(ctx context.Context, connectionId openapi_types.UUID, params *RotateSipConnectionPasswordV1SipConnectionsConnectionIdRotatePasswordPostParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRotateSipConnectionPasswordV1SipConnectionsConnectionIdRotatePasswordPostRequest(c.Server, connectionId, params)
 	if err != nil {
 		return nil, err
 	}
@@ -10463,6 +10910,524 @@ func NewDeleteProviderRequest(server string, layer string, provider string, para
 	return req, nil
 }
 
+// NewListSipConnectionsV1SipConnectionsGetRequest generates requests for ListSipConnectionsV1SipConnectionsGet
+func NewListSipConnectionsV1SipConnectionsGetRequest(server string, params *ListSipConnectionsV1SipConnectionsGetParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/sip-connections")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.Cursor != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "cursor", *params.Cursor, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewCreateSipConnectionV1SipConnectionsPostRequest calls the generic CreateSipConnectionV1SipConnectionsPost builder with application/json body
+func NewCreateSipConnectionV1SipConnectionsPostRequest(server string, params *CreateSipConnectionV1SipConnectionsPostParams, body CreateSipConnectionV1SipConnectionsPostJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreateSipConnectionV1SipConnectionsPostRequestWithBody(server, params, "application/json", bodyReader)
+}
+
+// NewCreateSipConnectionV1SipConnectionsPostRequestWithBody generates requests for CreateSipConnectionV1SipConnectionsPost with any type of body
+func NewCreateSipConnectionV1SipConnectionsPostRequestWithBody(server string, params *CreateSipConnectionV1SipConnectionsPostParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/sip-connections")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewDeleteSipConnectionV1SipConnectionsConnectionIdDeleteRequest generates requests for DeleteSipConnectionV1SipConnectionsConnectionIdDelete
+func NewDeleteSipConnectionV1SipConnectionsConnectionIdDeleteRequest(server string, connectionId openapi_types.UUID, params *DeleteSipConnectionV1SipConnectionsConnectionIdDeleteParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "connection_id", connectionId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/sip-connections/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("DELETE", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewGetSipConnectionV1SipConnectionsConnectionIdGetRequest generates requests for GetSipConnectionV1SipConnectionsConnectionIdGet
+func NewGetSipConnectionV1SipConnectionsConnectionIdGetRequest(server string, connectionId openapi_types.UUID, params *GetSipConnectionV1SipConnectionsConnectionIdGetParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "connection_id", connectionId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/sip-connections/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewUpdateSipConnectionV1SipConnectionsConnectionIdPatchRequest calls the generic UpdateSipConnectionV1SipConnectionsConnectionIdPatch builder with application/json body
+func NewUpdateSipConnectionV1SipConnectionsConnectionIdPatchRequest(server string, connectionId openapi_types.UUID, params *UpdateSipConnectionV1SipConnectionsConnectionIdPatchParams, body UpdateSipConnectionV1SipConnectionsConnectionIdPatchJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewUpdateSipConnectionV1SipConnectionsConnectionIdPatchRequestWithBody(server, connectionId, params, "application/json", bodyReader)
+}
+
+// NewUpdateSipConnectionV1SipConnectionsConnectionIdPatchRequestWithBody generates requests for UpdateSipConnectionV1SipConnectionsConnectionIdPatch with any type of body
+func NewUpdateSipConnectionV1SipConnectionsConnectionIdPatchRequestWithBody(server string, connectionId openapi_types.UUID, params *UpdateSipConnectionV1SipConnectionsConnectionIdPatchParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "connection_id", connectionId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/sip-connections/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("PATCH", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewAddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostRequest calls the generic AddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPost builder with application/json body
+func NewAddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostRequest(server string, connectionId openapi_types.UUID, params *AddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostParams, body AddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewAddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostRequestWithBody(server, connectionId, params, "application/json", bodyReader)
+}
+
+// NewAddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostRequestWithBody generates requests for AddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPost with any type of body
+func NewAddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostRequestWithBody(server string, connectionId openapi_types.UUID, params *AddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "connection_id", connectionId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/sip-connections/%s/numbers", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewRemoveSipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdDeleteRequest generates requests for RemoveSipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdDelete
+func NewRemoveSipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdDeleteRequest(server string, connectionId openapi_types.UUID, numberId openapi_types.UUID, params *RemoveSipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdDeleteParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "connection_id", connectionId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "number_id", numberId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/sip-connections/%s/numbers/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("DELETE", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewVerifySipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdVerifyPostRequest generates requests for VerifySipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdVerifyPost
+func NewVerifySipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdVerifyPostRequest(server string, connectionId openapi_types.UUID, numberId openapi_types.UUID, params *VerifySipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdVerifyPostParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "connection_id", connectionId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "number_id", numberId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/sip-connections/%s/numbers/%s/verify", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewRotateSipConnectionPasswordV1SipConnectionsConnectionIdRotatePasswordPostRequest generates requests for RotateSipConnectionPasswordV1SipConnectionsConnectionIdRotatePasswordPost
+func NewRotateSipConnectionPasswordV1SipConnectionsConnectionIdRotatePasswordPostRequest(server string, connectionId openapi_types.UUID, params *RotateSipConnectionPasswordV1SipConnectionsConnectionIdRotatePasswordPostParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "connection_id", connectionId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/sip-connections/%s/rotate-password", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
 // NewListSmsV1SmsGetRequest generates requests for ListSmsV1SmsGet
 func NewListSmsV1SmsGetRequest(server string, params *ListSmsV1SmsGetParams) (*http.Request, error) {
 	var err error
@@ -13029,6 +13994,39 @@ type ClientWithResponsesInterface interface {
 	// DeleteProviderWithResponse request
 	DeleteProviderWithResponse(ctx context.Context, layer string, provider string, params *DeleteProviderParams, reqEditors ...RequestEditorFn) (*DeleteProviderResponse, error)
 
+	// ListSipConnectionsV1SipConnectionsGetWithResponse request
+	ListSipConnectionsV1SipConnectionsGetWithResponse(ctx context.Context, params *ListSipConnectionsV1SipConnectionsGetParams, reqEditors ...RequestEditorFn) (*ListSipConnectionsV1SipConnectionsGetResponse, error)
+
+	// CreateSipConnectionV1SipConnectionsPostWithBodyWithResponse request with any body
+	CreateSipConnectionV1SipConnectionsPostWithBodyWithResponse(ctx context.Context, params *CreateSipConnectionV1SipConnectionsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateSipConnectionV1SipConnectionsPostResponse, error)
+
+	CreateSipConnectionV1SipConnectionsPostWithResponse(ctx context.Context, params *CreateSipConnectionV1SipConnectionsPostParams, body CreateSipConnectionV1SipConnectionsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateSipConnectionV1SipConnectionsPostResponse, error)
+
+	// DeleteSipConnectionV1SipConnectionsConnectionIdDeleteWithResponse request
+	DeleteSipConnectionV1SipConnectionsConnectionIdDeleteWithResponse(ctx context.Context, connectionId openapi_types.UUID, params *DeleteSipConnectionV1SipConnectionsConnectionIdDeleteParams, reqEditors ...RequestEditorFn) (*DeleteSipConnectionV1SipConnectionsConnectionIdDeleteResponse, error)
+
+	// GetSipConnectionV1SipConnectionsConnectionIdGetWithResponse request
+	GetSipConnectionV1SipConnectionsConnectionIdGetWithResponse(ctx context.Context, connectionId openapi_types.UUID, params *GetSipConnectionV1SipConnectionsConnectionIdGetParams, reqEditors ...RequestEditorFn) (*GetSipConnectionV1SipConnectionsConnectionIdGetResponse, error)
+
+	// UpdateSipConnectionV1SipConnectionsConnectionIdPatchWithBodyWithResponse request with any body
+	UpdateSipConnectionV1SipConnectionsConnectionIdPatchWithBodyWithResponse(ctx context.Context, connectionId openapi_types.UUID, params *UpdateSipConnectionV1SipConnectionsConnectionIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateSipConnectionV1SipConnectionsConnectionIdPatchResponse, error)
+
+	UpdateSipConnectionV1SipConnectionsConnectionIdPatchWithResponse(ctx context.Context, connectionId openapi_types.UUID, params *UpdateSipConnectionV1SipConnectionsConnectionIdPatchParams, body UpdateSipConnectionV1SipConnectionsConnectionIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateSipConnectionV1SipConnectionsConnectionIdPatchResponse, error)
+
+	// AddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostWithBodyWithResponse request with any body
+	AddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostWithBodyWithResponse(ctx context.Context, connectionId openapi_types.UUID, params *AddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*AddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostResponse, error)
+
+	AddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostWithResponse(ctx context.Context, connectionId openapi_types.UUID, params *AddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostParams, body AddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostJSONRequestBody, reqEditors ...RequestEditorFn) (*AddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostResponse, error)
+
+	// RemoveSipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdDeleteWithResponse request
+	RemoveSipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdDeleteWithResponse(ctx context.Context, connectionId openapi_types.UUID, numberId openapi_types.UUID, params *RemoveSipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdDeleteParams, reqEditors ...RequestEditorFn) (*RemoveSipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdDeleteResponse, error)
+
+	// VerifySipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdVerifyPostWithResponse request
+	VerifySipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdVerifyPostWithResponse(ctx context.Context, connectionId openapi_types.UUID, numberId openapi_types.UUID, params *VerifySipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdVerifyPostParams, reqEditors ...RequestEditorFn) (*VerifySipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdVerifyPostResponse, error)
+
+	// RotateSipConnectionPasswordV1SipConnectionsConnectionIdRotatePasswordPostWithResponse request
+	RotateSipConnectionPasswordV1SipConnectionsConnectionIdRotatePasswordPostWithResponse(ctx context.Context, connectionId openapi_types.UUID, params *RotateSipConnectionPasswordV1SipConnectionsConnectionIdRotatePasswordPostParams, reqEditors ...RequestEditorFn) (*RotateSipConnectionPasswordV1SipConnectionsConnectionIdRotatePasswordPostResponse, error)
+
 	// ListSmsV1SmsGetWithResponse request
 	ListSmsV1SmsGetWithResponse(ctx context.Context, params *ListSmsV1SmsGetParams, reqEditors ...RequestEditorFn) (*ListSmsV1SmsGetResponse, error)
 
@@ -14358,6 +15356,203 @@ func (r DeleteProviderResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r DeleteProviderResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ListSipConnectionsV1SipConnectionsGetResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *SipConnectionListResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r ListSipConnectionsV1SipConnectionsGetResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListSipConnectionsV1SipConnectionsGetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type CreateSipConnectionV1SipConnectionsPostResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON201      *SipConnectionCreated
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateSipConnectionV1SipConnectionsPostResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateSipConnectionV1SipConnectionsPostResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type DeleteSipConnectionV1SipConnectionsConnectionIdDeleteResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+}
+
+// Status returns HTTPResponse.Status
+func (r DeleteSipConnectionV1SipConnectionsConnectionIdDeleteResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeleteSipConnectionV1SipConnectionsConnectionIdDeleteResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetSipConnectionV1SipConnectionsConnectionIdGetResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *SipConnectionResponse
+}
+
+// Status returns HTTPResponse.Status
+func (r GetSipConnectionV1SipConnectionsConnectionIdGetResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetSipConnectionV1SipConnectionsConnectionIdGetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type UpdateSipConnectionV1SipConnectionsConnectionIdPatchResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *SipConnectionResponse
+}
+
+// Status returns HTTPResponse.Status
+func (r UpdateSipConnectionV1SipConnectionsConnectionIdPatchResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r UpdateSipConnectionV1SipConnectionsConnectionIdPatchResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type AddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON201      *PhoneNumberResponse
+}
+
+// Status returns HTTPResponse.Status
+func (r AddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r AddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type RemoveSipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdDeleteResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+}
+
+// Status returns HTTPResponse.Status
+func (r RemoveSipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdDeleteResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RemoveSipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdDeleteResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type VerifySipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdVerifyPostResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ConnectedNumberCheck
+}
+
+// Status returns HTTPResponse.Status
+func (r VerifySipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdVerifyPostResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r VerifySipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdVerifyPostResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type RotateSipConnectionPasswordV1SipConnectionsConnectionIdRotatePasswordPostResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *SipConnectionPassword
+}
+
+// Status returns HTTPResponse.Status
+func (r RotateSipConnectionPasswordV1SipConnectionsConnectionIdRotatePasswordPostResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RotateSipConnectionPasswordV1SipConnectionsConnectionIdRotatePasswordPostResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -15884,6 +17079,111 @@ func (c *ClientWithResponses) DeleteProviderWithResponse(ctx context.Context, la
 		return nil, err
 	}
 	return ParseDeleteProviderResponse(rsp)
+}
+
+// ListSipConnectionsV1SipConnectionsGetWithResponse request returning *ListSipConnectionsV1SipConnectionsGetResponse
+func (c *ClientWithResponses) ListSipConnectionsV1SipConnectionsGetWithResponse(ctx context.Context, params *ListSipConnectionsV1SipConnectionsGetParams, reqEditors ...RequestEditorFn) (*ListSipConnectionsV1SipConnectionsGetResponse, error) {
+	rsp, err := c.ListSipConnectionsV1SipConnectionsGet(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListSipConnectionsV1SipConnectionsGetResponse(rsp)
+}
+
+// CreateSipConnectionV1SipConnectionsPostWithBodyWithResponse request with arbitrary body returning *CreateSipConnectionV1SipConnectionsPostResponse
+func (c *ClientWithResponses) CreateSipConnectionV1SipConnectionsPostWithBodyWithResponse(ctx context.Context, params *CreateSipConnectionV1SipConnectionsPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateSipConnectionV1SipConnectionsPostResponse, error) {
+	rsp, err := c.CreateSipConnectionV1SipConnectionsPostWithBody(ctx, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateSipConnectionV1SipConnectionsPostResponse(rsp)
+}
+
+func (c *ClientWithResponses) CreateSipConnectionV1SipConnectionsPostWithResponse(ctx context.Context, params *CreateSipConnectionV1SipConnectionsPostParams, body CreateSipConnectionV1SipConnectionsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateSipConnectionV1SipConnectionsPostResponse, error) {
+	rsp, err := c.CreateSipConnectionV1SipConnectionsPost(ctx, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateSipConnectionV1SipConnectionsPostResponse(rsp)
+}
+
+// DeleteSipConnectionV1SipConnectionsConnectionIdDeleteWithResponse request returning *DeleteSipConnectionV1SipConnectionsConnectionIdDeleteResponse
+func (c *ClientWithResponses) DeleteSipConnectionV1SipConnectionsConnectionIdDeleteWithResponse(ctx context.Context, connectionId openapi_types.UUID, params *DeleteSipConnectionV1SipConnectionsConnectionIdDeleteParams, reqEditors ...RequestEditorFn) (*DeleteSipConnectionV1SipConnectionsConnectionIdDeleteResponse, error) {
+	rsp, err := c.DeleteSipConnectionV1SipConnectionsConnectionIdDelete(ctx, connectionId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeleteSipConnectionV1SipConnectionsConnectionIdDeleteResponse(rsp)
+}
+
+// GetSipConnectionV1SipConnectionsConnectionIdGetWithResponse request returning *GetSipConnectionV1SipConnectionsConnectionIdGetResponse
+func (c *ClientWithResponses) GetSipConnectionV1SipConnectionsConnectionIdGetWithResponse(ctx context.Context, connectionId openapi_types.UUID, params *GetSipConnectionV1SipConnectionsConnectionIdGetParams, reqEditors ...RequestEditorFn) (*GetSipConnectionV1SipConnectionsConnectionIdGetResponse, error) {
+	rsp, err := c.GetSipConnectionV1SipConnectionsConnectionIdGet(ctx, connectionId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetSipConnectionV1SipConnectionsConnectionIdGetResponse(rsp)
+}
+
+// UpdateSipConnectionV1SipConnectionsConnectionIdPatchWithBodyWithResponse request with arbitrary body returning *UpdateSipConnectionV1SipConnectionsConnectionIdPatchResponse
+func (c *ClientWithResponses) UpdateSipConnectionV1SipConnectionsConnectionIdPatchWithBodyWithResponse(ctx context.Context, connectionId openapi_types.UUID, params *UpdateSipConnectionV1SipConnectionsConnectionIdPatchParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateSipConnectionV1SipConnectionsConnectionIdPatchResponse, error) {
+	rsp, err := c.UpdateSipConnectionV1SipConnectionsConnectionIdPatchWithBody(ctx, connectionId, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUpdateSipConnectionV1SipConnectionsConnectionIdPatchResponse(rsp)
+}
+
+func (c *ClientWithResponses) UpdateSipConnectionV1SipConnectionsConnectionIdPatchWithResponse(ctx context.Context, connectionId openapi_types.UUID, params *UpdateSipConnectionV1SipConnectionsConnectionIdPatchParams, body UpdateSipConnectionV1SipConnectionsConnectionIdPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateSipConnectionV1SipConnectionsConnectionIdPatchResponse, error) {
+	rsp, err := c.UpdateSipConnectionV1SipConnectionsConnectionIdPatch(ctx, connectionId, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUpdateSipConnectionV1SipConnectionsConnectionIdPatchResponse(rsp)
+}
+
+// AddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostWithBodyWithResponse request with arbitrary body returning *AddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostResponse
+func (c *ClientWithResponses) AddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostWithBodyWithResponse(ctx context.Context, connectionId openapi_types.UUID, params *AddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*AddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostResponse, error) {
+	rsp, err := c.AddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostWithBody(ctx, connectionId, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseAddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostResponse(rsp)
+}
+
+func (c *ClientWithResponses) AddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostWithResponse(ctx context.Context, connectionId openapi_types.UUID, params *AddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostParams, body AddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostJSONRequestBody, reqEditors ...RequestEditorFn) (*AddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostResponse, error) {
+	rsp, err := c.AddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPost(ctx, connectionId, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseAddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostResponse(rsp)
+}
+
+// RemoveSipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdDeleteWithResponse request returning *RemoveSipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdDeleteResponse
+func (c *ClientWithResponses) RemoveSipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdDeleteWithResponse(ctx context.Context, connectionId openapi_types.UUID, numberId openapi_types.UUID, params *RemoveSipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdDeleteParams, reqEditors ...RequestEditorFn) (*RemoveSipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdDeleteResponse, error) {
+	rsp, err := c.RemoveSipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdDelete(ctx, connectionId, numberId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRemoveSipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdDeleteResponse(rsp)
+}
+
+// VerifySipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdVerifyPostWithResponse request returning *VerifySipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdVerifyPostResponse
+func (c *ClientWithResponses) VerifySipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdVerifyPostWithResponse(ctx context.Context, connectionId openapi_types.UUID, numberId openapi_types.UUID, params *VerifySipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdVerifyPostParams, reqEditors ...RequestEditorFn) (*VerifySipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdVerifyPostResponse, error) {
+	rsp, err := c.VerifySipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdVerifyPost(ctx, connectionId, numberId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseVerifySipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdVerifyPostResponse(rsp)
+}
+
+// RotateSipConnectionPasswordV1SipConnectionsConnectionIdRotatePasswordPostWithResponse request returning *RotateSipConnectionPasswordV1SipConnectionsConnectionIdRotatePasswordPostResponse
+func (c *ClientWithResponses) RotateSipConnectionPasswordV1SipConnectionsConnectionIdRotatePasswordPostWithResponse(ctx context.Context, connectionId openapi_types.UUID, params *RotateSipConnectionPasswordV1SipConnectionsConnectionIdRotatePasswordPostParams, reqEditors ...RequestEditorFn) (*RotateSipConnectionPasswordV1SipConnectionsConnectionIdRotatePasswordPostResponse, error) {
+	rsp, err := c.RotateSipConnectionPasswordV1SipConnectionsConnectionIdRotatePasswordPost(ctx, connectionId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRotateSipConnectionPasswordV1SipConnectionsConnectionIdRotatePasswordPostResponse(rsp)
 }
 
 // ListSmsV1SmsGetWithResponse request returning *ListSmsV1SmsGetResponse
@@ -17992,6 +19292,227 @@ func ParseDeleteProviderResponse(rsp *http.Response) (*DeleteProviderResponse, e
 			return nil, err
 		}
 		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListSipConnectionsV1SipConnectionsGetResponse parses an HTTP response from a ListSipConnectionsV1SipConnectionsGetWithResponse call
+func ParseListSipConnectionsV1SipConnectionsGetResponse(rsp *http.Response) (*ListSipConnectionsV1SipConnectionsGetResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListSipConnectionsV1SipConnectionsGetResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest SipConnectionListResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCreateSipConnectionV1SipConnectionsPostResponse parses an HTTP response from a CreateSipConnectionV1SipConnectionsPostWithResponse call
+func ParseCreateSipConnectionV1SipConnectionsPostResponse(rsp *http.Response) (*CreateSipConnectionV1SipConnectionsPostResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateSipConnectionV1SipConnectionsPostResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest SipConnectionCreated
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDeleteSipConnectionV1SipConnectionsConnectionIdDeleteResponse parses an HTTP response from a DeleteSipConnectionV1SipConnectionsConnectionIdDeleteWithResponse call
+func ParseDeleteSipConnectionV1SipConnectionsConnectionIdDeleteResponse(rsp *http.Response) (*DeleteSipConnectionV1SipConnectionsConnectionIdDeleteResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeleteSipConnectionV1SipConnectionsConnectionIdDeleteResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	return response, nil
+}
+
+// ParseGetSipConnectionV1SipConnectionsConnectionIdGetResponse parses an HTTP response from a GetSipConnectionV1SipConnectionsConnectionIdGetWithResponse call
+func ParseGetSipConnectionV1SipConnectionsConnectionIdGetResponse(rsp *http.Response) (*GetSipConnectionV1SipConnectionsConnectionIdGetResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetSipConnectionV1SipConnectionsConnectionIdGetResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest SipConnectionResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseUpdateSipConnectionV1SipConnectionsConnectionIdPatchResponse parses an HTTP response from a UpdateSipConnectionV1SipConnectionsConnectionIdPatchWithResponse call
+func ParseUpdateSipConnectionV1SipConnectionsConnectionIdPatchResponse(rsp *http.Response) (*UpdateSipConnectionV1SipConnectionsConnectionIdPatchResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &UpdateSipConnectionV1SipConnectionsConnectionIdPatchResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest SipConnectionResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseAddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostResponse parses an HTTP response from a AddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostWithResponse call
+func ParseAddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostResponse(rsp *http.Response) (*AddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &AddSipConnectionNumberV1SipConnectionsConnectionIdNumbersPostResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest PhoneNumberResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseRemoveSipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdDeleteResponse parses an HTTP response from a RemoveSipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdDeleteWithResponse call
+func ParseRemoveSipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdDeleteResponse(rsp *http.Response) (*RemoveSipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdDeleteResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RemoveSipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdDeleteResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	return response, nil
+}
+
+// ParseVerifySipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdVerifyPostResponse parses an HTTP response from a VerifySipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdVerifyPostWithResponse call
+func ParseVerifySipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdVerifyPostResponse(rsp *http.Response) (*VerifySipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdVerifyPostResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &VerifySipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdVerifyPostResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ConnectedNumberCheck
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseRotateSipConnectionPasswordV1SipConnectionsConnectionIdRotatePasswordPostResponse parses an HTTP response from a RotateSipConnectionPasswordV1SipConnectionsConnectionIdRotatePasswordPostWithResponse call
+func ParseRotateSipConnectionPasswordV1SipConnectionsConnectionIdRotatePasswordPostResponse(rsp *http.Response) (*RotateSipConnectionPasswordV1SipConnectionsConnectionIdRotatePasswordPostResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RotateSipConnectionPasswordV1SipConnectionsConnectionIdRotatePasswordPostResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest SipConnectionPassword
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
 
 	}
 

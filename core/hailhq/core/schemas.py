@@ -976,6 +976,137 @@ class PhoneNumberResponse(BaseModel):
     )
 
 
+# --------------------------------------------------------------------------- #
+# Connected phone systems (/sip-connections)
+# --------------------------------------------------------------------------- #
+
+PbxTransport = Literal["auto", "udp", "tcp", "tls"]
+
+
+class SipConnectionCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    label: str = Field(
+        min_length=1, max_length=80, description="A name, such as 'Main office'."
+    )
+    default_region: str = Field(
+        pattern=r"^[A-Z]{2}$",
+        description=(
+            "ISO alpha-2 country of the phone system. Hail reads national "
+            "caller numbers with it."
+        ),
+    )
+    pbx_host: str | None = Field(
+        default=None,
+        description=(
+            "Public host name or IP address where Hail dials your phone system "
+            "for outbound calls and handover. Null: Hail only answers calls."
+        ),
+    )
+    pbx_port: int = Field(default=5060, ge=1, le=65535, description="SIP port.")
+    pbx_transport: PbxTransport = Field(default="auto", description="SIP transport.")
+    pbx_username: str | None = Field(
+        default=None,
+        description="Username Hail sends when your phone system asks for one.",
+    )
+    pbx_password: str | None = Field(
+        default=None,
+        description="Password Hail sends with pbx_username. Stored encrypted.",
+    )
+
+
+class SipConnectionPatch(BaseModel):
+    """Fields left out stay as they are; ``null`` clears a nullable field."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    label: str | None = Field(default=None, min_length=1, max_length=80)
+    pbx_host: str | None = Field(
+        default=None,
+        description=(
+            "New host. Null removes it: Hail then only answers calls. A new "
+            "host, port or transport needs pbx_password again when a "
+            "pbx_username is set."
+        ),
+    )
+    pbx_port: int | None = Field(default=None, ge=1, le=65535)
+    pbx_transport: PbxTransport | None = None
+    pbx_username: str | None = None
+    pbx_password: str | None = None
+
+    @model_validator(mode="after")
+    def _not_null(self) -> "SipConnectionPatch":
+        for name in ("label", "pbx_port", "pbx_transport"):
+            if name in self.model_fields_set and getattr(self, name) is None:
+                raise ValueError(f"{name} cannot be null")
+        return self
+
+
+class SipConnectionResponse(BaseModel):
+    id: UUID
+    label: str
+    default_region: str
+    sip_host: str = Field(
+        description="SIP server your phone system sends calls to (the trunk's host)."
+    )
+    username: str = Field(description="Username your phone system sends to Hail.")
+    password_last4: str = Field(
+        description="Last 4 characters of the password. The full password shows once."
+    )
+    pbx_host: str | None
+    pbx_port: int
+    pbx_transport: str
+    pbx_username: str | None
+    pbx_password_set: bool
+    created_at: datetime
+
+
+class SipConnectionCreated(SipConnectionResponse):
+    password: str = Field(
+        description="Password your phone system sends to Hail. Shown only here."
+    )
+
+
+class SipConnectionPassword(BaseModel):
+    password: str = Field(description="The new password. Shown only here.")
+
+
+class SipConnectionListResponse(BaseModel):
+    items: list[SipConnectionResponse]
+    next_cursor: str | None = Field(
+        default=None, description="Pass as cursor for the next page. Null at the end."
+    )
+
+
+class ConnectedNumberCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    e164: str = Field(
+        description="Your number with its country code, such as +14155550100."
+    )
+
+
+class ConnectedNumberCheck(BaseModel):
+    state: Literal["active", "unverified"] = Field(
+        description="'active': the number passed and can be routed to an agent."
+    )
+    reason: (
+        Literal["no_call_arrived", "not_authenticated", "code_not_received"] | None
+    ) = Field(
+        default=None,
+        description=(
+            "Why the check failed. 'no_call_arrived': no call reached this "
+            "connection; check the trunk and the routing rule. "
+            "'not_authenticated': the call came without this connection's "
+            "username and password, or to another trunk. 'code_not_received': "
+            "the check code did not come through; turn on RFC 2833 key presses."
+        ),
+    )
+    call_id: UUID | None = Field(
+        default=None, description="The check call, billed as an outbound call."
+    )
+
+
 class PhoneNumberRoutingUpdate(BaseModel):
     """PATCH /numbers/{id}: which agent answers. A field left out keeps its
     value; ``null`` detaches."""
