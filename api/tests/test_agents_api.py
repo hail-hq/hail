@@ -125,6 +125,44 @@ async def _create_agent(client: httpx.AsyncClient, headers, name="Front desk") -
     return r.json()
 
 
+async def test_language_edits_keep_a_saved_provider_voice(client, org, async_session):
+    from hailhq.core.models import Agent
+
+    _, headers = org
+    created = await _create_agent(client, headers)
+    agent_id = uuid.UUID(created["id"])
+    agent = await async_session.get(Agent, agent_id)
+    agent.voice_config = {
+        "voice_provider": "cartesia",
+        "scoped_voice_id": "test",
+        "language": "en",
+    }
+    await async_session.commit()
+    url = f"/agents/{agent_id}"
+
+    for language in ("fr", "it"):
+        got = await client.get(url, headers=headers)
+        assert got.status_code == 200, got.text
+        voice_config = got.json()["voice_config"]
+        assert "scoped_voice_id" not in voice_config
+        voice_config["language"] = language
+        response = await client.patch(
+            url, json={"voice_config": voice_config}, headers=headers
+        )
+        assert response.status_code == 200, response.text
+        await async_session.refresh(agent)
+        assert agent.voice_config["language"] == language
+        assert agent.voice_config["scoped_voice_id"] == "test"
+        assert agent.voice_config["voice_provider"] == "cartesia"
+
+    response = await client.patch(
+        url, json={"voice_config": {"voice_id": None}}, headers=headers
+    )
+    assert response.status_code == 200, response.text
+    await async_session.refresh(agent)
+    assert "scoped_voice_id" not in agent.voice_config
+
+
 async def test_crud_round_trip(client: httpx.AsyncClient, org) -> None:
     _org_id, headers = org
     created = await _create_agent(client, headers)

@@ -152,6 +152,25 @@ func TestAgentsUpdate_VoiceKeepsTheRestOfVoiceConfig(t *testing.T) {
 	}
 }
 
+func TestAgentsUpdate_EmptyVoiceSendsAnExplicitNull(t *testing.T) {
+	a := sampleAgent()
+	a.VoiceConfig = map[string]interface{}{"language": "fr"}
+	srv := newFakeServer(t, http.StatusOK, a)
+	_, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"agents", "update", "33333333-3333-3333-3333-333333333333", "--voice", "",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var body map[string]any
+	_ = json.Unmarshal(srv.lastBody, &body)
+	vc, _ := body["voice_config"].(map[string]any)
+	if v, present := vc["voice_id"]; !present || v != nil {
+		t.Errorf("voice_id must be an explicit null: %v", body["voice_config"])
+	}
+}
+
 func TestAgentsUpdate_EmptyToolsMeansNone(t *testing.T) {
 	srv := newFakeServer(t, http.StatusOK, sampleAgent())
 	_, _, err := runRoot(t,

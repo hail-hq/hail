@@ -329,7 +329,20 @@ async def update_agent(
             # read of the agent and every call it answers.
             changes.pop(field)
     if "voice_config" in changes:
-        changes["voice_config"] = body.voice_config.model_dump(mode="json")
+        config = body.voice_config.model_dump(mode="json")
+        if "voice_id" not in body.voice_config.model_fields_set:
+            # Read after concurrent voice edits before copying a newer override.
+            await db.refresh(
+                agent,
+                attribute_names=["voice_config"],
+                with_for_update={"key_share": True},
+            )
+            saved = agent.voice_config or {}
+            if saved.get("scoped_voice_id"):
+                config.pop("voice_id")
+                config["scoped_voice_id"] = saved["scoped_voice_id"]
+                config["voice_provider"] = saved.get("voice_provider")
+        changes["voice_config"] = config
     # Validate before any attribute is set: the validation queries would
     # autoflush a pending name change outside the conflict handler below.
     items = None
