@@ -340,6 +340,10 @@ class PhoneNumberResponse(BaseModel):
     number_type: str
     capabilities: list[str]
     provisioning_state: str
+    # 'purchased' (bought through Hail) or 'connected' (on your own phone
+    # system, through a SIP connection). Older servers send neither.
+    source: str = "purchased"
+    sip_connection_id: UUID | None = None
     is_dedicated: bool
     # Who answers. None: calls ring out / texts reach webhooks only.
     voice_agent_id: UUID | None = None

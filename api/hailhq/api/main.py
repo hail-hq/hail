@@ -34,6 +34,7 @@ from hailhq.api.routes import forward_targets as forward_targets_routes
 from hailhq.api.routes import numbers as numbers_routes
 from hailhq.api.routes import providers as providers_routes
 from hailhq.api.routes import recordings as recordings_routes
+from hailhq.api.routes import sip_connections as sip_connections_routes
 from hailhq.api.routes import sms as sms_routes
 from hailhq.api.routes import sms_evidence as sms_evidence_routes
 from hailhq.api.routes import sms_trial as sms_trial_routes
@@ -540,6 +541,7 @@ _CUSTOMER_ROUTERS = [
     providers_routes.router,
     sms_evidence_routes.router,
     verifications_routes.router,
+    sip_connections_routes.router,
 ]
 for _router in _CUSTOMER_ROUTERS:
     app.include_router(_router, prefix="/v1")

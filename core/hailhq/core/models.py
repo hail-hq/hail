@@ -841,6 +841,13 @@ class PhoneNumber(Base):
         return self.inbound_registered_at is not None
 
     @property
+    def source(self) -> str:
+        """Read by ``PhoneNumberResponse``: ``connected`` for a number on the
+        customer's own phone system, ``purchased`` for one bought at a
+        carrier."""
+        return "connected" if self.provider == "pbx" else "purchased"
+
+    @property
     def subject_type(self) -> str | None:
         """Read by ``PhoneNumberResponse``: subject type of the verification
         the purchase used, from the stored offer. None when none was used."""

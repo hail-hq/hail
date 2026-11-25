@@ -72,3 +72,28 @@ def test_call_create_from_alias_python_kwarg() -> None:
     dumped = body.model_dump(by_alias=True, exclude_none=True)
     assert dumped["from"] == "+15550001111"
     assert "from_" not in dumped
+
+
+def test_phone_number_without_source_defaults_purchased():
+    from hail.models import PhoneNumberResponse
+
+    base = {
+        "id": "00000000-0000-0000-0000-000000000001",
+        "e164": "+14155550100",
+        "country_code": "US",
+        "number_type": "local",
+        "capabilities": ["voice"],
+        "provisioning_state": "active",
+        "is_dedicated": True,
+    }
+    old = PhoneNumberResponse.model_validate(base)
+    assert (old.source, old.sip_connection_id) == ("purchased", None)
+    new = PhoneNumberResponse.model_validate(
+        {
+            **base,
+            "source": "connected",
+            "sip_connection_id": "00000000-0000-0000-0000-000000000002",
+        }
+    )
+    assert new.source == "connected"
+    assert str(new.sip_connection_id).endswith("0002")
