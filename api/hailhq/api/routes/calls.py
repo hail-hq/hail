@@ -120,7 +120,12 @@ def apply_agent_defaults(body: CallCreate, agent: Agent) -> CallCreate:
             continue
         value = getattr(agent, field)
         if field == "voice_config":
-            value = VoiceConfig.model_validate(value or {})
+            config = dict(value or {})
+            # A later release can persist a provider-specific voice. On rollback,
+            # let the workspace choose the voice and keep the saved language.
+            config.pop("scoped_voice_id", None)
+            config.pop("voice_provider", None)
+            value = VoiceConfig.model_validate(config)
         update[field] = value
     return body.model_copy(update=update)
 
