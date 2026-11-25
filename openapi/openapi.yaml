@@ -8047,8 +8047,8 @@ components:
             - type: "null"
           title: Reason
           description: "Why the check failed. 'no_call_arrived': no call reached
-            this connection; check the trunk, and that the routing rule sends this
-            number with + and the country code. 'not_authenticated': the call came
+            this connection; check the trunk, and that a routing rule sends this number
+            to Hail with + and the country code. 'not_authenticated': the call came
             without this connection's username and password, or to another trunk.
             'code_not_received': the check code did not come through; turn on RFC
             2833 key presses."

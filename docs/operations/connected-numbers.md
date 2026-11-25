@@ -62,8 +62,8 @@ docker compose exec api python -m hailhq.api.connected_numbers_ops release-claim
 The check calls the number from a Hail line and sends a 6-digit code as key presses.
 
 - `active`: the call arrived on this connection's trunk with the right code.
-- `no_call_arrived`: the PBX route, host, port or credentials are wrong. LiveKit refuses a call without valid digest auth before Hail sees it. Check the outbound route for this number, the PBX host and port, and the username and password.
-- `not_authenticated`: the call reached Hail only on another trunk, never on the connection's own trunk before the check ended. Most likely the dialed number is not in +E.164 form.
+- `no_call_arrived`: the PBX route, host, port or credentials are wrong, or the dialed number is not in +E.164 form. LiveKit refuses a call without valid digest auth, or to a number not on the connection's trunk, before Hail sees it. Check the outbound route for this number and its + and country code, the PBX host and port, and the username and password.
+- `not_authenticated`: the call reached Hail only on another trunk, never on the connection's own trunk before the check ended. For example, the PBX used another connection's username and password.
 - `code_not_received`: the call arrived but the code did not. The PBX drops key presses, or a digit was pressed before the code.
 
 ## 5. Limits
