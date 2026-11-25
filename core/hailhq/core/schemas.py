@@ -1062,7 +1062,7 @@ class SipConnectionResponse(BaseModel):
     )
     username: str = Field(description="Username your phone system sends to Hail.")
     password_last4: str = Field(
-        description="Last 4 characters of the password. The full password shows once."
+        description="Last 4 characters of the password. Read the full one with GET /sip-connections/{id}/password."
     )
     pbx_host: str | None = Field(
         description="Where Hail dials your phone system. Null: Hail only answers calls."
@@ -1079,13 +1079,11 @@ class SipConnectionResponse(BaseModel):
 
 
 class SipConnectionCreated(SipConnectionResponse):
-    password: str = Field(
-        description="Password your phone system sends to Hail. Shown only here."
-    )
+    password: str = Field(description="Password your phone system sends to Hail.")
 
 
 class SipConnectionPassword(BaseModel):
-    password: str = Field(description="The new password. Shown only here.")
+    password: str = Field(description="The password your phone system sends to Hail.")
 
 
 class SipConnectionListResponse(BaseModel):

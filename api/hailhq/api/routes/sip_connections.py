@@ -4,14 +4,16 @@ POST   /sip-connections                                   create (password shown
 GET    /sip-connections                                   list, newest first
 GET    /sip-connections/{id}                              one connection
 PATCH  /sip-connections/{id}                              label, PBX address, credentials
-POST   /sip-connections/{id}/rotate-password              new password (shown once)
+POST   /sip-connections/{id}/rotate-password              new password
+GET    /sip-connections/{id}/password                     the current password (audited)
 DELETE /sip-connections/{id}                              delete (no numbers left)
 POST   /sip-connections/{id}/numbers                      add a number (unverified)
 POST   /sip-connections/{id}/numbers/{number_id}/verify   ownership check call
 DELETE /sip-connections/{id}/numbers/{number_id}          remove a number from Hail
 
 Thin routes over ``hailhq.api.connected_numbers``. Passwords appear only in
-the create and rotate responses: no idempotency store, no audit payload.
+the create, rotate and password responses: no idempotency store, no audit
+payload, and ``Cache-Control: no-store``.
 """
 
 from __future__ import annotations
@@ -20,7 +22,7 @@ from typing import Annotated, Final
 from uuid import UUID
 
 from cryptography.fernet import InvalidToken
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi import status as http_status
 from hailhq.api.audit import actor_of, write_audit_log
 from hailhq.api.connected_numbers import (
@@ -369,6 +371,36 @@ async def rotate_sip_connection_password(
         raise _not_configured() from exc
     await _audit(
         principal, "sip_connection.rotate_password", "sip_connection", row.id, {}
+    )
+    return SipConnectionPassword(password=password)
+
+
+@router.get(
+    "/{connection_id}/password",
+    response_model=SipConnectionPassword,
+    responses=_ERROR_RESPONSES,
+)
+async def read_sip_connection_password(
+    connection_id: UUID,
+    response: Response,
+    principal: Annotated[Principal, Depends(connections_principal)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> SipConnectionPassword:
+    """The password your phone system sends to Hail, to copy into its trunk
+    again. Every read is recorded in the workspace's audit log."""
+    row = await _connection_or_404(db, principal.organization_id, connection_id)
+    try:
+        password = decrypt_secret(row.encrypted_inbound_password)
+    except SecretKeyMissing as exc:
+        raise _not_configured() from exc
+    except (InvalidToken, TypeError, AttributeError) as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="This password cannot be read. Make a new one.",
+        ) from exc
+    response.headers["Cache-Control"] = "no-store"
+    await _audit(
+        principal, "sip_connection.read_password", "sip_connection", row.id, {}
     )
     return SipConnectionPassword(password=password)
 

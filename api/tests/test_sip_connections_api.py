@@ -445,6 +445,7 @@ ROUTES = [
     ("get", "/sip-connections/{c}"),
     ("patch", "/sip-connections/{c}"),
     ("post", "/sip-connections/{c}/rotate-password"),
+    ("get", "/sip-connections/{c}/password"),
     ("delete", "/sip-connections/{c}"),
     ("post", "/sip-connections/{c}/numbers"),
     ("post", "/sip-connections/{c}/numbers/{n}/verify"),
@@ -508,3 +509,41 @@ async def test_staff_only_needs_a_jwt_even_with_the_staff_flag(
     finally:
         app.dependency_overrides.pop(get_current_principal, None)
     assert resp.status_code == 404
+
+
+async def test_read_password_returns_the_current_one_and_is_audited(
+    client: httpx.AsyncClient, org_and_key: tuple, async_session: AsyncSession
+) -> None:
+    from hailhq.core.models import AuditLog
+
+    org, _key, plain = org_and_key
+    conn = await _create(client, plain)
+    resp = await client.get(
+        f"/sip-connections/{conn['id']}/password", headers=_auth(plain)
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"password": conn["password"]}
+    assert resp.headers["cache-control"] == "no-store"
+    rotated = (
+        await client.post(
+            f"/sip-connections/{conn['id']}/rotate-password", headers=_auth(plain)
+        )
+    ).json()["password"]
+    again = await client.get(
+        f"/sip-connections/{conn['id']}/password", headers=_auth(plain)
+    )
+    assert again.json() == {"password": rotated}
+    logs = (
+        (
+            await async_session.execute(
+                select(AuditLog).where(
+                    AuditLog.organization_id == org,
+                    AuditLog.action == "sip_connection.read_password",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(logs) == 2
+    assert all(conn["password"] not in str(log.payload) for log in logs)

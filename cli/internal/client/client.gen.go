@@ -3850,10 +3850,10 @@ type SipConnectionCreated struct {
 	// Label Name of the connection.
 	Label string `json:"label"`
 
-	// Password Password your phone system sends to Hail. Shown only here.
+	// Password Password your phone system sends to Hail.
 	Password string `json:"password"`
 
-	// PasswordLast4 Last 4 characters of the password. The full password shows once.
+	// PasswordLast4 Last 4 characters of the password. Read the full one with GET /sip-connections/{id}/password.
 	PasswordLast4 string `json:"password_last4"`
 
 	// PbxHost Where Hail dials your phone system. Null: Hail only answers calls.
@@ -3889,7 +3889,7 @@ type SipConnectionListResponse struct {
 
 // SipConnectionPassword defines model for SipConnectionPassword.
 type SipConnectionPassword struct {
-	// Password The new password. Shown only here.
+	// Password The password your phone system sends to Hail.
 	Password string `json:"password"`
 }
 
@@ -3931,7 +3931,7 @@ type SipConnectionResponse struct {
 	// Label Name of the connection.
 	Label string `json:"label"`
 
-	// PasswordLast4 Last 4 characters of the password. The full password shows once.
+	// PasswordLast4 Last 4 characters of the password. Read the full one with GET /sip-connections/{id}/password.
 	PasswordLast4 string `json:"password_last4"`
 
 	// PbxHost Where Hail dials your phone system. Null: Hail only answers calls.
@@ -5138,6 +5138,11 @@ type VerifySipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdVerifyP
 	Authorization *string `json:"authorization,omitempty"`
 }
 
+// ReadSipConnectionPasswordV1SipConnectionsConnectionIdPasswordGetParams defines parameters for ReadSipConnectionPasswordV1SipConnectionsConnectionIdPasswordGet.
+type ReadSipConnectionPasswordV1SipConnectionsConnectionIdPasswordGetParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
 // RotateSipConnectionPasswordV1SipConnectionsConnectionIdRotatePasswordPostParams defines parameters for RotateSipConnectionPasswordV1SipConnectionsConnectionIdRotatePasswordPost.
 type RotateSipConnectionPasswordV1SipConnectionsConnectionIdRotatePasswordPostParams struct {
 	Authorization *string `json:"authorization,omitempty"`
@@ -6066,6 +6071,9 @@ type ClientInterface interface {
 
 	// VerifySipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdVerifyPost request
 	VerifySipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdVerifyPost(ctx context.Context, connectionId openapi_types.UUID, numberId openapi_types.UUID, params *VerifySipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdVerifyPostParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ReadSipConnectionPasswordV1SipConnectionsConnectionIdPasswordGet request
+	ReadSipConnectionPasswordV1SipConnectionsConnectionIdPasswordGet(ctx context.Context, connectionId openapi_types.UUID, params *ReadSipConnectionPasswordV1SipConnectionsConnectionIdPasswordGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// RotateSipConnectionPasswordV1SipConnectionsConnectionIdRotatePasswordPost request
 	RotateSipConnectionPasswordV1SipConnectionsConnectionIdRotatePasswordPost(ctx context.Context, connectionId openapi_types.UUID, params *RotateSipConnectionPasswordV1SipConnectionsConnectionIdRotatePasswordPostParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -7146,6 +7154,18 @@ func (c *Client) RemoveSipConnectionNumberV1SipConnectionsConnectionIdNumbersNum
 
 func (c *Client) VerifySipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdVerifyPost(ctx context.Context, connectionId openapi_types.UUID, numberId openapi_types.UUID, params *VerifySipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdVerifyPostParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewVerifySipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdVerifyPostRequest(c.Server, connectionId, numberId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ReadSipConnectionPasswordV1SipConnectionsConnectionIdPasswordGet(ctx context.Context, connectionId openapi_types.UUID, params *ReadSipConnectionPasswordV1SipConnectionsConnectionIdPasswordGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewReadSipConnectionPasswordV1SipConnectionsConnectionIdPasswordGetRequest(c.Server, connectionId, params)
 	if err != nil {
 		return nil, err
 	}
@@ -11423,6 +11443,55 @@ func NewVerifySipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdVeri
 	return req, nil
 }
 
+// NewReadSipConnectionPasswordV1SipConnectionsConnectionIdPasswordGetRequest generates requests for ReadSipConnectionPasswordV1SipConnectionsConnectionIdPasswordGet
+func NewReadSipConnectionPasswordV1SipConnectionsConnectionIdPasswordGetRequest(server string, connectionId openapi_types.UUID, params *ReadSipConnectionPasswordV1SipConnectionsConnectionIdPasswordGetParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "connection_id", connectionId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/sip-connections/%s/password", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
 // NewRotateSipConnectionPasswordV1SipConnectionsConnectionIdRotatePasswordPostRequest generates requests for RotateSipConnectionPasswordV1SipConnectionsConnectionIdRotatePasswordPost
 func NewRotateSipConnectionPasswordV1SipConnectionsConnectionIdRotatePasswordPostRequest(server string, connectionId openapi_types.UUID, params *RotateSipConnectionPasswordV1SipConnectionsConnectionIdRotatePasswordPostParams) (*http.Request, error) {
 	var err error
@@ -14068,6 +14137,9 @@ type ClientWithResponsesInterface interface {
 	// VerifySipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdVerifyPostWithResponse request
 	VerifySipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdVerifyPostWithResponse(ctx context.Context, connectionId openapi_types.UUID, numberId openapi_types.UUID, params *VerifySipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdVerifyPostParams, reqEditors ...RequestEditorFn) (*VerifySipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdVerifyPostResponse, error)
 
+	// ReadSipConnectionPasswordV1SipConnectionsConnectionIdPasswordGetWithResponse request
+	ReadSipConnectionPasswordV1SipConnectionsConnectionIdPasswordGetWithResponse(ctx context.Context, connectionId openapi_types.UUID, params *ReadSipConnectionPasswordV1SipConnectionsConnectionIdPasswordGetParams, reqEditors ...RequestEditorFn) (*ReadSipConnectionPasswordV1SipConnectionsConnectionIdPasswordGetResponse, error)
+
 	// RotateSipConnectionPasswordV1SipConnectionsConnectionIdRotatePasswordPostWithResponse request
 	RotateSipConnectionPasswordV1SipConnectionsConnectionIdRotatePasswordPostWithResponse(ctx context.Context, connectionId openapi_types.UUID, params *RotateSipConnectionPasswordV1SipConnectionsConnectionIdRotatePasswordPostParams, reqEditors ...RequestEditorFn) (*RotateSipConnectionPasswordV1SipConnectionsConnectionIdRotatePasswordPostResponse, error)
 
@@ -15575,6 +15647,28 @@ func (r VerifySipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdVeri
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r VerifySipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdVerifyPostResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ReadSipConnectionPasswordV1SipConnectionsConnectionIdPasswordGetResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *SipConnectionPassword
+}
+
+// Status returns HTTPResponse.Status
+func (r ReadSipConnectionPasswordV1SipConnectionsConnectionIdPasswordGetResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ReadSipConnectionPasswordV1SipConnectionsConnectionIdPasswordGetResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -17219,6 +17313,15 @@ func (c *ClientWithResponses) VerifySipConnectionNumberV1SipConnectionsConnectio
 		return nil, err
 	}
 	return ParseVerifySipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdVerifyPostResponse(rsp)
+}
+
+// ReadSipConnectionPasswordV1SipConnectionsConnectionIdPasswordGetWithResponse request returning *ReadSipConnectionPasswordV1SipConnectionsConnectionIdPasswordGetResponse
+func (c *ClientWithResponses) ReadSipConnectionPasswordV1SipConnectionsConnectionIdPasswordGetWithResponse(ctx context.Context, connectionId openapi_types.UUID, params *ReadSipConnectionPasswordV1SipConnectionsConnectionIdPasswordGetParams, reqEditors ...RequestEditorFn) (*ReadSipConnectionPasswordV1SipConnectionsConnectionIdPasswordGetResponse, error) {
+	rsp, err := c.ReadSipConnectionPasswordV1SipConnectionsConnectionIdPasswordGet(ctx, connectionId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseReadSipConnectionPasswordV1SipConnectionsConnectionIdPasswordGetResponse(rsp)
 }
 
 // RotateSipConnectionPasswordV1SipConnectionsConnectionIdRotatePasswordPostWithResponse request returning *RotateSipConnectionPasswordV1SipConnectionsConnectionIdRotatePasswordPostResponse
@@ -19527,6 +19630,32 @@ func ParseVerifySipConnectionNumberV1SipConnectionsConnectionIdNumbersNumberIdVe
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest ConnectedNumberCheck
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseReadSipConnectionPasswordV1SipConnectionsConnectionIdPasswordGetResponse parses an HTTP response from a ReadSipConnectionPasswordV1SipConnectionsConnectionIdPasswordGetWithResponse call
+func ParseReadSipConnectionPasswordV1SipConnectionsConnectionIdPasswordGetResponse(rsp *http.Response) (*ReadSipConnectionPasswordV1SipConnectionsConnectionIdPasswordGetResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ReadSipConnectionPasswordV1SipConnectionsConnectionIdPasswordGetResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest SipConnectionPassword
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
