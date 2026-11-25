@@ -3288,7 +3288,9 @@ def register_tools(
         voice can change carrier and LiveKit routing; text-only changes leave it unchanged.
         Clearing the voice route stops AI call answers; clearing the text route stops
         agent replies to texts. Restoring a route does not recover missed interactions.
-        Omitted settings retain their current values.
+        Omitted settings retain their current values. A connected number
+        (``source`` ``connected``) in state ``unverified`` returns an error
+        until its ownership check succeeds in the console or the API.
         Returns the updated number record or an error."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
@@ -3551,7 +3553,12 @@ def register_tools(
         """List dedicated workspace phone numbers, newest first.
 
         The records show capabilities, provisioning state and assigned agents,
-        so they can be used to select an existing number for sending or routing."""
+        so they can be used to select an existing number for sending or routing.
+        ``source`` is ``purchased`` (bought through Hail) or ``connected`` (a
+        number on the customer's own phone system, voice only). Connecting a
+        phone system happens in the console or the API, not through a tool:
+        setup shows a password once and the ownership check places a billed
+        call."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await list_numbers(client=client, limit=limit, cursor=cursor)
@@ -3598,6 +3605,8 @@ def register_tools(
     ) -> dict[str, Any]:
         """Read a workspace number's state, capabilities and assigned agents.
 
+        ``source`` ``connected`` marks a number on the customer's own phone
+        system; its state is ``unverified`` until its ownership check passes.
         Returns the number record or an error."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
@@ -3633,6 +3642,8 @@ def register_tools(
         Current and previous monthly fees remain due, without a refund.
         Pending orders cannot be released and return 409.
         A failed order was not purchased; this operation only dismisses it from the list.
+        A connected number (``source`` ``connected``) is only removed from Hail:
+        it stays with the customer's phone system and provider.
         Returns ``released`` or ``dismissed``, plus ``number_id`` and ``e164``, or an error.
         """
         try:

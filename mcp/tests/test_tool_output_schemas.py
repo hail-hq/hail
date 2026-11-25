@@ -56,3 +56,11 @@ async def test_create_contact_output_is_always_a_manual_contact(tools_by_name):
     assert validator.is_valid(contact)
     assert not validator.is_valid({**contact, "kind": "member"})
     assert not validator.is_valid({**contact, "role": "owner"})
+
+
+async def test_number_output_shows_source(tools_by_name):
+    for name in ("get_number", "route_number"):
+        schema = tools_by_name[name].output_schema
+        number = next(s for s in schema["anyOf"] if "e164" in s.get("properties", {}))
+        assert number["properties"]["source"]["enum"] == ["purchased", "connected"]
+        assert "sip_connection_id" in number["properties"]

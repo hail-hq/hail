@@ -837,6 +837,24 @@ func (e OptionVerificationSubjectType) Valid() bool {
 	}
 }
 
+// Defines values for PhoneNumberResponseSource.
+const (
+	Connected PhoneNumberResponseSource = "connected"
+	Purchased PhoneNumberResponseSource = "purchased"
+)
+
+// Valid indicates whether the value is a known member of the PhoneNumberResponseSource enum.
+func (e PhoneNumberResponseSource) Valid() bool {
+	switch e {
+	case Connected:
+		return true
+	case Purchased:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PhoneNumberResponseSubjectType.
 const (
 	PhoneNumberResponseSubjectTypeBusiness PhoneNumberResponseSubjectType = "business"
@@ -3456,11 +3474,17 @@ type PhoneNumberResponse struct {
 	// NumberType Kind of number: 'local', 'mobile', 'toll_free', or 'national'.
 	NumberType string `json:"number_type"`
 
-	// ProvisioningState 'pending', 'active', 'failed', or 'released'.
+	// ProvisioningState 'pending', 'active', 'failed', or 'released'. A connected number is 'unverified' until it passes its ownership check (POST /sip-connections/{id}/numbers/{number_id}/verify).
 	ProvisioningState string `json:"provisioning_state"`
+
+	// SipConnectionId The phone system connection of a connected number. Null for a purchased number.
+	SipConnectionId *openapi_types.UUID `json:"sip_connection_id,omitempty"`
 
 	// SmsAgentId Agent that answers texts to this number. Null: texts only reach your webhooks.
 	SmsAgentId *openapi_types.UUID `json:"sms_agent_id,omitempty"`
+
+	// Source 'purchased': bought through Hail. 'connected': a number on your own phone system, connected with POST /sip-connections/{id}/numbers. Removing a connected number takes it off Hail only; it stays with your phone system and provider.
+	Source *PhoneNumberResponseSource `json:"source,omitempty"`
 
 	// SubjectName Name of the person or company the verification used to buy this number is for. Null when no verification was used or the name is unknown.
 	SubjectName *string `json:"subject_name,omitempty"`
@@ -3474,6 +3498,9 @@ type PhoneNumberResponse struct {
 	// VoiceAgentId Agent that answers calls to this number. Null: calls ring out.
 	VoiceAgentId *openapi_types.UUID `json:"voice_agent_id,omitempty"`
 }
+
+// PhoneNumberResponseSource 'purchased': bought through Hail. 'connected': a number on your own phone system, connected with POST /sip-connections/{id}/numbers. Removing a connected number takes it off Hail only; it stays with your phone system and provider.
+type PhoneNumberResponseSource string
 
 // PhoneNumberResponseSubjectType Who the verification used to buy this number is for: 'person' or 'business'. Null when no verification was used.
 type PhoneNumberResponseSubjectType string

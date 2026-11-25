@@ -915,7 +915,24 @@ class PhoneNumberResponse(BaseModel):
         description="Channels this number supports, e.g. ['voice'], ['sms'], or both."
     )
     provisioning_state: str = Field(
-        description="'pending', 'active', 'failed', or 'released'."
+        description=(
+            "'pending', 'active', 'failed', or 'released'. A connected number "
+            "is 'unverified' until it passes its ownership check "
+            "(POST /sip-connections/{id}/numbers/{number_id}/verify)."
+        )
+    )
+    source: Literal["purchased", "connected"] = Field(
+        default="purchased",
+        description=(
+            "'purchased': bought through Hail. 'connected': a number on your "
+            "own phone system, connected with POST /sip-connections/{id}/numbers. "
+            "Removing a connected number takes it off Hail only; it stays "
+            "with your phone system and provider."
+        ),
+    )
+    sip_connection_id: UUID | None = Field(
+        default=None,
+        description="The phone system connection of a connected number. Null for a purchased number.",
     )
     is_dedicated: bool = Field(
         description="True if this number is owned by the organization. False for shared-pool numbers."

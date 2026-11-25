@@ -10446,7 +10446,29 @@ components:
         provisioning_state:
           type: string
           title: Provisioning State
-          description: "'pending', 'active', 'failed', or 'released'."
+          description:
+            "'pending', 'active', 'failed', or 'released'. A connected
+            number is 'unverified' until it passes its ownership check (POST /sip-connections/{id}/numbers/{number_id}/verify)."
+        source:
+          type: string
+          enum:
+            - purchased
+            - connected
+          title: Source
+          description: "'purchased': bought through Hail. 'connected': a number
+            on your own phone system, connected with POST /sip-connections/{id}/numbers.
+            Removing a connected number takes it off Hail only; it stays with your
+            phone system and provider."
+          default: purchased
+        sip_connection_id:
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
+          title: Sip Connection Id
+          description:
+            The phone system connection of a connected number. Null for
+            a purchased number.
         is_dedicated:
           type: boolean
           title: Is Dedicated
