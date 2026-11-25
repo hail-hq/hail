@@ -317,6 +317,32 @@ async def test_english_gemini_default_uses_the_call_route(monkeypatch):
     assert french["default_voice"] is None
 
 
+async def test_english_audition_keeps_regular_voices_available_for_preview(monkeypatch):
+    monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
+    monkeypatch.setattr(settings, "xai_tts_api_key", "xai-key")
+    monkeypatch.setattr(settings, "assemblyai_tts_api_key", "")
+    monkeypatch.setattr(
+        catalog,
+        "_provider_catalogue",
+        AsyncMock(
+            return_value={
+                "rows": [
+                    cart_row(),
+                    cart_row("a-man"),
+                    cart_row("b-man"),
+                    cart_row("woman", gender="feminine"),
+                ],
+                "models": [],
+            }
+        ),
+    )
+
+    legacy = await catalog.voice_catalogue("en")
+    audition = await catalog.voice_catalogue("en", include_direct=True)
+    assert [voice["id"] for voice in legacy["voices"]] == ["current", "woman", "a-man"]
+    assert audition["voices"][2:] == legacy["voices"]
+
+
 @pytest.mark.parametrize("response_body", ["not json", "[]"])
 async def test_malformed_voice_metadata_is_an_upstream_error(response_body):
     with respx.mock as mock:

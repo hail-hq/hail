@@ -1,5 +1,6 @@
 import hashlib
 import json
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -9,7 +10,6 @@ import respx
 from fastapi import FastAPI
 from hailhq.api.routes.internal import voices
 from hailhq.core.config import settings
-from hailhq.core.db import get_session
 
 from .test_internal_dsar import _signed, internal_secret_set  # noqa: F401
 
@@ -362,10 +362,20 @@ async def test_line_provider_failure_returns_retryable_error(voice_app):
 
 @pytest.fixture
 def workspace_voice_app(monkeypatch):
-    monkeypatch.setattr(voices, "load_org_provider_configs", AsyncMock(return_value={}))
     app = FastAPI()
     app.include_router(voices.router)
-    app.dependency_overrides[get_session] = lambda: None
+    app.state.session_open = False
+
+    @asynccontextmanager
+    async def session():
+        app.state.session_open = True
+        try:
+            yield None
+        finally:
+            app.state.session_open = False
+
+    monkeypatch.setattr(voices, "session_scope", session)
+    monkeypatch.setattr(voices, "load_org_provider_configs", AsyncMock(return_value={}))
     voices._lines.clear()
     return app
 
@@ -396,9 +406,13 @@ async def test_workspace_line_uses_saved_voice_and_model_outside_shortlist(
         b'{"organization_id":"00000000-0000-0000-0000-000000000001","text":"Bonjour."}'
     )
 
+    def synthesize(_request):
+        assert not workspace_voice_app.state.session_open
+        return httpx.Response(200, content=b"RIFF-sample")
+
     with respx.mock as mock:
         synthesis = mock.post("https://api.cartesia.ai/tts/bytes").mock(
-            return_value=httpx.Response(200, content=b"RIFF-sample")
+            side_effect=synthesize
         )
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=workspace_voice_app),
@@ -462,3 +476,36 @@ async def test_workspace_line_explains_when_saved_provider_is_unavailable(
     assert response.json()["detail"] == (
         "Choose an available voice in Call settings to preview this line."
     )
+
+
+async def test_workspace_line_keeps_elevenlabs_language_automatic_when_unset(
+    workspace_voice_app, monkeypatch
+):
+    monkeypatch.setattr(settings, "cartesia_api_key", "")
+    monkeypatch.setattr(settings, "hail_gemini_tts_enabled", False)
+    monkeypatch.setattr(settings, "eleven_api_key", "house-eleven")
+    monkeypatch.setattr(settings, "elevenlabs_voice_id", "house-eleven-voice")
+    data = {
+        "organization_id": "00000000-0000-0000-0000-000000000001",
+        "text": "Buenos días.",
+    }
+
+    with respx.mock as mock:
+        synthesis = mock.post(
+            "https://api.elevenlabs.io/v1/text-to-speech/house-eleven-voice"
+        ).respond(200, content=b"\x00\x00")
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=workspace_voice_app),
+            base_url="http://test",
+        ) as client:
+            for payload in (data, {**data, "language": "en"}):
+                body = json.dumps(payload).encode()
+                response = await client.post(
+                    "/internal/voices/workspace-line",
+                    content=body,
+                    headers=_signed(body),
+                )
+                assert response.status_code == 200
+        assert synthesis.call_count == 2
+        assert "language_code" not in json.loads(synthesis.calls[0].request.content)
+        assert json.loads(synthesis.calls[1].request.content)["language_code"] == "en"

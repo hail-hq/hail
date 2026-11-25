@@ -26,7 +26,7 @@ import httpx
 from cryptography.fernet import InvalidToken
 from fastapi import APIRouter, Depends, HTTPException, Response
 from hailhq.api.routes.internal.auth import verify_internal_request
-from hailhq.core.db import get_session
+from hailhq.core.db import session_scope
 from hailhq.core.languages import (
     SUPPORTED_LANGUAGES,
     Language,
@@ -52,7 +52,6 @@ from pydantic import (
     ValidationError,
     field_validator,
 )
-from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(
     prefix="/internal/voices",
@@ -198,19 +197,17 @@ async def speak_line(body: LineIn) -> Response:
 
 
 @router.post("/workspace-line")
-async def speak_workspace_line(
-    body: WorkspaceLineIn,
-    db: Annotated[AsyncSession, Depends(get_session)],
-) -> Response:
-    rows = await load_org_provider_configs(db, body.organization_id)
-    row = rows.get("tts")
+async def speak_workspace_line(body: WorkspaceLineIn) -> Response:
     try:
-        org = ResolvedLayer.from_row(row) if row is not None else None
+        async with session_scope() as db:
+            rows = await load_org_provider_configs(db, body.organization_id)
+            row = rows.get("tts")
+            org = ResolvedLayer.from_row(row) if row is not None else None
     except (SecretKeyMissing, InvalidToken) as exc:
         raise HTTPException(503, "This line could not play. Try again.") from exc
 
-    language = body.language or (org.params.get("language") if org else None) or "en"
-    if language not in SUPPORTED_LANGUAGES:
+    language = body.language or (org.params.get("language") if org else None)
+    if language and language not in SUPPORTED_LANGUAGES:
         raise HTTPException(409, "No voice is available for this language.")
     fallback = await resolve_fallback_voice_provider(org, body.voice_id, language)
     try:
@@ -236,7 +233,9 @@ async def speak_workspace_line(
         )
     try:
         preview = PreviewIn(
-            language=language, provider=primary.provider, voice_id=primary.voice_id
+            language=language or "en",
+            provider=primary.provider,
+            voice_id=primary.voice_id,
         )
     except ValidationError as exc:
         detail = (
@@ -282,7 +281,8 @@ async def _audio(
     route: SpeechRoute | None = None,
 ) -> bytes:
     digest = hashlib.sha256(text.encode()).hexdigest()
-    cache_key = (body.provider, model, body.language, body.voice_id, digest)
+    language = (route.language or "") if route else body.language
+    cache_key = (body.provider, model, language, body.voice_id, digest)
     lock, users = _sample_locks.get(cache_key, (asyncio.Lock(), 0))
     _sample_locks[cache_key] = (lock, users + 1)
     try:
@@ -352,15 +352,14 @@ async def _synthesize_route(route: SpeechRoute, text: str) -> bytes:
             )
             response.raise_for_status()
             return response.content
+        payload = {"model_id": route.model, "text": text}
+        if route.language:
+            payload["language_code"] = elevenlabs_language(route.language)
         response = await client.post(
             f"https://api.elevenlabs.io/v1/text-to-speech/{route.voice_id}",
             headers={"xi-api-key": route.api_key or ""},
             params={"output_format": "pcm_24000"},
-            json={
-                "model_id": route.model,
-                "text": text,
-                "language_code": elevenlabs_language(route.language or "en"),
-            },
+            json=payload,
         )
         response.raise_for_status()
         output = io.BytesIO()

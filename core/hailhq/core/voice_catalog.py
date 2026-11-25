@@ -192,19 +192,19 @@ def shortlist(
     *,
     preferred_voices: tuple[tuple[str, str], ...] = (),
 ) -> list[dict]:
-    """Rank the rollout shortlist, configured preferences, and three other voices."""
+    """Put the audition picks first, then rank the regular shortlist."""
 
     def identity(voice):
         return voice["provider"], voice["id"]
 
     available = {identity(v): v for v in choices if v["language"] == language}
+    audition_picks = [
+        available.pop(key) for key in preferred_voices if key in available
+    ]
     selected: list[dict] = []
     preferred = [
-        *preferred_voices,
-        *(
-            (p.provider, p.voice_id)
-            for p in settings.voice_shortlist_preferences.get(language, [])
-        ),
+        (p.provider, p.voice_id)
+        for p in settings.voice_shortlist_preferences.get(language, [])
     ]
     # Preserve a compatible configured default without pinning any voice ID.
     preferred.extend(
@@ -213,7 +213,7 @@ def shortlist(
             ("elevenlabs", settings.elevenlabs_voice_id),
         ]
     )
-    capacity = 3 + len(preferred_voices)
+    capacity = 3
     for key in preferred:
         if (
             key in available
@@ -242,7 +242,8 @@ def shortlist(
 
         selected.append(min(candidates, key=rank))
     return [
-        {k: v for k, v in row.items() if k != "original_language"} for row in selected
+        {k: v for k, v in row.items() if k != "original_language"}
+        for row in (*audition_picks, *selected)
     ]
 
 
