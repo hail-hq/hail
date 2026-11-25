@@ -17,7 +17,9 @@ export type FooterBadge = {
   alt: string;
   name: string;
   /** Square provider logo. Shared CSS owns all card and logo dimensions. */
-  icon: string;
+  icon?: string;
+  /** The directory asks for a website link in exchange for listing Hail. */
+  reciprocal?: boolean;
 };
 
 function FooterLinks({ group }: { group: FooterGroup }) {
@@ -66,14 +68,21 @@ export function Footer({
           <FooterAccordion />
         </div>
         {badges.length > 0 && (
-          <ul id="footer-badges" className="hail-footer-badges" aria-label="Featured on">
+          <ul id="footer-badges" className="hail-footer-badges" aria-label="Directory and platform links">
             {badges.map((badge) => (
               <li key={badge.id}>
-                <a href={badge.href} target="_blank" rel="noopener" aria-label={badge.alt}>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={badge.icon} alt="" width={36} height={36} loading="lazy" />
+                <a
+                  href={badge.href}
+                  target="_blank"
+                  rel={badge.reciprocal ? "noopener sponsored" : "noopener"}
+                  aria-label={badge.alt}
+                >
+                  {badge.icon && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={badge.icon} alt="" width={36} height={36} loading="lazy" />
+                  )}
                   <span className="hail-footer-badge-copy">
-                    <span className="hail-footer-badge-label">Find Hail on</span>
+                    <span className="hail-footer-badge-label">{badge.reciprocal ? "Directory" : "Find Hail on"}</span>
                     <span className="hail-footer-badge-name">{badge.name}</span>
                   </span>
                 </a>
