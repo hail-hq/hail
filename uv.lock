@@ -1226,7 +1226,7 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "hailhq-mcp"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "mcp" }
 dependencies = [
     { name = "fastapi" },

@@ -8,7 +8,8 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 Connect your phone system: keep your number and your phone system (PBX), and
 send the calls you choose to a Hail agent. Hail's team sets it up with you.
-Contacts can be phone system extensions, for handover.
+Contacts can be phone system extensions, for handover. A failed webhook
+delivery shows a short reason, such as a TLS or connection failure.
 
 Component versions cut alongside this release:
 **`cli-v0.36.0`** (Homebrew + GitHub Releases), **`sdk-v0.26.0`** (PyPI),
