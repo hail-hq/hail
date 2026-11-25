@@ -390,8 +390,14 @@ async def update_agent(
             # read of the agent and every call it answers.
             changes.pop(field)
     if "voice_config" in changes:
-        await _check_scoped_voice(db, principal.organization_id, body.voice_config)
-        changes["voice_config"] = body.voice_config.model_dump(mode="json")
+        voice = body.voice_config.model_dump(mode="json")
+        saved_voice = agent.voice_config or {}
+        if any(
+            voice[field] != saved_voice.get(field)
+            for field in ("language", "voice_id", "voice_provider")
+        ):
+            await _check_scoped_voice(db, principal.organization_id, body.voice_config)
+        changes["voice_config"] = voice
     # Validate before any attribute is set: the validation queries would
     # autoflush a pending name change outside the conflict handler below.
     items = None
