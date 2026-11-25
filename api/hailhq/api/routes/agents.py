@@ -333,7 +333,9 @@ async def update_agent(
         if "voice_id" not in body.voice_config.model_fields_set:
             # Read after concurrent voice edits before copying a newer override.
             await db.refresh(
-                agent, attribute_names=["voice_config"], with_for_update=True
+                agent,
+                attribute_names=["voice_config"],
+                with_for_update={"key_share": True},
             )
             saved = agent.voice_config or {}
             if saved.get("scoped_voice_id"):
