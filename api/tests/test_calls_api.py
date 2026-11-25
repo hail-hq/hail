@@ -1940,7 +1940,7 @@ async def test_post_calls_with_agent_id_fills_defaults(
     assert md["voice_config"].get("scoped_voice_id") == (
         "v9" if provider and not locked else None
     )
-    assert md["voice_config"]["voice_provider"] == (None if locked else provider)
+    assert md["voice_config"].get("voice_provider") == (None if locked else provider)
     assert md["voice_config"]["language"] == "it"
     assert md["max_duration_seconds"] == 900
     assert md["handover_targets"] == []
