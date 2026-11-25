@@ -336,6 +336,55 @@ async def test_short_spaced_noise_is_not_music(line):
     await held.aclose()
 
 
+async def test_choppy_music_with_pauses_is_music(line):
+    held, session, now, _ = line
+    await held.start()
+    # 9 s of audio over a 14 s stretch: most of it is sound, so it is music.
+    for _ in range(6):
+        speak(session, now, 1.5, pause=0.45)
+    now[0] += 3.0
+    await settle()
+    assert held._music
+    assert held.active
+    session.generate_reply.assert_not_called()
+    await held.aclose()
+
+
+async def test_one_stray_word_in_one_long_music_burst_keeps_the_music(line):
+    held, session, now, _ = line
+    await held.start()
+    session.emit("user_state_changed", new_state="speaking")
+    now[0] += 1
+    session.emit("user_input_transcribed", transcript="you", is_final=False)
+    now[0] += 39
+    session.emit("user_state_changed", new_state="listening")
+    await settle()
+    assert held._music
+    assert held.active
+    await held.aclose()
+
+
+async def test_late_finals_of_talk_do_not_make_it_music(line):
+    held, session, now, _ = line
+    await held.start()
+    # Talk in short phrases; each final lands just after the next one starts.
+    for i in range(7):
+        session.emit("user_state_changed", new_state="speaking")
+        if i:
+            now[0] += 0.3
+            session.emit("user_input_transcribed", transcript="okay", is_final=True)
+            now[0] += 1.7
+        else:
+            now[0] += 2
+        session.emit("user_state_changed", new_state="listening")
+        now[0] += 0.3
+    session.emit("user_input_transcribed", transcript="sure", is_final=True)
+    await settle()
+    assert not held._music
+    session.generate_reply.assert_not_called()
+    await held.aclose()
+
+
 async def test_the_rest_of_please_hold_is_not_a_quiet_voice(line):
     held, session, now, _ = line
     session.emit("user_state_changed", new_state="speaking")
@@ -353,8 +402,7 @@ async def test_the_rest_of_please_hold_is_not_a_quiet_voice(line):
 async def test_music_with_long_soft_pauses_is_still_music(line):
     held, session, now, _ = line
     await held.start()
-    # Short bursts with pauses just under the gap: the stretch, pauses
-    # included, is long enough to be music.
+    # Short bursts with pauses just under the gap: 12 s of wordless audio.
     for _ in range(8):
         speak(session, now, 1.5, pause=0.4)
     await settle()
@@ -410,7 +458,12 @@ async def test_talk_that_goes_on_after_please_hold_is_not_a_quiet_voice(line):
 async def test_long_speech_is_not_music(line):
     held, session, now, _ = line
     await held.start()
-    speak(session, now, MUSIC_SECONDS + 2, words="the reference is ...")
+    # Speech-to-text streams interim words all through real speech.
+    session.emit("user_state_changed", new_state="speaking")
+    for _ in range(12):
+        session.emit("user_input_transcribed", transcript="the ref", is_final=False)
+        now[0] += 1
+    session.emit("user_state_changed", new_state="listening")
     await settle()
     assert not held._music
     await held.aclose()

@@ -48,6 +48,12 @@ MUSIC_SECONDS = 10.0
 # Bursts closer than this are one stretch of audio. It is also the time a
 # late transcript gets after the audio ends.
 GAP_SECONDS = 2.5
+# A transcript this soon after a new burst starts belongs to the burst before
+# it: speech-to-text lags the audio.
+STT_LAG_SECONDS = 1.0
+# A stretch this long (pauses included) is music when at least this share of
+# it is wordless audio: choppy music is, spaced clicks are not.
+MUSIC_AUDIO_SHARE = 0.5
 
 CANT_HEAR = (
     "In the conversation's language, briefly tell them you can't quite hear "
@@ -85,7 +91,7 @@ class Hold:
         self._last_audio = clock()
         # One VAD burst of audio, and the stretch of bursts it belongs to.
         self._burst_started: float | None = None
-        self._burst_words = False
+        self._burst_words_at: float | None = None
         self._last_end = -math.inf
         # Wordless seconds of the last burst; a late transcript takes them back.
         self._last_wordless = 0.0
@@ -127,7 +133,7 @@ class Hold:
         ongoing = self._burst_started is not None
         if ongoing:
             self._burst_started = now
-            self._burst_words = False
+            self._burst_words_at: float | None = None
         self._stretch_started = now if ongoing else None
         self._stretch_words = ongoing
         self._stretch_wordless = 0.0
@@ -165,8 +171,15 @@ class Hold:
         if self._stretch_started is None:
             return
         if self._burst_started is not None:
-            self._burst_words = True
+            self._burst_words_at = now
             self._stretch_words = True
+            if (
+                now - self._burst_started <= STT_LAG_SECONDS
+                and self._burst_started - self._last_end <= GAP_SECONDS
+            ):
+                # Late words of the burst just before this one.
+                self._stretch_wordless -= self._last_wordless
+                self._last_wordless = 0.0
         elif now - self._last_end <= GAP_SECONDS:
             # A late transcript of the burst that just ended.
             self._stretch_words = True
@@ -187,14 +200,17 @@ class Hold:
                 self._stretch_words = False
                 self._stretch_wordless = 0.0
             self._burst_started = self._last_audio = now
-            self._burst_words = False
+            self._burst_words_at: float | None = None
             return
         if self._burst_started is None:
             return
         length = now - self._burst_started
         self._burst_started = None
         self._last_end = self._last_audio = now
-        self._last_wordless = 0.0 if self._burst_words else length
+        # Only the audio after the burst's last words is wordless: one stray
+        # word early in a long run of music does not hide the music.
+        words_at = self._burst_words_at
+        self._last_wordless = length if words_at is None else max(0.0, now - words_at)
         self._stretch_wordless += self._last_wordless
         if self.active:
             self._settle_task = asyncio.create_task(self._settle(now))
@@ -209,7 +225,10 @@ class Hold:
     def _decide(self) -> None:
         if not self.active or self._stretch_started is None:
             return
-        if self._stretch_wordless >= MUSIC_SECONDS:
+        span = self._last_end - self._stretch_started
+        if self._stretch_wordless >= MUSIC_SECONDS or (
+            span >= MUSIC_SECONDS and self._stretch_wordless >= MUSIC_AUDIO_SHARE * span
+        ):
             self._music = True
             return
         if self._music or self._stretch_words:
