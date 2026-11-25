@@ -274,7 +274,7 @@ class KnowledgeIngestWorker:
             if state and state != self._storage_state:
                 if over:
                     logger.warning(
-                        "knowledge: storage is more than %d MB past the cap; "
+                        "knowledge: storage is about %d MB past the cap; "
                         "vectors wait until VACUUM FULL knowledge_pieces gives "
                         "space back",
                         REEMBED_HEADROOM // (1024 * 1024),
@@ -285,6 +285,8 @@ class KnowledgeIngestWorker:
                         "search), other-model vectors are replaced within %d MB",
                         REEMBED_HEADROOM // (1024 * 1024),
                     )
+            if not state and self._storage_state:
+                logger.info("knowledge: storage has room again; embedding goes on")
             self._storage_state = state
             if over:
                 self._embed_after = time.monotonic() + EMBED_BACKOFF[1]

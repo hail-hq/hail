@@ -1069,10 +1069,18 @@ async def test_past_headroom_warning_logs_once(
     async def over(db, *, adding=0):
         return True
 
+    async def room(db, *, adding=0):
+        return False
+
     monkeypatch.setattr(ingest_module, "storage_full", over)
     fake.model = "fake-embedding-2"
-    for _ in range(2):
+    with caplog.at_level(logging.INFO, logger="hailhq.core.knowledge.ingest"):
+        for _ in range(2):
+            worker._embed_after = 0.0
+            await worker.tick()
+        assert caplog.text.count("past the cap") == 1
+        monkeypatch.setattr(ingest_module, "storage_full", room)
         worker._embed_after = 0.0
         await worker.tick()
-    assert caplog.text.count("past the cap") == 1
+        assert "room again" in caplog.text
     assert "replaced within" not in caplog.text
