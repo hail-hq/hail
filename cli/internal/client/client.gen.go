@@ -2212,14 +2212,14 @@ type ConnectedNumberCheck struct {
 	// CallId The check call, billed as an outbound call.
 	CallId *openapi_types.UUID `json:"call_id,omitempty"`
 
-	// Reason Why the check failed. 'no_call_arrived': no call reached this connection; check the trunk and the routing rule. 'not_authenticated': the call came without this connection's username and password, or to another trunk. 'code_not_received': the check code did not come through; turn on RFC 2833 key presses.
+	// Reason Why the check failed. 'no_call_arrived': no call reached this connection; check the trunk, and that the routing rule sends this number with + and the country code. 'not_authenticated': the call came without this connection's username and password, or to another trunk. 'code_not_received': the check code did not come through; turn on RFC 2833 key presses.
 	Reason *ConnectedNumberCheckReason `json:"reason,omitempty"`
 
 	// State 'active': the number passed and can be routed to an agent.
 	State ConnectedNumberCheckState `json:"state"`
 }
 
-// ConnectedNumberCheckReason Why the check failed. 'no_call_arrived': no call reached this connection; check the trunk and the routing rule. 'not_authenticated': the call came without this connection's username and password, or to another trunk. 'code_not_received': the check code did not come through; turn on RFC 2833 key presses.
+// ConnectedNumberCheckReason Why the check failed. 'no_call_arrived': no call reached this connection; check the trunk, and that the routing rule sends this number with + and the country code. 'not_authenticated': the call came without this connection's username and password, or to another trunk. 'code_not_received': the check code did not come through; turn on RFC 2833 key presses.
 type ConnectedNumberCheckReason string
 
 // ConnectedNumberCheckState 'active': the number passed and can be routed to an agent.

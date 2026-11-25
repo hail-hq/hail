@@ -447,7 +447,7 @@ func readSecretFlag(flag, name string, stdin io.Reader) (string, error) {
 
 // checkReasons turns a failed check's reason into the next step.
 var checkReasons = map[client.ConnectedNumberCheckReason]string{
-	"no_call_arrived":   "No call arrived. Check the SIP trunk and the routing rule.",
+	"no_call_arrived":   "No call arrived. Check the SIP trunk, and that the routing rule sends this number with + and the country code.",
 	"not_authenticated": "The call came in without this connection's username and password.",
 	"code_not_received": "The check code did not come through. Turn on RFC 2833 key presses on the trunk.",
 }

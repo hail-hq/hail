@@ -30,7 +30,7 @@ Hail through your connection and carry a code that Hail sends as key
 presses. A call you send yourself cannot pass.
 
 - Billed as a normal outbound call.
-- `no_call_arrived`: check the trunk, the routing rule for this number, and the address.
+- `no_call_arrived`: check the trunk and the address, and that the routing rule sends this number with `+` and the country code. A number without them never reaches Hail.
 - `not_authenticated`: the call came without this connection's username and password, or not in `+` format.
 - `code_not_received`: turn on RFC 2833 key presses.
 - Run the check soon after you add a number. Until it passes, someone else can buy or connect the number, and Hail removes numbers left unchecked.
