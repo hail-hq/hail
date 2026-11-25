@@ -2,7 +2,7 @@ import re
 from typing import Literal
 from uuid import UUID
 
-from hailhq.core.languages import Language
+from hailhq.core.languages import Language, TTSProvider
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -28,7 +28,7 @@ class VoicePreference(BaseModel):
     """Optional editorial preference, still checked against live capabilities."""
 
     model_config = ConfigDict(extra="forbid")
-    provider: Literal["cartesia", "elevenlabs"]
+    provider: TTSProvider
     voice_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
     reason: str = Field(min_length=1, max_length=500)
 
@@ -91,6 +91,10 @@ class Settings(BaseSettings):
     cartesia_api_key: str = ""
     eleven_api_key: str = ""
     speechmatics_api_key: str = ""
+    hail_gemini_tts_enabled: bool = False
+    google_tts_location: Literal["global", "us", "eu"] = "global"
+    xai_tts_api_key: str = ""
+    assemblyai_tts_api_key: str = ""
 
     # STT/TTS, model names set via .env / .env.local.
     deepgram_model: str = ""

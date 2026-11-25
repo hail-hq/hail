@@ -319,3 +319,26 @@ def test_decrypt_llm_metadata_roundtrip(monkeypatch) -> None:
     legacy = {"base_url": "https://x.example/v1", "api_key": "pk", "model": "m"}
     assert decrypt_llm_metadata(dict(legacy)) == legacy
     assert decrypt_llm_metadata(None) is None
+
+
+def test_gemini_default_only_applies_to_inherited_english(
+    monkeypatch, captured_plugins
+):
+    monkeypatch.setattr(settings, "hail_gemini_tts_enabled", True, raising=False)
+    monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
+    assert build_tts(language="en")._tts_instances[0].model == "gemini-3.8-flash-tts"
+    build_tts(voice_id_override="legacy-voice", language="en")
+    assert captured_plugins["cartesia"][-1].kwargs["voice"] == "legacy-voice"
+    build_tts(language="fr")
+    assert captured_plugins["cartesia"][-1].kwargs["language"] == "fr"
+
+
+def test_disabling_inherited_gemini_default_keeps_an_explicit_selection(
+    monkeypatch, captured_plugins
+):
+    monkeypatch.setattr(settings, "hail_gemini_tts_enabled", False)
+    monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
+    org = ResolvedLayer("gemini", None, {"voice_id": "Charon"}, False)
+    assert build_tts(org, language="en").model == "gemini-3.8-flash-tts"
+    build_tts(language="en")
+    assert len(captured_plugins["cartesia"]) == 1

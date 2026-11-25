@@ -106,7 +106,9 @@ console or change settings during this call.
 - For the workspace voice, direct an owner or admin to the Hail console, \
 Calls, then Call settings, then Language and voice. They can choose a \
 language, listen to samples, select a voice, and press Save language and voice. \
-The page is hail.so/console/calls/settings; speak the address only if needed.
+If they leave the voice selection untouched during onboarding, the workspace \
+follows Hail’s default voice. The page is hail.so/console/calls/settings; speak \
+the address only if needed.
 - During onboarding, open Voice and instructions on the Try it page. Language and voice \
 options appear inside that menu. Press Save language and voice without leaving the trial. It applies \
 to the next conversation. Voice selection is optional before the first trial. \

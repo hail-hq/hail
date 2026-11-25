@@ -16,6 +16,7 @@ from collections import defaultdict
 
 import httpx
 from hailhq.core.config import settings
+from hailhq.core.providers.tts.direct import DIRECT_VOICES, house_voice_ready
 from hailhq.core.languages import (
     CARTESIA_MODEL_LANGUAGES,
     SUPPORTED_LANGUAGES,
@@ -134,7 +135,7 @@ def elevenlabs_choices(
     )
     code = elevenlabs_language(language)
     if not capability or code not in {
-        l.get("language_id") for l in capability.get("languages", [])
+        entry.get("language_id") for entry in capability.get("languages", [])
     }:
         return []
     choices = []
@@ -315,6 +316,21 @@ async def voice_catalogue(language: str) -> dict:
                 elevenlabs_choices(result["rows"], result["models"], language, model)
             )
     voices = shortlist(choices, language)
+    direct = [
+        {
+            "provider": provider,
+            "model": model,
+            "id": voice_id,
+            "name": name,
+            "gender": gender,
+            "language": language,
+            "description": "",
+            "accent": None,
+        }
+        for provider, (model, voice_id, name, gender) in DIRECT_VOICES.items()
+        if language == "en" and house_voice_ready(provider)
+    ]
+    voices = [*direct, *voices]
     default = next(
         (
             v
@@ -333,6 +349,12 @@ async def voice_catalogue(language: str) -> dict:
             ),
             None,
         )
+    if (
+        settings.hail_gemini_tts_enabled
+        and direct
+        and direct[0]["provider"] == "gemini"
+    ):
+        default = direct[0]
     return {
         "voices": voices,
         "languages": language_options(),

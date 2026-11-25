@@ -15,10 +15,10 @@ from urllib.parse import urlsplit
 from uuid import UUID
 
 from hailhq.core.config import settings
-from hailhq.core.languages import Language
+from hailhq.core.languages import Language, TTSProvider
 from hailhq.core.models import OrgProviderConfig
 from hailhq.core.secret_cipher import SecretCipher
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -77,11 +77,21 @@ class LLMParams(BaseModel):
 class TTSParams(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    provider: Literal["cartesia", "elevenlabs"]
+    provider: TTSProvider
     voice_id: str | None = None
     model: str | None = None
     # Default spoken language for the workspace. A call or agent can override it.
     language: Language | None = None
+    project: str | None = Field(
+        default=None, pattern=r"^(?:[a-z][a-z0-9-]{4,28}[a-z0-9]|[0-9]{6,20})$"
+    )
+    location: Literal["global", "us", "eu"] | None = None
+
+    @model_validator(mode="after")
+    def _project_is_gemini_only(self) -> TTSParams:
+        if self.provider != "gemini" and (self.project or self.location):
+            raise ValueError("Project and location apply to Gemini speech only.")
+        return self
 
 
 class STTParams(BaseModel):

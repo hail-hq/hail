@@ -31,6 +31,7 @@ from hailhq.core.provider_config import (
     provider_cipher,
 )
 from hailhq.core.provider_validation import validate_provider_key
+from hailhq.core.providers.tts.direct import DIRECT_VOICES, DirectSpeech
 from hailhq.core.secret_cipher import SecretKeyMissing
 from hailhq.core.voice_catalog import validate_voice_language
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -271,11 +272,27 @@ async def upsert_provider_config(
         await _require_servable_language(db, organization_id, **{layer: incoming})
 
     row = await _get_row(db, organization_id, layer, body.provider)
+    direct_speech = layer == "tts" and body.provider in DIRECT_VOICES
+    if direct_speech:
+        has_key = body.api_key is not None or (
+            row is not None and row.encrypted_api_key is not None
+        )
+        try:
+            DirectSpeech.resolve(
+                body.provider, params, "configured" if has_key else None
+            )
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        if body.verify_voice_language:
+            voice = params.get("voice_id")
+            if voice and voice != DIRECT_VOICES[body.provider][1]:
+                raise HTTPException(422, "Choose a suggested voice or update Advanced.")
     # A provider outside the language's TTS set only passed the gate above
     # through fallback consent: the house chain speaks, so there is nothing
     # to verify on this provider.
     if (
         layer == "tts"
+        and not direct_speech
         and body.verify_voice_language
         and params.get("language")
         and body.provider in SUPPORTED_LANGUAGES[params["language"]].tts

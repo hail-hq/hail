@@ -64,7 +64,9 @@ def test_resolve_stt_provider_precedence() -> None:
 
 
 def test_tts_providers_trim() -> None:
-    assert tts_providers_for(None) == frozenset({"cartesia", "elevenlabs"})
+    assert tts_providers_for(None) == frozenset(
+        {"cartesia", "elevenlabs", "gemini", "xai", "assemblyai"}
+    )
     assert tts_providers_for("fr") == frozenset({"cartesia", "elevenlabs"})
     assert tts_providers_for("th") == frozenset({"cartesia"})  # no elevenlabs
 

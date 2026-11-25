@@ -20,13 +20,20 @@ import time
 import unicodedata
 import wave
 from collections import OrderedDict
-from typing import Annotated, Literal
+from contextlib import aclosing
+from typing import Annotated
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Response
 from hailhq.api.routes.internal.auth import verify_internal_request
 from hailhq.core.config import settings
-from hailhq.core.languages import SUPPORTED_LANGUAGES, Language, elevenlabs_language
+from hailhq.core.languages import (
+    SUPPORTED_LANGUAGES,
+    Language,
+    TTSProvider,
+    elevenlabs_language,
+)
+from hailhq.core.providers.tts.direct import DIRECT_VOICES, SAMPLE_RATE, DirectSpeech
 from hailhq.core.voice_catalog import HEADERS_VERSION, voice_catalogue
 from pydantic import BaseModel, Field, StringConstraints, field_validator
 
@@ -100,7 +107,7 @@ async def list_voices(language: Language = "en") -> dict:
 
 class PreviewIn(BaseModel):
     language: Language
-    provider: Literal["cartesia", "elevenlabs"]
+    provider: TTSProvider
     voice_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
 
 
@@ -145,7 +152,7 @@ async def preview_voice(body: PreviewIn) -> Response:
     try:
         model = await _catalogue_model(body)
         text = _HELLO[body.language]
-        cap = 3 * len(SUPPORTED_LANGUAGES)
+        cap = 3 * len(SUPPORTED_LANGUAGES) + len(DIRECT_VOICES)
         return _wav(await _audio(body, model, text, _samples, cap))
     except (httpx.HTTPError, ValueError) as exc:
         raise HTTPException(503, "This sample could not play. Try again.") from exc
@@ -189,6 +196,21 @@ async def _audio(
 
 async def _synthesize(body: PreviewIn, model: str, text: str) -> bytes:
     async with httpx.AsyncClient(timeout=20) as client:
+        if body.provider in DIRECT_VOICES:
+            speech = DirectSpeech.resolve(
+                body.provider, {"model": model}, voice=body.voice_id
+            )
+            output = io.BytesIO()
+            async with aclosing(speech.pcm(client, text)) as chunks:
+                with wave.open(output, "wb") as wav:
+                    wav.setnchannels(1)
+                    wav.setsampwidth(2)
+                    wav.setframerate(SAMPLE_RATE)
+                    async for chunk in chunks:
+                        wav.writeframesraw(chunk)
+            if output.getbuffer().nbytes <= 44:
+                raise ValueError("No sample audio was returned.")
+            return output.getvalue()
         if body.provider == "cartesia":
             response = await client.post(
                 "https://api.cartesia.ai/tts/bytes",

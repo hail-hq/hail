@@ -63,6 +63,12 @@ from typing import Any
 from uuid import UUID
 
 from hailhq.core.config import settings
+from hailhq.core.providers.tts.direct import (
+    DIRECT_VOICES,
+    DirectSpeech,
+    house_voice_ready,
+)
+from hailhq.voicebot.direct_tts import DirectTTS
 from hailhq.core.db import session_scope
 from hailhq.core.languages import (
     SUPPORTED_LANGUAGES,
@@ -539,10 +545,18 @@ def build_llm(
 
 
 def _house_tts(
-    voice_id_override: str | None, language: str | None
+    voice_id_override: str | None, language: str | None, *, include_gemini: bool = True
 ) -> list[agents_tts.TTS]:
     allowed = tts_providers_for(language)
     instances: list[agents_tts.TTS] = []
+    if (
+        include_gemini
+        and settings.hail_gemini_tts_enabled
+        and not voice_id_override
+        and "gemini" in allowed
+        and house_voice_ready("gemini")
+    ):
+        instances.append(DirectTTS(DirectSpeech.resolve("gemini")))
     if settings.cartesia_api_key and "cartesia" in allowed:
         kwargs: dict[str, Any] = {
             "model": settings.cartesia_model,
@@ -566,6 +580,10 @@ def _org_tts(
     org: ResolvedLayer, voice_id_override: str | None, language: str | None
 ) -> agents_tts.TTS:
     voice = voice_id_override or org.params.get("voice_id")
+    if org.provider in DIRECT_VOICES:
+        return DirectTTS(
+            DirectSpeech.resolve(org.provider, org.params, org.api_key, voice)
+        )
     if org.provider == "cartesia":
         kwargs: dict[str, Any] = {
             "model": org.params.get("model") or settings.cartesia_model
@@ -602,11 +620,9 @@ def build_tts(
 
     ``org`` present (mode C): the org's provider is used, with Hail's house
     TTS instances appended as a fallback only if ``org.fallback_enabled``.
-    ``org`` absent (mode A): Cartesia primary, ElevenLabs fallback, a
-    provider is included only when its API key is configured, so a
-    single-key self-host still works (tenet 4). With both keys set the two
-    are wrapped in a ``FallbackAdapter`` with Cartesia first. With one key
-    set that provider is used directly with no adapter.
+    Inherited English voices use Gemini first when it is enabled.
+    Existing voice IDs and other languages keep the legacy house chain.
+    A configured provider remains eligible when it is the only one available.
 
     ``language`` is the per-call ``voice_config.language`` (ISO 639-1); it is
     applied to every instance built here, BYO and house fallbacks alike,
@@ -637,10 +653,18 @@ def build_tts(
                 org.provider,
                 language,
             )
-            return build_tts(None, voice_id_override, language)
+            return build_tts(
+                None,
+                None if org.provider in DIRECT_VOICES else voice_id_override,
+                language,
+            )
         byo = _org_tts(org, voice_id_override, language)
         if org.fallback_enabled:
-            house = _house_tts(voice_id_override, language)
+            house = _house_tts(
+                None if org.provider in DIRECT_VOICES else voice_id_override,
+                language,
+                include_gemini=org.provider != "gemini",
+            )
             if house:
                 return agents_tts.FallbackAdapter([byo, *house])
         return byo
@@ -657,7 +681,7 @@ def build_tts(
                 f"language requires: {', '.join(sorted(providers))}."
             )
         raise ProviderKeyError(
-            "No TTS provider configured: set CARTESIA_API_KEY or ELEVEN_API_KEY."
+            "No TTS provider configured: enable Google Cloud speech or set CARTESIA_API_KEY or ELEVEN_API_KEY."
         )
     if len(instances) == 1:
         return instances[0]
@@ -775,6 +799,8 @@ def startup_capability_warnings() -> list[str]:
     if not settings.cartesia_api_key:
         # Determine which TTS providers are available
         available_tts_providers = set()
+        if settings.hail_gemini_tts_enabled and house_voice_ready("gemini"):
+            available_tts_providers.add("gemini")
         if settings.eleven_api_key:
             available_tts_providers.add("elevenlabs")
 

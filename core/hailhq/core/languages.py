@@ -142,6 +142,10 @@ _NO_SPEECHMATICS = frozenset({"gu", "kn", "te", "zh"})
 _NO_ELEVENLABS = frozenset({"bn", "gu", "he", "kn", "te", "th", "mr"})
 
 
+TTSProvider = Literal["cartesia", "elevenlabs", "gemini", "xai", "assemblyai"]
+_DIRECT_ENGLISH_TTS = frozenset({"gemini", "xai", "assemblyai"})
+
+
 @dataclasses.dataclass(frozen=True)
 class LanguageCaps:
     name: str
@@ -162,7 +166,8 @@ SUPPORTED_LANGUAGES: dict[str, LanguageCaps] = {
             frozenset({"cartesia"})
             if code in _NO_ELEVENLABS
             else frozenset({"cartesia", "elevenlabs"})
-        ),
+        )
+        | (_DIRECT_ENGLISH_TTS if code == "en" else frozenset()),
         semantic_turn=code in _SEMANTIC_TURN,
     )
     for code in _NAMES
@@ -228,9 +233,7 @@ def resolve_stt_provider(org_provider: str | None, language: str | None) -> str:
 
 
 def tts_providers_for(language: str | None) -> frozenset[str]:
-    if language is None:
-        return frozenset({"cartesia", "elevenlabs"})
-    return SUPPORTED_LANGUAGES[language].tts
+    return SUPPORTED_LANGUAGES[language or "en"].tts
 
 
 def turn_mode_for(language: str | None, stt_provider: str) -> str:

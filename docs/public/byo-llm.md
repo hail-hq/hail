@@ -385,6 +385,16 @@ it, and `--fallback` / `--fallback=false` (SDK: `fallback_enabled=True` /
 as they are. What the server validates is the merged result, so a partial
 write can never leave an invalid config behind — it 422s instead.
 
+For Gemini speech, use a Google Cloud API key bound to a service account with access to your project. Set `--project` to your Google Cloud project ID. The optional `--location` accepts `global`, `us`, or `eu`.
+
+```bash
+printf '%s' "$GOOGLE_CLOUD_TTS_KEY" | hail providers set tts --provider gemini \
+  --project my-speech-project --voice-id Charon --key -
+hail providers test tts --provider gemini
+```
+
+Use `--provider xai --voice-id ara` or `--provider assemblyai --voice-id aai-audrey` with the corresponding vendor key. These providers are available for English calls. Test key generates a short sample with the supplied provider.
+
 Config is per provider: rows are keyed by `(organization, layer, provider)`,
 so pointing a layer at a different `--provider` starts a fresh row rather
 than inheriting the old provider's params. `fallback_enabled` is `false` on

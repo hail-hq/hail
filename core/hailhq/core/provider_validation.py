@@ -19,7 +19,8 @@ verified probe):
 2. Add a ``_probe_for`` branch here. Prefer a ``capability`` probe (call the
    real endpoint with deliberately-bad params so nothing runs/bills); fall
    back to an ``auth`` probe (a cheap authenticated GET) if the provider has
-   no safe capability probe.
+   no safe capability probe. The direct speech providers synthesize one
+   fixed word on the explicit Test key action.
 3. EMPIRICALLY VERIFY the ordering before trusting a capability probe: a bad
    key must return 401/403, and a valid key with bad params must return a
    post-auth 4xx (404/400/422). If auth is NOT checked before params, the
@@ -30,9 +31,11 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+from contextlib import aclosing
 from typing import Literal
 
 import httpx
+from hailhq.core.providers.tts.direct import DIRECT_VOICES, DirectSpeech
 from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
 from hailhq.core.urls import join_url
 
@@ -155,6 +158,11 @@ async def validate_provider_key(
     client: httpx.AsyncClient | None = None,
 ) -> tuple[ValidationStatus, str]:
     """Return (status, message). Never raises on provider/network failure."""
+    if layer == "tts" and provider in DIRECT_VOICES:
+        if client is not None:
+            return await _validate_direct(provider, api_key, params, client)
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as direct_client:
+            return await _validate_direct(provider, api_key, params, direct_client)
     probe = await asyncio.to_thread(_probe_for, provider, api_key, params)
     if probe is None:
         if provider == "openai-compatible" and params.get("base_url"):
@@ -186,3 +194,32 @@ async def validate_provider_key(
         status,
         f"couldn't verify with {provider} (HTTP {resp.status_code}) — try again",
     )
+
+
+async def _validate_direct(
+    provider: str, api_key: str, params: dict, client: httpx.AsyncClient
+) -> tuple[ValidationStatus, str]:
+    # The explicit Test key action synthesizes one fixed word. Authentication
+    # alone cannot prove the project can use the selected speech model.
+    try:
+        speech = DirectSpeech.resolve(provider, params, api_key)
+        async with aclosing(speech.pcm(client, "Hello.")) as audio:
+            async for chunk in audio:
+                if chunk:
+                    return "valid", "ok"
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        if status in (400, 401, 403, 404, 422):
+            return (
+                "invalid",
+                f"{provider} rejected the speech configuration (HTTP {status})",
+            )
+        return (
+            "indeterminate",
+            f"couldn't verify with {provider} (HTTP {status}) — try again",
+        )
+    except httpx.HTTPError:
+        return "indeterminate", f"couldn't reach {provider} — try again"
+    except ValueError as exc:
+        return "invalid", str(exc)
+    return "indeterminate", "The provider did not return test audio. Try again."

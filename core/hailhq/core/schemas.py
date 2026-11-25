@@ -1683,7 +1683,12 @@ class AgentUpdate(BaseModel):
         description="New AI line template ('{org}' = organization name); null returns to the workspace line.",
     )
     voice_config: VoiceConfig | None = Field(
-        default=None, description="New TTS voice and language settings."
+        default=None,
+        description=(
+            "Update fields inside the voice settings. Omitted fields keep their "
+            "values. Set voice_id to null to clear the chosen voice, or send "
+            "an empty object to reset all voice settings."
+        ),
     )
     tools: list[str] | None = Field(
         default=None,
@@ -1922,8 +1927,7 @@ DEPRECATED_PREFIX_FIELDS = {
 }
 
 _PREFIX_RULE = (
-    "must be 1–20 chars of lowercase a–z, 0–9, or '-', "
-    "with no leading or trailing '-'"
+    "must be 1–20 chars of lowercase a–z, 0–9, or '-', with no leading or trailing '-'"
 )
 
 
