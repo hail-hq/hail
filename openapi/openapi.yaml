@@ -6989,9 +6989,10 @@ paths:
         "Connect your phone system (PBX). Add the returned SIP server,
         username
 
-        and password to it as a generic SIP trunk. The password is shown only in
+        and password to it as a generic SIP trunk. Read the password again with
 
-        this response; rotate it to get a new one. With ``pbx_host``, agents can
+        GET /sip-connections/{id}/password, or rotate it to get a new one. With ``pbx_host``,
+        agents can
 
         also call out and hand calls over through your phone system."
       operationId: create_sip_connection_v1_sip_connections_post
@@ -7286,6 +7287,75 @@ paths:
           description: Hail could not reach its call service.
         "503":
           description: Connected phone systems are not set up on this server.
+  /v1/sip-connections/{connection_id}/password:
+    get:
+      tags:
+        - sip-connections
+      summary: Read Sip Connection Password
+      description:
+        "The password your phone system sends to Hail, to copy into its
+        trunk
+
+        again. Every read is recorded in the workspace's audit log."
+      operationId: read_sip_connection_password_v1_sip_connections__connection_id__password_get
+      parameters:
+        - name: connection_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Connection Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SipConnectionPassword"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "404":
+          description: The connection or number does not exist here.
+        "409":
+          description: This password cannot be read. Make a new one.
+        "503":
+          description:
+            Connected phone systems are not set up on this server, or the
+            read could not be recorded. No password is returned.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
   /v1/sip-connections/{connection_id}/numbers:
     post:
       tags:
@@ -12146,8 +12216,8 @@ components:
           type: string
           title: Password Last4
           description:
-            Last 4 characters of the password. The full password shows
-            once.
+            Last 4 characters of the password. Read the full one with GET
+            /sip-connections/{id}/password.
         pbx_host:
           anyOf:
             - type: string
@@ -12182,7 +12252,7 @@ components:
         password:
           type: string
           title: Password
-          description: Password your phone system sends to Hail. Shown only here.
+          description: Password your phone system sends to Hail.
       type: object
       required:
         - id
@@ -12222,7 +12292,7 @@ components:
         password:
           type: string
           title: Password
-          description: The new password. Shown only here.
+          description: The password your phone system sends to Hail.
       type: object
       required:
         - password
@@ -12308,8 +12378,8 @@ components:
           type: string
           title: Password Last4
           description:
-            Last 4 characters of the password. The full password shows
-            once.
+            Last 4 characters of the password. Read the full one with GET
+            /sip-connections/{id}/password.
         pbx_host:
           anyOf:
             - type: string

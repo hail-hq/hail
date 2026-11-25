@@ -25,7 +25,11 @@ const rates = {
       "1 minute of batch audio",
     ],
   ],
-  tts: [["price_per_1m_chars", "Speech synthesis", "1 million characters"]],
+  tts: [
+    ["price_per_1m_chars", "Speech synthesis", "1 million characters"],
+    ["price_per_1m_text_tokens", "Text input", "1 million input text tokens"],
+    ["price_per_1m_audio_tokens", "Audio output", "1 million output audio tokens"],
+  ],
 } as const;
 
 export function modelProduct(
@@ -68,7 +72,9 @@ export function modelProduct(
     "@id": `${pageUrl}#model-${encodeURIComponent(model.model_id)}`,
     url: pageUrl,
     name: model.display_name,
-    model: model.model_id,
+    ...(typeof fields.api_endpoint === "string"
+      ? { identifier: fields.api_endpoint }
+      : { model: model.model_id }),
     category: categories[category],
     brand: { "@type": "Brand", name: model.provider },
     description: `${model.display_name}: ${categories[category].toLowerCase()} from ${model.provider}.`,
