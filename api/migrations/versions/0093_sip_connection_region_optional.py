@@ -4,9 +4,8 @@ When set, it names the phone system's country and Hail reads callers with it
 first. Empty (most connections): the country of the number that was called,
 then of the connection's other numbers.
 
-Upgrade clears every stored country. It was required until now (the console
-offered US by default), so a stored value does not show a choice; each
-connection now reads callers from its numbers. Set one again with PATCH.
+Upgrade keeps every stored country: each stays the phone system's country and
+is read first, as before.
 
 Tables checked first: this is a column of ``sip_connections`` (the
 connection's own setting); no other table fits.
@@ -30,7 +29,6 @@ depends_on = None
 
 def upgrade() -> None:
     op.alter_column("sip_connections", "default_region", nullable=True)
-    op.execute("UPDATE sip_connections SET default_region = NULL")
 
 
 def downgrade() -> None:
@@ -39,6 +37,7 @@ def downgrade() -> None:
            SET default_region = COALESCE(
                (SELECT n.country_code FROM phone_numbers n
                  WHERE n.sip_connection_id = c.id
+                   AND n.provisioning_state NOT IN ('released', 'failed')
                    AND n.country_code ~ '^[A-Z]{2}$'
                  ORDER BY n.created_at LIMIT 1),
                'US')

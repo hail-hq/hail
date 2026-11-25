@@ -103,7 +103,7 @@ hail sip-connections create --label "Main office"   # SIP server, username and p
 hail sip-connections list
 hail sip-connections get <connection_id>
 hail sip-connections update <connection_id> --label "Front desk"
-hail sip-connections update <connection_id> --region GB        # only when the phone system is in a country none of its numbers is from; --clear-region undoes it
+hail sip-connections update <connection_id> --region GB        # the phone system's country, read first for callers on every number; --clear-region undoes it
 hail sip-connections rotate-password <connection_id>
 hail sip-connections add-number <connection_id> +14155550100   # unverified until the check passes
 hail sip-connections verify <connection_id> <number_id>        # Hail calls the number (up to 2 minutes)
@@ -112,7 +112,7 @@ hail sip-connections remove-number <connection_id> <number_id>
 hail sip-connections delete <connection_id>
 ```
 
-The SIP server shows its first characters; Hail's team sends you the full address (hi@hail.so). Hail reads each caller with the country of the number that was called, so most connections need no `--region`.
+The SIP server shows its first characters; Hail's team sends you the full address (hi@hail.so). Hail reads each caller with the country of the number that was called, so most connections need no `--region`. A phone system whose numbers come from several countries should set its own country with `--region`: it is then read first for callers on every number.
 
 ## Email
 
