@@ -1029,3 +1029,50 @@ async def test_replacing_stops_past_the_headroom(
     assert fake.calls == calls and worker._embed_after > 0
     pieces = await pieces_of(async_session, org)
     assert all(p.embedding_model == "fake-embedding" for p in pieces)
+
+
+async def test_never_refused_pieces_go_before_refused_ones(
+    async_session, worker, s3, fake, monkeypatch
+) -> None:
+    """In a workspace's turn, a piece this model refused a day ago comes
+    after pieces never refused."""
+    org = uuid.uuid4()
+    rows = "Part,Name\nP-1,first\nP-2,second\n"
+    await add_document(async_session, s3, org, rows.encode(), "text/csv")
+    fake.fail = True
+    await worker.tick()
+    fake.fail = False
+    worker._embed_after = 0.0
+    first, second = await pieces_of(async_session, org)
+    await async_session.execute(
+        text(
+            "UPDATE knowledge_pieces SET embedding_refused = 'fake-embedding', "
+            "embedding_refused_at = now() - interval '2 days' WHERE id = :i"
+        ),
+        {"i": first.id},
+    )
+    await async_session.commit()
+    monkeypatch.setattr(ingest_module, "BATCH", 1)
+    monkeypatch.setattr(ingest_module, "EMBED_PER_TICK", 1)
+    await worker.tick()
+    first, second = await pieces_of(async_session, org)
+    assert second.embedding is not None and first.embedding is None
+
+
+async def test_past_headroom_warning_logs_once(
+    async_session, worker, s3, fake, monkeypatch, caplog
+) -> None:
+    org = uuid.uuid4()
+    await add_document(async_session, s3, org, NORTHGATE_MANUAL.encode())
+    await worker.tick()
+
+    async def over(db, *, adding=0):
+        return True
+
+    monkeypatch.setattr(ingest_module, "storage_full", over)
+    fake.model = "fake-embedding-2"
+    for _ in range(2):
+        worker._embed_after = 0.0
+        await worker.tick()
+    assert caplog.text.count("past the cap") == 1
+    assert "replaced within" not in caplog.text
