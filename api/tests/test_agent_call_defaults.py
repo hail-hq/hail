@@ -5,7 +5,7 @@ from uuid import uuid4
 import pytest
 from hailhq.api.routes.calls import apply_agent_defaults
 from hailhq.core.models import Agent
-from hailhq.core.schemas import CallCreate
+from hailhq.core.schemas import AgentResponse, CallCreate, VoiceConfig
 
 
 @pytest.mark.parametrize(
@@ -33,4 +33,6 @@ def test_saved_agent_voice_settings_keep_outbound_calls_compatible(
 
     assert body.voice_config.language == "it"
     assert body.voice_config.voice_id == voice_id
+    public_config = AgentResponse._public_voice_config(agent.voice_config)
+    assert VoiceConfig.model_validate(public_config) == body.voice_config
     assert agent.voice_config == voice_config

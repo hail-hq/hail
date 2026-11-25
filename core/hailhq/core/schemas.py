@@ -187,6 +187,16 @@ class VoiceConfig(BaseModel):
     )
 
 
+    @staticmethod
+    def legacy_agent_dict(config: dict) -> dict:
+        """Skip fields written by releases that support provider-specific voices."""
+        return {
+            key: value
+            for key, value in config.items()
+            if key not in {"scoped_voice_id", "voice_provider"}
+        }
+
+
 class ConsentAttestationMixin(BaseModel):
     """Shared consent-attestation fields for every outbound-send schema
     (Call, Email, Sms). Extracted here once a third channel needed the
@@ -1775,6 +1785,12 @@ class AgentResponse(BaseModel):
     )
     created_at: datetime = Field(description="ISO 8601 timestamp.")
     updated_at: datetime = Field(description="ISO 8601 timestamp.")
+
+
+    @field_validator("voice_config")
+    @classmethod
+    def _public_voice_config(cls, value: dict) -> dict:
+        return VoiceConfig.legacy_agent_dict(value)
 
 
 class AgentListResponse(BaseModel):
