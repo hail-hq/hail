@@ -2331,11 +2331,21 @@ async def test_update_agent_folds_language_and_voice_into_voice_config(
     [
         (
             {"language": "da"},
-            {"language": "da", "voice_id": "old-voice", "tts": "cartesia"},
+            {
+                "language": "da",
+                "voice_id": "old-voice",
+                "tts": "cartesia",
+                "voice_provider": "cartesia",
+            },
         ),
         (
             {"voice_id": "v2"},
-            {"language": "en", "voice_id": "v2", "tts": "cartesia"},
+            {
+                "language": "en",
+                "voice_id": "v2",
+                "tts": "cartesia",
+                "voice_provider": None,
+            },
         ),
     ],
 )
@@ -2347,6 +2357,7 @@ async def test_update_agent_one_voice_value_keeps_the_other(
     existing["voice_config"] = {
         "language": "en",
         "voice_id": "old-voice",
+        "voice_provider": "cartesia",
         "tts": "cartesia",
     }
     get = respx.get(f"{_BASE_URL}/agents/{aid}").mock(

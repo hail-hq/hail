@@ -644,8 +644,11 @@ def build_tts(
                 return build_tts(org, None, language)
             raise
         if selected.fallback_enabled:
+            uses_workspace_config = bool(
+                selected.api_key or selected.params.get("model")
+            )
             fallback = _house_tts(
-                None, language, skip=None if selected.api_key else voice_provider
+                None, language, skip=None if uses_workspace_config else voice_provider
             )
             if fallback:
                 return agents_tts.FallbackAdapter([primary, *fallback])

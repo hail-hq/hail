@@ -1745,6 +1745,8 @@ async def update_agent(
     elif language is not None:
         fields["voice_config"] = {}
     if "voice_config" in fields:
+        if voice_id is not None and "voice_provider" in fields["voice_config"]:
+            fields["voice_config"]["voice_provider"] = None
         for key, value in (("language", language), ("voice_id", voice_id)):
             if value is not None:
                 fields["voice_config"][key] = value

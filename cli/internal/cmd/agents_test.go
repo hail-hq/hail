@@ -132,7 +132,7 @@ func TestNumbersRoute_NoneDetaches(t *testing.T) {
 
 func TestAgentsUpdate_VoiceKeepsTheRestOfVoiceConfig(t *testing.T) {
 	a := sampleAgent()
-	a.VoiceConfig = map[string]interface{}{"language": "fr", "tts": "elevenlabs"}
+	a.VoiceConfig = map[string]interface{}{"language": "fr", "tts": "elevenlabs", "voice_provider": "elevenlabs"}
 	srv := newFakeServer(t, http.StatusOK, a)
 	_, _, err := runRoot(t,
 		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
@@ -147,7 +147,7 @@ func TestAgentsUpdate_VoiceKeepsTheRestOfVoiceConfig(t *testing.T) {
 	var body map[string]any
 	_ = json.Unmarshal(srv.lastBody, &body)
 	vc, _ := body["voice_config"].(map[string]any)
-	if vc["voice_id"] != "v2" || vc["language"] != "fr" || vc["tts"] != "elevenlabs" {
+	if vc["voice_id"] != "v2" || vc["language"] != "fr" || vc["tts"] != "elevenlabs" || vc["voice_provider"] != nil {
 		t.Errorf("voice_config must keep what --voice did not touch: %v", body["voice_config"])
 	}
 }

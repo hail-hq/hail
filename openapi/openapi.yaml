@@ -68,6 +68,8 @@ paths:
           description:
             An agent with this name already exists, or a handover contact
             changed while saving.
+        "503":
+          description: The selected voice could not be verified. Try again.
         "422":
           description: Validation Error
           content:
@@ -250,6 +252,8 @@ paths:
           description:
             An agent with this name already exists, or a handover contact
             changed while saving.
+        "503":
+          description: The selected voice could not be verified. Try again.
         "422":
           description: Validation Error
           content:

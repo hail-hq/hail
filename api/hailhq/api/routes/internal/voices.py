@@ -120,7 +120,7 @@ class LineIn(PreviewIn):
 
 
 async def _catalogue_model(body: PreviewIn) -> str:
-    for provider_filter in (None, body.provider):
+    for provider_filter in (body.provider, None):
         catalogue = (
             await voice_catalogue(body.language, provider_filter=provider_filter)
             if provider_filter
@@ -129,6 +129,8 @@ async def _catalogue_model(body: PreviewIn) -> str:
         for voice in catalogue["voices"]:
             if voice["id"] == body.voice_id and voice["provider"] == body.provider:
                 return voice["model"]
+        if provider_filter and catalogue.get("partial"):
+            raise HTTPException(503, "Voice choices could not load. Try again.")
     raise HTTPException(422, "Choose one of the suggested voices.")
 
 

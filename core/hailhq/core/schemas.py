@@ -195,9 +195,9 @@ class VoiceConfig(BaseModel):
     )
 
     @model_validator(mode="after")
-    def _scoped_voice_requires_id(self) -> "VoiceConfig":
-        if self.voice_provider and not self.voice_id:
-            raise ValueError("voice_provider requires voice_id")
+    def _clear_provider_without_voice(self) -> "VoiceConfig":
+        if not self.voice_id:
+            self.voice_provider = None
         return self
 
 

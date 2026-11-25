@@ -105,6 +105,16 @@ async def _check_scoped_voice(
             "This voice could not be verified for your workspace call settings.",
             loc=["body", "voice_config", "voice_id"],
         ) from exc
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        if 400 <= status < 500 and status not in (401, 403, 429):
+            raise unprocessable(
+                "Choose a voice available with your workspace call settings.",
+                loc=["body", "voice_config", "voice_id"],
+            ) from exc
+        raise HTTPException(
+            503, "Voice support could not be checked. Try again."
+        ) from exc
     except (InvalidToken, SecretKeyMissing, httpx.HTTPError) as exc:
         raise HTTPException(
             503, "Voice support could not be checked. Try again."
@@ -115,13 +125,14 @@ router = APIRouter(
     prefix="/agents", tags=["agents"], responses=GENERAL_RATE_LIMITED_RESPONSES
 )
 
-_CONFLICT = {
+_SAVE_RESPONSES = {
     409: {
         "description": (
             "An agent with this name already exists, or a handover contact "
             "changed while saving."
         )
-    }
+    },
+    503: {"description": "The selected voice could not be verified. Try again."},
 }
 
 
@@ -244,7 +255,7 @@ def _save_conflict(exc: IntegrityError) -> HTTPException:
     "",
     response_model=AgentResponse,
     status_code=http_status.HTTP_201_CREATED,
-    responses=_CONFLICT,
+    responses=_SAVE_RESPONSES,
 )
 async def create_agent(
     body: AgentCreate,
@@ -344,7 +355,7 @@ async def get_agent(
     return (await _respond(db, [agent]))[0]
 
 
-@router.patch("/{agent_id}", response_model=AgentResponse, responses=_CONFLICT)
+@router.patch("/{agent_id}", response_model=AgentResponse, responses=_SAVE_RESPONSES)
 async def update_agent(
     agent_id: UUID,
     body: AgentUpdate,
