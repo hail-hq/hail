@@ -30,7 +30,7 @@ from hailhq.core.knowledge.embed import EmbeddingUnavailable
 from hailhq.core.knowledge.index import MemoryIndex, Piece
 from hailhq.core.knowledge.ingest import MAX_ATTEMPTS, KnowledgeIngestWorker
 from hailhq.core.knowledge.search import search_pieces, vector_literal
-from hailhq.core.knowledge.text import Chunk
+from hailhq.core.knowledge.text import terms
 from hailhq.core.models import (
     Agent,
     FileUpload,
@@ -995,13 +995,10 @@ async def test_live_data_counts_text_and_every_vector(
     await add_document(async_session, s3, org, NORTHGATE_MANUAL.encode())
     await worker.tick()
     pieces = await pieces_of(async_session, org)
+    # Search words as stored: distinct, or "_" for a piece with none.
     expected = sum(
-        access_module.piece_bytes(row["text"], row["terms"])
-        for row in ingest_module._piece_rows(
-            pieces[0].document_id,
-            org,
-            [Chunk(p.text, page=p.page, csv_row=p.csv_row) for p in pieces],
-        )
+        access_module.piece_bytes(p.text, list(dict.fromkeys(terms(p.text))) or ["_"])
+        for p in pieces
     )
     assert expected > sum(len(p.text.encode()) for p in pieces) + len(pieces) * (
         access_module.PIECE_VECTOR_BYTES
@@ -1085,14 +1082,19 @@ async def test_cap_check_takes_the_global_lock(
 ) -> None:
     """The cap check runs under one lock for every workspace, so two
     stores never both take the last room."""
-    keys: list[str] = []
-    real = ingest_module.key_lock
+    calls: list[str] = []
+    real_lock, real_full = ingest_module.key_lock, ingest_module.storage_full
 
-    async def recording(db, key):
-        keys.append(key)
-        await real(db, key)
+    async def recording_lock(db, key):
+        calls.append(f"lock:{key}")
+        await real_lock(db, key)
 
-    monkeypatch.setattr(ingest_module, "key_lock", recording)
+    async def recording_full(db, **kwargs):
+        calls.append("storage_full")
+        return await real_full(db, **kwargs)
+
+    monkeypatch.setattr(ingest_module, "key_lock", recording_lock)
+    monkeypatch.setattr(ingest_module, "storage_full", recording_full)
     await add_document(async_session, s3, uuid.uuid4(), NORTHGATE_MANUAL.encode())
     await worker.tick()
-    assert keys == ["knowledge:global-cap"]
+    assert calls == ["lock:knowledge:global-cap", "storage_full"]

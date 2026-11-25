@@ -21,8 +21,11 @@ new uploads and documents are refused, and the ingest worker refuses to
 write more pieces. The real database size has its own daily alert
 (``db_size_alert``).
 
-The caps are checked under ``knowledge_lock`` (an advisory lock per
-workspace), so two requests at once never both pass the last free slot.
+Each workspace's own limits are checked under ``knowledge_lock`` (an
+advisory lock per workspace). The global byte cap is checked, before the
+pieces are written, under one ``knowledge:global-cap`` advisory lock held
+until commit (``ingest``), so two workspaces never both take the last
+room.
 """
 
 from __future__ import annotations

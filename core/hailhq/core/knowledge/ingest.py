@@ -41,10 +41,11 @@ workspace's large file never fills every batch.
 
 No transaction stays open during an API request: pieces are read,
 embedded, then written only where they still lack a vector of the model.
-The pass never checks the size cap: every piece's vector was counted when
-its document was admitted (the cap sums each document's live
-``stored_bytes``, never dead rows), so new vectors and a model change always finish. The
-API runs one worker process; several would at worst embed a piece twice.
+The pass never checks the size cap: the cap sums
+``knowledge_documents.stored_bytes``, set when a document is admitted and
+already counting every piece's vector, so replaced vectors never change it
+and new vectors and a model change always finish. The API runs one worker
+process; several would at worst embed a piece twice.
 
 A file that cannot be used (wrong type, no text, over a limit) is
 ``failed`` with a reason for the customer in ``error``. Anything else (the
