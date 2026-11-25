@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import json
 
@@ -75,4 +76,31 @@ async def test_direct_key_validation_synthesizes_on_the_vendor(
         assert await validate_provider_key("tts", provider, "test-key", {}, client) == (
             "valid",
             "ok",
+        )
+
+
+async def test_house_gemini_bounds_the_wait_for_credentials(monkeypatch):
+    monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
+    monkeypatch.setattr(direct, "_GOOGLE_AUTH_TIMEOUT", 0.01)
+
+    async def stalled(_function, _url):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(direct.asyncio, "to_thread", stalled)
+    speech = direct.DirectSpeech.resolve("gemini")
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda _: pytest.fail("unexpected synthesis"))
+    ) as client:
+        with pytest.raises(httpx.ReadTimeout, match="credentials timed out"):
+            await anext(speech.pcm(client, "Hello."))
+
+
+async def test_blank_customer_key_never_falls_back_to_house_key(monkeypatch):
+    monkeypatch.setattr(settings, "xai_tts_api_key", "test-house-key")
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda _: pytest.fail("unexpected synthesis"))
+    ) as client:
+        assert await validate_provider_key("tts", "xai", " ", {}, client) == (
+            "invalid",
+            "Enter an API key.",
         )

@@ -274,6 +274,8 @@ async def upsert_provider_config(
     row = await _get_row(db, organization_id, layer, body.provider)
     direct_speech = layer == "tts" and body.provider in DIRECT_VOICES
     if direct_speech:
+        if body.api_key is not None and not body.api_key.strip():
+            raise HTTPException(422, "Enter an API key.")
         has_key = body.api_key is not None or (
             row is not None and row.encrypted_api_key is not None
         )
@@ -283,7 +285,10 @@ async def upsert_provider_config(
             )
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
-        if body.verify_voice_language:
+        language = params.get("language")
+        if body.verify_voice_language and (
+            language is None or body.provider in SUPPORTED_LANGUAGES[language].tts
+        ):
             voice = params.get("voice_id")
             if voice and voice != DIRECT_VOICES[body.provider][1]:
                 raise HTTPException(422, "Choose a suggested voice or update Advanced.")
@@ -492,7 +497,11 @@ async def validate_provider_config(
         except (SecretKeyMissing, InvalidToken) as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         provider = row.provider
-        params = dict(row.params)
+        params = (
+            _validated_params(layer, provider, body.params)
+            if "params" in body.model_fields_set
+            else dict(row.params)
+        )
 
     status, message = await validate_provider_key(layer, provider, api_key, params)
     return {"status": status, "message": message}

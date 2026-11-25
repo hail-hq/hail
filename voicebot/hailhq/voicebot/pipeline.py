@@ -551,10 +551,13 @@ def _house_tts(
 ) -> list[agents_tts.TTS]:
     allowed = tts_providers_for(language)
     instances: list[agents_tts.TTS] = []
+    charon_on_gemini_only = voice_id_override == DIRECT_VOICES["gemini"][1] and not (
+        settings.cartesia_api_key or settings.eleven_api_key
+    )
     if (
         include_gemini
         and settings.hail_gemini_tts_enabled
-        and not voice_id_override
+        and (not voice_id_override or charon_on_gemini_only)
         and "gemini" in allowed
         and house_voice_ready("gemini")
     ):
@@ -712,10 +715,16 @@ def build_tts(
             )
             return build_tts(None, None, language)
         if org.fallback_enabled:
+            uses_house_charon = (
+                isinstance(byo, DirectTTS)
+                and byo.provider == "gemini"
+                and byo.speech.api_key is None
+                and byo.speech.voice == DIRECT_VOICES["gemini"][1]
+            )
             house = _house_tts(
                 None if org.provider in DIRECT_VOICES else voice_id_override,
                 language,
-                include_gemini=org.provider != "gemini",
+                include_gemini=not uses_house_charon,
             )
             if house:
                 return agents_tts.FallbackAdapter([byo, *house])

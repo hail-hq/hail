@@ -333,6 +333,28 @@ def test_gemini_default_only_applies_to_inherited_english(
     assert captured_plugins["cartesia"][-1].kwargs["language"] == "fr"
 
 
+def test_explicit_charon_works_when_gemini_is_the_only_house_provider(monkeypatch):
+    monkeypatch.setattr(settings, "hail_gemini_tts_enabled", True)
+    monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
+    monkeypatch.setattr(settings, "cartesia_api_key", "")
+    monkeypatch.setattr(settings, "eleven_api_key", "")
+    assert build_tts(voice_id_override="Charon", language="en").speech.voice == "Charon"
+
+
+def test_workspace_gemini_can_fall_back_to_house_credentials(monkeypatch):
+    monkeypatch.setattr(settings, "hail_gemini_tts_enabled", True)
+    monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
+    monkeypatch.setattr(settings, "cartesia_api_key", "")
+    monkeypatch.setattr(settings, "eleven_api_key", "")
+    org = ResolvedLayer("gemini", "customer-key", {"project": "customer-project"}, True)
+    customer, house = build_tts(org, language="en")._tts_instances
+    assert (customer.speech.project, customer.speech.api_key) == (
+        "customer-project",
+        "customer-key",
+    )
+    assert (house.speech.project, house.speech.api_key) == ("hail-speech", None)
+
+
 def test_disabling_inherited_gemini_default_keeps_an_explicit_selection(
     monkeypatch, captured_plugins
 ):

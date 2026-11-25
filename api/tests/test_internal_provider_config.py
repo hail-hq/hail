@@ -335,6 +335,41 @@ async def test_validate_honors_explicit_provider_over_active(
     assert seen["api_key"] == "sk-cart"
 
 
+@pytest.mark.usefixtures("internal_secret_set", "provider_key_set")
+async def test_validate_saved_gemini_key_with_the_draft_project(client, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    check = AsyncMock(return_value=("valid", "checked"))
+    monkeypatch.setattr(
+        "hailhq.api.routes.internal.provider_config.validate_provider_key", check
+    )
+    saved = b'{"provider":"gemini","api_key":"customer-key","params":{"project":"old-project","location":"us"}}'
+    assert (await _put(client, "tts", saved)).status_code == 200
+
+    draft = b'{"provider":"gemini","params":{"project":"new-project","location":"eu"}}'
+    response = await client.post(
+        f"{BASE}/tts/validate", content=draft, headers=_signed(draft)
+    )
+    assert response.status_code == 200
+    layer, provider, key, params = check.await_args.args
+    assert (layer, provider, key) == ("tts", "gemini", "customer-key")
+    assert (params["project"], params["location"]) == ("new-project", "eu")
+
+
+@pytest.mark.usefixtures("internal_secret_set", "provider_key_set")
+async def test_direct_custom_voice_survives_a_language_served_by_fallback(
+    client, monkeypatch
+):
+    monkeypatch.setattr(settings, "cartesia_api_key", "house-key")
+    initial = b'{"provider":"gemini","api_key":"customer-key","params":{"project":"cloud-project","language":"en","voice_id":"Kore"},"fallback_enabled":true}'
+    assert (await _put(client, "tts", initial)).status_code == 200
+
+    french = b'{"provider":"gemini","params":{"project":"cloud-project","language":"fr","voice_id":"Kore"},"fallback_enabled":true,"verify_voice_language":true}'
+    response = await _put(client, "tts", french)
+    assert response.status_code == 200, response.text
+    assert response.json()["params"]["voice_id"] == "Kore"
+
+
 async def test_validate_inflight_key_without_stored_row(
     client, internal_secret_set, provider_key_set, monkeypatch  # noqa: F811
 ) -> None:

@@ -7,7 +7,7 @@ import base64
 import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from functools import lru_cache
+from functools import lru_cache, partial
 from threading import Lock
 
 import google.auth
@@ -18,6 +18,7 @@ from hailhq.core.config import settings
 
 SAMPLE_RATE = 24000
 CLOUD_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
+_GOOGLE_AUTH_TIMEOUT = 4.0
 CLOUD_ENDPOINTS = {
     "global": "https://aiplatform.googleapis.com",
     "us": "https://aiplatform.us.rep.googleapis.com",
@@ -58,13 +59,17 @@ def _credentials():
 def _google_headers(url: str) -> dict[str, str]:
     # Refresh once across concurrent syntheses in the same worker.
     headers: dict[str, str] = {}
+    if not _auth_lock.acquire(timeout=_GOOGLE_AUTH_TIMEOUT):
+        raise httpx.ReadTimeout("Google Cloud speech credentials are busy.")
     try:
-        with _auth_lock:
-            _credentials().before_request(Request(), "POST", url, headers)
+        request = partial(Request(), timeout=_GOOGLE_AUTH_TIMEOUT)
+        _credentials().before_request(request, "POST", url, headers)
     except (GoogleAuthError, ValueError, OSError) as exc:
         raise ValueError(
             "Google Cloud speech credentials could not be loaded."
         ) from exc
+    finally:
+        _auth_lock.release()
     return headers
 
 
@@ -100,7 +105,9 @@ class DirectSpeech:
         voice = voice or params.get("voice_id") or default_voice
         if params.get("model") not in (None, model):
             raise ValueError(f"{provider} speech uses {model}.")
-        if not api_key and not house_voice_ready(provider):
+        if api_key is not None and not api_key.strip():
+            raise ValueError("Enter an API key.")
+        if api_key is None and not house_voice_ready(provider):
             raise ValueError(
                 f"No workspace or Hail key is available for {provider} speech."
             )
@@ -134,11 +141,16 @@ class DirectSpeech:
             if not self.project:
                 raise ValueError("Set a Google Cloud project for speech.")
             url = gemini_url(self.project, self.location)
-            headers = (
-                {"x-goog-api-key": self.api_key}
-                if self.api_key
-                else await asyncio.to_thread(_google_headers, url)
-            )
+            if self.api_key:
+                headers = {"x-goog-api-key": self.api_key}
+            else:
+                try:
+                    async with asyncio.timeout(_GOOGLE_AUTH_TIMEOUT):
+                        headers = await asyncio.to_thread(_google_headers, url)
+                except TimeoutError:
+                    raise httpx.ReadTimeout(
+                        "Google Cloud speech credentials timed out."
+                    ) from None
             body = {
                 "contents": [{"role": "user", "parts": [{"text": text}]}],
                 "generationConfig": {
