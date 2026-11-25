@@ -121,7 +121,8 @@ func newSipConnectionsCreateCmd(opts *Options) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&f.label, "label", "", "Name, such as \"Main office\" (required)")
-	cmd.Flags().StringVar(&f.region, "region", "", "2-letter country of the phone system, such as US (optional: the first number to pass its check sets it)")
+	cmd.Flags().StringVar(&f.region, "region", "", "Not used: Hail reads each caller with the country of the number called")
+	_ = cmd.Flags().MarkDeprecated("region", "Hail reads each caller with the country of the number called")
 	cmd.Flags().StringVar(&f.host, "pbx-host", "", "Public address Hail dials for calls out and handover")
 	cmd.Flags().IntVar(&f.port, "pbx-port", 5060, "SIP port of the phone system")
 	cmd.Flags().StringVar(&f.transport, "pbx-transport", "", "auto, udp, tcp or tls (default auto)")
@@ -173,13 +174,13 @@ func newSipConnectionsListCmd(opts *Options) *cobra.Command {
 				return nil
 			}
 			w := tabwriter.NewWriter(opts.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "ID\tLABEL\tREGION\tPBX HOST")
+			fmt.Fprintln(w, "ID\tLABEL\tPBX HOST")
 			for _, c := range items {
 				host := "-"
 				if c.PbxHost != nil {
 					host = *c.PbxHost
 				}
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", c.Id, c.Label, regionText(c.DefaultRegion), host)
+				fmt.Fprintf(w, "%s\t%s\t%s\n", c.Id, c.Label, host)
 			}
 			return w.Flush()
 		},
@@ -188,14 +189,6 @@ func newSipConnectionsListCmd(opts *Options) *cobra.Command {
 	cmd.Flags().StringVar(&cursor, "cursor", "", "Resume from a previous next_cursor")
 	cmd.Flags().BoolVar(&all, "all", false, "Walk every page")
 	return cmd
-}
-
-// regionText is the connection's country, or what fills it when it is empty.
-func regionText(region *string) string {
-	if region == nil || *region == "" {
-		return "set by the first number to pass its check"
-	}
-	return *region
 }
 
 // sipHostText is the SIP server line: a masked server says where to get it.
@@ -214,7 +207,6 @@ func printSipConnection(opts *Options, c *client.SipConnectionResponse) error {
 	fmt.Fprintf(opts.Stdout, "  SIP server: %s\n", sipHostText(c.SipHost, c.SipHostMasked))
 	fmt.Fprintf(opts.Stdout, "  Username:   %s\n", c.Username)
 	fmt.Fprintf(opts.Stdout, "  Password:   ••••%s\n", c.PasswordLast4)
-	fmt.Fprintf(opts.Stdout, "  Region:     %s\n", regionText(c.DefaultRegion))
 	if c.PbxHost != nil {
 		fmt.Fprintf(opts.Stdout, "  PBX:        %s:%d (%s)\n", *c.PbxHost, c.PbxPort, c.PbxTransport)
 	} else {
@@ -255,9 +247,9 @@ func newSipConnectionsGetCmd(opts *Options) *cobra.Command {
 // --------------------------------------------------------------------------- //
 
 type sipUpdateFlags struct {
-	label, host, transport, username, password, region string
-	port                                               int
-	clearHost, clearUsername                           bool
+	label, host, transport, username, password string
+	port                                       int
+	clearHost, clearUsername                   bool
 }
 
 func newSipConnectionsUpdateCmd(opts *Options) *cobra.Command {
@@ -284,7 +276,6 @@ A new host, port or transport needs --pbx-password again when a username is set.
 				}
 			}
 			set("label", "label", f.label)
-			set("region", "default_region", f.region)
 			set("pbx-host", "pbx_host", f.host)
 			set("pbx-port", "pbx_port", f.port)
 			set("pbx-transport", "pbx_transport", f.transport)
@@ -327,7 +318,6 @@ A new host, port or transport needs --pbx-password again when a username is set.
 		},
 	}
 	cmd.Flags().StringVar(&f.label, "label", "", "New name")
-	cmd.Flags().StringVar(&f.region, "region", "", "2-letter country Hail reads national caller numbers with, such as GB")
 	cmd.Flags().StringVar(&f.host, "pbx-host", "", "New public address of the phone system")
 	cmd.Flags().BoolVar(&f.clearHost, "clear-pbx-host", false, "Remove the address (answer only)")
 	cmd.Flags().IntVar(&f.port, "pbx-port", 5060, "New SIP port")

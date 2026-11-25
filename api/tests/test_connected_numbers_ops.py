@@ -54,8 +54,6 @@ def test_create_prints_password_once(capsys, monkeypatch):
                 ORG,
                 "--label",
                 "Main office",
-                "--region",
-                "US",
                 "--pbx-host",
                 "pbx.example.com",
             ]
@@ -116,12 +114,6 @@ def test_missing_row_exits_1(capsys, no_io):
     assert "not_found" in capsys.readouterr().out
 
 
-def test_bad_region_is_an_argument_error():
-    assert (
-        main(["create", "--org", ORG, "--label", "Main office", "--region", "usa"]) == 2
-    )
-
-
 def test_bad_uuid_is_an_argument_error():
     assert main(["check", "--number-id", "nope"]) == 2
 
@@ -164,7 +156,7 @@ def test_password_is_in_no_log_record(caplog, capsys, monkeypatch):
     monkeypatch.setattr("hailhq.core.livekit.api.LiveKitAPI", lambda *a, **k: fake_api)
     monkeypatch.setattr(ops, "LiveKitClient", LiveKitClient)
     with caplog.at_level("DEBUG"):
-        assert main(["create", "--org", ORG, "--label", "x", "--region", "US"]) == 0
+        assert main(["create", "--org", ORG, "--label", "x"]) == 0
     out = capsys.readouterr().out
     password = out.split("inbound password: ")[1].split()[0]
     assert len(password) >= 24

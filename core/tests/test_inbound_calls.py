@@ -1187,21 +1187,21 @@ async def test_twilio_call_on_a_connection_trunk_still_needs_the_secret(
     assert outcome.reason == "carrier_route_failed"
 
 
-@pytest.mark.parametrize("region,expected", [(None, "US"), ("GB", "GB")])
-async def test_a_passed_check_fills_an_empty_country_only(
-    async_session, unverified_number, seed_check_call, region, expected
+@pytest.mark.parametrize(
+    "number_country,raw,expected",
+    [
+        # A local caller in the national form of the number called.
+        ("GB", "02079460018", "+442079460018"),
+        ("US", "4155550123", "+14155550123"),
+        # A caller from abroad keeps its international prefix.
+        ("GB", "0014155550123", "+14155550123"),
+        ("GB", "+14155550123", "+14155550123"),
+    ],
+)
+async def test_a_pbx_caller_is_read_with_the_called_numbers_country(
+    async_session, number_country, raw, expected
 ):
-    """The first number to pass fills a connection's empty country; a country
-    already set stays."""
-    connection = await async_session.get(
-        SipConnection, unverified_number.sip_connection_id
-    )
-    connection.default_region = region
-    await async_session.commit()
-    check = await seed_check_call(
-        unverified_number, status="in_progress", requested_at=utcnow()
-    )
-    arrived = CheckArrived(unverified_number.id, check.id)
-    assert await finish_check(async_session, arrived, "482913", now=NOW) is True
-    await async_session.refresh(connection)
-    assert connection.default_region == expected
+    """No connection country: each call uses its own number's country, so one
+    connection can hold numbers from several countries."""
+    _org, _agent, number = await _pbx_seed(async_session, country_code=number_country)
+    assert await inbound_calls._caller_of(async_session, number, raw) == expected

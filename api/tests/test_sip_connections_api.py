@@ -705,55 +705,21 @@ def test_a_short_host_is_not_masked_into_nothing() -> None:
     assert _masked_host("abcdef.example") == "abcde" + "•" * 12
 
 
-async def test_adding_a_number_leaves_an_empty_country_empty(
+async def test_a_connection_needs_no_country(
     client: httpx.AsyncClient, org_and_key: tuple
 ) -> None:
-    # The country comes from the first number to pass its check
-    # (core finish_check), not from a number that is only added.
     _org, _key, plain = org_and_key
     resp = await client.post(
         "/sip-connections", json={"label": "Main office"}, headers=_auth(plain)
     )
     assert resp.status_code == 201, resp.text
-    conn = resp.json()
-    assert conn["default_region"] is None
-    added = await client.post(
-        f"/sip-connections/{conn['id']}/numbers",
-        json={"e164": "+442079460018"},
-        headers=_auth(plain),
-    )
-    assert added.status_code == 201, added.text
-    one = (
-        await client.get(f"/sip-connections/{conn['id']}", headers=_auth(plain))
-    ).json()
-    assert one["default_region"] is None
+    assert resp.json()["default_region"] is None
 
 
-async def test_patch_changes_the_country_and_refuses_null(
+async def test_an_older_client_may_still_send_a_country(
     client: httpx.AsyncClient, org_and_key: tuple
 ) -> None:
-    _org, _key, plain = org_and_key
-    conn = await _create(client, plain)
-    url = f"/sip-connections/{conn['id']}"
-    resp = await client.patch(url, json={"default_region": "GB"}, headers=_auth(plain))
-    assert resp.status_code == 200, resp.text
-    assert resp.json()["default_region"] == "GB"
-    bad = await client.patch(url, json={"default_region": None}, headers=_auth(plain))
-    assert bad.status_code == 422
-
-
-async def test_a_country_given_on_purpose_is_kept(
-    client: httpx.AsyncClient, org_and_key: tuple
-) -> None:
+    # Deprecated and unused, but accepted so older CLIs keep working.
     _org, _key, plain = org_and_key
     conn = await _create(client, plain, default_region="GB")
-    added = await client.post(
-        f"/sip-connections/{conn['id']}/numbers",
-        json={"e164": "+14155550100"},
-        headers=_auth(plain),
-    )
-    assert added.status_code == 201, added.text
-    one = (
-        await client.get(f"/sip-connections/{conn['id']}", headers=_auth(plain))
-    ).json()
-    assert one["default_region"] == "GB"
+    assert conn["default_region"] == "GB"

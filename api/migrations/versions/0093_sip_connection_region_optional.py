@@ -1,16 +1,13 @@
-"""Let ``sip_connections.default_region`` be empty until the first number.
+"""Let ``sip_connections.default_region`` be empty: it is no longer used.
 
-A connection is created without a country; the first number to pass its
-ownership check fills it with that number's country, and a country already
-set never changes by itself (PATCH changes it). Hail reads national caller
-numbers with it.
+Hail reads each PBX caller with the country of the number that was called,
+so a connection no longer needs a country. The column stays (nullable) for
+older clients that still send it; a later migration drops it.
 
 Tables checked first: this is a column of ``sip_connections`` (the
 connection's own setting); no other table fits.
 
 Downgrade fills an empty country with ``US`` before it restores NOT NULL.
-After a downgrade and a new upgrade those connections keep ``US``: PATCH
-``default_region`` corrects one.
 
 Revision ID: 0093
 Revises: 0092

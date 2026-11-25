@@ -40,7 +40,7 @@ func TestSipConnectionsCreatePrintsPasswordOnce(t *testing.T) {
 	srv := newFakeServer(t, http.StatusCreated, sampleSipConnection(true))
 	stdout, stderr, err := runRoot(t,
 		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
-		"sip-connections", "create", "--label", "Main office", "--region", "US",
+		"sip-connections", "create", "--label", "Main office",
 		"--pbx-host", "pbx.example.com",
 	)
 	if err != nil {
@@ -53,7 +53,7 @@ func TestSipConnectionsCreatePrintsPasswordOnce(t *testing.T) {
 	if err := json.Unmarshal(srv.lastBody, &body); err != nil {
 		t.Fatalf("body: %v", err)
 	}
-	if body["label"] != "Main office" || body["default_region"] != "US" || body["pbx_host"] != "pbx.example.com" {
+	if body["label"] != "Main office" || body["default_region"] != nil || body["pbx_host"] != "pbx.example.com" {
 		t.Errorf("body = %s", srv.lastBody)
 	}
 	if strings.Count(stdout, "abcdefghijklmnopqrstuvwxyz") != 1 {
@@ -183,7 +183,7 @@ func TestSipConnectionsCreatePasswordFromStdin(t *testing.T) {
 	_, _, err := runRootStdin(t,
 		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
 		"s3cret-from-stdin\n",
-		"sip-connections", "create", "--label", "Main office", "--region", "US",
+		"sip-connections", "create", "--label", "Main office",
 		"--pbx-host", "pbx.example.com", "--pbx-username", "hail", "--pbx-password", "-",
 	)
 	if err != nil {

@@ -57,7 +57,6 @@ from hailhq.core.models import (
     Organization,
     OrganizationCallSettings,
     PhoneNumber,
-    SipConnection,
 )
 from hailhq.core.recordings import recording_call_metadata
 from hailhq.core.sip_connections import (
@@ -196,18 +195,21 @@ async def _refuse(
 
 
 async def _caller_of(db: AsyncSession, number: PhoneNumber, raw: str) -> str:
-    """A PBX caller is normalized with its connection's region; a carrier
-    caller only gets a leading ``+``."""
+    """A PBX caller is read with the country of the number called: a phone
+    system writes local callers in that country's national form, and callers
+    from abroad with their international prefix. A carrier caller only gets
+    a leading ``+``."""
     if number.provider == "pbx":
         try:
-            conn = await connection_of(db, number)
+            # No connection: the trunk check below refuses this call.
+            await connection_of(db, number)
         except ValueError:
             # The trunk check refuses this call. An extension stays as given.
             raw = raw.strip()
             if raw.isascii() and raw.isdigit() and len(raw) <= 6:
                 return raw
             return carrier_caller(raw)
-        return normalize_caller(raw, conn.default_region)
+        return normalize_caller(raw, number.country_code)
     return carrier_caller(raw)
 
 
@@ -397,12 +399,6 @@ async def finish_check(
     if passed:
         number.provisioning_state = "active"
         number.acquired_at = now
-        # A connection created without a country takes the country of its
-        # first number to pass: Hail reads the national caller numbers the
-        # phone system sends with it. A country already set never changes.
-        connection = await db.get(SipConnection, number.sip_connection_id)
-        if connection is not None and connection.default_region is None:
-            connection.default_region = number.country_code
     await _check_event(db, check.id, "passed" if passed else "code_not_received")
     logger.info(
         "ownership check call %s for number %s: %s",

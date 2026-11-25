@@ -11565,10 +11565,8 @@ components:
             - type: "null"
           title: Default Region
           description:
-            "Optional. ISO alpha-2 country of the phone system. Hail reads
-            the national caller numbers it sends, for every number on this connection,
-            with it. Left out: the first number to pass its ownership check fills
-            it. Change it with PATCH."
+            "Deprecated and not used: leave it out. Hail reads each caller
+            with the country of the number that was called."
         pbx_host:
           anyOf:
             - type: string
@@ -11628,8 +11626,8 @@ components:
             - type: "null"
           title: Default Region
           description:
-            ISO alpha-2 country of the phone system, used to read national
-            caller numbers. Null until the first number passes its check.
+            Deprecated and not used. Hail reads each caller with the country
+            of the number that was called.
         sip_host:
           type: string
           title: Sip Host
@@ -11783,15 +11781,6 @@ components:
             - type: "null"
           title: Pbx Password
           description: New password Hail sends. Stored encrypted.
-        default_region:
-          anyOf:
-            - type: string
-              pattern: ^[A-Z]{2}$
-            - type: "null"
-          title: Default Region
-          description:
-            New ISO alpha-2 country, used to read national caller numbers
-            for every number on this connection.
       additionalProperties: false
       type: object
       title: SipConnectionPatch
@@ -11813,8 +11802,8 @@ components:
             - type: "null"
           title: Default Region
           description:
-            ISO alpha-2 country of the phone system, used to read national
-            caller numbers. Null until the first number passes its check.
+            Deprecated and not used. Hail reads each caller with the country
+            of the number that was called.
         sip_host:
           type: string
           title: Sip Host

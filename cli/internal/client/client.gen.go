@@ -3811,7 +3811,7 @@ type SenderIdResponse struct {
 
 // SipConnectionCreate defines model for SipConnectionCreate.
 type SipConnectionCreate struct {
-	// DefaultRegion Optional. ISO alpha-2 country of the phone system. Hail reads the national caller numbers it sends, for every number on this connection, with it. Left out: the first number to pass its ownership check fills it. Change it with PATCH.
+	// DefaultRegion Deprecated and not used: leave it out. Hail reads each caller with the country of the number that was called.
 	DefaultRegion *string `json:"default_region,omitempty"`
 
 	// Label A name, such as 'Main office'.
@@ -3841,7 +3841,7 @@ type SipConnectionCreated struct {
 	// CreatedAt When the connection was created.
 	CreatedAt time.Time `json:"created_at"`
 
-	// DefaultRegion ISO alpha-2 country of the phone system, used to read national caller numbers. Null until the first number passes its check.
+	// DefaultRegion Deprecated and not used. Hail reads each caller with the country of the number that was called.
 	DefaultRegion *string `json:"default_region"`
 
 	// Id Unique identifier for this connection.
@@ -3898,9 +3898,6 @@ type SipConnectionPassword struct {
 
 // SipConnectionPatch Fields left out stay as they are; “null“ clears a nullable field.
 type SipConnectionPatch struct {
-	// DefaultRegion New ISO alpha-2 country, used to read national caller numbers for every number on this connection.
-	DefaultRegion *string `json:"default_region,omitempty"`
-
 	// Label New name.
 	Label *string `json:"label,omitempty"`
 
@@ -3928,7 +3925,7 @@ type SipConnectionResponse struct {
 	// CreatedAt When the connection was created.
 	CreatedAt time.Time `json:"created_at"`
 
-	// DefaultRegion ISO alpha-2 country of the phone system, used to read national caller numbers. Null until the first number passes its check.
+	// DefaultRegion Deprecated and not used. Hail reads each caller with the country of the number that was called.
 	DefaultRegion *string `json:"default_region"`
 
 	// Id Unique identifier for this connection.
