@@ -594,6 +594,9 @@ func printPhoneNumber(opts *Options, n *client.PhoneNumberResponse, banner bool)
 	fmt.Fprintf(opts.Stdout, "  Type:         %s\n", n.NumberType)
 	fmt.Fprintf(opts.Stdout, "  Capabilities: %s\n", strings.Join(n.Capabilities, ", "))
 	fmt.Fprintf(opts.Stdout, "  State:        %s\n", n.ProvisioningState)
+	if n.Source != nil && *n.Source == "connected" {
+		fmt.Fprintln(opts.Stdout, "  Source:       connected (your phone system)")
+	}
 	if n.SubjectType != nil {
 		kind := string(*n.SubjectType)
 		if kind == "business" {
