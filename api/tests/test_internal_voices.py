@@ -192,7 +192,7 @@ async def test_preview_locks_serialize_one_sample_and_never_outlive_requests(
     await asyncio.sleep(0)
     digest = hashlib.sha256(b"hello").hexdigest()
     key = ("cartesia", "sonic-3.5", "en", "known", digest)
-    assert voices._sample_locks[key][1] == 2
+    assert voices._sample_locks[id(voices._samples), key][1] == 2
     release.set()
     assert await asyncio.gather(first, second) == [b"audio", b"audio"]
     assert peak == 1
@@ -268,6 +268,7 @@ async def test_line_speaks_text_and_caches_per_text(voice_app, monkeypatch):
 
 async def test_line_cache_stays_bounded(monkeypatch):
     voices._lines.clear()
+    voices._line_failures.clear()
     voices._sample_locks.clear()
     monkeypatch.setattr(voices, "_synthesize", AsyncMock(return_value=b"audio"))
     body = voices.PreviewIn(language="en", provider="cartesia", voice_id="known")
@@ -276,6 +277,19 @@ async def test_line_cache_stays_bounded(monkeypatch):
             body, "sonic-3.5", f"line {i}", voices._lines, voices._LINE_CAP
         )
     assert len(voices._lines) == voices._LINE_CAP
+    saved_recordings = tuple(voices._lines)
+    voices._synthesize.side_effect = httpx.ReadTimeout("provider unavailable")
+    with pytest.raises(httpx.ReadTimeout):
+        await voices._audio(
+            body,
+            "sonic-3.5",
+            "new line",
+            voices._lines,
+            voices._LINE_CAP,
+            has_backup=True,
+        )
+    assert tuple(voices._lines) == saved_recordings
+    assert len(voices._line_failures) == 1
 
 
 async def test_elevenlabs_line_sends_text(voice_app, monkeypatch):
@@ -377,6 +391,7 @@ def workspace_voice_app(monkeypatch):
     monkeypatch.setattr(voices, "session_scope", session)
     monkeypatch.setattr(voices, "load_org_provider_configs", AsyncMock(return_value={}))
     voices._lines.clear()
+    voices._line_failures.clear()
     return app
 
 

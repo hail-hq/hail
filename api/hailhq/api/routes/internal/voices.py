@@ -61,17 +61,17 @@ router = APIRouter(
 )
 # Key: provider, model, language, voice ID, SHA-256 of the spoken text.
 _Key = tuple[str, str, str, str, str]
-_Cache = OrderedDict[_Key, tuple[float, bytes | None]]
+_Cache = OrderedDict[_Key, tuple[float, bytes]]
 _samples: _Cache = OrderedDict()
 _lines: _Cache = OrderedDict()
+_line_failures: OrderedDict[_Key, float] = OrderedDict()
 _LINE_CAP = 256
 _SYNTHESIS_RETRY_SECONDS = 15
 _CHOOSE_VOICE = "Choose an available voice in Call settings to preview this line."
 _UNAVAILABLE_AGENT_VOICE = "Playback is not available for this agent's saved voice."
-# One lock per sample: concurrent first listens synthesize once, and a slow
-# provider never blocks other samples or cache hits. A lock lives only while
-# a request holds or waits on it, so the map holds in-flight samples only.
-_sample_locks: dict[_Key, tuple[asyncio.Lock, int]] = {}
+# One lock per recording in each cache. Locks only last while requests
+# hold or wait on them.
+_sample_locks: dict[tuple[int, _Key], tuple[asyncio.Lock, int]] = {}
 _HELLO = {
     "ar": "مرحباً، كيف يمكنني مساعدتك اليوم؟",
     "bg": "Здравейте, как мога да ви помогна днес?",
@@ -288,17 +288,17 @@ async def _audio(
     provider = route.provider if route else body.provider
     language = (route.language or "") if route else body.language
     cache_key = (provider, model, language, body.voice_id, digest)
-    lock, users = _sample_locks.get(cache_key, (asyncio.Lock(), 0))
-    _sample_locks[cache_key] = (lock, users + 1)
+    lock_key = (id(cache), cache_key)
+    lock, users = _sample_locks.get(lock_key, (asyncio.Lock(), 0))
+    _sample_locks[lock_key] = (lock, users + 1)
     try:
         async with lock:
             cached = cache.get(cache_key)
             if cached and time.monotonic() < cached[0]:
                 cache.move_to_end(cache_key)
-                if cached[1] is not None:
-                    return cached[1]
-                if has_backup:
-                    raise ProviderKeyError("Speech synthesis recently failed.")
+                return cached[1]
+            if has_backup and _line_failures.get(cache_key, 0) > time.monotonic():
+                raise ProviderKeyError("Speech synthesis recently failed.")
             try:
                 audio = (
                     await _synthesize_route(route, text)
@@ -307,27 +307,26 @@ async def _audio(
                 )
             except (httpx.HTTPError, ValueError, ProviderKeyError):
                 if has_backup:
-                    _remember_audio(
-                        cache, cache_key, None, _SYNTHESIS_RETRY_SECONDS, cap
+                    _line_failures[cache_key] = (
+                        time.monotonic() + _SYNTHESIS_RETRY_SECONDS
                     )
+                    _line_failures.move_to_end(cache_key)
+                    if len(_line_failures) > _LINE_CAP:
+                        _line_failures.popitem(last=False)
                 raise
-            _remember_audio(cache, cache_key, audio, 3600, cap)
+            if cache is _lines:
+                _line_failures.pop(cache_key, None)
+            cache[cache_key] = (time.monotonic() + 3600, audio)
+            cache.move_to_end(cache_key)
+            while len(cache) > cap:
+                cache.popitem(last=False)
             return audio
     finally:
-        lock, users = _sample_locks[cache_key]
+        lock, users = _sample_locks[lock_key]
         if users == 1:
-            del _sample_locks[cache_key]
+            del _sample_locks[lock_key]
         else:
-            _sample_locks[cache_key] = (lock, users - 1)
-
-
-def _remember_audio(
-    cache: _Cache, key: _Key, audio: bytes | None, seconds: int, cap: int
-) -> None:
-    cache[key] = (time.monotonic() + seconds, audio)
-    cache.move_to_end(key)
-    while len(cache) > cap:
-        cache.popitem(last=False)
+            _sample_locks[lock_key] = (lock, users - 1)
 
 
 async def _synthesize(body: PreviewIn, model: str, text: str) -> bytes:
