@@ -1675,7 +1675,11 @@ class AgentUpdate(BaseModel):
         description="New AI line template ('{org}' = organization name); null returns to the workspace line.",
     )
     voice_config: VoiceConfig | None = Field(
-        default=None, description="New TTS voice and language settings."
+        default=None,
+        description=(
+            "New TTS voice and language settings. Omit voice_id to keep any "
+            "saved provider-specific voice. Send null for voice_id to clear it."
+        ),
     )
     tools: list[str] | None = Field(
         default=None,
