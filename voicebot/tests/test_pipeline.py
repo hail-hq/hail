@@ -11,11 +11,20 @@ made because we never invoke ``.chat()``.
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import pytest
-from hailhq.voicebot.pipeline import ResolvedLayer, build_llm, build_session, build_stt
-from livekit.agents import AgentSession
+from hailhq.voicebot.pipeline import (
+    TURN_MAX_DELAY_SECONDS,
+    ResolvedLayer,
+    build_llm,
+    build_session,
+    build_stt,
+)
+from livekit.agents import AgentSession, inference
 from livekit.agents.llm import FallbackAdapter
 from livekit.agents.stt import FallbackAdapter as stt_fallback
+from livekit.agents.voice.turn import _resolve_endpointing
 from livekit.plugins import deepgram as deepgram_plugin
 from livekit.plugins import openai as openai_plugin
 
@@ -248,6 +257,26 @@ def test_build_session_smoke_constructs_full_pipeline() -> None:
 
     session = build_session(llm_cfg=None, vad=_StubVAD())  # type: ignore[arg-type]
     assert isinstance(session, AgentSession)
+
+
+@pytest.mark.parametrize("language, semantic", [("en", True), ("ru", False)])
+def test_build_session_caps_turn_end_wait(language: str, semantic: bool) -> None:
+    """The longest end-of-turn wait LiveKit uses is Hail's cap, with or
+    without its turn detector, and interruptions still need a word. The
+    filled-in values come from LiveKit's own resolver (private in
+    livekit-agents 1.8.8; this test fails if it moves)."""
+    session = build_session(None, MagicMock(), language=language)
+    turn_handling = session.options.turn_handling
+    detector = turn_handling["turn_detection"]
+    assert isinstance(detector, inference.TurnDetector) is semantic
+    resolved = _resolve_endpointing(
+        turn_handling["endpointing"], turn_detection=detector
+    )
+    assert resolved["max_delay"] == TURN_MAX_DELAY_SECONDS
+    # The shortest wait keeps LiveKit's default for that turn mode.
+    defaults = _resolve_endpointing(None, turn_detection=detector)
+    assert resolved["min_delay"] == defaults["min_delay"]
+    assert turn_handling["interruption"]["min_words"] == 1
 
 
 def test_build_tts_both_keys_returns_fallback_adapter() -> None:

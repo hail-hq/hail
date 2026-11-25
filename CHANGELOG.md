@@ -6,6 +6,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Fixed
 
+- Calls: the agent answers short replies such as "Yes." sooner.
 - Webhooks: a delivery that cannot reach its endpoint shows a short reason, such as a TLS or connection failure.
 
 ## [0.38.0] (2026-11-24)
