@@ -65,6 +65,7 @@ _Cache = OrderedDict[_Key, tuple[float, bytes]]
 _samples: _Cache = OrderedDict()
 _lines: _Cache = OrderedDict()
 _LINE_CAP = 256
+_CHOOSE_VOICE = "Choose an available voice in Call settings to preview this line."
 # One lock per sample: concurrent first listens synthesize once, and a slow
 # provider never blocks other samples or cache hits. A lock lives only while
 # a request holds or waits on it, so the map holds in-flight samples only.
@@ -213,39 +214,62 @@ async def speak_workspace_line(
         raise HTTPException(409, "No voice is available for this language.")
     fallback = await resolve_fallback_voice_provider(org, body.voice_id, language)
     try:
-        route = resolve_tts_routes(
+        routes = resolve_tts_routes(
             org, body.voice_id, language, fallback_voice_provider=fallback
-        )[0]
+        )
     except VoiceLanguageError as exc:
         raise HTTPException(
             409, "The saved provider cannot speak this language."
         ) from exc
     except (ValueError, ProviderKeyError) as exc:
-        raise HTTPException(409, "No voice is available for this language.") from exc
+        detail = (
+            _CHOOSE_VOICE
+            if org and not org.fallback_enabled
+            else "No voice is available for this language."
+        )
+        raise HTTPException(409, detail) from exc
 
-    if route.uses_workspace_key:
+    primary = routes[0]
+    if primary.uses_workspace_key:
         raise HTTPException(
             409, "Playback is not available for a voice on your own provider key."
         )
     try:
         preview = PreviewIn(
-            language=language, provider=route.provider, voice_id=route.voice_id
+            language=language, provider=primary.provider, voice_id=primary.voice_id
         )
     except ValidationError as exc:
         detail = (
             "Playback is not available for this agent's saved voice."
             if body.voice_id
-            else "Choose an available voice in Call settings to preview this line."
+            else _CHOOSE_VOICE
         )
         raise HTTPException(409, detail) from exc
 
-    try:
-        audio = await _audio(
-            preview, route.model, body.text, _lines, _LINE_CAP, route=route
+    # Old agent overrides have no provider ID. Try the permitted house
+    # routes for that exact voice ID without substituting a different voice.
+    playable = [primary]
+    if body.voice_id == preview.voice_id:
+        playable.extend(
+            route
+            for route in routes[1:]
+            if route.voice_id == preview.voice_id and not route.uses_workspace_key
         )
-    except (httpx.HTTPError, ValueError, ProviderKeyError) as exc:
-        raise HTTPException(503, "This line could not play. Try again.") from exc
-    return _wav(audio)
+
+    for route in playable:
+        try:
+            audio = await _audio(
+                preview.model_copy(update={"provider": route.provider}),
+                route.model,
+                body.text,
+                _lines,
+                _LINE_CAP,
+                route=route,
+            )
+        except (httpx.HTTPError, ValueError, ProviderKeyError):
+            continue
+        return _wav(audio)
+    raise HTTPException(503, "This line could not play. Try again.")
 
 
 async def _audio(

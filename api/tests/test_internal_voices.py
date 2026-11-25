@@ -1,5 +1,6 @@
 import hashlib
 import json
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import httpx
@@ -8,6 +9,7 @@ import respx
 from fastapi import FastAPI
 from hailhq.api.routes.internal import voices
 from hailhq.core.config import settings
+from hailhq.core.db import get_session
 
 from .test_internal_dsar import _signed, internal_secret_set  # noqa: F401
 
@@ -358,11 +360,19 @@ async def test_line_provider_failure_returns_retryable_error(voice_app):
     assert voices._lines == {}
 
 
-async def test_workspace_line_uses_saved_voice_and_model_outside_shortlist(monkeypatch):
-    from types import SimpleNamespace
+@pytest.fixture
+def workspace_voice_app(monkeypatch):
+    monkeypatch.setattr(voices, "load_org_provider_configs", AsyncMock(return_value={}))
+    app = FastAPI()
+    app.include_router(voices.router)
+    app.dependency_overrides[get_session] = lambda: None
+    voices._lines.clear()
+    return app
 
-    from hailhq.core.db import get_session
 
+async def test_workspace_line_uses_saved_voice_and_model_outside_shortlist(
+    workspace_voice_app, monkeypatch
+):
     monkeypatch.setattr(settings, "cartesia_api_key", "house-key")
     monkeypatch.setattr(
         voices,
@@ -382,9 +392,6 @@ async def test_workspace_line_uses_saved_voice_and_model_outside_shortlist(monke
             }
         ),
     )
-    app = FastAPI()
-    app.include_router(voices.router)
-    app.dependency_overrides[get_session] = lambda: None
     body = (
         b'{"organization_id":"00000000-0000-0000-0000-000000000001","text":"Bonjour."}'
     )
@@ -394,7 +401,8 @@ async def test_workspace_line_uses_saved_voice_and_model_outside_shortlist(monke
             return_value=httpx.Response(200, content=b"RIFF-sample")
         )
         async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://test"
+            transport=httpx.ASGITransport(app=workspace_voice_app),
+            base_url="http://test",
         ) as client:
             response = await client.post(
                 "/internal/voices/workspace-line", content=body, headers=_signed(body)
@@ -405,3 +413,52 @@ async def test_workspace_line_uses_saved_voice_and_model_outside_shortlist(monke
         assert payload["voice"] == "saved"
         assert payload["model_id"] == "saved-model"
         assert payload["language"] == "fr"
+
+
+async def test_workspace_line_can_play_saved_voice_on_legacy_fallback(
+    workspace_voice_app, monkeypatch
+):
+    monkeypatch.setattr(settings, "cartesia_api_key", "house-cartesia")
+    monkeypatch.setattr(settings, "eleven_api_key", "house-eleven")
+    body = b'{"organization_id":"00000000-0000-0000-0000-000000000001","text":"Hi.","voice_id":"saved-eleven"}'
+
+    with respx.mock as mock:
+        mock.post("https://api.cartesia.ai/tts/bytes").respond(404)
+        mock.post("https://api.elevenlabs.io/v1/text-to-speech/saved-eleven").respond(
+            200, content=b"\x00\x00"
+        )
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=workspace_voice_app),
+            base_url="http://test",
+        ) as client:
+            response = await client.post(
+                "/internal/voices/workspace-line", content=body, headers=_signed(body)
+            )
+    assert response.status_code == 200
+    assert response.content.startswith(b"RIFF")
+
+
+async def test_workspace_line_explains_when_saved_provider_is_unavailable(
+    workspace_voice_app, monkeypatch
+):
+    monkeypatch.setattr(settings, "xai_tts_api_key", "")
+    voices.load_org_provider_configs.return_value = {
+        "tts": SimpleNamespace(
+            provider="xai",
+            encrypted_api_key=None,
+            params={},
+            fallback_enabled=False,
+        )
+    }
+    body = b'{"organization_id":"00000000-0000-0000-0000-000000000001","text":"Hi."}'
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=workspace_voice_app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/internal/voices/workspace-line", content=body, headers=_signed(body)
+        )
+    assert response.status_code == 409
+    assert response.json()["detail"] == (
+        "Choose an available voice in Call settings to preview this line."
+    )

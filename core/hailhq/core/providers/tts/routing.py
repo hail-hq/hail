@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 
 import httpx
 from hailhq.core.config import settings
-from hailhq.core.languages import TTSProvider, tts_providers_for
+from hailhq.core.languages import SUPPORTED_LANGUAGES, TTSProvider, tts_providers_for
 from hailhq.core.provider_config import ResolvedLayer
 from hailhq.core.providers.tts.direct import (
     DIRECT_VOICES,
@@ -134,7 +134,7 @@ async def resolve_fallback_voice_provider(
         org is None
         or org.provider not in DIRECT_VOICES
         or not org.fallback_enabled
-        or not language
+        or language not in SUPPORTED_LANGUAGES
         or not voice_id
         or org.provider in tts_providers_for(language)
         or voice_id in (org.params.get("voice_id"), DIRECT_VOICES[org.provider][1])
@@ -210,6 +210,15 @@ def resolve_tts_routes(
     else:
         house = _house_routes(voice_id, language)
 
-    if not house:
-        raise ProviderKeyError("No TTS provider is configured for this language.")
-    return house
+    if house:
+        return house
+    if _house_routes(None, None):
+        providers = ", ".join(sorted(tts_providers_for(language)))
+        raise ProviderKeyError(
+            f"Configured TTS providers cannot speak language '{language}'; "
+            f"language requires: {providers}."
+        )
+    raise ProviderKeyError(
+        "No TTS provider configured: enable Google Cloud speech or set "
+        "CARTESIA_API_KEY or ELEVEN_API_KEY."
+    )
