@@ -117,6 +117,11 @@ class ToolSpec:
     # or API: the voicebot skips its availability check and still adds it
     # when building the other tools fails.
     on_every_call: bool = False
+    # True for a tool only a workspace member on the line gets (the person's
+    # number matches a member's). Everyone else is the business's customer:
+    # the voicebot leaves the tool out, and the prompt's sentence about it
+    # falls back to its ToolLine ``without`` text.
+    members_only: bool = False
 
 
 __all__ = [

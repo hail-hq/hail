@@ -335,6 +335,47 @@ def test_build_tts_no_language_keeps_plugin_default() -> None:
     assert cartesia_inst._opts.language == "en"
 
 
+def test_house_cartesia_speaks_with_a_voice_made_for_the_language() -> None:
+    """With no chosen voice, a non-English call uses the house voice for its
+    language; English and no language keep CARTESIA_VOICE_ID; a chosen voice
+    always wins."""
+    from hailhq.core.house_voices import CARTESIA_LANGUAGE_VOICES
+    from hailhq.voicebot.pipeline import build_tts
+    from livekit.plugins import cartesia as cartesia_plugin
+
+    def cartesia_voice(tts):
+        instances = getattr(tts, "_tts_instances", [tts])
+        return next(
+            i for i in instances if isinstance(i, cartesia_plugin.TTS)
+        )._opts.voice
+
+    assert cartesia_voice(build_tts(language="de")) == CARTESIA_LANGUAGE_VOICES["de"]
+    assert cartesia_voice(build_tts(language="th")) == CARTESIA_LANGUAGE_VOICES["th"]
+    assert cartesia_voice(build_tts(language="en")) == "ct-voice-id"
+    assert cartesia_voice(build_tts()) == "ct-voice-id"
+    assert cartesia_voice(build_tts(None, "chosen", "de")) == "chosen"
+
+
+def test_org_cartesia_without_a_voice_uses_the_language_voice() -> None:
+    """A workspace Cartesia key with no voice set speaks with the house
+    voice for the call's language; a workspace voice wins."""
+    from hailhq.core.house_voices import CARTESIA_LANGUAGE_VOICES
+    from hailhq.voicebot.pipeline import ResolvedLayer, build_tts
+
+    def org(params):
+        return ResolvedLayer(
+            provider="cartesia",
+            api_key="org-cartesia-key",
+            params=params,
+            fallback_enabled=False,
+        )
+
+    tts = build_tts(org=org({"model": "sonic-3.5"}), language="fr")
+    assert tts._opts.voice == CARTESIA_LANGUAGE_VOICES["fr"]
+    tts = build_tts(org=org({"voice_id": "org-voice"}), language="fr")
+    assert tts._opts.voice == "org-voice"
+
+
 def test_build_stt_language_pins_deepgram() -> None:
     """Per-call language reaches the Deepgram instance; None keeps en-US."""
     from hailhq.voicebot.pipeline import build_stt

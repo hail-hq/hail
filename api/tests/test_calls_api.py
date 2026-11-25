@@ -1939,6 +1939,27 @@ async def test_post_calls_with_agent_id_fills_defaults(
     assert md["ai_disclosure"] is True
     assert md["system_prompt"] == "Screen the candidate."
 
+    # voice_config merges key by key: a request that sets only a language
+    # keeps the agent's voice; a voice_id on the request wins.
+    for voice_config, voice_id in (
+        ({"language": "de"}, "v9"),
+        ({"language": "de", "voice_id": "v-request"}, "v-request"),
+    ):
+        resp = await client.post(
+            "/calls",
+            json={
+                "to": "+14155559999",
+                "recipient_consent": True,
+                "agent_id": agent_id,
+                "voice_config": voice_config,
+            },
+            headers=headers,
+        )
+        assert resp.status_code == 201, resp.text
+        md = livekit_mock.dispatch_agent.await_args.kwargs["metadata"]
+        assert md["voice_config"]["voice_id"] == voice_id
+        assert md["voice_config"]["language"] == "de"
+
     # Another org's agent (or a random id) is not found.
     resp = await client.post(
         "/calls",
@@ -1950,7 +1971,41 @@ async def test_post_calls_with_agent_id_fills_defaults(
         headers=headers,
     )
     assert resp.status_code == 404
-    assert livekit_mock.create_room.await_count == 2
+    assert livekit_mock.create_room.await_count == 4
+
+
+def test_agent_voice_config_merges_key_by_key() -> None:
+    """A request voice_config sets only the keys it sends; with no agent
+    voice_config the request's stays as it is."""
+    from types import SimpleNamespace
+
+    from hailhq.api.routes.calls import apply_agent_defaults
+    from hailhq.core.schemas import CallCreate
+
+    def agent(voice_config):
+        return SimpleNamespace(
+            system_prompt="Hi.",
+            first_message=None,
+            ai_disclosure=True,
+            recording_enabled=None,
+            voice_config=voice_config,
+            tools=None,
+        )
+
+    def call(**extra):
+        return CallCreate(
+            to="+14155559999", recipient_consent=True, agent_id=uuid.uuid4(), **extra
+        )
+
+    saved = {"voice_id": "v9", "language": "fr"}
+    merged = apply_agent_defaults(call(voice_config={"language": "de"}), agent(saved))
+    assert (merged.voice_config.voice_id, merged.voice_config.language) == ("v9", "de")
+    merged = apply_agent_defaults(call(voice_config={"voice_id": None}), agent(saved))
+    assert (merged.voice_config.voice_id, merged.voice_config.language) == (None, "fr")
+    merged = apply_agent_defaults(call(), agent(saved))
+    assert (merged.voice_config.voice_id, merged.voice_config.language) == ("v9", "fr")
+    merged = apply_agent_defaults(call(voice_config={"language": "de"}), agent(None))
+    assert (merged.voice_config.voice_id, merged.voice_config.language) == (None, "de")
 
 
 async def test_post_calls_rejects_a_paused_agent(

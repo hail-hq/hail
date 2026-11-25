@@ -28,8 +28,10 @@ from hailhq.core.pool import CALL_META_FROM_POOL
 from hailhq.core.prompts import (
     PRIVACY_REMINDER,
     TOOL_LINES,
+    VOICE_LANGUAGE_HEADING,
     fit_to_tools,
     other_party_section,
+    voice_language_section,
 )
 from hailhq.voicebot.agent import (
     AI_DISCLOSURE_LINE,
@@ -121,6 +123,60 @@ def test_build_instructions_keeps_privacy_reminder_last_with_language() -> None:
     out = build_instructions("Welcome the user", language="fr", other_party="Bob")
     assert out.endswith(PRIVACY_REMINDER)
     assert out.index("Bob") < out.index("Speak in French for this call.")
+
+
+def test_build_instructions_says_when_the_voice_fits_another_language() -> None:
+    out = build_instructions(
+        "Welcome the user", language="de", voice_language="English"
+    )
+    section = voice_language_section("English")
+    assert section in out
+    assert out.index("Speak in German for this call.") < out.index(section)
+    assert out.endswith(PRIVACY_REMINDER)
+    assert VOICE_LANGUAGE_HEADING not in build_instructions(
+        "Welcome the user", language="de"
+    )
+
+
+async def test_foreign_voice_checks_the_voice_the_call_speaks_with(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The same voice the TTS picks: the request's, then the workspace's,
+    then the house voice for the language. Other providers are not checked,
+    and the answer is a language name."""
+    import hailhq.voicebot.agent as agent_mod
+    from hailhq.core.house_voices import CARTESIA_LANGUAGE_VOICES
+    from hailhq.voicebot.pipeline import ResolvedLayer
+
+    asked: list[tuple[str, str, str]] = []
+
+    async def fake_lookup(voice, language, *, key, timeout):
+        asked.append((voice, language, key))
+        return "en" if voice == "english-voice" and language != "en" else None
+
+    monkeypatch.setattr(agent_mod, "foreign_voice_language", fake_lookup)
+    monkeypatch.setattr(agent_mod.settings, "cartesia_api_key", "house-key")
+    monkeypatch.setattr(agent_mod.settings, "cartesia_voice_id", "english-voice")
+
+    def org(provider, params, key=None):
+        return ResolvedLayer(
+            provider=provider, api_key=key, params=params, fallback_enabled=False
+        )
+
+    assert await agent_mod.foreign_voice("english-voice", None, "de") == "English"
+    assert asked[-1] == ("english-voice", "de", "house-key")
+    assert await agent_mod.foreign_voice(None, None, "de") is None
+    assert asked[-1][0] == CARTESIA_LANGUAGE_VOICES["de"]
+    workspace = org("cartesia", {"voice_id": "english-voice"}, key="org-key")
+    assert await agent_mod.foreign_voice(None, workspace, "fr") == "English"
+    assert asked[-1] == ("english-voice", "fr", "org-key")
+    # No language: English, which the English voice fits.
+    assert await agent_mod.foreign_voice(None, None, None) is None
+    assert asked[-1][1] == "en"
+    count = len(asked)
+    other = org("elevenlabs", {"voice_id": "english-voice"})
+    assert await agent_mod.foreign_voice(None, other, "de") is None
+    assert len(asked) == count
 
 
 def test_build_instructions_prepends_preamble_to_caller_prompt() -> None:

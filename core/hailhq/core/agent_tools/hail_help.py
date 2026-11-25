@@ -2,7 +2,9 @@
 
 Not in ``all_tools()``, which feeds the names a customer may allow-list.
 ``call_tools()`` includes it, and ``on_every_call`` keeps it on every call
-whatever the ``tools`` list says.
+whatever the ``tools`` list says. ``members_only`` keeps it to calls with a
+workspace member on the line: a business's customers never hear Hail's setup
+steps.
 """
 
 from __future__ import annotations
@@ -37,4 +39,5 @@ SPEC = ToolSpec(
     is_available=_always,
     execute=_execute,
     on_every_call=True,
+    members_only=True,
 )

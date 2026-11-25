@@ -71,6 +71,15 @@ Column meanings:
   no ElevenLabs failover is attached (and a BYO ElevenLabs TTS config is
   rejected for it).
 
+## Voice
+
+A call with no chosen voice (`voice_config.voice_id`, the saved agent's or
+the workspace's) speaks with a Cartesia voice made for its language, so it
+has a native accent. English uses `CARTESIA_VOICE_ID`. The table is
+[`core/hailhq/core/house_voices.py`](../core/hailhq/core/house_voices.py).
+A chosen voice always wins. When it was made for another language, the
+agent knows, and says so in one sentence if the person mentions its accent.
+
 Canonical data: [`core/hailhq/core/languages.py`](../core/hailhq/core/languages.py)
 (provider doc sources in its docstring). Voice routing:
 [`voicebot/hailhq/voicebot/pipeline.py`](../voicebot/hailhq/voicebot/pipeline.py).

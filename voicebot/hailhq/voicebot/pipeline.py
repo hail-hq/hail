@@ -64,6 +64,7 @@ from uuid import UUID
 
 from hailhq.core.config import settings
 from hailhq.core.db import session_scope
+from hailhq.core.house_voices import house_cartesia_voice
 from hailhq.core.languages import (
     SUPPORTED_LANGUAGES,
     default_stt_for,
@@ -546,7 +547,11 @@ def _house_tts(
     if settings.cartesia_api_key and "cartesia" in allowed:
         kwargs: dict[str, Any] = {
             "model": settings.cartesia_model,
-            "voice": voice_id_override or settings.cartesia_voice_id,
+            # With no chosen voice, a voice made for the call's language:
+            # one voice for every language gives a foreign accent.
+            "voice": voice_id_override
+            or house_cartesia_voice(language)
+            or settings.cartesia_voice_id,
         }
         if language:
             kwargs["language"] = language
@@ -567,6 +572,9 @@ def _org_tts(
 ) -> agents_tts.TTS:
     voice = voice_id_override or org.params.get("voice_id")
     if org.provider == "cartesia":
+        # A workspace Cartesia key with no voice: the house voice for the
+        # language (public voices work on any key), not the plugin default.
+        voice = voice or house_cartesia_voice(language)
         kwargs: dict[str, Any] = {
             "model": org.params.get("model") or settings.cartesia_model
         }

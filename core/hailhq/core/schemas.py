@@ -329,7 +329,8 @@ class CallCreate(ConsentAttestationMixin):
             "Agent tools to allow on this call. Omitted: every tool the "
             "organization's configured channels support (new channels appear "
             "automatically). Empty list: only the tools every call keeps "
-            "(end_call, send_dtmf and Hail's settings guide); a saved agent's "
+            "(end_call and send_dtmf, plus Hail's settings guide when a workspace "
+            "member is on the line); a saved agent's "
             "HTTP tools stay on. "
             "Tool names are validated "
             "against the server's registry."
@@ -341,7 +342,9 @@ class CallCreate(ConsentAttestationMixin):
             "Place the call with a saved agent (POST /agents). The agent "
             "supplies system_prompt, first_message, ai_disclosure, recording_enabled, "
             "voice_config, tools and max duration; any of those given "
-            "explicitly on this request wins. Satisfies the system_prompt "
+            "explicitly on this request wins. voice_config merges key by "
+            "key: a request that sets only language keeps the agent's "
+            "voice_id. Satisfies the system_prompt "
             "or llm requirement on its own. A paused agent is refused "
             "with 409."
         ),
@@ -1395,7 +1398,8 @@ class AgentCreate(BaseModel):
         description=(
             "Agent tools to allow. Omitted: every tool the organization's "
             "channels support. Empty list: only the tools every call keeps "
-            "(end_call, send_dtmf and Hail's settings guide). HTTP tools stay "
+            "(end_call and send_dtmf, plus Hail's settings guide when a workspace "
+            "member is on the line). HTTP tools stay "
             "on."
         ),
     )
@@ -1496,7 +1500,8 @@ class AgentUpdate(BaseModel):
         default=None,
         description=(
             "New allowed tools; null allows every tool. Calls always keep "
-            "end_call, send_dtmf and Hail's settings guide."
+            "end_call and send_dtmf, plus Hail's settings guide when a workspace "
+            "member is on the line."
         ),
     )
     max_duration_seconds: int | None = Field(

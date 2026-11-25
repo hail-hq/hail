@@ -16,6 +16,7 @@ from collections import defaultdict
 
 import httpx
 from hailhq.core.config import settings
+from hailhq.core.house_voices import house_cartesia_voice, house_voice_language
 from hailhq.core.languages import (
     CARTESIA_MODEL_LANGUAGES,
     SUPPORTED_LANGUAGES,
@@ -75,6 +76,17 @@ def voice_accent(row: dict, language: str) -> dict | None:
     return _accent(accents)
 
 
+def cartesia_voice_speaks(row: dict, language: str) -> bool:
+    """A Cartesia voice row supports ``language``: an accent for it, or, for
+    legacy entries with no accents, that primary language. Additional
+    multilingual accents count as support."""
+    if _matching_accents(row, language):
+        return True
+    # The primary language is provider metadata too; legacy entries may
+    # have no accents. If accents exist, they must confirm the request.
+    return not row.get("accents") and row.get("language") == language
+
+
 def cartesia_choices(
     rows: list[dict], language: str, model: str, *, allow_private: bool = False
 ) -> list[dict]:
@@ -95,10 +107,7 @@ def cartesia_choices(
             or not row.get("name")
         ):
             continue
-        accents = _matching_accents(row, language)
-        # The primary language is provider metadata too; legacy entries may
-        # have no accents. If accents exist, they must confirm the request.
-        if not accents and (row.get("accents") or row.get("language") != language):
+        if not cartesia_voice_speaks(row, language):
             continue
         choices.append(
             {
@@ -189,9 +198,12 @@ def shortlist(choices: list[dict], language: str) -> list[dict]:
         (p.provider, p.voice_id)
         for p in settings.voice_shortlist_preferences.get(language, [])
     ]
-    # Preserve a compatible configured default without pinning any voice ID.
+    # Preserve a compatible configured default without pinning any voice ID:
+    # the house voice for the language first (house_voices.py), then the
+    # configured voice.
     preferred.extend(
         [
+            ("cartesia", house_cartesia_voice(language) or ""),
             ("cartesia", settings.cartesia_voice_id),
             ("elevenlabs", settings.elevenlabs_voice_id),
         ]
@@ -315,12 +327,10 @@ async def voice_catalogue(language: str) -> dict:
                 elevenlabs_choices(result["rows"], result["models"], language, model)
             )
     voices = shortlist(choices, language)
+    # The voice a call in this language uses when none is chosen.
+    house = house_cartesia_voice(language) or settings.cartesia_voice_id
     default = next(
-        (
-            v
-            for v in voices
-            if v["provider"] == "cartesia" and v["id"] == settings.cartesia_voice_id
-        ),
+        (v for v in voices if v["provider"] == "cartesia" and v["id"] == house),
         None,
     )
     if not default and not settings.cartesia_api_key:
@@ -385,3 +395,52 @@ async def validate_voice_language(
         raise ValueError(
             "This voice's support for the language and model could not be verified. Choose a suggested voice or update Advanced."
         )
+
+
+# (voice id, language) -> the voice's own language when it cannot speak that
+# language, or None when it can. Voice metadata rarely changes, and a call
+# should not wait on the same lookup twice.
+_foreign_cache: dict[tuple[str, str], str | None] = {}
+
+
+async def foreign_voice_language(
+    voice_id: str, language: str, *, key: str, timeout: float
+) -> str | None:
+    """The language a Cartesia voice was made for, when it does not support
+    ``language`` (see :func:`cartesia_voice_speaks`). None when it supports
+    it, or when that is unknown: a missing key, an unknown voice id, a
+    timeout or a provider error. Never raises."""
+    if language in SUPPORTED_LANGUAGES and voice_id == house_cartesia_voice(language):
+        return None
+    if (own := house_voice_language(voice_id)) is not None:
+        return own if own != language else None
+    cache_key = (voice_id, language)
+    if cache_key in _foreign_cache:
+        return _foreign_cache[cache_key]
+    if not key:
+        return None
+    headers = {"Authorization": f"Bearer {key}", "Cartesia-Version": HEADERS_VERSION}
+    try:
+        async with httpx.AsyncClient(timeout=timeout, headers=headers) as client:
+            response = await asyncio.wait_for(
+                client.get(f"https://api.cartesia.ai/voices/{voice_id}"), timeout
+            )
+        response.raise_for_status()
+        row = response.json()
+    except Exception:
+        log.warning("voice language lookup failed", exc_info=True)
+        return None
+    if not isinstance(row, dict):
+        return None
+    own = row.get("language")
+    result = (
+        own
+        if isinstance(own, str)
+        and own in SUPPORTED_LANGUAGES
+        and not cartesia_voice_speaks(row, language)
+        else None
+    )
+    _foreign_cache[cache_key] = result
+    if len(_foreign_cache) > 256:
+        del _foreign_cache[next(iter(_foreign_cache))]
+    return result

@@ -49,6 +49,7 @@ from hailhq.core.db import session_scope
 from hailhq.core.directory import DirectoryEntry, find_by_phone
 from hailhq.core.disclosure import after_greeting_text, disclosure_text
 from hailhq.core.handover import HANDOVER_DEFAULT_MAX_SECONDS
+from hailhq.core.house_voices import house_cartesia_voice
 from hailhq.core.inbound_calls import (
     SIP_SECRET_ATTRIBUTE,
     CheckArrived,
@@ -68,6 +69,7 @@ from hailhq.core.prompts import (
     build_voice_instructions,
     other_party_section,
     safe_clock_section,
+    voice_language_section,
 )
 from hailhq.core.providers.voice import TwilioVoiceProvider
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
@@ -96,6 +98,7 @@ from hailhq.core.telemetry_identity import (
     tag_context,
 )
 from hailhq.core.url_guard import assert_public_https_url
+from hailhq.core.voice_catalog import foreign_voice_language
 from hailhq.core.webhook_fanout import fanout_call_event
 from hailhq.voicebot import text_watch
 from hailhq.voicebot.amd import (
@@ -114,6 +117,7 @@ from hailhq.voicebot.ivr import PhoneMenu
 from hailhq.voicebot.leg_tracker import LegTracker
 from hailhq.voicebot.pipeline import (
     ProviderKeyError,
+    ResolvedLayer,
     build_session,
     build_tts,
     decrypt_llm_metadata,
@@ -124,7 +128,12 @@ from hailhq.voicebot.recording import start_recording, stop_recording
 from hailhq.voicebot.recovery import ConversationRecovery
 from hailhq.voicebot.spoken_lines import spoken_lines
 from hailhq.voicebot.telemetry import connect_livekit_tracing
-from hailhq.voicebot.tools import SpeechTracker, build_agent_tools, every_call_tools
+from hailhq.voicebot.tools import (
+    SpeechTracker,
+    build_agent_tools,
+    every_call_tools,
+    for_other_party,
+)
 from livekit import rtc
 from livekit.agents import Agent, JobContext, JobProcess, StopResponse, room_io
 from livekit.agents.llm import LLM, LLMError
@@ -329,21 +338,58 @@ def build_instructions(
     other_party: str | None = None,
     clock: str | None = None,
     tool_names: Collection[str] | None = None,
+    voice_language: str | None = None,
 ) -> str:
     """The call's instructions (see :func:`hailhq.core.prompts.build_voice_instructions`).
     ``tool_names`` are the call's tools; None means every tool. The prompt
     never names a tool the call lacks: the model would write its name as
-    text, and the voice would read it aloud."""
+    text, and the voice would read it aloud. ``voice_language`` (a language
+    name) is set when the call's voice was made for another language (see
+    :func:`foreign_voice`)."""
     # The language line goes before the privacy reminder, which stays last.
     spoken = (
         f"Speak in {SUPPORTED_LANGUAGES[language].name} for this call."
         if language in SUPPORTED_LANGUAGES
         else None
     )
-    tail = "\n\n".join(part for part in (other_party, clock, spoken) if part) or None
+    voice = voice_language_section(voice_language) if voice_language else None
+    tail = (
+        "\n\n".join(part for part in (other_party, clock, spoken, voice) if part)
+        or None
+    )
     return build_voice_instructions(
         system_prompt, direction, other_party=tail, tool_names=tool_names
     )
+
+
+async def foreign_voice(
+    voice_id_override: str | None,
+    org_tts: ResolvedLayer | None,
+    language: str | None,
+) -> str | None:
+    """The name of the language the call's voice was made for, when it is
+    not the call's language (English when none is set). None when it fits,
+    when another provider than Cartesia speaks, or when that is unknown.
+    Picks the voice the same way the TTS does (``pipeline._house_tts`` and
+    ``_org_tts``)."""
+    if org_tts is not None and org_tts.provider != "cartesia":
+        return None
+    language = language or "en"
+    voice = (
+        voice_id_override
+        or (org_tts.params.get("voice_id") if org_tts is not None else None)
+        or house_cartesia_voice(language)
+        or settings.cartesia_voice_id
+    )
+    if not voice:
+        return None
+    key = (org_tts.api_key if org_tts is not None else None) or (
+        settings.cartesia_api_key
+    )
+    own = await foreign_voice_language(
+        voice, language, key=key or "", timeout=_OTHER_PARTY_TIMEOUT_SECONDS
+    )
+    return SUPPORTED_LANGUAGES[own].name if own in SUPPORTED_LANGUAGES else None
 
 
 def _call_clock(metadata: dict[str, Any], inbound: bool) -> str | None:
@@ -2717,6 +2763,9 @@ async def _run_call(
         speech.on_state(getattr(ev, "new_state", None), time.monotonic())
 
     other_party_task = asyncio.create_task(other_party(call_id))
+    voice_task = asyncio.create_task(
+        foreign_voice(voice_id_override, org_tts, language)
+    )
     agent_tools, agent_api = await build_tools_safely(
         metadata,
         call_id,
@@ -2737,11 +2786,15 @@ async def _run_call(
         cancel_bridge=make_bridge_cancel(ctx, call_id, bridge_state),
         prompt=lambda text: _prompt_agent(session, bridge_state, text),
     )
+    known = await other_party_task
+    # Setup help is for the workspace's own members, not its customers.
+    agent_tools = for_other_party(
+        agent_tools, member=known is not None and known.source == "member"
+    )
     tool_names = [t.info.name for t in agent_tools]
     if agent_tools:
         logger.info("call_id=%s agent tools enabled: %s", call_id, tool_names)
-
-    known = await other_party_task
+    voice_language = await voice_task
     if known is not None and stt_takes_keyterms(session.stt):
         # The STT then spells the known name right. Keyterm detection stays
         # off: a wrong detected term degrades recognition for the whole call.
@@ -2763,6 +2816,7 @@ async def _run_call(
             ),
             clock=_call_clock(metadata, inbound),
             tool_names=tool_names,
+            voice_language=voice_language,
         ),
         tools=agent_tools,
     )

@@ -1803,7 +1803,7 @@ type AgentCreate struct {
 	// SystemPrompt Task instructions, sent as the agent's leading system message.
 	SystemPrompt string `json:"system_prompt"`
 
-	// Tools Agent tools to allow. Omitted: every tool the organization's channels support. Empty list: only the tools every call keeps (end_call, send_dtmf and Hail's settings guide). HTTP tools stay on.
+	// Tools Agent tools to allow. Omitted: every tool the organization's channels support. Empty list: only the tools every call keeps (end_call and send_dtmf, plus Hail's settings guide when a workspace member is on the line). HTTP tools stay on.
 	Tools       *[]string    `json:"tools,omitempty"`
 	VoiceConfig *VoiceConfig `json:"voice_config,omitempty"`
 
@@ -1932,7 +1932,7 @@ type AgentUpdate struct {
 	// SystemPrompt New task instructions.
 	SystemPrompt *string `json:"system_prompt,omitempty"`
 
-	// Tools New allowed tools; null allows every tool. Calls always keep end_call, send_dtmf and Hail's settings guide.
+	// Tools New allowed tools; null allows every tool. Calls always keep end_call and send_dtmf, plus Hail's settings guide when a workspace member is on the line.
 	Tools *[]string `json:"tools,omitempty"`
 
 	// VoiceConfig New TTS voice and language settings.
@@ -1953,7 +1953,7 @@ type BodyUploadEmailAttachment struct {
 
 // CallCreate defines model for CallCreate.
 type CallCreate struct {
-	// AgentId Place the call with a saved agent (POST /agents). The agent supplies system_prompt, first_message, ai_disclosure, recording_enabled, voice_config, tools and max duration; any of those given explicitly on this request wins. Satisfies the system_prompt or llm requirement on its own. A paused agent is refused with 409.
+	// AgentId Place the call with a saved agent (POST /agents). The agent supplies system_prompt, first_message, ai_disclosure, recording_enabled, voice_config, tools and max duration; any of those given explicitly on this request wins. voice_config merges key by key: a request that sets only language keeps the agent's voice_id. Satisfies the system_prompt or llm requirement on its own. A paused agent is refused with 409.
 	AgentId *openapi_types.UUID `json:"agent_id,omitempty"`
 
 	// AiDisclosure Speak the AI self-disclosure line ('Hi, this is an AI assistant calling on behalf of ...') as the first thing on the call. Enabled by default. Disable only if you have verified the disclosure is not required for this call — 47 CFR 64.1200(b)(1) requires identifying the initiating business at the start of artificial-voice calls in the US, and several jurisdictions have AI bot-disclosure laws. Hail does not verify this for you. The agent still identifies itself as an AI if asked.
@@ -1992,7 +1992,7 @@ type CallCreate struct {
 	// To Recipient phone number, E.164 format (e.g. +14155551234).
 	To string `json:"to"`
 
-	// Tools Agent tools to allow on this call. Omitted: every tool the organization's configured channels support (new channels appear automatically). Empty list: only the tools every call keeps (end_call, send_dtmf and Hail's settings guide); a saved agent's HTTP tools stay on. Tool names are validated against the server's registry.
+	// Tools Agent tools to allow on this call. Omitted: every tool the organization's configured channels support (new channels appear automatically). Empty list: only the tools every call keeps (end_call and send_dtmf, plus Hail's settings guide when a workspace member is on the line); a saved agent's HTTP tools stay on. Tool names are validated against the server's registry.
 	Tools       *[]string    `json:"tools,omitempty"`
 	VoiceConfig *VoiceConfig `json:"voice_config,omitempty"`
 }

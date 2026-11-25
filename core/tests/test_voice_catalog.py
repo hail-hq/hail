@@ -290,3 +290,115 @@ def test_elevenlabs_tagalog_uses_the_filipino_provider_code():
     ]
     choices = catalog.elevenlabs_choices(rows, models, "tl", "model-a")
     assert [c["language"] for c in choices] == ["tl"]
+
+
+@pytest.fixture
+def no_foreign_cache():
+    catalog._foreign_cache.clear()
+    yield
+    catalog._foreign_cache.clear()
+
+
+async def test_foreign_voice_language_reports_a_voice_made_for_another_language(
+    no_foreign_cache,
+):
+    with respx.mock as mock:
+        route = mock.get("https://api.cartesia.ai/voices/custom").mock(
+            return_value=httpx.Response(200, json=cart_row("custom", "en"))
+        )
+        assert (
+            await catalog.foreign_voice_language("custom", "de", key="k", timeout=1)
+            == "en"
+        )
+        # Cached: the same call does not ask again.
+        assert (
+            await catalog.foreign_voice_language("custom", "de", key="k", timeout=1)
+            == "en"
+        )
+        assert route.call_count == 1
+        assert (
+            await catalog.foreign_voice_language("custom", "en", key="k", timeout=1)
+            is None
+        )
+
+
+async def test_foreign_voice_language_counts_multilingual_accents_as_support(
+    no_foreign_cache,
+):
+    row = cart_row(
+        "multi",
+        "en",
+        accents=[
+            {"accent": "general-american", "locale": "en-US", "is_native": True},
+            {"accent": "standard-german", "locale": "de-DE", "is_native": False},
+        ],
+    )
+    with respx.mock as mock:
+        mock.get("https://api.cartesia.ai/voices/multi").mock(
+            return_value=httpx.Response(200, json=row)
+        )
+        assert (
+            await catalog.foreign_voice_language("multi", "de", key="k", timeout=1)
+            is None
+        )
+        assert (
+            await catalog.foreign_voice_language("multi", "fr", key="k", timeout=1)
+            == "en"
+        )
+
+
+async def test_foreign_voice_language_knows_house_voices_without_asking(
+    no_foreign_cache,
+):
+    from hailhq.core.house_voices import CARTESIA_LANGUAGE_VOICES
+
+    with respx.mock(assert_all_called=False) as mock:
+        any_request = mock.route().mock(return_value=httpx.Response(500))
+        german = CARTESIA_LANGUAGE_VOICES["de"]
+        assert (
+            await catalog.foreign_voice_language(german, "de", key="k", timeout=1)
+            is None
+        )
+        assert (
+            await catalog.foreign_voice_language(german, "fr", key="k", timeout=1)
+            == "de"
+        )
+        assert not any_request.called
+
+
+async def test_foreign_voice_language_fails_open(no_foreign_cache):
+    with respx.mock as mock:
+        mock.get("https://api.cartesia.ai/voices/missing").mock(
+            return_value=httpx.Response(404, json={"error": "not found"})
+        )
+        mock.get("https://api.cartesia.ai/voices/slow").mock(
+            side_effect=httpx.ConnectTimeout("slow")
+        )
+        for voice in ("missing", "slow"):
+            assert (
+                await catalog.foreign_voice_language(voice, "de", key="k", timeout=1)
+                is None
+            )
+    # No key: nothing to ask with.
+    assert (
+        await catalog.foreign_voice_language("custom", "de", key="", timeout=1) is None
+    )
+
+
+async def test_catalogue_default_is_the_house_voice_for_the_language():
+    from hailhq.core.house_voices import CARTESIA_LANGUAGE_VOICES
+
+    german = CARTESIA_LANGUAGE_VOICES["de"]
+    with respx.mock as mock:
+        mock.get("https://api.cartesia.ai/voices").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "data": [cart_row("other", "de"), cart_row(german, "de")],
+                    "has_more": False,
+                },
+            )
+        )
+        result = await catalog.voice_catalogue("de")
+    assert result["default_voice"] == {"provider": "cartesia", "id": german}
+    assert result["voices"][0]["id"] == german
