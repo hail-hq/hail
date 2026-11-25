@@ -191,7 +191,7 @@ async def test_preview_locks_serialize_one_sample_and_never_outlive_requests(
     second = asyncio.create_task(voices._audio(*args))
     await asyncio.sleep(0)
     digest = hashlib.sha256(b"hello").hexdigest()
-    key = ("cartesia", "sonic-3.5", "en", "known", digest)
+    key = ((("cartesia", "sonic-3.5", "en", "known"),), digest)
     assert voices._sample_locks[key][1] == 2
     release.set()
     assert await asyncio.gather(first, second) == [b"audio", b"audio"]
@@ -434,22 +434,35 @@ async def test_workspace_line_can_play_saved_voice_on_legacy_fallback(
 ):
     monkeypatch.setattr(settings, "cartesia_api_key", "house-cartesia")
     monkeypatch.setattr(settings, "eleven_api_key", "house-eleven")
+    voices.load_org_provider_configs.return_value = {
+        "tts": SimpleNamespace(
+            provider="cartesia",
+            encrypted_api_key=None,
+            params={},
+            fallback_enabled=True,
+        )
+    }
     body = b'{"organization_id":"00000000-0000-0000-0000-000000000001","text":"Hi.","voice_id":"saved-eleven"}'
 
     with respx.mock as mock:
-        mock.post("https://api.cartesia.ai/tts/bytes").respond(404)
-        mock.post("https://api.elevenlabs.io/v1/text-to-speech/saved-eleven").respond(
-            200, content=b"\x00\x00"
-        )
+        first = mock.post("https://api.cartesia.ai/tts/bytes").respond(404)
+        backup = mock.post(
+            "https://api.elevenlabs.io/v1/text-to-speech/saved-eleven"
+        ).respond(200, content=b"\x00\x00")
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=workspace_voice_app),
             base_url="http://test",
         ) as client:
-            response = await client.post(
-                "/internal/voices/workspace-line", content=body, headers=_signed(body)
-            )
-    assert response.status_code == 200
-    assert response.content.startswith(b"RIFF")
+            for _ in range(2):
+                response = await client.post(
+                    "/internal/voices/workspace-line",
+                    content=body,
+                    headers=_signed(body),
+                )
+                assert response.status_code == 200
+                assert response.content.startswith(b"RIFF")
+        assert first.call_count == 1
+        assert backup.call_count == 1
 
 
 async def test_workspace_line_explains_when_saved_provider_is_unavailable(

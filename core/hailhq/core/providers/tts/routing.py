@@ -40,6 +40,10 @@ class VoiceLanguageError(ProviderKeyError):
     """The workspace provider cannot speak the language and fallback is off."""
 
 
+class SavedVoiceError(ProviderKeyError):
+    """A configured provider can speak the language but cannot use the override."""
+
+
 @dataclass(frozen=True)
 class SpeechRoute:
     provider: TTSProvider
@@ -212,6 +216,8 @@ def resolve_tts_routes(
 
     if house:
         return house
+    if voice_id and _house_routes(None, language):
+        raise SavedVoiceError("No configured TTS provider can use the saved voice.")
     if _house_routes(None, None):
         providers = ", ".join(sorted(tts_providers_for(language)))
         raise ProviderKeyError(

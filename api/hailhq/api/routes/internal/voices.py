@@ -37,6 +37,7 @@ from hailhq.core.provider_config import ResolvedLayer, load_org_provider_configs
 from hailhq.core.providers.tts.direct import DIRECT_VOICES, SAMPLE_RATE
 from hailhq.core.providers.tts.routing import (
     ProviderKeyError,
+    SavedVoiceError,
     SpeechRoute,
     VoiceLanguageError,
     resolve_fallback_voice_provider,
@@ -58,13 +59,15 @@ router = APIRouter(
     include_in_schema=False,
     dependencies=[Depends(verify_internal_request)],
 )
-# Key: provider, model, language, voice id, sha256 of the spoken text.
-_Key = tuple[str, str, str, str, str]
+# Key: ordered speech routes and SHA-256 of the spoken text.
+_VoiceKey = tuple[str, str, str, str]
+_Key = tuple[tuple[_VoiceKey, ...], str]
 _Cache = OrderedDict[_Key, tuple[float, bytes]]
 _samples: _Cache = OrderedDict()
 _lines: _Cache = OrderedDict()
 _LINE_CAP = 256
 _CHOOSE_VOICE = "Choose an available voice in Call settings to preview this line."
+_UNAVAILABLE_AGENT_VOICE = "Playback is not available for this agent's saved voice."
 # One lock per sample: concurrent first listens synthesize once, and a slow
 # provider never blocks other samples or cache hits. A lock lives only while
 # a request holds or waits on it, so the map holds in-flight samples only.
@@ -218,6 +221,8 @@ async def speak_workspace_line(body: WorkspaceLineIn) -> Response:
         raise HTTPException(
             409, "The saved provider cannot speak this language."
         ) from exc
+    except SavedVoiceError as exc:
+        raise HTTPException(409, _UNAVAILABLE_AGENT_VOICE) from exc
     except (ValueError, ProviderKeyError) as exc:
         detail = (
             _CHOOSE_VOICE
@@ -238,11 +243,7 @@ async def speak_workspace_line(body: WorkspaceLineIn) -> Response:
             voice_id=primary.voice_id,
         )
     except ValidationError as exc:
-        detail = (
-            "Playback is not available for this agent's saved voice."
-            if body.voice_id
-            else _CHOOSE_VOICE
-        )
+        detail = _UNAVAILABLE_AGENT_VOICE if body.voice_id else _CHOOSE_VOICE
         raise HTTPException(409, detail) from exc
 
     # Old agent overrides have no provider ID. Try the permitted house
@@ -255,20 +256,18 @@ async def speak_workspace_line(body: WorkspaceLineIn) -> Response:
             if route.voice_id == preview.voice_id and not route.uses_workspace_key
         )
 
-    for route in playable:
-        try:
-            audio = await _audio(
-                preview.model_copy(update={"provider": route.provider}),
-                route.model,
-                body.text,
-                _lines,
-                _LINE_CAP,
-                route=route,
-            )
-        except (httpx.HTTPError, ValueError, ProviderKeyError):
-            continue
-        return _wav(audio)
-    raise HTTPException(503, "This line could not play. Try again.")
+    try:
+        audio = await _audio(
+            preview,
+            primary.model,
+            body.text,
+            _lines,
+            _LINE_CAP,
+            routes=tuple(dict.fromkeys(playable)),
+        )
+    except (httpx.HTTPError, ValueError, ProviderKeyError) as exc:
+        raise HTTPException(503, "This line could not play. Try again.") from exc
+    return _wav(audio)
 
 
 async def _audio(
@@ -278,11 +277,18 @@ async def _audio(
     cache: _Cache,
     cap: int,
     *,
-    route: SpeechRoute | None = None,
+    routes: tuple[SpeechRoute, ...] = (),
 ) -> bytes:
     digest = hashlib.sha256(text.encode()).hexdigest()
-    language = (route.language or "") if route else body.language
-    cache_key = (body.provider, model, language, body.voice_id, digest)
+    voice_keys = (
+        tuple(
+            (route.provider, route.model, route.language or "", route.voice_id or "")
+            for route in routes
+        )
+        if routes
+        else ((body.provider, model, body.language, body.voice_id),)
+    )
+    cache_key = (voice_keys, digest)
     lock, users = _sample_locks.get(cache_key, (asyncio.Lock(), 0))
     _sample_locks[cache_key] = (lock, users + 1)
     try:
@@ -292,8 +298,8 @@ async def _audio(
                 cache.move_to_end(cache_key)
                 return cached[1]
             audio = (
-                await _synthesize_route(route, text)
-                if route is not None
+                await _synthesize_saved_line(routes, text)
+                if routes
                 else await _synthesize(body, model, text)
             )
             cache[cache_key] = (time.monotonic(), audio)
@@ -307,6 +313,15 @@ async def _audio(
             del _sample_locks[cache_key]
         else:
             _sample_locks[cache_key] = (lock, users - 1)
+
+
+async def _synthesize_saved_line(routes: tuple[SpeechRoute, ...], text: str) -> bytes:
+    for route in routes[:-1]:
+        try:
+            return await _synthesize_route(route, text)
+        except (httpx.HTTPError, ValueError, ProviderKeyError):
+            continue
+    return await _synthesize_route(routes[-1], text)
 
 
 async def _synthesize(body: PreviewIn, model: str, text: str) -> bytes:
