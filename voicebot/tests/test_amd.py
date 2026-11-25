@@ -37,6 +37,7 @@ from livekit.agents.llm import (
 )
 from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS
 from livekit.agents.voice.amd import AMDCategory, AMDPredictionEvent
+from livekit.agents.voice.amd.classifier import _AMDClassifier
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing_extensions import Self
@@ -104,7 +105,8 @@ async def test_run_amd_passes_session_layers_and_identity(
     assert kwargs["detection_options"] == {
         "timeout": amd_mod.POST_ANSWER_TIMEOUT_SECONDS,
         "no_speech_threshold": NO_SPEECH_THRESHOLD_SECONDS,
-        "human_speech_threshold": 0.0,
+        "human_speech_threshold": amd_mod.SHORT_PICKUP_SPEECH_SECONDS,
+        "human_silence_threshold": amd_mod.SHORT_PICKUP_SILENCE_SECONDS,
         "prompt": amd_mod.GREETING_CLASSIFICATION_PROMPT,
     }
     assert kwargs["wait_until_finished"] is False
@@ -1183,3 +1185,38 @@ def test_menu_prompt_without_keys_waits_then_ends_on_repeats():
     without = ivr_navigation_instructions("Press 1 for sales.", ["end_call"])
     assert "cannot press keys" in without
     assert "three times" in without
+
+
+async def test_a_short_pickup_is_a_person_without_the_classifier():
+    """LiveKit's short-greeting rule with Hail's values: 1 s of speech, then
+    silence and no transcript yet, settles as a person. Longer speech waits
+    for the classifier."""
+
+    def classifier():
+        return _AMDClassifier(
+            llm=None,
+            human_speech_threshold=amd_mod.SHORT_PICKUP_SPEECH_SECONDS,
+            human_silence_threshold=0.05,
+            machine_silence_threshold=5.0,
+        )
+
+    short = classifier()
+    short.start_listening()
+    short.on_user_speech_started()
+    short._speech_started_at -= 1.0
+    short.on_user_speech_ended(0.0)
+    await asyncio.sleep(0.15)
+    assert short._verdict_result is not None
+    assert short._verdict_result.category == AMDCategory.HUMAN
+    assert short._verdict_result.reason == "short_greeting"
+
+    long = classifier()
+    long._classify_user_speech = lambda: asyncio.sleep(0)  # no model in this test
+    long.start_listening()
+    long.on_user_speech_started()
+    long._speech_started_at -= amd_mod.SHORT_PICKUP_SPEECH_SECONDS + 0.5
+    long.on_user_speech_ended(0.0)
+    await asyncio.sleep(0.15)
+    assert long._verdict_result is None
+    for c in (short, long):
+        c.close()

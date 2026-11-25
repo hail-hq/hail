@@ -8,6 +8,10 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 - Webhooks: a delivery that cannot reach its endpoint shows a short reason, such as a TLS or connection failure.
 
+### Changed
+
+- Calls: on a call the agent places, it starts speaking about one second after a short "Hello", instead of about 2.5 seconds.
+
 ## [0.38.0] (2026-11-24)
 
 Calls can always hang up: every call keeps `end_call` and `send_dtmf`, whatever
