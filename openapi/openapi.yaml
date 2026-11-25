@@ -11565,9 +11565,10 @@ components:
             - type: "null"
           title: Default Region
           description:
-            "Optional. ISO alpha-2 country of the phone system; Hail reads
-            national caller numbers with it. Left out: the first number you add fills
-            it with that number's country. A country given here is kept."
+            "Optional. ISO alpha-2 country of the phone system. Hail reads
+            the national caller numbers it sends, for every number on this connection,
+            with it. Left out: the first number to pass its ownership check fills
+            it. Change it with PATCH."
         pbx_host:
           anyOf:
             - type: string
@@ -11627,8 +11628,8 @@ components:
             - type: "null"
           title: Default Region
           description:
-            ISO alpha-2 country of the phone system. Null until the first
-            number fills it.
+            ISO alpha-2 country of the phone system, used to read national
+            caller numbers. Null until the first number passes its check.
         sip_host:
           type: string
           title: Sip Host
@@ -11782,6 +11783,15 @@ components:
             - type: "null"
           title: Pbx Password
           description: New password Hail sends. Stored encrypted.
+        default_region:
+          anyOf:
+            - type: string
+              pattern: ^[A-Z]{2}$
+            - type: "null"
+          title: Default Region
+          description:
+            New ISO alpha-2 country, used to read national caller numbers
+            for every number on this connection.
       additionalProperties: false
       type: object
       title: SipConnectionPatch
@@ -11803,8 +11813,8 @@ components:
             - type: "null"
           title: Default Region
           description:
-            ISO alpha-2 country of the phone system. Null until the first
-            number fills it.
+            ISO alpha-2 country of the phone system, used to read national
+            caller numbers. Null until the first number passes its check.
         sip_host:
           type: string
           title: Sip Host

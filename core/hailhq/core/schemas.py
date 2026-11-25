@@ -993,10 +993,10 @@ class SipConnectionCreate(BaseModel):
         default=None,
         pattern=r"^[A-Z]{2}$",
         description=(
-            "Optional. ISO alpha-2 country of the phone system; Hail reads "
-            "national caller numbers with it. Left out: the first number you "
-            "add fills it with that number's country. A country given here is "
-            "kept."
+            "Optional. ISO alpha-2 country of the phone system. Hail reads the "
+            "national caller numbers it sends, for every number on this "
+            "connection, with it. Left out: the first number to pass its "
+            "ownership check fills it. Change it with PATCH."
         ),
     )
     pbx_host: str | None = Field(
@@ -1047,10 +1047,18 @@ class SipConnectionPatch(BaseModel):
     pbx_password: str | None = Field(
         default=None, description="New password Hail sends. Stored encrypted."
     )
+    default_region: str | None = Field(
+        default=None,
+        pattern=r"^[A-Z]{2}$",
+        description=(
+            "New ISO alpha-2 country, used to read national caller numbers "
+            "for every number on this connection."
+        ),
+    )
 
     @model_validator(mode="after")
     def _not_null(self) -> "SipConnectionPatch":
-        for name in ("label", "pbx_port", "pbx_transport"):
+        for name in ("label", "pbx_port", "pbx_transport", "default_region"):
             if name in self.model_fields_set and getattr(self, name) is None:
                 raise ValueError(f"{name} cannot be null")
         return self
@@ -1061,8 +1069,8 @@ class SipConnectionResponse(BaseModel):
     label: str = Field(description="Name of the connection.")
     default_region: str | None = Field(
         description=(
-            "ISO alpha-2 country of the phone system. Null until the first "
-            "number fills it."
+            "ISO alpha-2 country of the phone system, used to read national "
+            "caller numbers. Null until the first number passes its check."
         )
     )
     sip_host: str = Field(

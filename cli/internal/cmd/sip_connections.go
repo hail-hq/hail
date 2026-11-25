@@ -121,7 +121,7 @@ func newSipConnectionsCreateCmd(opts *Options) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&f.label, "label", "", "Name, such as \"Main office\" (required)")
-	cmd.Flags().StringVar(&f.region, "region", "", "2-letter country of the phone system, such as US (optional: the first number you add sets it)")
+	cmd.Flags().StringVar(&f.region, "region", "", "2-letter country of the phone system, such as US (optional: the first number to pass its check sets it)")
 	cmd.Flags().StringVar(&f.host, "pbx-host", "", "Public address Hail dials for calls out and handover")
 	cmd.Flags().IntVar(&f.port, "pbx-port", 5060, "SIP port of the phone system")
 	cmd.Flags().StringVar(&f.transport, "pbx-transport", "", "auto, udp, tcp or tls (default auto)")
@@ -193,7 +193,7 @@ func newSipConnectionsListCmd(opts *Options) *cobra.Command {
 // regionText is the connection's country, or what fills it when it is empty.
 func regionText(region *string) string {
 	if region == nil || *region == "" {
-		return "set by the first number"
+		return "set by the first number to pass its check"
 	}
 	return *region
 }
@@ -255,9 +255,9 @@ func newSipConnectionsGetCmd(opts *Options) *cobra.Command {
 // --------------------------------------------------------------------------- //
 
 type sipUpdateFlags struct {
-	label, host, transport, username, password string
-	port                                       int
-	clearHost, clearUsername                   bool
+	label, host, transport, username, password, region string
+	port                                               int
+	clearHost, clearUsername                           bool
 }
 
 func newSipConnectionsUpdateCmd(opts *Options) *cobra.Command {
@@ -284,6 +284,7 @@ A new host, port or transport needs --pbx-password again when a username is set.
 				}
 			}
 			set("label", "label", f.label)
+			set("region", "default_region", f.region)
 			set("pbx-host", "pbx_host", f.host)
 			set("pbx-port", "pbx_port", f.port)
 			set("pbx-transport", "pbx_transport", f.transport)
@@ -326,6 +327,7 @@ A new host, port or transport needs --pbx-password again when a username is set.
 		},
 	}
 	cmd.Flags().StringVar(&f.label, "label", "", "New name")
+	cmd.Flags().StringVar(&f.region, "region", "", "2-letter country Hail reads national caller numbers with, such as GB")
 	cmd.Flags().StringVar(&f.host, "pbx-host", "", "New public address of the phone system")
 	cmd.Flags().BoolVar(&f.clearHost, "clear-pbx-host", false, "Remove the address (answer only)")
 	cmd.Flags().IntVar(&f.port, "pbx-port", 5060, "New SIP port")

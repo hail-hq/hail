@@ -1185,3 +1185,23 @@ async def test_twilio_call_on_a_connection_trunk_still_needs_the_secret(
     )
     assert isinstance(outcome, inbound_calls.Rejected)
     assert outcome.reason == "carrier_route_failed"
+
+
+@pytest.mark.parametrize("region,expected", [(None, "US"), ("GB", "GB")])
+async def test_a_passed_check_fills_an_empty_country_only(
+    async_session, unverified_number, seed_check_call, region, expected
+):
+    """The first number to pass fills a connection's empty country; a country
+    already set stays."""
+    connection = await async_session.get(
+        SipConnection, unverified_number.sip_connection_id
+    )
+    connection.default_region = region
+    await async_session.commit()
+    check = await seed_check_call(
+        unverified_number, status="in_progress", requested_at=utcnow()
+    )
+    arrived = CheckArrived(unverified_number.id, check.id)
+    assert await finish_check(async_session, arrived, "482913", now=NOW) is True
+    await async_session.refresh(connection)
+    assert connection.default_region == expected

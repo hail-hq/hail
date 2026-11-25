@@ -99,10 +99,11 @@ hail numbers register-sms --subject-type business --field legal_name="Acme Inc" 
 Connect your own phone system: it sends the calls you choose to a Hail agent over a SIP trunk. Setup: [Connect your phone system](connect-phone-system.md).
 
 ```bash
-hail sip-connections create --label "Main office"   # SIP server, username and password (shown once); the first number sets the country
+hail sip-connections create --label "Main office"   # SIP server, username and password (shown once)
 hail sip-connections list
 hail sip-connections get <connection_id>
 hail sip-connections update <connection_id> --label "Front desk"
+hail sip-connections update <connection_id> --region GB        # the country Hail reads national caller numbers with
 hail sip-connections rotate-password <connection_id>
 hail sip-connections add-number <connection_id> +14155550100   # unverified until the check passes
 hail sip-connections verify <connection_id> <number_id>        # Hail calls the number (up to 2 minutes)
@@ -111,7 +112,7 @@ hail sip-connections remove-number <connection_id> <number_id>
 hail sip-connections delete <connection_id>
 ```
 
-The SIP server shows its first characters; Hail's team sends you the full address (hi@hail.so).
+The SIP server shows its first characters; Hail's team sends you the full address (hi@hail.so). Without `--region`, the first number to pass its check sets the connection's country; Hail reads the national caller numbers it sends with it, for every number on the connection.
 
 ## Email
 
