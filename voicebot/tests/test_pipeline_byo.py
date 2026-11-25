@@ -145,9 +145,13 @@ def test_scoped_voice_tries_another_provider_before_the_same_provider_default(
     monkeypatch,
 ) -> None:
     monkeypatch.setattr(settings, "eleven_api_key", "house-eleven")
-    monkeypatch.setattr(pipeline.agents_tts, "FallbackAdapter", lambda chain: chain)
-    chain = build_tts(None, "agent-voice", "en", voice_provider="cartesia")
-    assert [voice.label for voice in chain] == ["cartesia", "elevenlabs", "cartesia"]
+    adapter = build_tts(None, "agent-voice", "en", voice_provider="cartesia")
+    assert [voice.label for voice in adapter._tts_instances] == [
+        "cartesia",
+        "elevenlabs",
+        "cartesia",
+    ]
+    assert adapter._max_retry_per_tts == 0
 
 
 def test_agent_voice_retains_same_provider_fallback_for_a_byo_key(

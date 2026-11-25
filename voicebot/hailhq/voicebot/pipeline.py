@@ -669,7 +669,11 @@ def build_tts(
                 last=voice_provider,
             )
             if fallback:
-                return agents_tts.FallbackAdapter([primary, *fallback])
+                # Try each voice once before moving on. Retries on a slow
+                # provider can delay the caller's first line by tens of seconds.
+                return agents_tts.FallbackAdapter(
+                    [primary, *fallback], max_retry_per_tts=0
+                )
         return primary
     if org is not None:
         if language is not None and org.provider not in tts_providers_for(language):
