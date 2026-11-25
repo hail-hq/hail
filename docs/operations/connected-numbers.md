@@ -41,7 +41,7 @@ docker compose exec api python -m hailhq.api.connected_numbers_ops release-claim
   --number +14155550100
 ```
 
-- `create` prints the connection id, the inbound username and the inbound password. The password is shown once. Hail does not log it.
+- `create` prints the connection id, the inbound username and the inbound password. Hail does not log it. Staff read it again in the console (Show), which writes `sip_connection.read_password` to the audit log.
 - `add` prints the number id and its state (`unverified`).
 - `check` prints the state, the reason and the check call id.
 - `delete` works only when the connection has no numbers.

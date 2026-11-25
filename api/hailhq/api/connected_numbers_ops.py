@@ -146,7 +146,7 @@ async def _run(args: argparse.Namespace) -> None:
                 )
                 print(f"connection id: {row.id}")
                 print(f"inbound username: {row.inbound_username}")
-                print(f"inbound password (shown once): {password}")
+                print(f"inbound password: {password}")
             elif args.command == "add":
                 connection = await _connection(db, args.connection)
                 number = await add_connected_number(db, lk, connection, args.number)

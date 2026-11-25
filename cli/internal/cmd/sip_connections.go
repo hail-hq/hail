@@ -27,7 +27,7 @@ func newSipConnectionsCmd(opts *Options) *cobra.Command {
 		Long: `hail sip-connections: connect your own phone system (PBX).
 
 1. create        gives the SIP server, username and password for a generic
-                 SIP trunk on your phone system. The password shows once.
+                 SIP trunk on your phone system.
 2. add-number    adds a number your phone system holds (state unverified).
 3. verify        Hail calls the number to prove you own it (up to 2 minutes,
                  billed as a normal outbound call).
@@ -111,7 +111,7 @@ func newSipConnectionsCreateCmd(opts *Options) *cobra.Command {
 				return printJSON(opts.Stdout, resp.JSON201)
 			}
 			c := resp.JSON201
-			fmt.Fprintln(opts.Stderr, "Copy the password now: it is shown once.")
+			fmt.Fprintln(opts.Stderr, "Put the password in your phone system's trunk. Staff can read it again in the console.")
 			fmt.Fprintf(opts.Stdout, "✓ Connection %s: %s\n", c.Label, c.Id)
 			fmt.Fprintf(opts.Stdout, "  SIP server:    %s\n", c.SipHost)
 			fmt.Fprintf(opts.Stdout, "  Username:      %s\n", c.Username)
@@ -354,7 +354,7 @@ func newSipConnectionsRotateCmd(opts *Options) *cobra.Command {
 			if opts.JSON {
 				return printJSON(opts.Stdout, resp.JSON200)
 			}
-			fmt.Fprintln(opts.Stderr, "Copy the password now: it is shown once. Put it in your phone system's trunk.")
+			fmt.Fprintln(opts.Stderr, "The old password stopped working. Put this one in your phone system's trunk.")
 			fmt.Fprintf(opts.Stdout, "Password: %s\n", resp.JSON200.Password)
 			return nil
 		},
