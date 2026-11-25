@@ -16,12 +16,12 @@ from collections import defaultdict
 
 import httpx
 from hailhq.core.config import settings
-from hailhq.core.providers.tts.direct import DIRECT_VOICES, house_voice_ready
 from hailhq.core.languages import (
     CARTESIA_MODEL_LANGUAGES,
     SUPPORTED_LANGUAGES,
     elevenlabs_language,
 )
+from hailhq.core.providers.tts.direct import DIRECT_VOICES, house_voice_ready
 
 log = logging.getLogger(__name__)
 HEADERS_VERSION = "2026-08-14"
@@ -357,6 +357,7 @@ async def voice_catalogue(language: str) -> dict:
         default = direct[0]
     return {
         "voices": voices,
+        "supported_providers": sorted(SUPPORTED_LANGUAGES[language].tts),
         "languages": language_options(),
         "partial": partial,
         "default_voice": (

@@ -63,12 +63,6 @@ from typing import Any
 from uuid import UUID
 
 from hailhq.core.config import settings
-from hailhq.core.providers.tts.direct import (
-    DIRECT_VOICES,
-    DirectSpeech,
-    house_voice_ready,
-)
-from hailhq.voicebot.direct_tts import DirectTTS
 from hailhq.core.db import session_scope
 from hailhq.core.languages import (
     SUPPORTED_LANGUAGES,
@@ -81,7 +75,13 @@ from hailhq.core.languages import (
 from hailhq.core.provider_config import load_org_provider_configs, provider_cipher
 from hailhq.core.providers.llm.bedrock import bedrock_client, is_bedrock_client
 from hailhq.core.providers.llm.thinking import thinking_off
+from hailhq.core.providers.tts.direct import (
+    DIRECT_VOICES,
+    DirectSpeech,
+    house_voice_ready,
+)
 from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
+from hailhq.voicebot.direct_tts import DirectTTS
 from livekit.agents import (
     AgentSession,
     APIConnectOptions,

@@ -11,7 +11,7 @@ from livekit.agents import (
     tts,
     utils,
 )
-from livekit.agents.types import APIConnectOptions, DEFAULT_API_CONNECT_OPTIONS
+from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS, APIConnectOptions
 
 
 class DirectTTS(tts.TTS):
