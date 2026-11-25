@@ -115,7 +115,7 @@ This needs a client with a shell (Claude Code, Codex, Cursor). Claude.ai web cha
 
 3. `route_number`: `{"number_id": "<id>", "voice_agent_id": "<agent-id>"}`.
 
-Numbers from your own phone system show `source: "connected"` in `list_numbers` and `get_number`. Connecting a phone system happens in the console or the [API](connect-phone-system.md), not over MCP: setup shows a password once and the ownership check places a billed call. Once checked, `route_number` routes it like any number, and `release_number` removes it from Hail only.
+Numbers from your own phone system show `source: "connected"` in `list_numbers` and `get_number`. Hail's team [connects phone systems](connect-phone-system.md) with you; MCP does not. Once checked, `route_number` routes it like any number, and `release_number` removes it from Hail only.
 
 > **Warning:** `acquire_number` buys a real number. It charges the setup fee and the first month now, then renews monthly. The account balance is the only spending limit. Keep the human approval prompt on for this tool.
 

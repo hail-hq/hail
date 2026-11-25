@@ -3555,10 +3555,8 @@ def register_tools(
         The records show capabilities, provisioning state and assigned agents,
         so they can be used to select an existing number for sending or routing.
         ``source`` is ``purchased`` (bought through Hail) or ``connected`` (a
-        number on the customer's own phone system, voice only). Connecting a
-        phone system happens in the console or the API, not through a tool:
-        setup shows a password once and the ownership check places a billed
-        call."""
+        number on the customer's own phone system, voice only). Hail's team
+        connects phone systems with the customer; no tool does it."""
         try:
             async with _client_for(ctx, mode=mode, singleton=singleton) as client:
                 return await list_numbers(client=client, limit=limit, cursor=cursor)

@@ -65,8 +65,10 @@ router = APIRouter(
 )
 
 # Connected phone systems are staff-only for now: only a staff console
-# session reaches these routes; everyone else gets 404. True opens them to
-# every workspace (the console's `connectedPhoneSystems` feature follows).
+# session (a JWT the website minted with superadmin) reaches these routes;
+# everyone else gets 404. True opens them to every workspace, API keys
+# included; open hail-website's `connectedPhoneSystems` feature with it.
+# Self-hosted: set it to True to use these routes with API keys.
 OPEN_TO_ALL_WORKSPACES: Final = False
 
 
@@ -74,7 +76,8 @@ async def connections_principal(
     principal: Annotated[Principal, Depends(get_current_principal)],
 ) -> Principal:
     """The caller, when connected phone systems are open to it."""
-    if not OPEN_TO_ALL_WORKSPACES and not principal.superadmin:
+    staff = principal.auth_kind == "jwt" and principal.superadmin
+    if not OPEN_TO_ALL_WORKSPACES and not staff:
         raise HTTPException(status_code=404, detail="Not Found")
     return principal
 

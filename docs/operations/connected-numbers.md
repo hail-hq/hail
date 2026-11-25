@@ -19,7 +19,7 @@ A customer's phone system (PBX) connects to Hail over a SIP trunk. Each connecti
 
 3. Do this before the first connection is created, and after the per-carrier trunks of the [inbound trunk runbook](inbound-trunk-lockdown.md) are applied.
 
-Who can use it: staff console sessions only while `OPEN_TO_ALL_WORKSPACES` is `False` in `api/hailhq/api/routes/sip_connections.py` (everyone else gets 404), with the console feature `connectedPhoneSystems` in hail-website `lib/console-features.ts`. Open both together, and only when every inbound trunk in the LiveKit project checks a password or a secret header: the API shows the project's SIP host to every customer who connects a phone system.
+Who can use it: staff console sessions only while `OPEN_TO_ALL_WORKSPACES` is `False` in `api/hailhq/api/routes/sip_connections.py` (everyone else gets 404), with the console feature `connectedPhoneSystems` in hail-website `lib/console-features.ts`. Open both together. Once open, the API shows the LiveKit project's SIP host to every workspace that connects a phone system.
 
 ## 2. Commands
 
