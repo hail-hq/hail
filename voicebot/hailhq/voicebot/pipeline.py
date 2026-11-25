@@ -599,6 +599,23 @@ def _org_tts(
     raise ProviderKeyError(f"unknown org tts provider '{org.provider}'")
 
 
+def _matches_house_tts(org: ResolvedLayer, voice: str | None) -> bool:
+    if org.provider == "cartesia":
+        key = settings.cartesia_api_key
+        model = settings.cartesia_model
+        house_voice = settings.cartesia_voice_id
+    else:
+        key = settings.eleven_api_key
+        model = settings.elevenlabs_model
+        house_voice = settings.elevenlabs_voice_id
+    return (
+        bool(key and voice)
+        and org.api_key in (None, key)
+        and (org.params.get("model") or model) == model
+        and voice == house_voice
+    )
+
+
 def build_tts(
     org: ResolvedLayer | None = None,
     voice_id_override: str | None = None,
@@ -650,20 +667,12 @@ def build_tts(
                 return build_tts(org, None, language)
             raise
         if selected.fallback_enabled:
-            uses_workspace_config = bool(
-                selected.api_key or selected.params.get("model")
-            )
-            default_voice = (
-                settings.cartesia_voice_id
-                if voice_provider == "cartesia"
-                else settings.elevenlabs_voice_id
-            )
             fallback = _house_tts(
                 None,
                 language,
                 skip=(
                     voice_provider
-                    if not uses_workspace_config and voice_id_override == default_voice
+                    if _matches_house_tts(selected, voice_id_override)
                     else None
                 ),
                 last=voice_provider,
@@ -672,6 +681,7 @@ def build_tts(
                 org
                 and org.provider != voice_provider
                 and org.provider in tts_providers_for(language)
+                and not _matches_house_tts(org, org.params.get("voice_id"))
             ):
                 try:
                     fallback.insert(0, _org_tts(org, None, language))

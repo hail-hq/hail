@@ -138,6 +138,25 @@ def test_scoped_voice_keeps_workspace_provider_without_a_matching_house_key(
     assert captured_plugins["cartesia"][0].kwargs["voice"] == "org-voice"
 
 
+def test_scoped_voice_skips_an_identical_workspace_tts_fallback(
+    captured_plugins, monkeypatch
+) -> None:
+    monkeypatch.setattr(settings, "eleven_api_key", "house-eleven")
+    org = ResolvedLayer(
+        "cartesia",
+        None,
+        {"model": settings.cartesia_model, "voice_id": settings.cartesia_voice_id},
+        True,
+    )
+    adapter = build_tts(org, "agent-voice", "it", voice_provider="elevenlabs")
+    assert [provider.label for provider in adapter._tts_instances] == [
+        "elevenlabs",
+        "cartesia",
+        "elevenlabs",
+    ]
+    assert len(captured_plugins["cartesia"]) == 1
+
+
 def test_agent_voice_respects_workspace_fallback_policy(captured_plugins) -> None:
     org = ResolvedLayer("cartesia", "org-key", {"voice_id": "org-voice"}, False)
     build_tts(org, "italian-voice", "it", voice_provider="elevenlabs")

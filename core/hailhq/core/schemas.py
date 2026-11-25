@@ -1699,8 +1699,9 @@ class AgentUpdate(BaseModel):
     voice_config: VoiceConfig | None = Field(
         default=None,
         description=(
-            "New TTS voice and language settings. Omit voice_id to keep any "
-            "saved provider-specific voice. Send null for voice_id to clear it."
+            "New TTS voice and language settings. Repeating the saved voice ID "
+            "without voice_provider keeps its provider. Send null for "
+            "voice_provider to clear the provider while keeping the same ID."
         ),
     )
     tools: list[str] | None = Field(
