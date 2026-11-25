@@ -81,7 +81,7 @@ func newSipConnectionsCreateCmd(opts *Options) *cobra.Command {
 			}
 			body := client.SipConnectionCreate{
 				Label:         f.label,
-				DefaultRegion: strPtr(f.region),
+				DefaultRegion: strPtr(strings.ToUpper(strings.TrimSpace(f.region))),
 				PbxHost:       strPtr(f.host),
 				PbxUsername:   strPtr(f.username),
 				PbxPassword:   strPtr(password),
@@ -121,8 +121,7 @@ func newSipConnectionsCreateCmd(opts *Options) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&f.label, "label", "", "Name, such as \"Main office\" (required)")
-	cmd.Flags().StringVar(&f.region, "region", "", "Not used: Hail reads each caller with the country of the number called")
-	_ = cmd.Flags().MarkDeprecated("region", "Hail reads each caller with the country of the number called")
+	cmd.Flags().StringVar(&f.region, "region", "", "Optional 2-letter country tried last to read callers; most leave it out")
 	cmd.Flags().StringVar(&f.host, "pbx-host", "", "Public address Hail dials for calls out and handover")
 	cmd.Flags().IntVar(&f.port, "pbx-port", 5060, "SIP port of the phone system")
 	cmd.Flags().StringVar(&f.transport, "pbx-transport", "", "auto, udp, tcp or tls (default auto)")

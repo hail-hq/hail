@@ -67,7 +67,7 @@ from hailhq.core.sip_connections import (
     check_code_matches,
     check_in_flight,
     connection_of,
-    normalize_caller,
+    read_caller,
 )
 from hailhq.core.sms_ingest import active_dedicated_number
 from hailhq.core.webhook_fanout import call_event_data, fanout_call_event
@@ -195,21 +195,34 @@ async def _refuse(
 
 
 async def _caller_of(db: AsyncSession, number: PhoneNumber, raw: str) -> str:
-    """A PBX caller is read with the country of the number called: a phone
-    system writes local callers in that country's national form, and callers
-    from abroad with their international prefix. A carrier caller only gets
-    a leading ``+``."""
+    """A PBX caller is read first with the country of the number called: a
+    phone system writes local callers in its country's national form and
+    callers from abroad with that country's international prefix. When that
+    gives no valid number (a phone system in another country than the
+    number), the connection's other numbers' countries, then its optional
+    ``default_region``, are tried. A carrier caller only gets a leading ``+``."""
     if number.provider == "pbx":
         try:
-            # No connection: the trunk check below refuses this call.
-            await connection_of(db, number)
+            conn = await connection_of(db, number)
         except ValueError:
             # The trunk check refuses this call. An extension stays as given.
             raw = raw.strip()
             if raw.isascii() and raw.isdigit() and len(raw) <= 6:
                 return raw
             return carrier_caller(raw)
-        return normalize_caller(raw, number.country_code)
+        others = (
+            await db.scalars(
+                select(PhoneNumber.country_code)
+                .where(
+                    PhoneNumber.sip_connection_id == conn.id,
+                    PhoneNumber.provisioning_state.not_in(("released", "failed")),
+                )
+                .distinct()
+            )
+        ).all()
+        return read_caller(
+            raw, [number.country_code, *sorted(others), conn.default_region]
+        )
     return carrier_caller(raw)
 
 

@@ -111,7 +111,7 @@ hail sip-connections remove-number <connection_id> <number_id>
 hail sip-connections delete <connection_id>
 ```
 
-The SIP server shows its first characters; Hail's team sends you the full address (hi@hail.so). Hail reads each caller with the country of the number that was called, so a connection needs no country.
+The SIP server shows its first characters; Hail's team sends you the full address (hi@hail.so). Hail reads each caller with the country of the number that was called, so most connections need no `--region`.
 
 ## Email
 

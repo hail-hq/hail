@@ -902,8 +902,8 @@ class SipConnection(Base):
     )
     pbx_username: Mapped[str | None] = mapped_column(Text, nullable=True)
     encrypted_pbx_password: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # Deprecated, not used: callers are read with the called number's country.
-    # Kept for older clients that send it; a later migration drops it.
+    # Optional, tried last to read callers (inbound_calls._caller_of): the
+    # called number's country comes first, then the connection's other numbers'.
     default_region: Mapped[str | None] = mapped_column(Text, nullable=True)
     livekit_inbound_trunk_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     livekit_outbound_trunk_id: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -1,13 +1,15 @@
-"""Let ``sip_connections.default_region`` be empty: it is no longer used.
+"""Let ``sip_connections.default_region`` be empty.
 
 Hail reads each PBX caller with the country of the number that was called,
-so a connection no longer needs a country. The column stays (nullable) for
-older clients that still send it; a later migration drops it.
+then of the connection's other numbers, and tries this column last. Most
+connections leave it empty.
 
 Tables checked first: this is a column of ``sip_connections`` (the
 connection's own setting); no other table fits.
 
-Downgrade fills an empty country with ``US`` before it restores NOT NULL.
+Downgrade fills an empty country with ``US`` before it restores NOT NULL;
+the older code then reads those connections' national callers as US, so a
+rollback misreads callers of connections in other countries.
 
 Revision ID: 0093
 Revises: 0092

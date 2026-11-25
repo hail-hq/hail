@@ -1205,3 +1205,35 @@ async def test_a_pbx_caller_is_read_with_the_called_numbers_country(
     connection can hold numbers from several countries."""
     _org, _agent, number = await _pbx_seed(async_session, country_code=number_country)
     assert await inbound_calls._caller_of(async_session, number, raw) == expected
+
+
+async def test_a_caller_the_called_numbers_country_cannot_read_tries_the_others(
+    async_session,
+):
+    """A UK phone system hosting a US number writes a caller from France with
+    the UK international prefix: the connection's GB number reads it."""
+    org, _agent, us_number = await _pbx_seed(async_session, country_code="US")
+    async_session.add(
+        PhoneNumber(
+            organization_id=org,
+            e164="+442079460018",
+            country_code="GB",
+            number_type="local",
+            capabilities=["voice"],
+            provider="pbx",
+            sip_connection_id=us_number.sip_connection_id,
+            provisioning_state="active",
+        )
+    )
+    await async_session.flush()
+    out = await inbound_calls._caller_of(async_session, us_number, "0033123456789")
+    assert out == "+33123456789"
+
+
+async def test_the_connection_country_is_tried_last(async_session):
+    _org, _agent, number = await _pbx_seed(async_session, country_code="US")
+    conn = await async_session.get(SipConnection, number.sip_connection_id)
+    conn.default_region = "GB"
+    await async_session.flush()
+    out = await inbound_calls._caller_of(async_session, number, "0033123456789")
+    assert out == "+33123456789"

@@ -191,8 +191,7 @@ async def create_connection(
     """Create a connection and its trunks. Returns the row and the inbound
     password in plain text."""
     label = _clean_label(label)
-    # Deprecated and unused: callers are read with the called number's
-    # country (core inbound_calls._caller_of). Still checked when sent.
+    # Optional: tried last to read callers (core inbound_calls._caller_of).
     if default_region is not None:
         _check_region(default_region)
     pbx_host = _check_host(pbx_host)

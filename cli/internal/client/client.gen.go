@@ -3811,7 +3811,7 @@ type SenderIdResponse struct {
 
 // SipConnectionCreate defines model for SipConnectionCreate.
 type SipConnectionCreate struct {
-	// DefaultRegion Deprecated and not used: leave it out. Hail reads each caller with the country of the number that was called.
+	// DefaultRegion Optional; most connections leave it out. Hail reads each caller with the country of the number that was called, then of the connection's other numbers. This country is tried last: set it only when the phone system is in a country none of its numbers are from.
 	DefaultRegion *string `json:"default_region,omitempty"`
 
 	// Label A name, such as 'Main office'.
@@ -3841,7 +3841,7 @@ type SipConnectionCreated struct {
 	// CreatedAt When the connection was created.
 	CreatedAt time.Time `json:"created_at"`
 
-	// DefaultRegion Deprecated and not used. Hail reads each caller with the country of the number that was called.
+	// DefaultRegion Optional country tried last to read callers (see create). Null for most connections.
 	DefaultRegion *string `json:"default_region"`
 
 	// Id Unique identifier for this connection.
@@ -3925,7 +3925,7 @@ type SipConnectionResponse struct {
 	// CreatedAt When the connection was created.
 	CreatedAt time.Time `json:"created_at"`
 
-	// DefaultRegion Deprecated and not used. Hail reads each caller with the country of the number that was called.
+	// DefaultRegion Optional country tried last to read callers (see create). Null for most connections.
 	DefaultRegion *string `json:"default_region"`
 
 	// Id Unique identifier for this connection.

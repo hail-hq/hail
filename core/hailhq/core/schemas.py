@@ -993,8 +993,11 @@ class SipConnectionCreate(BaseModel):
         default=None,
         pattern=r"^[A-Z]{2}$",
         description=(
-            "Deprecated and not used: leave it out. Hail reads each caller "
-            "with the country of the number that was called."
+            "Optional; most connections leave it out. Hail reads each caller "
+            "with the country of the number that was called, then of the "
+            "connection's other numbers. This country is tried last: set it "
+            "only when the phone system is in a country none of its numbers "
+            "are from."
         ),
     )
     pbx_host: str | None = Field(
@@ -1059,8 +1062,8 @@ class SipConnectionResponse(BaseModel):
     label: str = Field(description="Name of the connection.")
     default_region: str | None = Field(
         description=(
-            "Deprecated and not used. Hail reads each caller with the country "
-            "of the number that was called."
+            "Optional country tried last to read callers (see create). Null "
+            "for most connections."
         )
     )
     sip_host: str = Field(

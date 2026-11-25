@@ -116,6 +116,24 @@ def normalize_caller(raw: str, default_region: str | None) -> str:
     return phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
 
 
+def read_caller(raw: str, regions: list[str | None]) -> str:
+    """A PBX caller read with the first of ``regions`` that gives a valid
+    number; as given when none does. Non-ISO regions (``001``) are skipped."""
+    tried: set[str] = set()
+    for region in regions:
+        if (
+            not region
+            or region in tried
+            or region not in phonenumbers.SUPPORTED_REGIONS
+        ):
+            continue
+        tried.add(region)
+        out = normalize_caller(raw, region)
+        if out.startswith("+"):
+            return out
+    return normalize_caller(raw, None)
+
+
 def new_inbound_username() -> str:
     return "hail-" + secrets.token_hex(6)
 
