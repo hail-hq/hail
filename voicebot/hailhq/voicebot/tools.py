@@ -281,17 +281,18 @@ async def build_agent_tools(
             specs.append(transfer_call.CANCEL_SPEC)
     # The agent's own HTTP tools are not built-ins: a `tools` list does not
     # name them, and they stay on with `tools: []`.
-    built_in = {s.name for s in specs} | RESERVED_TOOL_NAMES
+    taken = {s.name for s in specs} | RESERVED_TOOL_NAMES
     for http in await _http_tools(metadata, call_id, organization_id):
-        if http.name in built_in:
-            # Saved before Hail took the name: two tools with one name would
-            # break the call, so Hail's own tool wins.
+        if http.name in taken:
+            # Saved before Hail took the name (or twice): two tools with one
+            # name would break the call, so the first one wins.
             logger.warning(
-                "call_id=%s http tool %s skipped: Hail has a tool with that name",
+                "call_id=%s http tool %s skipped: the call has a tool with that name",
                 call_id,
                 http.name,
             )
             continue
+        taken.add(http.name)
         specs.append(http)
     # Every-call tools need no database or API: a call with only those
     # (`tools: []`) opens neither.

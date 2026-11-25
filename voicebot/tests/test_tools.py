@@ -513,3 +513,20 @@ async def test_an_http_tool_with_a_built_in_name_is_skipped(monkeypatch):
     assert [t.info.name for t in tools] == EVERY_CALL
     assert tools[-1].info.raw_schema["description"] != "Old."
     assert api is None
+
+
+async def test_two_http_tools_with_one_name_keep_only_the_first(monkeypatch):
+    first = dataclasses.replace(
+        call_tools()[0], name="lookup_order", description="First."
+    )
+    second = dataclasses.replace(first, description="Second.")
+    monkeypatch.setattr(
+        tools_mod, "_http_tools", AsyncMock(return_value=[first, second])
+    )
+    meta = {"organization_id": str(uuid.uuid4()), "tools": []}
+    tools, api = await build_agent_tools(
+        meta, call_id=uuid.uuid4(), hangup=None, send_dtmf=None
+    )
+    assert [t.info.name for t in tools] == [*EVERY_CALL, "lookup_order"]
+    assert tools[-1].info.raw_schema["description"] == "First."
+    assert api is None

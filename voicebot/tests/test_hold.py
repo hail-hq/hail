@@ -103,6 +103,7 @@ async def test_music_keeps_the_hold_and_restarts_the_silence_clock(line):
     await held.start()
     now[0] = HOLD_SECONDS - 5
     speak(session, now, MUSIC_SECONDS)
+    await settle()
     # Later short wordless bursts in the same hold are music too.
     speak(session, now, 3, pause=0)
     await settle()
@@ -274,25 +275,31 @@ async def test_music_right_after_please_hold_is_music(line):
     await held.aclose()
 
 
-async def test_an_interim_guess_on_one_music_burst_does_not_hide_the_music(line):
+async def test_music_with_long_soft_pauses_is_still_music(line):
     held, session, now, _ = line
     await held.start()
-    session.emit("user_state_changed", new_state="speaking")
-    session.emit("user_input_transcribed", transcript="you", is_final=False)
-    now[0] += 3
-    session.emit("user_state_changed", new_state="listening")
-    now[0] += 0.2
-    for _ in range(4):
-        speak(session, now, 3, pause=0.2)
+    # Short bursts with pauses just under the gap: the stretch, pauses
+    # included, is long enough to be music.
+    for _ in range(8):
+        speak(session, now, 1.5, pause=0.4)
     await settle()
     assert held._music
     assert held.active
-    # A later wordless stretch in the same hold is music too.
-    now[0] += 5
-    speak(session, now, 4)
-    await settle()
-    assert held.active
     session.generate_reply.assert_not_called()
+    await held.aclose()
+
+
+async def test_music_that_starts_without_a_gap_after_please_hold(line):
+    held, session, now, _ = line
+    session.emit("user_state_changed", new_state="speaking")
+    session.emit("user_input_transcribed", transcript="please hold", is_final=True)
+    now[0] += 1
+    await held.start()
+    now[0] += 30  # the same VAD burst runs on into the music
+    session.emit("user_state_changed", new_state="listening")
+    await settle()
+    assert held._music
+    assert held.active
     await held.aclose()
 
 
@@ -309,13 +316,15 @@ async def test_speech_with_only_interims_is_not_a_quiet_voice(line):
     await held.aclose()
 
 
-async def test_the_rest_of_please_hold_is_not_a_quiet_voice(line):
+async def test_talk_that_goes_on_after_please_hold_is_not_a_quiet_voice(line):
     held, session, now, _ = line
     session.emit("user_state_changed", new_state="speaking")
     session.emit("user_input_transcribed", transcript="please hold", is_final=True)
     now[0] += 1
     await held.start()  # they keep talking to a colleague
-    now[0] += 3
+    now[0] += 1
+    session.emit("user_input_transcribed", transcript="can you", is_final=False)
+    now[0] += 2
     session.emit("user_state_changed", new_state="listening")
     await settle()
     session.generate_reply.assert_not_called()
