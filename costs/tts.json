@@ -914,7 +914,7 @@
       "last_verified": "2026-11-25",
       "last_changed_at": "2026-11-02",
       "verification_method": "manual-confirmed",
-      "verified_by": "codex",
+      "verified_by": "r13i",
       "source_url": "https://elevenlabs.io/pricing/api",
       "notes": "Direct pay-as-you-go rate is $0.08 per 1,000 characters. The October 2026 launch promotion has ended. The API model guide confirms the model and supported endpoints (https://elevenlabs.io/docs/overview/models). Confidence is medium because the exact direct rate appears on the pricing page."
     },
@@ -1027,9 +1027,9 @@
       "last_verified": "2026-11-25",
       "last_changed_at": "2026-11-02",
       "verification_method": "manual-confirmed",
-      "verified_by": "codex",
+      "verified_by": "r13i",
       "source_url": "https://elevenlabs.io/pricing/api",
-      "notes": "Direct pay-as-you-go rate is $0.04 per 1,000 characters. The October 2026 launch promotion has ended. The real-time model uses the Text to Dialogue WebSocket (https://elevenlabs.io/docs/eleven-api/guides/how-to/websockets/realtime-tdd). The 100 ms figure is the vendor median server-side latency on a warm WebSocket, excluding network and playback (https://elevenlabs.io/docs/eleven-api/concepts/latency-methodology). Confidence is medium because the exact direct rate appears on the pricing page."
+      "notes": "Direct pay-as-you-go rate is $0.04 per 1,000 characters. The October 2026 launch promotion has ended. The real-time model uses the Text to Dialogue WebSocket (https://elevenlabs.io/docs/eleven-api/guides/how-to/websockets/realtime-tdd). ElevenLabs reports about 100 ms median server-side latency for WebSocket requests with previously used voices, excluding network and playback (https://elevenlabs.io/docs/eleven-api/concepts/latency-methodology). Confidence is medium because the exact direct rate appears on the pricing page."
     },
     {
       "provider": "Mistral",
@@ -1067,7 +1067,7 @@
       "last_verified": "2026-11-25",
       "last_changed_at": "2026-11-02",
       "verification_method": "manual-confirmed",
-      "verified_by": "codex",
+      "verified_by": "r13i",
       "source_url": "https://docs.mistral.ai/inference/pricing",
       "notes": "Public Preview, released October 20, 2026. Direct rate is $13 per million input characters and $1.30 per million cached input characters. Supports 35+ languages, 50+ dialects, voice cloning, and inline emotion and pace tags. Mistral documents this same model ID for the realtime WebSocket (https://docs.mistral.ai/studio/audio/text-to-speech/speak-in-realtime)."
     },
@@ -1086,7 +1086,7 @@
       "last_verified": "2026-11-25",
       "last_changed_at": "2026-11-25",
       "verification_method": "manual-confirmed",
-      "verified_by": "codex",
+      "verified_by": "r13i",
       "source_url": "https://www.assemblyai.com/pricing",
       "notes": "Direct pay-as-you-go rate for input characters. US and EU processing and cloned voices cost the same. AssemblyAI reports ~90 ms to first audio in production and a 47 ms median time to first byte in its single-client benchmark. The launch confirms the rate (https://www.assemblyai.com/blog/text-to-speech-api) and the OpenAI compatibility guide confirms the canonical model ID (https://www.assemblyai.com/blog/migrate-openai-tts-to-assemblyai)."
     },
@@ -1094,7 +1094,7 @@
       "provider": "SpeechifyAI",
       "provider_url": "https://speechify.ai",
       "model_id": "simba-3.5",
-      "display_name": "Simba 3.5 (Starter, $10/mo)",
+      "display_name": "Simba 3.5 (Starter top-up, $10/mo plan)",
       "price_per_1m_chars_usd": "15",
       "voice_quality": "neural",
       "languages": [
@@ -1155,9 +1155,9 @@
       "last_verified": "2026-11-25",
       "last_changed_at": "2026-11-25",
       "verification_method": "manual-confirmed",
-      "verified_by": "codex",
+      "verified_by": "r13i",
       "source_url": "https://speechify.ai/pricing",
-      "notes": "Published Starter usage and top-up rate requires a $10/month subscription. Pro ($99/month) is $12 per million characters and Scale ($499/month) is $10. Free pauses after its included allowance. The current model page confirms the rates, 48 languages and streaming API model ID (https://speechify.ai/blog/simba-3-5)."
+      "notes": "Starter costs $10/month and includes about 1.3 million Simba 3.5 characters. The published $15 per million rate applies to Starter top-ups. The Pro ($99/month) and Scale ($499/month) top-up rates are $12 and $10 per million. Free pauses after its included allowance. The API changelog confirms the model ID and rates (https://docs.speechify.ai/build/changelog/2026/11/9)."
     }
   ]
 }
