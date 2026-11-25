@@ -84,8 +84,6 @@
       "WebFetch(domain:*.fireworks.ai)",
       "WebFetch(domain:hume.ai)",
       "WebFetch(domain:*.hume.ai)",
-      "WebFetch(domain:livekit.com)",
-      "WebFetch(domain:docs.livekit.io)",
       "WebFetch(domain:lmnt.com)",
       "WebFetch(domain:*.lmnt.com)",
       "WebFetch(domain:resemble.ai)",
