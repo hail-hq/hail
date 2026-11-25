@@ -212,7 +212,7 @@ class KnowledgeIngestWorker:
         # The probe text passed in the current pass: not sent again.
         self._probe_ok = False
         # "storage is full" was logged; not again until it clears.
-        self._full_warned = False
+        self._full_warned: bool | str = False
 
     def _get_s3(self) -> S3MailClient:
         if self._s3 is None:
@@ -275,7 +275,13 @@ class KnowledgeIngestWorker:
                     "search), other-model vectors are replaced within %d MB",
                     REEMBED_HEADROOM // (1024 * 1024),
                 )
-            self._full_warned = full
+            if over and self._full_warned != "over":
+                logger.warning(
+                    "knowledge: storage is %d MB past the cap; vectors wait "
+                    "until VACUUM FULL knowledge_pieces gives space back",
+                    REEMBED_HEADROOM // (1024 * 1024),
+                )
+            self._full_warned = "over" if over else full
             if over:
                 self._embed_after = time.monotonic() + EMBED_BACKOFF[1]
                 break
@@ -286,8 +292,8 @@ class KnowledgeIngestWorker:
                 .over(
                     partition_by=KnowledgePiece.organization_id,
                     order_by=(
-                        # Pieces refused a day ago go last.
-                        KnowledgePiece.embedding_refused.is_not(None),
+                        # Pieces this model refused a day ago go last.
+                        KnowledgePiece.embedding_refused == embedder.model,
                         KnowledgePiece.embedding_model.is_not(None),
                         KnowledgePiece.document_id,
                         KnowledgePiece.ordinal,

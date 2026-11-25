@@ -970,7 +970,7 @@ async def test_one_workspace_refused_pieces_never_stop_another(
     )
     await async_session.commit()
     calls = fake.calls
-    before = {p.id: p.embedding_refused_at for p in bad_pieces}
+    before = {p.id: p.embedding_refused_at for p in await pieces_of(async_session, bad)}
     await worker.tick()
     assert fake.calls > calls
     again = await pieces_of(async_session, bad)
@@ -1008,3 +1008,24 @@ async def test_model_change_finishes_when_storage_is_full(
     pieces = await pieces_of(async_session, org)
     assert pieces and all(p.embedding_model == "fake-embedding-2" for p in pieces)
     assert all(p.embedding is None for p in await pieces_of(async_session, waiting))
+
+
+async def test_replacing_stops_past_the_headroom(
+    async_session, worker, s3, fake, monkeypatch
+) -> None:
+    """Past the cap and its headroom, nothing is embedded, not even a
+    replacement; the pass waits."""
+    org = uuid.uuid4()
+    await add_document(async_session, s3, org, NORTHGATE_MANUAL.encode())
+    await worker.tick()
+
+    async def over(db, *, adding=0):
+        return True
+
+    monkeypatch.setattr(ingest_module, "storage_full", over)
+    fake.model = "fake-embedding-2"
+    calls = fake.calls
+    await worker.tick()
+    assert fake.calls == calls and worker._embed_after > 0
+    pieces = await pieces_of(async_session, org)
+    assert all(p.embedding_model == "fake-embedding" for p in pieces)
