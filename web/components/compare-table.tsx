@@ -1,7 +1,7 @@
 import type { LLMRow, STTRow, TTSRow } from '@/lib/types';
 import { CopyableCode } from './copyable-code';
 import { isStale, daysSince } from '@/lib/staleness';
-import { formatCloning, langs, priceLabel, rowPrice } from '@/lib/format';
+import { formatCloning, langs, priceLabel, rowPrice, ttsPrice } from '@/lib/format';
 import { compareHrefRemove } from '@/lib/url';
 import { TableWrap } from './table-wrap';
 
@@ -18,7 +18,7 @@ function CompareGrid({
   rows,
   removable = true,
 }: {
-  models: { provider: string; display_name: string; model_id: string }[];
+  models: { provider: string; display_name: string; model_id: string; api_endpoint?: string }[];
   currentIds: string[];
   rows: CompareRow[];
   removable?: boolean;
@@ -34,7 +34,11 @@ function CompareGrid({
                 <div className="compare-model-head-inner">
                   <div className="compare-model-prov">{m.provider}</div>
                   <div className="compare-model-name">{m.display_name}</div>
-                  <CopyableCode value={m.model_id} />
+                  {m.api_endpoint ? (
+                    <code>{new URL(m.api_endpoint).pathname}</code>
+                  ) : (
+                    <CopyableCode value={m.model_id} />
+                  )}
                   {removable && (
                     <a
                       href={compareHrefRemove(currentIds, m.model_id)}
@@ -176,8 +180,8 @@ export function TTSCompareTable({
 }) {
   const rows: CompareRow[] = [
     {
-      label: priceLabel(models, '$/1M chars', 'Price/1M chars'),
-      cells: models.map((m) => rowPrice(m, 'price_per_1m_chars_usd', 2)),
+      label: 'Price',
+      cells: models.map(ttsPrice),
       emphasis: true,
     },
     { label: 'Voice quality', cells: models.map((m) => m.voice_quality) },

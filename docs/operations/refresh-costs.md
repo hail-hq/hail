@@ -71,8 +71,8 @@ These rules are mandatory per the project tenets and the v0.2 design spec. For c
 
 1. **Two-source rule.** For every price-affecting change, cite the vendor pricing page plus one secondary source. A secondary source is a vendor announcement, a third-party aggregator, or the vendor API docs. If only one source is available, set `confidence: medium` on the row and give the reason in `notes`.
 2. **Decimal-string prices.** All `*_per_*_usd` fields are JSON strings, not numbers. They must match the pattern `^(0|[1-9][0-9]*)(\.[0-9]{1,8})?$`. The validator rejects floats.
-3. **Canonical model_ids.** Use the vendor's real API model_id string. Do not invent one. If a marketing name does not have a stable API identifier, defer the row.
-4. **Two source verifications are the bar.** If the vendor pricing page is unreachable, or the model_id is not in the docs, defer the row with a documented reason. Do not guess.
+3. **Canonical model_ids.** Use the vendor's API model ID. If the vendor prices a dedicated API endpoint without a model parameter, use its documented endpoint slug and explain it in the row. Defer marketing names without a stable API identifier.
+4. **Two source verifications are the bar.** If the vendor pricing page is unreachable or the model or endpoint ID is undocumented, defer the row and give the reason.
 5. **Always bump `last_verified`** on each row that you touch. **Bump `last_changed_at` only** if a structured price field changed.
 6. **Field order convention** (refer to "Field order" below). Match it exactly.
 7. **No destructive git in the shared tree.** In the default model of this runbook, every provider-agent edits the **same** working tree. Thus a subagent must never run a git command that reverts or discards the tree — `git checkout`, `git restore`, `git stash`, `git reset` — and must never run `git commit`/`git add`. A `checkout`/`restore` on a shared `costs/*.json` reverts the full file and silently erases the in-flight edits of every other provider — one such error caused the loss of a full LLM sweep. Repair broken formatting with the `Edit` tool or `pnpm exec prettier --write costs/<category>.json`, never with git. Leave the files modified but unstaged. Produce a commit message. Let the operator commit. (A separate git worktree for each provider makes git safe for each agent. But then you must add a step to collate the single-file edit of each worktree back. Thus the default is one shared tree plus sequential dispatch.)
@@ -133,8 +133,9 @@ TTS rows (`costs/tts.json`):
 ```
 Required: provider, provider_url, model_id, display_name, voice_quality,
 languages, last_verified, last_changed_at, verification_method,
-verified_by, source_url. PLUS one of price_per_1m_chars_usd OR
-price_per_second_usd (v2.2 anyOf constraint).
+verified_by, source_url. PLUS a per-character or per-second rate in USD or EUR,
+or both price_per_1m_text_tokens_usd and price_per_1m_audio_tokens_usd.
+Record the vendor’s billing units. Keep input and output token rates separate.
 
 Optional: voice_count, voices_count, voices_premium_count, ssml_supported,
 emotion_control_supported, streaming_supported, voice_cloning,
@@ -292,6 +293,10 @@ The agent verifies each provider again against these primary and secondary sourc
 | SMS      | Plivo            | https://www.plivo.com/sms/pricing/us/                                                 | https://www.plivo.com/docs/                                                            | Long Codes row is the matching route                                                                                                                                                                                           |
 | SMS      | AWS              | https://aws.amazon.com/end-user-messaging/pricing/                                    | https://docs.aws.amazon.com/sms-voice/                                                 | US price is in the CSV linked from the page, not its text                                                                                                                                                                      |
 | SMS      | Telnyx           | https://telnyx.com/pricing/messaging                                                  | https://telnyx.com/pricing.md                                                          | Local and 10DLC row; carrier fees are separate                                                                                                                                                                                 |
+
+For Gemini 3.8 Flash TTS, check [Google Agent Platform pricing](https://cloud.google.com/model-garden/pricing) and [Gemini Developer API pricing](https://ai.google.dev/gemini-api/docs/pricing#gemini-3.8-flash-tts). The introductory credits end December 31, 2026.
+
+For xAI, check [Text to Speech pricing](https://docs.x.ai/developers/models/text-to-speech) and the [API guide](https://docs.x.ai/developers/model-capabilities/audio/text-to-speech). Use the documented endpoint slug `tts` and save the endpoint in `api_endpoint`. Requests identify the voice by its ID.
 
 ## Procedure
 

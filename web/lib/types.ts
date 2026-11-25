@@ -107,9 +107,13 @@ export type STTRow = CommonFields & {
 };
 
 export type TTSRow = CommonFields & {
+  api_endpoint?: string;
   price_per_1m_chars_usd?: string;
   price_per_1m_chars_eur?: string;
   price_per_second_usd?: string;
+  price_per_1m_text_tokens_usd?: string;
+  price_per_1m_audio_tokens_usd?: string;
+  promo_ends_at?: string;
   voice_quality: 'standard' | 'neural' | 'cloned';
   voice_count?: number;
   voices_count?: number;

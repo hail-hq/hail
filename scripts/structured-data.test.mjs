@@ -15,6 +15,7 @@ import {
   collectionSchema,
   serializeJsonLd,
 } from "../shared/structured-data.ts";
+import { ttsPrice } from "../web/lib/format.ts";
 import {
   modelComparisonSchema,
   modelProduct,
@@ -79,6 +80,35 @@ test("Vercel build filters fit its 256 character limit", () => {
       `${file}: ${ignoreCommand.length} characters`,
     );
   }
+});
+
+test("TTS prices keep character and token rates in their original units", () => {
+  const { models } = JSON.parse(
+    readFileSync(new URL("../costs/tts.json", import.meta.url)),
+  );
+  const gemini = models.find((row) => row.model_id === "gemini-3.8-flash-tts");
+  const xai = models.find((row) => row.model_id === "tts" && row.provider === "xAI");
+  const textPrice = Number(gemini.price_per_1m_text_tokens_usd).toFixed(2);
+  const audioPrice = Number(gemini.price_per_1m_audio_tokens_usd).toFixed(2);
+  const tokenPrice = `$${textPrice} / 1M text tokens · $${audioPrice} / 1M audio tokens`;
+  assert.equal(
+    ttsPrice(gemini),
+    gemini.promo_ends_at ? `${tokenPrice} · Introductory through ${gemini.promo_ends_at}` : tokenPrice,
+  );
+  assert.equal(
+    ttsPrice(xai),
+    `$${Number(xai.price_per_1m_chars_usd).toFixed(2)} / 1M characters`,
+  );
+  const xaiProduct = modelProduct(xai, "tts", "https://hail.so/costs");
+  assert.equal(xaiProduct.model, undefined);
+  const product = modelProduct(gemini, "tts", "https://hail.so/costs");
+  assert.deepEqual(
+    product.offers.map(({ priceSpecification: { price, unitText } }) => [price, unitText]),
+    [
+      [gemini.price_per_1m_text_tokens_usd, "1 million input text tokens"],
+      [gemini.price_per_1m_audio_tokens_usd, "1 million output audio tokens"],
+    ],
+  );
 });
 
 test("a hosted model rate does not label the model creator as the seller", () => {
