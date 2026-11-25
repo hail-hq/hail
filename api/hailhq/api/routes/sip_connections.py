@@ -66,12 +66,26 @@ router = APIRouter(
     responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
 
-# Connected phone systems are staff-only for now: only a staff console
-# session (a JWT the website minted with superadmin) reaches these routes;
-# everyone else gets 404. True opens them to every workspace, API keys
-# included; open hail-website's `connectedPhoneSystems` feature with it.
-# Self-hosted: set it to True to use these routes with API keys.
-OPEN_TO_ALL_WORKSPACES: Final = False
+# Connected phone systems are open to every workspace, API keys included.
+# False makes them staff-only again: only a staff console session (a JWT the
+# website minted with superadmin) reaches these routes, everyone else gets
+# 404. Change it together with hail-website's `connectedPhoneSystems` feature.
+OPEN_TO_ALL_WORKSPACES: Final = True
+
+# Characters of the SIP server a workspace sees; Hail's team sends the full
+# address (see _sees_full_host).
+MASKED_HOST_CHARS: Final = 5
+
+
+def _sees_full_host(principal: Principal) -> bool:
+    """Hail staff (a staff console session) and a self-hosted operator (the
+    shared key) see the full SIP server; every workspace sees its start."""
+    staff = principal.auth_kind == "jwt" and principal.superadmin
+    return staff or principal.auth_kind == "shared"
+
+
+def _masked_host(host: str) -> str:
+    return host[:MASKED_HOST_CHARS] + "…" if len(host) > MASKED_HOST_CHARS else host
 
 
 async def connections_principal(
@@ -191,7 +205,7 @@ async def _number_or_404(
     return row
 
 
-def _response(row: SipConnection) -> SipConnectionResponse:
+def _response(row: SipConnection, principal: Principal) -> SipConnectionResponse:
     try:
         last4 = decrypt_secret(row.encrypted_inbound_password)[-4:]
     except SecretKeyMissing as exc:
@@ -200,11 +214,17 @@ def _response(row: SipConnection) -> SipConnectionResponse:
         # A rotated key or a damaged value: the connection still lists;
         # rotate-password makes a new one.
         last4 = ""
+    full_host = _sees_full_host(principal)
     return SipConnectionResponse(
         id=row.id,
         label=row.label,
         default_region=row.default_region,
-        sip_host=settings.livekit_sip_host,
+        sip_host=(
+            settings.livekit_sip_host
+            if full_host
+            else _masked_host(settings.livekit_sip_host)
+        ),
+        sip_host_masked=not full_host,
         username=row.inbound_username,
         password_last4=last4,
         pbx_host=row.pbx_host,
@@ -295,7 +315,9 @@ async def create_sip_connection(
         {"label": row.label},
     )
     response.headers["Cache-Control"] = "no-store"
-    return SipConnectionCreated(**_response(row).model_dump(), password=password)
+    return SipConnectionCreated(
+        **_response(row, principal).model_dump(), password=password
+    )
 
 
 @router.get("", response_model=SipConnectionListResponse)
@@ -321,7 +343,7 @@ async def list_sip_connections(
         newest_first=True,
     )
     return SipConnectionListResponse(
-        items=[_response(r) for r in rows], next_cursor=next_cursor
+        items=[_response(r, principal) for r in rows], next_cursor=next_cursor
     )
 
 
@@ -335,7 +357,7 @@ async def get_sip_connection(
 ) -> SipConnectionResponse:
     """Read one connected phone system."""
     row = await _connection_or_404(db, principal.organization_id, connection_id)
-    return _response(row)
+    return _response(row, principal)
 
 
 @router.patch(
@@ -367,7 +389,7 @@ async def update_sip_connection(
         row.id,
         {"fields": sorted(fields)},
     )
-    return _response(row)
+    return _response(row, principal)
 
 
 @router.post(

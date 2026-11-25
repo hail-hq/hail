@@ -11625,7 +11625,15 @@ components:
         sip_host:
           type: string
           title: Sip Host
-          description: SIP server your phone system sends calls to (the trunk's host).
+          description:
+            SIP server your phone system sends calls to (the trunk's host).
+            Shows only its first characters when sip_host_masked is true.
+        sip_host_masked:
+          type: boolean
+          title: Sip Host Masked
+          description:
+            "True: sip_host shows only its first characters. Hail's support
+            team sends you the full address (hi@hail.so)."
         username:
           type: string
           title: Username
@@ -11677,6 +11685,7 @@ components:
         - label
         - default_region
         - sip_host
+        - sip_host_masked
         - username
         - password_last4
         - pbx_host
@@ -11787,7 +11796,15 @@ components:
         sip_host:
           type: string
           title: Sip Host
-          description: SIP server your phone system sends calls to (the trunk's host).
+          description:
+            SIP server your phone system sends calls to (the trunk's host).
+            Shows only its first characters when sip_host_masked is true.
+        sip_host_masked:
+          type: boolean
+          title: Sip Host Masked
+          description:
+            "True: sip_host shows only its first characters. Hail's support
+            team sends you the full address (hi@hail.so)."
         username:
           type: string
           title: Username
@@ -11835,6 +11852,7 @@ components:
         - label
         - default_region
         - sip_host
+        - sip_host_masked
         - username
         - password_last4
         - pbx_host

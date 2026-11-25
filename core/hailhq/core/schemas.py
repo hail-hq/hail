@@ -1058,7 +1058,16 @@ class SipConnectionResponse(BaseModel):
     label: str = Field(description="Name of the connection.")
     default_region: str = Field(description="ISO alpha-2 country of the phone system.")
     sip_host: str = Field(
-        description="SIP server your phone system sends calls to (the trunk's host)."
+        description=(
+            "SIP server your phone system sends calls to (the trunk's host). "
+            "Shows only its first characters when sip_host_masked is true."
+        )
+    )
+    sip_host_masked: bool = Field(
+        description=(
+            "True: sip_host shows only its first characters. Hail's support "
+            "team sends you the full address (hi@hail.so)."
+        )
     )
     username: str = Field(description="Username your phone system sends to Hail.")
     password_last4: str = Field(

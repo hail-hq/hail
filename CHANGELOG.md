@@ -4,6 +4,10 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- Connect your phone system is open to every workspace, in the console, the API and the CLI (`hail sip-connections`).
+
 ## [0.39.0] (2026-11-25)
 
 Connect your phone system: keep your number and your phone system (PBX), and
