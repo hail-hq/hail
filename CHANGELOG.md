@@ -8,6 +8,12 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 - Webhooks: a delivery that cannot reach its endpoint shows a short reason, such as a TLS or connection failure.
 
+### Changed
+
+- Calls: a short "okay" or "mhmm" no longer stops the agent. Someone who insists still does.
+- Calls: a longer reply is spoken about two sentences at a time, with a short pause in which the other party can speak.
+- Calls: when the agent hears speech that does not fit the conversation (a TV, a radio, other people), it says so and asks instead of answering it.
+
 ## [0.38.0] (2026-11-24)
 
 Calls can always hang up: every call keeps `end_call` and `send_dtmf`, whatever

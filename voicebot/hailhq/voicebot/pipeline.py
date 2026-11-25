@@ -809,6 +809,14 @@ def startup_capability_warnings() -> list[str]:
     return warnings
 
 
+# What stops the agent mid-reply: at least two transcribed words and 1.2 s of
+# speech. A short "okay" or "mhmm" does not; someone who insists does. These
+# are LiveKit's documented settings for an agent that acknowledgments cut off:
+# https://docs.livekit.io/agents/logic/turns/tuning/#troubleshooting
+# Known limit: two acknowledgments in a row count as two words.
+INTERRUPTION: dict[str, Any] = {"min_words": 2, "min_duration": 1.2}
+
+
 def build_session(
     llm_cfg: dict[str, Any] | None,
     vad: agents_vad.VAD,
@@ -905,8 +913,6 @@ def build_session(
         llm=build_llm(llm_cfg, org_cfgs.get("llm"), retry_on_chunk_sent=True),
         turn_handling=TurnHandlingOptions(
             turn_detection=turn_detection,
-            # Only the setting that differs from the SDK defaults: a transcribed
-            # word, not VAD energy alone, is needed to interrupt the agent.
-            interruption={"min_words": 1},
+            interruption=INTERRUPTION,
         ),
     )

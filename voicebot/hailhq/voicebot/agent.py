@@ -122,6 +122,7 @@ from hailhq.voicebot.pipeline import (
 )
 from hailhq.voicebot.recording import start_recording, stop_recording
 from hailhq.voicebot.recovery import ConversationRecovery
+from hailhq.voicebot.reply_limit import ReplyContinuation, limit_reply
 from hailhq.voicebot.spoken_lines import spoken_lines
 from hailhq.voicebot.telemetry import connect_livekit_tracing
 from hailhq.voicebot.tools import SpeechTracker, build_agent_tools, every_call_tools
@@ -243,6 +244,7 @@ class SpeechSanitizingAgent(Agent):
         self._opening_pending = opening_pending
         self._held_words: list[str] = []
         self.phone_menu: PhoneMenu | None = None
+        self.continuation: ReplyContinuation | None = None
 
     def release_opening(self) -> str | None:
         """Let replies through. Returns what the person said while held."""
@@ -313,7 +315,16 @@ class SpeechSanitizingAgent(Agent):
             chat_ctx.add_message(
                 role="system", content=ivr_navigation_instructions(None, names)
             )
-        return Agent.default.llm_node(self, chat_ctx, tools, model_settings)
+            return Agent.default.llm_node(self, chat_ctx, tools, model_settings)
+        # A long reply leaves no room to speak: it is spoken in short parts
+        # with a pause between them (reply_limit.py).
+        rest = self.continuation
+        if rest is not None:
+            rest.drop()
+        return limit_reply(
+            Agent.default.llm_node(self, chat_ctx, tools, model_settings),
+            on_rest=rest.keep if rest is not None else None,
+        )
 
     async def tts_node(self, text: Any, model_settings: Any) -> Any:
         if self.phone_menu is not None and self.phone_menu.active:
@@ -2872,6 +2883,16 @@ async def _run_call(
             and not bridge_state.get("connected")
         ),
         call_id=call_id,
+    )
+    agent.continuation = ReplyContinuation(
+        session,
+        can_continue=lambda: (
+            not shutting_down
+            and captured["end_reason"] is None
+            and (agent.phone_menu is None or not agent.phone_menu.active)
+            and not bridge_state.get("picked_up")
+            and not bridge_state.get("connected")
+        ),
     )
 
     # AMD's clients. Its classifier also backs the phone menu check, so it
