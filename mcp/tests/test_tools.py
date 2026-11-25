@@ -2347,6 +2347,15 @@ async def test_update_agent_folds_language_and_voice_into_voice_config(
                 "voice_provider": None,
             },
         ),
+        (
+            {"voice_id": "old-voice"},
+            {
+                "language": "en",
+                "voice_id": "old-voice",
+                "tts": "cartesia",
+                "voice_provider": "cartesia",
+            },
+        ),
     ],
 )
 async def test_update_agent_one_voice_value_keeps_the_other(

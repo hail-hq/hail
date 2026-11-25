@@ -107,7 +107,7 @@ async def _check_scoped_voice(
         ) from exc
     except httpx.HTTPStatusError as exc:
         status = exc.response.status_code
-        if 400 <= status < 500 and status not in (401, 403, 429):
+        if 400 <= status < 500 and status not in (401, 403, 408, 429):
             raise unprocessable(
                 "Choose a voice available with your workspace call settings.",
                 loc=["body", "voice_config", "voice_id"],
