@@ -97,25 +97,26 @@ Before the first customer, place 6 calls at the same time on one connection. Wat
 
 ## 8. 3CX V20 field notes
 
-Learned on a 3CX V20 setup (November 2026). Menu names are from V20 Update 10.
+Menu names are from 3CX V20 Update 10.
 
 **Trunk** (Admin > Voice & Chat > Add Trunk > Generic SIP Trunk):
 
 - Registrar/Server: the SIP server from the connection, port 5060.
-- Authentication ID and password: the connection's username and password. Type of authentication `Do not require – IP based` works: 3CX still answers LiveKit's digest challenge on each call.
+- Authentication ID and password: the connection's username and password. Seen working on one install with type of authentication `Do not require – IP based` (3CX still answered LiveKit's digest challenge); not checked in 3CX's docs. If calls never reach Hail, try a type that authenticates.
 - Main Trunk Number is required. 3CX sends it as the caller on every call through the trunk (see caller ID below).
 - DTMF: RFC 2833.
 
 **Outbound rule** (Admin > Outbound Rules, move it to the top):
 
 - Do not match the number itself. 3CX's E.164 setting ("remove the country code if same country") rewrites `+<cc>…` to the national form before rules run, so a `+<cc>` prefix never matches, and each number would need its own rule.
-- Match a dial-prefix tag no other rule uses (for example `7799`). Route 1: the Hail trunk, strip 4 digits, prepend `+<country code>`. One rule serves every number.
+- Match a dial-prefix tag no other rule uses (for example `7799`). Route 1: the Hail trunk, strip the tag's digits, prepend `+<country code>`. One rule serves every number.
+- Countries that drop the national trunk prefix in E.164 (the leading `0` in GB, DE and most others): strip the tag and that `0` too (5 digits for a 4-digit tag). Countries that keep it (IT): strip only the tag.
 - "Calls from extension(s)", "Calls to numbers with a length of" and "Outbound Caller ID" stay empty. A length value makes the rule never match; an Outbound Caller ID replaces the real caller.
 
-**Sending calls to the trunk**: forward to outside number `<tag><national number>`, for example `77990201555010` for a national `0201555010`. Hail receives `+<cc><national number without the 0>`.
+**Sending calls to the trunk**: forward to outside number `<tag><national number>`. Example in GB: the national `020 7946 0018` is forwarded to `779902079460018`; the rule strips 5 digits and prepends `+44`, so Hail receives `+442079460018`, the number on the connection.
 
 - Testing: Admin > Advanced > CID Rules, one rule per caller (a staff mobile), on the trunk that receives the number, forward to `<tag><national number>`. Other callers keep reaching the business.
-- The ownership check calls from a pool line, often a different number on each check (currently US `+1` lines). 3CX may show it as `+1…`, `001…` or `1…`: read it in the call history and match that start (`+1*`, `001*`, `1*`). If no rule matches, 3CX answers the check itself (reception or menu) and the check ends `no_call_arrived`.
+- The ownership check calls from a Hail pool line, often a different number on each check. Read the check call's number in 3CX's call history and match its start in the form 3CX shows it (with `+`, with `00`, or with neither). If no rule matches, 3CX answers the check itself (reception or menu) and the check ends `no_call_arrived`.
 - Go-live: the number's inbound rule (office hours, out of office, or one menu option) forwards to `<tag><national number>`. Remove the test CID rules.
 
 **Caller ID**: by default 3CX sends the Main Trunk Number as the caller, so every caller looks like the business's own number. Agents find earlier calls and texts by the caller's number, so callers' histories would mix. Fix it before go-live: V20 has no Outbound Parameters tab, so set `FromUserPart` to `$OriginatorCallerId` in a copy of the trunk's provider template (Advanced > Templates > SIP Trunk Providers) or in an exported trunk file, then import it. A test call from a mobile must show the mobile's number in Hail. Not yet checked in 3CX's own docs: the P-Asserted-Identity and Remote-Party-ID fields.
@@ -124,7 +125,7 @@ Learned on a 3CX V20 setup (November 2026). Menu names are from V20 Update 10.
 
 - `403` from another trunk's address: the call left on the business's normal line, so the Hail rule did not match (prefix, an empty field not empty, or rule order).
 - `401` or `407` from the SIP server: wrong username or password.
-- `486 Busy Here` from the SIP server: Hail refused the call. The number has no agent routed, or the workspace has no credit.
+- `486 Busy Here` from the SIP server: Hail refused the call (seen for a number with no agent routed). Read the failed call's end reason in Hail: `no_agent`, `insufficient_funds` and the like.
 - No line at all and Hail says `no_call_arrived`: the CID or inbound rule did not catch the call.
 
 **Agent voice**: set a voice native to the call's language; with no voice set, the default voice speaks with a foreign accent. Write brand names in the instructions and greeting as words ("Northgate"), not capitals ("NORTHGATE"): text-to-speech spells capitals letter by letter.
