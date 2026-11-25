@@ -1554,3 +1554,30 @@ async def test_purchase_blocked_by_running_check(
     lk.remove_inbound_number.assert_not_awaited()
     assert await _state(async_session, claim_id) == "unverified"
     assert await get_balance_cents(async_session, org) == 100000
+
+
+@pytest.mark.parametrize("problem", ["expired", "consumed", "by_request"])
+async def test_failing_purchase_keeps_the_claim(
+    async_session, org_and_key, monkeypatch, problem
+):
+    org, _, _ = org_and_key
+    row, offer = await seed_quote(async_session, org)
+    rival = (await insert_org_and_key(async_session, org_slug="rival"))[0]
+    claim_id = await _claim(async_session, rival, offer.e164)
+    if problem == "expired":
+        row.expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+    elif problem == "consumed":
+        row.number_id = claim_id
+    else:
+        row.offer = {**row.offer, "by_request": True}
+    await async_session.commit()
+    _pending_wire(monkeypatch, offer)
+    lk = AsyncMock()
+    try:
+        await acquire_offer(
+            async_session, org, row.id, country="PT", kind="local", billed=True, lk=lk
+        )
+    except HTTPException:
+        assert problem != "consumed"  # a consumed quote replays, no error
+    lk.remove_inbound_number.assert_not_awaited()
+    assert await _state(async_session, claim_id) == "unverified"

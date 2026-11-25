@@ -485,6 +485,26 @@ async def delete_connection(
         raise
 
 
+async def _unverified_count(db: AsyncSession, org_id: UUID) -> int:
+    return await db.scalar(
+        select(func.count())
+        .select_from(PhoneNumber)
+        .where(
+            PhoneNumber.organization_id == org_id,
+            PhoneNumber.provider == "pbx",
+            PhoneNumber.provisioning_state == "unverified",
+        )
+    )
+
+
+def _too_many_unverified() -> ConnectedNumberError:
+    return ConnectedNumberError(
+        "too_many_unverified",
+        None,
+        "check or remove the numbers waiting for their check first",
+    )
+
+
 CHECK_IN_PROGRESS_MESSAGE: Final = (
     "This number is being checked. Try again in 2 minutes."
 )
@@ -565,27 +585,19 @@ async def add_connected_number(
     e164 = phonenumbers.format_number(
         phonenumbers.parse(e164, None), phonenumbers.PhoneNumberFormat.E164
     )
-    connection_id = connection.id
+    connection_id, org_id = connection.id, connection.organization_id
+    # Free another claim only for a request that can still succeed: the same
+    # checks run again under the org lock below.
+    _live(connection)
+    if await _unverified_count(db, org_id) >= UNVERIFIED_PER_ORG:
+        raise _too_many_unverified()
     await give_way_unchecked_claim(db, lk, e164, keep_connection_id=connection_id)
-    await org_lock(db, connection.organization_id)
+    await org_lock(db, org_id)
     await db.refresh(connection)
     try:
         _live(connection)
-        unverified = await db.scalar(
-            select(func.count())
-            .select_from(PhoneNumber)
-            .where(
-                PhoneNumber.organization_id == connection.organization_id,
-                PhoneNumber.provider == "pbx",
-                PhoneNumber.provisioning_state == "unverified",
-            )
-        )
-        if unverified >= UNVERIFIED_PER_ORG:
-            raise ConnectedNumberError(
-                "too_many_unverified",
-                None,
-                "check or remove the numbers waiting for their check first",
-            )
+        if await _unverified_count(db, org_id) >= UNVERIFIED_PER_ORG:
+            raise _too_many_unverified()
     except BaseException:
         await db.rollback()
         raise

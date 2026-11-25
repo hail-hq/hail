@@ -1965,3 +1965,43 @@ async def test_give_way_livekit_failure_keeps_claim(async_session, lk, conn):
     assert e.value.code == "livekit_failed"
     assert await _state_of(async_session, claim) == "unverified"
     assert await _count(async_session, "+14155550100") == 1
+
+
+async def test_add_number_on_deleted_connection_keeps_others_claim(
+    async_session, lk, conn
+):
+    claim = await _number(async_session, conn, "unverified")
+    claim = SimpleNamespace(id=claim.id)
+    other = await _conn_of(async_session, lk, ORG_B)
+    other.deleted_at = datetime.now(timezone.utc)
+    await async_session.commit()
+    with pytest.raises(ConnectedNumberError) as e:
+        await add_connected_number(async_session, lk, other, "+14155550100")
+    assert e.value.code == "connection_deleted"
+    assert await _state_of(async_session, claim) == "unverified"
+    lk.remove_inbound_number.assert_not_awaited()
+
+
+async def test_add_number_over_cap_keeps_others_claim(async_session, lk, conn):
+    claim = await _number(async_session, conn, "unverified")
+    claim = SimpleNamespace(id=claim.id)
+    other = await _conn_of(async_session, lk, ORG_B)
+    for i in range(connected_numbers.UNVERIFIED_PER_ORG):
+        async_session.add(
+            PhoneNumber(
+                organization_id=ORG_B,
+                e164=f"+1415555{200 + i:04d}",
+                country_code="US",
+                number_type="local",
+                capabilities=["voice"],
+                provider="pbx",
+                sip_connection_id=other.id,
+                provisioning_state="unverified",
+            )
+        )
+    await async_session.commit()
+    with pytest.raises(ConnectedNumberError) as e:
+        await add_connected_number(async_session, lk, other, "+14155550100")
+    assert e.value.code == "too_many_unverified"
+    assert await _state_of(async_session, claim) == "unverified"
+    lk.remove_inbound_number.assert_not_awaited()

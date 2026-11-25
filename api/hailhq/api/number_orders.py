@@ -511,14 +511,22 @@ async def _free_unchecked_claim(
 ) -> None:
     """Let an unchecked connected-number claim on the quoted number give way.
     Runs before the buyer's org lock: it may take the claim's org lock."""
-    offer = await db.scalar(
-        select(NumberOffer.offer).where(
+    quote = await db.scalar(
+        select(NumberOffer).where(
             NumberOffer.id == quote_id, NumberOffer.organization_id == org
         )
     )
-    e164 = (offer or {}).get("e164")
-    if not e164:
+    # Only a quote that can still buy frees a claim. The checks under the
+    # org lock run again; these are the ones a failing request would fail.
+    if (
+        quote is None
+        or quote.number_id is not None
+        or quote.expires_at <= datetime.now(timezone.utc)
+        or (quote.offer or {}).get("by_request")
+        or not (quote.offer or {}).get("e164")
+    ):
         return
+    e164 = quote.offer["e164"]
     try:
         await give_way_unchecked_claim(db, lk, e164)
     except ConnectedNumberError as exc:
