@@ -58,7 +58,7 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-# The width of ``knowledge_pieces.embedding`` (migration 0092).
+# The width of ``knowledge_pieces.embedding`` (migration 0093).
 DIMS = 1536
 # Texts per request: Gemini's OpenAI-compatible endpoint takes at most 100.
 BATCH = 100

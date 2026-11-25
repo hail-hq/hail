@@ -7,7 +7,9 @@ import re
 import uuid
 
 import pytest
+from hailhq.api.numbers import resolve_org_number
 from hailhq.core import telephony_catalog
+from hailhq.core.models import PhoneNumber
 from hailhq.core.providers.sms.base import SmsProvisioningError
 
 
@@ -1134,3 +1136,176 @@ async def test_quotes_subject_drops_offer_the_catalog_does_not_accept(
     resp = await _quotes(client, org_and_key[2], subject_type="business")
     assert resp.status_code == 200, resp.text
     assert resp.json()["offers"] == []
+
+
+async def _pbx_number(
+    session,
+    org_id,
+    *,
+    host,
+    outbound_trunk,
+    e164,
+    state="active",
+    inbound_trunk="ST_in_pbx",
+):
+    from hailhq.core.models import SipConnection
+
+    conn = SipConnection(
+        organization_id=org_id,
+        label="Main office",
+        inbound_username=f"hail-{uuid.uuid4().hex[:12]}",
+        encrypted_inbound_password="token",
+        default_region="US",
+        pbx_host=host,
+        livekit_inbound_trunk_id=inbound_trunk,
+        livekit_outbound_trunk_id=outbound_trunk,
+    )
+    session.add(conn)
+    await session.flush()
+    number = PhoneNumber(
+        organization_id=org_id,
+        e164=e164,
+        country_code="US",
+        number_type="local",
+        capabilities=["voice"],
+        provider="pbx",
+        sip_connection_id=conn.id,
+        provisioning_state=state,
+    )
+    session.add(number)
+    await session.commit()
+    return number
+
+
+async def test_route_number_refuses_unverified(client, org_and_key, async_session):
+    org_id, _, plaintext = org_and_key
+    headers = {"Authorization": f"Bearer {plaintext}"}
+    number = await _pbx_number(
+        async_session,
+        org_id,
+        host=None,
+        outbound_trunk=None,
+        e164="+14155550100",
+        state="unverified",
+    )
+    r = await client.patch(
+        f"/numbers/{number.id}",
+        json={"voice_agent_id": str(uuid.uuid4())},
+        headers=headers,
+    )
+    assert r.status_code == 422, r.text
+    assert "not checked yet" in r.text
+    assert r.json()["detail"][0]["loc"] == ["path", "number_id"]
+
+
+async def test_default_caller_id_skips_answer_only_pbx_number(
+    async_session, org_and_key, add_phone_number
+):
+    org_id, _, _ = org_and_key
+    await _pbx_number(
+        async_session, org_id, host=None, outbound_trunk=None, e164="+14155550100"
+    )
+    await add_phone_number(async_session, org_id, e164="+14155550101")
+    found = await resolve_org_number(async_session, org_id, None)
+    assert found.provider == "twilio"
+
+
+async def test_default_caller_id_is_never_a_pbx_number(
+    async_session, org_and_key, add_phone_number
+):
+    """A connected number is the caller ID only when ``from`` names it: an
+    older one with an outbound address still loses to a carrier number."""
+    org_id, _, _ = org_and_key
+    pbx = await _pbx_number(
+        async_session,
+        org_id,
+        host="pbx.example.com",
+        outbound_trunk="ST_out_pbx",
+        e164="+14155550100",
+    )
+    await add_phone_number(async_session, org_id, e164="+14155550101")
+    assert (await resolve_org_number(async_session, org_id, None)).provider == "twilio"
+    named = await resolve_org_number(async_session, org_id, "+14155550100")
+    assert named.id == pbx.id
+
+
+async def test_default_caller_id_with_only_pbx_numbers_is_none(
+    async_session, org_and_key
+):
+    """With no carrier number, a call without ``from`` uses the shared pool."""
+    org_id, _, _ = org_and_key
+    await _pbx_number(
+        async_session,
+        org_id,
+        host="pbx.example.com",
+        outbound_trunk="ST_out_pbx",
+        e164="+14155550100",
+    )
+    assert await resolve_org_number(async_session, org_id, None) is None
+
+
+async def test_release_endpoint_removes_pbx_number(
+    client, org_and_key, async_session, livekit_mock
+):
+    org_id, _, plaintext = org_and_key
+    number = await _pbx_number(
+        async_session, org_id, host=None, outbound_trunk=None, e164="+14155550100"
+    )
+    r = await client.delete(
+        f"/numbers/{number.id}", headers={"Authorization": f"Bearer {plaintext}"}
+    )
+    assert r.status_code == 204, r.text
+    await async_session.refresh(number)
+    assert number.provisioning_state == "released"
+    livekit_mock.remove_inbound_number.assert_awaited_once_with(
+        "ST_in_pbx", "+14155550100"
+    )
+
+
+async def test_release_pbx_number_livekit_failure_is_502(
+    client, org_and_key, async_session, livekit_mock
+):
+    org_id, _, plaintext = org_and_key
+    number = await _pbx_number(
+        async_session, org_id, host=None, outbound_trunk=None, e164="+14155550100"
+    )
+    livekit_mock.remove_inbound_number.side_effect = RuntimeError("down")
+    r = await client.delete(
+        f"/numbers/{number.id}", headers={"Authorization": f"Bearer {plaintext}"}
+    )
+    assert r.status_code == 502, r.text
+    await async_session.refresh(number)
+    assert number.provisioning_state == "active"
+
+
+async def test_number_reads_accept_connected_rows(client, org_and_key, async_session):
+    org_id, _, plaintext = org_and_key
+    headers = {"Authorization": f"Bearer {plaintext}"}
+    unverified = await _pbx_number(
+        async_session,
+        org_id,
+        host=None,
+        outbound_trunk=None,
+        e164="+14155550100",
+        state="unverified",
+    )
+    await _pbx_number(
+        async_session, org_id, host=None, outbound_trunk=None, e164="+14155550101"
+    )
+    assert (await client.get("/numbers", headers=headers)).status_code == 200
+    r = await client.get(f"/numbers/{unverified.id}", headers=headers)
+    assert r.json()["provisioning_state"] == "unverified"
+
+
+async def test_enable_sms_on_connected_number_is_refused(
+    client, org_and_key, async_session
+):
+    org_id, _, plaintext = org_and_key
+    number = await _pbx_number(
+        async_session, org_id, host=None, outbound_trunk=None, e164="+14155550100"
+    )
+    r = await client.post(
+        f"/numbers/{number.id}/enable-sms",
+        headers={"Authorization": f"Bearer {plaintext}"},
+    )
+    assert r.status_code == 422, r.text

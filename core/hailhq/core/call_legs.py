@@ -15,10 +15,11 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Literal
 from uuid import UUID
 
-from hailhq.core.carrier_routing import carrier
+from hailhq.core.carrier_routing import PBX, carrier
 from hailhq.core.db import session_scope
 from hailhq.core.models import Call, CallLeg
 from hailhq.core.providers.voice.base import CarrierNotConfigured, LegCost, LegRef
@@ -69,26 +70,37 @@ async def record_call_legs(call_id: UUID, legs: list[LegRecord]) -> None:
             )
             if provider is None:
                 return
-            stmt = insert(CallLeg).values(
-                [
-                    {
-                        "call_id": call_id,
-                        "role": leg.role,
-                        "provider": provider,
-                        "direction": leg.direction,
-                        "sip_call_id": leg.sip_call_id,
-                        "carrier_call_id": leg.carrier_call_id,
-                        "to_e164": leg.to_e164,
-                        "joined_at": leg.joined_at,
-                        "answered_at": leg.answered_at,
-                        "left_at": leg.left_at,
-                        "cost_status": (
-                            "pending" if _priceable(provider, leg) else "missing"
-                        ),
-                    }
-                    for leg in legs
-                ]
-            )
+            now = datetime.now(timezone.utc)
+            rows = []
+            for leg in legs:
+                row = {
+                    "call_id": call_id,
+                    "role": leg.role,
+                    "provider": provider,
+                    "direction": leg.direction,
+                    "sip_call_id": leg.sip_call_id,
+                    "carrier_call_id": leg.carrier_call_id,
+                    "to_e164": leg.to_e164,
+                    "joined_at": leg.joined_at,
+                    "answered_at": leg.answered_at,
+                    "left_at": leg.left_at,
+                }
+                if provider == PBX:
+                    # The customer's own phone system carries these legs: no
+                    # carrier is asked, and the cost to Hail is 0. A handover
+                    # leg is charged by hail-website from answered_at/left_at.
+                    row.update(
+                        cost_status="found",
+                        cost_usd=Decimal(0),
+                        usd_per_minute=Decimal(0),
+                        cost_checked_at=now,
+                    )
+                else:
+                    row["cost_status"] = (
+                        "pending" if _priceable(provider, leg) else "missing"
+                    )
+                rows.append(row)
+            stmt = insert(CallLeg).values(rows)
             await session.execute(
                 stmt.on_conflict_do_nothing(
                     index_elements=["call_id", "sip_call_id"],

@@ -20,6 +20,7 @@ from hailhq.core.livekit import LiveKitClient
 from livekit import api
 
 CALL_ID = UUID("11111111-2222-3333-4444-555555555555")
+CONN_ID = UUID("66666666-7777-8888-9999-000000000000")
 
 
 @pytest.fixture()
@@ -38,6 +39,13 @@ def client(monkeypatch: pytest.MonkeyPatch) -> LiveKitClient:
     fake_api.agent_dispatch.delete_dispatch = AsyncMock()
     fake_api.sip = MagicMock()
     fake_api.sip.create_sip_participant = AsyncMock()
+    fake_api.sip.create_inbound_trunk = AsyncMock()
+    fake_api.sip.create_outbound_trunk = AsyncMock()
+    fake_api.sip.update_inbound_trunk_fields = AsyncMock()
+    fake_api.sip.update_outbound_trunk_fields = AsyncMock()
+    fake_api.sip.delete_trunk = AsyncMock()
+    fake_api.sip.list_dispatch_rule = AsyncMock()
+    fake_api.sip.update_dispatch_rule = AsyncMock()
     fake_api.aclose = AsyncMock()
 
     with patch("hailhq.core.livekit.api.LiveKitAPI", return_value=fake_api):
@@ -131,6 +139,30 @@ async def test_dispatch_agent_serializes_metadata_and_returns_id(
     # The proto field is a string, we must serialize the dict ourselves.
     assert req.metadata == json.dumps(metadata)
     assert json.loads(req.metadata)["org_name"] is None
+
+
+async def test_create_sip_participant_without_failover_tries_once(
+    client: LiveKitClient,
+) -> None:
+    """``failover=False`` dials through a client that never replays the
+    request to another region, so an error means this one attempt failed."""
+    once = MagicMock()  # api.LiveKitAPI is patched by the fixture
+    once.sip.create_sip_participant = AsyncMock()
+    once.aclose = AsyncMock()
+    with patch("hailhq.core.livekit.api.LiveKitAPI", return_value=once) as made:
+        await client.create_sip_participant(
+            room_name=f"hail-{CALL_ID}",
+            to_e164="+14155559999",
+            from_e164="+14155551234",
+            sip_trunk_id="ST_trunk1",
+            participant_identity="pbx-check-1",
+            failover=False,
+        )
+    assert made.call_args.kwargs["failover"] is False
+    once.sip.create_sip_participant.assert_awaited_once()
+    client._lkapi.sip.create_sip_participant.assert_not_awaited()
+    await client.aclose()
+    once.aclose.assert_awaited_once()
 
 
 async def test_create_sip_participant_maps_to_e164_and_from_e164(
@@ -244,3 +276,126 @@ async def test_add_and_remove_inbound_number(client: LiveKitClient) -> None:
     await client.remove_inbound_number("ST_in", "+14155550100")
     _, kwargs = client._lkapi.sip.update_inbound_trunk_fields.await_args
     assert list(kwargs["numbers"].remove) == ["+14155550100"]
+
+
+async def test_create_pbx_inbound_trunk_lists_only_the_placeholder(client):
+    await client.create_pbx_inbound_trunk(CONN_ID, "hail-ab12", "p" * 32)
+    (req,), _ = client._lkapi.sip.create_inbound_trunk.call_args
+    assert isinstance(req, api.CreateSIPInboundTrunkRequest)
+    assert req.trunk.name == f"pbx-{CONN_ID}"
+    assert list(req.trunk.numbers) == [f"pbx-{CONN_ID}"]
+    assert req.trunk.auth_username == "hail-ab12"
+
+
+async def test_create_pbx_outbound_trunk_dials_the_pbx(client):
+    await client.create_pbx_outbound_trunk(
+        CONN_ID, "pbx.example.com", 5060, "tls", None, None
+    )
+    (req,), _ = client._lkapi.sip.create_outbound_trunk.call_args
+    assert req.trunk.name == f"pbx-{CONN_ID}-out"
+    assert req.trunk.address == "pbx.example.com:5060"
+    assert req.trunk.transport == api.SIPTransport.SIP_TRANSPORT_TLS
+    assert list(req.trunk.numbers) == ["*"]
+    assert req.trunk.auth_username == ""
+
+
+@pytest.mark.parametrize(
+    "name,enum",
+    [
+        ("auto", api.SIPTransport.SIP_TRANSPORT_AUTO),
+        ("udp", api.SIPTransport.SIP_TRANSPORT_UDP),
+        ("tcp", api.SIPTransport.SIP_TRANSPORT_TCP),
+        ("tls", api.SIPTransport.SIP_TRANSPORT_TLS),
+    ],
+)
+async def test_transport_map(client, name, enum):
+    await client.create_pbx_outbound_trunk(
+        CONN_ID, "pbx.example.com", 5060, name, None, None
+    )
+    (req,), _ = client._lkapi.sip.create_outbound_trunk.call_args
+    assert req.trunk.transport == enum
+
+
+async def test_set_pbx_inbound_credentials_changes_only_auth(client):
+    await client.set_pbx_inbound_credentials("ST_1", "hail-ab12", "q" * 32)
+    client._lkapi.sip.update_inbound_trunk_fields.assert_awaited_once_with(
+        "ST_1", auth_username="hail-ab12", auth_password="q" * 32
+    )
+
+
+async def test_update_pbx_outbound_trunk_sets_address_and_auth(client):
+    await client.update_pbx_outbound_trunk(
+        "ST_2", "pbx.example.com", 5061, "tcp", "pbxuser", "pw"
+    )
+    client._lkapi.sip.update_outbound_trunk_fields.assert_awaited_once_with(
+        "ST_2",
+        address="pbx.example.com:5061",
+        transport=api.SIPTransport.SIP_TRANSPORT_TCP,
+        auth_username="pbxuser",
+        auth_password="pw",
+    )
+
+
+async def test_remove_inbound_number_refuses_placeholder(client):
+    with pytest.raises(ValueError):
+        await client.remove_inbound_number("ST_1", f"pbx-{CONN_ID}")
+    client._lkapi.sip.update_inbound_trunk_fields.assert_not_awaited()
+
+
+async def test_delete_sip_trunk_treats_404_as_done(client):
+    client._lkapi.sip.delete_trunk.side_effect = api.TwirpError(
+        "not_found", "gone", status=404
+    )
+    assert await client.delete_sip_trunk("ST_1") is None
+    client._lkapi.sip.delete_trunk.assert_awaited_once()
+
+
+async def test_delete_sip_trunk_raises_other_errors(client):
+    client._lkapi.sip.delete_trunk.side_effect = api.TwirpError(
+        "internal", "boom", status=500
+    )
+    with pytest.raises(api.TwirpError):
+        await client.delete_sip_trunk("ST_1")
+
+
+async def test_create_sip_participant_can_wait_for_answer(client):
+    await client.create_sip_participant(
+        "r",
+        "+14155550100",
+        "+14155550199",
+        "ST_1",
+        "check-1",
+        wait_until_answered=True,
+        ringing_timeout_seconds=30,
+    )
+    (req,), _ = client._lkapi.sip.create_sip_participant.call_args
+    assert req.wait_until_answered is True
+    assert req.ringing_timeout.seconds == 30
+
+
+async def test_clear_dispatch_rule_trunks_updates_rule_with_no_trunks(client):
+    rule = api.SIPDispatchRuleInfo(
+        sip_dispatch_rule_id="SDR_1", name="hail-inbound", trunk_ids=["ST_a", "ST_b"]
+    )
+    other = api.SIPDispatchRuleInfo(
+        sip_dispatch_rule_id="SDR_2", name="other", trunk_ids=["ST_c"]
+    )
+    client._lkapi.sip.list_dispatch_rule.return_value = api.ListSIPDispatchRuleResponse(
+        items=[other, rule]
+    )
+    client._lkapi.sip.update_dispatch_rule.return_value = api.SIPDispatchRuleInfo(
+        sip_dispatch_rule_id="SDR_1", name="hail-inbound"
+    )
+    assert await client.clear_dispatch_rule_trunks("hail-inbound") == ("SDR_1", [])
+    (rule_id, sent), _ = client._lkapi.sip.update_dispatch_rule.call_args
+    assert rule_id == "SDR_1"
+    assert list(sent.trunk_ids) == [] and sent.name == "hail-inbound"
+    client._lkapi.sip.update_dispatch_rule.assert_awaited_once()
+
+
+async def test_clear_dispatch_rule_trunks_unknown_name_is_none(client):
+    client._lkapi.sip.list_dispatch_rule.return_value = api.ListSIPDispatchRuleResponse(
+        items=[]
+    )
+    assert await client.clear_dispatch_rule_trunks("hail-inbound") is None
+    client._lkapi.sip.update_dispatch_rule.assert_not_awaited()

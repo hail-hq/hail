@@ -22,6 +22,10 @@ Billing reads these costs: the hail-website rater charges each call from its leg
 
 Each lookup is the carrier's `leg_costs` function in `core/hailhq/core/providers/voice/<carrier>.py`, registered in `CARRIERS` ([`carrier_routing.py`](../../core/hailhq/core/carrier_routing.py)). It uses the carrier keys the api already has. No new env key.
 
+Connected calls (provider `pbx`, a customer's own phone system): legs are written `found` at 0 with `usd_per_minute` 0, and no carrier is asked. hail-website charges a `pbx` handover leg from its `answered_at` and `left_at`.
+
+An ownership check call writes no `call_legs` rows, so hail-website keeps its rate-table estimate for it.
+
 Carriers bill in steps: Twilio and Telnyx round US calls up to the minute. `billed_seconds` is the time the carrier billed, not the talk time. Twilio does not report it, so it stays empty there.
 
 ## Check that costs arrive

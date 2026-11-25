@@ -78,7 +78,7 @@ from hailhq.core.call_allowance import (
     minutes_affordable,
     paid_minutes,
 )
-from hailhq.core.carrier_routing import voice_route
+from hailhq.core.carrier_routing import PBX, voice_route
 from hailhq.core.compliance_gate import (
     check_email_allowed,
     check_handover_allowed,
@@ -126,6 +126,7 @@ from hailhq.core.handover import (
     handover_sms_text,
     has_answered_handover,
     load_handover,
+    pbx_extension,
 )
 from hailhq.core.internal_webhook import quote_call_price, quotes_enabled
 from hailhq.core.models import (
@@ -1957,6 +1958,9 @@ async def agent_send_email(
 
 _SPOKEN_HANDOVER_UNAVAILABLE = "I can't connect you to that person right now."
 _SPOKEN_HANDOVER_DONE = "You are already connected."
+# A caller ID a connected phone system passes on to the handover: +E.164 or
+# an extension of 1 to 6 digits.
+_PBX_CALLER_ID = re.compile(r"\+[1-9][0-9]{1,14}|[0-9]{1,6}")
 
 # Wire id: a contact's uuid or ``member:<user uuid>`` (dispatch metadata
 # ``handover_targets``).
@@ -2058,7 +2062,11 @@ async def _linked_person(
     for row in (await load_handover(db, [call.agent_id])).get(call.agent_id, []):
         if row["contact_id"] == wire_id:
             return HandoverPerson(
-                wire_id, row["name"], row["phone_e164"], row.get("email")
+                wire_id,
+                row["name"],
+                row["phone_e164"],
+                row.get("email"),
+                row.get("extension"),
             )
     return None
 
@@ -2099,10 +2107,25 @@ async def agent_handover(
         db, call.organization_id
     ):
         return await _deny_handover(call, body, "insufficient_funds")
+    # The Hail number row: outbound dials from it, inbound rang it.
+    number_id = (
+        call.to_number_id if call.direction == "inbound" else call.from_number_id
+    )
+    number = await db.get(PhoneNumber, number_id) if number_id else None
+    if number is None:
+        return await _deny_handover(call, body, "carrier_route_failed")
     contact = await _linked_person(db, call, body.contact_id)
-    if contact is None or not contact.phone_e164:
+    if contact is None:
         return deny
-    if contact.phone_e164 == _other_party(call):
+    via_pbx = call.provider == PBX
+    # On a connected call the extension wins: the phone system dials it. A
+    # carrier call dials only a phone.
+    extension = pbx_extension(contact.extension) if via_pbx else None
+    target = extension or contact.phone_e164
+    if not target:
+        return deny
+    other_party = _other_party(call)
+    if target == other_party:
         # Dialing it rings the phone already on the call: it declines or goes
         # to voicemail, and the agent introduces the caller to the mailbox.
         return await _deny_handover(
@@ -2111,34 +2134,40 @@ async def agent_handover(
             "contact_is_on_call",
             spoken=ON_CALL_LINE.format(name=contact.name),
         )
-    # Any carrier, as on save: the second leg dials a person, not a number
-    # the call's carrier sells.
-    country = country_of(contact.phone_e164)
+    if extension is None:
+        # Any carrier, as on save: the second leg dials a person, not a
+        # number the call's carrier sells.
+        country = country_of(target)
+        try:
+            sold = country is not None and sells_in(country)
+        except Exception:  # e.g. a missing catalog file
+            sold = False
+        if not sold:
+            return await _deny_handover(call, body, "country_not_sold")
+        gate = await check_handover_allowed(db, call.organization_id, target)
+        if not gate.allowed:
+            return await _deny_handover(call, body, gate.reason or "gate")
     try:
-        sold = country is not None and sells_in(country)
-    except Exception:  # e.g. a missing catalog file
-        sold = False
-    if not sold:
-        return await _deny_handover(call, body, "country_not_sold")
-    gate = await check_handover_allowed(db, call.organization_id, contact.phone_e164)
-    if not gate.allowed:
-        return await _deny_handover(call, body, gate.reason or "gate")
-    try:
-        trunk_id, headers = voice_route(call.provider)
-    except Exception:
+        trunk_id, headers = await voice_route(db, number)
+    except Exception:  # an unset trunk, a deleted connection, a DB error
+        logger.warning("handover route failed for call %s", call.id, exc_info=True)
         return await _deny_handover(call, body, "carrier_route_failed")
-    # The Hail number on this call: outbound dials from it, inbound rang it.
     hail_number = call.to_e164 if call.direction == "inbound" else call.from_e164
+    # A connected call shows the person on the line to the handover contact;
+    # a withheld or unusable caller ID shows the Hail number instead.
+    from_e164 = hail_number
+    if via_pbx and other_party and _PBX_CALLER_ID.fullmatch(other_party):
+        from_e164 = other_party
     max_seconds = None
     if call.metadata_.get(CALL_META_BILLED) and quotes_enabled():
-        max_seconds = await _handover_cap(db, call, contact.phone_e164, hail_number)
+        max_seconds = await _handover_cap(db, call, target, hail_number)
         if max_seconds == 0:
             return await _deny_handover(call, body, "insufficient_funds")
     return AgentHandoverResponse(
         ok=True,
         spoken="",
-        to_e164=contact.phone_e164,
-        from_e164=hail_number,
+        to_e164=target,
+        from_e164=from_e164,
         trunk_id=trunk_id,
         headers=headers or None,
         max_seconds=max_seconds,

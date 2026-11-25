@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from hailhq.core import inbound_calls
@@ -10,17 +11,33 @@ from hailhq.core.config import settings
 from hailhq.core.models import (
     AccountCredit,
     Agent,
+    AgentHandoverContact,
     Call,
     CallEvent,
+    Contact,
     OrganizationCallSettings,
     PhoneNumber,
+    SipConnection,
     WebhookDelivery,
     WebhookSubscription,
 )
-from sqlalchemy import select, text
+from hailhq.core.secret_cipher import generate_key
+from hailhq.core.sip_connections import (
+    CHECK_CALL_META,
+    CHECK_CODE_META,
+    CHECK_EVENT_KIND,
+    CHECK_WINDOW,
+    hash_check_code,
+)
+from sqlalchemy import func, select, text
 
 DIALED = "+14155550100"
 CALLER = "+33612345678"
+NOW = datetime(2026, 11, 18, 12, 0, tzinfo=timezone.utc)
+CheckArrived = inbound_calls.CheckArrived
+Rejected = inbound_calls.Rejected
+finish_check = inbound_calls.finish_check
+open_inbound_call = inbound_calls.open_inbound_call
 
 
 @pytest.fixture(autouse=True)
@@ -38,8 +55,8 @@ def no_org_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(inbound_calls, "fetch_organization_name", fake)
 
 
-async def _seed(session, *, credits=10_000, agent=True, **number_kwargs):
-    org = uuid.uuid4()
+async def _seed(session, *, credits=10_000, agent=True, org=None, **number_kwargs):
+    org = org or uuid.uuid4()
     if credits:
         session.add(
             AccountCredit(
@@ -178,6 +195,49 @@ async def test_shared_trunk_serves_every_carrier(async_session, monkeypatch) -> 
         async_session, _attrs(dialed="+351300509184", trunk_id="ST_shared")
     )
     assert isinstance(outcome, inbound_calls.Accepted)
+
+
+async def _pbx_seed(
+    session, inbound_trunk_id="ST_in_pbx", outbound_trunk_id=None, **number_kwargs
+):
+    org = uuid.uuid4()
+    conn = SipConnection(
+        organization_id=org,
+        label="Main office",
+        inbound_username="hail-aabbccddeeff",
+        encrypted_inbound_password="token",
+        default_region="US",
+        pbx_host="pbx.example.com" if outbound_trunk_id else None,
+        livekit_inbound_trunk_id=inbound_trunk_id,
+        livekit_outbound_trunk_id=outbound_trunk_id,
+    )
+    session.add(conn)
+    await session.flush()
+    return await _seed(
+        session,
+        provider="pbx",
+        sip_connection_id=conn.id,
+        org=org,
+        capabilities=["voice"],
+        **number_kwargs,
+    )
+
+
+async def test_pbx_call_on_its_connection_trunk_is_accepted(async_session) -> None:
+    await _pbx_seed(async_session)
+    outcome = await inbound_calls.open_inbound_call(
+        async_session, _attrs(trunk_id="ST_in_pbx")
+    )
+    assert isinstance(outcome, inbound_calls.Accepted)
+
+
+async def test_pbx_call_on_other_trunk_is_refused(async_session) -> None:
+    await _pbx_seed(async_session)
+    outcome = await inbound_calls.open_inbound_call(
+        async_session, _attrs(trunk_id="ST_in_tw")
+    )
+    assert isinstance(outcome, inbound_calls.Rejected)
+    assert outcome.reason == "carrier_route_failed"
 
 
 async def test_missing_trunk_id_is_refused(async_session) -> None:
@@ -373,6 +433,469 @@ async def test_org_name_falls_back_to_hail_so_when_the_db_fails(monkeypatch) -> 
 
     monkeypatch.setattr(inbound_calls, "session_scope", broken)
     assert await inbound_calls._organization_name(uuid.uuid4()) == "Acme Dental"
+
+
+async def test_pbx_call_answers_with_normalized_caller(async_session) -> None:
+    await _pbx_seed(async_session)
+    out = await inbound_calls.open_inbound_call(
+        async_session, _attrs(caller="4155550199", trunk_id="ST_in_pbx")
+    )
+    assert isinstance(out, inbound_calls.Accepted)
+    assert out.metadata["from_e164"] == "+14155550199"
+    call = await async_session.get(Call, out.metadata["call_id"])
+    assert call.from_e164 == "+14155550199"
+
+
+async def test_pbx_call_from_extension_keeps_digits(async_session) -> None:
+    await _pbx_seed(async_session)
+    out = await inbound_calls.open_inbound_call(
+        async_session, _attrs(caller="101", trunk_id="ST_in_pbx")
+    )
+    assert out.metadata["from_e164"] == "101"
+
+
+async def test_refused_pbx_call_row_uses_normalized_caller(async_session) -> None:
+    await _pbx_seed(async_session)
+    out = await inbound_calls.open_inbound_call(
+        async_session, _attrs(caller="4155550199", trunk_id="ST_in_tw")
+    )
+    assert isinstance(out, inbound_calls.Rejected)
+    call = await async_session.get(Call, out.call_id)
+    assert call.from_e164 == "+14155550199"
+
+
+async def test_carrier_call_caller_still_gets_plus(async_session) -> None:
+    await _seed(async_session)
+    out = await inbound_calls.open_inbound_call(
+        async_session, _attrs(caller="14155550199")
+    )
+    assert out.metadata["from_e164"] == "+14155550199"
+
+
+async def test_refused_call_of_deleted_connection_keeps_extension(
+    async_session,
+) -> None:
+    _org, _agent, number = await _pbx_seed(async_session)
+    conn = await async_session.get(SipConnection, number.sip_connection_id)
+    conn.deleted_at = datetime.now(timezone.utc)
+    await async_session.commit()
+    out = await inbound_calls.open_inbound_call(
+        async_session, _attrs(caller="101", trunk_id="ST_in_pbx")
+    )
+    assert isinstance(out, inbound_calls.Rejected)
+    call = await async_session.get(Call, out.call_id)
+    assert call.from_e164 == "101"
+
+
+async def _handover_contacts(session, org, agent) -> None:
+    """One contact with a phone, one with only an extension."""
+    phone = Contact(organization_id=org, name="Sam Lee", phone_e164="+14155550123")
+    ext = Contact(organization_id=org, name="Front desk", extension="800")
+    session.add_all([phone, ext])
+    await session.flush()
+    session.add_all(
+        [
+            AgentHandoverContact(
+                agent_id=agent.id, contact_id=phone.id, note="Sales", position=0
+            ),
+            AgentHandoverContact(
+                agent_id=agent.id, contact_id=ext.id, note="Desk", position=1
+            ),
+        ]
+    )
+    await session.commit()
+
+
+async def test_pbx_call_offers_phone_and_extension_targets(async_session) -> None:
+    org, agent, _ = await _pbx_seed(async_session, outbound_trunk_id="ST_out_pbx")
+    await _handover_contacts(async_session, org, agent)
+    out = await inbound_calls.open_inbound_call(
+        async_session, _attrs(trunk_id="ST_in_pbx")
+    )
+    labels = [t["label"] for t in out.metadata["handover_targets"]]
+    assert labels == ["Sam Lee", "Front desk"]
+
+
+async def test_answer_only_pbx_call_offers_no_handover(async_session) -> None:
+    """A phone system that only answers has no address for the second leg:
+    every handover would fail, so the agent is offered none."""
+    org, agent, _ = await _pbx_seed(async_session)
+    await _handover_contacts(async_session, org, agent)
+    out = await inbound_calls.open_inbound_call(
+        async_session, _attrs(trunk_id="ST_in_pbx")
+    )
+    assert isinstance(out, inbound_calls.Accepted)
+    assert out.metadata["handover_targets"] == []
+
+
+# Ownership check, inbound side.
+
+
+def utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def attrs(**over) -> inbound_calls.SipAttributes:
+    return _attrs(**over)
+
+
+@pytest.fixture(autouse=True)
+def secret_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The check code hash is keyed from HAIL_PROVIDER_SECRET_KEY."""
+    monkeypatch.setattr(settings, "hail_provider_secret_key", generate_key())
+
+
+@pytest.fixture()
+async def unverified_number(async_session):
+    """``+14155550100`` on a connection whose inbound trunk is ``ST_in_pbx``."""
+    _org, _agent, number = await _pbx_seed(
+        async_session, provisioning_state="unverified"
+    )
+    return number
+
+
+@pytest.fixture()
+def seed_check_call(async_session):
+    async def seed(
+        number,
+        status,
+        requested_at,
+        code="482913",
+        number_id=None,
+        from_pool=True,
+        to_e164=None,
+    ):
+        pool = PhoneNumber(
+            organization_id=None if from_pool else number.organization_id,
+            is_pool=from_pool,
+            e164="+14155550199",
+            country_code="US",
+            number_type="local",
+            provider="twilio",
+            provisioning_state="active",
+        )
+        async_session.add(pool)
+        await async_session.flush()
+        terminal = status in ("completed", "failed", "busy", "no_answer", "canceled")
+        metadata = {CHECK_CALL_META: str(number_id or number.id)}
+        if code is not None:
+            metadata[CHECK_CODE_META] = hash_check_code(code)
+        call = Call(
+            organization_id=number.organization_id,
+            from_number_id=pool.id,
+            from_e164=pool.e164,
+            to_e164=to_e164 or number.e164,
+            direction="outbound",
+            status=status,
+            end_reason="user_unavailable" if terminal else None,
+            voice_config={},
+            requested_at=requested_at,
+            metadata_=metadata,
+        )
+        async_session.add(call)
+        await async_session.commit()
+        return call
+
+    return seed
+
+
+@pytest.fixture()
+def last_check_event(async_session):
+    async def last(check):
+        return (
+            await async_session.execute(
+                select(CallEvent)
+                .where(
+                    CallEvent.call_id == check.id, CallEvent.kind == CHECK_EVENT_KIND
+                )
+                .order_by(CallEvent.occurred_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+
+    return last
+
+
+async def check_events(session, check) -> list[dict]:
+    rows = (
+        await session.execute(
+            select(CallEvent.payload)
+            .where(CallEvent.call_id == check.id, CallEvent.kind == CHECK_EVENT_KIND)
+            .order_by(CallEvent.occurred_at)
+        )
+    ).scalars()
+    return list(rows)
+
+
+async def count_rows(session, model) -> int:
+    return await session.scalar(select(func.count()).select_from(model))
+
+
+async def test_check_arrival_on_connection_trunk_does_not_activate_yet(
+    async_session, unverified_number, seed_check_call, last_check_event
+):
+    check = await seed_check_call(
+        unverified_number, status="ringing", requested_at=utcnow()
+    )
+    out = await open_inbound_call(
+        async_session, attrs(dialed="+14155550100", trunk_id="ST_in_pbx")
+    )
+    assert out == CheckArrived(unverified_number.id, check.id)
+    assert unverified_number.provisioning_state == "unverified"
+    assert (await last_check_event(check)).payload == {"outcome": "arrived"}
+
+
+async def test_right_code_activates(
+    async_session, unverified_number, seed_check_call, last_check_event
+):
+    check = await seed_check_call(
+        unverified_number, status="in_progress", requested_at=utcnow()
+    )
+    assert (
+        await finish_check(
+            async_session,
+            CheckArrived(unverified_number.id, check.id),
+            "482913",
+            now=NOW,
+        )
+        is True
+    )
+    assert unverified_number.provisioning_state == "active"
+    assert unverified_number.acquired_at == NOW
+    assert (await last_check_event(check)).payload == {"outcome": "passed"}
+
+
+@pytest.mark.parametrize("digits", ["000000", "", "48291"])
+async def test_wrong_or_missing_code_does_not_activate(
+    async_session, unverified_number, seed_check_call, last_check_event, digits
+):
+    check = await seed_check_call(
+        unverified_number, status="in_progress", requested_at=utcnow()
+    )
+    assert (
+        await finish_check(
+            async_session, CheckArrived(unverified_number.id, check.id), digits, now=NOW
+        )
+        is False
+    )
+    assert unverified_number.provisioning_state == "unverified"
+    assert (await last_check_event(check)).payload == {"outcome": "code_not_received"}
+
+
+async def test_check_arrival_on_other_trunk_does_not_activate(
+    async_session, unverified_number, seed_check_call, last_check_event
+):
+    check = await seed_check_call(
+        unverified_number, status="ringing", requested_at=utcnow()
+    )
+    out = await open_inbound_call(
+        async_session, attrs(dialed="+14155550100", trunk_id="ST_in_shared")
+    )
+    assert out == Rejected("pbx_check_wrong_trunk")
+    assert unverified_number.provisioning_state == "unverified"
+    assert (await last_check_event(check)).payload == {"outcome": "not_authenticated"}
+
+
+async def test_check_arrival_on_the_right_trunk_after_a_wrong_one(
+    async_session, unverified_number, seed_check_call, last_check_event
+):
+    """A wrong-trunk INVITE does not end the check: the right one still
+    arrives and its code still counts."""
+    check = await seed_check_call(
+        unverified_number, status="ringing", requested_at=utcnow()
+    )
+    wrong = await open_inbound_call(
+        async_session, attrs(dialed="+14155550100", trunk_id="ST_in_shared")
+    )
+    assert wrong == Rejected("pbx_check_wrong_trunk")
+    right = await open_inbound_call(
+        async_session, attrs(dialed="+14155550100", trunk_id="ST_in_pbx")
+    )
+    assert right == CheckArrived(unverified_number.id, check.id)
+    assert (await last_check_event(check)).payload == {"outcome": "arrived"}
+
+
+async def test_check_arrival_without_trunk_id_does_not_activate(
+    async_session, unverified_number, seed_check_call, last_check_event
+):
+    check = await seed_check_call(
+        unverified_number, status="ringing", requested_at=utcnow()
+    )
+    out = await open_inbound_call(async_session, attrs(trunk_id=""))
+    assert out == Rejected("pbx_check_wrong_trunk")
+    assert (await last_check_event(check)).payload == {"outcome": "not_authenticated"}
+
+
+async def test_check_arrival_on_deleted_connection_does_not_activate(
+    async_session, unverified_number, seed_check_call, last_check_event
+):
+    check = await seed_check_call(
+        unverified_number, status="ringing", requested_at=utcnow()
+    )
+    conn = await async_session.get(SipConnection, unverified_number.sip_connection_id)
+    conn.deleted_at = utcnow()
+    await async_session.commit()
+    out = await open_inbound_call(async_session, attrs(trunk_id="ST_in_pbx"))
+    assert out == Rejected("pbx_check_wrong_trunk")
+    assert (await last_check_event(check)).payload == {"outcome": "not_authenticated"}
+
+
+async def test_arrival_without_check_in_flight_is_dropped(
+    async_session, unverified_number
+):
+    out = await open_inbound_call(
+        async_session, attrs(dialed="+14155550100", trunk_id="ST_in_pbx")
+    )
+    assert out == Rejected("unknown_number")
+    assert unverified_number.provisioning_state == "unverified"
+    assert await count_rows(async_session, Call) == 0
+
+
+async def test_arrival_after_window_is_dropped(
+    async_session, unverified_number, seed_check_call
+):
+    check = await seed_check_call(
+        unverified_number,
+        status="ringing",
+        requested_at=utcnow() - CHECK_WINDOW - timedelta(seconds=1),
+    )
+    out = await open_inbound_call(
+        async_session, attrs(dialed="+14155550100", trunk_id="ST_in_pbx")
+    )
+    assert out == Rejected("unknown_number")
+    assert await check_events(async_session, check) == []
+
+
+async def test_arrival_for_finished_check_is_dropped(
+    async_session, unverified_number, seed_check_call
+):
+    check = await seed_check_call(
+        unverified_number, status="no_answer", requested_at=utcnow()
+    )
+    out = await open_inbound_call(
+        async_session, attrs(dialed="+14155550100", trunk_id="ST_in_pbx")
+    )
+    assert out == Rejected("unknown_number")
+    assert await check_events(async_session, check) == []
+
+
+async def test_check_counts_one_code_per_check_call(
+    async_session, unverified_number, seed_check_call
+):
+    """A second INVITE during the same check is not a second guess."""
+    check = await seed_check_call(
+        unverified_number, status="in_progress", requested_at=utcnow()
+    )
+    arrived = CheckArrived(unverified_number.id, check.id)
+    assert await finish_check(async_session, arrived, "000000", now=NOW) is False
+    assert await finish_check(async_session, arrived, "482913", now=NOW) is False
+    assert unverified_number.provisioning_state == "unverified"
+    assert await check_events(async_session, check) == [
+        {"outcome": "code_not_received"}
+    ]
+
+
+async def test_a_passed_check_is_not_counted_twice(
+    async_session, unverified_number, seed_check_call
+):
+    check = await seed_check_call(
+        unverified_number, status="in_progress", requested_at=utcnow()
+    )
+    arrived = CheckArrived(unverified_number.id, check.id)
+    assert await finish_check(async_session, arrived, "482913", now=NOW) is True
+    later = NOW + timedelta(seconds=5)
+    assert await finish_check(async_session, arrived, "482913", now=later) is False
+    assert unverified_number.acquired_at == NOW
+    assert await check_events(async_session, check) == [{"outcome": "passed"}]
+
+
+async def test_right_code_never_activates_a_removed_number(
+    async_session, unverified_number, seed_check_call
+):
+    check = await seed_check_call(
+        unverified_number, status="in_progress", requested_at=utcnow()
+    )
+    unverified_number.provisioning_state = "released"
+    unverified_number.released_at = utcnow()
+    await async_session.commit()
+    arrived = CheckArrived(unverified_number.id, check.id)
+    assert await finish_check(async_session, arrived, "482913", now=NOW) is False
+    assert unverified_number.provisioning_state == "released"
+    assert unverified_number.acquired_at is None
+
+
+async def test_right_code_of_another_numbers_check_does_not_activate(
+    async_session, unverified_number, seed_check_call
+):
+    check = await seed_check_call(
+        unverified_number,
+        status="in_progress",
+        requested_at=utcnow(),
+        number_id=uuid.uuid4(),
+    )
+    arrived = CheckArrived(unverified_number.id, check.id)
+    assert await finish_check(async_session, arrived, "482913", now=NOW) is False
+    assert unverified_number.provisioning_state == "unverified"
+
+
+async def test_check_call_without_code_hash_does_not_activate(
+    async_session, unverified_number, seed_check_call, last_check_event
+):
+    check = await seed_check_call(
+        unverified_number, status="in_progress", requested_at=utcnow(), code=None
+    )
+    arrived = CheckArrived(unverified_number.id, check.id)
+    assert await finish_check(async_session, arrived, "482913", now=NOW) is False
+    assert unverified_number.provisioning_state == "unverified"
+    assert (await last_check_event(check)).payload == {"outcome": "code_not_received"}
+
+
+async def test_customer_call_with_forged_check_metadata_is_not_a_check(
+    async_session, unverified_number, seed_check_call
+):
+    """A call from the customer's own number carrying check keys (and a hash
+    of a code the customer chose) never passes the check."""
+    forged = await seed_check_call(
+        unverified_number,
+        status="in_progress",
+        requested_at=utcnow(),
+        code="123456",
+        from_pool=False,
+    )
+    out = await open_inbound_call(async_session, attrs(trunk_id="ST_in_pbx"))
+    assert out == Rejected("unknown_number")
+    arrived = CheckArrived(unverified_number.id, forged.id)
+    assert await finish_check(async_session, arrived, "123456", now=NOW) is False
+    assert unverified_number.provisioning_state == "unverified"
+    assert await check_events(async_session, forged) == []
+
+
+async def test_call_to_another_number_is_not_a_check(
+    async_session, unverified_number, seed_check_call
+):
+    other = await seed_check_call(
+        unverified_number,
+        status="in_progress",
+        requested_at=utcnow(),
+        to_e164="+14155550142",
+    )
+    out = await open_inbound_call(async_session, attrs(trunk_id="ST_in_pbx"))
+    assert out == Rejected("unknown_number")
+    arrived = CheckArrived(unverified_number.id, other.id)
+    assert await finish_check(async_session, arrived, "482913", now=NOW) is False
+    assert unverified_number.provisioning_state == "unverified"
+
+
+async def test_check_without_secret_key_never_activates(
+    async_session, unverified_number, seed_check_call, monkeypatch
+):
+    check = await seed_check_call(
+        unverified_number, status="in_progress", requested_at=utcnow()
+    )
+    monkeypatch.setattr(settings, "hail_provider_secret_key", "")
+    arrived = CheckArrived(unverified_number.id, check.id)
+    assert await finish_check(async_session, arrived, "482913", now=NOW) is False
+    assert unverified_number.provisioning_state == "unverified"
 
 
 async def test_shared_trunk_is_accepted_while_numbers_move(
@@ -598,3 +1121,67 @@ async def test_wrong_trunk_keeps_its_failed_row_after_a_valid_secret(
     assert outcome.reason == "carrier_route_failed"
     calls = (await async_session.execute(select(Call))).scalars().all()
     assert [c.end_reason for c in calls] == ["carrier_route_failed"]
+
+
+# Connected (pbx) numbers next to the Twilio secret check: a pbx call is
+# authenticated by its connection trunk's digest login, never by the header,
+# and only its connection trunk is accepted.
+
+
+@pytest.mark.parametrize("sent", ["", "wrong"])
+async def test_pbx_call_needs_no_twilio_secret(
+    async_session, monkeypatch, sent
+) -> None:
+    monkeypatch.setattr(settings, "hail_sip_inbound_secret", SECRET)
+    monkeypatch.setattr(settings, "livekit_sip_inbound_trunk_id", "ST_shared")
+    await _pbx_seed(async_session)
+    outcome = await inbound_calls.open_inbound_call(
+        async_session, _attrs(trunk_id="ST_in_pbx", sip_secret=sent)
+    )
+    assert isinstance(outcome, inbound_calls.Accepted)
+
+
+async def test_check_arrival_needs_no_twilio_secret(
+    async_session, monkeypatch, unverified_number, seed_check_call
+) -> None:
+    monkeypatch.setattr(settings, "hail_sip_inbound_secret", SECRET)
+    check = await seed_check_call(
+        unverified_number, status="ringing", requested_at=utcnow()
+    )
+    out = await open_inbound_call(async_session, attrs(trunk_id="ST_in_pbx"))
+    assert out == CheckArrived(unverified_number.id, check.id)
+
+
+@pytest.mark.parametrize("trunk_id", ["ST_shared", "ST_in_tw", "ST_in_tx"])
+async def test_pbx_call_on_the_shared_or_a_carrier_trunk_is_refused(
+    async_session, monkeypatch, trunk_id
+) -> None:
+    """The shared trunk is accepted while carrier numbers move, never for a
+    connected number: it does not check the connection's login."""
+    monkeypatch.setattr(settings, "hail_sip_inbound_secret", SECRET)
+    monkeypatch.setattr(settings, "livekit_sip_inbound_trunk_id", "ST_shared")
+    await _pbx_seed(async_session)
+    outcome = await inbound_calls.open_inbound_call(
+        async_session, _attrs(trunk_id=trunk_id, sip_secret=SECRET)
+    )
+    assert isinstance(outcome, inbound_calls.Rejected)
+    assert outcome.reason == "carrier_route_failed"
+
+
+async def test_twilio_call_on_a_connection_trunk_still_needs_the_secret(
+    async_session, monkeypatch
+) -> None:
+    """A carrier number reached through a connection trunk: no header, no
+    row; with the header, the trunk check refuses it."""
+    monkeypatch.setattr(settings, "hail_sip_inbound_secret", SECRET)
+    await _seed(async_session)
+    outcome = await inbound_calls.open_inbound_call(
+        async_session, _attrs(trunk_id="ST_in_pbx")
+    )
+    assert outcome == Rejected("bad_secret")
+    assert (await async_session.execute(select(Call))).scalars().all() == []
+    outcome = await inbound_calls.open_inbound_call(
+        async_session, _attrs(trunk_id="ST_in_pbx", sip_secret=SECRET)
+    )
+    assert isinstance(outcome, inbound_calls.Rejected)
+    assert outcome.reason == "carrier_route_failed"

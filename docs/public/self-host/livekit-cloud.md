@@ -112,7 +112,7 @@ dispatch rule**. Hail adds and removes numbers on the trunk itself.
    {
      "dispatch_rule": {
        "name": "hail-inbound",
-       "trunk_ids": ["<inbound-trunk-id>"],
+       "trunk_ids": [],
        "rule": {"dispatchRuleIndividual": {"roomPrefix": "hail-in-"}},
        "roomConfig": {
          "agents": [{"agentName": "hail-voicebot", "metadata": "{\"direction\":\"inbound\"}"}]
@@ -126,6 +126,11 @@ dispatch rule**. Hail adds and removes numbers on the trunk itself.
    Room names include the caller's number (LiveKit's individual rule);
    `calls.from_e164` records it anyway.
 
+   An empty `trunk_ids` list matches every inbound trunk in the project,
+   including the trunks Hail creates for each connected phone system
+   (`sip_trunks.py apply` leaves an empty list as it is). Keep the LiveKit
+   project for Hail only.
+
 3. Set the trunk id in `.env` and recreate `api` and `voicebot`. Then
    `PATCH /v1/numbers/{id}` with `voice_agent_id` registers a number
    ([Agents](../agents.md#routing-rules)).
@@ -133,3 +138,12 @@ dispatch rule**. Hail adds and removes numbers on the trunk itself.
 Reference: LiveKit [accepting calls](https://docs.livekit.io/telephony/accepting-calls/),
 [inbound trunk](https://docs.livekit.io/telephony/accepting-calls/inbound-trunk/),
 [dispatch rule](https://docs.livekit.io/telephony/accepting-calls/dispatch-rule/).
+
+## 5. Connected phone systems
+
+A connected phone system gets its own LiveKit trunks, and LiveKit's SIP
+service dials its host. Hail refuses a host that is an internal IP address
+or an internal name, but it does not resolve the name: LiveKit does, from
+its own network. If you run your own LiveKit SIP service, firewall its
+egress so it cannot reach internal ranges (private, loopback, link-local,
+and your cloud's metadata address).

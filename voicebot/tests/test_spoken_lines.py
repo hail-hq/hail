@@ -13,10 +13,9 @@ from .test_agent import CALL_ID, FakeBridgeSession, FakeJobContext
 def test_every_supported_language_has_every_line():
     assert SPOKEN_LINES.keys() == SUPPORTED_LANGUAGES.keys()
     for lines in SPOKEN_LINES.values():
-        assert lines.soft_cap
-        assert lines.llm_failure
-        assert "{" not in lines.soft_cap
-        assert "{" not in lines.llm_failure
+        for line in lines:
+            assert line
+            assert "{" not in line
 
 
 def test_unknown_language_is_english():

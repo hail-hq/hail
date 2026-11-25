@@ -12,7 +12,7 @@ from decimal import Decimal
 import pytest
 from hailhq.core import call_legs, carrier_routing
 from hailhq.core.call_legs import LegRecord, fetch_leg_costs, record_call_legs
-from hailhq.core.models import Call, CallLeg, PhoneNumber
+from hailhq.core.models import Call, CallLeg, PhoneNumber, SipConnection
 from hailhq.core.providers.voice.base import CarrierNotConfigured, LegCost
 from sqlalchemy import select
 
@@ -23,6 +23,18 @@ async def _call(
     session, provider: str = "telnyx", e164: str = "+14155550100"
 ) -> uuid.UUID:
     org = uuid.uuid4()
+    extra: dict = {}
+    if provider == "pbx":
+        conn = SipConnection(
+            organization_id=org,
+            label="Main office",
+            inbound_username="hail-aabbccddeeff",
+            encrypted_inbound_password="token",
+            default_region="US",
+        )
+        session.add(conn)
+        await session.flush()
+        extra = {"sip_connection_id": conn.id, "capabilities": ["voice"]}
     number = PhoneNumber(
         organization_id=org,
         e164=e164,
@@ -30,6 +42,7 @@ async def _call(
         number_type="local",
         provider=provider,
         provisioning_state="active",
+        **extra,
     )
     session.add(number)
     await session.flush()
@@ -291,3 +304,35 @@ async def test_carriers_are_asked_at_the_same_time(async_session, lookups):
     await record_call_legs(telnyx, [_leg()])
     await fetch_leg_costs(NOW)
     assert sorted(waiting) == ["telnyx", "twilio"]
+
+
+async def test_pbx_legs_are_found_at_zero(async_session):
+    call_id = await _call(async_session, provider="pbx")
+    t0 = NOW - timedelta(hours=1)
+    leg_call = _leg(
+        sip_call_id="SCL_1",
+        joined_at=t0,
+        answered_at=t0,
+        left_at=t0 + timedelta(seconds=180),
+    )
+    leg_handover = _leg(
+        role="handover",
+        direction="outbound",
+        sip_call_id="SCL_2",
+        to_e164="800",
+        joined_at=t0 + timedelta(seconds=60),
+        answered_at=t0 + timedelta(seconds=70),
+        left_at=t0 + timedelta(seconds=130),
+    )
+    await record_call_legs(call_id, [leg_call, leg_handover])
+    rows = {r.role: r for r in await _legs(async_session)}
+    assert {(r.provider, r.cost_status, r.cost_usd) for r in rows.values()} == {
+        ("pbx", "found", Decimal(0))
+    }
+    assert {r.usd_per_minute for r in rows.values()} == {Decimal(0)}
+    assert all(r.cost_checked_at is not None for r in rows.values())
+    assert rows["handover"].answered_at == t0 + timedelta(seconds=70)
+    assert rows["handover"].left_at == t0 + timedelta(seconds=130)
+    assert rows["handover"].to_e164 == "800"
+    # Never asked of a carrier.
+    assert await fetch_leg_costs(now=NOW) == 0

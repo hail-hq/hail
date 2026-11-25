@@ -2595,8 +2595,14 @@ paths:
             The order is still pending (refresh its status first) or the
             number's carrier is unsupported. A failed order is dismissed with 204
             and no carrier call.
+        "502":
+          description:
+            A connected phone system's number could not be taken off its
+            inbound trunk; the number stays as it was.
         "503":
-          description: The number's carrier is not configured on this server.
+          description:
+            The number's carrier is not configured on this server, or,
+            for a connected phone system's number, inbound calls are not.
         "422":
           description: Validation Error
           content:

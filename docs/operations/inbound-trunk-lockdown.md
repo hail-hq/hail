@@ -134,7 +134,7 @@ Run `move` right after the restart anyway: a number routed to an agent between t
 
   The carrier trunk can stay; it lists only its placeholder.
 
-- After `retire-shared`: create an open shared trunk again ([LiveKit Cloud §4](../public/self-host/livekit-cloud.md#4-inbound-calls), with `"numbers": ["hail-placeholder-shared"]`), add it to the `hail-inbound` dispatch rule, and set `LIVEKIT_SIP_INBOUND_TRUNK_ID` in `.env`. Then do the one-carrier rollback above for each carrier.
+- After `retire-shared`: create an open shared trunk again ([LiveKit Cloud §4](../public/self-host/livekit-cloud.md#4-inbound-calls), with `"numbers": ["hail-placeholder-shared"]`), add it to the `hail-inbound` dispatch rule (skip this when the rule lists no trunks: it already matches every trunk, and adding one would drop the [connected number](connected-numbers.md) trunks), and set `LIVEKIT_SIP_INBOUND_TRUNK_ID` in `.env`. Then do the one-carrier rollback above for each carrier.
 - DIDWW credentials can stay on the DIDWW trunk. To remove them: [my.didww.com](https://my.didww.com) → **Voice → Inbound Trunks** → the trunk → **Authorization** off.
 
 ## When the weekly check fails

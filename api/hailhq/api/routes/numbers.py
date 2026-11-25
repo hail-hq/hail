@@ -20,6 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi import status as http_status
 from hailhq.api import sms_registration
 from hailhq.api.audit import actor_of, write_audit_log
+from hailhq.api.connected_numbers import ConnectedNumberError, remove_connected_number
 from hailhq.api.deps import Principal, get_current_principal
 from hailhq.api.errors import unprocessable
 from hailhq.api.funds import FUNDS_RESPONSES
@@ -215,6 +216,11 @@ def _reject_if_released(number: PhoneNumber) -> None:
     """422 on a released row. A released row is a tombstone: its PN is
     deleted at Twilio, so any provisioning call against it would 404 into
     an opaque 500."""
+    if number.provisioning_state == "unverified":
+        raise unprocessable(
+            "this number is not checked yet; run the ownership check first",
+            loc=["path", "number_id"],
+        )
     if number.provisioning_state != "active":
         raise unprocessable(
             f"this number is {number.provisioning_state}; wait for provisioning or acquire a new number",
@@ -283,6 +289,19 @@ async def release_org_number(
             status_code=409,
             detail="Number order is still pending; refresh its status before releasing",
         )
+    if number.provider == "pbx":
+        if lk is None:
+            raise HTTPException(
+                status_code=503,
+                detail="inbound calls are not configured on this server",
+            )
+        try:
+            return await remove_connected_number(db, lk, number)
+        except ConnectedNumberError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail="could not take the number off the phone system trunk",
+            ) from exc
     if number.provider not in CARRIERS:
         logger.warning(
             "number %s (org %s): release refused, carrier %s is not supported",
@@ -363,7 +382,18 @@ async def release_org_number(
                 "with 204 and no carrier call."
             ),
         },
-        503: {"description": "The number's carrier is not configured on this server."},
+        502: {
+            "description": (
+                "A connected phone system's number could not be taken off its "
+                "inbound trunk; the number stays as it was."
+            ),
+        },
+        503: {
+            "description": (
+                "The number's carrier is not configured on this server, or, "
+                "for a connected phone system's number, inbound calls are not."
+            ),
+        },
     },
 )
 async def release_number(

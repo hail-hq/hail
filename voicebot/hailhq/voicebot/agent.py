@@ -38,7 +38,7 @@ from google.protobuf.duration_pb2 import Duration
 from hailhq.core import threads
 from hailhq.core.agent_tools import transfer_call
 from hailhq.core.agent_tools.client import AgentApiClient
-from hailhq.core.agent_tools.send_dtmf import DTMF_CODES
+from hailhq.core.agent_tools.send_dtmf import DIGIT_DELAY_SECONDS, DTMF_CODES
 from hailhq.core.agent_tools.spec import BridgeOutcome, BridgeRoute
 from hailhq.core.billing import RECORDING_USAGE_REF_SUFFIX
 from hailhq.core.call_end_reasons import CallEndReason
@@ -51,8 +51,10 @@ from hailhq.core.disclosure import after_greeting_text, disclosure_text
 from hailhq.core.handover import HANDOVER_DEFAULT_MAX_SECONDS
 from hailhq.core.inbound_calls import (
     SIP_SECRET_ATTRIBUTE,
+    CheckArrived,
     Rejected,
     SipAttributes,
+    finish_check,
     open_inbound_call,
 )
 from hailhq.core.internal_webhook import notify_usage_event_recorded
@@ -70,6 +72,16 @@ from hailhq.core.prompts import (
 from hailhq.core.providers.voice import TwilioVoiceProvider
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
 from hailhq.core.secret_cipher import SecretKeyMissing
+from hailhq.core.sip_connections import (
+    CHECK_ARRIVAL_WAIT_SECONDS,
+    CHECK_CODE_DIGITS,
+    CHECK_CODE_SECONDS,
+    CHECK_RING_SECONDS,
+    CHECK_SEND_DELAY_SECONDS,
+    PBX_CHECK_LINE_SECONDS,
+    carrier_caller,
+    check_outcomes,
+)
 from hailhq.core.telemetry import (
     configure_telemetry,
     flush_telemetry,
@@ -104,6 +116,7 @@ from hailhq.voicebot.leg_tracker import LegTracker
 from hailhq.voicebot.pipeline import (
     ProviderKeyError,
     build_session,
+    build_tts,
     decrypt_llm_metadata,
     resolve_org_configs,
     stt_takes_keyterms,
@@ -114,7 +127,7 @@ from hailhq.voicebot.spoken_lines import spoken_lines
 from hailhq.voicebot.telemetry import connect_livekit_tracing
 from hailhq.voicebot.tools import SpeechTracker, build_agent_tools, every_call_tools
 from livekit import rtc
-from livekit.agents import Agent, JobContext, JobProcess, StopResponse
+from livekit.agents import Agent, JobContext, JobProcess, StopResponse, room_io
 from livekit.agents.llm import LLM, LLMError
 from livekit.agents.voice import AgentSession, ConversationItemAddedEvent
 from livekit.agents.voice.amd import AMDCategory
@@ -1571,16 +1584,6 @@ def parse_metadata(raw: str | None) -> dict[str, Any]:
 INBOUND_PARTICIPANT_TIMEOUT_SECONDS = 15.0
 
 
-def _e164(number: str) -> str:
-    """``351300509184`` → ``+351300509184``. Carriers differ on the leading
-    ``+`` (Telnyx and Twilio send it, DIDWW may not); ``phone_numbers.e164``
-    always has it."""
-    number = (number or "").strip()
-    if number and number[0] != "+" and number.isdigit():
-        return "+" + number
-    return number
-
-
 async def open_inbound_from_room(
     ctx: JobContext, on_caller: Callable[[rtc.Participant], None] | None = None
 ) -> dict[str, Any] | None:
@@ -1606,8 +1609,9 @@ async def open_inbound_from_room(
         on_caller(participant)
     attrs = participant.attributes
     sip = SipAttributes(
-        dialed=_e164(attrs.get("sip.trunkPhoneNumber", "")),
-        caller=_e164(attrs.get("sip.phoneNumber", "")),
+        dialed=carrier_caller(attrs.get("sip.trunkPhoneNumber", "")),
+        # Raw: core normalizes it by number type (a PBX extension stays as is).
+        caller=(attrs.get("sip.phoneNumber") or "").strip(),
         trunk_id=attrs.get("sip.trunkID", ""),
         room_name=ctx.room.name,
         provider_call_sid=attrs.get("sip.callIDFull")
@@ -1622,6 +1626,9 @@ async def open_inbound_from_room(
     except Exception:
         logger.exception("inbound room %s: could not open the call", ctx.room.name)
         outcome = Rejected("error")
+    if isinstance(outcome, CheckArrived):
+        await run_check_leg(ctx, outcome)
+        return None
     if isinstance(outcome, Rejected):
         try:
             await ctx.delete_room()
@@ -1630,6 +1637,159 @@ async def open_inbound_from_room(
         ctx.shutdown(reason=outcome.reason)
         return None
     return outcome.metadata
+
+
+async def collect_check_digits(
+    room: rtc.Room, seconds: float = CHECK_CODE_SECONDS
+) -> str:
+    """The key presses the check leg receives: returns at the
+    ``CHECK_CODE_DIGITS``-th digit (only the first ones count), or after
+    ``seconds`` with the digits it has."""
+    digits: list[str] = []
+    full = asyncio.Event()
+
+    def on_dtmf(event: rtc.SipDTMF) -> None:
+        if len(digits) < CHECK_CODE_DIGITS and len(event.digit or "") == 1:
+            digits.append(event.digit)
+        if len(digits) >= CHECK_CODE_DIGITS:
+            full.set()
+
+    room.on("sip_dtmf_received", on_dtmf)
+    try:
+        await asyncio.wait_for(full.wait(), timeout=seconds)
+    except asyncio.TimeoutError:
+        pass
+    finally:
+        room.off("sip_dtmf_received", on_dtmf)
+    return "".join(digits)
+
+
+async def play_check_line(ctx: JobContext, language: str | None = None) -> None:
+    """Say the ownership check line in ``language`` (English when unknown) in
+    Hail's house voice (no STT or LLM). Best effort, at most
+    ``PBX_CHECK_LINE_SECONDS``; errors are logged."""
+    session: AgentSession | None = None
+    try:
+        async with asyncio.timeout(PBX_CHECK_LINE_SECONDS):
+            session = AgentSession(tts=build_tts(language=language))
+            await session.start(
+                agent=Agent(instructions=""),
+                room=ctx.room,
+                record=False,
+                room_options=room_io.RoomOptions(audio_input=False, text_input=False),
+                session_host=False,
+            )
+            await session.say(
+                spoken_lines(language).pbx_check, allow_interruptions=False
+            )
+    except Exception:
+        logger.warning("check line not played in room %s", ctx.room.name, exc_info=True)
+    finally:
+        if session is not None:
+            try:
+                await asyncio.wait_for(session.aclose(), timeout=2)
+            except Exception:
+                logger.warning("check line session did not close", exc_info=True)
+
+
+async def run_check_leg(ctx: JobContext, arrived: CheckArrived) -> None:
+    """The inbound leg of an ownership check: receive the code, record the
+    result, play the line on a pass, then hang up. Always deletes the room."""
+    try:
+        digits = await collect_check_digits(ctx.room)
+        async with session_scope() as db:
+            passed = await finish_check(db, arrived, digits)
+        if passed:
+            await play_check_line(ctx)
+    except Exception:
+        logger.exception("ownership check leg failed in room %s", ctx.room.name)
+    finally:
+        try:
+            await ctx.delete_room()
+        except Exception:
+            logger.exception("delete_room failed after an ownership check")
+        ctx.shutdown(reason="pbx_check")
+
+
+# Ownership check, outbound leg: it only sends the code as key presses, once.
+# Only the first 6 key presses count and a check call has one result, so a
+# second send could never help. It waits CHECK_ARRIVAL_WAIT_SECONDS for
+# "arrived", then CHECK_SEND_DELAY_SECONDS (both in core: the API derives
+# its result wait from them).
+# How long the dialed leg may take to answer.
+CHECK_ANSWER_WAIT_SECONDS = CHECK_RING_SECONDS + 5
+# How often to look for "arrived".
+CHECK_ARRIVAL_POLL_SECONDS = 0.25
+
+
+async def check_arrival(
+    call_id: UUID, seconds: float = CHECK_ARRIVAL_WAIT_SECONDS
+) -> bool:
+    """True once the inbound side wrote ``arrived`` for check call
+    ``call_id``; False after ``seconds``, or once the check has a final
+    result. A wrong-trunk INVITE (``not_authenticated``) is not final: the
+    right trunk can still arrive."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + seconds
+    while True:
+        async with session_scope() as db:
+            outcomes = await check_outcomes(db, call_id)
+        if "arrived" in outcomes:
+            return True
+        if outcomes - {"not_authenticated"} or loop.time() >= deadline:
+            return False
+        await asyncio.sleep(CHECK_ARRIVAL_POLL_SECONDS)
+
+
+async def _check_leg_answered(room: rtc.Room, seconds: float) -> bool:
+    """True once a SIP participant in ``room`` is ``active`` (answered)."""
+    answered = asyncio.Event()
+
+    def _look(*_args: Any) -> None:
+        if any(is_sip_answer_signal(p) for p in room.remote_participants.values()):
+            answered.set()
+
+    room.on("participant_attributes_changed", _look)
+    room.on("participant_connected", _look)
+    try:
+        _look()
+        await asyncio.wait_for(answered.wait(), timeout=seconds)
+        return True
+    except asyncio.TimeoutError:
+        return False
+    finally:
+        room.off("participant_attributes_changed", _look)
+        room.off("participant_connected", _look)
+
+
+async def send_check_code(ctx: JobContext, call_id: UUID, code: str) -> None:
+    """Send the ownership check code as key presses on the outbound leg:
+    after the answer and the inbound side's ``arrived``, plus
+    ``CHECK_SEND_DELAY_SECONDS``, once. Never logs the code, never raises.
+    The API deletes the room when it has the result."""
+    try:
+        if not await _check_leg_answered(ctx.room, CHECK_ANSWER_WAIT_SECONDS):
+            logger.info("ownership check call %s: not answered", call_id)
+            return
+        if not await check_arrival(call_id):
+            logger.info("ownership check call %s: no arrival; code not sent", call_id)
+            return
+        await asyncio.sleep(CHECK_SEND_DELAY_SECONDS)
+        for i, key in enumerate(code):
+            if i:
+                await asyncio.sleep(DIGIT_DELAY_SECONDS)
+            # Not make_agent_send_dtmf: it logs each key.
+            await ctx.room.local_participant.publish_dtmf(
+                code=DTMF_CODES[key], digit=key
+            )
+        logger.info("ownership check call %s: code sent", call_id)
+    except Exception as exc:
+        # The type only: an error text may hold a key.
+        logger.warning(
+            "ownership check call %s: code not sent (%s)",
+            call_id,
+            type(exc).__name__,
+        )
 
 
 async def write_call_event(call_id: UUID, kind: str, payload: dict[str, Any]) -> None:
@@ -2353,6 +2513,12 @@ async def _run_call(
 
     await ctx.connect()
 
+    if metadata.get("pbx_check_send"):
+        # Ownership check call: only the code sender. The API finalizes the
+        # call (status, usage, pool line); no session, no webhook.
+        await send_check_code(ctx, metadata["call_id"], metadata["pbx_check_send"])
+        return
+
     inbound = metadata.get("direction") == "inbound"
     # The caller's SIP leg as first seen: it may leave before the leg
     # tracker exists, and the carrier bills it anyway.
@@ -2954,6 +3120,7 @@ async def _run_call(
 __all__ = [
     "AI_DISCLOSURE_LINE",
     "BYO_LLM_FAILURE_END_REASON",
+    "CHECK_SEND_DELAY_SECONDS",
     "DTMF_TOOL_NAME",
     "MAX_CONSECUTIVE_LLM_ERRORS",
     "SIP_CALL_STATUS_ACTIVE",
@@ -2967,6 +3134,8 @@ __all__ = [
     "attach_event_handlers",
     "build_instructions",
     "build_tools_safely",
+    "check_arrival",
+    "collect_check_digits",
     "disclosure_line",
     "disconnect_reason_to_status",
     "entrypoint",
@@ -2978,7 +3147,9 @@ __all__ = [
     "open_inbound_from_room",
     "opening_instructions",
     "parse_metadata",
+    "play_check_line",
     "prewarm",
+    "send_check_code",
     "soft_cap_announce_and_hangup",
     "speak_greeting",
     "speech_text",

@@ -14,6 +14,7 @@ from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from hailhq.api import access_log
+from hailhq.api.connected_numbers import remove_stale_unverified_numbers
 from hailhq.api.deprecation import DeprecationHeaderMiddleware
 from hailhq.api.number_orders import (
     purge_expired_quotes,
@@ -43,6 +44,7 @@ from hailhq.api.routes import uploads as uploads_routes
 from hailhq.api.routes import verifications as verifications_routes
 from hailhq.api.routes import webhooks as webhooks_routes
 from hailhq.api.routes import whoami as whoami_routes
+from hailhq.api.routes.calls import get_livekit_optional
 from hailhq.api.routes.internal import agent as internal_agent
 from hailhq.api.routes.internal import browser_sessions
 from hailhq.api.routes.internal import call_settings as internal_call_settings
@@ -163,6 +165,7 @@ async def _order_reconciler_loop() -> None:
             await reconcile_pending_orders()
             await retry_unreleased_numbers()
             await purge_expired_quotes()
+            await remove_stale_unverified_numbers(await get_livekit_optional())
         except asyncio.CancelledError:
             raise
         except Exception:  # pragma: no cover — defensive; logged + retried

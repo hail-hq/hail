@@ -33,8 +33,8 @@ vector, both null until the ingest worker embeds the piece. An HNSW index
 the organization and model filters from dropping results. Another width
 needs a new migration and a re-embed.
 
-Revision ID: 0092
-Revises: 0091
+Revision ID: 0093
+Revises: 0092
 """
 
 from __future__ import annotations
@@ -43,8 +43,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision: str = "0092"
-down_revision: str | None = "0091"
+revision: str = "0093"
+down_revision: str | None = "0092"
 branch_labels = None
 depends_on = None
 
