@@ -32,8 +32,9 @@ vector, both null until the ingest worker embeds the piece. An HNSW index
 (cosine) serves the nearest-piece search; ``hnsw.iterative_scan`` keeps
 the organization and model filters from dropping results. Another width
 needs a new migration and a re-embed. ``embedding_refused`` names the model
-whose API refused the piece alone: the piece leaves the embedding queue
-(keyword search only) until the model changes.
+whose API refused the piece alone (and ``embedding_refused_at`` when): the
+piece leaves the embedding queue (keyword search only) for a day, or
+until the model changes.
 
 Revision ID: 0093
 Revises: 0092
@@ -190,6 +191,7 @@ def upgrade() -> None:
             embedding halfvec(1536),
             embedding_model text,
             embedding_refused text,
+            embedding_refused_at timestamptz,
             terms tsvector NOT NULL,
             CONSTRAINT knowledge_pieces_document_ordinal_uq
                 UNIQUE (document_id, ordinal),

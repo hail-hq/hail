@@ -930,7 +930,10 @@ async def test_storage_cap_counts_vectors_with_or_without_an_api(
     await worker.tick()
     assert fake.calls == 0
     assert all(p.embedding is None for p in await pieces_of(async_session, org))
-    assert worker._embed_after > 0
+    # Space again: the waiting pieces get their vectors.
+    full["now"] = False
+    await worker.tick()
+    assert all(p.embedding is not None for p in await pieces_of(async_session, org))
 
 
 async def test_one_workspace_refused_pieces_never_stop_another(
@@ -956,7 +959,18 @@ async def test_one_workspace_refused_pieces_never_stop_another(
     # Keywords still find the refused pieces.
     hits = await search_pieces(async_session, bad, "poison 7", None, 3)
     assert hits
-    # A new model tries them again.
+    # A day later they are tried again; so does a new model.
+    await async_session.execute(
+        text(
+            "UPDATE knowledge_pieces SET embedding_refused_at = now() - "
+            "interval '2 days' WHERE organization_id = :o"
+        ),
+        {"o": bad},
+    )
+    await async_session.commit()
+    calls = fake.calls
+    await worker.tick()
+    assert fake.calls > calls
     fake.model, fake.refuse = "fake-embedding-2", None
     await worker.tick()
     assert all(p.embedding_model for p in await pieces_of(async_session, bad))
@@ -965,11 +979,16 @@ async def test_one_workspace_refused_pieces_never_stop_another(
 async def test_model_change_finishes_when_storage_is_full(
     async_session, worker, s3, fake, monkeypatch
 ) -> None:
-    """Replacing another model's vector adds no bytes, so a full store
-    never stops a re-embed."""
-    org = uuid.uuid4()
+    """While the store is full, pieces with no vector wait but vectors of
+    another model are still replaced, so a model change finishes."""
+    org, waiting = uuid.uuid4(), uuid.uuid4()
     await add_document(async_session, s3, org, NORTHGATE_MANUAL.encode())
     await worker.tick()
+    fake.fail = True
+    await add_document(async_session, s3, waiting, NORTHGATE_MANUAL.encode())
+    await worker.tick()
+    fake.fail = False
+    worker._embed_after = 0.0
 
     async def always_full(db, *, adding=0):
         return True
@@ -979,3 +998,4 @@ async def test_model_change_finishes_when_storage_is_full(
     await worker.tick()
     pieces = await pieces_of(async_session, org)
     assert pieces and all(p.embedding_model == "fake-embedding-2" for p in pieces)
+    assert all(p.embedding is None for p in await pieces_of(async_session, waiting))

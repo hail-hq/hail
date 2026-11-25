@@ -2824,8 +2824,9 @@ class KnowledgePiece(Base):
     embedding_model: Mapped[str | None] = mapped_column(Text, nullable=True)
     # The model whose API refused this piece on its own (a 400, 413 or 422
     # while a probe text passed): the embedding pass leaves it to keyword
-    # search until the configured model changes.
+    # search until the configured model changes or a day passes.
     embedding_refused: Mapped[str | None] = mapped_column(Text, nullable=True)
+    embedding_refused_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
     terms: Mapped[str] = mapped_column(TSVECTOR, nullable=False)
 
     __table_args__ = (
