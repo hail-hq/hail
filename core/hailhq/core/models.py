@@ -10,6 +10,7 @@ from hailhq.core.schemas import TERMINAL_CALL_STATUSES
 from sqlalchemy import (
     ARRAY,
     DDL,
+    BigInteger,
     Boolean,
     CheckConstraint,
     DateTime,
@@ -2750,6 +2751,11 @@ class KnowledgeDocument(Base):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     piece_count: Mapped[int] = mapped_column(
         Integer, server_default=text("0"), nullable=False
+    )
+    # The live bytes its pieces count toward the global knowledge cap
+    # (hailhq.core.knowledge.access.piece_bytes), set when it is ready.
+    stored_bytes: Mapped[int] = mapped_column(
+        BigInteger, server_default=text("0"), nullable=False
     )
     attempts: Mapped[int] = mapped_column(
         SmallInteger, server_default=text("0"), nullable=False

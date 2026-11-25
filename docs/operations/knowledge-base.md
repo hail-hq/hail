@@ -118,12 +118,11 @@ A message made only of filler words ("okay, thank you", "Sorry?") is not searche
 
 ## Limits and alerts
 
-- All knowledge data together is capped at 300 MB of live data: each current piece's text bytes plus 6 KB for its vector (about 3 KB of `halfvec(1536)` and about as much in the HNSW index), counted whether or not the vector is written yet. Dead rows and table bloat do not count, so replacing vectors never moves it. Past it, new links and documents answer 409, and the worker refuses new pieces.
+- All knowledge data together is capped at 300 MB of live data, counted by Hail from the current rows, not the tables' size on disk: each piece's text and search words, plus 6 KB for its vector (about 3 KB of `halfvec(1536)` and as much in the HNSW index, counted whether or not the vector is written yet), plus 256 bytes of row and index overhead. Each document keeps its total in `knowledge_documents.stored_bytes`. Dead rows and table bloat do not count, so replacing vectors (a model change) never moves it. Past it, new links and documents answer 409, and the worker refuses new pieces.
 - The abuse monitor emails `HAIL_SUPPORT_EMAIL` at most once a day while `pg_database_size` is over 200 MB (state in `platform_flags`, key `database_size_alert_day`). Check both:
 
 ```sql
 SELECT pg_size_pretty(pg_database_size(current_database())) AS database,
-       pg_size_pretty(coalesce(sum(octet_length(text)), 0)
-                      + count(*) * 6144) AS knowledge_live
-FROM knowledge_pieces;
+       pg_size_pretty((SELECT coalesce(sum(stored_bytes), 0)
+                       FROM knowledge_documents)) AS knowledge_live;
 ```

@@ -30,6 +30,7 @@ from hailhq.core.knowledge.embed import EmbeddingUnavailable
 from hailhq.core.knowledge.index import MemoryIndex, Piece
 from hailhq.core.knowledge.ingest import MAX_ATTEMPTS, KnowledgeIngestWorker
 from hailhq.core.knowledge.search import search_pieces, vector_literal
+from hailhq.core.knowledge.text import terms
 from hailhq.core.models import (
     Agent,
     FileUpload,
@@ -994,9 +995,12 @@ async def test_live_data_counts_text_and_every_vector(
     await add_document(async_session, s3, org, NORTHGATE_MANUAL.encode())
     await worker.tick()
     pieces = await pieces_of(async_session, org)
-    expected = (
-        sum(len(p.text.encode()) for p in pieces)
-        + len(pieces) * access_module.PIECE_VECTOR_BYTES
+    expected = sum(
+        access_module.piece_bytes(p.text, list(dict.fromkeys(terms(p.text))))
+        for p in pieces
+    )
+    assert expected > sum(len(p.text.encode()) for p in pieces) + len(pieces) * (
+        access_module.PIECE_VECTOR_BYTES
     )
     assert all(p.embedding is None for p in pieces)
     assert await knowledge_bytes(async_session) == expected
@@ -1051,3 +1055,22 @@ async def test_new_pieces_past_the_live_cap_are_refused(
         )
         == 0
     )
+
+
+async def test_reading_a_document_again_at_the_cap_is_not_refused(
+    async_session, worker, s3, monkeypatch
+) -> None:
+    """A document read again replaces its own pieces, so at the cap its
+    earlier pieces are not counted twice."""
+    org = uuid.uuid4()
+    doc_id = await add_document(async_session, s3, org, NORTHGATE_MANUAL.encode())
+    await worker.tick()
+    monkeypatch.setattr(
+        access_module, "GLOBAL_MAX_BYTES", await knowledge_bytes(async_session) + 1
+    )
+    doc = await async_session.get(KnowledgeDocument, doc_id)
+    doc.status, doc.attempts, doc.claimed_at = "pending", 0, None
+    await async_session.commit()
+    assert await worker.tick() == 1
+    await async_session.refresh(doc)
+    assert doc.status == "ready"

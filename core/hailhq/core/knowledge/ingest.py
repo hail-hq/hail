@@ -72,16 +72,17 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from botocore.exceptions import BotoCoreError, ClientError
+from hailhq.core.db import key_lock
 from hailhq.core.file_uploads import matches_declared_type
 from hailhq.core.isolated_process import run_isolated
 from hailhq.core.knowledge.access import (
-    PIECE_VECTOR_BYTES,
     STORAGE_FULL,
     FolderSweepFailed,
     delete_org_knowledge,
     knowledge_limits,
     knowledge_lock,
     log_failure,
+    piece_bytes,
     storage_full,
 )
 from hailhq.core.knowledge.decode import MAX_TEXT_BYTES
@@ -675,13 +676,13 @@ class KnowledgeIngestWorker:
             if held + len(chunks) > limits.max_pieces:
                 await db.rollback()
                 raise _Refused(_too_many(limits.max_pieces, held))
-            # Live data only: the new pieces' text and vectors (counted
-            # whether or not an embedding API is set up yet), with this
+            # Live data only: the new pieces with their vectors (counted
+            # whether or not an embedding API is set up yet), this
             # document's earlier pieces left out since they are replaced.
-            adding = (
-                sum(len(r["text"].encode()) for r in rows)
-                + len(rows) * PIECE_VECTOR_BYTES
-            )
+            # One global lock, so two workspaces never both take the last
+            # room.
+            adding = sum(piece_bytes(r["text"], r["terms"]) for r in rows)
+            await key_lock(db, "knowledge:global-cap")
             if await storage_full(db, adding=adding, excluding_document=document_id):
                 await db.rollback()
                 raise _Refused(STORAGE_FULL)
@@ -692,6 +693,7 @@ class KnowledgeIngestWorker:
                 await db.execute(_INSERT_PIECES, rows[start : start + _INSERT_BATCH])
             doc.status = "ready"
             doc.piece_count = len(rows)
+            doc.stored_bytes = adding
             doc.error = None
             doc.claimed_at = None
             doc.updated_at = datetime.now(timezone.utc)

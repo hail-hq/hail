@@ -152,6 +152,14 @@ def upgrade() -> None:
         sa.Column(
             "piece_count", sa.Integer(), server_default=sa.text("0"), nullable=False
         ),
+        # The live bytes its pieces count toward the global knowledge cap
+        # (hailhq.core.knowledge.access.piece_bytes), set when it is ready.
+        sa.Column(
+            "stored_bytes",
+            sa.BigInteger(),
+            server_default=sa.text("0"),
+            nullable=False,
+        ),
         sa.Column(
             "attempts", sa.SmallInteger(), server_default=sa.text("0"), nullable=False
         ),

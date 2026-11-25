@@ -10,9 +10,13 @@ and its agents answer without the knowledge base even when
 
 On top of every workspace's own limits, ``GLOBAL_MAX_BYTES`` caps all
 knowledge data together, counted from the live rows (``knowledge_bytes``):
-each piece's text bytes plus ``PIECE_VECTOR_BYTES`` for its vector, whether
-or not the vector is written yet. Dead rows and table bloat never count,
-so replacing vectors (a model change) never moves the count. Past the cap,
+each current piece's text and search words plus ``PIECE_VECTOR_BYTES`` for
+its vector and ``PIECE_ROW_BYTES`` for its row and index entries
+(``piece_bytes``), whether or not the vector is written yet. Each document
+keeps its pieces' total in ``knowledge_documents.stored_bytes``, so the
+count is a sum over documents, never a scan of the pieces. Dead rows and
+table bloat never count, so replacing vectors (a model change) never moves
+it. Past the cap,
 new uploads and documents are refused, and the ingest worker refuses to
 write more pieces. The real database size has its own daily alert
 (``db_size_alert``).
@@ -48,6 +52,7 @@ __all__ = [
     "GLOBAL_MAX_BYTES",
     "KNOWLEDGE_OFF",
     "MEMORY_MAX_PIECES",
+    "PIECE_ROW_BYTES",
     "PIECE_VECTOR_BYTES",
     "STORAGE_FULL",
     "FolderSweepFailed",
@@ -58,6 +63,7 @@ __all__ = [
     "knowledge_limits",
     "knowledge_lock",
     "log_failure",
+    "piece_bytes",
     "short_cause",
     "storage_full",
 ]
@@ -69,6 +75,8 @@ GLOBAL_MAX_BYTES = 300 * 1024 * 1024
 # What one piece's vector counts toward ``GLOBAL_MAX_BYTES``: about 3 KB of
 # halfvec(1536) and about as much for its entry in the HNSW index.
 PIECE_VECTOR_BYTES = 6 * 1024
+# A piece row's header, ids, locators and its btree and GIN index entries.
+PIECE_ROW_BYTES = 256
 # A workspace with more pieces than this is searched in SQL during calls
 # instead of being loaded into each call's memory (hailhq.voicebot.knowledge).
 # 5,000 pieces is about 7.5 MB of vectors plus their text per call.
@@ -97,21 +105,27 @@ async def knowledge_lock(db: AsyncSession, organization_id: UUID) -> None:
     await key_lock(db, f"knowledge:{organization_id}")
 
 
+def piece_bytes(text_: str, terms: list[str]) -> int:
+    """What one piece counts toward ``GLOBAL_MAX_BYTES``: its text and
+    search words, its vector (written or not) and its row overhead."""
+    words = sum(len(t.encode()) + 4 for t in terms)
+    return len(text_.encode()) + words + PIECE_VECTOR_BYTES + PIECE_ROW_BYTES
+
+
 async def knowledge_bytes(
     db: AsyncSession, *, excluding_document: UUID | None = None
 ) -> int:
-    """The live knowledge data: every current piece's text bytes plus
-    ``PIECE_VECTOR_BYTES``, without the pieces of ``excluding_document``
-    (a document being read again replaces them)."""
+    """The live knowledge data: the sum of every document's
+    ``stored_bytes``, without ``excluding_document`` (a document being read
+    again replaces its own pieces)."""
     return int(
         (
             await db.execute(
                 text(
-                    "SELECT coalesce(sum(octet_length(text)), 0) "
-                    "+ count(*) * :vector_bytes FROM knowledge_pieces "
-                    "WHERE document_id IS DISTINCT FROM :excluding"
+                    "SELECT coalesce(sum(stored_bytes), 0) FROM knowledge_documents "
+                    "WHERE id IS DISTINCT FROM :excluding"
                 ),
-                {"vector_bytes": PIECE_VECTOR_BYTES, "excluding": excluding_document},
+                {"excluding": excluding_document},
             )
         ).scalar_one()
     )
