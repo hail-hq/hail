@@ -250,6 +250,21 @@ def test_build_session_smoke_constructs_full_pipeline() -> None:
     assert isinstance(session, AgentSession)
 
 
+def test_build_session_caps_turn_end_wait() -> None:
+    """The turn detector's longest wait is Hail's cap, not LiveKit's 2.5 s;
+    the shortest wait keeps LiveKit's turn-detector default."""
+    from unittest.mock import MagicMock
+
+    from hailhq.voicebot.pipeline import TURN_MAX_DELAY_SECONDS
+
+    session = build_session(None, MagicMock(), language="en")
+    endpointing = session.options.turn_handling["endpointing"]
+    assert endpointing["max_delay"] == TURN_MAX_DELAY_SECONDS == 1.5
+    assert endpointing["min_delay"] == 0.3
+    assert endpointing["mode"] == "fixed"
+    assert session.options.turn_handling["interruption"]["min_words"] == 1
+
+
 def test_build_tts_both_keys_returns_fallback_adapter() -> None:
     """Cartesia + ElevenLabs configured -> FallbackAdapter, Cartesia primary.
 

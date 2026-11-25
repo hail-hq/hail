@@ -809,6 +809,17 @@ def startup_capability_warnings() -> list[str]:
     return warnings
 
 
+# The longest wait after the person stops speaking, used only when the
+# turn detector thinks they are not done (LiveKit's default with its turn
+# detector is 2.5 s). The detector often says "not done" after a short,
+# complete answer ("Yes."), so the agent waited the full 2.5 s. With 1.5 s
+# those replies start 1 s sooner. A person who pauses longer and goes on
+# speaking interrupts the reply; the reply usually has not started playing by
+# then. Other settings keep LiveKit's defaults.
+# https://docs.livekit.io/reference/agents/turn-handling-options/#endpointingoptions
+TURN_MAX_DELAY_SECONDS = 1.5
+
+
 def build_session(
     llm_cfg: dict[str, Any] | None,
     vad: agents_vad.VAD,
@@ -905,8 +916,9 @@ def build_session(
         llm=build_llm(llm_cfg, org_cfgs.get("llm"), retry_on_chunk_sent=True),
         turn_handling=TurnHandlingOptions(
             turn_detection=turn_detection,
-            # Only the setting that differs from the SDK defaults: a transcribed
-            # word, not VAD energy alone, is needed to interrupt the agent.
+            endpointing={"max_delay": TURN_MAX_DELAY_SECONDS},
+            # A transcribed word, not VAD energy alone, is needed to interrupt
+            # the agent.
             interruption={"min_words": 1},
         ),
     )

@@ -1104,8 +1104,8 @@ async def speak_greeting(
     first_message = metadata.get("first_message")
     inbound = metadata.get("direction") == "inbound"
     if generate_opening and not inbound:
-        # The turn detector can wait up to max_delay (2.5 s) on a bare pickup
-        # "Hello?". If that turn ends after this opening starts, it cuts the
+        # The turn detector can wait up to max_delay (1.5 s, see
+        # pipeline.TURN_MAX_DELAY_SECONDS) on a bare pickup "Hello?". If that turn ends after this opening starts, it cuts the
         # opening off, so drop the unfinished turn. Its words reach the
         # generated opening only through pickup_transcript (AMD's transcript
         # at the verdict). A first_message opening does not answer them. Not
