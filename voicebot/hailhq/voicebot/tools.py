@@ -158,6 +158,15 @@ async def _http_tools(
     )
 
 
+def for_other_party(tools: list, *, member: bool) -> list:
+    """``tools`` without the members-only ones (``ToolSpec.members_only``)
+    when the person on the line is not a workspace member."""
+    if member:
+        return tools
+    hidden = {s.name for s in call_tools() if s.members_only}
+    return [t for t in tools if t.info.name not in hidden]
+
+
 def every_call_tools(
     metadata: dict[str, Any],
     *,

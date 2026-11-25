@@ -17,6 +17,7 @@ from hailhq.voicebot.tools import (
     SPOKEN_TOOL_FAILURE,
     _make_handler,
     build_agent_tools,
+    every_call_tools,
 )
 
 # The tools every call keeps, in build order.
@@ -491,3 +492,21 @@ async def test_failed_availability_check_closes_the_api_client(monkeypatch):
             send_dtmf=None,
         )
     assert closed == [True]
+
+
+async def test_members_only_tools_reach_workspace_members_only():
+    """Settings help is for the workspace's own members: a business's
+    customers on the line never get it (ToolSpec.members_only)."""
+    members_only = {s.name for s in tools_mod.call_tools() if s.members_only}
+    assert "hail_settings_help" in members_only
+    tools = every_call_tools(
+        {"organization_id": str(uuid.uuid4())}, call_id=uuid.uuid4(), hangup=None
+    )
+    names = [t.info.name for t in tools]
+    assert names == EVERY_CALL
+    member = tools_mod.for_other_party(tools, member=True)
+    assert [t.info.name for t in member] == EVERY_CALL
+    outsider = tools_mod.for_other_party(tools, member=False)
+    assert [t.info.name for t in outsider] == [
+        n for n in EVERY_CALL if n not in members_only
+    ]

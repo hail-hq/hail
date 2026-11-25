@@ -112,15 +112,24 @@ _AGENT_FIELDS = (
 
 def apply_agent_defaults(body: CallCreate, agent: Agent) -> CallCreate:
     """The request merged over the agent: a field the caller sent explicitly
-    (even to its default value) wins; everything else comes from the agent."""
+    (even to its default value) wins; everything else comes from the agent.
+    ``voice_config`` merges key by key, so a request that sends only a
+    language keeps the agent's voice."""
     sent = body.model_fields_set
     update: dict = {}
     for field in _AGENT_FIELDS:
-        if field in sent:
-            continue
         value = getattr(agent, field)
         if field == "voice_config":
-            value = VoiceConfig.model_validate(value or {})
+            saved = value or {}
+            if "voice_config" in sent:
+                request = body.voice_config
+                saved = {
+                    **saved,
+                    **request.model_dump(include=request.model_fields_set),
+                }
+            value = VoiceConfig.model_validate(saved)
+        elif field in sent:
+            continue
         update[field] = value
     return body.model_copy(update=update)
 

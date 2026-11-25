@@ -41,7 +41,11 @@ accessible when a workspace retains its own provider key.
 Selection applies these rules in order:
 
 1. Keep eligible operator preferences in their configured order.
-2. Include eligible voices from Hail's existing default voice configuration.
+2. Include eligible voices from Hail's default voice configuration: the house
+   voice for the language
+   ([`core/hailhq/core/house_voices.py`](../core/hailhq/core/house_voices.py)),
+   then `CARTESIA_VOICE_ID`. The house voice is also `default_voice`: the voice
+   a call in that language uses when none is chosen.
 3. Fill remaining places with original-language voices first. Prefer a gender,
    provider and accent region not already represented. Break ties by name,
    provider and voice ID for stable results.

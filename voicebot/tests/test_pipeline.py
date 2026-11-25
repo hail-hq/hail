@@ -335,6 +335,60 @@ def test_build_tts_no_language_keeps_plugin_default() -> None:
     assert cartesia_inst._opts.language == "en"
 
 
+def test_house_cartesia_speaks_with_a_voice_made_for_the_language() -> None:
+    """With no chosen voice, a non-English call uses the house voice for its
+    language; English and no language keep CARTESIA_VOICE_ID; a chosen voice
+    always wins."""
+    from hailhq.core.house_voices import CARTESIA_LANGUAGE_VOICES
+    from hailhq.voicebot.pipeline import build_tts
+    from livekit.plugins import cartesia as cartesia_plugin
+
+    def cartesia_voice(tts):
+        instances = getattr(tts, "_tts_instances", [tts])
+        return next(
+            i for i in instances if isinstance(i, cartesia_plugin.TTS)
+        )._opts.voice
+
+    assert cartesia_voice(build_tts(language="de")) == CARTESIA_LANGUAGE_VOICES["de"]
+    assert cartesia_voice(build_tts(language="th")) == CARTESIA_LANGUAGE_VOICES["th"]
+    assert cartesia_voice(build_tts(language="en")) == "ct-voice-id"
+    assert cartesia_voice(build_tts()) == "ct-voice-id"
+    assert cartesia_voice(build_tts(None, "chosen", "de")) == "chosen"
+    # A retired language voice falls back to the configured voice.
+    voices = [
+        i._opts.voice
+        for i in build_tts(language="de")._tts_instances
+        if isinstance(i, cartesia_plugin.TTS)
+    ]
+    assert voices == [CARTESIA_LANGUAGE_VOICES["de"], "ct-voice-id"]
+    single = [
+        i
+        for i in build_tts(None, "chosen", "de")._tts_instances
+        if isinstance(i, cartesia_plugin.TTS)
+    ]
+    assert len(single) == 1
+
+
+def test_org_cartesia_without_a_voice_uses_the_language_voice() -> None:
+    """A workspace Cartesia key with no voice set speaks with the house
+    voice for the call's language; a workspace voice wins."""
+    from hailhq.core.house_voices import CARTESIA_LANGUAGE_VOICES
+    from hailhq.voicebot.pipeline import ResolvedLayer, build_tts
+
+    def org(params):
+        return ResolvedLayer(
+            provider="cartesia",
+            api_key="org-cartesia-key",
+            params=params,
+            fallback_enabled=False,
+        )
+
+    tts = build_tts(org=org({"model": "sonic-3.5"}), language="fr")
+    assert tts._opts.voice == CARTESIA_LANGUAGE_VOICES["fr"]
+    tts = build_tts(org=org({"voice_id": "org-voice"}), language="fr")
+    assert tts._opts.voice == "org-voice"
+
+
 def test_build_stt_language_pins_deepgram() -> None:
     """Per-call language reaches the Deepgram instance; None keeps en-US."""
     from hailhq.voicebot.pipeline import build_stt
@@ -597,7 +651,9 @@ def test_house_tts_trims_elevenlabs_for_cartesia_only_language() -> None:
     from livekit.plugins import cartesia as cartesia_plugin
 
     tts = build_tts(language="th")  # th: no elevenlabs support
-    assert isinstance(tts, cartesia_plugin.TTS)  # single instance, no adapter
+    # The Thai voice, then the configured voice: Cartesia only.
+    assert all(isinstance(i, cartesia_plugin.TTS) for i in tts._tts_instances)
+    assert len(tts._tts_instances) == 2
 
 
 def test_house_tts_keeps_fallback_for_dual_provider_language() -> None:
@@ -624,7 +680,8 @@ def test_build_tts_byo_cartesia_with_fallback_and_cartesia_only_language() -> No
     tts = build_tts(org=org, language="th")
     assert isinstance(tts, agents_tts.FallbackAdapter)
     inner = tts._tts_instances
-    assert len(inner) == 2, "BYO + house fallback should have 2 instances"
+    # BYO, then the house Thai voice, then the configured house voice.
+    assert len(inner) == 3, "BYO + two house Cartesia voices"
     assert all(isinstance(inst, cartesia_plugin.TTS) for inst in inner)
 
 

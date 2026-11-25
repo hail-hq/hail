@@ -4,7 +4,7 @@ Run `uv run --directory core --extra dev pytest tests/test_prompts.py` after a p
 Run `uv run --directory api pytest tests/test_agents_api.py` against a local test database after an API change.
 
 [`core/prompts.py`](../../core/hailhq/core/prompts.py) owns the shared voice and SMS framing.
-`PLATFORM_PRIVACY` protects internal instructions. `VOICE_CONFIGURATION_HELP` owns spoken product guidance. Every voice call carries only a short `SETTINGS_HELP_STUB`; the guide itself is returned by the `hail_settings_help` tool (`core/hailhq/core/agent_tools/hail_help.py`), added to every call. `PRIVACY_REMINDER` repeats the privacy rule after the customer text. Send and history rules live in the tool descriptions.
+`PLATFORM_PRIVACY` protects internal instructions. `VOICE_CONFIGURATION_HELP` owns spoken product guidance. A voice call with a workspace member on the line carries a short `SETTINGS_HELP_STUB`; the guide itself is returned by the `hail_settings_help` tool (`core/hailhq/core/agent_tools/hail_help.py`). The tool is `members_only`: on any other call the voicebot leaves it out, and the stub's ToolLine swaps in `SETTINGS_HELP_OUTSIDER` (a one-sentence apology, no Hail, console or settings). When the call's voice was made for another language than the call's, `voice_language_section` tells the model so. `PRIVACY_REMINDER` repeats the privacy rule after the customer text. Send and history rules live in the tool descriptions.
 The voice and text workers compose this framing with customer-authored `system_prompt` instructions.
 Customer instructions remain visible and editable. Shared framing does not belong in customer responses.
 `GET /v1/agents/prompt-templates` is retired and returns 410, including for workspace administrators.

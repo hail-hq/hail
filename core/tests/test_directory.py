@@ -12,6 +12,7 @@ from hailhq.core import directory
 from hailhq.core.directory import (
     entry_email,
     find_by_phone,
+    has_member_phone,
     list_directory,
     resolve_contact_emails,
     resolve_member_emails,
@@ -150,6 +151,28 @@ async def test_find_by_phone_names_nobody_for_a_shared_number(async_session):
     )
 
     assert await find_by_phone(async_session, org, "+15550001111") is None
+
+
+async def test_has_member_phone_ignores_name_and_sharing(async_session):
+    """Setup help goes to any member with the number: unnamed, or sharing
+    it with another member. A contact, or another org's member, is not one."""
+    org, other = uuid.uuid4(), uuid.uuid4()
+    await _add_member(async_session, org, "", "a@a.test", phone_number="+15550002222")
+    await _add_member(
+        async_session, org, "Ana", "b@a.test", phone_number="+15550003333"
+    )
+    await _add_member(
+        async_session, org, "Ben", "c@a.test", phone_number="+15550003333"
+    )
+    await _add_member(
+        async_session, other, "Cy", "d@a.test", phone_number="+15550004444"
+    )
+    await _add_contact(async_session, org, "Dee", phone_e164="+15550005555")
+
+    assert await has_member_phone(async_session, org, "+15550002222")
+    assert await has_member_phone(async_session, org, "+15550003333")
+    assert not await has_member_phone(async_session, org, "+15550004444")
+    assert not await has_member_phone(async_session, org, "+15550005555")
 
 
 async def test_resolve_contact_emails_by_name_in_org_only(async_session):

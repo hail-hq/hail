@@ -30,8 +30,14 @@ CLI: `hail agents create "Front desk" --prompt-file ./front-desk.md`, then
 `hail numbers route <number-id> --calls <agent-id> --texts <agent-id>`.
 Restrict tools with `hail agents update <id> --tools send_sms`; allow
 all again with `hail agents update <id> --all-tools`. Some tools stay on
-every call, whatever the list says: `end_call` (hang up), `send_dtmf`
-(keypad presses) and Hail's settings guide.
+every call, whatever the list says: `end_call` (hang up) and `send_dtmf`
+(keypad presses). Hail's settings guide is added when a workspace member
+is on the line (their profile phone number matches); other callers get a
+short apology instead of setup steps.
+
+A call with `agent_id` takes the agent's settings for every field the
+request leaves out. `voice_config` merges key by key: a request that sets
+only `language` keeps the agent's `voice_id`.
 MCP: `list_agents`, `get_agent`, `create_agent`, `update_agent`, `delete_agent`, `route_number`, and `place_call(agent_id=...)`.
 SDK: `client.agents.create(...)`, `client.numbers.route(...)`.
 

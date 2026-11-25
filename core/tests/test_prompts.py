@@ -47,8 +47,65 @@ def test_privacy_and_help_stub_apply_to_every_call() -> None:
 def test_voice_settings_guide_distinguishes_optional_and_always_on_tools() -> None:
     guide = prompts.VOICE_CONFIGURATION_HELP
     assert "optional tools" in guide
-    assert "Every call keeps the ability to hang up, press keypad digits," in guide
-    assert "and explain where to change Hail settings." in guide
+    assert "Every call keeps the ability to hang up and press keypad digits." in guide
+    assert "only when a workspace member" in guide
+    assert "voice was made for another language" in guide
+    assert "voice_id for a saved agent or a one-off call" in guide
+
+
+def test_callers_who_are_not_members_hear_no_setup_steps() -> None:
+    """Without the settings help tool (only a workspace member on the line
+    gets it), the settings section becomes a short apology rule that keeps
+    Hail and its menus out of the call."""
+    have = ["end_call", "send_dtmf"]
+    for direction in (None, "inbound"):
+        text = prompts.build_voice_instructions("Be kind.", direction, tool_names=have)
+        assert prompts.SETTINGS_HELP_STUB not in text
+        assert prompts.SETTINGS_HELP_OUTSIDER in text
+        assert "hail_settings_help" not in text
+        assert "Call settings" not in text
+        # The privacy rule keeps its private-details refusal, without the
+        # offer to explain settings.
+        assert "explain supported settings" not in text
+        assert "offer help with the setting" not in text
+        assert "briefly decline that part." in text
+        member = prompts.build_voice_instructions(
+            "Be kind.", direction, tool_names=[*have, "hail_settings_help"]
+        )
+        assert prompts.SETTINGS_HELP_STUB in member
+        assert prompts.SETTINGS_HELP_OUTSIDER not in member
+    assert "Always identify honestly as AI if asked." in prompts.SETTINGS_HELP_OUTSIDER
+    assert "Never mention Hail" in prompts.SETTINGS_HELP_OUTSIDER
+
+
+def test_call_language_section_keeps_the_call_in_its_language() -> None:
+    text = prompts.call_language_section("German")
+    assert text.startswith(prompts.CALL_LANGUAGE_HEADING)
+    assert "Speak in German for this call." in text
+    assert "can't switch languages on this call" in text
+    assert "then continue in German" in text
+    assert "Hail" not in text
+
+
+def test_members_get_steps_to_set_the_call_language() -> None:
+    """Only the member version of the settings section (with the help tool)
+    offers the steps; the guide has them."""
+    assert "language this call is not set up for" in prompts.SETTINGS_HELP_STUB
+    assert "set the language" not in prompts.SETTINGS_HELP_OUTSIDER
+    assert "never offer to change your setup" in prompts.SETTINGS_HELP_OUTSIDER
+    guide = prompts.VOICE_CONFIGURATION_HELP
+    assert "you cannot switch during the call" in guide
+    assert "voice_config.language" in guide
+    assert "Language, then Save" in guide
+
+
+def test_voice_language_section_names_the_voice_language_only() -> None:
+    text = prompts.voice_language_section("English")
+    assert text.startswith(prompts.VOICE_LANGUAGE_HEADING)
+    assert "made for English" in text
+    assert "one sentence" in text
+    for vendor in ("Cartesia", "ElevenLabs", "Hail"):
+        assert vendor not in text
 
 
 def test_text_instructions_keep_the_same_private_boundary() -> None:
@@ -150,15 +207,15 @@ def _sha(text: str) -> str:
 
 # Any change here changes what every agent is told: update on purpose only.
 _VOICE = {
-    (None, None): "9d3cfa6c40e03f696bff169884718a670482829d61bdec8cb7231ded68e4fa52",
+    (None, None): "cd6e9956640466ab3c175fc7d1c2debad6a2c4c533d3d4429aad27b2e78d168a",
     (None, "inbound"): (
-        "54675424df2c5d9c9c6a7e211f166fd83aaf8be38acbc01c084c927b9fc4ca93"
+        "9908e0650a9de5658b264baa77ddb9cb6fa6b48d897011a21b3de0bb8717d3c6"
     ),
     ("Be kind.", None): (
-        "656057cf6e43f33771c73bc1d4aee1c5cb862b1a4713a49a057f8c7ea04469c1"
+        "2c32dc0b0ea2cf8e200802000395288d2c27b685edb73291a5872ab29cca9bb4"
     ),
     ("Be kind.", "inbound"): (
-        "f849abfde4b790926e7339319db3a4d92b82f73196fe572fca4abe2ee63e911d"
+        "8636432d77678646d1df8ae16f3450c9a57a45630c5b6bd7532e47e813404345"
     ),
 }
 
@@ -172,7 +229,7 @@ def test_prompt_text_is_pinned() -> None:
         "37e9a0b5058e8c60355db926a963a8fba59c0fc4dd43d9ede4c7116e464e9e8b"
     )
     assert _sha(prompts.VOICE_CONFIGURATION_HELP) == (
-        "949d9b1e099e90adbf6a72cdcb261998659ad5a665b586e9f03cd1fac390995b"
+        "7a9afafbdce0ba9d8564ed57db2d1310ef79a2f24ab14152e5d380458acf82db"
     )
 
 

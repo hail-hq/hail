@@ -21,6 +21,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from hailhq.api.routes.internal.auth import verify_internal_request
 from hailhq.core.config import settings
 from hailhq.core.db import get_session
+from hailhq.core.house_voices import house_cartesia_voice
 from hailhq.core.languages import SUPPORTED_LANGUAGES
 from hailhq.core.models import OrgProviderConfig
 from hailhq.core.provider_config import (
@@ -301,8 +302,9 @@ async def upsert_provider_config(
             if provider == "cartesia"
             else settings.elevenlabs_model
         )
+        # The voice calls in this language use when none is chosen.
         voice_id = params.get("voice_id") or (
-            settings.cartesia_voice_id
+            house_cartesia_voice(params["language"]) or settings.cartesia_voice_id
             if provider == "cartesia"
             else settings.elevenlabs_voice_id
         )
