@@ -196,7 +196,7 @@ class VoiceConfig(BaseModel):
 
     @model_validator(mode="after")
     def _clear_provider_without_voice(self) -> "VoiceConfig":
-        if not self.voice_id:
+        if self.voice_provider and not self.voice_id:
             self.voice_provider = None
         return self
 
