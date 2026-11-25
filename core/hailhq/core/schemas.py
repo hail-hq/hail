@@ -186,7 +186,6 @@ class VoiceConfig(BaseModel):
         ),
     )
 
-
     @staticmethod
     def legacy_agent_dict(config: dict) -> dict:
         """Skip fields written by releases that support provider-specific voices."""
@@ -1785,7 +1784,6 @@ class AgentResponse(BaseModel):
     )
     created_at: datetime = Field(description="ISO 8601 timestamp.")
     updated_at: datetime = Field(description="ISO 8601 timestamp.")
-
 
     @field_validator("voice_config")
     @classmethod

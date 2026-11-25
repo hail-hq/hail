@@ -121,7 +121,9 @@ def apply_agent_defaults(body: CallCreate, agent: Agent) -> CallCreate:
         value = getattr(agent, field)
         if field == "voice_config":
             # On rollback, keep the language and fall back to the workspace voice.
-            value = VoiceConfig.model_validate(VoiceConfig.legacy_agent_dict(value or {}))
+            value = VoiceConfig.model_validate(
+                VoiceConfig.legacy_agent_dict(value or {})
+            )
         update[field] = value
     return body.model_copy(update=update)
 
