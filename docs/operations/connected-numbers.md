@@ -1,6 +1,6 @@
 # Connected numbers
 
-A customer's phone system (PBX) connects to Hail over a SIP trunk. Each connection has its own LiveKit inbound and outbound trunk. Until the public routes exist, an operator sets everything up with one command.
+A customer's phone system (PBX) connects to Hail over a SIP trunk. Each connection has its own LiveKit inbound and outbound trunk. Customers set it up in the console or with [`/v1/sip-connections`](../public/connect-phone-system.md); the API needs `LIVEKIT_SIP_HOST` set (empty: the routes answer 503). The operator command below is for support.
 
 ## 1. Before any connected number exists
 
@@ -16,6 +16,7 @@ A customer's phone system (PBX) connects to Hail over a SIP trunk. Each connecti
    - `lk sip dispatch update --trunks ""` does not work (lk 2.16.3: "unsupported list update operation"). Use the command above.
    - Verify: `lk sip dispatch list` shows `<any>` under SipTrunks for `hail-inbound`.
    - Never add a trunk to the rule after this. A rule that lists one trunk matches only the trunks it lists, and connection trunks stop being answered. `scripts/ops/sip_trunks.py apply` already skips the add on an empty list; skip it in the [inbound trunk runbook](inbound-trunk-lockdown.md) rollback too.
+
 3. Do this before the first connection is created, and after the per-carrier trunks of the [inbound trunk runbook](inbound-trunk-lockdown.md) are applied.
 
 ## 2. Commands
@@ -44,7 +45,7 @@ docker compose exec api python -m hailhq.api.connected_numbers_ops release-claim
 - `delete` works only when the connection has no numbers.
 - `release-claim` frees a number held by an unchecked claim (section 5), for a number added by hand. It prints `released`, or exits 1 when the number has no unchecked claim.
 - Exit codes: 0 done, 1 refused (prints the error `code` and `field`), 2 bad arguments.
-- Limits: `create` has no `--pbx-username` or `--pbx-password`, and there is no update or rotate command. If an inbound password is lost, remove the numbers, delete the connection and create it again. Plan 2 adds these.
+- The command has no update or rotate: use `PATCH /v1/sip-connections/{id}` and `POST /v1/sip-connections/{id}/rotate-password` (or the console).
 
 ## 3. What the customer enters in their PBX
 

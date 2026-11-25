@@ -51,7 +51,7 @@ Every tool sets the MCP hints `readOnlyHint`, `destructiveHint`, `idempotentHint
 | `whoami`                        | Identify the human behind the session (for `reply_to`).                                                                         |
 | `list_contacts`                 | List the org's contacts (members + manual contacts).                                                                            |
 | `lookup_contact`                | Find one contact by name, email, or phone fragment.                                                                             |
-| `create_contact`                | Add a manual contact.                                                                                                           |
+| `create_contact`                | Add a manual contact: phone, email, or an extension on a connected phone system.                                                |
 | `list_agents`                   | List saved agents.                                                                                                              |
 | `get_agent`                     | Fetch one saved agent.                                                                                                          |
 | `create_agent`                  | Save an agent that answers calls and texts.                                                                                     |
@@ -114,6 +114,8 @@ This needs a client with a shell (Claude Code, Codex, Cursor). Claude.ai web cha
    The server checks the total. If it differs from the quote, the call fails with 409 and nothing is charged. The result is the number plus an `idempotency_key`. To retry after a timeout, pass that key as `idempotency_key`.
 
 3. `route_number`: `{"number_id": "<id>", "voice_agent_id": "<agent-id>"}`.
+
+Numbers from your own phone system show `source: "connected"` in `list_numbers` and `get_number`. Connecting a phone system happens in the console or the [API](connect-phone-system.md), not over MCP: setup shows a password once and the ownership check places a billed call. Once checked, `route_number` routes it like any number, and `release_number` removes it from Hail only.
 
 > **Warning:** `acquire_number` buys a real number. It charges the setup fee and the first month now, then renews monthly. The account balance is the only spending limit. Keep the human approval prompt on for this tool.
 

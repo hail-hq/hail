@@ -4,6 +4,11 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- Connect your phone system: keep your number and phone system, and send its calls to a Hail agent.
+- Contacts can be phone system extensions, for handover.
+
 ### Fixed
 
 - Webhooks: a delivery that cannot reach its endpoint shows a short reason, such as a TLS or connection failure.

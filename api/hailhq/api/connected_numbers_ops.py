@@ -1,4 +1,5 @@
-"""Operator command for connected numbers, until the public routes exist.
+"""Operator command for connected numbers (support and ops; customers use
+the console or /v1/sip-connections).
 
 Run on the API host:
 ``docker compose exec api python -m hailhq.api.connected_numbers_ops <command>``.
