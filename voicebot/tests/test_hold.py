@@ -163,6 +163,11 @@ def test_the_classifier_knows_a_live_rep_after_a_hold():
     assert 'Thanks for holding, this is Sam. How can I help you?" -> human' in (
         REMOTE_SPEECH_PROMPT
     )
+    # A recorded "thank you for holding" stays a recording: the live-rep
+    # example must not pull queue messages over to human.
+    assert '"Thank you for holding. Your call is important to us." -> machine-ivr' in (
+        REMOTE_SPEECH_PROMPT
+    )
 
 
 async def test_short_noise_and_words_do_not_trigger_the_cant_hear_line(line):
