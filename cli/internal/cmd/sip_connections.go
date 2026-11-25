@@ -22,6 +22,8 @@ func newSipConnectionsCmd(opts *Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "sip-connections",
 		Short: "Connect your phone system (PBX) to Hail agents",
+		// Hidden from help while the API opens these routes to staff only.
+		Hidden: true,
 		Long: `hail sip-connections: connect your own phone system (PBX).
 
 1. create        gives the SIP server, username and password for a generic

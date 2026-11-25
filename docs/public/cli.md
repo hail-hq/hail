@@ -166,24 +166,6 @@ carries no user, so the email and name come back empty. Use the email as
 `hail email send --reply-to` so replies reach the person rather than the
 sending domain.
 
-## Connect your phone system
-
-Send calls from your own phone system (PBX) to Hail agents ([guide](connect-phone-system.md)).
-
-```bash
-hail sip-connections create --label "Main office" --region US --pbx-host pbx.example.com
-hail sip-connections add-number <connection-id> +14155550100
-hail sip-connections verify <connection-id> <number-id>   # Hail calls the number, up to 2 minutes
-hail numbers route <number-id> --calls <agent-id>
-hail sip-connections list
-hail sip-connections update <connection-id> --clear-pbx-host
-hail sip-connections rotate-password <connection-id>
-hail sip-connections remove-number <connection-id> <number-id>
-hail sip-connections delete <connection-id>
-```
-
-`create` and `rotate-password` print the password once. `--pbx-password -` reads the phone system's password from stdin. `verify` exits 1 with the reason when the check does not pass.
-
 ## Contacts
 
 The org's contact directory (members + manual contacts).

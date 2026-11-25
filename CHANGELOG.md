@@ -6,7 +6,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Added
 
-- Connect your phone system: keep your number and phone system, and send its calls to a Hail agent.
+- Connect your phone system: keep your number and phone system, and send its calls to a Hail agent. Hail's team sets it up with you.
 - Contacts can be phone system extensions, for handover.
 
 ### Fixed

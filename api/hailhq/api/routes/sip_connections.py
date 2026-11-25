@@ -16,7 +16,7 @@ the create and rotate responses: no idempotency store, no audit payload.
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Final
 from uuid import UUID
 
 from cryptography.fernet import InvalidToken
@@ -63,6 +63,24 @@ router = APIRouter(
     tags=["sip-connections"],
     responses=GENERAL_RATE_LIMITED_RESPONSES,
 )
+
+# Connected phone systems are staff-only for now: only a staff console
+# session (a JWT the website minted with superadmin) reaches these routes;
+# everyone else gets 404. True opens them to every workspace, API keys
+# included; open hail-website's `connectedPhoneSystems` feature with it.
+# Self-hosted: set it to True to use these routes with API keys.
+OPEN_TO_ALL_WORKSPACES: Final = False
+
+
+async def connections_principal(
+    principal: Annotated[Principal, Depends(get_current_principal)],
+) -> Principal:
+    """The caller, when connected phone systems are open to it."""
+    staff = principal.auth_kind == "jwt" and principal.superadmin
+    if not OPEN_TO_ALL_WORKSPACES and not staff:
+        raise HTTPException(status_code=404, detail="Not Found")
+    return principal
+
 
 _DEFAULT_LIST_LIMIT = 50
 _MAX_LIST_LIMIT = 100
@@ -220,7 +238,7 @@ async def _audit(
 )
 async def create_sip_connection(
     body: SipConnectionCreate,
-    principal: Annotated[Principal, Depends(get_current_principal)],
+    principal: Annotated[Principal, Depends(connections_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
     lk: Annotated[LiveKitClient | None, Depends(get_livekit_optional)],
 ) -> SipConnectionCreated:
@@ -258,7 +276,7 @@ async def create_sip_connection(
 
 @router.get("", response_model=SipConnectionListResponse)
 async def list_sip_connections(
-    principal: Annotated[Principal, Depends(get_current_principal)],
+    principal: Annotated[Principal, Depends(connections_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
     cursor: str | None = Query(default=None),
     limit: int = Query(default=_DEFAULT_LIST_LIMIT, ge=1, le=_MAX_LIST_LIMIT),
@@ -288,7 +306,7 @@ async def list_sip_connections(
 )
 async def get_sip_connection(
     connection_id: UUID,
-    principal: Annotated[Principal, Depends(get_current_principal)],
+    principal: Annotated[Principal, Depends(connections_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> SipConnectionResponse:
     """Read one connected phone system."""
@@ -302,7 +320,7 @@ async def get_sip_connection(
 async def update_sip_connection(
     connection_id: UUID,
     body: SipConnectionPatch,
-    principal: Annotated[Principal, Depends(get_current_principal)],
+    principal: Annotated[Principal, Depends(connections_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
     lk: Annotated[LiveKitClient | None, Depends(get_livekit_optional)],
 ) -> SipConnectionResponse:
@@ -335,7 +353,7 @@ async def update_sip_connection(
 )
 async def rotate_sip_connection_password(
     connection_id: UUID,
-    principal: Annotated[Principal, Depends(get_current_principal)],
+    principal: Annotated[Principal, Depends(connections_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
     lk: Annotated[LiveKitClient | None, Depends(get_livekit_optional)],
 ) -> SipConnectionPassword:
@@ -362,7 +380,7 @@ async def rotate_sip_connection_password(
 )
 async def delete_sip_connection(
     connection_id: UUID,
-    principal: Annotated[Principal, Depends(get_current_principal)],
+    principal: Annotated[Principal, Depends(connections_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
     lk: Annotated[LiveKitClient | None, Depends(get_livekit_optional)],
 ) -> None:
@@ -388,7 +406,7 @@ async def delete_sip_connection(
 async def add_sip_connection_number(
     connection_id: UUID,
     body: ConnectedNumberCreate,
-    principal: Annotated[Principal, Depends(get_current_principal)],
+    principal: Annotated[Principal, Depends(connections_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
     lk: Annotated[LiveKitClient | None, Depends(get_livekit_optional)],
 ) -> PhoneNumberResponse:
@@ -416,7 +434,7 @@ async def add_sip_connection_number(
 async def verify_sip_connection_number(
     connection_id: UUID,
     number_id: UUID,
-    principal: Annotated[Principal, Depends(get_current_principal)],
+    principal: Annotated[Principal, Depends(connections_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
     lk: Annotated[LiveKitClient | None, Depends(get_livekit_optional)],
 ) -> ConnectedNumberCheck:
@@ -450,7 +468,7 @@ async def verify_sip_connection_number(
 async def remove_sip_connection_number(
     connection_id: UUID,
     number_id: UUID,
-    principal: Annotated[Principal, Depends(get_current_principal)],
+    principal: Annotated[Principal, Depends(connections_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
     lk: Annotated[LiveKitClient | None, Depends(get_livekit_optional)],
 ) -> None:

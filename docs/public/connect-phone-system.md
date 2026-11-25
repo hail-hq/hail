@@ -4,40 +4,15 @@ Keep your number, your phone provider and your phone system (PBX). Your
 phone system sends the calls you choose to a Hail agent over a SIP trunk:
 all calls, after hours, overflow, or one menu option.
 
-```bash
-# 1. Create a connection. The password is shown once.
-curl -X POST "$HAIL_API_URL/v1/sip-connections" -H "Authorization: Bearer $HAIL_API_KEY" \
-  -H 'Content-Type: application/json' \
-  -d '{"label": "Main office", "default_region": "US", "pbx_host": "pbx.example.com"}'
-# → {"id": "c1...", "sip_host": "<project>.sip.livekit.cloud", "username": "hail-...", "password": "..."}
-
-# 2. Add your number. It starts "unverified".
-curl -X POST "$HAIL_API_URL/v1/sip-connections/c1.../numbers" -H "Authorization: Bearer $HAIL_API_KEY" \
-  -H 'Content-Type: application/json' -d '{"e164": "+14155550100"}'
-# → {"id": "n1...", "e164": "+14155550100", "provisioning_state": "unverified", "source": "connected"}
-
-# 3. Send that number's calls to Hail (below), then run the ownership check.
-curl -X POST "$HAIL_API_URL/v1/sip-connections/c1.../numbers/n1.../verify" \
-  -H "Authorization: Bearer $HAIL_API_KEY"
-# → {"state": "active"}  or  {"state": "unverified", "reason": "no_call_arrived"}
-
-# 4. Route it to an agent, as any number.
-curl -X PATCH "$HAIL_API_URL/v1/numbers/n1..." -H "Authorization: Bearer $HAIL_API_KEY" \
-  -H 'Content-Type: application/json' -d '{"voice_agent_id": "a1b2..."}'
-```
-
-CLI: `hail sip-connections create --label "Main office" --region US --pbx-host pbx.example.com`,
-then `add-number`, `verify`, and `hail numbers route <number-id> --calls <agent-id>` ([CLI](cli.md#connect-your-phone-system)).
-Console: **Numbers → Connect your phone system**.
-Schemas: `SipConnectionCreate`, `SipConnectionCreated`, `ConnectedNumberCheck` in
-[`openapi/openapi.yaml`](../../openapi/openapi.yaml).
+Hail's team sets up the connection with you: email hi@hail.so. Below is
+what your phone system needs and what the setup does.
 
 ## Set up the trunk on your phone system
 
 Add a generic SIP trunk with:
 
-- **SIP server**: `sip_host` from step 1.
-- **Username and password**: from step 1. Lost the password? `POST /v1/sip-connections/{id}/rotate-password` makes a new one.
+- **SIP server**: from Hail's setup.
+- **Username and password**: from Hail's setup. Lost the password? Hail makes a new one.
 - **Audio**: G.711 (PCMU or PCMA).
 - **Key presses**: RFC 2833 / RFC 4733 (telephone events). The ownership check needs them.
 - **Dialed number**: `+` and the country code, like `+14155550100`, on every call to Hail (an outbound rule that adds them).
@@ -62,16 +37,16 @@ presses. A call you send yourself cannot pass.
 
 ## Calls out and handover
 
-With `pbx_host`, agents call out from your number through your phone system
+With your phone system's address, agents call out from your number through your phone system
 (`POST /v1/calls` with `from` set to it), and hand calls over to a person on
 an extension: save the person as a contact with `extension` (1 to 6 digits,
 `*` or `#`), then add it to the agent's `handover_contacts`
 ([Agents](agents.md#hand-over-to-a-person)). The person sees the caller's own number.
 
-Without `pbx_host`, Hail only answers.
+Without it, Hail only answers.
 
 ## Good to know
 
 - Price: 10¢ a minute of call, and 10¢ a minute more while a handover is answered. No monthly fee.
 - Voice only: a connected number cannot send texts. An agent can still text from a Hail number.
-- `DELETE /v1/sip-connections/{id}/numbers/{number_id}` removes the number from Hail. It stays with your phone system and provider.
+- Removing a number from Hail leaves it with your phone system and provider.

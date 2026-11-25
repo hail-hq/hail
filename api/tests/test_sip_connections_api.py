@@ -22,6 +22,9 @@ SIP_HOST = "example.sip.livekit.cloud"
 
 @pytest.fixture(autouse=True)
 def configured(monkeypatch, livekit_mock):
+    monkeypatch.setattr(
+        "hailhq.api.routes.sip_connections.OPEN_TO_ALL_WORKSPACES", True
+    )
     monkeypatch.setattr(settings, "hail_provider_secret_key", generate_key())
     monkeypatch.setattr(settings, "livekit_sip_host", SIP_HOST)
     livekit_mock.create_pbx_inbound_trunk.return_value = "ST_in"
@@ -390,3 +393,118 @@ async def test_verify_a_removed_number_says_so(
     )
     assert resp.status_code == 409
     assert resp.json()["detail"] == "This number was removed from Hail. Add it again."
+
+
+async def test_staff_only_hides_the_routes_from_api_keys(
+    client: httpx.AsyncClient, org_and_key: tuple, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "hailhq.api.routes.sip_connections.OPEN_TO_ALL_WORKSPACES", False
+    )
+    _org, _key, plain = org_and_key
+    assert (
+        await client.get("/sip-connections", headers=_auth(plain))
+    ).status_code == 404
+    resp = await client.post(
+        "/sip-connections",
+        json={"label": "Main office", "default_region": "US"},
+        headers=_auth(plain),
+    )
+    assert resp.status_code == 404
+
+
+async def test_staff_only_lets_a_staff_console_session_in(
+    client: httpx.AsyncClient, org_and_key: tuple, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from hailhq.api.deps import Principal, get_current_principal
+    from hailhq.api.main import app
+
+    monkeypatch.setattr(
+        "hailhq.api.routes.sip_connections.OPEN_TO_ALL_WORKSPACES", False
+    )
+    org, _key, _plain = org_and_key
+    app.dependency_overrides[get_current_principal] = lambda: Principal(
+        auth_kind="jwt",
+        api_key_id=None,
+        user_id=None,
+        organization_id=org,
+        scopes=[],
+        superadmin=True,
+        console_session=True,
+    )
+    try:
+        resp = await client.get("/sip-connections")
+    finally:
+        app.dependency_overrides.pop(get_current_principal, None)
+    assert resp.status_code == 200
+
+
+ROUTES = [
+    ("get", "/sip-connections"),
+    ("post", "/sip-connections"),
+    ("get", "/sip-connections/{c}"),
+    ("patch", "/sip-connections/{c}"),
+    ("post", "/sip-connections/{c}/rotate-password"),
+    ("delete", "/sip-connections/{c}"),
+    ("post", "/sip-connections/{c}/numbers"),
+    ("post", "/sip-connections/{c}/numbers/{n}/verify"),
+    ("delete", "/sip-connections/{c}/numbers/{n}"),
+]
+
+
+@pytest.mark.parametrize("method,path", ROUTES)
+async def test_staff_only_refuses_a_customer_console_session_everywhere(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    monkeypatch: pytest.MonkeyPatch,
+    method: str,
+    path: str,
+) -> None:
+    from hailhq.api.deps import Principal, get_current_principal
+    from hailhq.api.main import app
+
+    monkeypatch.setattr(
+        "hailhq.api.routes.sip_connections.OPEN_TO_ALL_WORKSPACES", False
+    )
+    org, _key, _plain = org_and_key
+    app.dependency_overrides[get_current_principal] = lambda: Principal(
+        auth_kind="jwt",
+        api_key_id=None,
+        user_id=None,
+        organization_id=org,
+        scopes=[],
+        superadmin=False,
+        console_session=True,
+    )
+    url = path.format(c=uuid4(), n=uuid4())
+    try:
+        resp = await client.request(method.upper(), url, json={})
+    finally:
+        app.dependency_overrides.pop(get_current_principal, None)
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "Not Found"
+
+
+async def test_staff_only_needs_a_jwt_even_with_the_staff_flag(
+    client: httpx.AsyncClient, org_and_key: tuple, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from hailhq.api.deps import Principal, get_current_principal
+    from hailhq.api.main import app
+
+    monkeypatch.setattr(
+        "hailhq.api.routes.sip_connections.OPEN_TO_ALL_WORKSPACES", False
+    )
+    org, _key, _plain = org_and_key
+    app.dependency_overrides[get_current_principal] = lambda: Principal(
+        auth_kind="shared",
+        api_key_id=None,
+        user_id=None,
+        organization_id=org,
+        scopes=[],
+        superadmin=True,
+    )
+    try:
+        resp = await client.get("/sip-connections")
+    finally:
+        app.dependency_overrides.pop(get_current_principal, None)
+    assert resp.status_code == 404
