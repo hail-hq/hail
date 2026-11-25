@@ -45,7 +45,11 @@ from hailhq.core.http_tools import (
 )
 from hailhq.core.livekit import LiveKitClient
 from hailhq.core.models import Agent, EmailDomain, PhoneNumber
-from hailhq.core.provider_config import provider_cipher
+from hailhq.core.provider_config import (
+    load_org_provider_configs,
+    provider_cipher,
+    voice_override_conflict,
+)
 from hailhq.core.schemas import (
     AgentCreate,
     AgentListResponse,
@@ -53,6 +57,7 @@ from hailhq.core.schemas import (
     AgentUpdate,
     HandoverContactOut,
     HttpToolIn,
+    VoiceConfig,
 )
 from hailhq.core.secret_cipher import SecretKeyMissing
 from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
@@ -61,6 +66,18 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
+
+
+async def _check_scoped_voice(
+    db: AsyncSession, org_id: UUID, voice: VoiceConfig
+) -> None:
+    if voice.voice_provider is None:
+        return
+    org_tts = (await load_org_provider_configs(db, org_id)).get("tts")
+    language = voice.language or (org_tts.params.get("language") if org_tts else None)
+    if error := voice_override_conflict(voice.voice_provider, language, org_tts):
+        raise unprocessable(error, loc=["body", "voice_config", "voice_provider"])
+
 
 router = APIRouter(
     prefix="/agents", tags=["agents"], responses=GENERAL_RATE_LIMITED_RESPONSES
@@ -205,6 +222,7 @@ async def create_agent(
     """Create an agent. Route numbers to it with PATCH /numbers/{id}, or
     place calls with it via ``agent_id`` on POST /calls."""
     _check_tools(body.tools)
+    await _check_scoped_voice(db, principal.organization_id, body.voice_config)
     await _check_http_tools(body.http_tools)
     handover = await _check_handover(
         db, principal.organization_id, body.handover_contacts
@@ -329,20 +347,8 @@ async def update_agent(
             # read of the agent and every call it answers.
             changes.pop(field)
     if "voice_config" in changes:
-        config = body.voice_config.model_dump(mode="json")
-        if "voice_id" not in body.voice_config.model_fields_set:
-            # Read after concurrent voice edits before copying a newer override.
-            await db.refresh(
-                agent,
-                attribute_names=["voice_config"],
-                with_for_update={"key_share": True},
-            )
-            saved = agent.voice_config or {}
-            if saved.get("scoped_voice_id"):
-                config.pop("voice_id")
-                config["scoped_voice_id"] = saved["scoped_voice_id"]
-                config["voice_provider"] = saved.get("voice_provider")
-        changes["voice_config"] = config
+        await _check_scoped_voice(db, principal.organization_id, body.voice_config)
+        changes["voice_config"] = body.voice_config.model_dump(mode="json")
     # Validate before any attribute is set: the validation queries would
     # autoflush a pending name change outside the conflict handler below.
     items = None

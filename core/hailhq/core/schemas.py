@@ -176,6 +176,14 @@ class VoiceConfig(BaseModel):
             "environment's default voice."
         ),
     )
+    voice_provider: str | None = Field(
+        default=None,
+        pattern=r"^[a-z][a-z0-9_-]{0,31}$",
+        description=(
+            "Provider for voice_id. The selected voice is only used with this "
+            "provider. Omit to keep the existing unscoped voice_id behavior."
+        ),
+    )
     language: Language | None = Field(
         default=None,
         description=(
@@ -185,6 +193,13 @@ class VoiceConfig(BaseModel):
             "Omitted: the providers' defaults (English)."
         ),
     )
+
+    @model_validator(mode="after")
+    def _scoped_voice_requires_id(self) -> "VoiceConfig":
+        if self.voice_provider and not self.voice_id:
+            raise ValueError("voice_provider requires voice_id")
+        return self
+
 
     @staticmethod
     def legacy_agent_dict(config: dict) -> dict:
@@ -1789,6 +1804,7 @@ class AgentResponse(BaseModel):
     created_at: datetime = Field(description="ISO 8601 timestamp.")
     updated_at: datetime = Field(description="ISO 8601 timestamp.")
 
+
     @field_validator("voice_config")
     @classmethod
     def _public_voice_config(cls, value: dict) -> dict:
@@ -2269,6 +2285,13 @@ class EmailDomainPatch(_PrefixNames):
             "make the agent use its tools. Mail without a DMARC pass gets no "
             "reply. Omit to leave unchanged, except that a new agent starts at "
             "'members'."
+        ),
+    )
+    expected_email_agent_id: UUID | None = Field(
+        default=None,
+        description=(
+            "Optional precondition for changing email_agent_id. Null expects "
+            "no current agent. Returns 409 if another agent is assigned."
         ),
     )
 

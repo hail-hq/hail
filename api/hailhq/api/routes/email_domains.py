@@ -799,9 +799,10 @@ async def dns_check_email_domain(
     response_model=EmailDomainResponse,
     responses=merge_rate_limited_responses(
         {
+            409: {"description": "The address or agent assignment has changed."},
             429: {
                 "description": "The organization reached its daily confirm-mail limit for new forward addresses."
-            }
+            },
         },
         GENERAL_RATE_LIMITED_RESPONSES,
     ),
@@ -881,6 +882,12 @@ async def patch_email_domain(
 
     # ---- agent route (any kind) ----
     # Null clears the route, so "sent" is what counts here.
+    expected_agent = "expected_email_agent_id" in body.model_fields_set
+    if expected_agent and "email_agent_id" not in body.model_fields_set:
+        raise unprocessable(
+            "send email_agent_id with its precondition",
+            loc=["body", "expected_email_agent_id"],
+        )
     if "email_agent_id" in body.model_fields_set:
         if body.email_agent_id is not None:
             agent = (
@@ -985,9 +992,20 @@ async def patch_email_domain(
             )
 
     try:
-        await db.execute(
-            update(EmailDomain).where(EmailDomain.id == sd.id).values(**updates)
-        )
+        change = update(EmailDomain).where(EmailDomain.id == sd.id)
+        if expected_agent:
+            change = change.where(
+                EmailDomain.email_agent_id == body.expected_email_agent_id
+            )
+        changed = (
+            await db.execute(change.values(**updates).returning(EmailDomain.id))
+        ).scalar_one_or_none()
+        if expected_agent and changed is None:
+            await db.rollback()
+            raise HTTPException(
+                status_code=http_status.HTTP_409_CONFLICT,
+                detail="The email assignment changed. Pick the address again.",
+            )
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()

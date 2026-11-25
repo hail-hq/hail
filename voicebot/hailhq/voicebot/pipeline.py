@@ -539,9 +539,9 @@ def build_llm(
 
 
 def _house_tts(
-    voice_id_override: str | None, language: str | None
+    voice_id_override: str | None, language: str | None, *, skip: str | None = None
 ) -> list[agents_tts.TTS]:
-    allowed = tts_providers_for(language)
+    allowed = tts_providers_for(language) - {skip}
     instances: list[agents_tts.TTS] = []
     if settings.cartesia_api_key and "cartesia" in allowed:
         kwargs: dict[str, Any] = {
@@ -597,6 +597,8 @@ def build_tts(
     org: ResolvedLayer | None = None,
     voice_id_override: str | None = None,
     language: str | None = None,
+    *,
+    voice_provider: str | None = None,
 ) -> agents_tts.TTS:
     """Construct the TTS for one call.
 
@@ -623,6 +625,29 @@ def build_tts(
     voicebot ever sees it; this is defense-in-depth for direct LiveKit
     dispatches that bypass the API.
     """
+    if voice_provider and voice_id_override:
+        if voice_provider not in tts_providers_for(language) or (
+            org and org.provider != voice_provider and not org.fallback_enabled
+        ):
+            # Workspace settings or the effective language may have changed
+            # since this agent was saved. Never pass the ID to a different provider.
+            return build_tts(org, None, language)
+        selected = (
+            org
+            if org and org.provider == voice_provider
+            else ResolvedLayer(voice_provider, None, {}, True)
+        )
+        try:
+            primary = _org_tts(selected, voice_id_override, language)
+        except ProviderKeyError:
+            if selected.fallback_enabled:
+                return build_tts(org, None, language)
+            raise
+        if selected.fallback_enabled:
+            fallback = _house_tts(None, language, skip=voice_provider)
+            if fallback:
+                return agents_tts.FallbackAdapter([primary, *fallback])
+        return primary
     if org is not None:
         if language is not None and org.provider not in tts_providers_for(language):
             if not org.fallback_enabled:
@@ -815,6 +840,8 @@ def build_session(
     org_cfgs: dict[str, ResolvedLayer] | None = None,
     voice_id_override: str | None = None,
     language: str | None = None,
+    *,
+    voice_provider: str | None = None,
 ) -> AgentSession:
     """Build the :class:`AgentSession` for one job.
 
@@ -901,7 +928,12 @@ def build_session(
     return AgentSession(
         vad=vad,
         stt=build_stt(org_stt, language, provider, stt_drives_turns=(mode == "stt")),
-        tts=build_tts(org_cfgs.get("tts"), voice_id_override, language),
+        tts=build_tts(
+            org_cfgs.get("tts"),
+            voice_id_override,
+            language,
+            voice_provider=voice_provider,
+        ),
         llm=build_llm(llm_cfg, org_cfgs.get("llm"), retry_on_chunk_sent=True),
         turn_handling=TurnHandlingOptions(
             turn_detection=turn_detection,

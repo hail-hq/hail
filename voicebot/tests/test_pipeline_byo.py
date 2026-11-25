@@ -114,6 +114,21 @@ def test_house_default_when_no_org_config(captured_plugins) -> None:
     assert kw["voice"] == "house-voice"
 
 
+def test_agent_voice_stays_with_its_provider(captured_plugins, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "eleven_api_key", "house-eleven")
+    org = ResolvedLayer("cartesia", "org-key", {"voice_id": "org-voice"}, True)
+    build_tts(org, "italian-voice", "it", voice_provider="elevenlabs")
+    assert captured_plugins["elevenlabs"][0].kwargs["voice_id"] == "italian-voice"
+    assert captured_plugins["cartesia"][0].kwargs["voice"] == "house-voice"
+
+
+def test_agent_voice_respects_workspace_fallback_policy(captured_plugins) -> None:
+    org = ResolvedLayer("cartesia", "org-key", {"voice_id": "org-voice"}, False)
+    build_tts(org, "italian-voice", "it", voice_provider="elevenlabs")
+    assert captured_plugins["cartesia"][0].kwargs["voice"] == "org-voice"
+    assert "elevenlabs" not in captured_plugins
+
+
 def test_llm_org_anthropic(captured_plugins) -> None:
     org = ResolvedLayer(
         provider="anthropic",

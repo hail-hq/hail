@@ -1654,6 +1654,38 @@ async def test_patch_routes_an_address_to_an_agent(
     assert resp.json()["email_agent_id"] is None
 
 
+async def test_patch_rejects_stale_agent_assignment(
+    client: httpx.AsyncClient,
+    org_and_key: tuple,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, _, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    domain_id, agent_id = await _hail_mail_and_agent(client, headers, monkeypatch)
+    url = f"/email-domains/{domain_id}"
+    assigned = await client.patch(
+        url,
+        json={"email_agent_id": agent_id, "expected_email_agent_id": None},
+        headers=headers,
+    )
+    assert assigned.status_code == 200, assigned.text
+    stale = await client.patch(
+        url,
+        json={"email_agent_id": None, "expected_email_agent_id": None},
+        headers=headers,
+    )
+    assert stale.status_code == 409, stale.text
+    current = await client.get(url, headers=headers)
+    assert current.json()["email_agent_id"] == agent_id
+    cleared = await client.patch(
+        url,
+        json={"email_agent_id": None, "expected_email_agent_id": agent_id},
+        headers=headers,
+    )
+    assert cleared.status_code == 200, cleared.text
+    assert cleared.json()["email_agent_id"] is None
+
+
 async def test_a_new_route_starts_at_members(
     client: httpx.AsyncClient,
     org_and_key: tuple,

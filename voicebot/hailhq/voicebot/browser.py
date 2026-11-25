@@ -367,6 +367,7 @@ async def run_browser_session(
             org_cfgs=configs,
             voice_id_override=cfg.get("voice_id"),
             language=language,
+            voice_provider=cfg.get("voice_provider"),
         )
 
         event_tasks = attach_handlers(session, call_id)

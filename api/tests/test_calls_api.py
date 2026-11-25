@@ -1873,12 +1873,14 @@ async def test_post_calls_twilio_number_without_trunk_fails_before_room(
     assert call.end_reason == "carrier_route_failed"
 
 
+@pytest.mark.parametrize("provider", [None, "elevenlabs"])
 async def test_post_calls_with_agent_id_fills_defaults(
     client: httpx.AsyncClient,
     async_session: AsyncSession,
     org_and_key: tuple[str, ApiKey, str],
     livekit_mock: AsyncMock,
     add_phone_number,
+    provider: str | None,
 ) -> None:
     from hailhq.core.models import Agent
 
@@ -1891,7 +1893,7 @@ async def test_post_calls_with_agent_id_fills_defaults(
         first_message="Hi, is now a good time?",
         ai_disclosure=False,
         ai_disclosure_line="AI for {org}.",
-        voice_config={"voice_id": "v9"},
+        voice_config={"voice_id": "v9", "voice_provider": provider, "language": "it"},
         tools=["end_call"],
         max_duration_seconds=900,
     )
@@ -1918,6 +1920,8 @@ async def test_post_calls_with_agent_id_fills_defaults(
     assert md["ai_disclosure_line"] == "AI for {org}."
     assert md["tools"] == ["end_call"]
     assert md["voice_config"]["voice_id"] == "v9"
+    assert md["voice_config"]["voice_provider"] == provider
+    assert md["voice_config"]["language"] == "it"
     assert md["max_duration_seconds"] == 900
     assert md["handover_targets"] == []
 

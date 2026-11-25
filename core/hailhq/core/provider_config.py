@@ -15,7 +15,7 @@ from urllib.parse import urlsplit
 from uuid import UUID
 
 from hailhq.core.config import settings
-from hailhq.core.languages import Language
+from hailhq.core.languages import Language, tts_providers_for
 from hailhq.core.models import OrgProviderConfig
 from hailhq.core.secret_cipher import SecretCipher
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
@@ -34,6 +34,17 @@ __all__ = [
 ]
 
 LAYERS: tuple[str, ...] = ("llm", "tts", "stt")
+
+
+def voice_override_conflict(
+    provider: str, language: str | None, org: OrgProviderConfig | None
+) -> str | None:
+    """Check language compatibility and the workspace's routing consent."""
+    if provider not in tts_providers_for(language):
+        return "Choose a voice that speaks this language."
+    if org is not None and org.provider != provider and not org.fallback_enabled:
+        return "Choose a voice allowed by your workspace call settings."
+    return None
 
 
 class LLMParams(BaseModel):

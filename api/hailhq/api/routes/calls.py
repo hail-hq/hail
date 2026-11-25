@@ -75,7 +75,11 @@ from hailhq.core.pool import (
     claim_pool_number,
     release_pool_reservation,
 )
-from hailhq.core.provider_config import load_org_provider_configs, provider_cipher
+from hailhq.core.provider_config import (
+    load_org_provider_configs,
+    provider_cipher,
+    voice_override_conflict,
+)
 from hailhq.core.recordings import recording_call_metadata
 from hailhq.core.schemas import (
     TERMINAL_CALL_STATUSES,
@@ -446,6 +450,14 @@ async def create_call(
     lang = body.voice_config.language or (
         default_tts.params.get("language") if default_tts else None
     )
+    if body.voice_config.voice_provider and (
+        error := voice_override_conflict(
+            body.voice_config.voice_provider, lang, default_tts
+        )
+    ):
+        raise await cache_failure(
+            idem, unprocessable(error, loc=["body", "voice_config", "voice_provider"])
+        )
     if lang is not None:
         body = body.model_copy(
             update={

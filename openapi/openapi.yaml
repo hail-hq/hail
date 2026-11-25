@@ -8917,6 +8917,15 @@ components:
             passes DMARC and the spam and header rules; such a sender can make the
             agent use its tools. Mail without a DMARC pass gets no reply. Omit to
             leave unchanged, except that a new agent starts at 'members'."
+        expected_email_agent_id:
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
+          title: Expected Email Agent Id
+          description:
+            Optional precondition for changing email_agent_id. Null expects
+            no current agent. Returns 409 if another agent is assigned.
       additionalProperties: false
       type: object
       title: EmailDomainPatch
@@ -13192,6 +13201,15 @@ components:
             "Per-call TTS voice override, applied to whichever TTS provider
             serves the call. Omitted: the organization's or environment's default
             voice."
+        voice_provider:
+          anyOf:
+            - type: string
+              pattern: ^[a-z][a-z0-9_-]{0,31}$
+            - type: "null"
+          title: Voice Provider
+          description:
+            Provider for voice_id. The selected voice is only used with
+            this provider. Omit to keep the existing unscoped voice_id behavior.
         language:
           anyOf:
             - type: string
