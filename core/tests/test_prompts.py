@@ -36,7 +36,11 @@ def test_privacy_and_help_stub_apply_to_every_call() -> None:
                 ) in text
                 assert text.index(prompts.PLATFORM_PRIVACY) < text.index(customer)
     guide = prompts.VOICE_CONFIGURATION_HELP
-    assert "Calls, then Call settings, then Language and voice" in guide
+    assert "Phone, then Settings, then Language and voice" in guide
+    assert "Phone, then Settings, then AI line" in guide
+    assert "Email, then Settings, then Agent replies" in guide
+    assert "hail.so/console/calls/settings" in guide
+    assert "hail.so/console/domains" in guide
     assert "Save language and voice" in guide
     assert "Do not invent an agent voice picker" in guide
     assert "future calls, not the call already in progress" in guide
@@ -172,7 +176,7 @@ def test_prompt_text_is_pinned() -> None:
         "37e9a0b5058e8c60355db926a963a8fba59c0fc4dd43d9ede4c7116e464e9e8b"
     )
     assert _sha(prompts.VOICE_CONFIGURATION_HELP) == (
-        "949d9b1e099e90adbf6a72cdcb261998659ad5a665b586e9f03cd1fac390995b"
+        "2cf14e27076449ed37a8c46f67e5030033c9cd25afc823eab13b35aad9da49ed"
     )
 
 

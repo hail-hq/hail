@@ -1,6 +1,6 @@
 # Optional call recording
 
-Workspace owners choose recording in **Calls → Settings** or during onboarding.
+Workspace owners choose recording in **Phone → Settings** or during onboarding.
 Recording is on for every workspace unless an owner turns it off. Retention is
 **7 days**, **30 days** or **1 year**; the default is 30 days. A call keeps the retention saved when it
 starts, so later changes apply to future calls only.
