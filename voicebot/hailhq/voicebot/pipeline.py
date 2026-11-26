@@ -78,7 +78,7 @@ from hailhq.core.providers.llm.thinking import thinking_off
 from hailhq.core.providers.tts import (
     PCM_ADAPTERS,
     GeminiSpeech,
-    legacy_fallback_voice_id,
+    legacy_fallback_voice_provider,
 )
 from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
 from hailhq.voicebot.pcm_tts import PCMTTS
@@ -557,6 +557,11 @@ def _house_tts(
 ) -> list[agents_tts.TTS]:
     allowed = tts_providers_for(language)
     instances: list[agents_tts.TTS] = []
+    voice_provider = (
+        legacy_fallback_voice_provider(voice_id_override)
+        if match_legacy_voice
+        else None
+    )
     has_legacy_keys = settings.cartesia_api_key or settings.eleven_api_key
     if (
         include_gemini
@@ -571,9 +576,9 @@ def _house_tts(
         instances.append(PCMTTS(GeminiSpeech.from_config({})))
     if settings.cartesia_api_key and "cartesia" in allowed:
         voice = (
-            legacy_fallback_voice_id("cartesia", voice_id_override, language)
-            if match_legacy_voice
-            else voice_id_override
+            voice_id_override
+            if not match_legacy_voice or voice_provider == "cartesia"
+            else None
         )
         kwargs: dict[str, Any] = {
             "model": settings.cartesia_model,
@@ -584,9 +589,9 @@ def _house_tts(
         instances.append(cartesia_plugin.TTS(**kwargs))
     if settings.eleven_api_key and "elevenlabs" in allowed:
         voice = (
-            legacy_fallback_voice_id("elevenlabs", voice_id_override, language)
-            if match_legacy_voice
-            else voice_id_override
+            voice_id_override
+            if not match_legacy_voice or voice_provider == "elevenlabs"
+            else None
         )
         kwargs = {
             "voice_id": voice or settings.elevenlabs_voice_id,
@@ -594,7 +599,11 @@ def _house_tts(
         }
         if language:
             kwargs["language"] = elevenlabs_language(language)
-        instances.append(elevenlabs_plugin.TTS(**kwargs))
+        eleven = elevenlabs_plugin.TTS(**kwargs)
+        if voice_provider == "elevenlabs":
+            instances.insert(0, eleven)
+        else:
+            instances.append(eleven)
     return instances
 
 
