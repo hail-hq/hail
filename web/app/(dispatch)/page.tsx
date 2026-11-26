@@ -102,7 +102,8 @@ export default function CostsPage() {
               <p>
                 Find the prices you need to estimate an AI agent’s running cost.
                 Compare language and speech models, then check SMS and phone
-                number rates.
+                number rental. For voice calls, add your phone provider’s
+                per-minute call charges.
               </p>
               <div className="costs-hero-actions">
                 <a href="/costs/compare">Compare models</a>
