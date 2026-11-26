@@ -10,9 +10,68 @@ from google.genai import types
 from google.oauth2.credentials import Credentials
 from hailhq.core.config import settings
 from hailhq.core.providers.tts.gemini import GeminiSpeech
-from hailhq.voicebot.gemini_tts import GeminiDirectTTS, build_gemini_tts
+from hailhq.core.providers.tts.gemini_direct import GeminiDirectTTS
+from hailhq.voicebot.pipeline import ResolvedLayer, build_tts
 from livekit.agents import APIConnectionError, APIConnectOptions, APITimeoutError
 from livekit.plugins.google.beta import gemini_tts
+
+
+@pytest.mark.parametrize("workspace_key", [None, "workspace-key"])
+async def test_gemini_developer_key_uses_the_livekit_plugin(monkeypatch, workspace_key):
+    monkeypatch.setattr(
+        settings, "google_cloud_project", "hail-speech" if workspace_key else ""
+    )
+    monkeypatch.setattr(settings, "google_api_key", "configured-house-key")
+    monkeypatch.setattr(settings, "hail_gemini_tts_enabled", True)
+    monkeypatch.setattr(settings, "cartesia_api_key", "")
+    monkeypatch.setattr(settings, "eleven_api_key", "")
+    monkeypatch.setenv("GOOGLE_GENAI_USE_VERTEXAI", "true")
+    requests = []
+    audio = base64.b64encode(b"\x01\x00" * 480).decode()
+    event = {
+        "candidates": [
+            {
+                "content": {
+                    "parts": [{"inlineData": {"mimeType": "audio/pcm", "data": audio}}]
+                }
+            }
+        ]
+    }
+
+    def respond(request):
+        requests.append(request)
+        return httpx.Response(200, content=f"data: {json.dumps(event)}\n\n")
+
+    sdk_client = gemini_tts.Client
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http:
+        monkeypatch.setattr(
+            gemini_tts,
+            "Client",
+            lambda **kwargs: sdk_client(
+                **kwargs, http_options=types.HttpOptions(httpx_async_client=http)
+            ),
+        )
+        org = (
+            ResolvedLayer("gemini", workspace_key, {}, False) if workspace_key else None
+        )
+        renderer = build_tts(org, language="en")
+        try:
+            assert isinstance(renderer, gemini_tts.TTS)
+            async with renderer.synthesize("Good morning.") as stream:
+                assert (
+                    sum([chunk.frame.samples_per_channel async for chunk in stream])
+                    == 480
+                )
+        finally:
+            await renderer.aclose()
+    (request,) = requests
+    assert request.url.host == "generativelanguage.googleapis.com"
+    assert request.url.path.endswith(
+        "/models/gemini-3.8-flash-tts:streamGenerateContent"
+    )
+    assert request.headers["x-goog-api-key"] == (
+        workspace_key or "configured-house-key"
+    )
 
 
 @pytest.mark.parametrize(
@@ -78,7 +137,7 @@ async def test_native_gemini_synthesizes_with_the_configured_cloud_project(
             )
 
         monkeypatch.setattr(gemini_tts, "Client", client_with_test_transport)
-        renderer = build_gemini_tts(GeminiSpeech.from_config({}))
+        renderer = GeminiSpeech.from_config({}).livekit_tts()
         try:
             assert isinstance(renderer, gemini_tts.TTS)
             options = APIConnectOptions(
@@ -124,7 +183,7 @@ async def test_inline_cloud_credentials_keep_the_existing_direct_path(monkeypatc
     monkeypatch.setattr(
         settings, "google_service_account_json_b64", "fixture-encoded-credentials"
     )
-    renderer = build_gemini_tts(GeminiSpeech.from_config({}))
+    renderer = GeminiSpeech.from_config({}).livekit_tts()
     try:
         assert isinstance(renderer, GeminiDirectTTS)
         assert renderer.speech.api_key is None

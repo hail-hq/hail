@@ -6,8 +6,8 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Added
 
-- English call voices include Charon from Gemini on Google Cloud, Ara from xAI, and Audrey from AssemblyAI. Preview the available voices in onboarding and Call settings.
-- Connect your own Google Cloud, xAI, or AssemblyAI credentials for speech.
+- English call voices include Charon from Gemini, Ara from xAI, and Audrey from AssemblyAI. Preview the available voices in onboarding and Call settings.
+- Connect your own Gemini, xAI, or AssemblyAI credentials for speech. Gemini supports API keys and Vertex AI.
 
 ### Changed
 

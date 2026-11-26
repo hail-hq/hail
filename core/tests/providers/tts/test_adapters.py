@@ -37,12 +37,41 @@ async def test_gemini_stream_uses_customer_cloud_project():
         assert [audio async for audio in speech.pcm(client, "Hello.")] == [PCM]
 
 
+async def test_gemini_preview_uses_the_existing_developer_api_key(monkeypatch):
+    monkeypatch.setattr(settings, "google_cloud_project", "")
+    monkeypatch.setattr(settings, "google_api_key", "fixture-developer-key")
+    assert await gemini.GeminiSpeech.house_credentials_available()
+
+    def respond(request):
+        assert request.url.host == "generativelanguage.googleapis.com"
+        assert request.headers["x-goog-api-key"] == "fixture-developer-key"
+        event = {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {"inlineData": {"data": base64.b64encode(PCM).decode()}}
+                        ]
+                    }
+                }
+            ]
+        }
+        return httpx.Response(200, content=f"data: {json.dumps(event)}\n\n")
+
+    speech = gemini.GeminiSpeech.from_config({})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        assert [audio async for audio in speech.pcm(client, "Hello.")] == [PCM]
+
+
 def test_gemini_separates_customer_credentials_from_house_project(monkeypatch):
     monkeypatch.setattr(settings, "hail_gemini_tts_enabled", True)
     monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
     monkeypatch.setattr(settings, "google_tts_location", "us")
+    monkeypatch.setattr(settings, "google_api_key", "configured-house-key")
+    developer = gemini.GeminiSpeech.from_config({}, "workspace-key")
+    assert (developer.project, developer.api_key) == ("", "workspace-key")
     with pytest.raises(ValueError, match="Google Cloud project"):
-        gemini.GeminiSpeech.from_config({}, "workspace-key")
+        gemini.GeminiSpeech.from_config({"location": "eu"}, "workspace-key")
     with pytest.raises(ValueError, match="Supply your Google Cloud key"):
         gemini.GeminiSpeech.from_config({"project": "customer-speech"})
     speech = gemini.GeminiSpeech.from_config({})
@@ -126,7 +155,7 @@ async def test_invalid_google_credential_documents_are_unavailable(
 
 
 async def test_blank_customer_key_never_falls_back_to_house_key(monkeypatch):
-    monkeypatch.setattr(settings, "xai_tts_api_key", "test-house-key")
+    monkeypatch.setattr(settings, "xai_api_key", "test-house-key")
     async with httpx.AsyncClient(
         transport=httpx.MockTransport(lambda _: pytest.fail("unexpected synthesis"))
     ) as client:

@@ -1,4 +1,4 @@
-"""Gemini speech through Google Cloud Agent Platform."""
+"""Gemini speech through the Gemini API or Vertex AI."""
 
 from __future__ import annotations
 
@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from livekit.agents.tts import TTS
 
 CLOUD_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
+GEMINI_API_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta"
 _GOOGLE_AUTH_TIMEOUT = 4.0
 CLOUD_ENDPOINTS = {
     "global": "https://aiplatform.googleapis.com",
@@ -30,13 +31,6 @@ CLOUD_ENDPOINTS = {
     "eu": "https://aiplatform.eu.rep.googleapis.com",
 }
 _auth_lock = Lock()
-
-
-def gemini_url(project: str, location: str) -> str:
-    return (
-        f"{CLOUD_ENDPOINTS[location]}/v1/projects/{project}/locations/{location}"
-        f"/publishers/google/models/{GeminiSpeech.model}:streamGenerateContent"
-    )
 
 
 @lru_cache(maxsize=1)
@@ -83,44 +77,49 @@ class GeminiSpeech(PCMAdapter):
     project: str = ""
     location: str = "global"
 
-    @property
-    def requires_direct_transport(self) -> bool:
-        # The Gemini plugin supports process ADC in Vertex mode. It drops
-        # API keys in that mode and cannot accept a credentials object.
-        credentials_file = settings.google_application_credentials
-        return bool(
-            self.api_key is not None
-            or settings.google_service_account_json_b64
-            or credentials_file
-            and credentials_file != os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-        )
-
     def livekit_tts(self) -> TTS:
         from hailhq.core.providers.tts.livekit_deadline import GeminiTTS
 
-        if self.requires_direct_transport:
-            raise ValueError("These Google Cloud credentials require direct synthesis.")
+        if self.project:
+            # LiveKit only supports process ADC in Vertex mode.
+            credentials_file = settings.google_application_credentials
+            if (
+                self.api_key
+                or settings.google_service_account_json_b64
+                or credentials_file
+                and credentials_file != os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+            ):
+                from hailhq.core.providers.tts.gemini_direct import GeminiDirectTTS
+
+                return GeminiDirectTTS(self)
+            auth = {
+                "vertexai": True,
+                "project": self.project,
+                "location": self.location,
+            }
+        else:
+            auth = {"vertexai": False, "api_key": self.api_key}
         try:
-            return GeminiTTS(
-                model=self.model,
-                voice_name=self.voice,
-                vertexai=True,
-                project=self.project,
-                location=self.location,
-            )
+            return GeminiTTS(model=self.model, voice_name=self.voice, **auth)
         except GoogleAuthError as exc:
             raise ValueError(
                 "Google Cloud speech credentials could not be loaded."
             ) from exc
 
     @classmethod
+    def house_key(cls) -> str | None:
+        return (
+            None if settings.google_cloud_project else settings.google_api_key or None
+        )
+
+    @classmethod
     def house_available(cls) -> bool:
-        return bool(settings.google_cloud_project)
+        return bool(settings.google_cloud_project or cls.house_key())
 
     @classmethod
     async def house_credentials_available(cls) -> bool:
-        if not cls.house_available():
-            return False
+        if not settings.google_cloud_project:
+            return bool(cls.house_key())
         try:
             async with asyncio.timeout(_GOOGLE_AUTH_TIMEOUT):
                 await asyncio.to_thread(_credentials)
@@ -131,8 +130,8 @@ class GeminiSpeech(PCMAdapter):
     @classmethod
     def validate_options(cls, params: dict, *, has_workspace_key: bool) -> None:
         super().validate_options(params, has_workspace_key=has_workspace_key)
-        if has_workspace_key and not params.get("project"):
-            raise ValueError("Set your Google Cloud project for a Gemini speech key.")
+        if has_workspace_key and params.get("location") and not params.get("project"):
+            raise ValueError("Set a Google Cloud project to use a location.")
         if not has_workspace_key and (params.get("project") or params.get("location")):
             raise ValueError(
                 "Supply your Google Cloud key to use your own project or location."
@@ -143,17 +142,26 @@ class GeminiSpeech(PCMAdapter):
         cls, params: dict, api_key: str | None = None, voice: str | None = None
     ) -> Self:
         speech = super().from_config(params, api_key, voice)
+        if api_key is not None:
+            return replace(
+                speech,
+                project=params.get("project") or "",
+                location=params.get("location") or "global",
+            )
         return replace(
             speech,
-            project=params.get("project") or settings.google_cloud_project,
-            location=params.get("location")
-            or ("global" if api_key else settings.google_tts_location),
+            project=settings.google_cloud_project,
+            location=settings.google_tts_location,
         )
 
     async def pcm(self, client: httpx.AsyncClient, text: str) -> AsyncIterator[bytes]:
-        if not self.project:
-            raise ValueError("Set a Google Cloud project for speech.")
-        url = gemini_url(self.project, self.location)
+        root = (
+            f"{CLOUD_ENDPOINTS[self.location]}/v1/projects/{self.project}"
+            f"/locations/{self.location}/publishers/google"
+            if self.project
+            else GEMINI_API_ENDPOINT
+        )
+        url = f"{root}/models/{self.model}:streamGenerateContent"
         if self.api_key:
             headers = {"x-goog-api-key": self.api_key}
         else:

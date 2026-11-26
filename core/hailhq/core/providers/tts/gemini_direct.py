@@ -19,12 +19,6 @@ _FRAME_MS = 20
 _INITIAL_PCM_BYTES = SAMPLE_RATE * _FRAME_MS // 1000 * 2
 
 
-def build_gemini_tts(speech: GeminiSpeech) -> tts.TTS:
-    if speech.requires_direct_transport:
-        return GeminiDirectTTS(speech)
-    return speech.livekit_tts()
-
-
 class GeminiDirectTTS(tts.TTS):
     def __init__(self, speech: GeminiSpeech) -> None:
         # Gemini streams audio back for a complete phrase. The worker's

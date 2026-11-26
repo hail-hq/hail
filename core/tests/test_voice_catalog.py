@@ -302,8 +302,8 @@ async def test_catalogue_marks_gemini_as_default_only_for_opted_in_english(monke
         AsyncMock(return_value=True),
     )
     monkeypatch.setattr(settings, "hail_gemini_tts_enabled", True)
-    monkeypatch.setattr(settings, "xai_tts_api_key", "xai-key")
-    monkeypatch.setattr(settings, "assemblyai_tts_api_key", "assembly-key")
+    monkeypatch.setattr(settings, "xai_api_key", "xai-key")
+    monkeypatch.setattr(settings, "assemblyai_api_key", "assembly-key")
     legacy = await catalog.voice_catalogue("en")
     assert legacy["voices"] == []
     assert legacy["default_voice"] is None
@@ -329,8 +329,8 @@ async def test_english_audition_keeps_regular_voices_available_for_preview(monke
         "house_credentials_available",
         AsyncMock(return_value=True),
     )
-    monkeypatch.setattr(settings, "xai_tts_api_key", "xai-key")
-    monkeypatch.setattr(settings, "assemblyai_tts_api_key", "")
+    monkeypatch.setattr(settings, "xai_api_key", "xai-key")
+    monkeypatch.setattr(settings, "assemblyai_api_key", "")
     monkeypatch.setattr(
         catalog,
         "_provider_catalogue",

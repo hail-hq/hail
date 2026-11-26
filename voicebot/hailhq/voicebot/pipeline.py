@@ -82,7 +82,6 @@ from hailhq.core.providers.tts import (
     configured_house_voice_provider,
 )
 from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
-from hailhq.voicebot.gemini_tts import build_gemini_tts
 from livekit.agents import (
     AgentSession,
     APIConnectOptions,
@@ -602,7 +601,7 @@ def _house_tts(
         )
     ):
         try:
-            gemini = build_gemini_tts(GeminiSpeech.from_config({}))
+            gemini = GeminiSpeech.from_config({}).livekit_tts()
         except ValueError:
             logger.warning("Could not configure Hail's Gemini speech.")
         else:
@@ -639,10 +638,7 @@ def _org_tts(
             kwargs["language"] = elevenlabs_language(language)
         return elevenlabs_plugin.TTS(**kwargs)
     if adapter := PCM_ADAPTERS.get(org.provider):
-        speech = adapter.from_config(org.params, org.api_key, voice)
-        if isinstance(speech, GeminiSpeech):
-            return build_gemini_tts(speech)
-        return speech.livekit_tts()
+        return adapter.from_config(org.params, org.api_key, voice).livekit_tts()
     raise ProviderKeyError(f"unknown org tts provider '{org.provider}'")
 
 
@@ -760,7 +756,7 @@ def build_tts(
                 f"language requires: {', '.join(sorted(providers))}."
             )
         raise ProviderKeyError(
-            "No TTS provider configured: enable Google Cloud speech or set "
+            "No TTS provider configured: enable Gemini speech or set "
             "CARTESIA_API_KEY or ELEVEN_API_KEY."
         )
     if len(instances) == 1:

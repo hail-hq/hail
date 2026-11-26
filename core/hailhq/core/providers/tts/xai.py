@@ -20,7 +20,7 @@ class XaiSpeech(PCMAdapter):
 
     @classmethod
     def house_key(cls) -> str:
-        return settings.xai_tts_api_key
+        return settings.xai_api_key
 
     def livekit_tts(self) -> "TTS":
         from hailhq.core.providers.tts.livekit_deadline import XaiTTS

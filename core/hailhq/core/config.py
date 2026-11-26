@@ -93,8 +93,8 @@ class Settings(BaseSettings):
     speechmatics_api_key: str = ""
     hail_gemini_tts_enabled: bool = False
     google_tts_location: Literal["global", "us", "eu"] = "global"
-    xai_tts_api_key: str = ""
-    assemblyai_tts_api_key: str = ""
+    xai_api_key: str = ""
+    assemblyai_api_key: str = ""
 
     # STT/TTS, model names set via .env / .env.local.
     deepgram_model: str = ""

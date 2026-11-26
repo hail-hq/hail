@@ -20,7 +20,7 @@ class AssemblyAISpeech(PCMAdapter):
 
     @classmethod
     def house_key(cls) -> str:
-        return settings.assemblyai_tts_api_key
+        return settings.assemblyai_api_key
 
     def livekit_tts(self) -> "TTS":
         from livekit.plugins.assemblyai import TTS

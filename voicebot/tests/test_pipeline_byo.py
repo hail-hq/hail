@@ -532,7 +532,7 @@ def test_explicit_workspace_voice_keeps_its_legacy_fallback_order(
 def test_removed_xai_key_uses_house_speech_only_with_consent(
     monkeypatch, captured_plugins
 ):
-    monkeypatch.setattr(settings, "xai_tts_api_key", "")
+    monkeypatch.setattr(settings, "xai_api_key", "")
     org = ResolvedLayer("xai", None, {"voice_id": "ara"}, True)
     build_tts(org, language="en")
     assert captured_plugins["cartesia"][0].kwargs["voice"] == "house-voice"
