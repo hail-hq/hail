@@ -96,7 +96,7 @@ class GeminiSpeech(PCMAdapter):
         )
 
     def livekit_tts(self) -> TTS:
-        from livekit.plugins.google.beta import GeminiTTS
+        from hailhq.core.providers.tts.livekit_deadline import GeminiTTS
 
         if self.requires_direct_transport:
             raise ValueError("These Google Cloud credentials require direct synthesis.")

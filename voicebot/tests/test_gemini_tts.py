@@ -15,7 +15,10 @@ from livekit.agents import APIConnectOptions, APITimeoutError
 from livekit.plugins.google.beta import gemini_tts
 
 
-async def test_native_gemini_synthesizes_with_the_configured_cloud_project(monkeypatch):
+@pytest.mark.parametrize("stalled", [False, True])
+async def test_native_gemini_synthesizes_with_the_configured_cloud_project(
+    monkeypatch, stalled
+):
     monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
     monkeypatch.setattr(settings, "google_tts_location", "eu")
     monkeypatch.setattr(settings, "google_service_account_json_b64", "")
@@ -33,8 +36,10 @@ async def test_native_gemini_synthesizes_with_the_configured_cloud_project(monke
         ]
     }
 
-    def provider_response(request):
+    async def provider_response(request):
         requests.append(request)
+        if stalled:
+            await asyncio.Event().wait()
         return httpx.Response(
             200,
             headers={"content-type": "text/event-stream"},
@@ -58,9 +63,14 @@ async def test_native_gemini_synthesizes_with_the_configured_cloud_project(monke
         renderer = build_gemini_tts(GeminiSpeech.from_config({}))
         try:
             assert isinstance(renderer, gemini_tts.TTS)
-            options = APIConnectOptions(max_retry=0)
+            options = APIConnectOptions(timeout=0.05, max_retry=0)
             async with renderer.synthesize("Hello.", conn_options=options) as stream:
-                assert [chunk.frame async for chunk in stream]
+                async with asyncio.timeout(1):
+                    if stalled:
+                        with pytest.raises(APITimeoutError):
+                            await anext(stream)
+                    else:
+                        assert [chunk.frame async for chunk in stream]
         finally:
             await renderer.aclose()
     (request,) = requests

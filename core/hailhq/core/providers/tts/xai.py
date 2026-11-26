@@ -23,9 +23,17 @@ class XaiSpeech(PCMAdapter):
         return settings.xai_tts_api_key
 
     def livekit_tts(self) -> "TTS":
-        from livekit.plugins.xai import TTS
+        from hailhq.core.providers.tts.livekit_deadline import XaiTTS
+        from livekit.agents import tokenize
 
-        return TTS(api_key=self.api_key, voice=self.voice, language="en")
+        return XaiTTS(
+            api_key=self.api_key,
+            voice=self.voice,
+            language="en",
+            tokenizer=tokenize.basic.WordTokenizer(
+                ignore_punctuation=False, retain_format=True
+            ),
+        )
 
     def pcm(self, client: httpx.AsyncClient, text: str) -> AsyncIterator[bytes]:
         return stream_pcm(

@@ -66,6 +66,7 @@ from hailhq.core.config import settings
 from hailhq.core.db import session_scope
 from hailhq.core.languages import (
     SUPPORTED_LANGUAGES,
+    TTSProvider,
     default_stt_for,
     elevenlabs_language,
     resolve_stt_provider,
@@ -75,7 +76,11 @@ from hailhq.core.languages import (
 from hailhq.core.provider_config import load_org_provider_configs, provider_cipher
 from hailhq.core.providers.llm.bedrock import bedrock_client, is_bedrock_client
 from hailhq.core.providers.llm.thinking import thinking_off
-from hailhq.core.providers.tts import PCM_ADAPTERS, GeminiSpeech
+from hailhq.core.providers.tts import (
+    PCM_ADAPTERS,
+    GeminiSpeech,
+    configured_house_voice_provider,
+)
 from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
 from hailhq.voicebot.gemini_tts import build_gemini_tts
 from livekit.agents import (
@@ -550,25 +555,42 @@ def _house_tts(
     *,
     include_gemini: bool = True,
     gemini_last: bool = False,
+    override_provider: TTSProvider | None = None,
 ) -> list[agents_tts.TTS]:
     allowed = tts_providers_for(language)
-    instances: list[agents_tts.TTS] = []
+    legacy: dict[str, agents_tts.TTS] = {}
+    unscoped_voice = None if override_provider else voice_id_override
+    cartesia_voice = unscoped_voice or settings.cartesia_voice_id
+    elevenlabs_voice = unscoped_voice or settings.elevenlabs_voice_id
     if settings.cartesia_api_key and "cartesia" in allowed:
         kwargs: dict[str, Any] = {
             "model": settings.cartesia_model,
-            "voice": voice_id_override or settings.cartesia_voice_id,
+            "voice": cartesia_voice,
         }
         if language:
             kwargs["language"] = language
-        instances.append(cartesia_plugin.TTS(**kwargs))
+        legacy["cartesia"] = cartesia_plugin.TTS(**kwargs)
     if settings.eleven_api_key and "elevenlabs" in allowed:
         kwargs = {
-            "voice_id": voice_id_override or settings.elevenlabs_voice_id,
+            "voice_id": elevenlabs_voice,
             "model": settings.elevenlabs_model,
         }
         if language:
             kwargs["language"] = elevenlabs_language(language)
-        instances.append(elevenlabs_plugin.TTS(**kwargs))
+        legacy["elevenlabs"] = elevenlabs_plugin.TTS(**kwargs)
+    instances: list[agents_tts.TTS] = []
+    if override_provider is not None and override_provider in legacy:
+        default = (
+            cartesia_voice if override_provider == "cartesia" else elevenlabs_voice
+        )
+        if voice_id_override == default:
+            instances.append(legacy.pop(override_provider))
+        else:
+            selection = ResolvedLayer(
+                override_provider, None, {"voice_id": voice_id_override}, False
+            )
+            instances.append(_org_tts(selection, None, language))
+    instances.extend(legacy.values())
     if (
         include_gemini
         and GeminiSpeech.provider in allowed
@@ -655,6 +677,7 @@ def build_tts(
     voicebot ever sees it; this is defense-in-depth for direct LiveKit
     dispatches that bypass the API.
     """
+    override_provider = None
     if (
         org is not None
         and language is not None
@@ -673,8 +696,12 @@ def build_tts(
             language,
         )
         if org.provider in PCM_ADAPTERS:
-            # This override carries no provider identity. Keep the fallback's voice.
-            voice_id_override = None
+            if voice_id_explicit:
+                override_provider = configured_house_voice_provider(
+                    voice_id_override, language
+                )
+            if override_provider is None:
+                voice_id_override = None
         org = None
     if org is not None:
         adapter = PCM_ADAPTERS.get(org.provider)
@@ -718,7 +745,9 @@ def build_tts(
             if house:
                 return agents_tts.FallbackAdapter([byo, *house])
         return byo
-    instances = _house_tts(voice_id_override, language)
+    instances = _house_tts(
+        voice_id_override, language, override_provider=override_provider
+    )
     if not instances:
         # Distinguish between no keys configured vs. language filtering all keys out.
         if settings.cartesia_api_key or settings.eleven_api_key:

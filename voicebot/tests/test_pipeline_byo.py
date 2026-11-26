@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import uuid
-from importlib import import_module
-from unittest.mock import Mock
 from dataclasses import dataclass
+from importlib import import_module
+from unittest.mock import ANY, Mock
 
 import pytest
-from hailhq.core.config import settings
+from hailhq.core.config import VoicePreference, settings
 from hailhq.core.models import OrgProviderConfig
+from hailhq.core.providers.tts import livekit_deadline
 from hailhq.core.secret_cipher import generate_key
 from hailhq.voicebot import pipeline
 from hailhq.voicebot.pipeline import (
@@ -81,7 +82,7 @@ def captured_plugins(monkeypatch):
     monkeypatch.setattr(pipeline.deepgram_plugin, "STT", make("deepgram"))
     monkeypatch.setattr(pipeline.openai_plugin, "LLM", make("openai"))
     monkeypatch.setattr(pipeline.google_plugin, "LLM", make("google"))
-    monkeypatch.setattr(pipeline.google_plugin.beta, "GeminiTTS", make("gemini"))
+    monkeypatch.setattr(livekit_deadline, "GeminiTTS", make("gemini"))
     monkeypatch.setattr(pipeline.anthropic_plugin, "LLM", make("anthropic"))
     return calls
 
@@ -444,6 +445,37 @@ def test_workspace_gemini_language_fallback_uses_configured_voices(
     assert captured_plugins["elevenlabs"][0].kwargs["voice_id"] == "eleven-house-voice"
 
 
+@pytest.mark.parametrize("provider", ["cartesia", "elevenlabs"])
+def test_fallback_honors_a_voice_with_a_known_provider(
+    monkeypatch, captured_plugins, provider
+):
+    voice = "configured-french-voice"
+    org = ResolvedLayer("gemini", "workspace", {"voice_id": "Charon"}, True)
+    monkeypatch.setattr(settings, "eleven_api_key", "house-eleven")
+    monkeypatch.setattr(settings, "elevenlabs_voice_id", "eleven-house-voice")
+    monkeypatch.setattr(
+        settings,
+        "voice_shortlist_preferences",
+        {
+            "fr": [
+                VoicePreference(
+                    provider=provider, voice_id=voice, reason="French calls"
+                )
+            ]
+        },
+    )
+
+    chain = build_tts(org, voice, "fr", voice_id_explicit=True)
+    field = "voice" if provider == "cartesia" else "voice_id"
+    default = "house-voice" if provider == "cartesia" else "eleven-house-voice"
+
+    assert chain._tts_instances[0].label == provider
+    assert [item.kwargs[field] for item in captured_plugins[provider]] == [
+        default,
+        voice,
+    ]
+
+
 @pytest.mark.parametrize(
     ("provider", "voice", "model"),
     [("assemblyai", "aai-audrey", "assemblyai-tts-1"), ("xai", "ara", None)],
@@ -451,16 +483,34 @@ def test_workspace_gemini_language_fallback_uses_configured_voices(
 def test_workspace_uses_native_tts_with_the_workspace_key(
     monkeypatch, provider, voice, model
 ):
-    plugin = import_module(f"livekit.plugins.{provider}")
     constructor = Mock()
-    monkeypatch.setattr(plugin, "TTS", constructor)
+    if provider == "xai":
+        monkeypatch.setattr(livekit_deadline, "XaiTTS", constructor)
+    else:
+        monkeypatch.setattr(
+            import_module("livekit.plugins.assemblyai"), "TTS", constructor
+        )
     org = ResolvedLayer(provider, "workspace-key", {"voice_id": voice}, False)
 
     assert build_tts(org, language="en") is constructor.return_value
     expected = {"api_key": "workspace-key", "voice": voice, "language": "en"}
+    if provider == "xai":
+        expected["tokenizer"] = ANY
     if model is not None:
         expected["model"] = model
     constructor.assert_called_once_with(**expected)
+
+
+def test_invalid_assembly_voice_uses_a_house_voice_only_with_consent(
+    captured_plugins,
+):
+    strict = ResolvedLayer("assemblyai", "workspace-key", {}, False)
+    with pytest.raises(ValueError, match="voice"):
+        build_tts(strict, " ", "en", voice_id_explicit=True)
+
+    consent = ResolvedLayer("assemblyai", "workspace-key", {}, True)
+    assert build_tts(consent, " ", "en", voice_id_explicit=True).label == "cartesia"
+    assert captured_plugins["cartesia"][0].kwargs["voice"] == "house-voice"
 
 
 def test_explicit_workspace_voice_keeps_its_legacy_fallback_order(

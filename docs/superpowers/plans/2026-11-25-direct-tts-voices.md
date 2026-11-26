@@ -10,6 +10,7 @@
 
 - [x] Add regression tests for provider routing, legacy explicit selections, authentication, and advertised voices.
 - [x] Connect the Gemini, xAI, and AssemblyAI plugins to the existing TTS pipeline. Keep provider keys and setup in core. Use the current LiveKit Agents minor series and a compatible RTC patch.
+- [x] Bound the audio wait in the native Gemini and xAI streams. Keep xAI word boundaries and honor configured fallback voice IDs.
 - [x] Add BYO parameter validation and keep the existing fallback policy. Show Charon, Ara, and Audrey when configured for English. Keep current non-English defaults.
 
 ## Console and release
