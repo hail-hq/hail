@@ -19,28 +19,48 @@
         "href": "/email"
       },
       {
-        "label": "Answer business calls",
-        "href": "/answer-business-calls"
+        "label": "AI receptionist",
+        "href": "/receptionist"
       },
       {
         "label": "Keep your business number",
-        "href": "/ai-receptionist-existing-number"
+        "href": "/keep-number"
       },
       {
-        "label": "Book jobs or capture requests",
-        "href": "/customer-call-follow-up"
+        "label": "Bookings and support tickets",
+        "href": "/follow-up"
       },
       {
         "label": "Test before going live",
-        "href": "/test-ai-receptionist"
+        "href": "/test-calls"
       },
       {
         "label": "Estimate answering costs",
-        "href": "/ai-answering-service-cost"
+        "href": "/answering-cost"
       },
       {
         "label": "Answer calls for trades",
-        "href": "/answering-service-for-trades"
+        "href": "/trades"
+      },
+      {
+        "label": "AI phone agent",
+        "href": "/phone-agent"
+      },
+      {
+        "label": "Call routing",
+        "href": "/call-routing"
+      },
+      {
+        "label": "AI secretary",
+        "href": "/secretary"
+      },
+      {
+        "label": "Outbound callbacks",
+        "href": "/outbound"
+      },
+      {
+        "label": "Call center overflow",
+        "href": "/call-center"
       },
       {
         "label": "Integrations",

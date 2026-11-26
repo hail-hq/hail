@@ -37,16 +37,33 @@ const RESOURCES = [
   },
 ];
 
-const USE_CASES = [
-  { label: "Answer business calls", href: "/answer-business-calls" },
+const SOLUTIONS = [
   {
-    label: "Keep your business number",
-    href: "/ai-receptionist-existing-number",
+    label: "Answer and route",
+    items: [
+      { label: "AI receptionist", href: "/receptionist" },
+      { label: "Answer calls for trades", href: "/trades" },
+      { label: "AI phone agent", href: "/phone-agent" },
+      { label: "Call routing", href: "/call-routing" },
+      { label: "Call center overflow", href: "/call-center" },
+    ],
   },
-  { label: "Book jobs or capture requests", href: "/customer-call-follow-up" },
-  { label: "Test before going live", href: "/test-ai-receptionist" },
-  { label: "Estimate answering costs", href: "/ai-answering-service-cost" },
-  { label: "Answer calls for trades", href: "/answering-service-for-trades" },
+  {
+    label: "Follow up",
+    items: [
+      { label: "Bookings and support tickets", href: "/follow-up" },
+      { label: "AI secretary", href: "/secretary" },
+      { label: "Outbound callbacks", href: "/outbound" },
+    ],
+  },
+  {
+    label: "Set up and estimate",
+    items: [
+      { label: "Keep your business number", href: "/keep-number" },
+      { label: "Test before going live", href: "/test-calls" },
+      { label: "Estimate answering costs", href: "/answering-cost" },
+    ],
+  },
 ];
 
 const SETUP_GUIDES = [
@@ -264,7 +281,7 @@ export function SiteHeader({
                 setSetupOpen(false);
               }}
             >
-              Use cases
+              Solutions
               <svg
                 className={styles.chev}
                 width="10"
@@ -281,14 +298,17 @@ export function SiteHeader({
               </svg>
             </button>
             {useCasesOpen && (
-              <div className={styles.panel}>
-                <div>
-                  {USE_CASES.map((item) => (
-                    <a key={item.href} href={siteHref(item.href)}>
-                      {item.label}
-                    </a>
-                  ))}
-                </div>
+              <div className={`${styles.panel} ${styles.solutionsPanel}`}>
+                {SOLUTIONS.map((group) => (
+                  <div key={group.label}>
+                    <div className={styles.panelGroup}>{group.label}</div>
+                    {group.items.map((item) => (
+                      <a key={item.href} href={siteHref(item.href)}>
+                        {item.label}
+                      </a>
+                    ))}
+                  </div>
+                ))}
               </div>
             )}
           </div>

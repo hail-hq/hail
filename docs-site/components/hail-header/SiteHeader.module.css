@@ -257,6 +257,15 @@
     gap: 6px;
   }
 }
+@media (min-width: 901px) {
+  .solutionsPanel {
+    left: -110px;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 560px;
+  }
+}
+
 @media (max-width: 900px) {
   :global(:root) {
     --hail-header-h: 82px;
