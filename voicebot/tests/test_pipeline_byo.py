@@ -406,16 +406,28 @@ def test_workspace_gemini_uses_an_explicit_per_call_voice(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ("explicit", "expected"), [(True, "requested-voice"), (False, "house-voice")]
+    ("voice_id", "explicit", "expected"),
+    [
+        (
+            "228fca29-3a0a-435c-8728-5cb483251068",
+            True,
+            "228fca29-3a0a-435c-8728-5cb483251068",
+        ),
+        ("228fca29-3a0a-435c-8728-5cb483251068", False, "house-voice"),
+        ("Charon", True, "house-voice"),
+    ],
 )
 def test_workspace_gemini_language_fallback_keeps_only_per_call_voice(
-    captured_plugins, explicit, expected
+    monkeypatch, captured_plugins, voice_id, explicit, expected
 ):
     org = ResolvedLayer("gemini", "workspace", {"voice_id": "Charon"}, True)
+    monkeypatch.setattr(settings, "eleven_api_key", "house-eleven")
+    monkeypatch.setattr(settings, "elevenlabs_voice_id", "eleven-house-voice")
 
-    build_tts(org, "requested-voice", "fr", voice_id_explicit=explicit)
+    build_tts(org, voice_id, "fr", voice_id_explicit=explicit)
 
     assert captured_plugins["cartesia"][0].kwargs["voice"] == expected
+    assert captured_plugins["elevenlabs"][0].kwargs["voice_id"] == "eleven-house-voice"
 
 
 def test_explicit_workspace_voice_keeps_its_legacy_fallback_order(

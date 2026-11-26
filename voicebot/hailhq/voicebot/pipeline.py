@@ -75,7 +75,11 @@ from hailhq.core.languages import (
 from hailhq.core.provider_config import load_org_provider_configs, provider_cipher
 from hailhq.core.providers.llm.bedrock import bedrock_client, is_bedrock_client
 from hailhq.core.providers.llm.thinking import thinking_off
-from hailhq.core.providers.tts import PCM_ADAPTERS, GeminiSpeech
+from hailhq.core.providers.tts import (
+    PCM_ADAPTERS,
+    GeminiSpeech,
+    legacy_fallback_voice_id,
+)
 from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
 from hailhq.voicebot.pcm_tts import PCMTTS
 from livekit.agents import (
@@ -545,7 +549,11 @@ def _house_gemini_ready() -> bool:
 
 
 def _house_tts(
-    voice_id_override: str | None, language: str | None, *, include_gemini: bool = True
+    voice_id_override: str | None,
+    language: str | None,
+    *,
+    include_gemini: bool = True,
+    match_legacy_voice: bool = False,
 ) -> list[agents_tts.TTS]:
     allowed = tts_providers_for(language)
     instances: list[agents_tts.TTS] = []
@@ -562,16 +570,26 @@ def _house_tts(
     ):
         instances.append(PCMTTS(GeminiSpeech.from_config({})))
     if settings.cartesia_api_key and "cartesia" in allowed:
+        voice = (
+            legacy_fallback_voice_id("cartesia", voice_id_override, language)
+            if match_legacy_voice
+            else voice_id_override
+        )
         kwargs: dict[str, Any] = {
             "model": settings.cartesia_model,
-            "voice": voice_id_override or settings.cartesia_voice_id,
+            "voice": voice or settings.cartesia_voice_id,
         }
         if language:
             kwargs["language"] = language
         instances.append(cartesia_plugin.TTS(**kwargs))
     if settings.eleven_api_key and "elevenlabs" in allowed:
+        voice = (
+            legacy_fallback_voice_id("elevenlabs", voice_id_override, language)
+            if match_legacy_voice
+            else voice_id_override
+        )
         kwargs = {
-            "voice_id": voice_id_override or settings.elevenlabs_voice_id,
+            "voice_id": voice or settings.elevenlabs_voice_id,
             "model": settings.elevenlabs_model,
         }
         if language:
@@ -639,31 +657,40 @@ def build_tts(
     ``fallback_enabled`` on the org row is consent to house-provider
     rerouting: if the org's BYO provider can't speak ``language`` at all,
     consent means skip the incapable BYO instance and build the house
-    chain only (this recurses into the ``org is None`` branch below, so it
-    shares that branch's single-instance/adapter shape and its
-    empty-chain ``ProviderKeyError``). Without consent it's a hard error,
+    chain only. Without consent it's a hard error,
     the API gate (``routes/calls.py``) is meant to catch this before the
     voicebot ever sees it; this is defense-in-depth for direct LiveKit
     dispatches that bypass the API.
     """
+    match_legacy_voice = False
+    if (
+        org is not None
+        and language is not None
+        and org.provider not in tts_providers_for(language)
+    ):
+        if not org.fallback_enabled:
+            raise ProviderKeyError(
+                f"org tts provider '{org.provider}' does not support "
+                f"language '{language}' and fallback is disabled"
+            )
+        logger.warning(
+            "org tts provider %r does not support language %r; "
+            "skipping the BYO instance and using the house chain only "
+            "(fallback consented)",
+            org.provider,
+            language,
+        )
+        if adapter := PCM_ADAPTERS.get(org.provider):
+            match_legacy_voice = True
+            if not voice_id_explicit or voice_id_override in (
+                adapter.default_voice,
+                org.params.get("voice_id"),
+            ):
+                voice_id_override = None
+        org = None
     if org is not None:
         adapter = PCM_ADAPTERS.get(org.provider)
         fallback_voice = None if adapter else voice_id_override
-        if language is not None and org.provider not in tts_providers_for(language):
-            if not org.fallback_enabled:
-                raise ProviderKeyError(
-                    f"org tts provider '{org.provider}' does not support "
-                    f"language '{language}' and fallback is disabled"
-                )
-            logger.warning(
-                "org tts provider %r does not support language %r; "
-                "skipping the BYO instance and using the house chain only "
-                "(fallback consented)",
-                org.provider,
-                language,
-            )
-            skipped_voice = voice_id_override if voice_id_explicit else fallback_voice
-            return build_tts(None, skipped_voice, language)
         try:
             primary_voice = voice_id_override
             if (
@@ -704,7 +731,9 @@ def build_tts(
             if house:
                 return agents_tts.FallbackAdapter([byo, *house])
         return byo
-    instances = _house_tts(voice_id_override, language)
+    instances = _house_tts(
+        voice_id_override, language, match_legacy_voice=match_legacy_voice
+    )
     if not instances:
         # Distinguish between no keys configured vs. language filtering all keys out.
         if settings.cartesia_api_key or settings.eleven_api_key:
