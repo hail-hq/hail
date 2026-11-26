@@ -8,6 +8,7 @@ import styles from "./SiteHeader.module.css";
 
 export type SiteHeaderActive =
   | "product"
+  | "use-cases"
   | "setup"
   | "pricing"
   | "docs"
@@ -34,6 +35,18 @@ const RESOURCES = [
       { label: "AI model pricing", href: "/costs" },
     ],
   },
+];
+
+const USE_CASES = [
+  { label: "Answer business calls", href: "/answer-business-calls" },
+  {
+    label: "Keep your business number",
+    href: "/ai-receptionist-existing-number",
+  },
+  { label: "Book jobs or capture requests", href: "/customer-call-follow-up" },
+  { label: "Test before going live", href: "/test-ai-receptionist" },
+  { label: "Estimate answering costs", href: "/ai-answering-service-cost" },
+  { label: "Answer calls for trades", href: "/answering-service-for-trades" },
 ];
 
 const SETUP_GUIDES = [
@@ -87,6 +100,11 @@ export function SiteHeader({
   const siteHref = (path: string) => new URL(path, origin).href;
   const { open, setOpen, ref } = useDropdown();
   const {
+    open: useCasesOpen,
+    setOpen: setUseCasesOpen,
+    ref: useCasesRef,
+  } = useDropdown();
+  const {
     open: setupOpen,
     setOpen: setSetupOpen,
     ref: setupRef,
@@ -123,6 +141,7 @@ export function SiteHeader({
           if (event.key === "Escape" && mobileOpen) {
             setMobileOpen(false);
             setOpen(false);
+            setUseCasesOpen(false);
             setSetupOpen(false);
             menuButton.current?.focus();
           }
@@ -162,6 +181,7 @@ export function SiteHeader({
             if ((event.target as HTMLElement).closest("a")) {
               setMobileOpen(false);
               setOpen(false);
+              setUseCasesOpen(false);
               setSetupOpen(false);
             }
           }}
@@ -184,6 +204,7 @@ export function SiteHeader({
               aria-expanded={open}
               onClick={() => {
                 setOpen(!open);
+                setUseCasesOpen(false);
                 setSetupOpen(false);
               }}
             >
@@ -224,6 +245,56 @@ export function SiteHeader({
           </div>
           <div
             className={styles.dropdown}
+            ref={useCasesRef}
+            onKeyDown={(event) => {
+              if (event.key === "Escape" && useCasesOpen) {
+                setUseCasesOpen(false);
+                useCasesRef.current?.querySelector("button")?.focus();
+              }
+            }}
+          >
+            <button
+              type="button"
+              className={navLinkClass(current === "use-cases")}
+              aria-current={current === "use-cases" ? "true" : undefined}
+              aria-haspopup="true"
+              aria-expanded={useCasesOpen}
+              onClick={() => {
+                setUseCasesOpen(!useCasesOpen);
+                setOpen(false);
+                setSetupOpen(false);
+              }}
+            >
+              Use cases
+              <svg
+                className={styles.chev}
+                width="10"
+                height="10"
+                viewBox="0 0 10 10"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M2 3.5 5 6.5 8 3.5" />
+              </svg>
+            </button>
+            {useCasesOpen && (
+              <div className={styles.panel}>
+                <div>
+                  {USE_CASES.map((item) => (
+                    <a key={item.href} href={siteHref(item.href)}>
+                      {item.label}
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+          <div
+            className={styles.dropdown}
             ref={setupRef}
             onKeyDown={(event) => {
               if (event.key === "Escape" && setupOpen) {
@@ -241,6 +312,7 @@ export function SiteHeader({
               onClick={() => {
                 setSetupOpen(!setupOpen);
                 setOpen(false);
+                setUseCasesOpen(false);
               }}
             >
               Setup guide
@@ -355,6 +427,7 @@ export function SiteHeader({
             onClick={() => {
               setMobileOpen(!mobileOpen);
               setOpen(false);
+              setUseCasesOpen(false);
               setSetupOpen(false);
             }}
           >
