@@ -68,3 +68,50 @@ jobs:
           [ "$size" -gt 30 ] || { echo "::error::robots.txt body too small ($size bytes)"; exit 1; }
           grep -q "Sitemap:" <<< "$body" || { echo "::error::robots.txt missing Sitemap"; exit 1; }
           grep -q "User-agent: \*" <<< "$body" || { echo "::error::robots.txt missing User-agent"; exit 1; }
+      - name: Probe public agent discovery
+        if: ${{ !cancelled() }}
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from "node:assert/strict";
+
+          async function readPublic(url, mediaType, { method = "GET", headers } = {}) {
+            const request = `${method} ${url}`;
+            const response = await fetch(url, {
+              method,
+              headers,
+              redirect: "error",
+              signal: AbortSignal.timeout(20_000),
+            }).catch((cause) => {
+              throw new Error(`${request} failed`, { cause });
+            });
+            assert.equal(response.status, 200, `${request} status`);
+            const contentType = response.headers.get("content-type")?.split(";")[0].trim().toLowerCase();
+            assert.equal(contentType, mediaType, `${request} content type`);
+            return response;
+          }
+
+          const manifestUrl = "https://hail.so/.well-known/mcp.json";
+          const manifestResponse = await readPublic(manifestUrl, "application/json", {
+            headers: { Accept: "text/markdown" },
+          });
+          const manifest = await manifestResponse.json();
+          assert.equal(manifest.name, "io.github.hail-hq/hail-mcp", "MCP registry name");
+          const mcpEndpoint = new URL("https://mcp.hail.so");
+          const hasMcpRemote = manifest.remotes?.some((remote) =>
+            remote.type === "streamable-http" && new URL(remote.url).href === mcpEndpoint.href,
+          );
+          assert.ok(hasMcpRemote, "MCP streamable HTTP remote");
+          await readPublic(manifestUrl, "application/json", { method: "HEAD" });
+          console.log("MCP discovery manifest served as JSON on GET and HEAD");
+
+          const skill = await readPublic("https://hail.so/skill.md", "text/markdown");
+          const frontMatter = (await skill.text()).match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/)?.[1];
+          assert.match(frontMatter ?? "", /^name:[ \t]*hail[ \t]*\r?$/m, "Hail skill front matter");
+          console.log("Hosted Hail skill served as Markdown");
+
+          const api = await readPublic("https://api.hail.so/openapi.json", "application/json");
+          const spec = await api.json();
+          assert.match(spec.openapi ?? "", /^\d+\.\d+\.\d+$/, "OpenAPI version");
+          assert.ok(Object.keys(spec.paths ?? {}).some((path) => path.startsWith("/")), "OpenAPI paths");
+          console.log("OpenAPI document served as JSON with API paths");
+          NODE
