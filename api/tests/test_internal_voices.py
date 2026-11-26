@@ -113,6 +113,18 @@ async def test_preview_uses_the_xai_adapter_for_an_advertised_voice(
     voices.voice_catalogue.assert_awaited_once_with("en", include_direct=True)
 
 
+async def test_line_keeps_the_existing_provider_scope(voice_app):
+    body = b'{"voice_id":"ara","provider":"xai","language":"en","text":"Hello."}'
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=voice_app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/internal/voices/line", content=body, headers=_signed(body)
+        )
+    assert response.status_code == 422
+    voices.voice_catalogue.assert_not_awaited()
+
+
 async def test_preview_provider_failure_returns_retryable_error(voice_app):
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=voice_app), base_url="http://test"

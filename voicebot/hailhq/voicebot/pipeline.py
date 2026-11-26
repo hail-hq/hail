@@ -555,7 +555,7 @@ def _house_tts(
         and GeminiSpeech.provider in allowed
         and _house_gemini_ready()
         and (
-            voice_id_override is None
+            not voice_id_override
             or voice_id_override == GeminiSpeech.default_voice
             and not has_legacy_keys
         )
@@ -646,6 +646,12 @@ def build_tts(
     """
     if org is not None:
         adapter = PCM_ADAPTERS.get(org.provider)
+        fallback_voice = voice_id_override
+        if adapter and fallback_voice in (
+            adapter.default_voice,
+            org.params.get("voice_id"),
+        ):
+            fallback_voice = None
         if language is not None and org.provider not in tts_providers_for(language):
             if not org.fallback_enabled:
                 raise ProviderKeyError(
@@ -659,22 +665,19 @@ def build_tts(
                 org.provider,
                 language,
             )
-            fallback_voice = voice_id_override
-            if adapter and fallback_voice in (
-                adapter.default_voice,
-                org.params.get("voice_id"),
-            ):
-                fallback_voice = None
             return build_tts(None, fallback_voice, language)
         try:
-            byo = _org_tts(org, voice_id_override, language)
+            # Old agent IDs carry no provider. The new provider can use its
+            # workspace voice while permitted fallback retains the legacy ID.
+            primary_voice = None if adapter and fallback_voice else voice_id_override
+            byo = _org_tts(org, primary_voice, language)
         except ValueError:
             if adapter is None or not org.fallback_enabled:
                 raise
             logger.warning(
                 "Could not configure %s speech. Using the house chain.", org.provider
             )
-            return build_tts(None, None, language)
+            return build_tts(None, fallback_voice, language)
         if org.fallback_enabled:
             same_house_gemini = (
                 isinstance(byo, PCMTTS)
@@ -682,10 +685,11 @@ def build_tts(
                 and byo.speech.api_key is None
                 and byo.speech.voice == GeminiSpeech.default_voice
             )
+            explicit_legacy_voice = adapter is None and org.params.get("voice_id")
             house = _house_tts(
-                None if adapter else voice_id_override,
+                fallback_voice,
                 language,
-                include_gemini=not same_house_gemini,
+                include_gemini=not (same_house_gemini or explicit_legacy_voice),
             )
             if (
                 org.provider == GeminiSpeech.provider

@@ -4,9 +4,10 @@ import json
 
 import httpx
 import pytest
+from google.auth.exceptions import DefaultCredentialsError
 from hailhq.core.config import settings
 from hailhq.core.provider_config import TTSParams
-from hailhq.core.provider_validation import validate_provider_key
+from hailhq.core.provider_validation import validate_provider_key, validate_tts_options
 from hailhq.core.providers.tts import assemblyai, gemini, xai
 
 PCM = b"\x01\x02\x03\x04"
@@ -93,6 +94,20 @@ async def test_house_gemini_bounds_the_wait_for_credentials(monkeypatch):
     ) as client:
         with pytest.raises(httpx.ReadTimeout, match="credentials timed out"):
             await anext(speech.pcm(client, "Hello."))
+
+
+async def test_managed_gemini_selection_requires_discoverable_credentials(monkeypatch):
+    def unavailable():
+        raise DefaultCredentialsError("no test credentials")
+
+    monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
+    monkeypatch.setattr(gemini, "_credentials", unavailable)
+    assert not await gemini.GeminiSpeech.house_credentials_available()
+    with pytest.raises(ValueError, match="No Hail credentials"):
+        await validate_tts_options("gemini", {}, None, has_stored_key=False)
+    await validate_tts_options(
+        "gemini", {"project": "workspace-speech"}, "fixture-key", has_stored_key=False
+    )
 
 
 async def test_blank_customer_key_never_falls_back_to_house_key(monkeypatch):

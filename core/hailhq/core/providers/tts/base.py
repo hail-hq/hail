@@ -28,6 +28,10 @@ class PCMAdapter(ABC):
         return bool(cls.house_key())
 
     @classmethod
+    async def house_credentials_available(cls) -> bool:
+        return cls.house_available()
+
+    @classmethod
     def validate_options(cls, params: dict, *, has_workspace_key: bool) -> None:
         if params.get("model") not in (None, cls.model):
             raise ValueError(f"{cls.provider} speech uses {cls.model}.")

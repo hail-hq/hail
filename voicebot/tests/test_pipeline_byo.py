@@ -378,6 +378,41 @@ def test_disabling_inherited_gemini_default_keeps_an_explicit_selection(
     assert len(captured_plugins["cartesia"]) == 1
 
 
+@pytest.mark.parametrize("fallback", [False, True])
+def test_workspace_gemini_does_not_receive_a_legacy_voice_id(
+    monkeypatch, captured_plugins, fallback
+):
+    monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
+    monkeypatch.setattr(settings, "hail_gemini_tts_enabled", True)
+    org = ResolvedLayer("gemini", None, {"voice_id": "Charon"}, fallback)
+
+    renderer = build_tts(org, voice_id_override="saved-legacy", language="en")
+    if fallback:
+        primary, legacy = renderer._tts_instances
+        assert legacy.label == "cartesia"
+        assert captured_plugins["cartesia"][0].kwargs["voice"] == "saved-legacy"
+    else:
+        primary = renderer
+        assert "cartesia" not in captured_plugins
+    assert primary.speech.voice == "Charon"
+
+
+def test_explicit_workspace_voice_keeps_its_legacy_fallback_order(
+    monkeypatch, captured_plugins
+):
+    monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
+    monkeypatch.setattr(settings, "hail_gemini_tts_enabled", True)
+    monkeypatch.setattr(settings, "eleven_api_key", "house-eleven")
+    org = ResolvedLayer("cartesia", "workspace", {"voice_id": "saved"}, True)
+
+    chain = build_tts(org, language="en")
+    assert [provider.label for provider in chain._tts_instances] == [
+        "cartesia",
+        "cartesia",
+        "elevenlabs",
+    ]
+
+
 def test_removed_xai_key_uses_house_speech_only_with_consent(
     monkeypatch, captured_plugins
 ):

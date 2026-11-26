@@ -353,7 +353,7 @@ async def voice_catalogue(language: str, *, include_direct: bool = False) -> dic
                 "accent": None,
             }
             for provider, name, gender in _ENGLISH_PRESETS
-            if (adapter := PCM_ADAPTERS[provider]).house_available()
+            if await (adapter := PCM_ADAPTERS[provider]).house_credentials_available()
         ]
         if (
             settings.hail_gemini_tts_enabled

@@ -1,5 +1,6 @@
 """Feed provider PCM into the existing LiveKit TTS pipeline."""
 
+import asyncio
 from contextlib import aclosing
 
 import httpx
@@ -59,6 +60,15 @@ class _PCMStream(tts.ChunkedStream):
             async with aclosing(
                 model.speech.pcm(model._client, self._input_text)
             ) as chunks:
+                async with asyncio.timeout(self._conn_options.timeout):
+                    first = await anext(chunks, None)
+                    while first == b"":
+                        first = await anext(chunks, None)
+                if first is None:
+                    raise APIConnectionError(
+                        f"{model.provider} returned no speech audio"
+                    )
+                output_emitter.push(first)
                 async for chunk in chunks:
                     output_emitter.push(chunk)
         except httpx.HTTPStatusError as exc:
@@ -66,7 +76,7 @@ class _PCMStream(tts.ChunkedStream):
                 f"{model.provider} synthesis failed",
                 status_code=exc.response.status_code,
             ) from None
-        except httpx.TimeoutException:
+        except (httpx.TimeoutException, TimeoutError):
             raise APITimeoutError() from None
         except (httpx.HTTPError, ValueError):
             raise APIConnectionError(f"{model.provider} speech stream failed") from None

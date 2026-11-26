@@ -79,6 +79,17 @@ class GeminiSpeech(PCMAdapter):
         return bool(settings.google_cloud_project)
 
     @classmethod
+    async def house_credentials_available(cls) -> bool:
+        if not cls.house_available():
+            return False
+        try:
+            async with asyncio.timeout(_GOOGLE_AUTH_TIMEOUT):
+                await asyncio.to_thread(_credentials)
+        except (GoogleAuthError, OSError, ValueError, TimeoutError):
+            return False
+        return True
+
+    @classmethod
     def validate_options(cls, params: dict, *, has_workspace_key: bool) -> None:
         super().validate_options(params, has_workspace_key=has_workspace_key)
         if has_workspace_key and not params.get("project"):

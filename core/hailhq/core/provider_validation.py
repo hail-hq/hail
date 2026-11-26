@@ -36,7 +36,7 @@ from typing import Literal
 import httpx
 from hailhq.core.config import settings
 from hailhq.core.provider_config import provider_cipher
-from hailhq.core.providers.tts import PCM_ADAPTERS
+from hailhq.core.providers.tts import PCM_ADAPTERS, GeminiSpeech
 from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
 from hailhq.core.urls import join_url
 from hailhq.core.voice_catalog import validate_voice_language
@@ -152,7 +152,7 @@ def _classify(mode: str, status: int) -> ValidationStatus:
     return "indeterminate"
 
 
-def validate_tts_options(
+async def validate_tts_options(
     provider: str, params: dict, api_key: str | None, *, has_stored_key: bool
 ) -> None:
     adapter = PCM_ADAPTERS.get(provider)
@@ -160,17 +160,33 @@ def validate_tts_options(
         return
     if api_key is not None and not api_key.strip():
         raise ValueError("Enter an API key.")
-    adapter.validate_options(
-        params, has_workspace_key=api_key is not None or has_stored_key
-    )
+    has_workspace_key = api_key is not None or has_stored_key
+    adapter.validate_options(params, has_workspace_key=has_workspace_key)
+    if not has_workspace_key and not await adapter.house_credentials_available():
+        raise ValueError(f"No Hail credentials are available for {provider} speech.")
+
+
+def supports_saved_key_draft_test(layer: str, provider: str) -> bool:
+    """Only a fixed vendor endpoint may receive a stored key for draft settings."""
+    return layer == "tts" and provider == GeminiSpeech.provider
 
 
 async def validate_tts_voice_selection(
-    provider: str, params: dict, api_key: str | None, stored_key: str | None
+    provider: str,
+    params: dict,
+    api_key: str | None,
+    stored_key: str | None,
+    *,
+    saved_voice_id: str | None,
 ) -> None:
     adapter = PCM_ADAPTERS.get(provider)
     if adapter is not None:
-        if params.get("voice_id") not in (None, "", adapter.default_voice):
+        if params.get("voice_id") not in (
+            None,
+            "",
+            adapter.default_voice,
+            saved_voice_id,
+        ):
             raise ValueError("Choose a suggested voice or update Advanced.")
         return
 

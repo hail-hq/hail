@@ -30,6 +30,7 @@ from hailhq.core.provider_config import (
     provider_cipher,
 )
 from hailhq.core.provider_validation import (
+    supports_saved_key_draft_test,
     validate_provider_key,
     validate_tts_options,
     validate_tts_voice_selection,
@@ -275,7 +276,7 @@ async def upsert_provider_config(
     row = await _get_row(db, organization_id, layer, body.provider)
     if layer == "tts":
         try:
-            validate_tts_options(
+            await validate_tts_options(
                 body.provider,
                 params,
                 body.api_key,
@@ -298,6 +299,7 @@ async def upsert_provider_config(
                 params,
                 body.api_key,
                 row.encrypted_api_key if row is not None else None,
+                saved_voice_id=row.params.get("voice_id") if row is not None else None,
             )
         except (InvalidToken, SecretKeyMissing) as exc:
             raise HTTPException(
@@ -469,11 +471,14 @@ async def validate_provider_config(
         except (SecretKeyMissing, InvalidToken) as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         provider = row.provider
-        params = (
-            _validated_params(layer, provider, body.params)
-            if "params" in body.model_fields_set
-            else dict(row.params)
-        )
+        params = dict(row.params)
+        # A stored key remains bound to its saved endpoint. Draft speech
+        # project settings are only accepted for a fixed vendor endpoint.
+        if (
+            supports_saved_key_draft_test(layer, provider)
+            and "params" in body.model_fields_set
+        ):
+            params = _validated_params(layer, provider, {**params, **body.params})
 
     status, message = await validate_provider_key(layer, provider, api_key, params)
     return {"status": status, "message": message}

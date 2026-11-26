@@ -296,6 +296,11 @@ async def test_catalogue_marks_gemini_as_default_only_for_opted_in_english(monke
     monkeypatch.setattr(settings, "cartesia_api_key", "")
     monkeypatch.setattr(settings, "eleven_api_key", "")
     monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
+    monkeypatch.setattr(
+        catalog.GeminiSpeech,
+        "house_credentials_available",
+        AsyncMock(return_value=True),
+    )
     monkeypatch.setattr(settings, "hail_gemini_tts_enabled", True)
     monkeypatch.setattr(settings, "xai_tts_api_key", "xai-key")
     monkeypatch.setattr(settings, "assemblyai_tts_api_key", "assembly-key")
@@ -319,6 +324,11 @@ async def test_catalogue_marks_gemini_as_default_only_for_opted_in_english(monke
 
 async def test_english_audition_keeps_regular_voices_available_for_preview(monkeypatch):
     monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
+    monkeypatch.setattr(
+        catalog.GeminiSpeech,
+        "house_credentials_available",
+        AsyncMock(return_value=True),
+    )
     monkeypatch.setattr(settings, "xai_tts_api_key", "xai-key")
     monkeypatch.setattr(settings, "assemblyai_tts_api_key", "")
     monkeypatch.setattr(

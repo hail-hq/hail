@@ -21,7 +21,7 @@ import unicodedata
 import wave
 from collections import OrderedDict
 from contextlib import aclosing
-from typing import Annotated
+from typing import Annotated, Literal
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Response
@@ -113,6 +113,7 @@ class PreviewIn(BaseModel):
 
 
 class LineIn(PreviewIn):
+    provider: Literal["cartesia", "elevenlabs"]
     text: Annotated[
         str, StringConstraints(strip_whitespace=True, min_length=1, max_length=400)
     ]

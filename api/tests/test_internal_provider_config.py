@@ -356,6 +356,31 @@ async def test_validate_saved_gemini_key_with_the_draft_project(client, monkeypa
     assert (params["project"], params["location"]) == ("new-project", "eu")
 
 
+async def test_llm_key_test_uses_its_saved_endpoint(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, Mock
+
+    from hailhq.api.routes.internal import provider_config
+
+    saved = {"base_url": "https://saved.example.invalid/v1", "model": "fixture"}
+    row = SimpleNamespace(
+        provider="openai-compatible", params=saved, encrypted_api_key="encrypted"
+    )
+    monkeypatch.setattr(provider_config, "_get_active_row", AsyncMock(return_value=row))
+    monkeypatch.setattr(
+        provider_config,
+        "provider_cipher",
+        Mock(return_value=Mock(decrypt=Mock(return_value="fixture-key"))),
+    )
+    check = AsyncMock(return_value=("valid", "checked"))
+    monkeypatch.setattr(provider_config, "validate_provider_key", check)
+    body = provider_config.ValidateIn(
+        params={"base_url": "https://draft.example.invalid/v1", "model": "fixture"}
+    )
+    await provider_config.validate_provider_config(uuid.UUID(ORG), "llm", body, None)
+    check.assert_awaited_once_with("llm", "openai-compatible", "fixture-key", saved)
+
+
 @pytest.mark.usefixtures("internal_secret_set", "provider_key_set")
 async def test_direct_custom_voice_survives_a_language_served_by_fallback(
     client, monkeypatch
@@ -366,6 +391,10 @@ async def test_direct_custom_voice_survives_a_language_served_by_fallback(
 
     french = b'{"provider":"gemini","params":{"project":"cloud-project","language":"fr","voice_id":"Kore"},"fallback_enabled":true,"verify_voice_language":true}'
     response = await _put(client, "tts", french)
+    assert response.status_code == 200, response.text
+    assert response.json()["params"]["voice_id"] == "Kore"
+    english = french.replace(b'"fr"', b'"en"')
+    response = await _put(client, "tts", english)
     assert response.status_code == 200, response.text
     assert response.json()["params"]["voice_id"] == "Kore"
 
