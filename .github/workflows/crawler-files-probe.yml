@@ -91,6 +91,7 @@ jobs:
           }
 
           const manifestUrl = "https://hail.so/.well-known/mcp.json";
+          const whoamiUrl = new URL("https://api.hail.so/v1/whoami");
 
           async function probeManifestGet() {
             const response = await readPublic(manifestUrl, "application/json", {
@@ -117,17 +118,17 @@ jobs:
               (await skill.text()).match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)([\s\S]*)$/) ?? [];
             assert.match(frontMatter ?? "", /^name:[ \t]*hail[ \t]*\r?$/m, "Hail skill front matter");
             const visibleBody = body?.replace(/<!--[\s\S]*?-->/g, "") ?? "";
-            const hasSection = /^ {0,3}##[ \t]+\S[^\r\n]*\r?\n(?:[ \t]*\r?\n)*[ \t]*[^#\s]/m.test(visibleBody);
-            assert.ok(hasSection, "Hail skill instructions");
-            console.log("Hosted Hail skill served with Markdown instructions");
+            assert.ok(visibleBody.includes(whoamiUrl.href), "Hail skill API setup example");
+            console.log("Hosted Hail skill includes the API setup example");
           }
 
           async function probeOpenApi() {
-            const api = await readPublic("https://api.hail.so/openapi.json", "application/json");
+            const openapiUrl = new URL("/openapi.json", whoamiUrl);
+            const api = await readPublic(openapiUrl.href, "application/json");
             const spec = await api.json();
             assert.match(spec.openapi ?? "", /^\d+\.\d+\.\d+$/, "OpenAPI version");
-            assert.ok(spec.paths?.["/v1/whoami"]?.get, "OpenAPI GET /v1/whoami");
-            console.log("OpenAPI document describes GET /v1/whoami");
+            assert.ok(spec.paths?.[whoamiUrl.pathname]?.get, `OpenAPI GET ${whoamiUrl.pathname}`);
+            console.log(`OpenAPI document describes GET ${whoamiUrl.pathname}`);
           }
 
           const results = await Promise.allSettled([
