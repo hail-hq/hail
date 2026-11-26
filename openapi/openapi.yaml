@@ -7547,10 +7547,7 @@ components:
           anyOf:
             - $ref: "#/components/schemas/VoiceConfig"
             - type: "null"
-          description:
-            Update fields inside the voice settings. Omitted fields keep
-            their values. Set voice_id to null to clear the chosen voice, or send
-            an empty object to reset all voice settings.
+          description: New TTS voice and language settings.
         tools:
           anyOf:
             - items:

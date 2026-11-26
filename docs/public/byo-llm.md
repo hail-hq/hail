@@ -385,9 +385,10 @@ it, and `--fallback` / `--fallback=false` (SDK: `fallback_enabled=True` /
 as they are. What the server validates is the merged result, so a partial
 write can never leave an invalid config behind — it 422s instead.
 
-Some speech providers accept `--project` and `--location`. Use the project ID
-and location supported by the selected provider. The provider key must have
-access to that project.
+Some speech providers accept `--project` and `--location`. Check the accepted
+values and credential requirements under [Call settings → Your own keys](https://hail.so/console/calls/settings/providers).
+In [Language and voice](https://hail.so/console/calls/settings), choose a voice
+offered for the language your agent speaks.
 
 Config is per provider: rows are keyed by `(organization, layer, provider)`,
 so pointing a layer at a different `--provider` starts a fresh row rather

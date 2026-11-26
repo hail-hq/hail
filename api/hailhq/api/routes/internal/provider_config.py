@@ -19,7 +19,6 @@ import httpx
 from cryptography.fernet import InvalidToken
 from fastapi import APIRouter, Depends, HTTPException
 from hailhq.api.routes.internal.auth import verify_internal_request
-from hailhq.core.config import settings
 from hailhq.core.db import get_session
 from hailhq.core.languages import SUPPORTED_LANGUAGES
 from hailhq.core.models import OrgProviderConfig
@@ -30,10 +29,12 @@ from hailhq.core.provider_config import (
     load_org_provider_configs,
     provider_cipher,
 )
-from hailhq.core.provider_validation import validate_provider_key
-from hailhq.core.providers.tts.direct import DIRECT_VOICES, DirectSpeech
+from hailhq.core.provider_validation import (
+    validate_provider_key,
+    validate_tts_options,
+    validate_tts_voice_selection,
+)
 from hailhq.core.secret_cipher import SecretKeyMissing
-from hailhq.core.voice_catalog import validate_voice_language
 from pydantic import BaseModel, ConfigDict, ValidationError
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
@@ -272,66 +273,37 @@ async def upsert_provider_config(
         await _require_servable_language(db, organization_id, **{layer: incoming})
 
     row = await _get_row(db, organization_id, layer, body.provider)
-    direct_speech = layer == "tts" and body.provider in DIRECT_VOICES
-    if direct_speech:
-        if body.api_key is not None and not body.api_key.strip():
-            raise HTTPException(422, "Enter an API key.")
-        has_key = body.api_key is not None or (
-            row is not None and row.encrypted_api_key is not None
-        )
+    if layer == "tts":
         try:
-            DirectSpeech.resolve(
-                body.provider, params, "configured" if has_key else None
+            validate_tts_options(
+                body.provider,
+                params,
+                body.api_key,
+                has_stored_key=row is not None and row.encrypted_api_key is not None,
             )
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
-        language = params.get("language")
-        if body.verify_voice_language and (
-            language is None or body.provider in SUPPORTED_LANGUAGES[language].tts
-        ):
-            voice = params.get("voice_id")
-            if voice and voice != DIRECT_VOICES[body.provider][1]:
-                raise HTTPException(422, "Choose a suggested voice or update Advanced.")
     # A provider outside the language's TTS set only passed the gate above
     # through fallback consent: the house chain speaks, so there is nothing
     # to verify on this provider.
     if (
         layer == "tts"
-        and not direct_speech
         and body.verify_voice_language
         and params.get("language")
         and body.provider in SUPPORTED_LANGUAGES[params["language"]].tts
     ):
-        provider = body.provider
-        key = body.api_key
-        if key is None and row is not None and row.encrypted_api_key is not None:
-            try:
-                key = provider_cipher().decrypt(row.encrypted_api_key)
-            except (InvalidToken, SecretKeyMissing) as exc:
-                raise HTTPException(
-                    503,
-                    "Your stored voice key could not be read. Update it in Advanced.",
-                ) from exc
-        if key is None:
-            key = (
-                settings.cartesia_api_key
-                if provider == "cartesia"
-                else settings.eleven_api_key
-            )
-        model = params.get("model") or (
-            settings.cartesia_model
-            if provider == "cartesia"
-            else settings.elevenlabs_model
-        )
-        voice_id = params.get("voice_id") or (
-            settings.cartesia_voice_id
-            if provider == "cartesia"
-            else settings.elevenlabs_voice_id
-        )
         try:
-            await validate_voice_language(
-                provider, voice_id, model, key, params["language"]
+            await validate_tts_voice_selection(
+                body.provider,
+                params,
+                body.api_key,
+                row.encrypted_api_key if row is not None else None,
             )
+        except (InvalidToken, SecretKeyMissing) as exc:
+            raise HTTPException(
+                503,
+                "Your stored voice key could not be read. Update it in Advanced.",
+            ) from exc
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
         except httpx.HTTPStatusError as exc:

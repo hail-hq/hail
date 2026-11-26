@@ -1,9 +1,9 @@
-"""Connect direct vendor audio streams to the call worker."""
+"""Feed provider PCM into the existing LiveKit TTS pipeline."""
 
 from contextlib import aclosing
 
 import httpx
-from hailhq.core.providers.tts.direct import SAMPLE_RATE, DirectSpeech
+from hailhq.core.providers.tts.base import SAMPLE_RATE, PCMAdapter
 from livekit.agents import (
     APIConnectionError,
     APIStatusError,
@@ -14,8 +14,8 @@ from livekit.agents import (
 from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS, APIConnectOptions
 
 
-class DirectTTS(tts.TTS):
-    def __init__(self, speech: DirectSpeech) -> None:
+class PCMTTS(tts.TTS):
+    def __init__(self, speech: PCMAdapter) -> None:
         # Vendors stream audio back for a complete phrase. The worker's
         # StreamAdapter feeds this adapter one phrase at a time.
         super().__init__(
@@ -40,15 +40,15 @@ class DirectTTS(tts.TTS):
         *,
         conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS,
     ) -> tts.ChunkedStream:
-        return _DirectStream(tts=self, input_text=text, conn_options=conn_options)
+        return _PCMStream(tts=self, input_text=text, conn_options=conn_options)
 
     async def aclose(self) -> None:
         await self._client.aclose()
 
 
-class _DirectStream(tts.ChunkedStream):
+class _PCMStream(tts.ChunkedStream):
     async def _run(self, output_emitter: tts.AudioEmitter) -> None:
-        model: DirectTTS = self._tts
+        model: PCMTTS = self._tts
         output_emitter.initialize(
             request_id=utils.shortuuid(),
             sample_rate=SAMPLE_RATE,

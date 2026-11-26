@@ -1059,25 +1059,3 @@ async def test_email_enabled_defaults_on_and_can_be_changed(client, org) -> None
     )
     assert r.status_code == 200, r.text
     assert r.json()["email_enabled"] is False
-
-
-async def test_language_edit_preserves_a_saved_voice(client: httpx.AsyncClient, org):
-    _, headers = org
-    created = await _create_agent(client, headers)
-    endpoint = f"/agents/{created['id']}"
-    selected = await client.patch(
-        endpoint, json={"voice_config": {"voice_id": "saved-voice"}}, headers=headers
-    )
-    assert selected.status_code == 200, selected.text
-    changed = await client.patch(
-        endpoint, json={"voice_config": {"language": "fr"}}, headers=headers
-    )
-    assert changed.status_code == 200, changed.text
-    assert changed.json()["voice_config"]["voice_id"] == "saved-voice"
-    assert changed.json()["voice_config"]["language"] == "fr"
-    cleared = await client.patch(
-        endpoint, json={"voice_config": {"voice_id": None}}, headers=headers
-    )
-    assert cleared.status_code == 200, cleared.text
-    assert cleared.json()["voice_config"]["voice_id"] is None
-    assert cleared.json()["voice_config"]["language"] == "fr"

@@ -329,12 +329,7 @@ async def update_agent(
             # read of the agent and every call it answers.
             changes.pop(field)
     if "voice_config" in changes:
-        voice_changes = body.voice_config.model_dump(mode="json", exclude_unset=True)
-        changes["voice_config"] = (
-            {**(agent.voice_config or {}), **voice_changes}
-            if voice_changes
-            else body.voice_config.model_dump(mode="json")
-        )
+        changes["voice_config"] = body.voice_config.model_dump(mode="json")
     # Validate before any attribute is set: the validation queries would
     # autoflush a pending name change outside the conflict handler below.
     items = None

@@ -6,13 +6,8 @@ import uuid
 from dataclasses import dataclass
 
 import pytest
-from hailhq.core import voice_catalog
 from hailhq.core.config import settings
 from hailhq.core.models import OrgProviderConfig
-from hailhq.core.providers.tts.routing import (
-    resolve_fallback_voice_provider,
-    resolve_provider_voice,
-)
 from hailhq.core.secret_cipher import generate_key
 from hailhq.voicebot import pipeline
 from hailhq.voicebot.pipeline import (
@@ -115,7 +110,7 @@ def test_per_call_voice_id_beats_org_params(captured_plugins) -> None:
 def test_house_default_when_no_org_config(captured_plugins) -> None:
     build_tts(None, voice_id_override=None)
     kw = captured_plugins["cartesia"][0].kwargs
-    assert kw["api_key"] == settings.cartesia_api_key
+    assert "api_key" not in kw  # house path keeps env-driven key sourcing
     assert kw["voice"] == "house-voice"
 
 
@@ -241,9 +236,7 @@ def test_build_tts_org_incapable_with_fallback_uses_house_only(
     tts = build_tts(org, language="th")
     assert "elevenlabs" not in captured_plugins
     assert len(captured_plugins["cartesia"]) == 1
-    assert (
-        captured_plugins["cartesia"][0].kwargs["api_key"] == settings.cartesia_api_key
-    )
+    assert "api_key" not in captured_plugins["cartesia"][0].kwargs
     assert tts is not None
 
 
@@ -267,9 +260,7 @@ def test_fallback_enabled_wraps_house_after_byo(captured_plugins) -> None:
     # two cartesia constructions: BYO first, house second, wrapped in a FallbackAdapter
     assert len(captured_plugins["cartesia"]) == 2
     assert captured_plugins["cartesia"][0].kwargs["api_key"] == "org-key"
-    assert (
-        captured_plugins["cartesia"][1].kwargs["api_key"] == settings.cartesia_api_key
-    )
+    assert "api_key" not in captured_plugins["cartesia"][1].kwargs
 
 
 async def test_resolve_org_configs_rejects_unsafe_llm_base_url(async_session) -> None:
@@ -333,7 +324,7 @@ def test_decrypt_llm_metadata_roundtrip(monkeypatch) -> None:
 def test_gemini_default_only_applies_to_inherited_english(
     monkeypatch, captured_plugins
 ):
-    monkeypatch.setattr(settings, "hail_gemini_tts_enabled", True, raising=False)
+    monkeypatch.setattr(settings, "hail_gemini_tts_enabled", True)
     monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
     assert build_tts(language="en")._tts_instances[0].model == "gemini-3.8-flash-tts"
     build_tts(voice_id_override="legacy-voice", language="en")
@@ -387,7 +378,7 @@ def test_disabling_inherited_gemini_default_keeps_an_explicit_selection(
     assert len(captured_plugins["cartesia"]) == 1
 
 
-def test_removed_direct_key_uses_house_speech_only_with_consent(
+def test_removed_xai_key_uses_house_speech_only_with_consent(
     monkeypatch, captured_plugins
 ):
     monkeypatch.setattr(settings, "xai_tts_api_key", "")
@@ -397,54 +388,3 @@ def test_removed_direct_key_uses_house_speech_only_with_consent(
     strict = ResolvedLayer("xai", None, {"voice_id": "ara"}, False)
     with pytest.raises(ValueError, match="No workspace or Hail key"):
         build_tts(strict, language="en")
-
-
-async def test_language_fallback_verifies_the_override_without_synthesizing(
-    monkeypatch, captured_plugins
-):
-    from unittest.mock import AsyncMock
-
-    async def validate(provider, voice_id, model, key, language):
-        if voice_id == "Kore":
-            raise ValueError("not a house voice")
-
-    checks = AsyncMock(side_effect=validate)
-    monkeypatch.setattr(voice_catalog, "validate_voice_language", checks)
-    org = ResolvedLayer("gemini", "key", {"voice_id": "Charon"}, True)
-    chosen = await resolve_fallback_voice_provider(org, "saved-french-voice", "fr")
-    assert chosen == "cartesia"
-    chain = build_tts(
-        org,
-        voice_id_override="saved-french-voice",
-        language="fr",
-        fallback_voice_provider=chosen,
-    )
-    assert len(chain._tts_instances) == 2
-    assert chain._max_retry_per_tts > 0
-    assert [call.kwargs["voice"] for call in captured_plugins["cartesia"]] == [
-        "saved-french-voice",
-        "house-voice",
-    ]
-    chosen = await resolve_fallback_voice_provider(org, "Kore", "fr")
-    assert chosen is None
-    build_tts(
-        org, voice_id_override="Kore", language="fr", fallback_voice_provider=chosen
-    )
-    assert captured_plugins["cartesia"][-1].kwargs["voice"] == "house-voice"
-    checks.side_effect = AttributeError("bad voice metadata")
-    assert await resolve_fallback_voice_provider(org, "bad-voice", "fr") is None
-    assert checks.await_count == 3
-
-
-def test_provider_default_voices_still_match_the_worker_adapters(monkeypatch):
-    from inspect import signature
-
-    from livekit.plugins import cartesia, elevenlabs
-
-    monkeypatch.setattr(settings, "eleven_api_key", "house-eleven")
-    assert resolve_provider_voice("cartesia", "en", {}).voice_id == (
-        signature(cartesia.TTS).parameters["voice"].default
-    )
-    assert resolve_provider_voice("elevenlabs", "en", {}).voice_id == (
-        signature(elevenlabs.TTS).parameters["voice_id"].default
-    )

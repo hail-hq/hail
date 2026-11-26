@@ -292,7 +292,7 @@ def test_elevenlabs_tagalog_uses_the_filipino_provider_code():
     assert [c["language"] for c in choices] == ["tl"]
 
 
-async def test_english_gemini_default_uses_the_call_route(monkeypatch):
+async def test_catalogue_marks_gemini_as_default_only_for_opted_in_english(monkeypatch):
     monkeypatch.setattr(settings, "cartesia_api_key", "")
     monkeypatch.setattr(settings, "eleven_api_key", "")
     monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
@@ -341,15 +341,3 @@ async def test_english_audition_keeps_regular_voices_available_for_preview(monke
     audition = await catalog.voice_catalogue("en", include_direct=True)
     assert [voice["id"] for voice in legacy["voices"]] == ["current", "woman", "a-man"]
     assert audition["voices"][2:] == legacy["voices"]
-
-
-@pytest.mark.parametrize("response_body", ["not json", "[]"])
-async def test_malformed_voice_metadata_is_an_upstream_error(response_body):
-    with respx.mock as mock:
-        mock.get("https://api.cartesia.ai/voices/custom").mock(
-            return_value=httpx.Response(200, text=response_body)
-        )
-        with pytest.raises(httpx.DecodingError):
-            await catalog.validate_voice_language(
-                "cartesia", "custom", "sonic-3.5", "customer-key", "en"
-            )

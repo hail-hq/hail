@@ -13,28 +13,25 @@ import hashlib
 import logging
 import time
 from collections import defaultdict
-from typing import get_args
 
 import httpx
 from hailhq.core.config import settings
 from hailhq.core.languages import (
     CARTESIA_MODEL_LANGUAGES,
     SUPPORTED_LANGUAGES,
-    TTSProvider,
     elevenlabs_language,
 )
-from hailhq.core.providers.tts.direct import DIRECT_VOICES
-from hailhq.core.providers.tts.routing import (
-    ProviderKeyError,
-    house_credentials_available,
-    resolve_provider_voice,
-    resolve_tts_routes,
-)
+from hailhq.core.providers.tts import PCM_ADAPTERS, GeminiSpeech
 
 log = logging.getLogger(__name__)
 HEADERS_VERSION = "2026-08-14"
 _cache: dict[tuple[str, str, str], tuple[float, dict]] = {}
 _catalogue_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+_ENGLISH_PRESETS = (
+    ("gemini", "Charon", "male"),
+    ("xai", "Ara", "female"),
+    ("assemblyai", "Audrey", "female"),
+)
 
 
 def language_options() -> list[dict]:
@@ -143,7 +140,7 @@ def elevenlabs_choices(
     )
     code = elevenlabs_language(language)
     if not capability or code not in {
-        entry.get("language_id") for entry in capability.get("languages", [])
+        l.get("language_id") for l in capability.get("languages", [])
     }:
         return []
     choices = []
@@ -186,21 +183,13 @@ def elevenlabs_choices(
     return choices
 
 
-def shortlist(
-    choices: list[dict],
-    language: str,
-    *,
-    preferred_voices: tuple[tuple[str, str], ...] = (),
-) -> list[dict]:
-    """Put the audition picks first, then rank the regular shortlist."""
+def shortlist(choices: list[dict], language: str) -> list[dict]:
+    """Up to three compatible choices; curation, current default, then variety."""
 
     def identity(voice):
         return voice["provider"], voice["id"]
 
     available = {identity(v): v for v in choices if v["language"] == language}
-    audition_picks = [
-        available.pop(key) for key in preferred_voices if key in available
-    ]
     selected: list[dict] = []
     preferred = [
         (p.provider, p.voice_id)
@@ -213,15 +202,10 @@ def shortlist(
             ("elevenlabs", settings.elevenlabs_voice_id),
         ]
     )
-    capacity = 3
     for key in preferred:
-        if (
-            key in available
-            and available[key] not in selected
-            and len(selected) < capacity
-        ):
+        if key in available and available[key] not in selected and len(selected) < 3:
             selected.append(available[key])
-    while len(selected) < capacity:
+    while len(selected) < 3:
         candidates = [v for v in available.values() if v not in selected]
         if not candidates:
             break
@@ -242,8 +226,7 @@ def shortlist(
 
         selected.append(min(candidates, key=rank))
     return [
-        {k: v for k, v in row.items() if k != "original_language"}
-        for row in (*audition_picks, *selected)
+        {k: v for k, v in row.items() if k != "original_language"} for row in selected
     ]
 
 
@@ -311,89 +294,82 @@ async def _provider_catalogue(provider: str, model: str, key: str) -> dict:
         return result
 
 
-async def _catalogue_choices(provider: str, language: str) -> list[dict]:
-    route = resolve_provider_voice(provider, language, {}, use_house_defaults=True)
-    if route.direct:
-        _, _, name, gender = DIRECT_VOICES[provider]
-        return [
+async def voice_catalogue(language: str, *, include_direct: bool = False) -> dict:
+    if language not in SUPPORTED_LANGUAGES:
+        raise ValueError("Choose a supported language")
+    providers = [
+        (p, model, key)
+        for p, model, key in [
+            ("cartesia", settings.cartesia_model, settings.cartesia_api_key),
+            ("elevenlabs", settings.elevenlabs_model, settings.eleven_api_key),
+        ]
+        if key and model and p in SUPPORTED_LANGUAGES[language].tts
+    ]
+    results = await asyncio.gather(
+        *[_provider_catalogue(*p) for p in providers], return_exceptions=True
+    )
+    choices, partial = [], False
+    for (provider, model, _), result in zip(providers, results, strict=True):
+        if isinstance(result, Exception):
+            log.warning("Voice catalogue could not load for %s", provider)
+            partial = True
+            continue
+        if provider == "cartesia":
+            choices.extend(cartesia_choices(result["rows"], language, model))
+        else:
+            choices.extend(
+                elevenlabs_choices(result["rows"], result["models"], language, model)
+            )
+    voices = shortlist(choices, language)
+    default = next(
+        (
+            v
+            for v in voices
+            if v["provider"] == "cartesia" and v["id"] == settings.cartesia_voice_id
+        ),
+        None,
+    )
+    if not default and not settings.cartesia_api_key:
+        default = next(
+            (
+                v
+                for v in voices
+                if v["provider"] == "elevenlabs"
+                and v["id"] == settings.elevenlabs_voice_id
+            ),
+            None,
+        )
+    if include_direct and language == "en":
+        # Older consoles only accept the two original provider IDs.
+        presets = [
             {
                 "provider": provider,
-                "model": route.model,
-                "id": route.voice_id,
+                "model": adapter.model,
+                "id": adapter.default_voice,
                 "name": name,
                 "gender": gender,
                 "language": language,
                 "description": "",
                 "accent": None,
             }
+            for provider, name, gender in _ENGLISH_PRESETS
+            if (adapter := PCM_ADAPTERS[provider]).house_available()
         ]
-    if not route.model or not route.api_key:
-        return []
-    result = await _provider_catalogue(provider, route.model, route.api_key)
-    if provider == "cartesia":
-        return cartesia_choices(result["rows"], language, route.model)
-    return elevenlabs_choices(result["rows"], result["models"], language, route.model)
-
-
-async def voice_catalogue(language: str, *, include_direct: bool = False) -> dict:
-    if language not in SUPPORTED_LANGUAGES:
-        raise ValueError("Choose a supported language")
-
-    # The flag keeps older consoles, which validate two provider IDs, working
-    # while the API and console roll out independently.
-    providers = [
-        provider
-        for provider in get_args(TTSProvider)
-        if provider in SUPPORTED_LANGUAGES[language].tts
-        and house_credentials_available(provider)
-        and (include_direct or provider not in DIRECT_VOICES)
-    ]
-    results = await asyncio.gather(
-        *(_catalogue_choices(provider, language) for provider in providers),
-        return_exceptions=True,
-    )
-    choices, partial = [], False
-    for provider, result in zip(providers, results, strict=True):
-        if isinstance(result, Exception):
-            log.warning("Voice catalogue could not load for %s", provider)
-            partial = True
-        else:
-            choices.extend(result)
-
-    rollout_choices = tuple(
-        (provider, voice_id)
-        for provider, (_, voice_id, _, _) in DIRECT_VOICES.items()
-        if any(v["provider"] == provider and v["id"] == voice_id for v in choices)
-    )
-    voices = shortlist(choices, language, preferred_voices=rollout_choices)
-    try:
-        house = resolve_tts_routes(None, None, language)
-    except ProviderKeyError:
-        house = []
-    primary = next((route for route in house if route.provider in providers), None)
-    default = next(
-        (
-            {"provider": voice["provider"], "id": voice["id"]}
-            for voice in voices
-            if primary
-            and (voice["provider"], voice["id"], voice["model"])
-            == (primary.provider, primary.voice_id, primary.model)
-        ),
-        None,
-    )
+        if (
+            settings.hail_gemini_tts_enabled
+            and presets
+            and presets[0]["provider"] == GeminiSpeech.provider
+        ):
+            default = presets[0]
+        voices = [*presets, *voices]
     return {
         "voices": voices,
         "languages": language_options(),
         "partial": partial,
-        "default_voice": default,
+        "default_voice": (
+            {"provider": default["provider"], "id": default["id"]} if default else None
+        ),
     }
-
-
-def _voice_metadata(response: httpx.Response):
-    try:
-        return response.json()
-    except ValueError as exc:
-        raise httpx.DecodingError("Invalid voice metadata from provider.") from exc
 
 
 async def validate_voice_language(
@@ -419,10 +395,9 @@ async def validate_voice_language(
         if provider == "cartesia":
             response = await client.get(f"https://api.cartesia.ai/voices/{voice_id}")
             response.raise_for_status()
-            voice = _voice_metadata(response)
-            if not isinstance(voice, dict):
-                raise httpx.DecodingError("Cartesia returned invalid voice metadata.")
-            choices = cartesia_choices([voice], language, model, allow_private=True)
+            choices = cartesia_choices(
+                [response.json()], language, model, allow_private=True
+            )
         elif provider == "elevenlabs":
             response = await client.get(
                 f"https://api.elevenlabs.io/v1/voices/{voice_id}"
@@ -430,16 +405,8 @@ async def validate_voice_language(
             response.raise_for_status()
             models = await client.get("https://api.elevenlabs.io/v1/models")
             models.raise_for_status()
-            voice = _voice_metadata(response)
-            model_rows = _voice_metadata(models)
-            if (
-                not isinstance(voice, dict)
-                or not isinstance(model_rows, list)
-                or not all(isinstance(row, dict) for row in model_rows)
-            ):
-                raise httpx.DecodingError("ElevenLabs returned invalid voice metadata.")
             choices = elevenlabs_choices(
-                [voice], model_rows, language, model, allow_private=True
+                [response.json()], models.json(), language, model, allow_private=True
             )
         else:
             choices = []

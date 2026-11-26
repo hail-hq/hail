@@ -23,13 +23,9 @@ from hailhq.core.db import session_scope
 from hailhq.core.languages import SUPPORTED_LANGUAGES
 from hailhq.core.models import Call
 from hailhq.core.prompts import BROWSER_VOICE_PREAMBLE
-from hailhq.core.providers.tts.routing import resolve_fallback_voice_provider
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
 from hailhq.voicebot.browser_tools import build_browser_tools
-from hailhq.voicebot.pipeline import (
-    build_session,
-    resolve_org_configs,
-)
+from hailhq.voicebot.pipeline import build_session, resolve_org_configs
 from livekit.agents import Agent, AgentSession
 
 logger = logging.getLogger(__name__)
@@ -365,18 +361,12 @@ async def run_browser_session(
         if finished:
             return
         language = browser_language(cfg, configs)
-        fallback_voice_provider = await resolve_fallback_voice_provider(
-            configs.get("tts"), cfg.get("voice_id"), language
-        )
-        if finished:
-            return
         session = build_session(
             None,
             ctx.proc.userdata["vad"],
             org_cfgs=configs,
             voice_id_override=cfg.get("voice_id"),
             language=language,
-            fallback_voice_provider=fallback_voice_provider,
         )
 
         event_tasks = attach_handlers(session, call_id)

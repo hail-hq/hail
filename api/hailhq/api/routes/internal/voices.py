@@ -1,12 +1,14 @@
 """Authenticated catalogue, fixed-text samples, and first-line playback.
 
-Catalogue previews speak one fixed greeting per language in each suggested
-voice. Samples are shared in memory across workspaces for one hour.
+Previews speak fixed text only: one greeting per language, for the current
+three recommendations. They are shared in memory across orgs for one hour
+(at most three per supported language).
 
-Saved-line playback uses the same initial speech route as a call. The website
-loads the line after checking the session, workspace, and per-user rate limit.
-Lines of up to 400 characters are cached in memory for one hour, at most 256
-at a time. Playback uses Hail credentials.
+The line route speaks only a workspace's own first line, at most 400
+characters, in a catalogue voice. The website calls it after it checks the
+session, org membership, and a per-user rate limit. Lines are cached in
+memory for one hour, at most 256 at a time. No provider key reaches the
+browser.
 """
 
 from __future__ import annotations
@@ -20,58 +22,37 @@ import wave
 from collections import OrderedDict
 from contextlib import aclosing
 from typing import Annotated
-from uuid import UUID
 
 import httpx
-from cryptography.fernet import InvalidToken
 from fastapi import APIRouter, Depends, HTTPException, Response
 from hailhq.api.routes.internal.auth import verify_internal_request
-from hailhq.core.db import session_scope
+from hailhq.core.config import settings
 from hailhq.core.languages import (
     SUPPORTED_LANGUAGES,
     Language,
     TTSProvider,
     elevenlabs_language,
 )
-from hailhq.core.provider_config import ResolvedLayer, load_org_provider_configs
-from hailhq.core.providers.tts.direct import DIRECT_VOICES, SAMPLE_RATE
-from hailhq.core.providers.tts.routing import (
-    ProviderKeyError,
-    SavedVoiceError,
-    SpeechRoute,
-    VoiceLanguageError,
-    resolve_fallback_voice_provider,
-    resolve_provider_voice,
-    resolve_tts_routes,
-)
-from hailhq.core.secret_cipher import SecretKeyMissing
+from hailhq.core.providers.tts import PCM_ADAPTERS
+from hailhq.core.providers.tts.base import SAMPLE_RATE
 from hailhq.core.voice_catalog import HEADERS_VERSION, voice_catalogue
-from pydantic import (
-    BaseModel,
-    Field,
-    StringConstraints,
-    ValidationError,
-    field_validator,
-)
+from pydantic import BaseModel, Field, StringConstraints, field_validator
 
 router = APIRouter(
     prefix="/internal/voices",
     include_in_schema=False,
     dependencies=[Depends(verify_internal_request)],
 )
-# Key: provider, model, language, voice ID, SHA-256 of the spoken text.
+# Key: provider, model, language, voice id, sha256 of the spoken text.
 _Key = tuple[str, str, str, str, str]
 _Cache = OrderedDict[_Key, tuple[float, bytes]]
 _samples: _Cache = OrderedDict()
 _lines: _Cache = OrderedDict()
-_line_failures: OrderedDict[_Key, float] = OrderedDict()
 _LINE_CAP = 256
-_SYNTHESIS_RETRY_SECONDS = 15
-_CHOOSE_VOICE = "Choose an available voice in Call settings to preview this line."
-_UNAVAILABLE_AGENT_VOICE = "Playback is not available for this agent's saved voice."
-# One lock per recording in each cache. Locks only last while requests
-# hold or wait on them.
-_sample_locks: dict[tuple[int, _Key], tuple[asyncio.Lock, int]] = {}
+# One lock per sample: concurrent first listens synthesize once, and a slow
+# provider never blocks other samples or cache hits. A lock lives only while
+# a request holds or waits on it, so the map holds in-flight samples only.
+_sample_locks: dict[_Key, tuple[asyncio.Lock, int]] = {}
 _HELLO = {
     "ar": "مرحباً، كيف يمكنني مساعدتك اليوم؟",
     "bg": "Здравейте, как мога да ви помогна днес?",
@@ -119,7 +100,7 @@ _HELLO = {
 async def list_voices(language: Language = "en", include_direct: bool = False) -> dict:
     try:
         return await voice_catalogue(language, include_direct=include_direct)
-    except (httpx.HTTPError, ValueError, ProviderKeyError) as exc:
+    except (httpx.HTTPError, ValueError) as exc:
         raise HTTPException(
             503, "Voice choices could not load. Try again or keep your current voice."
         ) from exc
@@ -131,7 +112,7 @@ class PreviewIn(BaseModel):
     voice_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
 
 
-class LineText(BaseModel):
+class LineIn(PreviewIn):
     text: Annotated[
         str, StringConstraints(strip_whitespace=True, min_length=1, max_length=400)
     ]
@@ -139,24 +120,14 @@ class LineText(BaseModel):
     @field_validator("text")
     @classmethod
     def _no_control_characters(cls, text: str) -> str:
-        if any(unicodedata.category(char) in {"Cc", "Zl", "Zp"} for char in text):
+        if any(unicodedata.category(char) == "Cc" for char in text):
             raise ValueError("Use one line of text without control characters.")
         return text
 
 
-class LineIn(PreviewIn, LineText):
-    pass
-
-
-class WorkspaceLineIn(LineText):
-    organization_id: UUID
-    language: Language | None = None
-    voice_id: str | None = None
-
-
 async def _catalogue_model(body: PreviewIn) -> str:
     catalogue = await voice_catalogue(
-        body.language, include_direct=body.provider in DIRECT_VOICES
+        body.language, include_direct=body.provider in PCM_ADAPTERS
     )
     choice = next(
         (
@@ -184,9 +155,9 @@ async def preview_voice(body: PreviewIn) -> Response:
     try:
         model = await _catalogue_model(body)
         text = _HELLO[body.language]
-        cap = 3 * len(SUPPORTED_LANGUAGES) + len(DIRECT_VOICES)
+        cap = 3 * len(SUPPORTED_LANGUAGES) + len(PCM_ADAPTERS)
         return _wav(await _audio(body, model, text, _samples, cap))
-    except (httpx.HTTPError, ValueError, ProviderKeyError) as exc:
+    except (httpx.HTTPError, ValueError) as exc:
         raise HTTPException(503, "This sample could not play. Try again.") from exc
 
 
@@ -195,159 +166,41 @@ async def speak_line(body: LineIn) -> Response:
     try:
         model = await _catalogue_model(body)
         return _wav(await _audio(body, model, body.text, _lines, _LINE_CAP))
-    except (httpx.HTTPError, ValueError, ProviderKeyError) as exc:
+    except (httpx.HTTPError, ValueError) as exc:
         raise HTTPException(503, "This line could not play. Try again.") from exc
-
-
-@router.post("/workspace-line")
-async def speak_workspace_line(body: WorkspaceLineIn) -> Response:
-    try:
-        async with session_scope() as db:
-            rows = await load_org_provider_configs(db, body.organization_id)
-            row = rows.get("tts")
-            org = ResolvedLayer.from_row(row) if row is not None else None
-    except (SecretKeyMissing, InvalidToken) as exc:
-        raise HTTPException(503, "This line could not play. Try again.") from exc
-
-    language = body.language or (org.params.get("language") if org else None)
-    if language and language not in SUPPORTED_LANGUAGES:
-        raise HTTPException(409, "No voice is available for this language.")
-    fallback = await resolve_fallback_voice_provider(org, body.voice_id, language)
-    try:
-        routes = resolve_tts_routes(
-            org, body.voice_id, language, fallback_voice_provider=fallback
-        )
-    except VoiceLanguageError as exc:
-        raise HTTPException(
-            409, "The saved provider cannot speak this language."
-        ) from exc
-    except SavedVoiceError as exc:
-        raise HTTPException(409, _UNAVAILABLE_AGENT_VOICE) from exc
-    except (ValueError, ProviderKeyError) as exc:
-        detail = (
-            _CHOOSE_VOICE
-            if org and not org.fallback_enabled
-            else "No voice is available for this language."
-        )
-        raise HTTPException(409, detail) from exc
-
-    primary = routes[0]
-    if primary.uses_workspace_key:
-        raise HTTPException(
-            409, "Playback is not available for a voice on your own provider key."
-        )
-    try:
-        preview = PreviewIn(
-            language=language or "en",
-            provider=primary.provider,
-            voice_id=primary.voice_id,
-        )
-    except ValidationError as exc:
-        detail = _UNAVAILABLE_AGENT_VOICE if body.voice_id else _CHOOSE_VOICE
-        raise HTTPException(409, detail) from exc
-
-    # Old agent overrides have no provider ID. Try the permitted house
-    # routes for that exact voice ID without substituting a different voice.
-    playable = [primary]
-    if body.voice_id == preview.voice_id:
-        playable.extend(
-            route
-            for route in routes[1:]
-            if route.voice_id == preview.voice_id and not route.uses_workspace_key
-        )
-
-    playable = list(dict.fromkeys(playable))
-    for index, route in enumerate(playable):
-        try:
-            audio = await _audio(
-                preview,
-                route.model,
-                body.text,
-                _lines,
-                _LINE_CAP,
-                route=route,
-                has_backup=index < len(playable) - 1,
-            )
-        except (httpx.HTTPError, ValueError, ProviderKeyError):
-            continue
-        return _wav(audio)
-    raise HTTPException(503, "This line could not play. Try again.")
 
 
 async def _audio(
-    body: PreviewIn,
-    model: str,
-    text: str,
-    cache: _Cache,
-    cap: int,
-    *,
-    route: SpeechRoute | None = None,
-    has_backup: bool = False,
+    body: PreviewIn, model: str, text: str, cache: _Cache, cap: int
 ) -> bytes:
     digest = hashlib.sha256(text.encode()).hexdigest()
-    provider = route.provider if route else body.provider
-    language = (route.language or "") if route else body.language
-    cache_key = (provider, model, language, body.voice_id, digest)
-    lock_key = (id(cache), cache_key)
-    lock, users = _sample_locks.get(lock_key, (asyncio.Lock(), 0))
-    _sample_locks[lock_key] = (lock, users + 1)
+    cache_key = (body.provider, model, body.language, body.voice_id, digest)
+    lock, users = _sample_locks.get(cache_key, (asyncio.Lock(), 0))
+    _sample_locks[cache_key] = (lock, users + 1)
     try:
         async with lock:
             cached = cache.get(cache_key)
-            if cached and time.monotonic() < cached[0]:
+            if cached and time.monotonic() - cached[0] < 3600:
                 cache.move_to_end(cache_key)
                 return cached[1]
-            if has_backup and _line_failures.get(cache_key, 0) > time.monotonic():
-                _line_failures.move_to_end(cache_key)
-                raise ProviderKeyError("Speech synthesis recently failed.")
-            try:
-                audio = (
-                    await _synthesize_route(route, text)
-                    if route
-                    else await _synthesize(body, model, text)
-                )
-            except (httpx.HTTPError, ValueError, ProviderKeyError):
-                if has_backup:
-                    failed_at = time.monotonic()
-                    _line_failures[cache_key] = failed_at + _SYNTHESIS_RETRY_SECONDS
-                    _line_failures.move_to_end(cache_key)
-                    if len(_line_failures) > _LINE_CAP:
-                        evicted = next(
-                            (
-                                key
-                                for key, expires_at in _line_failures.items()
-                                if expires_at <= failed_at
-                            ),
-                            next(iter(_line_failures)),
-                        )
-                        del _line_failures[evicted]
-                raise
-            if cache is _lines:
-                _line_failures.pop(cache_key, None)
-            cache[cache_key] = (time.monotonic() + 3600, audio)
+            audio = await _synthesize(body, model, text)
+            cache[cache_key] = (time.monotonic(), audio)
             cache.move_to_end(cache_key)
             while len(cache) > cap:
                 cache.popitem(last=False)
             return audio
     finally:
-        lock, users = _sample_locks[lock_key]
+        lock, users = _sample_locks[cache_key]
         if users == 1:
-            del _sample_locks[lock_key]
+            del _sample_locks[cache_key]
         else:
-            _sample_locks[lock_key] = (lock, users - 1)
+            _sample_locks[cache_key] = (lock, users - 1)
 
 
 async def _synthesize(body: PreviewIn, model: str, text: str) -> bytes:
-    route = resolve_provider_voice(
-        body.provider, body.language, {"model": model}, voice_id=body.voice_id
-    )
-    return await _synthesize_route(route, text)
-
-
-async def _synthesize_route(route: SpeechRoute, text: str) -> bytes:
     async with httpx.AsyncClient(timeout=20) as client:
-        if route.direct:
-            speech = route.direct
+        if adapter := PCM_ADAPTERS.get(body.provider):
+            speech = adapter.from_config({"model": model}, voice=body.voice_id)
             output = io.BytesIO()
             async with aclosing(speech.pcm(client, text)) as chunks:
                 with wave.open(output, "wb") as wav:
@@ -359,18 +212,18 @@ async def _synthesize_route(route: SpeechRoute, text: str) -> bytes:
             if output.getbuffer().nbytes <= 44:
                 raise ValueError("No sample audio was returned.")
             return output.getvalue()
-        if route.provider == "cartesia":
+        if body.provider == "cartesia":
             response = await client.post(
                 "https://api.cartesia.ai/tts/bytes",
                 headers={
-                    "Authorization": f"Bearer {route.api_key}",
+                    "Authorization": f"Bearer {settings.cartesia_api_key}",
                     "Cartesia-Version": HEADERS_VERSION,
                 },
                 json={
-                    "model_id": route.model,
+                    "model_id": model,
                     "transcript": text,
-                    "language": route.language or "en",
-                    "voice": route.voice_id,
+                    "language": body.language,
+                    "voice": body.voice_id,
                     "output_format": {
                         "container": "wav",
                         "encoding": "pcm_s16le",
@@ -380,14 +233,15 @@ async def _synthesize_route(route: SpeechRoute, text: str) -> bytes:
             )
             response.raise_for_status()
             return response.content
-        payload = {"model_id": route.model, "text": text}
-        if route.language:
-            payload["language_code"] = elevenlabs_language(route.language)
         response = await client.post(
-            f"https://api.elevenlabs.io/v1/text-to-speech/{route.voice_id}",
-            headers={"xi-api-key": route.api_key or ""},
+            f"https://api.elevenlabs.io/v1/text-to-speech/{body.voice_id}",
+            headers={"xi-api-key": settings.eleven_api_key},
             params={"output_format": "pcm_24000"},
-            json=payload,
+            json={
+                "model_id": model,
+                "text": text,
+                "language_code": elevenlabs_language(body.language),
+            },
         )
         response.raise_for_status()
         output = io.BytesIO()

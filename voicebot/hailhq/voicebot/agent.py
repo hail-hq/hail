@@ -69,7 +69,6 @@ from hailhq.core.prompts import (
     other_party_section,
     safe_clock_section,
 )
-from hailhq.core.providers.tts.routing import resolve_fallback_voice_provider
 from hailhq.core.providers.voice import TwilioVoiceProvider
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
 from hailhq.core.secret_cipher import SecretKeyMissing
@@ -2650,16 +2649,12 @@ async def _run_call(
             org_cfgs = await resolve_org_configs(org_id, skip_llm=llm_cfg is not None)
             org_tts = org_cfgs.get("tts")
             language = language or (org_tts.params.get("language") if org_tts else None)
-            fallback_voice_provider = await resolve_fallback_voice_provider(
-                org_tts, voice_id_override, language
-            )
             session = build_session(
                 llm_cfg,
                 vad,
                 org_cfgs=org_cfgs,
                 voice_id_override=voice_id_override,
                 language=language,
-                fallback_voice_provider=fallback_voice_provider,
             )
         except ProviderKeyError:
             raise

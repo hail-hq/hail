@@ -56,6 +56,7 @@ https://docs.livekit.io/agents/logic/turns/turn-detector/
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import logging
 from collections.abc import AsyncIterable
 from typing import Any
@@ -68,23 +69,15 @@ from hailhq.core.languages import (
     default_stt_for,
     elevenlabs_language,
     resolve_stt_provider,
+    tts_providers_for,
     turn_mode_for,
 )
-from hailhq.core.provider_config import (
-    ResolvedLayer,
-    load_org_provider_configs,
-    provider_cipher,
-)
+from hailhq.core.provider_config import load_org_provider_configs, provider_cipher
 from hailhq.core.providers.llm.bedrock import bedrock_client, is_bedrock_client
 from hailhq.core.providers.llm.thinking import thinking_off
-from hailhq.core.providers.tts.routing import (
-    ProviderKeyError,
-    SpeechRoute,
-    house_credentials_available,
-    resolve_tts_routes,
-)
+from hailhq.core.providers.tts import PCM_ADAPTERS, GeminiSpeech
 from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
-from hailhq.voicebot.direct_tts import DirectTTS
+from hailhq.voicebot.pcm_tts import PCMTTS
 from livekit.agents import (
     AgentSession,
     APIConnectOptions,
@@ -141,6 +134,23 @@ __all__ = [
 ]
 
 
+class ProviderKeyError(RuntimeError):
+    """A BYO layer could not be built and fallback is disabled.
+
+    agent.py maps this to end_reason='provider_key_error' (fail-fast by
+    design - the org chose BYO deliberately; silently substituting Hail's
+    keys would defeat the point unless they opted in).
+    """
+
+
+@dataclasses.dataclass(frozen=True)
+class ResolvedLayer:
+    provider: str
+    api_key: str | None
+    params: dict
+    fallback_enabled: bool
+
+
 async def resolve_org_configs(
     organization_id: UUID | None,
     *,
@@ -171,8 +181,10 @@ async def resolve_org_configs(
     for layer, row in rows.items():
         if layer == "llm" and skip_llm:
             continue
-        config = ResolvedLayer.from_row(row)
-        params = config.params
+        api_key: str | None = None
+        if row.encrypted_api_key is not None:
+            api_key = provider_cipher().decrypt(row.encrypted_api_key)
+        params = dict(row.params)
         if layer == "llm" and row.provider == "openai-compatible":
             stored_base_url = params.get("base_url")
             if not stored_base_url:
@@ -185,7 +197,12 @@ async def resolve_org_configs(
                 raise ProviderKeyError(
                     f"org llm base_url is not permitted: {exc}"
                 ) from exc
-        resolved[layer] = config
+        resolved[layer] = ResolvedLayer(
+            provider=row.provider,
+            api_key=api_key,
+            params=params,
+            fallback_enabled=row.fallback_enabled,
+        )
     return resolved
 
 
@@ -523,38 +540,178 @@ def build_llm(
     return _house_llm(retry_on_chunk_sent=retry_on_chunk_sent)
 
 
-def _tts_adapter(route: SpeechRoute) -> agents_tts.TTS:
-    if route.direct:
-        return DirectTTS(route.direct)
-    kwargs: dict[str, Any] = {"model": route.model, "api_key": route.api_key}
-    if route.provider == "cartesia":
-        if route.voice_id:
-            kwargs["voice"] = route.voice_id
-        if route.language:
-            kwargs["language"] = route.language
-        return cartesia_plugin.TTS(**kwargs)
+def _house_gemini_ready() -> bool:
+    return settings.hail_gemini_tts_enabled and GeminiSpeech.house_available()
 
-    if route.voice_id:
-        kwargs["voice_id"] = route.voice_id
-    if route.language:
-        kwargs["language"] = elevenlabs_language(route.language)
-    return elevenlabs_plugin.TTS(**kwargs)
+
+def _house_tts(
+    voice_id_override: str | None, language: str | None, *, include_gemini: bool = True
+) -> list[agents_tts.TTS]:
+    allowed = tts_providers_for(language)
+    instances: list[agents_tts.TTS] = []
+    has_legacy_keys = settings.cartesia_api_key or settings.eleven_api_key
+    if (
+        include_gemini
+        and GeminiSpeech.provider in allowed
+        and _house_gemini_ready()
+        and (
+            voice_id_override is None
+            or voice_id_override == GeminiSpeech.default_voice
+            and not has_legacy_keys
+        )
+    ):
+        instances.append(PCMTTS(GeminiSpeech.from_config({})))
+    if settings.cartesia_api_key and "cartesia" in allowed:
+        kwargs: dict[str, Any] = {
+            "model": settings.cartesia_model,
+            "voice": voice_id_override or settings.cartesia_voice_id,
+        }
+        if language:
+            kwargs["language"] = language
+        instances.append(cartesia_plugin.TTS(**kwargs))
+    if settings.eleven_api_key and "elevenlabs" in allowed:
+        kwargs = {
+            "voice_id": voice_id_override or settings.elevenlabs_voice_id,
+            "model": settings.elevenlabs_model,
+        }
+        if language:
+            kwargs["language"] = elevenlabs_language(language)
+        instances.append(elevenlabs_plugin.TTS(**kwargs))
+    return instances
+
+
+def _org_tts(
+    org: ResolvedLayer, voice_id_override: str | None, language: str | None
+) -> agents_tts.TTS:
+    voice = voice_id_override or org.params.get("voice_id")
+    if org.provider == "cartesia":
+        kwargs: dict[str, Any] = {
+            "model": org.params.get("model") or settings.cartesia_model
+        }
+        if org.api_key is not None:
+            kwargs["api_key"] = org.api_key
+        elif not settings.cartesia_api_key:
+            raise ProviderKeyError("no org or house cartesia key available")
+        if voice:
+            kwargs["voice"] = voice
+        if language:
+            kwargs["language"] = language
+        return cartesia_plugin.TTS(**kwargs)
+    if org.provider == "elevenlabs":
+        kwargs = {"model": org.params.get("model") or settings.elevenlabs_model}
+        if org.api_key is not None:
+            kwargs["api_key"] = org.api_key
+        elif not settings.eleven_api_key:
+            raise ProviderKeyError("no org or house elevenlabs key available")
+        if voice:
+            kwargs["voice_id"] = voice
+        if language:
+            kwargs["language"] = elevenlabs_language(language)
+        return elevenlabs_plugin.TTS(**kwargs)
+    if adapter := PCM_ADAPTERS.get(org.provider):
+        return PCMTTS(adapter.from_config(org.params, org.api_key, voice))
+    raise ProviderKeyError(f"unknown org tts provider '{org.provider}'")
 
 
 def build_tts(
     org: ResolvedLayer | None = None,
     voice_id_override: str | None = None,
     language: str | None = None,
-    *,
-    fallback_voice_provider: str | None = None,
 ) -> agents_tts.TTS:
-    routes = resolve_tts_routes(
-        org,
-        voice_id_override,
-        language,
-        fallback_voice_provider=fallback_voice_provider,
-    )
-    instances = [_tts_adapter(route) for route in routes]
+    """Construct the TTS for one call.
+
+    ``org`` present (mode C): the org's provider is used, with Hail's house
+    TTS instances appended as a fallback only if ``org.fallback_enabled``.
+    Inherited English voices start with Gemini when it is enabled.
+    ``org`` absent (mode A): Cartesia, then ElevenLabs, a
+    provider is included only when its API key is configured, so a
+    single-key self-host still works (tenet 4). With both keys set the two
+    are wrapped in a ``FallbackAdapter`` with Cartesia first. With one key
+    set that provider is used directly with no adapter.
+
+    ``language`` is the per-call ``voice_config.language`` (ISO 639-1); it is
+    applied to every instance built here, BYO and house fallbacks alike,
+    so a provider failover never silently switches the call's language back
+    to English. ``None`` keeps each plugin's default (English).
+
+    ``fallback_enabled`` on the org row is consent to house-provider
+    rerouting: if the org's BYO provider can't speak ``language`` at all,
+    consent means skip the incapable BYO instance and build the house
+    chain only (this recurses into the ``org is None`` branch below, so it
+    shares that branch's single-instance/adapter shape and its
+    empty-chain ``ProviderKeyError``). Without consent it's a hard error,
+    the API gate (``routes/calls.py``) is meant to catch this before the
+    voicebot ever sees it; this is defense-in-depth for direct LiveKit
+    dispatches that bypass the API.
+    """
+    if org is not None:
+        adapter = PCM_ADAPTERS.get(org.provider)
+        if language is not None and org.provider not in tts_providers_for(language):
+            if not org.fallback_enabled:
+                raise ProviderKeyError(
+                    f"org tts provider '{org.provider}' does not support "
+                    f"language '{language}' and fallback is disabled"
+                )
+            logger.warning(
+                "org tts provider %r does not support language %r; "
+                "skipping the BYO instance and using the house chain only "
+                "(fallback consented)",
+                org.provider,
+                language,
+            )
+            fallback_voice = voice_id_override
+            if adapter and fallback_voice in (
+                adapter.default_voice,
+                org.params.get("voice_id"),
+            ):
+                fallback_voice = None
+            return build_tts(None, fallback_voice, language)
+        try:
+            byo = _org_tts(org, voice_id_override, language)
+        except ValueError:
+            if adapter is None or not org.fallback_enabled:
+                raise
+            logger.warning(
+                "Could not configure %s speech. Using the house chain.", org.provider
+            )
+            return build_tts(None, None, language)
+        if org.fallback_enabled:
+            same_house_gemini = (
+                isinstance(byo, PCMTTS)
+                and isinstance(byo.speech, GeminiSpeech)
+                and byo.speech.api_key is None
+                and byo.speech.voice == GeminiSpeech.default_voice
+            )
+            house = _house_tts(
+                None if adapter else voice_id_override,
+                language,
+                include_gemini=not same_house_gemini,
+            )
+            if (
+                org.provider == GeminiSpeech.provider
+                and house
+                and isinstance(house[0], PCMTTS)
+            ):
+                house.append(house.pop(0))
+            if house:
+                return agents_tts.FallbackAdapter([byo, *house])
+        return byo
+    instances = _house_tts(voice_id_override, language)
+    if not instances:
+        # Distinguish between no keys configured vs. language filtering all keys out.
+        if settings.cartesia_api_key or settings.eleven_api_key:
+            # Keys exist but the language filtered them all out. (Every
+            # supported language has at least Cartesia, so `providers` is
+            # never empty here.)
+            providers = tts_providers_for(language)
+            raise ProviderKeyError(
+                f"Configured TTS providers cannot speak language '{language}'; "
+                f"language requires: {', '.join(sorted(providers))}."
+            )
+        raise ProviderKeyError(
+            "No TTS provider configured: enable Google Cloud speech or set "
+            "CARTESIA_API_KEY or ELEVEN_API_KEY."
+        )
     if len(instances) == 1:
         return instances[0]
     return agents_tts.FallbackAdapter(instances)
@@ -671,10 +828,10 @@ def startup_capability_warnings() -> list[str]:
     if not settings.cartesia_api_key:
         # Determine which TTS providers are available
         available_tts_providers = set()
-        if settings.hail_gemini_tts_enabled and house_credentials_available("gemini"):
-            available_tts_providers.add("gemini")
         if settings.eleven_api_key:
             available_tts_providers.add("elevenlabs")
+        if _house_gemini_ready():
+            available_tts_providers.add(GeminiSpeech.provider)
 
         # Find languages that have no available TTS provider
         unservable_langs = []
@@ -713,8 +870,6 @@ def build_session(
     org_cfgs: dict[str, ResolvedLayer] | None = None,
     voice_id_override: str | None = None,
     language: str | None = None,
-    *,
-    fallback_voice_provider: str | None = None,
 ) -> AgentSession:
     """Build the :class:`AgentSession` for one job.
 
@@ -801,12 +956,7 @@ def build_session(
     return AgentSession(
         vad=vad,
         stt=build_stt(org_stt, language, provider, stt_drives_turns=(mode == "stt")),
-        tts=build_tts(
-            org_cfgs.get("tts"),
-            voice_id_override,
-            language,
-            fallback_voice_provider=fallback_voice_provider,
-        ),
+        tts=build_tts(org_cfgs.get("tts"), voice_id_override, language),
         llm=build_llm(llm_cfg, org_cfgs.get("llm"), retry_on_chunk_sent=True),
         turn_handling=TurnHandlingOptions(
             turn_detection=turn_detection,

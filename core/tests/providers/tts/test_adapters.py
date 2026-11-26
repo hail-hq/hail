@@ -7,7 +7,7 @@ import pytest
 from hailhq.core.config import settings
 from hailhq.core.provider_config import TTSParams
 from hailhq.core.provider_validation import validate_provider_key
-from hailhq.core.providers.tts import direct
+from hailhq.core.providers.tts import assemblyai, gemini, xai
 
 PCM = b"\x01\x02\x03\x04"
 
@@ -29,8 +29,8 @@ async def test_gemini_stream_uses_customer_cloud_project():
         }
         return httpx.Response(200, content="data: " + json.dumps(event) + "\n\n")
 
-    speech = direct.DirectSpeech.resolve(
-        "gemini", {"project": "customer-speech", "location": "eu"}, "workspace-key"
+    speech = gemini.GeminiSpeech.from_config(
+        {"project": "customer-speech", "location": "eu"}, "workspace-key"
     )
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
         assert [audio async for audio in speech.pcm(client, "Hello.")] == [PCM]
@@ -41,10 +41,10 @@ def test_gemini_separates_customer_credentials_from_house_project(monkeypatch):
     monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
     monkeypatch.setattr(settings, "google_tts_location", "us")
     with pytest.raises(ValueError, match="Google Cloud project"):
-        direct.DirectSpeech.resolve("gemini", api_key="workspace-key")
+        gemini.GeminiSpeech.from_config({}, "workspace-key")
     with pytest.raises(ValueError, match="Supply your Google Cloud key"):
-        direct.DirectSpeech.resolve("gemini", {"project": "customer-speech"})
-    speech = direct.DirectSpeech.resolve("gemini")
+        gemini.GeminiSpeech.from_config({"project": "customer-speech"})
+    speech = gemini.GeminiSpeech.from_config({})
     assert (speech.project, speech.location, speech.api_key) == (
         "hail-speech",
         "us",
@@ -59,8 +59,8 @@ def test_gemini_separates_customer_credentials_from_house_project(monkeypatch):
 @pytest.mark.parametrize(
     ("provider", "url", "voice_field", "voice"),
     [
-        ("xai", direct.XAI_TTS_URL, "voice_id", "ara"),
-        ("assemblyai", direct.ASSEMBLYAI_TTS_URL, "voice", "aai-audrey"),
+        ("xai", xai.TTS_URL, "voice_id", "ara"),
+        ("assemblyai", assemblyai.TTS_URL, "voice", "aai-audrey"),
     ],
 )
 async def test_direct_key_validation_synthesizes_on_the_vendor(
@@ -81,13 +81,13 @@ async def test_direct_key_validation_synthesizes_on_the_vendor(
 
 async def test_house_gemini_bounds_the_wait_for_credentials(monkeypatch):
     monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
-    monkeypatch.setattr(direct, "_GOOGLE_AUTH_TIMEOUT", 0.01)
+    monkeypatch.setattr(gemini, "_GOOGLE_AUTH_TIMEOUT", 0.01)
 
     async def stalled(_function, _url):
         await asyncio.Event().wait()
 
-    monkeypatch.setattr(direct.asyncio, "to_thread", stalled)
-    speech = direct.DirectSpeech.resolve("gemini")
+    monkeypatch.setattr(gemini.asyncio, "to_thread", stalled)
+    speech = gemini.GeminiSpeech.from_config({})
     async with httpx.AsyncClient(
         transport=httpx.MockTransport(lambda _: pytest.fail("unexpected synthesis"))
     ) as client:

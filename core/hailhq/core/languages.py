@@ -143,7 +143,7 @@ _NO_ELEVENLABS = frozenset({"bn", "gu", "he", "kn", "te", "th", "mr"})
 
 
 TTSProvider = Literal["cartesia", "elevenlabs", "gemini", "xai", "assemblyai"]
-_DIRECT_ENGLISH_TTS = frozenset({"gemini", "xai", "assemblyai"})
+_ENGLISH_ONLY_TTS = frozenset({"gemini", "xai", "assemblyai"})
 
 
 @dataclasses.dataclass(frozen=True)
@@ -167,7 +167,7 @@ SUPPORTED_LANGUAGES: dict[str, LanguageCaps] = {
             if code in _NO_ELEVENLABS
             else frozenset({"cartesia", "elevenlabs"})
         )
-        | (_DIRECT_ENGLISH_TTS if code == "en" else frozenset()),
+        | (_ENGLISH_ONLY_TTS if code == "en" else frozenset()),
         semantic_turn=code in _SEMANTIC_TURN,
     )
     for code in _NAMES

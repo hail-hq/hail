@@ -489,7 +489,7 @@ async def test_picker_checks_retained_voice_with_stored_key_before_write(
     assert response.status_code == 200
     check = AsyncMock(side_effect=ValueError("This voice does not support French."))
     monkeypatch.setattr(
-        "hailhq.api.routes.internal.provider_config.validate_voice_language", check
+        "hailhq.core.provider_validation.validate_voice_language", check
     )
     changed = b'{"provider":"cartesia","params":{"voice_id":"custom","model":"custom-model","language":"fr"},"fallback_enabled":false,"verify_voice_language":true}'
     response = await client.put(
@@ -512,7 +512,7 @@ async def test_picker_validates_house_voice_and_persists_its_model(client, monke
     monkeypatch.setattr(settings, "eleven_api_key", "house-key")
     check = AsyncMock()
     monkeypatch.setattr(
-        "hailhq.api.routes.internal.provider_config.validate_voice_language", check
+        "hailhq.core.provider_validation.validate_voice_language", check
     )
     body = b'{"provider":"elevenlabs","params":{"voice_id":"verified","model":"validated-model","language":"fr"},"fallback_enabled":true,"verify_voice_language":true}'
     response = await client.put(f"{BASE}/tts", content=body, headers=_signed(body))
@@ -532,7 +532,7 @@ async def test_picker_skips_voice_check_when_fallback_serves_the_language(
 
     check = AsyncMock(side_effect=ValueError("unsupported"))
     monkeypatch.setattr(
-        "hailhq.api.routes.internal.provider_config.validate_voice_language", check
+        "hailhq.core.provider_validation.validate_voice_language", check
     )
     body = b'{"provider":"elevenlabs","params":{"voice_id":"verified","language":"bn"},"fallback_enabled":true,"verify_voice_language":true}'
     response = await client.put(f"{BASE}/tts", content=body, headers=_signed(body))
@@ -561,7 +561,7 @@ async def test_picker_maps_provider_status_errors(
     )
     monkeypatch.setattr(settings, "cartesia_api_key", "house-key")
     monkeypatch.setattr(
-        "hailhq.api.routes.internal.provider_config.validate_voice_language",
+        "hailhq.core.provider_validation.validate_voice_language",
         AsyncMock(side_effect=failure),
     )
     body = b'{"provider":"cartesia","params":{"voice_id":"missing","model":"sonic-3.5","language":"fr"},"fallback_enabled":false,"verify_voice_language":true}'

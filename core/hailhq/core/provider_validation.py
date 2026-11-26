@@ -19,8 +19,7 @@ verified probe):
 2. Add a ``_probe_for`` branch here. Prefer a ``capability`` probe (call the
    real endpoint with deliberately-bad params so nothing runs/bills); fall
    back to an ``auth`` probe (a cheap authenticated GET) if the provider has
-   no safe capability probe. The direct speech providers synthesize one
-   fixed word on the explicit Test key action.
+   no safe capability probe. PCM adapters synthesize one fixed word when the user selects Test key.
 3. EMPIRICALLY VERIFY the ordering before trusting a capability probe: a bad
    key must return 401/403, and a valid key with bad params must return a
    post-auth 4xx (404/400/422). If auth is NOT checked before params, the
@@ -35,9 +34,12 @@ from contextlib import aclosing
 from typing import Literal
 
 import httpx
-from hailhq.core.providers.tts.direct import DIRECT_VOICES, DirectSpeech
+from hailhq.core.config import settings
+from hailhq.core.provider_config import provider_cipher
+from hailhq.core.providers.tts import PCM_ADAPTERS
 from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
 from hailhq.core.urls import join_url
+from hailhq.core.voice_catalog import validate_voice_language
 
 ValidationStatus = Literal["valid", "invalid", "indeterminate"]
 
@@ -150,6 +152,47 @@ def _classify(mode: str, status: int) -> ValidationStatus:
     return "indeterminate"
 
 
+def validate_tts_options(
+    provider: str, params: dict, api_key: str | None, *, has_stored_key: bool
+) -> None:
+    adapter = PCM_ADAPTERS.get(provider)
+    if adapter is None:
+        return
+    if api_key is not None and not api_key.strip():
+        raise ValueError("Enter an API key.")
+    adapter.validate_options(
+        params, has_workspace_key=api_key is not None or has_stored_key
+    )
+
+
+async def validate_tts_voice_selection(
+    provider: str, params: dict, api_key: str | None, stored_key: str | None
+) -> None:
+    adapter = PCM_ADAPTERS.get(provider)
+    if adapter is not None:
+        if params.get("voice_id") not in (None, "", adapter.default_voice):
+            raise ValueError("Choose a suggested voice or update Advanced.")
+        return
+
+    if api_key is None and stored_key is not None:
+        api_key = provider_cipher().decrypt(stored_key)
+    if provider == "cartesia":
+        key = settings.cartesia_api_key
+        model = settings.cartesia_model
+        voice = settings.cartesia_voice_id
+    else:
+        key = settings.eleven_api_key
+        model = settings.elevenlabs_model
+        voice = settings.elevenlabs_voice_id
+    await validate_voice_language(
+        provider,
+        params.get("voice_id") or voice,
+        params.get("model") or model,
+        key if api_key is None else api_key,
+        params["language"],
+    )
+
+
 async def validate_provider_key(
     layer: str,
     provider: str,
@@ -158,11 +201,11 @@ async def validate_provider_key(
     client: httpx.AsyncClient | None = None,
 ) -> tuple[ValidationStatus, str]:
     """Return (status, message). Never raises on provider/network failure."""
-    if layer == "tts" and provider in DIRECT_VOICES:
+    if layer == "tts" and provider in PCM_ADAPTERS:
         if client is not None:
-            return await _validate_direct(provider, api_key, params, client)
-        async with httpx.AsyncClient(timeout=_TIMEOUT) as direct_client:
-            return await _validate_direct(provider, api_key, params, direct_client)
+            return await _validate_pcm_adapter(provider, api_key, params, client)
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as speech_client:
+            return await _validate_pcm_adapter(provider, api_key, params, speech_client)
     probe = await asyncio.to_thread(_probe_for, provider, api_key, params)
     if probe is None:
         if provider == "openai-compatible" and params.get("base_url"):
@@ -196,13 +239,13 @@ async def validate_provider_key(
     )
 
 
-async def _validate_direct(
+async def _validate_pcm_adapter(
     provider: str, api_key: str, params: dict, client: httpx.AsyncClient
 ) -> tuple[ValidationStatus, str]:
     # The explicit Test key action synthesizes one fixed word. Authentication
     # alone cannot prove the project can use the selected speech model.
     try:
-        speech = DirectSpeech.resolve(provider, params, api_key)
+        speech = PCM_ADAPTERS[provider].from_config(params, api_key)
         async with aclosing(speech.pcm(client, "Hello.")) as audio:
             async for chunk in audio:
                 if chunk:
