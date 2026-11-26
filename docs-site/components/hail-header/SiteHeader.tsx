@@ -99,6 +99,10 @@ function navLinkClass(isActive: boolean, extra?: string) {
   return classes.join(" ");
 }
 
+function usesDesktopNav() {
+  return window.matchMedia?.("(width > 900px)").matches;
+}
+
 function hasKeyboardFocusedLink(root: HTMLDivElement | null) {
   const focused = document.activeElement;
   return focused?.matches("a:focus-visible") && root?.contains(focused);
@@ -234,10 +238,7 @@ export function SiteHeader({
                 className={styles.dropdown}
                 ref={ref}
                 onPointerEnter={(event) => {
-                  if (
-                    event.pointerType !== "mouse" ||
-                    !window.matchMedia?.("(width > 900px)").matches
-                  )
+                  if (event.pointerType !== "mouse" || !usesDesktopNav())
                     return;
                   hoveredMenu.current = section;
                   if (
@@ -260,6 +261,8 @@ export function SiteHeader({
                   if (!hasKeyboardFocusedLink(ref.current)) setOpen(false);
                 }}
                 onBlur={(event) => {
+                  // Phone panels must stay in place until the next click lands.
+                  if (!usesDesktopNav()) return;
                   if (
                     open &&
                     event.relatedTarget &&
