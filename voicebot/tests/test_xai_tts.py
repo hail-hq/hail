@@ -37,3 +37,21 @@ async def test_xai_times_out_after_sending_text_to_a_silent_socket(monkeypatch):
     )
     assert messages[-1] == {"type": "text.done"}
     socket.close.assert_awaited_once()
+
+
+async def test_xai_timeout_bounds_a_stalled_socket_acquisition(monkeypatch):
+    async def stall(*, timeout):
+        await asyncio.Event().wait()
+
+    renderer = XaiSpeech.from_config({}, "fixture-key").livekit_tts()
+    monkeypatch.setattr(renderer._pool, "get", stall)
+    try:
+        options = APIConnectOptions(timeout=0.05, max_retry=0)
+        async with renderer.stream(conn_options=options) as stream:
+            stream.push_text("Hello.")
+            stream.end_input()
+            async with asyncio.timeout(1):
+                with pytest.raises(APITimeoutError):
+                    await anext(stream)
+    finally:
+        await renderer.aclose()

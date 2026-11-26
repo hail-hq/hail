@@ -11,11 +11,13 @@ from google.oauth2.credentials import Credentials
 from hailhq.core.config import settings
 from hailhq.core.providers.tts.gemini import GeminiSpeech
 from hailhq.voicebot.gemini_tts import GeminiDirectTTS, build_gemini_tts
-from livekit.agents import APIConnectOptions, APITimeoutError
+from livekit.agents import APIConnectionError, APIConnectOptions, APITimeoutError
 from livekit.plugins.google.beta import gemini_tts
 
 
-@pytest.mark.parametrize("response_mode", ["complete", "no_audio", "partial_audio"])
+@pytest.mark.parametrize(
+    "response_mode", ["complete", "no_audio", "partial_audio", "transport_error"]
+)
 async def test_native_gemini_synthesizes_with_the_configured_cloud_project(
     monkeypatch, response_mode
 ):
@@ -38,11 +40,14 @@ async def test_native_gemini_synthesizes_with_the_configured_cloud_project(
 
     class AudioChunks(httpx.AsyncByteStream):
         async def __aiter__(self):
-            for _ in range(1 if response_mode == "partial_audio" else 3):
+            for _ in range(3 if response_mode == "complete" else 1):
                 await asyncio.sleep(0.08)
                 yield f"data: {json.dumps(event)}\n\n".encode()
             if response_mode == "partial_audio":
                 await asyncio.Event().wait()
+            if response_mode == "transport_error":
+                await asyncio.sleep(0.03)
+                raise httpx.ReadTimeout("Fixture transport stalled.")
 
     async def provider_response(request):
         requests.append(request)
@@ -72,12 +77,18 @@ async def test_native_gemini_synthesizes_with_the_configured_cloud_project(
         try:
             assert isinstance(renderer, gemini_tts.TTS)
             options = APIConnectOptions(
-                timeout=0.2, max_retry=int(response_mode == "partial_audio")
+                timeout=0.2,
+                max_retry=int(response_mode in ("partial_audio", "transport_error")),
             )
             async with renderer.synthesize("Hello.", conn_options=options) as stream:
                 async with asyncio.timeout(2):
                     if response_mode != "complete":
-                        with pytest.raises(APITimeoutError) as exc:
+                        error = (
+                            APIConnectionError
+                            if response_mode == "transport_error"
+                            else APITimeoutError
+                        )
+                        with pytest.raises(error) as exc:
                             [chunk.frame async for chunk in stream]
                         assert exc.value.retryable == (response_mode == "no_audio")
                     else:

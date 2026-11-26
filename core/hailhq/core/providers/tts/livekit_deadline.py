@@ -4,7 +4,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from typing import cast
 
-from livekit.agents import APITimeoutError, tokenize, tts
+from livekit.agents import APIConnectionError, APIError, APITimeoutError, tokenize, tts
 from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS, APIConnectOptions
 from livekit.plugins.google.beta import gemini_tts
 from livekit.plugins.xai import tts as xai_tts
@@ -32,6 +32,10 @@ class _ProgressEmitter:
     def start(self) -> None:
         self._deadline.reschedule(self._now() + self._interval)
 
+    def pause(self) -> None:
+        if not self._deadline.expired():
+            self._deadline.reschedule(None)
+
     def push(self, data: bytes) -> None:
         if self._deadline.expired():
             return
@@ -43,14 +47,8 @@ class _ProgressEmitter:
 
 
 @asynccontextmanager
-async def _audio_deadline(
-    emitter: tts.AudioEmitter,
-    timeout: float,
-    sample_rate: int,
-    *,
-    wait_for_text: bool = False
-):
-    async with asyncio.timeout(None if wait_for_text else timeout) as deadline:
+async def _audio_deadline(emitter: tts.AudioEmitter, timeout: float, sample_rate: int):
+    async with asyncio.timeout(timeout) as deadline:
         yield _ProgressEmitter(emitter, deadline, timeout, sample_rate)
 
 
@@ -65,6 +63,12 @@ class _GeminiStream(gemini_tts.ChunkedStream):
             raise APITimeoutError(
                 retryable=output_emitter.pushed_duration() == 0
             ) from None
+        except APIError as exc:
+            if exc.retryable and output_emitter.pushed_duration() > 0:
+                raise APIConnectionError(
+                    "Gemini speech failed after audio was delivered.", retryable=False
+                ) from exc
+            raise
 
 
 class GeminiTTS(gemini_tts.TTS):
@@ -85,10 +89,11 @@ class _XaiStream(xai_tts.SynthesizeStream):
             output_emitter,
             self._conn_options.timeout,
             self._tts.sample_rate,
-            wait_for_text=True,
         ) as emitter:
 
             async def outgoing_words():
+                # The SDK starts reading words only after it acquires a socket.
+                emitter.pause()
                 words = aiter(input_stream)
                 first = await anext(words, None)
                 # Begin when the plugin can send its first word or text.done.
