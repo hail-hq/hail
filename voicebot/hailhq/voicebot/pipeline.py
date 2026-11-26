@@ -75,13 +75,9 @@ from hailhq.core.languages import (
 from hailhq.core.provider_config import load_org_provider_configs, provider_cipher
 from hailhq.core.providers.llm.bedrock import bedrock_client, is_bedrock_client
 from hailhq.core.providers.llm.thinking import thinking_off
-from hailhq.core.providers.tts import (
-    PCM_ADAPTERS,
-    GeminiSpeech,
-    match_legacy_fallback_voice,
-)
+from hailhq.core.providers.tts import PCM_ADAPTERS, GeminiSpeech
 from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
-from hailhq.voicebot.pcm_tts import PCMTTS
+from hailhq.voicebot.gemini_tts import build_gemini_tts
 from livekit.agents import (
     AgentSession,
     APIConnectOptions,
@@ -553,16 +549,26 @@ def _house_tts(
     language: str | None,
     *,
     include_gemini: bool = True,
-    match_legacy_voice: bool = False,
+    gemini_last: bool = False,
 ) -> list[agents_tts.TTS]:
     allowed = tts_providers_for(language)
     instances: list[agents_tts.TTS] = []
-    voice_provider, voice_id_override = (
-        match_legacy_fallback_voice(voice_id_override, language)
-        if match_legacy_voice
-        else (None, voice_id_override)
-    )
-    has_legacy_keys = settings.cartesia_api_key or settings.eleven_api_key
+    if settings.cartesia_api_key and "cartesia" in allowed:
+        kwargs: dict[str, Any] = {
+            "model": settings.cartesia_model,
+            "voice": voice_id_override or settings.cartesia_voice_id,
+        }
+        if language:
+            kwargs["language"] = language
+        instances.append(cartesia_plugin.TTS(**kwargs))
+    if settings.eleven_api_key and "elevenlabs" in allowed:
+        kwargs = {
+            "voice_id": voice_id_override or settings.elevenlabs_voice_id,
+            "model": settings.elevenlabs_model,
+        }
+        if language:
+            kwargs["language"] = elevenlabs_language(language)
+        instances.append(elevenlabs_plugin.TTS(**kwargs))
     if (
         include_gemini
         and GeminiSpeech.provider in allowed
@@ -570,55 +576,15 @@ def _house_tts(
         and (
             not voice_id_override
             or voice_id_override == GeminiSpeech.default_voice
-            and not has_legacy_keys
+            and not (settings.cartesia_api_key or settings.eleven_api_key)
         )
     ):
-        instances.append(PCMTTS(GeminiSpeech.from_config({})))
-    if settings.cartesia_api_key and "cartesia" in allowed:
-        voice = (
-            voice_id_override
-            if not match_legacy_voice or voice_provider == "cartesia"
-            else None
-        )
-        kwargs: dict[str, Any] = {
-            "model": settings.cartesia_model,
-            "voice": voice or settings.cartesia_voice_id,
-        }
-        if language:
-            kwargs["language"] = language
-        instances.append(cartesia_plugin.TTS(**kwargs))
-        if (
-            voice_provider == "cartesia"
-            and settings.cartesia_voice_id != kwargs["voice"]
-        ):
-            if settings.cartesia_voice_id:
-                kwargs["voice"] = settings.cartesia_voice_id
-            else:
-                kwargs.pop("voice")
-            instances.append(cartesia_plugin.TTS(**kwargs))
-    if settings.eleven_api_key and "elevenlabs" in allowed:
-        voice = (
-            voice_id_override
-            if not match_legacy_voice or voice_provider == "elevenlabs"
-            else None
-        )
-        kwargs = {
-            "voice_id": voice or settings.elevenlabs_voice_id,
-            "model": settings.elevenlabs_model,
-        }
-        if language:
-            kwargs["language"] = elevenlabs_language(language)
-        eleven = elevenlabs_plugin.TTS(**kwargs)
-        if voice_provider == "elevenlabs":
-            instances.insert(0, eleven)
-            if settings.elevenlabs_voice_id != kwargs["voice_id"]:
-                if settings.elevenlabs_voice_id:
-                    kwargs["voice_id"] = settings.elevenlabs_voice_id
-                else:
-                    kwargs.pop("voice_id")
-                instances.append(elevenlabs_plugin.TTS(**kwargs))
+        try:
+            gemini = build_gemini_tts(GeminiSpeech.from_config({}))
+        except ValueError:
+            logger.warning("Could not configure Hail's Gemini speech.")
         else:
-            instances.append(eleven)
+            instances.insert(len(instances) if gemini_last else 0, gemini)
     return instances
 
 
@@ -651,7 +617,10 @@ def _org_tts(
             kwargs["language"] = elevenlabs_language(language)
         return elevenlabs_plugin.TTS(**kwargs)
     if adapter := PCM_ADAPTERS.get(org.provider):
-        return PCMTTS(adapter.from_config(org.params, org.api_key, voice))
+        speech = adapter.from_config(org.params, org.api_key, voice)
+        if isinstance(speech, GeminiSpeech):
+            return build_gemini_tts(speech)
+        return speech.livekit_tts()
     raise ProviderKeyError(f"unknown org tts provider '{org.provider}'")
 
 
@@ -686,7 +655,6 @@ def build_tts(
     voicebot ever sees it; this is defense-in-depth for direct LiveKit
     dispatches that bypass the API.
     """
-    match_legacy_voice = False
     if (
         org is not None
         and language is not None
@@ -704,13 +672,9 @@ def build_tts(
             org.provider,
             language,
         )
-        if adapter := PCM_ADAPTERS.get(org.provider):
-            match_legacy_voice = True
-            if not voice_id_explicit or voice_id_override in (
-                adapter.default_voice,
-                org.params.get("voice_id"),
-            ):
-                voice_id_override = None
+        if org.provider in PCM_ADAPTERS:
+            # This override carries no provider identity. Keep the fallback's voice.
+            voice_id_override = None
         org = None
     if org is not None:
         adapter = PCM_ADAPTERS.get(org.provider)
@@ -735,29 +699,26 @@ def build_tts(
             return build_tts(None, fallback_voice, language)
         if org.fallback_enabled:
             same_house_gemini = (
-                isinstance(byo, PCMTTS)
-                and isinstance(byo.speech, GeminiSpeech)
-                and byo.speech.api_key is None
-                and byo.speech.voice == GeminiSpeech.default_voice
+                org.provider == GeminiSpeech.provider
+                and org.api_key is None
+                and (
+                    primary_voice
+                    or org.params.get("voice_id")
+                    or GeminiSpeech.default_voice
+                )
+                == GeminiSpeech.default_voice
             )
             explicit_legacy_voice = adapter is None and org.params.get("voice_id")
             house = _house_tts(
                 fallback_voice,
                 language,
                 include_gemini=not (same_house_gemini or explicit_legacy_voice),
+                gemini_last=org.provider == GeminiSpeech.provider,
             )
-            if (
-                org.provider == GeminiSpeech.provider
-                and house
-                and isinstance(house[0], PCMTTS)
-            ):
-                house.append(house.pop(0))
             if house:
                 return agents_tts.FallbackAdapter([byo, *house])
         return byo
-    instances = _house_tts(
-        voice_id_override, language, match_legacy_voice=match_legacy_voice
-    )
+    instances = _house_tts(voice_id_override, language)
     if not instances:
         # Distinguish between no keys configured vs. language filtering all keys out.
         if settings.cartesia_api_key or settings.eleven_api_key:

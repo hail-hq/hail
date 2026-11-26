@@ -1,10 +1,14 @@
 """xAI text-to-speech adapter."""
 
 from collections.abc import AsyncIterator
+from typing import TYPE_CHECKING
 
 import httpx
 from hailhq.core.config import settings
 from hailhq.core.providers.tts.base import SAMPLE_RATE, PCMAdapter, stream_pcm
+
+if TYPE_CHECKING:
+    from livekit.agents.tts import TTS
 
 TTS_URL = "https://api.x.ai/v1/tts"
 
@@ -17,6 +21,11 @@ class XaiSpeech(PCMAdapter):
     @classmethod
     def house_key(cls) -> str:
         return settings.xai_tts_api_key
+
+    def livekit_tts(self) -> "TTS":
+        from livekit.plugins.xai import TTS
+
+        return TTS(api_key=self.api_key, voice=self.voice, language="en")
 
     def pcm(self, client: httpx.AsyncClient, text: str) -> AsyncIterator[bytes]:
         return stream_pcm(

@@ -1,10 +1,11 @@
-"""Feed provider PCM into the existing LiveKit TTS pipeline."""
+"""Use direct Gemini synthesis for credentials the LiveKit plugin cannot accept."""
 
 import asyncio
 from contextlib import aclosing
 
 import httpx
-from hailhq.core.providers.tts.base import SAMPLE_RATE, PCMAdapter
+from hailhq.core.providers.tts.base import SAMPLE_RATE
+from hailhq.core.providers.tts.gemini import GeminiSpeech
 from livekit.agents import (
     APIConnectionError,
     APIStatusError,
@@ -18,9 +19,15 @@ _FRAME_MS = 20
 _INITIAL_PCM_BYTES = SAMPLE_RATE * _FRAME_MS // 1000 * 2
 
 
-class PCMTTS(tts.TTS):
-    def __init__(self, speech: PCMAdapter) -> None:
-        # Vendors stream audio back for a complete phrase. The worker's
+def build_gemini_tts(speech: GeminiSpeech) -> tts.TTS:
+    if speech.requires_direct_transport:
+        return GeminiDirectTTS(speech)
+    return speech.livekit_tts()
+
+
+class GeminiDirectTTS(tts.TTS):
+    def __init__(self, speech: GeminiSpeech) -> None:
+        # Gemini streams audio back for a complete phrase. The worker's
         # StreamAdapter feeds this adapter one phrase at a time.
         super().__init__(
             capabilities=tts.TTSCapabilities(streaming=False),
@@ -52,7 +59,7 @@ class PCMTTS(tts.TTS):
 
 class _PCMStream(tts.ChunkedStream):
     async def _run(self, output_emitter: tts.AudioEmitter) -> None:
-        model: PCMTTS = self._tts
+        model: GeminiDirectTTS = self._tts
         output_emitter.initialize(
             request_id=utils.shortuuid(),
             sample_rate=SAMPLE_RATE,

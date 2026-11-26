@@ -5,11 +5,12 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import os
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, replace
 from functools import lru_cache, partial
 from threading import Lock
-from typing import Self
+from typing import TYPE_CHECKING, Self
 
 import google.auth
 import httpx
@@ -17,6 +18,9 @@ from google.auth.exceptions import GoogleAuthError
 from google.auth.transport.requests import Request
 from hailhq.core.config import settings
 from hailhq.core.providers.tts.base import PCMAdapter
+
+if TYPE_CHECKING:
+    from livekit.agents.tts import TTS
 
 CLOUD_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
 _GOOGLE_AUTH_TIMEOUT = 4.0
@@ -78,6 +82,36 @@ class GeminiSpeech(PCMAdapter):
 
     project: str = ""
     location: str = "global"
+
+    @property
+    def requires_direct_transport(self) -> bool:
+        # The Gemini plugin supports process ADC in Vertex mode. It drops
+        # API keys in that mode and cannot accept a credentials object.
+        credentials_file = settings.google_application_credentials
+        return bool(
+            self.api_key is not None
+            or settings.google_service_account_json_b64
+            or credentials_file
+            and credentials_file != os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+        )
+
+    def livekit_tts(self) -> TTS:
+        from livekit.plugins.google.beta import GeminiTTS
+
+        if self.requires_direct_transport:
+            raise ValueError("These Google Cloud credentials require direct synthesis.")
+        try:
+            return GeminiTTS(
+                model=self.model,
+                voice_name=self.voice,
+                vertexai=True,
+                project=self.project,
+                location=self.location,
+            )
+        except GoogleAuthError as exc:
+            raise ValueError(
+                "Google Cloud speech credentials could not be loaded."
+            ) from exc
 
     @classmethod
     def house_available(cls) -> bool:

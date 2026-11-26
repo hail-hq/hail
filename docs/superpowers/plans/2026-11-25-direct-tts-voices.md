@@ -2,14 +2,14 @@
 
 **Goal** — Add Gemini, xAI, and AssemblyAI speech to Hail and make Charon the default for inherited English voices.
 
-**Architecture** — Keep voice and credential settings in the existing provider rows. Add one core adapter per vendor and use the existing call and sample paths. Gemini uses Google Cloud Agent Platform with Hail's application credentials or a customer project and key.
+**Architecture** — Keep voice and credential settings in the existing provider rows. Use LiveKit's direct provider plugins for call synthesis and the existing signed API endpoint for samples. Gemini uses Google Cloud Agent Platform. Keep direct call synthesis where the Gemini plugin cannot accept a workspace's Cloud key or Hail's configured credential source.
 
 [Voice audition and rollout plan](https://chatgpt.com/space/page_dcec800738c88191bdefd7c8e9232056)
 
 ## Backend
 
 - [x] Add regression tests for provider routing, legacy explicit selections, authentication, and advertised voices.
-- [x] Add Gemini, xAI, and AssemblyAI adapters in core. Connect them to the existing TTS pipeline and catalogue sample endpoint.
+- [x] Connect the Gemini, xAI, and AssemblyAI plugins to the existing TTS pipeline. Keep provider keys and setup in core. Use the current LiveKit Agents minor series and a compatible RTC patch.
 - [x] Add BYO parameter validation and keep the existing fallback policy. Show Charon, Ara, and Audrey when configured for English. Keep current non-English defaults.
 
 ## Console and release

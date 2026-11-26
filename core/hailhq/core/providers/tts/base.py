@@ -3,9 +3,12 @@
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import ClassVar, Self
+from typing import TYPE_CHECKING, ClassVar, Self
 
 import httpx
+
+if TYPE_CHECKING:
+    from livekit.agents.tts import TTS
 
 SAMPLE_RATE = 24000
 
@@ -54,7 +57,11 @@ class PCMAdapter(ABC):
 
     @abstractmethod
     def pcm(self, client: httpx.AsyncClient, text: str) -> AsyncIterator[bytes]:
-        """Yield signed 16-bit samples at the shared sample rate."""
+        """Yield PCM for the API's standalone previews and credential checks."""
+
+    @abstractmethod
+    def livekit_tts(self) -> "TTS":
+        """Build the provider plugin used by the call worker."""
 
 
 async def stream_pcm(

@@ -1,10 +1,14 @@
 """AssemblyAI text-to-speech adapter."""
 
 from collections.abc import AsyncIterator
+from typing import TYPE_CHECKING
 
 import httpx
 from hailhq.core.config import settings
 from hailhq.core.providers.tts.base import SAMPLE_RATE, PCMAdapter, stream_pcm
+
+if TYPE_CHECKING:
+    from livekit.agents.tts import TTS
 
 TTS_URL = "https://tts.us.assemblyai.com/v1/openai/audio/speech"
 
@@ -17,6 +21,13 @@ class AssemblyAISpeech(PCMAdapter):
     @classmethod
     def house_key(cls) -> str:
         return settings.assemblyai_tts_api_key
+
+    def livekit_tts(self) -> "TTS":
+        from livekit.plugins.assemblyai import TTS
+
+        return TTS(
+            api_key=self.api_key, model=self.model, voice=self.voice, language="en"
+        )
 
     def pcm(self, client: httpx.AsyncClient, text: str) -> AsyncIterator[bytes]:
         return stream_pcm(
