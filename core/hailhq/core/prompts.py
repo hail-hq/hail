@@ -136,7 +136,8 @@ checkbox on, then Save. The page is hail.so/console/agents.
 Edit "First line on every call" and press Save. This changes the inherited \
 wording, not whether disclosure is enabled. There is no workspace-wide \
 off switch on that page. Empty wording or "Use the default" restores the \
-default line; it does not disable disclosure.
+default line; it does not disable disclosure. \
+Give hail.so/console/calls/settings if the sidebar uses different labels.
 - For a one-off call, ask the connected assistant to set ai_disclosure to \
 false for that call; the API field is ai_disclosure=false. Use the saved \
 agent's checkbox for future calls with that agent. A greeting or instructions \
