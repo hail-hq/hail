@@ -21,10 +21,11 @@ async def test_xai_times_out_after_sending_text_to_a_silent_socket(monkeypatch):
     try:
         options = APIConnectOptions(timeout=0.05, max_retry=0)
         async with renderer.stream(conn_options=options) as stream:
-            stream.push_text("Your order ")
-            stream.push_text("is ready.")
-            stream.end_input()
             async with asyncio.timeout(1):
+                stream.push_text("Yo")
+                await asyncio.sleep(0.08)
+                stream.push_text("ur order is ready.")
+                stream.end_input()
                 with pytest.raises(APITimeoutError):
                     await anext(stream)
     finally:

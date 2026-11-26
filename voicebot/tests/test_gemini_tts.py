@@ -15,9 +15,9 @@ from livekit.agents import APIConnectOptions, APITimeoutError
 from livekit.plugins.google.beta import gemini_tts
 
 
-@pytest.mark.parametrize("stalled", [False, True])
+@pytest.mark.parametrize("response_mode", ["complete", "no_audio", "partial_audio"])
 async def test_native_gemini_synthesizes_with_the_configured_cloud_project(
-    monkeypatch, stalled
+    monkeypatch, response_mode
 ):
     monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
     monkeypatch.setattr(settings, "google_tts_location", "eu")
@@ -25,7 +25,7 @@ async def test_native_gemini_synthesizes_with_the_configured_cloud_project(
     monkeypatch.setattr(settings, "google_application_credentials", "")
     monkeypatch.setenv("GOOGLE_API_KEY", "fixture-developer-key")
     requests = []
-    audio = base64.b64encode(b"\x01\x00" * 2400).decode()
+    audio = base64.b64encode(b"\x01\x00" * 480).decode()
     event = {
         "candidates": [
             {
@@ -36,14 +36,22 @@ async def test_native_gemini_synthesizes_with_the_configured_cloud_project(
         ]
     }
 
+    class AudioChunks(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            for _ in range(1 if response_mode == "partial_audio" else 3):
+                await asyncio.sleep(0.08)
+                yield f"data: {json.dumps(event)}\n\n".encode()
+            if response_mode == "partial_audio":
+                await asyncio.Event().wait()
+
     async def provider_response(request):
         requests.append(request)
-        if stalled:
+        if response_mode == "no_audio":
             await asyncio.Event().wait()
         return httpx.Response(
             200,
             headers={"content-type": "text/event-stream"},
-            text=f"data: {json.dumps(event)}\n\n",
+            stream=AudioChunks(),
         )
 
     sdk_client = gemini_tts.Client
@@ -63,14 +71,20 @@ async def test_native_gemini_synthesizes_with_the_configured_cloud_project(
         renderer = build_gemini_tts(GeminiSpeech.from_config({}))
         try:
             assert isinstance(renderer, gemini_tts.TTS)
-            options = APIConnectOptions(timeout=0.05, max_retry=0)
+            options = APIConnectOptions(
+                timeout=0.2, max_retry=int(response_mode == "partial_audio")
+            )
             async with renderer.synthesize("Hello.", conn_options=options) as stream:
-                async with asyncio.timeout(1):
-                    if stalled:
-                        with pytest.raises(APITimeoutError):
-                            await anext(stream)
+                async with asyncio.timeout(2):
+                    if response_mode != "complete":
+                        with pytest.raises(APITimeoutError) as exc:
+                            [chunk.frame async for chunk in stream]
+                        assert exc.value.retryable == (response_mode == "no_audio")
                     else:
-                        assert [chunk.frame async for chunk in stream]
+                        frames = [chunk.frame async for chunk in stream]
+                        assert (
+                            sum(frame.samples_per_channel for frame in frames) == 1440
+                        )
         finally:
             await renderer.aclose()
     (request,) = requests

@@ -91,6 +91,8 @@ class _PCMStream(tts.ChunkedStream):
                 status_code=exc.response.status_code,
             ) from None
         except (httpx.TimeoutException, TimeoutError):
-            raise APITimeoutError() from None
+            raise APITimeoutError(
+                retryable=output_emitter.pushed_duration() == 0
+            ) from None
         except (httpx.HTTPError, ValueError):
             raise APIConnectionError(f"{model.provider} speech stream failed") from None

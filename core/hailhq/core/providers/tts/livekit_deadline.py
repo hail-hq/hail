@@ -22,13 +22,15 @@ class _ProgressEmitter:
         self._deadline = deadline
         self._interval = interval
         self._now = asyncio.get_running_loop().time
-        self._frame_bytes = (
-            sample_rate * 2 // 5
-        )  # Native plugins emit 200 ms of mono PCM.
+        # Count 20 ms of mono PCM, the same progress unit as direct synthesis.
+        self._frame_bytes = sample_rate * 2 // 50
         self._buffered = 0
 
     def __getattr__(self, name: str):
         return getattr(self._emitter, name)
+
+    def start(self) -> None:
+        self._deadline.reschedule(self._now() + self._interval)
 
     def push(self, data: bytes) -> None:
         if self._deadline.expired():
@@ -37,15 +39,19 @@ class _ProgressEmitter:
         self._buffered += len(data)
         if self._buffered >= self._frame_bytes:
             self._buffered %= self._frame_bytes
-            self._deadline.reschedule(self._now() + self._interval)
+            self.start()
 
 
 @asynccontextmanager
-async def _audio_deadline(emitter: tts.AudioEmitter, timeout: float, sample_rate: int):
-    async with asyncio.timeout(timeout) as deadline:
-        yield cast(
-            tts.AudioEmitter, _ProgressEmitter(emitter, deadline, timeout, sample_rate)
-        )
+async def _audio_deadline(
+    emitter: tts.AudioEmitter,
+    timeout: float,
+    sample_rate: int,
+    *,
+    wait_for_text: bool = False
+):
+    async with asyncio.timeout(None if wait_for_text else timeout) as deadline:
+        yield _ProgressEmitter(emitter, deadline, timeout, sample_rate)
 
 
 class _GeminiStream(gemini_tts.ChunkedStream):
@@ -54,9 +60,11 @@ class _GeminiStream(gemini_tts.ChunkedStream):
             async with _audio_deadline(
                 output_emitter, self._conn_options.timeout, self._tts.sample_rate
             ) as emitter:
-                await super()._run(emitter)
+                await super()._run(cast(tts.AudioEmitter, emitter))
         except TimeoutError:
-            raise APITimeoutError() from None
+            raise APITimeoutError(
+                retryable=output_emitter.pushed_duration() == 0
+            ) from None
 
 
 class GeminiTTS(gemini_tts.TTS):
@@ -73,11 +81,27 @@ class _XaiStream(xai_tts.SynthesizeStream):
     async def _run_ws(
         self, input_stream: tokenize.WordStream, output_emitter: tts.AudioEmitter
     ) -> None:
-        # The plugin enters here after text is available for this segment.
         async with _audio_deadline(
-            output_emitter, self._conn_options.timeout, self._tts.sample_rate
+            output_emitter,
+            self._conn_options.timeout,
+            self._tts.sample_rate,
+            wait_for_text=True,
         ) as emitter:
-            await super()._run_ws(input_stream, emitter)
+
+            async def outgoing_words():
+                words = aiter(input_stream)
+                first = await anext(words, None)
+                # Begin when the plugin can send its first word or text.done.
+                emitter.start()
+                if first is not None:
+                    yield first
+                    async for word in words:
+                        yield word
+
+            await super()._run_ws(
+                cast(tokenize.WordStream, outgoing_words()),
+                cast(tts.AudioEmitter, emitter),
+            )
 
 
 class XaiTTS(xai_tts.TTS):
