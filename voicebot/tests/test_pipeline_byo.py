@@ -465,6 +465,30 @@ def test_workspace_gemini_language_fallback_keeps_only_per_call_voice(
     assert captured_plugins["cartesia"][0].kwargs["voice"] == expected_cartesia
     assert captured_plugins["elevenlabs"][0].kwargs["voice_id"] == expected_elevenlabs
     assert chain._tts_instances[0].label == first
+    if first == "elevenlabs":
+        assert [
+            entry.kwargs["voice_id"] for entry in captured_plugins["elevenlabs"]
+        ] == [
+            expected_elevenlabs,
+            "eleven-house-voice",
+        ]
+
+
+def test_gemini_language_fallback_keeps_the_only_providers_default(
+    monkeypatch, captured_plugins
+):
+    monkeypatch.setattr(settings, "cartesia_api_key", "")
+    monkeypatch.setattr(settings, "eleven_api_key", "house-eleven")
+    monkeypatch.setattr(settings, "elevenlabs_voice_id", "eleven-house-voice")
+    org = ResolvedLayer("gemini", "workspace", {"voice_id": "Charon"}, True)
+
+    chain = build_tts(org, "21m00Tcm4TlvDq8ikWAM", "fr", voice_id_explicit=True)
+
+    assert [item.label for item in chain._tts_instances] == ["elevenlabs", "elevenlabs"]
+    assert [entry.kwargs["voice_id"] for entry in captured_plugins["elevenlabs"]] == [
+        "21m00Tcm4TlvDq8ikWAM",
+        "eleven-house-voice",
+    ]
 
 
 def test_explicit_workspace_voice_keeps_its_legacy_fallback_order(

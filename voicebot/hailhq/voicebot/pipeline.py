@@ -587,6 +587,15 @@ def _house_tts(
         if language:
             kwargs["language"] = language
         instances.append(cartesia_plugin.TTS(**kwargs))
+        if (
+            voice_provider == "cartesia"
+            and settings.cartesia_voice_id != kwargs["voice"]
+        ):
+            if settings.cartesia_voice_id:
+                kwargs["voice"] = settings.cartesia_voice_id
+            else:
+                kwargs.pop("voice")
+            instances.append(cartesia_plugin.TTS(**kwargs))
     if settings.eleven_api_key and "elevenlabs" in allowed:
         voice = (
             voice_id_override
@@ -602,6 +611,12 @@ def _house_tts(
         eleven = elevenlabs_plugin.TTS(**kwargs)
         if voice_provider == "elevenlabs":
             instances.insert(0, eleven)
+            if settings.elevenlabs_voice_id != kwargs["voice_id"]:
+                if settings.elevenlabs_voice_id:
+                    kwargs["voice_id"] = settings.elevenlabs_voice_id
+                else:
+                    kwargs.pop("voice_id")
+                instances.append(elevenlabs_plugin.TTS(**kwargs))
         else:
             instances.append(eleven)
     return instances
