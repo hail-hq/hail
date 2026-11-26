@@ -99,7 +99,11 @@ export default function CostsPage() {
           <div className="hero-grid">
             <div className="costs-hero-copy">
               <h1 className="dispatch-h1">{COSTS_HERO_COPY.heading}</h1>
-              <p>{COSTS_HERO_COPY.description}</p>
+              <p>
+                Find the prices you need to estimate an AI agent’s running cost.
+                Compare language and speech models, then check SMS and phone
+                number rates.
+              </p>
               <div className="costs-hero-actions">
                 <a href="/costs/compare">Compare models</a>
                 <a href="/costs/costs.md">Fetch markdown</a>
