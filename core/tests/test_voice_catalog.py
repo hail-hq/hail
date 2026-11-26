@@ -48,6 +48,12 @@ async def test_managed_gemini_preview_uses_the_vertex_location(
     assert result == b"\x01\x00"
 
 
+async def test_unsupported_vertex_location_makes_gemini_unavailable(monkeypatch):
+    monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
+    monkeypatch.setattr(settings, "google_cloud_location", "us-central1")
+    assert not await catalog.preset_credentials_available("gemini")
+
+
 @pytest.fixture(autouse=True)
 def catalogue_settings(monkeypatch):
     catalog._cache.clear()

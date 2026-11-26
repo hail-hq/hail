@@ -610,7 +610,9 @@ def _house_tts(
         )
     ):
         try:
-            gemini = _org_tts(ResolvedLayer("gemini", None, {}, False), None, language)
+            gemini = _org_tts(
+                ResolvedLayer("gemini", None, {}, False), voice_id_override, language
+            )
         except (GoogleAuthError, ValueError):
             logger.warning("Could not configure Hail's Gemini speech.")
         else:

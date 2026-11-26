@@ -353,9 +353,11 @@ def test_explicit_charon_works_when_gemini_is_the_only_house_provider(
     monkeypatch, captured_plugins
 ):
     monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
+    monkeypatch.setattr(settings, "gemini_voice_id", "Kore")
     monkeypatch.setattr(settings, "cartesia_api_key", "")
     monkeypatch.setattr(settings, "eleven_api_key", "")
     assert build_tts(voice_id_override="Charon", language="en").label == "gemini"
+    assert captured_plugins["gemini"][-1].kwargs["voice_name"] == "Charon"
 
 
 def test_workspace_gemini_can_fall_back_to_house_credentials(

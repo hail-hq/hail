@@ -30,6 +30,7 @@ from hailhq.core.provider_config import (
     TTS_PRESET_MODELS,
     gemini_vertex_location,
     tts_preset,
+    tts_preset_configured,
 )
 
 log = logging.getLogger(__name__)
@@ -388,8 +389,9 @@ def _vertex_credentials():
 
 async def preset_credentials_available(provider: str) -> bool:
     if provider != "gemini" or not settings.google_cloud_project:
-        return bool(tts_preset(provider)[1])
+        return tts_preset_configured(provider)
     try:
+        gemini_vertex_location()
         async with asyncio.timeout(_GOOGLE_AUTH_TIMEOUT):
             await asyncio.to_thread(_vertex_credentials)
     except (GoogleAuthError, OSError, ValueError, TimeoutError):
