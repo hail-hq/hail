@@ -6,7 +6,7 @@ import uuid
 from dataclasses import dataclass
 
 import pytest
-from hailhq.core.config import settings
+from hailhq.core.config import VoicePreference, settings
 from hailhq.core.models import OrgProviderConfig
 from hailhq.core.secret_cipher import generate_key
 from hailhq.voicebot import pipeline
@@ -409,7 +409,7 @@ def test_workspace_gemini_uses_an_explicit_per_call_voice(monkeypatch):
     ("voice_id", "explicit", "expected_cartesia", "expected_elevenlabs", "first"),
     [
         (
-            "228fca29-3a0a-435c-8728-5cb483251068",
+            "{228FCA293A0A435C87285CB483251068}",
             True,
             "228fca29-3a0a-435c-8728-5cb483251068",
             "eleven-house-voice",
@@ -431,6 +431,7 @@ def test_workspace_gemini_uses_an_explicit_per_call_voice(monkeypatch):
             "21m00Tcm4TlvDq8ikWAM",
             "elevenlabs",
         ),
+        ("reviewed-voice", True, "house-voice", "reviewed-voice", "elevenlabs"),
     ],
 )
 def test_workspace_gemini_language_fallback_keeps_only_per_call_voice(
@@ -445,6 +446,19 @@ def test_workspace_gemini_language_fallback_keeps_only_per_call_voice(
     org = ResolvedLayer("gemini", "workspace", {"voice_id": "Charon"}, True)
     monkeypatch.setattr(settings, "eleven_api_key", "house-eleven")
     monkeypatch.setattr(settings, "elevenlabs_voice_id", "eleven-house-voice")
+    monkeypatch.setattr(
+        settings,
+        "voice_shortlist_preferences",
+        {
+            "fr": [
+                VoicePreference(
+                    provider="elevenlabs",
+                    voice_id="reviewed-voice",
+                    reason="French sample",
+                )
+            ]
+        },
+    )
 
     chain = build_tts(org, voice_id, "fr", voice_id_explicit=explicit)
 

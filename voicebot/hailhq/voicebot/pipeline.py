@@ -78,7 +78,7 @@ from hailhq.core.providers.llm.thinking import thinking_off
 from hailhq.core.providers.tts import (
     PCM_ADAPTERS,
     GeminiSpeech,
-    legacy_fallback_voice_provider,
+    match_legacy_fallback_voice,
 )
 from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
 from hailhq.voicebot.pcm_tts import PCMTTS
@@ -557,10 +557,10 @@ def _house_tts(
 ) -> list[agents_tts.TTS]:
     allowed = tts_providers_for(language)
     instances: list[agents_tts.TTS] = []
-    voice_provider = (
-        legacy_fallback_voice_provider(voice_id_override)
+    voice_provider, voice_id_override = (
+        match_legacy_fallback_voice(voice_id_override, language)
         if match_legacy_voice
-        else None
+        else (None, voice_id_override)
     )
     has_legacy_keys = settings.cartesia_api_key or settings.eleven_api_key
     if (

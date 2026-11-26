@@ -14,16 +14,22 @@ PCM_ADAPTERS: dict[str, type[PCMAdapter]] = {
 }
 
 
-def legacy_fallback_voice_provider(voice_id: object) -> TTSProvider | None:
+def match_legacy_fallback_voice(
+    voice_id: object, language: str | None
+) -> tuple[TTSProvider | None, str | None]:
     """Infer a likely legacy provider without querying a catalogue mid-call."""
     if not isinstance(voice_id, str) or not voice_id:
-        return None
-    if voice_id == settings.elevenlabs_voice_id or (
-        len(voice_id) == 20 and voice_id.isascii() and voice_id.isalnum()
+        return None, None
+    if (
+        voice_id == settings.elevenlabs_voice_id
+        or (len(voice_id) == 20 and voice_id.isascii() and voice_id.isalnum())
+        or any(
+            voice.provider == "elevenlabs" and voice.voice_id == voice_id
+            for voice in settings.voice_shortlist_preferences.get(language, [])
+        )
     ):
-        return "elevenlabs"
+        return "elevenlabs", voice_id
     try:
-        UUID(voice_id)
+        return "cartesia", str(UUID(voice_id))
     except ValueError:
-        return None
-    return "cartesia"
+        return None, None
