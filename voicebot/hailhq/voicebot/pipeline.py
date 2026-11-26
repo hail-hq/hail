@@ -617,6 +617,8 @@ def build_tts(
     org: ResolvedLayer | None = None,
     voice_id_override: str | None = None,
     language: str | None = None,
+    *,
+    voice_id_explicit: bool = False,
 ) -> agents_tts.TTS:
     """Construct the TTS for one call.
 
@@ -646,12 +648,7 @@ def build_tts(
     """
     if org is not None:
         adapter = PCM_ADAPTERS.get(org.provider)
-        fallback_voice = voice_id_override
-        if adapter and fallback_voice in (
-            adapter.default_voice,
-            org.params.get("voice_id"),
-        ):
-            fallback_voice = None
+        fallback_voice = None if adapter else voice_id_override
         if language is not None and org.provider not in tts_providers_for(language):
             if not org.fallback_enabled:
                 raise ProviderKeyError(
@@ -667,9 +664,15 @@ def build_tts(
             )
             return build_tts(None, fallback_voice, language)
         try:
-            # Old agent IDs carry no provider. The new provider can use its
-            # workspace voice while permitted fallback retains the legacy ID.
-            primary_voice = None if adapter and fallback_voice else voice_id_override
+            primary_voice = voice_id_override
+            if (
+                adapter
+                and not voice_id_explicit
+                and primary_voice
+                not in (adapter.default_voice, org.params.get("voice_id"))
+            ):
+                # A saved, unscoped agent voice may belong to an old provider.
+                primary_voice = None
             byo = _org_tts(org, primary_voice, language)
         except ValueError:
             if adapter is None or not org.fallback_enabled:
@@ -874,6 +877,8 @@ def build_session(
     org_cfgs: dict[str, ResolvedLayer] | None = None,
     voice_id_override: str | None = None,
     language: str | None = None,
+    *,
+    voice_id_explicit: bool = False,
 ) -> AgentSession:
     """Build the :class:`AgentSession` for one job.
 
@@ -881,8 +886,9 @@ def build_session(
     :func:`hailhq.voicebot.agent.prewarm`. ``org_cfgs`` is the org's resolved
     BYO layers (from :func:`resolve_org_configs`); ``voice_id_override`` and
     ``language`` are the per-call ``voice_config.voice_id`` /
-    ``voice_config.language`` from dispatch metadata, the voice beats any
-    org-level default, the language pins both STT and TTS.
+    ``voice_config.language`` from dispatch metadata. The language pins
+    both STT and TTS. ``voice_id_explicit`` identifies caller-supplied voices
+    when a saved agent voice may belong to a previous workspace provider.
 
     STT provider selection is console-BYO-only (no per-call knob): the
     org's BYO STT row wins (:func:`resolve_stt_provider`), else the call
@@ -960,7 +966,12 @@ def build_session(
     return AgentSession(
         vad=vad,
         stt=build_stt(org_stt, language, provider, stt_drives_turns=(mode == "stt")),
-        tts=build_tts(org_cfgs.get("tts"), voice_id_override, language),
+        tts=build_tts(
+            org_cfgs.get("tts"),
+            voice_id_override,
+            language,
+            voice_id_explicit=voice_id_explicit,
+        ),
         llm=build_llm(llm_cfg, org_cfgs.get("llm"), retry_on_chunk_sent=True),
         turn_handling=TurnHandlingOptions(
             turn_detection=turn_detection,

@@ -14,6 +14,9 @@ from livekit.agents import (
 )
 from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS, APIConnectOptions
 
+_FRAME_MS = 20
+_INITIAL_PCM_BYTES = SAMPLE_RATE * _FRAME_MS // 1000 * 2
+
 
 class PCMTTS(tts.TTS):
     def __init__(self, speech: PCMAdapter) -> None:
@@ -55,20 +58,24 @@ class _PCMStream(tts.ChunkedStream):
             sample_rate=SAMPLE_RATE,
             num_channels=1,
             mime_type="audio/pcm",
+            frame_size_ms=_FRAME_MS,
         )
         try:
             async with aclosing(
                 model.speech.pcm(model._client, self._input_text)
             ) as chunks:
                 async with asyncio.timeout(self._conn_options.timeout):
-                    first = await anext(chunks, None)
-                    while first == b"":
-                        first = await anext(chunks, None)
-                if first is None:
+                    first = bytearray()
+                    while len(first) < _INITIAL_PCM_BYTES:
+                        chunk = await anext(chunks, None)
+                        if chunk is None:
+                            break
+                        first.extend(chunk)
+                if len(first) < 2:
                     raise APIConnectionError(
                         f"{model.provider} returned no speech audio"
                     )
-                output_emitter.push(first)
+                output_emitter.push(bytes(first))
                 async for chunk in chunks:
                     output_emitter.push(chunk)
         except httpx.HTTPStatusError as exc:

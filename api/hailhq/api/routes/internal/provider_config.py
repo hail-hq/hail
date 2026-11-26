@@ -36,6 +36,7 @@ from hailhq.core.provider_validation import (
     validate_tts_voice_selection,
 )
 from hailhq.core.secret_cipher import SecretKeyMissing
+from hailhq.core.urls import join_url, same_request_url
 from pydantic import BaseModel, ConfigDict, ValidationError
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
@@ -474,6 +475,21 @@ async def validate_provider_config(
         params = dict(row.params)
         # A stored key remains bound to its saved endpoint. Draft speech
         # project settings are only accepted for a fixed vendor endpoint.
+        if (
+            layer == "llm"
+            and provider == "openai-compatible"
+            and "base_url" in body.params
+        ):
+            draft_url = body.params["base_url"]
+            saved_url = params.get("base_url")
+            if (
+                not isinstance(draft_url, str)
+                or not saved_url
+                or not same_request_url(
+                    join_url(saved_url, "models"), join_url(draft_url, "models")
+                )
+            ):
+                raise HTTPException(422, "Enter the key to test a different endpoint.")
         if (
             supports_saved_key_draft_test(layer, provider)
             and "params" in body.model_fields_set

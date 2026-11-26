@@ -390,11 +390,19 @@ def test_workspace_gemini_does_not_receive_a_legacy_voice_id(
     if fallback:
         primary, legacy = renderer._tts_instances
         assert legacy.label == "cartesia"
-        assert captured_plugins["cartesia"][0].kwargs["voice"] == "saved-legacy"
+        assert captured_plugins["cartesia"][0].kwargs["voice"] == "house-voice"
     else:
         primary = renderer
         assert "cartesia" not in captured_plugins
     assert primary.speech.voice == "Charon"
+
+
+def test_workspace_gemini_uses_an_explicit_per_call_voice(monkeypatch):
+    monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
+    org = ResolvedLayer("gemini", None, {"voice_id": "Charon"}, False)
+
+    renderer = build_tts(org, "Kore", "en", voice_id_explicit=True)
+    assert renderer.speech.voice == "Kore"
 
 
 def test_explicit_workspace_voice_keeps_its_legacy_fallback_order(

@@ -38,14 +38,19 @@ def gemini_url(project: str, location: str) -> str:
 @lru_cache(maxsize=1)
 def _credentials():
     scopes = [CLOUD_SCOPE]
-    if settings.google_service_account_json_b64:
-        info = json.loads(base64.b64decode(settings.google_service_account_json_b64))
-        return google.auth.load_credentials_from_dict(info, scopes=scopes)[0]
-    if settings.google_application_credentials:
-        return google.auth.load_credentials_from_file(
-            settings.google_application_credentials, scopes=scopes
-        )[0]
-    return google.auth.default(scopes=scopes)[0]
+    try:
+        if settings.google_service_account_json_b64:
+            info = json.loads(
+                base64.b64decode(settings.google_service_account_json_b64)
+            )
+            return google.auth.load_credentials_from_dict(info, scopes=scopes)[0]
+        if settings.google_application_credentials:
+            return google.auth.load_credentials_from_file(
+                settings.google_application_credentials, scopes=scopes
+            )[0]
+        return google.auth.default(scopes=scopes)[0]
+    except AttributeError as exc:
+        raise ValueError("Google Cloud credentials must be a JSON object.") from exc
 
 
 def _google_headers(url: str) -> dict[str, str]:

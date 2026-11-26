@@ -110,6 +110,21 @@ async def test_managed_gemini_selection_requires_discoverable_credentials(monkey
     )
 
 
+@pytest.mark.parametrize("document", ["[]", "null"])
+async def test_invalid_google_credential_documents_are_unavailable(
+    monkeypatch, tmp_path, document
+):
+    credentials_file = tmp_path / "credentials.json"
+    credentials_file.write_text(document)
+    monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
+    monkeypatch.setattr(settings, "google_service_account_json_b64", "")
+    monkeypatch.setattr(
+        settings, "google_application_credentials", str(credentials_file)
+    )
+    gemini._credentials.cache_clear()
+    assert not await gemini.GeminiSpeech.house_credentials_available()
+
+
 async def test_blank_customer_key_never_falls_back_to_house_key(monkeypatch):
     monkeypatch.setattr(settings, "xai_tts_api_key", "test-house-key")
     async with httpx.AsyncClient(

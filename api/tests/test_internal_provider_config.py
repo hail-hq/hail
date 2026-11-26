@@ -360,6 +360,7 @@ async def test_llm_key_test_uses_its_saved_endpoint(monkeypatch):
     from types import SimpleNamespace
     from unittest.mock import AsyncMock, Mock
 
+    from fastapi import HTTPException
     from hailhq.api.routes.internal import provider_config
 
     saved = {"base_url": "https://saved.example.invalid/v1", "model": "fixture"}
@@ -377,7 +378,19 @@ async def test_llm_key_test_uses_its_saved_endpoint(monkeypatch):
     body = provider_config.ValidateIn(
         params={"base_url": "https://draft.example.invalid/v1", "model": "fixture"}
     )
-    await provider_config.validate_provider_config(uuid.UUID(ORG), "llm", body, None)
+    with pytest.raises(
+        HTTPException, match="Enter the key to test a different endpoint"
+    ):
+        await provider_config.validate_provider_config(
+            uuid.UUID(ORG), "llm", body, None
+        )
+    check.assert_not_awaited()
+    await provider_config.validate_provider_config(
+        uuid.UUID(ORG),
+        "llm",
+        provider_config.ValidateIn(params={"base_url": saved["base_url"] + "/"}),
+        None,
+    )
     check.assert_awaited_once_with("llm", "openai-compatible", "fixture-key", saved)
 
 

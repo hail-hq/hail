@@ -8,9 +8,10 @@ from hailhq.voicebot.pcm_tts import PCMTTS
 from livekit.agents import APIConnectOptions, APITimeoutError
 
 
-async def test_pcm_stream_respects_first_audio_timeout(monkeypatch):
+@pytest.mark.parametrize("partial", [b"", b"\x00"])
+async def test_pcm_stream_respects_first_audio_timeout(monkeypatch, partial):
     async def stalled_pcm(self, client, text):
-        yield b""
+        yield partial
         await asyncio.Event().wait()
 
     monkeypatch.setattr(XaiSpeech, "pcm", stalled_pcm)

@@ -2655,6 +2655,7 @@ async def _run_call(
                 org_cfgs=org_cfgs,
                 voice_id_override=voice_id_override,
                 language=language,
+                voice_id_explicit=metadata.get("voice_id_explicit") is True,
             )
         except ProviderKeyError:
             raise
