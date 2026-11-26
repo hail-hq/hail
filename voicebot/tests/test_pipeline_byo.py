@@ -11,6 +11,7 @@ import pytest
 from hailhq.core.config import VoicePreference, settings
 from hailhq.core.models import OrgProviderConfig
 from hailhq.core.secret_cipher import generate_key
+from hailhq.core.voice_routing import resolve_provider_voice
 from hailhq.voicebot import pipeline
 from hailhq.voicebot.pipeline import (
     ProviderKeyError,
@@ -464,9 +465,23 @@ def test_fallback_honors_a_voice_with_a_known_provider(
 
     assert chain._tts_instances[0].label == provider
     assert [item.kwargs[field] for item in captured_plugins[provider]] == [
-        default,
         voice,
+        default,
     ]
+
+
+def test_provider_default_voices_still_match_the_worker_adapters(monkeypatch):
+    from inspect import signature
+
+    from livekit.plugins import cartesia, elevenlabs
+
+    monkeypatch.setattr(settings, "eleven_api_key", "house-eleven")
+    assert resolve_provider_voice("cartesia", "en", {}).voice_id == (
+        signature(cartesia.TTS).parameters["voice"].default
+    )
+    assert resolve_provider_voice("elevenlabs", "en", {}).voice_id == (
+        signature(elevenlabs.TTS).parameters["voice_id"].default
+    )
 
 
 @pytest.mark.parametrize(

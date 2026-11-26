@@ -1,5 +1,7 @@
 import hashlib
 import json
+from contextlib import asynccontextmanager
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import httpx
@@ -111,6 +113,27 @@ async def test_preview_uses_xai_for_an_advertised_voice(voice_app, monkeypatch):
     voices.voice_catalogue.assert_awaited_once_with("en", include_direct=True)
 
 
+async def test_legacy_line_still_accepts_unicode_paragraph_separator(
+    voice_app, monkeypatch
+):
+    monkeypatch.setattr(settings, "cartesia_api_key", "house-key")
+    body = b'{"voice_id":"known","provider":"cartesia","language":"en","text":"Hello.\\u2029Goodbye."}'
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=voice_app), base_url="http://test"
+    ) as client:
+        with respx.mock as mock:
+            synthesis = mock.post("https://api.cartesia.ai/tts/bytes").respond(
+                200, content=b"RIFF-legacy"
+            )
+            response = await client.post(
+                "/internal/voices/line", content=body, headers=_signed(body)
+            )
+            assert response.status_code == 200
+            assert synthesis.call_count == 1
+            payload = json.loads(synthesis.calls[0].request.content)
+            assert payload["transcript"] == "Hello.\u2029Goodbye."
+
+
 async def test_line_keeps_the_existing_provider_scope(voice_app):
     body = b'{"voice_id":"ara","provider":"xai","language":"en","text":"Hello."}'
     async with httpx.AsyncClient(
@@ -149,7 +172,10 @@ async def test_provider_identity_prevents_cross_provider_preview(voice_app):
         assert response.status_code == 422
 
 
-async def test_elevenlabs_preview_uses_verified_model_and_wav_envelope(voice_app):
+async def test_elevenlabs_preview_uses_verified_model_and_wav_envelope(
+    voice_app, monkeypatch
+):
+    monkeypatch.setattr(settings, "eleven_api_key", "house-eleven")
     import io
     import json
     import wave
@@ -195,8 +221,10 @@ async def test_preview_rejects_path_like_ids(voice_app):
         assert response.status_code == 422
 
 
+@pytest.mark.parametrize("fails", [False, True])
 async def test_preview_locks_serialize_one_sample_and_never_outlive_requests(
     monkeypatch,
+    fails,
 ):
     import asyncio
 
@@ -213,6 +241,8 @@ async def test_preview_locks_serialize_one_sample_and_never_outlive_requests(
         peak = max(peak, running)
         await release.wait()
         running -= 1
+        if fails:
+            raise httpx.ReadTimeout("fixture provider failure")
         return b"audio"
 
     monkeypatch.setattr(voices, "_synthesize", slow_audio)
@@ -222,9 +252,14 @@ async def test_preview_locks_serialize_one_sample_and_never_outlive_requests(
     await asyncio.sleep(0)
     digest = hashlib.sha256(b"hello").hexdigest()
     key = ("cartesia", "sonic-3.5", "en", "known", digest)
-    assert voices._sample_locks[key][1] == 2
+    assert voices._sample_locks[id(voices._samples), key].requests == 2
     release.set()
-    assert await asyncio.gather(first, second) == [b"audio", b"audio"]
+    results = await asyncio.gather(first, second, return_exceptions=True)
+    if fails:
+        assert isinstance(results[0], httpx.ReadTimeout)
+        assert isinstance(results[1], voices.ProviderKeyError)
+    else:
+        assert results == [b"audio", b"audio"]
     assert peak == 1
     assert calls == 1
     assert voices._sample_locks == {}
@@ -298,6 +333,7 @@ async def test_line_speaks_text_and_caches_per_text(voice_app, monkeypatch):
 
 async def test_line_cache_stays_bounded(monkeypatch):
     voices._lines.clear()
+    voices._line_failures.clear()
     voices._sample_locks.clear()
     monkeypatch.setattr(voices, "_synthesize", AsyncMock(return_value=b"audio"))
     body = voices.PreviewIn(language="en", provider="cartesia", voice_id="known")
@@ -306,9 +342,23 @@ async def test_line_cache_stays_bounded(monkeypatch):
             body, "sonic-3.5", f"line {i}", voices._lines, voices._LINE_CAP
         )
     assert len(voices._lines) == voices._LINE_CAP
+    saved_recordings = tuple(voices._lines)
+    voices._synthesize.side_effect = httpx.ReadTimeout("provider unavailable")
+    with pytest.raises(httpx.ReadTimeout):
+        await voices._audio(
+            body,
+            "sonic-3.5",
+            "new line",
+            voices._lines,
+            voices._LINE_CAP,
+            has_backup=True,
+        )
+    assert tuple(voices._lines) == saved_recordings
+    assert len(voices._line_failures) == 1
 
 
-async def test_elevenlabs_line_sends_text(voice_app):
+async def test_elevenlabs_line_sends_text(voice_app, monkeypatch):
+    monkeypatch.setattr(settings, "eleven_api_key", "house-eleven")
     voices._lines.clear()
     voices.voice_catalogue.return_value["voices"] = [
         {"id": "known", "provider": "elevenlabs", "model": "verified-model"}
@@ -387,3 +437,407 @@ async def test_line_provider_failure_returns_retryable_error(voice_app):
             assert response.status_code == 503
             assert response.json()["detail"] == "This line could not play. Try again."
     assert voices._lines == {}
+
+
+@pytest.fixture
+def workspace_voice_app(monkeypatch):
+    app = FastAPI()
+    app.include_router(voices.router)
+    app.state.session_open = False
+
+    @asynccontextmanager
+    async def session():
+        app.state.session_open = True
+        try:
+            yield None
+        finally:
+            app.state.session_open = False
+
+    monkeypatch.setattr(voices, "session_scope", session)
+    monkeypatch.setattr(voices, "load_org_provider_configs", AsyncMock(return_value={}))
+    voices._lines.clear()
+    voices._line_failures.clear()
+    return app
+
+
+async def test_workspace_line_uses_saved_voice_and_model_outside_shortlist(
+    workspace_voice_app, monkeypatch
+):
+    monkeypatch.setattr(settings, "cartesia_api_key", "house-key")
+    monkeypatch.setattr(
+        voices,
+        "load_org_provider_configs",
+        AsyncMock(
+            return_value={
+                "tts": SimpleNamespace(
+                    provider="cartesia",
+                    encrypted_api_key=None,
+                    params={
+                        "language": "fr",
+                        "voice_id": "saved",
+                        "model": "saved-model",
+                    },
+                    fallback_enabled=False,
+                )
+            }
+        ),
+    )
+    body = (
+        b'{"organization_id":"00000000-0000-0000-0000-000000000001","text":"Bonjour."}'
+    )
+
+    def synthesize(_request):
+        assert not workspace_voice_app.state.session_open
+        return httpx.Response(200, content=b"RIFF-sample")
+
+    with respx.mock as mock:
+        synthesis = mock.post("https://api.cartesia.ai/tts/bytes").mock(
+            side_effect=synthesize
+        )
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=workspace_voice_app),
+            base_url="http://test",
+        ) as client:
+            response = await client.post(
+                "/internal/voices/workspace-line", content=body, headers=_signed(body)
+            )
+
+        assert response.status_code == 200, response.text
+        payload = json.loads(synthesis.calls[0].request.content)
+        assert payload["voice"] == "saved"
+        assert payload["model_id"] == "saved-model"
+        assert payload["language"] == "fr"
+
+
+async def test_workspace_line_can_play_saved_voice_on_legacy_fallback(
+    workspace_voice_app, monkeypatch
+):
+    monkeypatch.setattr(settings, "cartesia_api_key", "house-cartesia")
+    monkeypatch.setattr(settings, "eleven_api_key", "house-eleven")
+    current_time = 100.0
+    monkeypatch.setattr(voices, "time", SimpleNamespace(monotonic=lambda: current_time))
+    voices.load_org_provider_configs.return_value = {
+        "tts": SimpleNamespace(
+            provider="cartesia",
+            encrypted_api_key=None,
+            params={},
+            fallback_enabled=True,
+        )
+    }
+    body = b'{"organization_id":"00000000-0000-0000-0000-000000000001","text":"Hi.","voice_id":"saved-eleven"}'
+
+    with respx.mock as mock:
+        first = mock.post("https://api.cartesia.ai/tts/bytes").respond(404)
+        backup = mock.post(
+            "https://api.elevenlabs.io/v1/text-to-speech/saved-eleven"
+        ).respond(200, content=b"\x00\x00")
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=workspace_voice_app),
+            base_url="http://test",
+        ) as client:
+            for _ in range(2):
+                response = await client.post(
+                    "/internal/voices/workspace-line",
+                    content=body,
+                    headers=_signed(body),
+                )
+                assert response.status_code == 200
+                assert response.content.startswith(b"RIFF")
+            assert first.call_count == 1
+            assert backup.call_count == 1
+
+            current_time += 30
+            first.respond(200, content=b"RIFF-primary")
+            response = await client.post(
+                "/internal/voices/workspace-line", content=body, headers=_signed(body)
+            )
+            assert response.content == b"RIFF-primary"
+            assert first.call_count == 2
+
+            voices.load_org_provider_configs.return_value["tts"].fallback_enabled = (
+                False
+            )
+            first.respond(503)
+            response = await client.post(
+                "/internal/voices/workspace-line", content=body, headers=_signed(body)
+            )
+            assert response.content == b"RIFF-primary"
+            assert first.call_count == 2
+            assert backup.call_count == 1
+
+
+async def test_inherited_line_uses_fallback_voice_only_with_consent(
+    workspace_voice_app, monkeypatch
+):
+    monkeypatch.setattr(settings, "cartesia_api_key", "house-cartesia")
+    monkeypatch.setattr(settings, "cartesia_voice_id", "cartesia-default")
+    monkeypatch.setattr(settings, "eleven_api_key", "house-eleven")
+    monkeypatch.setattr(settings, "elevenlabs_voice_id", "eleven-default")
+    org = SimpleNamespace(
+        provider="cartesia",
+        encrypted_api_key=None,
+        params={"voice_id": "cartesia-default"},
+        fallback_enabled=True,
+    )
+    voices.load_org_provider_configs.return_value = {"tts": org}
+    body = b'{"organization_id":"00000000-0000-0000-0000-000000000001","text":"Hello."}'
+
+    with respx.mock as mock:
+        primary = mock.post("https://api.cartesia.ai/tts/bytes").respond(503)
+        backup = mock.post(
+            "https://api.elevenlabs.io/v1/text-to-speech/eleven-default"
+        ).respond(200, content=b"\x00\x00")
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=workspace_voice_app),
+            base_url="http://test",
+        ) as client:
+            opted_in = await client.post(
+                "/internal/voices/workspace-line", content=body, headers=_signed(body)
+            )
+            org.fallback_enabled = False
+            strict = await client.post(
+                "/internal/voices/workspace-line", content=body, headers=_signed(body)
+            )
+
+    assert opted_in.status_code == 200
+    assert strict.status_code == 503
+    assert primary.call_count == 2
+    assert backup.call_count == 1
+    assert {key[3] for key in voices._lines} == {"eleven-default"}
+
+
+async def test_workspace_line_rejects_an_override_the_call_would_skip(
+    workspace_voice_app, monkeypatch
+):
+    monkeypatch.setattr(settings, "xai_api_key", "house-xai")
+    monkeypatch.setattr(settings, "cartesia_api_key", "house-cartesia")
+    monkeypatch.setattr(settings, "cartesia_voice_id", "former-voice")
+    voices.load_org_provider_configs.return_value = {
+        "tts": SimpleNamespace(
+            provider="xai", encrypted_api_key=None, params={}, fallback_enabled=True
+        )
+    }
+    body = b'{"organization_id":"00000000-0000-0000-0000-000000000001","language":"en","voice_id":"former-voice","text":"Hi."}'
+    synthesize = AsyncMock(return_value=b"RIFF-unused")
+    monkeypatch.setattr(voices, "_synthesize_route", synthesize)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=workspace_voice_app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/internal/voices/workspace-line", content=body, headers=_signed(body)
+        )
+    assert response.status_code == 409
+    synthesize.assert_not_awaited()
+
+
+async def test_empty_elevenlabs_audio_does_not_block_playback_fallback(
+    workspace_voice_app, monkeypatch
+):
+    monkeypatch.setattr(settings, "eleven_api_key", "house-eleven")
+    monkeypatch.setattr(settings, "elevenlabs_voice_id", "eleven-default")
+    monkeypatch.setattr(settings, "cartesia_api_key", "house-cartesia")
+    voices.load_org_provider_configs.return_value = {
+        "tts": SimpleNamespace(
+            provider="elevenlabs",
+            encrypted_api_key=None,
+            params={"voice_id": "eleven-default"},
+            fallback_enabled=True,
+        )
+    }
+    body = b'{"organization_id":"00000000-0000-0000-0000-000000000001","text":"Hi."}'
+
+    with respx.mock as mock:
+        primary = mock.post(
+            "https://api.elevenlabs.io/v1/text-to-speech/eleven-default"
+        ).respond(200, content=b"")
+        backup = mock.post("https://api.cartesia.ai/tts/bytes").respond(
+            200, content=b"RIFF-backup"
+        )
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=workspace_voice_app),
+            base_url="http://test",
+        ) as client:
+            response = await client.post(
+                "/internal/voices/workspace-line", content=body, headers=_signed(body)
+            )
+        assert response.content == b"RIFF-backup"
+        assert primary.call_count == backup.call_count == 1
+    assert {key[0] for key in voices._lines} == {"cartesia"}
+
+
+async def test_workspace_line_stops_a_stalled_provider_and_uses_the_backup(
+    workspace_voice_app, monkeypatch
+):
+    import asyncio
+
+    monkeypatch.setattr(settings, "cartesia_api_key", "house-cartesia")
+    monkeypatch.setattr(settings, "eleven_api_key", "house-eleven")
+    monkeypatch.setattr(voices, "_SYNTHESIS_TIMEOUT_SECONDS", 0.02, raising=False)
+    attempted = []
+
+    async def synthesize(route, text):
+        attempted.append(route.provider)
+        if route.provider == "cartesia":
+            await asyncio.Future()
+        return b"RIFF-backup"
+
+    monkeypatch.setattr(voices, "_synthesize_route", synthesize)
+    body = b'{"organization_id":"00000000-0000-0000-0000-000000000001","text":"Hi."}'
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=workspace_voice_app), base_url="http://test"
+    ) as client:
+        async with asyncio.timeout(1):
+            response = await client.post(
+                "/internal/voices/workspace-line", content=body, headers=_signed(body)
+            )
+    assert response.status_code == 200
+    assert response.content == b"RIFF-backup"
+    assert attempted == ["cartesia", "elevenlabs"]
+
+
+async def test_workspace_line_explains_when_saved_provider_is_unavailable(
+    workspace_voice_app, monkeypatch
+):
+    monkeypatch.setattr(settings, "xai_api_key", "")
+    voices.load_org_provider_configs.return_value = {
+        "tts": SimpleNamespace(
+            provider="xai",
+            encrypted_api_key=None,
+            params={},
+            fallback_enabled=False,
+        )
+    }
+    body = b'{"organization_id":"00000000-0000-0000-0000-000000000001","text":"Hi."}'
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=workspace_voice_app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/internal/voices/workspace-line", content=body, headers=_signed(body)
+        )
+    assert response.status_code == 409
+    assert response.json()["detail"] == (
+        "Choose an available voice in Call settings to preview this line."
+    )
+
+
+async def test_concurrent_workspace_lines_share_terminal_fallback_failure(
+    workspace_voice_app, monkeypatch
+):
+    import asyncio
+
+    monkeypatch.setattr(settings, "cartesia_api_key", "house-cartesia")
+    monkeypatch.setattr(settings, "eleven_api_key", "house-eleven")
+    started = asyncio.Event()
+    release = asyncio.Event()
+    calls = []
+
+    async def unavailable(route, text):
+        calls.append(route.provider)
+        if route.provider == "cartesia":
+            started.set()
+            await release.wait()
+        raise httpx.ReadTimeout("fixture provider failure")
+
+    monkeypatch.setattr(voices, "_synthesize_route", unavailable)
+    body = b'{"organization_id":"00000000-0000-0000-0000-000000000001","text":"Hi.","voice_id":"saved-eleven"}'
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=workspace_voice_app), base_url="http://test"
+    ) as client:
+
+        async def play():
+            return await client.post(
+                "/internal/voices/workspace-line", content=body, headers=_signed(body)
+            )
+
+        first = asyncio.create_task(play())
+        await asyncio.wait_for(started.wait(), timeout=1)
+        second = asyncio.create_task(play())
+        await asyncio.sleep(0)
+        release.set()
+        responses = await asyncio.gather(first, second)
+
+    assert [response.status_code for response in responses] == [503, 503]
+    assert calls == ["cartesia", "elevenlabs"]
+    assert voices._playback_flights == {}
+
+
+async def test_cancelled_workspace_line_releases_synthesis_for_a_retry(
+    workspace_voice_app, monkeypatch
+):
+    import asyncio
+
+    monkeypatch.setattr(settings, "cartesia_api_key", "house-cartesia")
+    started = asyncio.Event()
+    released = asyncio.Event()
+
+    async def interrupted(route, text):
+        if started.is_set():
+            return b"RIFF-retry"
+        started.set()
+        try:
+            await asyncio.Future()
+        finally:
+            released.set()
+
+    monkeypatch.setattr(voices, "_synthesize_route", interrupted)
+    body = (
+        b'{"organization_id":"00000000-0000-0000-0000-000000000001","text":"Retry me."}'
+    )
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=workspace_voice_app), base_url="http://test"
+    ) as client:
+
+        async def play():
+            return await client.post(
+                "/internal/voices/workspace-line", content=body, headers=_signed(body)
+            )
+
+        first = asyncio.create_task(play())
+        await asyncio.wait_for(started.wait(), timeout=1)
+        first.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await first
+        await asyncio.wait_for(released.wait(), timeout=1)
+        assert voices._playback_flights == {}
+
+        response = await asyncio.wait_for(play(), timeout=1)
+
+    assert response.status_code == 200
+    assert response.content == b"RIFF-retry"
+
+
+async def test_workspace_line_keeps_elevenlabs_language_automatic_when_unset(
+    workspace_voice_app, monkeypatch
+):
+    monkeypatch.setattr(settings, "cartesia_api_key", "")
+    monkeypatch.setattr(settings, "google_cloud_project", "")
+    monkeypatch.setattr(settings, "google_api_key", "")
+    monkeypatch.setattr(settings, "eleven_api_key", "house-eleven")
+    monkeypatch.setattr(settings, "elevenlabs_voice_id", "house-eleven-voice")
+    data = {
+        "organization_id": "00000000-0000-0000-0000-000000000001",
+        "text": "Buenos días.",
+    }
+
+    with respx.mock as mock:
+        synthesis = mock.post(
+            "https://api.elevenlabs.io/v1/text-to-speech/house-eleven-voice"
+        ).respond(200, content=b"\x00\x00")
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=workspace_voice_app),
+            base_url="http://test",
+        ) as client:
+            for payload in (data, {**data, "language": "en"}):
+                body = json.dumps(payload).encode()
+                response = await client.post(
+                    "/internal/voices/workspace-line",
+                    content=body,
+                    headers=_signed(body),
+                )
+                assert response.status_code == 200
+        assert synthesis.call_count == 2
+        assert "language_code" not in json.loads(synthesis.calls[0].request.content)
+        assert json.loads(synthesis.calls[1].request.content)["language_code"] == "en"
