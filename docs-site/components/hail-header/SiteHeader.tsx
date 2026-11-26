@@ -170,6 +170,10 @@ export function SiteHeader({
     document.body.style.overflow = "hidden";
     const closeOnDesktop = () => {
       if (media.matches) return;
+      const focusedDropdown = document.activeElement?.closest(
+        `.${styles.dropdown}`,
+      );
+      focusedDropdown?.querySelector("button")?.focus();
       hoveredMenu.current = null;
       openMenu(null);
       setMobileOpen(false);
