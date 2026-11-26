@@ -192,6 +192,25 @@ async def test_inline_cloud_credentials_keep_the_existing_direct_path(monkeypatc
         await renderer.aclose()
 
 
+@pytest.mark.parametrize(
+    ("project", "override"),
+    [("", "GOOGLE_GEMINI_BASE_URL"), ("hail-speech", "GOOGLE_VERTEX_BASE_URL")],
+)
+async def test_gemini_does_not_use_an_sdk_proxy_for_call_audio(
+    monkeypatch, project, override
+):
+    monkeypatch.setattr(settings, "google_cloud_project", project)
+    monkeypatch.setattr(settings, "google_api_key", "fixture-key")
+    monkeypatch.setattr(settings, "google_application_credentials", "")
+    monkeypatch.setattr(settings, "google_service_account_json_b64", "")
+    monkeypatch.setenv(override, "https://other.example.test")
+    renderer = GeminiSpeech.from_config({}).livekit_tts()
+    try:
+        assert isinstance(renderer, GeminiDirectTTS)
+    finally:
+        await renderer.aclose()
+
+
 @pytest.mark.parametrize("partial", [b"", b"\x00"])
 async def test_pcm_stream_respects_first_audio_timeout(monkeypatch, partial):
     async def stalled_pcm(self, client, text):

@@ -1,4 +1,4 @@
-"""Use direct Gemini synthesis for credentials the LiveKit plugin cannot accept."""
+"""Run Gemini synthesis on the same endpoint as API previews and key checks."""
 
 import asyncio
 from contextlib import aclosing

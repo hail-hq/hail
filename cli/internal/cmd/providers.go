@@ -37,7 +37,7 @@ then standing, then Hail's own models.
 Layers:
   llm   the brain. Providers: openai-compatible (needs --base-url),
         anthropic, google.
-  tts   speech synthesis. Providers: cartesia, elevenlabs.
+  tts   speech synthesis. Providers: cartesia, elevenlabs, gemini, xai, assemblyai.
   stt   transcription. Providers: deepgram, speechmatics.
 
 Keys are write-only — reads show only the last four characters. Pass
@@ -128,7 +128,7 @@ Omit --key the same way to edit params without resending the key, or pass
 
 Which params each layer takes:
   llm   --model (required by the layer), --base-url (openai-compatible only)
-  tts   --model, --voice-id, --project and --location (some providers only)
+  tts   --model, --voice-id, --project and --location (Gemini only)
   stt   --model
 
 Config is per provider, so pointing a layer at a different --provider starts
@@ -147,8 +147,8 @@ bringing your own). Pass --fallback=false to turn it back off.`,
 	cmd.Flags().StringVar(&f.model, "model", "", "Model identifier to run on that provider")
 	cmd.Flags().StringVar(&f.baseURL, "base-url", "", "HTTPS endpoint — required by the openai-compatible LLM provider")
 	cmd.Flags().StringVar(&f.voiceID, "voice-id", "", "Voice identifier — tts layer only")
-	cmd.Flags().StringVar(&f.project, "project", "", "Project ID for providers that use projects")
-	cmd.Flags().StringVar(&f.location, "location", "", "Location for providers that support location selection")
+	cmd.Flags().StringVar(&f.project, "project", "", "Vertex AI project ID. Pass --project= to clear it")
+	cmd.Flags().StringVar(&f.location, "location", "", "Vertex AI location. Pass --location= to use the default")
 	cmd.Flags().StringVar(&f.key, "key", "", "Provider API key; '-' reads it from stdin. Omit to keep the stored key")
 	cmd.Flags().BoolVar(&f.fallback, "fallback", false, "Fall back to Hail's own keys when this provider fails")
 	cmd.MarkFlagRequired("provider")
@@ -183,10 +183,10 @@ func runProvidersSet(ctx context.Context, cmd *cobra.Command, opts *Options, f *
 		params["voice_id"] = f.voiceID
 	}
 	if cmd.Flags().Changed("project") {
-		params["project"] = f.project
+		params["project"] = strPtr(f.project)
 	}
 	if cmd.Flags().Changed("location") {
-		params["location"] = f.location
+		params["location"] = strPtr(f.location)
 	}
 	if len(params) > 0 {
 		body.Params = &params

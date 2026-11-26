@@ -78,20 +78,28 @@ class GeminiSpeech(PCMAdapter):
     location: str = "global"
 
     def livekit_tts(self) -> TTS:
-        from hailhq.core.providers.tts.livekit_deadline import GeminiTTS
-
-        if self.project:
-            # LiveKit only supports process ADC in Vertex mode.
-            credentials_file = settings.google_application_credentials
-            if (
+        endpoint_override = os.environ.get(
+            "GOOGLE_VERTEX_BASE_URL" if self.project else "GOOGLE_GEMINI_BASE_URL"
+        )
+        credentials_file = settings.google_application_credentials
+        # Keep calls on the same Google endpoint as previews and key checks.
+        # The plugin also needs process ADC to authenticate to Vertex AI.
+        if endpoint_override or (
+            self.project
+            and (
                 self.api_key
                 or settings.google_service_account_json_b64
                 or credentials_file
                 and credentials_file != os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-            ):
-                from hailhq.core.providers.tts.gemini_direct import GeminiDirectTTS
+            )
+        ):
+            from hailhq.core.providers.tts.gemini_direct import GeminiDirectTTS
 
-                return GeminiDirectTTS(self)
+            return GeminiDirectTTS(self)
+
+        from hailhq.core.providers.tts.livekit_deadline import GeminiTTS
+
+        if self.project:
             auth = {
                 "vertexai": True,
                 "project": self.project,
@@ -188,7 +196,7 @@ class GeminiSpeech(PCMAdapter):
                     continue
                 event = json.loads(line[5:])
                 if "error" in event:
-                    raise ValueError("Google Cloud returned a speech stream error.")
+                    raise ValueError("Gemini returned a speech stream error.")
                 for candidate in event.get("candidates", []):
                     for part in candidate.get("content", {}).get("parts", []):
                         data = part.get("inlineData", {}).get("data")
