@@ -257,7 +257,6 @@ export function SiteHeader({
               type="button"
               className={navLinkClass(current === "use-cases")}
               aria-current={current === "use-cases" ? "true" : undefined}
-              aria-haspopup="true"
               aria-expanded={useCasesOpen}
               onClick={() => {
                 setUseCasesOpen(!useCasesOpen);
