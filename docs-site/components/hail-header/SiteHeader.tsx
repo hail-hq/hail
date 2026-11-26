@@ -99,6 +99,11 @@ function navLinkClass(isActive: boolean, extra?: string) {
   return classes.join(" ");
 }
 
+function hasKeyboardFocusedLink(root: HTMLDivElement | null) {
+  const focused = document.activeElement;
+  return focused?.matches("a:focus-visible") && root?.contains(focused);
+}
+
 /** Shared marketing navigation with a collapsible mobile menu. */
 export function SiteHeader({
   active = null,
@@ -231,10 +236,18 @@ export function SiteHeader({
                 onPointerEnter={(event) => {
                   if (
                     event.pointerType !== "mouse" ||
-                    !window.matchMedia?.("(min-width: 901px)").matches
+                    !window.matchMedia?.("(width > 900px)").matches
                   )
                     return;
                   hoveredMenu.current = section;
+                  if (
+                    menus.some(
+                      (item) =>
+                        item.section !== section &&
+                        hasKeyboardFocusedLink(item.menu.ref.current),
+                    )
+                  )
+                    return;
                   openMenu(section);
                 }}
                 onPointerLeave={(event) => {
@@ -244,7 +257,17 @@ export function SiteHeader({
                   )
                     return;
                   hoveredMenu.current = null;
-                  setOpen(false);
+                  if (!hasKeyboardFocusedLink(ref.current)) setOpen(false);
+                }}
+                onBlur={(event) => {
+                  if (
+                    open &&
+                    event.relatedTarget &&
+                    !event.currentTarget.contains(event.relatedTarget) &&
+                    hoveredMenu.current !== section
+                  ) {
+                    openMenu(hoveredMenu.current);
+                  }
                 }}
                 onKeyDown={(event) => {
                   if (event.key === "Escape" && open) {

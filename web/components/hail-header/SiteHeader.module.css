@@ -258,7 +258,7 @@
     gap: 6px;
   }
 }
-@media (min-width: 901px) {
+@media (width > 900px) {
   .panelPosition {
     position: absolute;
     top: 100%;
