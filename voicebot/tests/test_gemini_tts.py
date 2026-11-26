@@ -212,7 +212,9 @@ async def test_gemini_does_not_use_an_sdk_proxy_for_call_audio(
 
 
 @pytest.mark.parametrize(
-    "partial", [b"", b"\x00", b"\x01\x00" * 480], ids=["none", "one-byte", "one-frame"]
+    "partial",
+    [b"", b"\x00", b"\x01\x00", b"\x01\x00" * 480],
+    ids=["none", "one-byte", "one-sample", "one-frame"],
 )
 async def test_pcm_stream_times_out_when_audio_stalls(monkeypatch, partial):
     async def stalled_pcm(self, client, text):
@@ -234,7 +236,30 @@ async def test_pcm_stream_times_out_when_audio_stalls(monkeypatch, partial):
         await renderer.aclose()
 
 
-async def test_direct_gemini_preserves_provider_cancellation_after_audio(monkeypatch):
+async def test_direct_gemini_empty_response_error_omits_call_text(monkeypatch):
+    async def empty_pcm(self, client, text):
+        yield b""
+
+    monkeypatch.setattr(GeminiSpeech, "pcm", empty_pcm)
+    renderer = GeminiSpeech.from_config(
+        {"project": "hail-speech"}, "fixture-key"
+    ).livekit_tts()
+    try:
+        options = APIConnectOptions(max_retry=0)
+        async with renderer.synthesize(
+            "Private call text", conn_options=options
+        ) as stream:
+            with pytest.raises(
+                APIConnectionError, match="returned no speech audio"
+            ) as error:
+                [chunk.frame async for chunk in stream]
+            assert "Private call text" not in str(error.value)
+    finally:
+        await renderer.aclose()
+
+
+@pytest.mark.parametrize("timing", ["before-audio", "same-read", "after-audio"])
+async def test_direct_gemini_handles_provider_cancellation(monkeypatch, timing):
     speech = GeminiSpeech.from_config({"project": "hail-speech"}, "fixture-key")
     renderer = speech.livekit_tts()
     audio_sent = asyncio.Event()
@@ -245,9 +270,16 @@ async def test_direct_gemini_preserves_provider_cancellation_after_audio(monkeyp
 
     class Body(httpx.AsyncByteStream):
         async def __aiter__(self):
-            yield f"data: {json.dumps(event)}\n\n".encode()
-            await audio_sent.wait()
-            yield f"data: {json.dumps(cancelled)}\n\n".encode()
+            audio_event = f"data: {json.dumps(event)}\n\n".encode()
+            cancellation = f"data: {json.dumps(cancelled)}\n\n".encode()
+            if timing == "before-audio":
+                yield cancellation
+            elif timing == "same-read":
+                yield audio_event + cancellation
+            else:
+                yield audio_event
+                await audio_sent.wait()
+                yield cancellation
 
     def respond(request):
         requests.append(request)
@@ -259,12 +291,25 @@ async def test_direct_gemini_preserves_provider_cancellation_after_audio(monkeyp
             GeminiSpeech, "pcm", lambda self, _, text: original(self, http, text)
         )
         try:
-            options = APIConnectOptions(max_retry=1, timeout=0.3)
+            options = APIConnectOptions(
+                max_retry=int(timing != "before-audio"), timeout=0.3
+            )
             async with renderer.synthesize("Hello.", conn_options=options) as stream:
                 async with asyncio.timeout(2):
-                    async for _ in stream:
-                        audio_sent.set()
+                    if timing == "before-audio":
+                        with pytest.raises(
+                            APIConnectionError, match="cancelled before"
+                        ):
+                            await anext(stream)
+                    else:
+                        spoken_samples = 0
+                        async for chunk in stream:
+                            # LiveKit can emit a silent end-of-segment marker.
+                            spoken_samples += sum(
+                                sample != 0 for sample in chunk.frame.data
+                            )
+                            audio_sent.set()
+                        assert spoken_samples == 480
         finally:
             await renderer.aclose()
-    assert audio_sent.is_set()
     assert len(requests) == 1
