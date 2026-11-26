@@ -415,11 +415,12 @@ async def synthesize_preset(
         model = TTS_PRESET_MODELS[provider]
         if api_key is None and settings.google_cloud_project:
             location = settings.google_cloud_location
-            host = (
-                "aiplatform.googleapis.com"
-                if location == "global"
-                else f"aiplatform.{location}.rep.googleapis.com"
-            )
+            if location == "global":
+                host = "aiplatform.googleapis.com"
+            elif location in {"us", "eu"}:
+                host = f"aiplatform.{location}.rep.googleapis.com"
+            else:
+                host = f"{location}-aiplatform.googleapis.com"
             project = settings.google_cloud_project
             url = (
                 f"https://{host}/v1/projects/{project}/locations/{location}"
@@ -442,6 +443,7 @@ async def synthesize_preset(
                 "contents": [{"role": "user", "parts": [{"text": text}]}],
                 "generationConfig": {
                     "responseModalities": ["AUDIO"],
+                    "responseFormat": {"audio": {"mimeType": "AUDIO_L16"}},
                     "speechConfig": {"voiceConfig": {"voice": voice}},
                 },
             },

@@ -53,7 +53,7 @@ def tts_preset(provider: str) -> tuple[str, str]:
 
 def tts_preset_configured(provider: str) -> bool:
     return bool(
-        tts_preset(provider)[1]
+        tts_preset(provider)[1].strip()
         or (provider == "gemini" and settings.google_cloud_project)
     )
 

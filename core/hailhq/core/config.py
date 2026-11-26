@@ -1,5 +1,4 @@
 import re
-from typing import Literal
 from uuid import UUID
 
 from hailhq.core.languages import Language, TTSProvider
@@ -91,7 +90,7 @@ class Settings(BaseSettings):
     cartesia_api_key: str = ""
     eleven_api_key: str = ""
     speechmatics_api_key: str = ""
-    google_cloud_location: Literal["global", "us", "eu"] = "global"
+    google_cloud_location: str = Field(default="global", pattern=r"^[a-z][a-z0-9-]*$")
     xai_api_key: str = ""
     assemblyai_api_key: str = ""
 

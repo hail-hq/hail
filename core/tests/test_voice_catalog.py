@@ -1,3 +1,4 @@
+import json
 from unittest.mock import AsyncMock
 
 import httpx
@@ -5,6 +6,46 @@ import pytest
 import respx
 from hailhq.core import voice_catalog as catalog
 from hailhq.core.config import VoicePreference, settings
+
+
+@pytest.mark.parametrize(
+    ("location", "host"),
+    [
+        ("global", "aiplatform.googleapis.com"),
+        ("eu", "aiplatform.eu.rep.googleapis.com"),
+        ("us-central1", "us-central1-aiplatform.googleapis.com"),
+    ],
+)
+async def test_managed_gemini_preview_uses_the_vertex_location(
+    monkeypatch, location, host
+):
+    monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
+    monkeypatch.setattr(settings, "google_cloud_location", location)
+    monkeypatch.setattr(settings, "google_api_key", "fallback-key")
+    monkeypatch.setattr(
+        catalog, "_vertex_headers", lambda url: {"Authorization": "Bearer adc-token"}
+    )
+
+    def respond(request):
+        assert request.url.host == host
+        assert f"/projects/hail-speech/locations/{location}/" in request.url.path
+        assert request.headers["Authorization"] == "Bearer adc-token"
+        assert "x-goog-api-key" not in request.headers
+        assert json.loads(request.content)["generationConfig"]["responseFormat"] == {
+            "audio": {"mimeType": "AUDIO_L16"}
+        }
+        return httpx.Response(
+            200,
+            json={
+                "candidates": [
+                    {"content": {"parts": [{"inlineData": {"data": "AQA="}}]}}
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        result = await catalog.synthesize_preset(client, "gemini", "Charon", "Hi.")
+    assert result == b"\x01\x00"
 
 
 @pytest.fixture(autouse=True)
