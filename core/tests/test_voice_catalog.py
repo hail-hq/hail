@@ -292,25 +292,32 @@ def test_elevenlabs_tagalog_uses_the_filipino_provider_code():
     assert [c["language"] for c in choices] == ["tl"]
 
 
-async def test_catalogue_marks_gemini_as_default_only_for_opted_in_english(monkeypatch):
+@pytest.mark.parametrize("gemini_voice", ["Charon", "Kore"])
+async def test_catalogue_marks_gemini_as_default_only_for_english(
+    monkeypatch, gemini_voice
+):
     monkeypatch.setattr(settings, "cartesia_api_key", "")
     monkeypatch.setattr(settings, "eleven_api_key", "")
     monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
+    monkeypatch.setattr(settings, "gemini_voice_id", gemini_voice)
     monkeypatch.setattr(
-        catalog.GeminiSpeech,
-        "house_credentials_available",
-        AsyncMock(return_value=True),
+        catalog,
+        "preset_credentials_available",
+        AsyncMock(
+            side_effect=lambda provider: provider != "assemblyai"
+            or bool(settings.assemblyai_api_key)
+        ),
     )
-    monkeypatch.setattr(settings, "hail_gemini_tts_enabled", True)
     monkeypatch.setattr(settings, "xai_api_key", "xai-key")
     monkeypatch.setattr(settings, "assemblyai_api_key", "assembly-key")
     legacy = await catalog.voice_catalogue("en")
     assert legacy["voices"] == []
     assert legacy["default_voice"] is None
     english = await catalog.voice_catalogue("en", include_direct=True)
-    assert english["default_voice"] == {"provider": "gemini", "id": "Charon"}
+    assert english["default_voice"] == {"provider": "gemini", "id": gemini_voice}
+    assert english["voices"][0]["name"] == gemini_voice
     assert [voice["id"] for voice in english["voices"]] == [
-        "Charon",
+        gemini_voice,
         "ara",
         "aai-audrey",
     ]
@@ -325,9 +332,12 @@ async def test_catalogue_marks_gemini_as_default_only_for_opted_in_english(monke
 async def test_english_audition_keeps_regular_voices_available_for_preview(monkeypatch):
     monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
     monkeypatch.setattr(
-        catalog.GeminiSpeech,
-        "house_credentials_available",
-        AsyncMock(return_value=True),
+        catalog,
+        "preset_credentials_available",
+        AsyncMock(
+            side_effect=lambda provider: provider != "assemblyai"
+            or bool(settings.assemblyai_api_key)
+        ),
     )
     monkeypatch.setattr(settings, "xai_api_key", "xai-key")
     monkeypatch.setattr(settings, "assemblyai_api_key", "")

@@ -19,7 +19,7 @@ verified probe):
 2. Add a ``_probe_for`` branch here. Prefer a ``capability`` probe (call the
    real endpoint with deliberately-bad params so nothing runs/bills); fall
    back to an ``auth`` probe (a cheap authenticated GET) if the provider has
-   no safe capability probe. PCM adapters synthesize one fixed word when the user selects Test key.
+   no safe capability probe. The English presets synthesize one fixed word for Test key.
 3. EMPIRICALLY VERIFY the ordering before trusting a capability probe: a bad
    key must return 401/403, and a valid key with bad params must return a
    post-auth 4xx (404/400/422). If auth is NOT checked before params, the
@@ -30,16 +30,18 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
-from contextlib import aclosing
 from typing import Literal
 
 import httpx
 from hailhq.core.config import settings
-from hailhq.core.provider_config import provider_cipher
-from hailhq.core.providers.tts import PCM_ADAPTERS, GeminiSpeech
+from hailhq.core.provider_config import TTS_PRESET_MODELS, provider_cipher, tts_preset
 from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
 from hailhq.core.urls import join_url
-from hailhq.core.voice_catalog import validate_voice_language
+from hailhq.core.voice_catalog import (
+    preset_credentials_available,
+    synthesize_preset,
+    validate_voice_language,
+)
 
 ValidationStatus = Literal["valid", "invalid", "indeterminate"]
 
@@ -155,20 +157,16 @@ def _classify(mode: str, status: int) -> ValidationStatus:
 async def validate_tts_options(
     provider: str, params: dict, api_key: str | None, *, has_stored_key: bool
 ) -> None:
-    adapter = PCM_ADAPTERS.get(provider)
-    if adapter is None:
+    model = TTS_PRESET_MODELS.get(provider)
+    if model is None:
         return
     if api_key is not None and not api_key.strip():
         raise ValueError("Enter an API key.")
     has_workspace_key = api_key is not None or has_stored_key
-    adapter.validate_options(params, has_workspace_key=has_workspace_key)
-    if not has_workspace_key and not await adapter.house_credentials_available():
+    if params.get("model") not in (None, model):
+        raise ValueError(f"{provider} speech uses {model}.")
+    if not has_workspace_key and not await preset_credentials_available(provider):
         raise ValueError(f"No Hail credentials are available for {provider} speech.")
-
-
-def supports_saved_key_draft_test(layer: str, provider: str) -> bool:
-    """Only a fixed vendor endpoint may receive a stored key for draft settings."""
-    return layer == "tts" and provider == GeminiSpeech.provider
 
 
 async def validate_tts_voice_selection(
@@ -179,12 +177,11 @@ async def validate_tts_voice_selection(
     *,
     saved_voice_id: str | None,
 ) -> None:
-    adapter = PCM_ADAPTERS.get(provider)
-    if adapter is not None:
+    if provider in TTS_PRESET_MODELS:
         if params.get("voice_id") not in (
             None,
             "",
-            adapter.default_voice,
+            tts_preset(provider)[0],
             saved_voice_id,
         ):
             raise ValueError("Choose a suggested voice or update Advanced.")
@@ -217,11 +214,11 @@ async def validate_provider_key(
     client: httpx.AsyncClient | None = None,
 ) -> tuple[ValidationStatus, str]:
     """Return (status, message). Never raises on provider/network failure."""
-    if layer == "tts" and provider in PCM_ADAPTERS:
+    if layer == "tts" and provider in TTS_PRESET_MODELS:
         if client is not None:
-            return await _validate_pcm_adapter(provider, api_key, params, client)
+            return await _validate_preset_key(provider, api_key, params, client)
         async with httpx.AsyncClient(timeout=_TIMEOUT) as speech_client:
-            return await _validate_pcm_adapter(provider, api_key, params, speech_client)
+            return await _validate_preset_key(provider, api_key, params, speech_client)
     probe = await asyncio.to_thread(_probe_for, provider, api_key, params)
     if probe is None:
         if provider == "openai-compatible" and params.get("base_url"):
@@ -255,17 +252,18 @@ async def validate_provider_key(
     )
 
 
-async def _validate_pcm_adapter(
+async def _validate_preset_key(
     provider: str, api_key: str, params: dict, client: httpx.AsyncClient
 ) -> tuple[ValidationStatus, str]:
     # The explicit Test key action synthesizes one fixed word. Authentication
     # alone cannot prove the project can use the selected speech model.
     try:
-        speech = PCM_ADAPTERS[provider].from_config(params, api_key)
-        async with aclosing(speech.pcm(client, "Hello.")) as audio:
-            async for chunk in audio:
-                if chunk:
-                    return "valid", "ok"
+        await validate_tts_options(provider, params, api_key, has_stored_key=False)
+        if provider == "gemini" and (params.get("project") or params.get("location")):
+            return "invalid", "Use a Gemini API key for workspace speech."
+        voice = params.get("voice_id") or tts_preset(provider)[0]
+        if await synthesize_preset(client, provider, voice, "Hello.", api_key=api_key):
+            return "valid", "ok"
     except httpx.HTTPStatusError as exc:
         status = exc.response.status_code
         if status in (400, 401, 403, 404, 422):

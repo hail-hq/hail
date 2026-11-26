@@ -10,7 +10,6 @@ from unittest.mock import ANY, Mock
 import pytest
 from hailhq.core.config import VoicePreference, settings
 from hailhq.core.models import OrgProviderConfig
-from hailhq.core.providers.tts import livekit_deadline
 from hailhq.core.secret_cipher import generate_key
 from hailhq.voicebot import pipeline
 from hailhq.voicebot.pipeline import (
@@ -82,7 +81,7 @@ def captured_plugins(monkeypatch):
     monkeypatch.setattr(pipeline.deepgram_plugin, "STT", make("deepgram"))
     monkeypatch.setattr(pipeline.openai_plugin, "LLM", make("openai"))
     monkeypatch.setattr(pipeline.google_plugin, "LLM", make("google"))
-    monkeypatch.setattr(livekit_deadline, "GeminiTTS", make("gemini"))
+    monkeypatch.setattr(pipeline.google_plugin.beta, "GeminiTTS", make("gemini"))
     monkeypatch.setattr(pipeline.anthropic_plugin, "LLM", make("anthropic"))
     return calls
 
@@ -325,19 +324,23 @@ def test_decrypt_llm_metadata_roundtrip(monkeypatch) -> None:
     assert decrypt_llm_metadata(None) is None
 
 
+@pytest.mark.parametrize("gemini_voice", ["Charon", "Kore"])
 def test_gemini_default_only_applies_to_inherited_english(
-    monkeypatch, captured_plugins
+    monkeypatch, captured_plugins, gemini_voice
 ):
-    monkeypatch.setattr(settings, "hail_gemini_tts_enabled", True)
     monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
+    monkeypatch.setattr(settings, "gemini_voice_id", gemini_voice)
     assert build_tts(language="en")._tts_instances[0].label == "gemini"
     assert captured_plugins["gemini"][0].kwargs == {
         "model": "gemini-3.8-flash-tts",
-        "voice_name": "Charon",
+        "voice_name": gemini_voice,
         "vertexai": True,
         "project": "hail-speech",
-        "location": settings.google_tts_location,
+        "location": settings.google_cloud_location,
     }
+    workspace = ResolvedLayer("gemini", "workspace-key", {}, False)
+    build_tts(workspace, language="en")
+    assert captured_plugins["gemini"][-1].kwargs["voice_name"] == gemini_voice
     build_tts(voice_id_override="legacy-voice", language="en")
     assert captured_plugins["cartesia"][-1].kwargs["voice"] == "legacy-voice"
     build_tts(language="fr")
@@ -347,7 +350,6 @@ def test_gemini_default_only_applies_to_inherited_english(
 def test_explicit_charon_works_when_gemini_is_the_only_house_provider(
     monkeypatch, captured_plugins
 ):
-    monkeypatch.setattr(settings, "hail_gemini_tts_enabled", True)
     monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
     monkeypatch.setattr(settings, "cartesia_api_key", "")
     monkeypatch.setattr(settings, "eleven_api_key", "")
@@ -357,43 +359,31 @@ def test_explicit_charon_works_when_gemini_is_the_only_house_provider(
 def test_workspace_gemini_can_fall_back_to_house_credentials(
     monkeypatch, captured_plugins
 ):
-    monkeypatch.setattr(settings, "hail_gemini_tts_enabled", True)
     monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
     monkeypatch.setattr(settings, "cartesia_api_key", "")
     monkeypatch.setattr(settings, "eleven_api_key", "")
-    org = ResolvedLayer("gemini", "customer-key", {"project": "customer-project"}, True)
+    org = ResolvedLayer("gemini", "customer-key", {}, True)
     customer, house = build_tts(org, language="en")._tts_instances
-    assert (customer.speech.project, customer.speech.api_key) == (
-        "customer-project",
-        "customer-key",
-    )
+    assert customer.label == "gemini"
+    assert captured_plugins["gemini"][0].kwargs["api_key"] == "customer-key"
+    assert captured_plugins["gemini"][0].kwargs["vertexai"] is False
     assert house.label == "gemini"
-    assert captured_plugins["gemini"][0].kwargs["project"] == "hail-speech"
-    assert "api_key" not in captured_plugins["gemini"][0].kwargs
+    assert captured_plugins["gemini"][-1].kwargs["project"] == "hail-speech"
+    assert "api_key" not in captured_plugins["gemini"][-1].kwargs
 
 
 def test_workspace_gemini_tries_a_different_vendor_before_house_gemini(
     monkeypatch, captured_plugins
 ):
-    monkeypatch.setattr(settings, "hail_gemini_tts_enabled", True)
     monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
-    org = ResolvedLayer("gemini", "customer-key", {"project": "customer-project"}, True)
+    org = ResolvedLayer("gemini", "customer-key", {}, True)
     customer, cartesia, house = build_tts(org, language="en")._tts_instances
-    assert customer.speech.project == "customer-project"
+    assert customer.label == "gemini"
+    assert captured_plugins["gemini"][0].kwargs["api_key"] == "customer-key"
+    assert captured_plugins["gemini"][0].kwargs["vertexai"] is False
     assert cartesia.label == "cartesia"
     assert house.label == "gemini"
-    assert captured_plugins["gemini"][0].kwargs["project"] == "hail-speech"
-
-
-def test_disabling_inherited_gemini_default_keeps_an_explicit_selection(
-    monkeypatch, captured_plugins
-):
-    monkeypatch.setattr(settings, "hail_gemini_tts_enabled", False)
-    monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
-    org = ResolvedLayer("gemini", None, {"voice_id": "Charon"}, False)
-    assert build_tts(org, language="en").label == "gemini"
-    build_tts(language="en")
-    assert len(captured_plugins["cartesia"]) == 1
+    assert captured_plugins["gemini"][-1].kwargs["project"] == "hail-speech"
 
 
 @pytest.mark.parametrize("fallback", [False, True])
@@ -401,7 +391,6 @@ def test_workspace_gemini_does_not_receive_a_legacy_voice_id(
     monkeypatch, captured_plugins, fallback
 ):
     monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
-    monkeypatch.setattr(settings, "hail_gemini_tts_enabled", True)
     org = ResolvedLayer("gemini", None, {"voice_id": "Charon"}, fallback)
 
     renderer = build_tts(org, voice_id_override="saved-legacy", language="en")
@@ -484,12 +473,9 @@ def test_workspace_uses_native_tts_with_the_workspace_key(
     monkeypatch, provider, voice, model
 ):
     constructor = Mock()
-    if provider == "xai":
-        monkeypatch.setattr(livekit_deadline, "XaiTTS", constructor)
-    else:
-        monkeypatch.setattr(
-            import_module("livekit.plugins.assemblyai"), "TTS", constructor
-        )
+    monkeypatch.setattr(
+        import_module(f"livekit.plugins.{provider}"), "TTS", constructor
+    )
     org = ResolvedLayer(provider, "workspace-key", {"voice_id": voice}, False)
 
     assert build_tts(org, language="en") is constructor.return_value
@@ -517,7 +503,6 @@ def test_explicit_workspace_voice_keeps_its_legacy_fallback_order(
     monkeypatch, captured_plugins
 ):
     monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
-    monkeypatch.setattr(settings, "hail_gemini_tts_enabled", True)
     monkeypatch.setattr(settings, "eleven_api_key", "house-eleven")
     org = ResolvedLayer("cartesia", "workspace", {"voice_id": "saved"}, True)
 

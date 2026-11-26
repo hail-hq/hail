@@ -194,25 +194,6 @@ func TestProvidersSet_VoiceIDFlag(t *testing.T) {
 	}
 }
 
-func TestProvidersSet_ClearsGeminiProjectAndLocation(t *testing.T) {
-	srv := newFakeServer(t, http.StatusOK, sampleProviderEntry())
-	_, _, err := runRoot(t,
-		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
-		"providers", "set", "tts", "--provider", "gemini",
-		"--project=", "--location=", "--key", "fixture-key",
-	)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	params := decodeBody(t, srv.lastBody)["params"].(map[string]interface{})
-	for _, key := range []string{"project", "location"} {
-		if value, present := params[key]; !present || value != nil {
-			t.Errorf("%s must be explicitly null: %v", key, params)
-		}
-	}
-}
-
 // --fallback=false is a real instruction (turn it off) and has to reach the
 // wire, unlike the omitted default asserted above.
 func TestProvidersSet_ExplicitFallbackFalseIsSent(t *testing.T) {

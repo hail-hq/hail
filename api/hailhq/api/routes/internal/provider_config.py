@@ -30,7 +30,6 @@ from hailhq.core.provider_config import (
     provider_cipher,
 )
 from hailhq.core.provider_validation import (
-    supports_saved_key_draft_test,
     validate_provider_key,
     validate_tts_options,
     validate_tts_voice_selection,
@@ -473,8 +472,7 @@ async def validate_provider_config(
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         provider = row.provider
         params = dict(row.params)
-        # A stored key remains bound to its saved endpoint. Draft speech
-        # project settings are only accepted for a fixed vendor endpoint.
+        # A stored key remains bound to its saved endpoint.
         if (
             layer == "llm"
             and provider == "openai-compatible"
@@ -490,11 +488,6 @@ async def validate_provider_config(
                 )
             ):
                 raise HTTPException(422, "Enter the key to test a different endpoint.")
-        if (
-            supports_saved_key_draft_test(layer, provider)
-            and "params" in body.model_fields_set
-        ):
-            params = _validated_params(layer, provider, {**params, **body.params})
 
     status, message = await validate_provider_key(layer, provider, api_key, params)
     return {"status": status, "message": message}

@@ -58,10 +58,12 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import logging
+import os
 from collections.abc import AsyncIterable
 from typing import Any
 from uuid import UUID
 
+from google.auth.exceptions import GoogleAuthError
 from hailhq.core.config import settings
 from hailhq.core.db import session_scope
 from hailhq.core.languages import (
@@ -73,20 +75,23 @@ from hailhq.core.languages import (
     tts_providers_for,
     turn_mode_for,
 )
-from hailhq.core.provider_config import load_org_provider_configs, provider_cipher
+from hailhq.core.provider_config import (
+    TTS_PRESET_MODELS,
+    configured_house_voice_provider,
+    load_org_provider_configs,
+    provider_cipher,
+    tts_preset,
+    tts_preset_configured,
+)
 from hailhq.core.providers.llm.bedrock import bedrock_client, is_bedrock_client
 from hailhq.core.providers.llm.thinking import thinking_off
-from hailhq.core.providers.tts import (
-    PCM_ADAPTERS,
-    GeminiSpeech,
-    configured_house_voice_provider,
-)
 from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
 from livekit.agents import (
     AgentSession,
     APIConnectOptions,
     TurnHandlingOptions,
     inference,
+    tokenize,
 )
 from livekit.agents import llm as agents_llm
 from livekit.agents import stt as agents_stt
@@ -100,6 +105,9 @@ from livekit.agents.types import NOT_GIVEN, NotGivenOr
 from livekit.agents.utils import is_given
 from livekit.plugins import (
     anthropic as anthropic_plugin,
+)
+from livekit.plugins import (
+    assemblyai as assemblyai_plugin,
 )
 from livekit.plugins import (
     cartesia as cartesia_plugin,
@@ -118,6 +126,9 @@ from livekit.plugins import (
 )
 from livekit.plugins import (
     speechmatics as speechmatics_plugin,
+)
+from livekit.plugins import (
+    xai as xai_plugin,
 )
 
 logger = logging.getLogger("hailhq.voicebot")
@@ -544,10 +555,6 @@ def build_llm(
     return _house_llm(retry_on_chunk_sent=retry_on_chunk_sent)
 
 
-def _house_gemini_ready() -> bool:
-    return settings.hail_gemini_tts_enabled and GeminiSpeech.house_available()
-
-
 def _house_tts(
     voice_id_override: str | None,
     language: str | None,
@@ -592,17 +599,17 @@ def _house_tts(
     instances.extend(legacy.values())
     if (
         include_gemini
-        and GeminiSpeech.provider in allowed
-        and _house_gemini_ready()
+        and "gemini" in allowed
+        and tts_preset_configured("gemini")
         and (
             not voice_id_override
-            or voice_id_override == GeminiSpeech.default_voice
+            or voice_id_override == settings.gemini_voice_id
             and not (settings.cartesia_api_key or settings.eleven_api_key)
         )
     ):
         try:
-            gemini = GeminiSpeech.from_config({}).livekit_tts()
-        except ValueError:
+            gemini = _org_tts(ResolvedLayer("gemini", None, {}, False), None, language)
+        except (GoogleAuthError, ValueError):
             logger.warning("Could not configure Hail's Gemini speech.")
         else:
             instances.insert(len(instances) if gemini_last else 0, gemini)
@@ -637,8 +644,53 @@ def _org_tts(
         if language:
             kwargs["language"] = elevenlabs_language(language)
         return elevenlabs_plugin.TTS(**kwargs)
-    if adapter := PCM_ADAPTERS.get(org.provider):
-        return adapter.from_config(org.params, org.api_key, voice).livekit_tts()
+    if org.provider in TTS_PRESET_MODELS:
+        default_voice, house_key = tts_preset(org.provider)
+        voice = voice or default_voice
+        model = TTS_PRESET_MODELS[org.provider]
+        if org.params.get("model") not in (None, model):
+            raise ValueError(f"{org.provider} speech uses {model}.")
+        key = house_key if org.api_key is None else org.api_key
+        if org.provider == "gemini":
+            if org.params.get("project") or org.params.get("location"):
+                raise ValueError("Use a Gemini API key for workspace speech.")
+            project = settings.google_cloud_project if org.api_key is None else ""
+            endpoint_override = (
+                "GOOGLE_VERTEX_BASE_URL" if project else "GOOGLE_GEMINI_BASE_URL"
+            )
+            if os.environ.get(endpoint_override):
+                raise ValueError("Gemini speech requires Google's standard endpoint.")
+            if project:
+                return google_plugin.beta.GeminiTTS(
+                    model=model,
+                    voice_name=voice,
+                    vertexai=True,
+                    project=project,
+                    location=settings.google_cloud_location,
+                )
+        if not key.strip():
+            raise ValueError(
+                f"No workspace or Hail key is available for {org.provider} speech."
+            )
+        if org.provider == "gemini":
+            return google_plugin.beta.GeminiTTS(
+                model=model, voice_name=voice, vertexai=False, api_key=key
+            )
+        if org.provider == "assemblyai":
+            return assemblyai_plugin.TTS(
+                api_key=key,
+                voice=voice,
+                language="en",
+                model=model,
+            )
+        return xai_plugin.TTS(
+            api_key=key,
+            voice=voice,
+            language="en",
+            tokenizer=tokenize.basic.WordTokenizer(
+                ignore_punctuation=False, retain_format=True
+            ),
+        )
     raise ProviderKeyError(f"unknown org tts provider '{org.provider}'")
 
 
@@ -653,7 +705,7 @@ def build_tts(
 
     ``org`` present (mode C): the org's provider is used, with Hail's house
     TTS instances appended as a fallback only if ``org.fallback_enabled``.
-    Inherited English voices start with Gemini when it is enabled.
+    Inherited English voices start with Gemini when credentials are available.
     ``org`` absent (mode A): Cartesia, then ElevenLabs, a
     provider is included only when its API key is configured, so a
     single-key self-host still works (tenet 4). With both keys set the two
@@ -691,7 +743,7 @@ def build_tts(
             org.provider,
             language,
         )
-        if org.provider in PCM_ADAPTERS:
+        if org.provider in TTS_PRESET_MODELS:
             if voice_id_explicit:
                 override_provider = configured_house_voice_provider(
                     voice_id_override, language
@@ -700,21 +752,18 @@ def build_tts(
                 voice_id_override = None
         org = None
     if org is not None:
-        adapter = PCM_ADAPTERS.get(org.provider)
-        fallback_voice = None if adapter else voice_id_override
+        preset_provider = org.provider in TTS_PRESET_MODELS
+        fallback_voice = None if preset_provider else voice_id_override
         try:
             primary_voice = voice_id_override
-            if (
-                adapter
-                and not voice_id_explicit
-                and primary_voice
-                not in (adapter.default_voice, org.params.get("voice_id"))
-            ):
-                # A saved, unscoped agent voice may belong to an old provider.
-                primary_voice = None
+            if preset_provider and not voice_id_explicit:
+                preset_voice, _ = tts_preset(org.provider)
+                if primary_voice not in (preset_voice, org.params.get("voice_id")):
+                    # A saved, unscoped agent voice may belong to an old provider.
+                    primary_voice = None
             byo = _org_tts(org, primary_voice, language)
-        except ValueError:
-            if adapter is None or not org.fallback_enabled:
+        except (GoogleAuthError, ValueError):
+            if not preset_provider or not org.fallback_enabled:
                 raise
             logger.warning(
                 "Could not configure %s speech. Using the house chain.", org.provider
@@ -722,21 +771,21 @@ def build_tts(
             return build_tts(None, fallback_voice, language)
         if org.fallback_enabled:
             same_house_gemini = (
-                org.provider == GeminiSpeech.provider
+                org.provider == "gemini"
                 and org.api_key is None
                 and (
                     primary_voice
                     or org.params.get("voice_id")
-                    or GeminiSpeech.default_voice
+                    or settings.gemini_voice_id
                 )
-                == GeminiSpeech.default_voice
+                == settings.gemini_voice_id
             )
-            explicit_legacy_voice = adapter is None and org.params.get("voice_id")
+            explicit_legacy_voice = not preset_provider and org.params.get("voice_id")
             house = _house_tts(
                 fallback_voice,
                 language,
                 include_gemini=not (same_house_gemini or explicit_legacy_voice),
-                gemini_last=org.provider == GeminiSpeech.provider,
+                gemini_last=org.provider == "gemini",
             )
             if house:
                 return agents_tts.FallbackAdapter([byo, *house])
@@ -756,7 +805,7 @@ def build_tts(
                 f"language requires: {', '.join(sorted(providers))}."
             )
         raise ProviderKeyError(
-            "No TTS provider configured: enable Gemini speech or set "
+            "No TTS provider configured: configure Gemini or set "
             "CARTESIA_API_KEY or ELEVEN_API_KEY."
         )
     if len(instances) == 1:
@@ -877,8 +926,8 @@ def startup_capability_warnings() -> list[str]:
         available_tts_providers = set()
         if settings.eleven_api_key:
             available_tts_providers.add("elevenlabs")
-        if _house_gemini_ready():
-            available_tts_providers.add(GeminiSpeech.provider)
+        if tts_preset_configured("gemini"):
+            available_tts_providers.add("gemini")
 
         # Find languages that have no available TTS provider
         unservable_langs = []

@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import json
+
 import httpx
 import pytest
+from hailhq.core.config import settings
 from hailhq.core.provider_validation import validate_provider_key
 
 # (provider, layer, params, method, url-substr, header-key, header-val-substr, mode)
@@ -212,3 +215,44 @@ async def test_cartesia_body_never_uses_a_real_voice() -> None:
     assert "real-voice-xyz" not in seen["body"]
     assert "real-voice-xyz" not in seen["url"]
     assert "00000000-0000-0000-0000-000000000000" in seen["body"]
+
+
+@pytest.mark.parametrize(
+    ("provider", "host", "voice_field", "voice"),
+    [
+        ("gemini", "generativelanguage.googleapis.com", None, "Kore"),
+        ("xai", "api.x.ai", "voice_id", "ara"),
+        ("assemblyai", "tts.us.assemblyai.com", "voice", "aai-audrey"),
+    ],
+)
+async def test_voice_preset_key_check_synthesizes_with_the_workspace_key(
+    monkeypatch, provider, host, voice_field, voice
+):
+    monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
+    monkeypatch.setattr(settings, "gemini_voice_id", "Kore")
+
+    def respond(request):
+        assert request.url.host == host
+        body = json.loads(request.content)
+        if provider == "gemini":
+            assert request.headers["x-goog-api-key"] == "workspace-key"
+            assert (
+                body["generationConfig"]["speechConfig"]["voiceConfig"]["voice"]
+                == voice
+            )
+            return httpx.Response(
+                200,
+                json={
+                    "candidates": [
+                        {"content": {"parts": [{"inlineData": {"data": "AQA="}}]}}
+                    ]
+                },
+            )
+        assert request.headers["authorization"] == "Bearer workspace-key"
+        assert body[voice_field] == voice
+        return httpx.Response(200, content=b"\x01\x00")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        assert await validate_provider_key(
+            "tts", provider, "workspace-key", {}, client
+        ) == ("valid", "ok")

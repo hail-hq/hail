@@ -7,11 +7,11 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 ### Added
 
 - English call voices include Charon from Gemini, Ara from xAI, and Audrey from AssemblyAI. Preview the available voices in onboarding and Call settings.
-- Connect your own Gemini, xAI, or AssemblyAI credentials for speech. Gemini supports API keys and Vertex AI.
+- Connect your own Gemini, xAI, or AssemblyAI API keys for speech.
 
 ### Changed
 
-- When enabled, Charon becomes the English default for agents that inherit Hail's voice. Saved voice selections and the defaults for other languages stay in place.
+- Charon is the default for agents that inherit Hail's English voice. Agents keep their saved voice selections and other languages keep their defaults.
 
 ## [0.40.0] (2026-11-25)
 

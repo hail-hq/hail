@@ -91,14 +91,16 @@ class Settings(BaseSettings):
     cartesia_api_key: str = ""
     eleven_api_key: str = ""
     speechmatics_api_key: str = ""
-    hail_gemini_tts_enabled: bool = False
-    google_tts_location: Literal["global", "us", "eu"] = "global"
+    google_cloud_location: Literal["global", "us", "eu"] = "global"
     xai_api_key: str = ""
     assemblyai_api_key: str = ""
 
     # STT/TTS, model names set via .env / .env.local.
     deepgram_model: str = ""
     speechmatics_model: str = ""
+    gemini_voice_id: str = Field(
+        default="Charon", min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$"
+    )
     cartesia_voice_id: str = ""
     cartesia_model: str = ""
     elevenlabs_voice_id: str = ""

@@ -1,33 +1,60 @@
 import asyncio
+import base64
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
-import pytest
-from hailhq.core.providers.tts.xai import XaiSpeech
-from livekit.agents import APIConnectOptions, APITimeoutError
+from aiohttp import WSMessage, WSMsgType
+from hailhq.voicebot.pipeline import ResolvedLayer, build_tts
+from livekit.agents import APIConnectOptions
+from livekit.plugins import xai
 
 
-async def test_xai_times_out_after_sending_text_to_a_silent_socket(monkeypatch):
-    async def stall():
-        await asyncio.Event().wait()
+async def test_xai_sends_intact_text_and_plays_provider_audio(monkeypatch):
+    input_done = asyncio.Event()
+    pcm = b"\x01\x00" * 480
 
+    async def send(message):
+        if json.loads(message)["type"] == "text.done":
+            input_done.set()
+
+    async def receive():
+        await input_done.wait()
+        message = next(provider_messages)
+        return WSMessage(WSMsgType.TEXT, json.dumps(message), "")
+
+    provider_messages = iter(
+        [
+            {"type": "audio.delta", "delta": base64.b64encode(pcm).decode()},
+            {"type": "audio.done"},
+        ]
+    )
     socket = Mock(
-        send_str=AsyncMock(), receive=AsyncMock(side_effect=stall), close=AsyncMock()
+        send_str=AsyncMock(side_effect=send),
+        receive=AsyncMock(side_effect=receive),
+        close=AsyncMock(),
     )
     session = SimpleNamespace(ws_connect=AsyncMock(return_value=socket))
-    renderer = XaiSpeech.from_config({}, "fixture-key").livekit_tts()
+    renderer = build_tts(ResolvedLayer("xai", "fixture-key", {}, False), language="en")
+    assert type(renderer) is xai.TTS
     monkeypatch.setattr(renderer, "_ensure_session", lambda: session)
     try:
-        options = APIConnectOptions(timeout=0.05, max_retry=0)
+        options = APIConnectOptions(max_retry=0)
         async with renderer.stream(conn_options=options) as stream:
-            async with asyncio.timeout(1):
+            async with asyncio.timeout(2):
                 stream.push_text("Yo")
-                await asyncio.sleep(0.08)
                 stream.push_text("ur order is ready.")
                 stream.end_input()
-                with pytest.raises(APITimeoutError):
-                    await anext(stream)
+                assert (
+                    sum(
+                        [
+                            sample != 0
+                            async for chunk in stream
+                            for sample in chunk.frame.data
+                        ]
+                    )
+                    == 480
+                )
     finally:
         await renderer.aclose()
     messages = [json.loads(call.args[0]) for call in socket.send_str.await_args_list]
@@ -35,23 +62,3 @@ async def test_xai_times_out_after_sending_text_to_a_silent_socket(monkeypatch):
         "".join(message.get("delta", "") for message in messages)
         == "Your order is ready."
     )
-    assert messages[-1] == {"type": "text.done"}
-    socket.close.assert_awaited_once()
-
-
-async def test_xai_timeout_bounds_a_stalled_socket_acquisition(monkeypatch):
-    async def stall(*, timeout):
-        await asyncio.Event().wait()
-
-    renderer = XaiSpeech.from_config({}, "fixture-key").livekit_tts()
-    monkeypatch.setattr(renderer._pool, "get", stall)
-    try:
-        options = APIConnectOptions(timeout=0.05, max_retry=0)
-        async with renderer.stream(conn_options=options) as stream:
-            stream.push_text("Hello.")
-            stream.end_input()
-            async with asyncio.timeout(1):
-                with pytest.raises(APITimeoutError):
-                    await anext(stream)
-    finally:
-        await renderer.aclose()

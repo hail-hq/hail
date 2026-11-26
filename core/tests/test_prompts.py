@@ -144,11 +144,10 @@ async def test_settings_help_tool_returns_the_guide() -> None:
     assert await hail_help._execute(None, {}) == prompts.VOICE_CONFIGURATION_HELP  # type: ignore[arg-type]
 
 
-def test_settings_help_distinguishes_gemini_key_types() -> None:
+def test_settings_help_explains_gemini_api_keys() -> None:
     guide = prompts.VOICE_CONFIGURATION_HELP
     assert "Bring your own providers" in guide
-    assert "leave Vertex AI project blank" in guide
-    assert "Cloud key bound to a service account" in guide
+    assert "Enter the Gemini API key in the console" in guide
 
 
 def _sha(text: str) -> str:
@@ -179,7 +178,7 @@ def test_prompt_text_is_pinned() -> None:
         "37e9a0b5058e8c60355db926a963a8fba59c0fc4dd43d9ede4c7116e464e9e8b"
     )
     assert _sha(prompts.VOICE_CONFIGURATION_HELP) == (
-        "e426038962c41b58d5efeb131a43803cbdab8f64bf0aa8b06dabbea8bf2948bb"
+        "e83ba4493c032c19ab509e0d4333bdde8429b61f956298fb54d875ffc954ee28"
     )
 
 

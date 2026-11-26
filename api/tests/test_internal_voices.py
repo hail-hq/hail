@@ -88,9 +88,7 @@ async def test_preview_is_fixed_text_cached_and_rejects_arbitrary_voices(
             assert synthesis.call_count == 1
 
 
-async def test_preview_uses_the_xai_adapter_for_an_advertised_voice(
-    voice_app, monkeypatch
-):
+async def test_preview_uses_xai_for_an_advertised_voice(voice_app, monkeypatch):
     monkeypatch.setattr(settings, "xai_api_key", "house-key")
     voices.voice_catalogue.return_value["voices"] = [
         {"id": "ara", "provider": "xai", "model": "tts"}

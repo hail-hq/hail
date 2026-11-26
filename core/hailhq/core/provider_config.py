@@ -18,7 +18,7 @@ from hailhq.core.config import settings
 from hailhq.core.languages import Language, TTSProvider
 from hailhq.core.models import OrgProviderConfig
 from hailhq.core.secret_cipher import SecretCipher
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,6 +34,46 @@ __all__ = [
 ]
 
 LAYERS: tuple[str, ...] = ("llm", "tts", "stt")
+
+TTS_PRESET_MODELS = {
+    "gemini": "gemini-3.8-flash-tts",
+    "xai": "tts",
+    "assemblyai": "assemblyai-tts-1",
+}
+
+
+def tts_preset(provider: str) -> tuple[str, str]:
+    """Return the configured voice and house key for a preset provider."""
+    return {
+        "gemini": (settings.gemini_voice_id, settings.google_api_key),
+        "xai": ("ara", settings.xai_api_key),
+        "assemblyai": ("aai-audrey", settings.assemblyai_api_key),
+    }[provider]
+
+
+def tts_preset_configured(provider: str) -> bool:
+    return bool(
+        tts_preset(provider)[1]
+        or (provider == "gemini" and settings.google_cloud_project)
+    )
+
+
+def configured_house_voice_provider(
+    voice_id: str | None, language: str
+) -> TTSProvider | None:
+    """Identify a fallback voice from the operator's legacy voice settings."""
+    if not voice_id:
+        return None
+    providers: set[TTSProvider] = {
+        choice.provider
+        for choice in settings.voice_shortlist_preferences.get(language, [])
+        if choice.voice_id == voice_id and choice.provider in ("cartesia", "elevenlabs")
+    }
+    if voice_id == settings.cartesia_voice_id:
+        providers.add("cartesia")
+    if voice_id == settings.elevenlabs_voice_id:
+        providers.add("elevenlabs")
+    return providers.pop() if len(providers) == 1 else None
 
 
 class LLMParams(BaseModel):
@@ -82,16 +122,6 @@ class TTSParams(BaseModel):
     model: str | None = None
     # Default spoken language for the workspace. A call or agent can override it.
     language: Language | None = None
-    project: str | None = Field(
-        default=None, pattern=r"^(?:[a-z][a-z0-9-]{4,28}[a-z0-9]|[0-9]{6,20})$"
-    )
-    location: Literal["global", "us", "eu"] | None = None
-
-    @model_validator(mode="after")
-    def _project_is_gemini_only(self) -> TTSParams:
-        if self.provider != "gemini" and (self.project or self.location):
-            raise ValueError("Project and location apply to Gemini speech only.")
-        return self
 
 
 class STTParams(BaseModel):

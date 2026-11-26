@@ -20,7 +20,6 @@ import time
 import unicodedata
 import wave
 from collections import OrderedDict
-from contextlib import aclosing
 from typing import Annotated, Literal
 
 import httpx
@@ -33,9 +32,13 @@ from hailhq.core.languages import (
     TTSProvider,
     elevenlabs_language,
 )
-from hailhq.core.providers.tts import PCM_ADAPTERS
-from hailhq.core.providers.tts.base import SAMPLE_RATE
-from hailhq.core.voice_catalog import HEADERS_VERSION, voice_catalogue
+from hailhq.core.provider_config import TTS_PRESET_MODELS
+from hailhq.core.voice_catalog import (
+    HEADERS_VERSION,
+    SAMPLE_RATE,
+    synthesize_preset,
+    voice_catalogue,
+)
 from pydantic import BaseModel, Field, StringConstraints, field_validator
 
 router = APIRouter(
@@ -128,7 +131,7 @@ class LineIn(PreviewIn):
 
 async def _catalogue_model(body: PreviewIn) -> str:
     catalogue = await voice_catalogue(
-        body.language, include_direct=body.provider in PCM_ADAPTERS
+        body.language, include_direct=body.provider in TTS_PRESET_MODELS
     )
     choice = next(
         (
@@ -156,7 +159,7 @@ async def preview_voice(body: PreviewIn) -> Response:
     try:
         model = await _catalogue_model(body)
         text = _HELLO[body.language]
-        cap = 3 * len(SUPPORTED_LANGUAGES) + len(PCM_ADAPTERS)
+        cap = 3 * len(SUPPORTED_LANGUAGES) + len(TTS_PRESET_MODELS)
         return _wav(await _audio(body, model, text, _samples, cap))
     except (httpx.HTTPError, ValueError) as exc:
         raise HTTPException(503, "This sample could not play. Try again.") from exc
@@ -200,19 +203,6 @@ async def _audio(
 
 async def _synthesize(body: PreviewIn, model: str, text: str) -> bytes:
     async with httpx.AsyncClient(timeout=20) as client:
-        if adapter := PCM_ADAPTERS.get(body.provider):
-            speech = adapter.from_config({"model": model}, voice=body.voice_id)
-            output = io.BytesIO()
-            async with aclosing(speech.pcm(client, text)) as chunks:
-                with wave.open(output, "wb") as wav:
-                    wav.setnchannels(1)
-                    wav.setsampwidth(2)
-                    wav.setframerate(SAMPLE_RATE)
-                    async for chunk in chunks:
-                        wav.writeframesraw(chunk)
-            if output.getbuffer().nbytes <= 44:
-                raise ValueError("No sample audio was returned.")
-            return output.getvalue()
         if body.provider == "cartesia":
             response = await client.post(
                 "https://api.cartesia.ai/tts/bytes",
@@ -234,21 +224,27 @@ async def _synthesize(body: PreviewIn, model: str, text: str) -> bytes:
             )
             response.raise_for_status()
             return response.content
-        response = await client.post(
-            f"https://api.elevenlabs.io/v1/text-to-speech/{body.voice_id}",
-            headers={"xi-api-key": settings.eleven_api_key},
-            params={"output_format": "pcm_24000"},
-            json={
-                "model_id": model,
-                "text": text,
-                "language_code": elevenlabs_language(body.language),
-            },
-        )
-        response.raise_for_status()
+        if body.provider in TTS_PRESET_MODELS:
+            pcm = await synthesize_preset(client, body.provider, body.voice_id, text)
+            if not pcm:
+                raise ValueError("No sample audio was returned.")
+        else:
+            response = await client.post(
+                f"https://api.elevenlabs.io/v1/text-to-speech/{body.voice_id}",
+                headers={"xi-api-key": settings.eleven_api_key},
+                params={"output_format": "pcm_24000"},
+                json={
+                    "model_id": model,
+                    "text": text,
+                    "language_code": elevenlabs_language(body.language),
+                },
+            )
+            response.raise_for_status()
+            pcm = response.content
         output = io.BytesIO()
         with wave.open(output, "wb") as wav:
             wav.setnchannels(1)
             wav.setsampwidth(2)
-            wav.setframerate(24000)
-            wav.writeframes(response.content)
+            wav.setframerate(SAMPLE_RATE)
+            wav.writeframes(pcm)
         return output.getvalue()
