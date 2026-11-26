@@ -16,7 +16,8 @@ from livekit.plugins.google.beta import gemini_tts
 
 
 @pytest.mark.parametrize(
-    "response_mode", ["complete", "no_audio", "partial_audio", "transport_error"]
+    "response_mode",
+    ["complete", "no_audio", "partial_audio", "transport_error", "cancelled"],
 )
 async def test_native_gemini_synthesizes_with_the_configured_cloud_project(
     monkeypatch, response_mode
@@ -48,6 +49,10 @@ async def test_native_gemini_synthesizes_with_the_configured_cloud_project(
             if response_mode == "transport_error":
                 await asyncio.sleep(0.03)
                 raise httpx.ReadTimeout("Fixture transport stalled.")
+            if response_mode == "cancelled":
+                await asyncio.sleep(0.03)
+                error = {"error": {"code": 499, "status": "CANCELLED"}}
+                yield f"data: {json.dumps(error)}\n\n".encode()
 
     async def provider_response(request):
         requests.append(request)
@@ -78,11 +83,15 @@ async def test_native_gemini_synthesizes_with_the_configured_cloud_project(
             assert isinstance(renderer, gemini_tts.TTS)
             options = APIConnectOptions(
                 timeout=0.2,
-                max_retry=int(response_mode in ("partial_audio", "transport_error")),
+                max_retry=int(response_mode != "no_audio"),
             )
             async with renderer.synthesize("Hello.", conn_options=options) as stream:
                 async with asyncio.timeout(2):
-                    if response_mode != "complete":
+                    if response_mode in (
+                        "no_audio",
+                        "partial_audio",
+                        "transport_error",
+                    ):
                         error = (
                             APIConnectionError
                             if response_mode == "transport_error"
@@ -93,8 +102,10 @@ async def test_native_gemini_synthesizes_with_the_configured_cloud_project(
                         assert exc.value.retryable == (response_mode == "no_audio")
                     else:
                         frames = [chunk.frame async for chunk in stream]
+                        expected_samples = 1440 if response_mode == "complete" else 480
                         assert (
-                            sum(frame.samples_per_channel for frame in frames) == 1440
+                            sum(frame.samples_per_channel for frame in frames)
+                            == expected_samples
                         )
         finally:
             await renderer.aclose()

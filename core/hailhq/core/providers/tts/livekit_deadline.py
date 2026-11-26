@@ -4,7 +4,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from typing import cast
 
-from livekit.agents import APIConnectionError, APIError, APITimeoutError, tokenize, tts
+from livekit.agents import APIError, APITimeoutError, tokenize, tts
 from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS, APIConnectOptions
 from livekit.plugins.google.beta import gemini_tts
 from livekit.plugins.xai import tts as xai_tts
@@ -64,10 +64,9 @@ class _GeminiStream(gemini_tts.ChunkedStream):
                 retryable=output_emitter.pushed_duration() == 0
             ) from None
         except APIError as exc:
-            if exc.retryable and output_emitter.pushed_duration() > 0:
-                raise APIConnectionError(
-                    "Gemini speech failed after audio was delivered.", retryable=False
-                ) from exc
+            if output_emitter.pushed_duration() > 0:
+                # Preserve the status so LiveKit can still close 499 gracefully.
+                exc.retryable = False
             raise
 
 
