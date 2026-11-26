@@ -1,11 +1,11 @@
 """Run Gemini synthesis on the same endpoint as API previews and key checks."""
 
-import asyncio
 from contextlib import aclosing
 
 import httpx
 from hailhq.core.providers.tts.base import SAMPLE_RATE
-from hailhq.core.providers.tts.gemini import GeminiSpeech
+from hailhq.core.providers.tts.gemini import GeminiSpeech, GeminiSpeechCancelled
+from hailhq.core.providers.tts.livekit_deadline import audio_deadline
 from livekit.agents import (
     APIConnectionError,
     APIStatusError,
@@ -16,7 +16,6 @@ from livekit.agents import (
 from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS, APIConnectOptions
 
 _FRAME_MS = 20
-_INITIAL_PCM_BYTES = SAMPLE_RATE * _FRAME_MS // 1000 * 2
 
 
 class GeminiDirectTTS(tts.TTS):
@@ -62,31 +61,30 @@ class _PCMStream(tts.ChunkedStream):
             frame_size_ms=_FRAME_MS,
         )
         try:
-            async with aclosing(
-                model.speech.pcm(model._client, self._input_text)
-            ) as chunks:
-                async with asyncio.timeout(self._conn_options.timeout):
-                    first = bytearray()
-                    while len(first) < _INITIAL_PCM_BYTES:
-                        chunk = await anext(chunks, None)
-                        if chunk is None:
-                            break
-                        first.extend(chunk)
-                if len(first) < 2:
-                    raise APIConnectionError(
-                        f"{model.provider} returned no speech audio"
-                    )
-                output_emitter.push(bytes(first))
+            async with (
+                audio_deadline(
+                    output_emitter, self._conn_options.timeout, SAMPLE_RATE
+                ) as emitter,
+                aclosing(model.speech.pcm(model._client, self._input_text)) as chunks,
+            ):
                 async for chunk in chunks:
-                    output_emitter.push(chunk)
+                    emitter.push(chunk)
+        except GeminiSpeechCancelled:
+            raise APIStatusError(
+                "Gemini cancelled speech synthesis.", status_code=499, retryable=False
+            ) from None
         except httpx.HTTPStatusError as exc:
             raise APIStatusError(
                 f"{model.provider} synthesis failed",
                 status_code=exc.response.status_code,
+                retryable=output_emitter.pushed_duration() == 0,
             ) from None
         except (httpx.TimeoutException, TimeoutError):
             raise APITimeoutError(
                 retryable=output_emitter.pushed_duration() == 0
             ) from None
         except (httpx.HTTPError, ValueError):
-            raise APIConnectionError(f"{model.provider} speech stream failed") from None
+            raise APIConnectionError(
+                f"{model.provider} speech stream failed",
+                retryable=output_emitter.pushed_duration() == 0,
+            ) from None

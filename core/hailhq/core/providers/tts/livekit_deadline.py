@@ -47,7 +47,7 @@ class _ProgressEmitter:
 
 
 @asynccontextmanager
-async def _audio_deadline(emitter: tts.AudioEmitter, timeout: float, sample_rate: int):
+async def audio_deadline(emitter: tts.AudioEmitter, timeout: float, sample_rate: int):
     async with asyncio.timeout(timeout) as deadline:
         yield _ProgressEmitter(emitter, deadline, timeout, sample_rate)
 
@@ -55,7 +55,7 @@ async def _audio_deadline(emitter: tts.AudioEmitter, timeout: float, sample_rate
 class _GeminiStream(gemini_tts.ChunkedStream):
     async def _run(self, output_emitter: tts.AudioEmitter) -> None:
         try:
-            async with _audio_deadline(
+            async with audio_deadline(
                 output_emitter, self._conn_options.timeout, self._tts.sample_rate
             ) as emitter:
                 await super()._run(cast(tts.AudioEmitter, emitter))
@@ -84,7 +84,7 @@ class _XaiStream(xai_tts.SynthesizeStream):
     async def _run_ws(
         self, input_stream: tokenize.WordStream, output_emitter: tts.AudioEmitter
     ) -> None:
-        async with _audio_deadline(
+        async with audio_deadline(
             output_emitter,
             self._conn_options.timeout,
             self._tts.sample_rate,

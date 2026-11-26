@@ -33,6 +33,10 @@ CLOUD_ENDPOINTS = {
 _auth_lock = Lock()
 
 
+class GeminiSpeechCancelled(ValueError):
+    """Google cancelled an in-progress response."""
+
+
 @lru_cache(maxsize=1)
 def _credentials():
     scopes = [CLOUD_SCOPE]
@@ -196,6 +200,11 @@ class GeminiSpeech(PCMAdapter):
                     continue
                 event = json.loads(line[5:])
                 if "error" in event:
+                    error = event["error"]
+                    if isinstance(error, dict) and error.get("code") == 499:
+                        raise GeminiSpeechCancelled(
+                            "Gemini cancelled speech synthesis."
+                        )
                     raise ValueError("Gemini returned a speech stream error.")
                 for candidate in event.get("candidates", []):
                     for part in candidate.get("content", {}).get("parts", []):

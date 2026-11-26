@@ -211,8 +211,10 @@ async def test_gemini_does_not_use_an_sdk_proxy_for_call_audio(
         await renderer.aclose()
 
 
-@pytest.mark.parametrize("partial", [b"", b"\x00"])
-async def test_pcm_stream_respects_first_audio_timeout(monkeypatch, partial):
+@pytest.mark.parametrize(
+    "partial", [b"", b"\x00", b"\x01\x00" * 480], ids=["none", "one-byte", "one-frame"]
+)
+async def test_pcm_stream_times_out_when_audio_stalls(monkeypatch, partial):
     async def stalled_pcm(self, client, text):
         yield partial
         await asyncio.Event().wait()
@@ -224,7 +226,45 @@ async def test_pcm_stream_respects_first_audio_timeout(monkeypatch, partial):
     try:
         options = APIConnectOptions(timeout=0.02, max_retry=0)
         async with renderer.synthesize("Hello.", conn_options=options) as stream:
-            with pytest.raises(APITimeoutError):
-                await asyncio.wait_for(anext(stream), timeout=1)
+            with pytest.raises(APITimeoutError) as error:
+                async with asyncio.timeout(1):
+                    [chunk.frame async for chunk in stream]
+            assert error.value.retryable == (len(partial) < 960)
     finally:
         await renderer.aclose()
+
+
+async def test_direct_gemini_preserves_provider_cancellation_after_audio(monkeypatch):
+    speech = GeminiSpeech.from_config({"project": "hail-speech"}, "fixture-key")
+    renderer = speech.livekit_tts()
+    audio_sent = asyncio.Event()
+    audio = base64.b64encode(b"\x01\x00" * 480).decode()
+    event = {"candidates": [{"content": {"parts": [{"inlineData": {"data": audio}}]}}]}
+    cancelled = {"error": {"code": 499, "status": "CANCELLED"}}
+    requests = []
+
+    class Body(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            yield f"data: {json.dumps(event)}\n\n".encode()
+            await audio_sent.wait()
+            yield f"data: {json.dumps(cancelled)}\n\n".encode()
+
+    def respond(request):
+        requests.append(request)
+        return httpx.Response(200, stream=Body())
+
+    original = GeminiSpeech.pcm
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http:
+        monkeypatch.setattr(
+            GeminiSpeech, "pcm", lambda self, _, text: original(self, http, text)
+        )
+        try:
+            options = APIConnectOptions(max_retry=1, timeout=0.3)
+            async with renderer.synthesize("Hello.", conn_options=options) as stream:
+                async with asyncio.timeout(2):
+                    async for _ in stream:
+                        audio_sent.set()
+        finally:
+            await renderer.aclose()
+    assert audio_sent.is_set()
+    assert len(requests) == 1
