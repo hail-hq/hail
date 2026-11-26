@@ -14,12 +14,10 @@ export type FooterGroup = {
 export type FooterBadge = {
   id: string;
   href: string;
-  alt: string;
   name: string;
   /** Square provider logo. Shared CSS owns all card and logo dimensions. */
-  icon?: string;
-  /** The directory asks for a website link in exchange for listing Hail. */
-  reciprocal?: boolean;
+  icon: string;
+  rel?: string;
 };
 
 function FooterLinks({ group }: { group: FooterGroup }) {
@@ -74,15 +72,12 @@ export function Footer({
                 <a
                   href={badge.href}
                   target="_blank"
-                  rel={badge.reciprocal ? "noopener sponsored" : "noopener"}
-                  aria-label={badge.alt}
+                  rel={badge.rel ? `noopener ${badge.rel}` : "noopener"}
                 >
-                  {badge.icon && (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={badge.icon} alt="" width={36} height={36} loading="lazy" />
-                  )}
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={badge.icon} alt="" width={36} height={36} loading="lazy" />
                   <span className="hail-footer-badge-copy">
-                    <span className="hail-footer-badge-label">{badge.reciprocal ? "Directory" : "Find Hail on"}</span>
+                    <span className="hail-footer-badge-label">Find Hail on</span>
                     <span className="hail-footer-badge-name">{badge.name}</span>
                   </span>
                 </a>

@@ -2,43 +2,40 @@
   {
     "id": "forg",
     "href": "https://forg.to/projects/hail",
-    "alt": "Hail - Featured on Forg",
     "name": "Forg",
-    "icon": "https://hail.so/assets/third-party/badges/forg.svg"
+    "icon": "/costs/assets/third-party/badges/forg.svg",
+    "rel": "sponsored"
   },
   {
     "id": "devhunt",
     "href": "https://devhunt.org/tool/hail",
-    "alt": "hail - Featured on DevHunt",
     "name": "DevHunt",
-    "icon": "https://hail.so/assets/third-party/badges/devhunt.svg"
+    "icon": "/costs/assets/third-party/badges/devhunt.svg"
   },
   {
     "id": "postman",
     "href": "https://www.postman.com/hail-hq/hail-api",
-    "alt": "Hail - Featured on Postman",
     "name": "Postman",
-    "icon": "https://hail.so/assets/third-party/badges/postman.svg"
+    "icon": "/costs/assets/third-party/badges/postman.svg"
   },
   {
     "id": "tessl",
     "href": "https://tessl.io/registry/hail-hq/hail",
-    "alt": "Hail - Featured on Tessl",
     "name": "Tessl",
-    "icon": "https://hail.so/assets/third-party/badges/tessl.svg"
+    "icon": "/costs/assets/third-party/badges/tessl.svg"
   },
   {
     "id": "twelve-tools",
     "href": "https://twelve.tools",
-    "alt": "Visit Twelve Tools",
     "name": "Twelve Tools",
-    "reciprocal": true
+    "icon": "/costs/assets/third-party/badges/twelve-tools.svg",
+    "rel": "sponsored"
   },
   {
     "id": "dang-ai",
     "href": "https://dang.ai",
-    "alt": "Visit Dang.ai",
     "name": "Dang.ai",
-    "reciprocal": true
+    "icon": "/costs/assets/third-party/badges/dang-ai.svg",
+    "rel": "sponsored"
   }
 ]
