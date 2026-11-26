@@ -405,6 +405,19 @@ def test_workspace_gemini_uses_an_explicit_per_call_voice(monkeypatch):
     assert renderer.speech.voice == "Kore"
 
 
+@pytest.mark.parametrize(
+    ("explicit", "expected"), [(True, "requested-voice"), (False, "house-voice")]
+)
+def test_workspace_gemini_language_fallback_keeps_only_per_call_voice(
+    captured_plugins, explicit, expected
+):
+    org = ResolvedLayer("gemini", "workspace", {"voice_id": "Charon"}, True)
+
+    build_tts(org, "requested-voice", "fr", voice_id_explicit=explicit)
+
+    assert captured_plugins["cartesia"][0].kwargs["voice"] == expected
+
+
 def test_explicit_workspace_voice_keeps_its_legacy_fallback_order(
     monkeypatch, captured_plugins
 ):

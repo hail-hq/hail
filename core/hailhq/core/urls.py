@@ -62,16 +62,17 @@ def same_request_url(left: str, right: str) -> bool:
     """
     try:
         urls = [httpx.URL(value) for value in (left, right)]
+        if any(
+            not url.is_absolute_url or url.scheme not in {"http", "https"}
+            for url in urls
+        ):
+            return False
+        targets = [
+            (url.scheme, url.host, url.port, url.userinfo, url.raw_path, url.fragment)
+            for url in urls
+        ]
     except (httpx.InvalidURL, ValueError):
         return False
-    if any(
-        not url.is_absolute_url or url.scheme not in {"http", "https"} for url in urls
-    ):
-        return False
-    targets = [
-        (url.scheme, url.host, url.port, url.userinfo, url.raw_path, url.fragment)
-        for url in urls
-    ]
     return targets[0] == targets[1]
 
 

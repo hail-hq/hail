@@ -662,7 +662,8 @@ def build_tts(
                 org.provider,
                 language,
             )
-            return build_tts(None, fallback_voice, language)
+            skipped_voice = voice_id_override if voice_id_explicit else fallback_voice
+            return build_tts(None, skipped_voice, language)
         try:
             primary_voice = voice_id_override
             if (

@@ -356,7 +356,10 @@ async def test_validate_saved_gemini_key_with_the_draft_project(client, monkeypa
     assert (params["project"], params["location"]) == ("new-project", "eu")
 
 
-async def test_llm_key_test_uses_its_saved_endpoint(monkeypatch):
+@pytest.mark.parametrize(
+    "draft_url", ["https://draft.example.invalid/v1", "https://xn--.invalid/v1"]
+)
+async def test_llm_key_test_uses_its_saved_endpoint(monkeypatch, draft_url):
     from types import SimpleNamespace
     from unittest.mock import AsyncMock, Mock
 
@@ -376,7 +379,7 @@ async def test_llm_key_test_uses_its_saved_endpoint(monkeypatch):
     check = AsyncMock(return_value=("valid", "checked"))
     monkeypatch.setattr(provider_config, "validate_provider_key", check)
     body = provider_config.ValidateIn(
-        params={"base_url": "https://draft.example.invalid/v1", "model": "fixture"}
+        params={"base_url": draft_url, "model": "fixture"}
     )
     with pytest.raises(
         HTTPException, match="Enter the key to test a different endpoint"
