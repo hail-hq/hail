@@ -18,7 +18,7 @@ Never put credentials or other secrets in model instructions.
 When changing configuration, update the guide and its tests in the same change set.
 Check actual controls in the `hail-website` repository:
 
-- `app/console/calls/VoicePreferences.tsx`: Calls → Call settings → Language and voice; samples and Save language and voice.
+- `app/console/calls/VoicePreferences.tsx`: Phone → Settings → Language and voice; samples and Save language and voice.
 - `app/console/agents/AgentSheet.tsx`: Greeting, Instructions, Language, First line, tools, limits, and Save.
 - `app/console/agents/agent-form.ts` and `actions.ts`: fields accepted by the console.
 - [`schemas.py`](../../core/hailhq/core/schemas.py): API agent and call overrides.
@@ -33,7 +33,7 @@ Never promise to inspect or edit settings from a phone call without an authorize
 Use synthetic conversations; do not commit customer transcripts or recordings.
 
 - “Is this the system's voice or Hail's?” → voice configured for this Hail call; no provider guess.
-- “Where do I change it?” → Call settings, Language and voice, samples, then save.
+- “Where do I change it?” → Phone, Settings, Language and voice, samples, then save.
 - “Can I change the introduction?” → saved-agent Greeting or First line; one-off call greeting when applicable.
 - “Can I edit what you do?” → customer Instructions; distinguish behavior from voice selection.
 - “Is that in my chat app?” → clarify the app and call type; do not invent third-party menus.
@@ -134,10 +134,10 @@ promise universal disclosure or infer a legal exemption from a phone number.
 If asked directly, it still identifies honestly as AI.
 
 `hail_settings_help` documents the current controls, verified against
-`hail-website` on November 11, 2026:
+`hail-website`:
 
 - Agents → open agent → First line → uncheck “Say this first on every call” → Save.
-- Calls → Call settings → AI line → edit “First line on every call” → Save edits inherited wording; it has no workspace-wide off switch.
+- Phone → Settings → AI line → edit “First line on every call” → Save edits inherited wording; it has no workspace-wide off switch.
 - A connected assistant can set `ai_disclosure=false` for a one-off call.
 
 Empty workspace wording restores the default; it does not disable disclosure.
