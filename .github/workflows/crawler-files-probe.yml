@@ -90,20 +90,25 @@ jobs:
             return response;
           }
 
-          async function probeManifest() {
-            const url = "https://hail.so/.well-known/mcp.json";
-            const [get] = await Promise.all([
-              readPublic(url, "application/json", { headers: { Accept: "text/markdown" } }),
-              readPublic(url, "application/json", { method: "HEAD" }),
-            ]);
-            const manifest = await get.json();
+          const manifestUrl = "https://hail.so/.well-known/mcp.json";
+
+          async function probeManifestGet() {
+            const response = await readPublic(manifestUrl, "application/json", {
+              headers: { Accept: "text/markdown" },
+            });
+            const manifest = await response.json();
             assert.equal(manifest.name, "io.github.hail-hq/hail-mcp", "MCP registry name");
             const endpoint = new URL("https://mcp.hail.so");
             const hasMcpRemote = manifest.remotes?.some((remote) =>
               remote.type === "streamable-http" && new URL(remote.url).href === endpoint.href,
             );
             assert.ok(hasMcpRemote, "MCP streamable HTTP remote");
-            console.log("MCP discovery manifest served as JSON on GET and HEAD");
+            console.log("MCP discovery manifest served as JSON on GET");
+          }
+
+          async function probeManifestHead() {
+            await readPublic(manifestUrl, "application/json", { method: "HEAD" });
+            console.log("MCP discovery manifest served JSON headers on HEAD");
           }
 
           async function probeSkill() {
@@ -111,7 +116,9 @@ jobs:
             const [, frontMatter, body] =
               (await skill.text()).match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)([\s\S]*)$/) ?? [];
             assert.match(frontMatter ?? "", /^name:[ \t]*hail[ \t]*\r?$/m, "Hail skill front matter");
-            assert.match(body ?? "", /^##[ \t]+\S[^\r\n]*\r?\n(?:[ \t]*\r?\n)*[^#\s]/m, "Hail skill instructions");
+            const visibleBody = body?.replace(/<!--[\s\S]*?-->/g, "") ?? "";
+            const hasSection = /^ {0,3}##[ \t]+\S[^\r\n]*\r?\n(?:[ \t]*\r?\n)*[ \t]*[^#\s]/m.test(visibleBody);
+            assert.ok(hasSection, "Hail skill instructions");
             console.log("Hosted Hail skill served with Markdown instructions");
           }
 
@@ -123,7 +130,12 @@ jobs:
             console.log("OpenAPI document describes GET /v1/whoami");
           }
 
-          const results = await Promise.allSettled([probeManifest(), probeSkill(), probeOpenApi()]);
+          const results = await Promise.allSettled([
+            probeManifestGet(),
+            probeManifestHead(),
+            probeSkill(),
+            probeOpenApi(),
+          ]);
           const errors = results.filter((result) => result.status === "rejected").map((result) => result.reason);
           if (errors.length) throw new AggregateError(errors, "Public agent discovery probe failed");
           NODE
