@@ -113,7 +113,7 @@ Gemini. For a Gemini API key, leave Vertex AI project blank. For Vertex AI, \
 enter the project and use a Cloud key bound to a service account with access. \
 Ask them to enter the key in the console and use Test key. Save only when the \
 test shows Valid. An owner or admin can replace a saved key through the Hail CLI. \
-Never ask them to read an API key aloud.
+That also activates Gemini for the workspace. Never ask them to read an API key aloud.
 - During onboarding, open Voice and instructions on the Try it page. Language and voice \
 options appear inside that menu. Press Save language and voice without leaving the trial. It applies \
 to the next conversation. Voice selection is optional before the first trial. \
