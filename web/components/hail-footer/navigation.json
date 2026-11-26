@@ -19,6 +19,30 @@
         "href": "/email"
       },
       {
+        "label": "Business call coverage",
+        "href": "/answer-business-calls"
+      },
+      {
+        "label": "Keep your number",
+        "href": "/ai-receptionist-existing-number"
+      },
+      {
+        "label": "Customer call follow-up",
+        "href": "/customer-call-follow-up"
+      },
+      {
+        "label": "Test your receptionist",
+        "href": "/test-ai-receptionist"
+      },
+      {
+        "label": "Answering service cost",
+        "href": "/ai-answering-service-cost"
+      },
+      {
+        "label": "Calls for trades",
+        "href": "/answering-service-for-trades"
+      },
+      {
         "label": "Integrations",
         "href": "/integrations"
       },
