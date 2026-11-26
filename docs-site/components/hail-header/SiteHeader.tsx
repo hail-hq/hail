@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useRef, type ReactNode } from "react";
 import { AnswerButton } from "./AnswerButton";
 import { useDropdown } from "./useDropdown";
 import { Mascot } from "./Mascot";
@@ -151,9 +151,17 @@ export function SiteHeader({
   const menuButton = useRef<HTMLButtonElement>(null);
   const navId = useId();
 
-  function openMenu(section: SiteHeaderActive) {
-    for (const item of menus) item.menu.setOpen(item.section === section);
-  }
+  const { setOpen: setProductOpen } = product;
+  const { setOpen: setSolutionsOpen } = solutions;
+  const { setOpen: setSetupOpen } = setup;
+  const openMenu = useCallback(
+    (section: SiteHeaderActive) => {
+      setProductOpen(section === "product");
+      setSolutionsOpen(section === "use-cases");
+      setSetupOpen(section === "setup");
+    },
+    [setProductOpen, setSolutionsOpen, setSetupOpen],
+  );
 
   useEffect(() => {
     const media = window.matchMedia?.("(max-width: 900px)");
@@ -161,14 +169,17 @@ export function SiteHeader({
     const previous = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const closeOnDesktop = () => {
-      if (!media.matches) setMobileOpen(false);
+      if (media.matches) return;
+      hoveredMenu.current = null;
+      openMenu(null);
+      setMobileOpen(false);
     };
     media.addEventListener("change", closeOnDesktop);
     return () => {
       document.body.style.overflow = previous;
       media.removeEventListener("change", closeOnDesktop);
     };
-  }, [mobileOpen, setMobileOpen]);
+  }, [mobileOpen, openMenu, setMobileOpen]);
 
   return (
     <header className={styles.header} data-public-header>
