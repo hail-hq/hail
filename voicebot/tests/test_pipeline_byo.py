@@ -341,6 +341,8 @@ def test_gemini_default_only_applies_to_inherited_english(
     workspace = ResolvedLayer("gemini", "workspace-key", {}, False)
     build_tts(workspace, language="en")
     assert captured_plugins["gemini"][-1].kwargs["voice_name"] == gemini_voice
+    build_tts(workspace, voice_id_override="Charon", language="en")
+    assert captured_plugins["gemini"][-1].kwargs["voice_name"] == "Charon"
     build_tts(voice_id_override="legacy-voice", language="en")
     assert captured_plugins["cartesia"][-1].kwargs["voice"] == "legacy-voice"
     build_tts(language="fr")

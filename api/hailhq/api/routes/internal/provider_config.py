@@ -25,6 +25,7 @@ from hailhq.core.models import OrgProviderConfig
 from hailhq.core.provider_config import (
     LAYERS,
     PARAMS_BY_LAYER,
+    TTS_PRESET_MODELS,
     last4,
     load_org_provider_configs,
     provider_cipher,
@@ -472,6 +473,14 @@ async def validate_provider_config(
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         provider = row.provider
         params = dict(row.params)
+        # Preset speech providers use fixed endpoints. The console sends the
+        # draft settings, including an empty dict when the fields were cleared.
+        if (
+            layer == "tts"
+            and provider in TTS_PRESET_MODELS
+            and "params" in body.model_fields_set
+        ):
+            params = _validated_params(layer, provider, body.params)
         # A stored key remains bound to its saved endpoint.
         if (
             layer == "llm"

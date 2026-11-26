@@ -26,7 +26,11 @@ from hailhq.core.languages import (
     SUPPORTED_LANGUAGES,
     elevenlabs_language,
 )
-from hailhq.core.provider_config import TTS_PRESET_MODELS, tts_preset
+from hailhq.core.provider_config import (
+    TTS_PRESET_MODELS,
+    gemini_vertex_location,
+    tts_preset,
+)
 
 log = logging.getLogger(__name__)
 HEADERS_VERSION = "2026-08-14"
@@ -413,14 +417,15 @@ async def synthesize_preset(
     key = tts_preset(provider)[1] if api_key is None else api_key
     if provider == "gemini":
         model = TTS_PRESET_MODELS[provider]
-        if api_key is None and settings.google_cloud_project:
-            location = settings.google_cloud_location
-            if location == "global":
-                host = "aiplatform.googleapis.com"
-            elif location in {"us", "eu"}:
-                host = f"aiplatform.{location}.rep.googleapis.com"
-            else:
-                host = f"{location}-aiplatform.googleapis.com"
+        audio_format = {"audio": {"mimeType": "AUDIO_L16"}}
+        use_vertex = api_key is None and bool(settings.google_cloud_project)
+        if use_vertex:
+            location = gemini_vertex_location()
+            host = (
+                "aiplatform.googleapis.com"
+                if location == "global"
+                else f"aiplatform.{location}.rep.googleapis.com"
+            )
             project = settings.google_cloud_project
             url = (
                 f"https://{host}/v1/projects/{project}/locations/{location}"
@@ -443,7 +448,7 @@ async def synthesize_preset(
                 "contents": [{"role": "user", "parts": [{"text": text}]}],
                 "generationConfig": {
                     "responseModalities": ["AUDIO"],
-                    "responseFormat": {"audio": {"mimeType": "AUDIO_L16"}},
+                    "responseFormat": [audio_format] if use_vertex else audio_format,
                     "speechConfig": {"voiceConfig": {"voice": voice}},
                 },
             },

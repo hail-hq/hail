@@ -13,7 +13,7 @@ from hailhq.core.config import VoicePreference, settings
     [
         ("global", "aiplatform.googleapis.com"),
         ("eu", "aiplatform.eu.rep.googleapis.com"),
-        ("us-central1", "us-central1-aiplatform.googleapis.com"),
+        ("us", "aiplatform.us.rep.googleapis.com"),
     ],
 )
 async def test_managed_gemini_preview_uses_the_vertex_location(
@@ -31,9 +31,9 @@ async def test_managed_gemini_preview_uses_the_vertex_location(
         assert f"/projects/hail-speech/locations/{location}/" in request.url.path
         assert request.headers["Authorization"] == "Bearer adc-token"
         assert "x-goog-api-key" not in request.headers
-        assert json.loads(request.content)["generationConfig"]["responseFormat"] == {
-            "audio": {"mimeType": "AUDIO_L16"}
-        }
+        assert json.loads(request.content)["generationConfig"]["responseFormat"] == [
+            {"audio": {"mimeType": "AUDIO_L16"}}
+        ]
         return httpx.Response(
             200,
             json={

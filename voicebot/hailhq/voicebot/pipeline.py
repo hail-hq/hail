@@ -78,6 +78,8 @@ from hailhq.core.languages import (
 from hailhq.core.provider_config import (
     TTS_PRESET_MODELS,
     configured_house_voice_provider,
+    gemini_vertex_location,
+    is_gemini_voice,
     load_org_provider_configs,
     provider_cipher,
     tts_preset,
@@ -603,7 +605,7 @@ def _house_tts(
         and tts_preset_configured("gemini")
         and (
             not voice_id_override
-            or voice_id_override == settings.gemini_voice_id
+            or is_gemini_voice(voice_id_override)
             and not (settings.cartesia_api_key or settings.eleven_api_key)
         )
     ):
@@ -666,7 +668,7 @@ def _org_tts(
                     voice_name=voice,
                     vertexai=True,
                     project=project,
-                    location=settings.google_cloud_location,
+                    location=gemini_vertex_location(),
                 )
         if not key.strip():
             raise ValueError(
@@ -758,7 +760,13 @@ def build_tts(
             primary_voice = voice_id_override
             if preset_provider and not voice_id_explicit:
                 preset_voice, _ = tts_preset(org.provider)
-                if primary_voice not in (preset_voice, org.params.get("voice_id")):
+                saved_gemini_voice = org.provider == "gemini" and is_gemini_voice(
+                    primary_voice
+                )
+                if not saved_gemini_voice and primary_voice not in (
+                    preset_voice,
+                    org.params.get("voice_id"),
+                ):
                     # A saved, unscoped agent voice may belong to an old provider.
                     primary_voice = None
             byo = _org_tts(org, primary_voice, language)

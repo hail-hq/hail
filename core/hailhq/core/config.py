@@ -90,7 +90,7 @@ class Settings(BaseSettings):
     cartesia_api_key: str = ""
     eleven_api_key: str = ""
     speechmatics_api_key: str = ""
-    google_cloud_location: str = Field(default="global", pattern=r"^[a-z][a-z0-9-]*$")
+    google_cloud_location: str = "global"
     xai_api_key: str = ""
     assemblyai_api_key: str = ""
 

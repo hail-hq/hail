@@ -41,6 +41,54 @@ TTS_PRESET_MODELS = {
     "assemblyai": "assemblyai-tts-1",
 }
 
+# Gemini's prebuilt voice IDs are distinct from the other providers' IDs.
+# https://ai.google.dev/gemini-api/docs/speech-generation#voices
+_GEMINI_PREBUILT_VOICES = frozenset(
+    (
+        "Zephyr",
+        "Puck",
+        "Charon",
+        "Kore",
+        "Fenrir",
+        "Leda",
+        "Orus",
+        "Aoede",
+        "Callirrhoe",
+        "Autonoe",
+        "Enceladus",
+        "Iapetus",
+        "Umbriel",
+        "Algieba",
+        "Despina",
+        "Erinome",
+        "Algenib",
+        "Rasalgethi",
+        "Laomedeia",
+        "Achernar",
+        "Alnilam",
+        "Schedar",
+        "Gacrux",
+        "Pulcherrima",
+        "Achird",
+        "Zubenelgenubi",
+        "Vindemiatrix",
+        "Sadachbia",
+        "Sadaltager",
+        "Sulafat",
+    )
+)
+
+
+def is_gemini_voice(voice_id: str | None) -> bool:
+    return voice_id == settings.gemini_voice_id or voice_id in _GEMINI_PREBUILT_VOICES
+
+
+def gemini_vertex_location() -> str:
+    location = settings.google_cloud_location or "global"
+    if location not in {"global", "us", "eu"}:
+        raise ValueError("Gemini speech on Vertex AI requires global, us, or eu.")
+    return location
+
 
 def tts_preset(provider: str) -> tuple[str, str]:
     """Return the configured voice and house key for a preset provider."""
