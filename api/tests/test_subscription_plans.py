@@ -392,7 +392,7 @@ async def _pending(session, org, allowance, *, monthly=150, plan_cents=150):
         e164=f"+1415555{uuid.uuid4().int % 10000:04d}",
         country_code="US",
         number_type="local",
-        capabilities=["voice"]  # no SMS setup step,
+        capabilities=["voice"],  # no SMS setup step
         monthly_cents=monthly,
         setup_cents=0,
         readiness="ready",
