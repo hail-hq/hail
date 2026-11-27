@@ -5,14 +5,14 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock
 from urllib.parse import urlsplit
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from hailhq.api.deps import get_s3_mail_optional
 from hailhq.api.main import app
 from hailhq.api.routes import knowledge as knowledge_routes
 from hailhq.api.routes import uploads as uploads_routes
-from hailhq.core.config import settings
+from hailhq.core.config import SELF_HOSTED_ORG_ID, settings
 from hailhq.core.file_uploads import object_key
 from hailhq.core.knowledge.access import delete_org_knowledge
 from hailhq.core.knowledge.search import vector_literal
@@ -25,7 +25,7 @@ from hailhq.core.models import (
     OrganizationMember,
 )
 from hailhq.core.testing.knowledge import FakeEmbedder
-from sqlalchemy import select, text
+from sqlalchemy import select, text, update
 
 from .conftest import insert_org_and_key
 from .test_auth_jwt import _configure_env, _install_test_jwks
@@ -160,8 +160,16 @@ async def test_file_redirect_signs_the_stored_key_and_original_filename(
     )
 
 
+@pytest.mark.parametrize(
+    ("first", "matching", "display"),
+    [
+        (" Straße  ", "STRASSE", "Straße"),
+        ("\u1f88", "\u0391\u0345\u0313", "\u1f88"),
+    ],
+    ids=["case-folding", "canonical-equivalence"],
+)
 async def test_brand_tags_reuse_the_first_spelling_within_a_workspace(
-    client, async_session, org_and_key, s3
+    client, async_session, org_and_key, s3, first, matching, display
 ) -> None:
     org, _, plain = org_and_key
     other_org, _, other_plain = await insert_org_and_key(
@@ -180,8 +188,8 @@ async def test_brand_tags_reuse_the_first_spelling_within_a_workspace(
     for doc, token, value, expected in zip(
         documents,
         [plain, plain, other_plain],
-        [" Straße  ", "STRASSE", "STRASSE"],
-        ["Straße", "Straße", "STRASSE"],
+        [first, matching, matching],
+        [display, display, matching],
         strict=True,
     ):
         path = f"/v1/knowledge/documents/{doc['id']}"
@@ -199,7 +207,7 @@ async def test_brand_tags_reuse_the_first_spelling_within_a_workspace(
         documents[1]["id"],
     }
     assert all(
-        doc["tags"] == [{"type": "brand", "value": "Straße"}]
+        doc["tags"] == [{"type": "brand", "value": display}]
         for doc in listed.json()["items"]
     )
     for doc in documents[:2]:
@@ -210,7 +218,7 @@ async def test_brand_tags_reuse_the_first_spelling_within_a_workspace(
     remaining = await async_session.execute(
         text("SELECT value FROM knowledge_tag_values")
     )
-    assert remaining.scalars().all() == ["STRASSE"]
+    assert remaining.scalars().all() == [matching]
 
 
 async def test_brand_move_replaces_the_value_and_clear_keeps_manual_choice(
@@ -338,6 +346,48 @@ async def test_tag_update_requires_a_workspace_admin_for_jwt_users(
     assert read.json()["tags"] == (
         [{"type": "brand", "value": "Ardent"}] if expected == 200 else []
     )
+
+
+async def test_member_api_key_cannot_edit_tags_but_keeps_legacy_document_access(
+    client, async_session, org_and_key, s3
+) -> None:
+    org, key, plain = org_and_key
+    await async_session.execute(
+        update(OrganizationMember)
+        .where(
+            OrganizationMember.organization_id == org,
+            OrganizationMember.user_id == UUID(key.reference_id),
+        )
+        .values(role="member")
+    )
+    await async_session.commit()
+    await _turn_on(async_session, org)
+    doc = await _add_document(client, plain, await _stored_upload(async_session, org))
+    path = f"/v1/knowledge/documents/{doc['id']}"
+
+    response = await client.patch(
+        f"{path}/tags",
+        json={"type": "brand", "value": "Ardent"},
+        headers=_auth(plain),
+    )
+    assert response.status_code == 403
+    assert (await client.get(path, headers=_auth(plain))).json()["tags"] == []
+    assert (await client.delete(path, headers=_auth(plain))).status_code == 204
+
+
+async def test_self_hosted_shared_key_can_edit_tags(client, async_session, monkeypatch):
+    org = SELF_HOSTED_ORG_ID
+    plain = "test-shared-key"
+    monkeypatch.setattr(settings, "hail_api_key", plain)
+    await _turn_on(async_session, org)
+    doc = await _add_document(client, plain, await _stored_upload(async_session, org))
+    response = await client.patch(
+        f"/v1/knowledge/documents/{doc['id']}/tags",
+        json={"type": "brand", "value": "Ardent"},
+        headers=_auth(plain),
+    )
+    assert response.status_code == 200
+    assert response.json()["tags"] == [{"type": "brand", "value": "Ardent"}]
 
 
 async def _piece(session, org, doc_id, body: str, ordinal: int = 0) -> None:

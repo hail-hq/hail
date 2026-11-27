@@ -5289,7 +5289,9 @@ paths:
               schema:
                 type: integer
         "403":
-          description: Signed-in members need owner or admin access to edit tags.
+          description:
+            User credentials need workspace owner or admin access to edit
+            tags.
         "404":
           description: No such document in this workspace.
         "422":
