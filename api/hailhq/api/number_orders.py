@@ -32,7 +32,6 @@ from hailhq.core.number_offers import CarrierOffer, discover_offers
 from hailhq.core.plans import (
     OVER_PLAN_REF_SUFFIX,
     PLAN_NUMBER_SOURCE,
-    active_plan,
     current_allowance,
     return_number_slot,
     take_number_slot,
@@ -169,18 +168,18 @@ async def finish_order(
             )
         fee_ref = monthly_fee_ref(number.organization_id, number.id, now)
         if plan_cents and not failed:
-            # An order the carrier finished later. With the plan off (a
-            # failed payment), credits pay, as for every included number
-            # (the balance can dip by at most the per-number cap). In a new
-            # month whose row exists, it takes that month's slot if one is
-            # left. Before the billing site writes the new month's row, it
-            # keeps the slot it took.
+            # An order the carrier finished later. The plan pays only from a
+            # month row that covers now: the one whose slot it took, or the
+            # new month's if a slot is left there. Otherwise (the plan is
+            # off, the new month has no row yet or no slot left) the slot
+            # goes back and credits pay, as for any number beyond the plan;
+            # the balance can then dip by at most the per-number cap.
             current = await current_allowance(db, number.organization_id)
             stored = meta["plan_allowance_id"]
-            if await active_plan(db, number.organization_id) is None:
+            if current is None:
                 await return_number_slot(db, UUID(stored))
                 plan_cents = 0
-            elif current is not None and str(current.id) != stored:
+            elif str(current.id) != stored:
                 await return_number_slot(db, UUID(stored))
                 slot = await take_number_slot(
                     db, number.organization_id, offer.monthly_cents
@@ -698,7 +697,7 @@ async def acquire_offer(
             return None
         return HTTPException(
             status_code=402,
-            detail=f"insufficient credits; add at least ${short / 100:.2f} for setup and the first month; top up at {BILLING_URL}",
+            detail=f"insufficient credits; add at least ${short / 100:.2f} (setup and the first month cost ${need / 100:.2f} from credits); top up at {BILLING_URL}",
         )
 
     # Cheap check first so an empty balance never costs a carrier round-trip.

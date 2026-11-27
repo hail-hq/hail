@@ -478,9 +478,12 @@ async def test_purchase_402_names_what_credits_pay(client, async_session, monkey
     assert r.status_code == 402
     # $2.50 less the plan's $1.00, less the $0.10 balance.
     assert "at least $1.40" in r.json()["detail"]
+    assert "cost $1.50 from credits" in r.json()["detail"]
 
 
-async def test_late_order_before_the_new_months_row_keeps_its_slot(async_session):
+async def test_late_order_before_the_new_months_row_is_paid_from_credits(
+    async_session,
+):
     org, _, _ = await insert_org_and_key(async_session, initial_credit_cents=500)
     allowance = await _plan(async_session, org, numbers=1, used_numbers=1)
     # The month ended; the billing site has not written the next one yet.
@@ -494,6 +497,38 @@ async def test_late_order_before_the_new_months_row_keeps_its_slot(async_session
     await finish_order(async_session, number, resource_id="PN_late")
     rows = await _rows(async_session, org)
     fee = monthly_fee_ref(org, number_id, datetime.now(timezone.utc))
-    assert rows[fee].kind == "plan"
+    assert rows[fee].kind == "debit" and rows[fee].amount_cents == -150
     await async_session.refresh(allowance)
-    assert allowance.used_numbers == 1
+    assert allowance.used_numbers == 0
+    await async_session.refresh(number)
+    assert "plan_allowance_id" not in number.provisioning_metadata
+
+
+async def test_late_order_in_a_full_new_month_is_paid_from_credits(async_session):
+    org, _, _ = await insert_org_and_key(async_session, initial_credit_cents=500)
+    current = await _plan(async_session, org, numbers=1, used_numbers=1)
+    old = PlanAllowance(
+        organization_id=org,
+        plan_id=current.plan_id,
+        period_start=current.period_start - timedelta(days=30),
+        period_end=current.period_start,
+        included_minutes=Decimal(0),
+        included_texts=0,
+        included_emails=0,
+        included_numbers=1,
+        used_numbers=1,
+        number_fee_cap_cents=Decimal(200),
+    )
+    async_session.add(old)
+    await async_session.commit()
+    number = await _pending(async_session, org, old)
+    await org_lock(async_session, org)
+    await async_session.refresh(number)
+    number_id = number.id
+    await finish_order(async_session, number, resource_id="PN_late")
+    rows = await _rows(async_session, org)
+    fee = monthly_fee_ref(org, number_id, datetime.now(timezone.utc))
+    assert rows[fee].kind == "debit" and rows[fee].amount_cents == -150
+    await async_session.refresh(current)
+    await async_session.refresh(old)
+    assert (current.used_numbers, old.used_numbers) == (1, 0)

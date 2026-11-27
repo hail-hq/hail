@@ -145,19 +145,16 @@ def upgrade() -> None:
     )
     # The sign rule was created unnamed (Postgres named it
     # account_credits_check); find it by what it checks, whatever its name,
-    # and give it the name the model uses. None found: fail here, not at the
-    # first plan row.
+    # and give it the name the model uses. None or several found (STRICT):
+    # fail here, not at the first plan row.
     op.execute("""
         DO $$
         DECLARE c text;
         BEGIN
-          SELECT conname INTO c FROM pg_constraint
+          SELECT conname INTO STRICT c FROM pg_constraint
            WHERE conrelid = 'account_credits'::regclass AND contype = 'c'
              AND pg_get_constraintdef(oid) LIKE '%amount_cents%'
              AND pg_get_constraintdef(oid) LIKE '%kind%';
-          IF c IS NULL THEN
-            RAISE EXCEPTION 'account_credits sign check not found';
-          END IF;
           EXECUTE format('ALTER TABLE account_credits DROP CONSTRAINT %I', c);
         END
         $$;
