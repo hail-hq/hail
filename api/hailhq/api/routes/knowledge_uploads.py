@@ -455,16 +455,17 @@ async def complete_knowledge_upload(
         doc = await add_document(db, principal, upload, limits, body and body.name)
     except HTTPException as exc:
         await db.rollback()
-        if exc.status_code == http_status.HTTP_404_NOT_FOUND:
-            await _forget(s3, final)
-        elif exc.status_code != http_status.HTTP_503_SERVICE_UNAVAILABLE:
-            await _discard(db, s3, org, upload_id, final)
+        if exc.status_code in (
+            http_status.HTTP_404_NOT_FOUND,
+            http_status.HTTP_503_SERVICE_UNAVAILABLE,
+        ):
+            await _forget_copy(db, s3, upload_id, final)
         else:
-            await _forget(s3, final)
+            await _discard(db, s3, org, upload_id, final)
         raise
     except BaseException:
         await db.rollback()
-        await _forget(s3, final)
+        await _forget_copy(db, s3, upload_id, final)
         raise
     # The browser's own objects (the signed key, any other attempt). After
     # the response; a failure only logs.
@@ -536,6 +537,30 @@ async def _forget(s3: S3MailClient, key: str) -> None:
         logger.warning("knowledge upload: could not delete a copy", exc_info=True)
 
 
+async def _forget_copy(
+    db: AsyncSession, s3: S3MailClient, upload_id: UUID, final: str
+) -> None:
+    """Delete this request's copy unless the upload now points at it: a
+    failure after ``add_document`` committed (its audit log, say) must not
+    delete the document's file."""
+    try:
+        kept = (
+            await db.execute(
+                select(FileUpload.id).where(
+                    FileUpload.id == upload_id, FileUpload.s3_key == final
+                )
+            )
+        ).scalar_one_or_none()
+        await db.rollback()
+    except Exception:
+        logger.warning(
+            "knowledge upload %s: could not check its copy; kept it", upload_id
+        )
+        return
+    if kept is None:
+        await _forget(s3, final)
+
+
 async def _discard(
     db: AsyncSession, s3: S3MailClient, org: UUID, upload_id: UUID, final: str
 ) -> None:
@@ -552,7 +577,7 @@ async def _discard(
     ).scalar_one_or_none()
     await db.commit()
     if gone is None:
-        await _forget(s3, final)
+        await _forget_copy(db, s3, upload_id, final)
         return
     try:
         await delete_upload_objects(s3, gone)
