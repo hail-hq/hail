@@ -11,6 +11,10 @@ Three rules, run on every tick:
   past the hour.
 * An email attachment uploaded and never used by a send within
   ``UNUSED_TTL`` (24h). Used ones are reusable and kept.
+* A knowledge file uploaded and never turned into a document
+  (``POST /knowledge/documents`` sets ``first_used_at``) within
+  ``UNUSED_TTL``. A document's file is deleted with the document; a
+  knowledge base delete marks its uploads used and removes them itself.
 
 Same run_forever/tick shape as OutboundForwardWorker
 (core/hailhq/core/outbound_worker.py), gated in api/hailhq/api/main.py's
@@ -88,7 +92,7 @@ class EmailAttachmentGcWorker:
             )
         )
         deleted += await self._sweep_uploaded(
-            (FileUpload.purpose == "email_attachment")
+            FileUpload.purpose.in_(("email_attachment", "knowledge_document"))
             & FileUpload.first_used_at.is_(None)
             & (FileUpload.uploaded_at < func.statement_timestamp() - UNUSED_TTL)
         )
@@ -103,13 +107,13 @@ class EmailAttachmentGcWorker:
         to retry (see ``OutboundForwardWorker``'s module docstring for the
         same "commit per row" rationale).
 
-        Unlike that worker, GC isn't racing other GC replicas over who
-        "claims" a row — a duplicate ``s3.delete`` and a duplicate
-        ``DELETE ... WHERE id = x`` are both harmless no-ops — so there's no
-        need for ``FOR UPDATE SKIP LOCKED`` or a re-query per row. The batch
-        of stale candidates is listed once, up front, in its own short-lived
-        session, then processed one row (its own S3 delete + DB delete +
-        commit) at a time.
+        The batch of stale candidates is listed once, up front, in its own
+        short-lived session. Each row is then checked again under its row
+        lock (``FOR UPDATE``) before its objects and row are deleted:
+        ``POST /knowledge/documents`` sets ``first_used_at`` under the same
+        lock, and deleting a knowledge upload a document just took would
+        delete the document too (ON DELETE CASCADE). A duplicate S3 delete
+        is harmless, so other GC replicas need no SKIP LOCKED.
         """
         async with self._session_factory() as session:
             stmt = (
@@ -125,17 +129,36 @@ class EmailAttachmentGcWorker:
         s3 = self._get_s3()
         deleted = 0
         for row_id, s3_key in candidates:
-            try:
-                await delete_upload_objects(s3, s3_key)
-            except Exception:
-                logger.warning(
-                    "GC: failed to delete S3 object for upload_id=%s; "
-                    "skipping row deletion this tick",
-                    row_id,
-                    exc_info=True,
-                )
-                continue
             async with self._session_factory() as session:
+                # The rule again, under the row's lock: a request may have
+                # used the upload since the list (POST /knowledge/documents
+                # locks the same row), and deleting a used knowledge upload
+                # would delete its document.
+                still = (
+                    await session.execute(
+                        select(FileUpload.id)
+                        .where(
+                            FileUpload.id == row_id,
+                            FileUpload.uploaded_at.is_not(None),
+                            condition,
+                        )
+                        .with_for_update()
+                    )
+                ).scalar_one_or_none()
+                if still is None:
+                    await session.rollback()
+                    continue
+                try:
+                    await delete_upload_objects(s3, s3_key)
+                except Exception:
+                    await session.rollback()
+                    logger.warning(
+                        "GC: failed to delete S3 object for upload_id=%s; "
+                        "skipping row deletion this tick",
+                        row_id,
+                        exc_info=True,
+                    )
+                    continue
                 await session.execute(delete(FileUpload).where(FileUpload.id == row_id))
                 await session.commit()
             deleted += 1

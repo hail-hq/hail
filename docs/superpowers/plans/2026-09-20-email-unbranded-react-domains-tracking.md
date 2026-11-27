@@ -29,6 +29,7 @@
 ### Task 1: Delete the footer; prove full-document HTML is sent unchanged
 
 **Files:**
+
 - Delete: `core/hailhq/core/email_footer.py`, `core/tests/test_email_footer.py`
 - Modify: `api/hailhq/api/routes/emails.py` (import, docstring ~:300, call ~:315 — pass `email.body_text` / `email.body_html` to the provider), `core/hailhq/core/email_forwarding.py:24,108`, `core/tests/test_email_forwarding.py:207`
 - Test: `core/tests/providers/test_ses_email.py`, the API test file that covers `POST /emails` wire content (find with `grep -rn "Sent via\|append_sent_footer\|Hail.so" api/tests core/tests`)
@@ -41,6 +42,7 @@
 ### Task 2: react-email docs page
 
 **Files:**
+
 - Create: `docs/public/react-email.md`
 - Modify: `docs/public/meta.json` (insert `"react-email"` after `"webhooks"`), `docs/public/README.md` if it lists pages
 
@@ -51,10 +53,12 @@
 ### Task 3: DNS helpers in core
 
 **Files:**
+
 - Modify: `core/hailhq/core/dns_lookup.py`
 - Test: `core/tests/test_dns_lookup.py` (create or extend; mock httpx the way existing `resolve_mx` tests do)
 
 **Interfaces — Produces:**
+
 ```python
 @dataclass(frozen=True)
 class DnsProvider: id: str; name: str; dns_url: str; note: str | None
@@ -65,6 +69,7 @@ def detect_dns_provider(nameservers: list[str]) -> DnsProvider | None
 async def observe_record(record: dict) -> bool            # keys: type, name, value
 async def dmarc_present(zone: str) -> bool                # TXT at _dmarc.<zone> starting "v=DMARC1"
 ```
+
 - [ ] Tests first: zone walk (`inbox.mail.example.com` → `example.com`), each provider suffix from the spec table, unknown NS → `None`, CNAME/MX/TXT observe with trailing dots, quotes and case differences, DoH error → `False` / `[]`, `resolve_mx` keeps raising nothing new for callers (check current callers' expectations before changing its error behaviour; keep it as is if they rely on the raise).
 - [ ] Provider `dns_url`: verify each against the host's own docs with WebFetch. If it cannot be verified, use the host's login page. Cloudflare `note`: "Set Proxy status to DNS only for every CNAME."
 - [ ] Lint + tests green. Commit `feat(core): dns host detection and record observation`.
@@ -72,10 +77,12 @@ async def dmarc_present(zone: str) -> bool                # TXT at _dmarc.<zone>
 ### Task 4: Route `GET /v1/email-domains/{id}/dns-check`
 
 **Files:**
+
 - Modify: `core/hailhq/core/schemas.py` (after `EmailDomainResponse`), `api/hailhq/api/routes/email_domains.py` (register above `GET /{domain_id}` only if path matching needs it), `openapi/openapi.yaml`, `cli/internal/client/client.gen.go`
 - Test: `api/tests/test_email_domains_dns_check.py`
 
 **Interfaces — Produces** (every field carries a `description=`; 0.22.0 made that a rule):
+
 ```python
 class DnsProviderSchema(BaseModel): id: str; name: str; dns_url: str; note: str | None
 class ObservedDnsRecord(DnsRecordSchema): observed: bool
@@ -84,6 +91,7 @@ class EmailDomainDnsCheck(BaseModel):
     dns_provider: DnsProviderSchema | None; zone: str | None
     records: list[ObservedDnsRecord]; dmarc: DmarcCheck
 ```
+
 - [ ] Tests first (monkeypatch the Task 3 functions): happy path; other org → 404; `hail_mail` row → `records: []`, `dns_provider: null`, `dmarc.suggested: null`; DMARC present → `suggested: null`; absent → `{"type":"TXT","name":"_dmarc.<zone>","value":"v=DMARC1; p=none;"}`.
 - [ ] Implement with `asyncio.gather`. Same auth, rate-limit and legacy-path treatment as the sibling `GET /{domain_id}` route.
 - [ ] Regenerate: command at `docs/public/self-host/operations.md:76`, then prettier, then `cd cli && make generate` (read `cli/Makefile` for the real target). `git diff --stat openapi/` must be small.
@@ -92,6 +100,7 @@ class EmailDomainDnsCheck(BaseModel):
 ### Task 5: SDK + CLI
 
 **Files:**
+
 - Modify: `sdk/hail/client.py` (domain class near :509, add `async def dns_check(self, domain_id) -> EmailDomainDnsCheck` in the file's existing style; sync client too if one exists), SDK models/exports, `cli/internal/cmd/email_domain.go` (new `dns-check <id>` subcommand, table output: TYPE NAME VALUE SEEN, plus host line and DMARC line; `--json` as siblings do), `docs/public/cli.md`
 - Test: SDK test next to the existing domain tests; `cli/internal/cmd/email_domain_test.go` in the existing style
 

@@ -225,6 +225,71 @@ def verify(secret: str, signature_header: str, raw_body: bytes) -> bool:
   HTTP tools returns 503.
 - Code: [`http_tool.py`](../../core/hailhq/core/agent_tools/http_tool.py).
 
+## Answer from your documents (knowledge base)
+
+Give an agent your manuals, datasheets, FAQs and part lists. It answers calls, texts and email from them, in the caller's language.
+
+```bash
+# 1. Upload a file (CLI: one command does the upload link, the PUT and the add).
+hail knowledge add northgate-ns5000-manual.pdf
+# → ✓ Document added: 6f1c...  Status: pending
+
+# 2. Wait until it is ready.
+hail knowledge get 6f1c...
+# → Status: ready  Pieces: 42
+
+# 3. Turn the knowledge base on for an agent.
+hail agents update <agent_id> --knowledge
+
+# 4. Check what the agent will find.
+hail knowledge search "what does error E-204 mean"
+```
+
+The knowledge base is in early access. It is off until Hail support turns it on for your workspace; until then adding documents, search and `knowledge: true` on an agent answer `403`. Listing, reading and deleting your documents always work.
+
+### Add a document with the API
+
+```bash
+# 1. A one-time upload link (15 minutes, no key needed for the PUT).
+curl -s "$HAIL_API_URL/v1/uploads" \
+  -H "Authorization: Bearer $HAIL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"purpose": "knowledge_document", "filename": "manual.pdf", "content_type": "application/pdf"}'
+# → {"id": "<upload_id>", "upload_url": "<api>/v1/uploads/<upload_id>?token=...", "max_bytes": 20971520, ...}
+
+# 2. Send the bytes.
+curl --silent --show-error --globoff --upload-file manual.pdf '<upload_url>'
+
+# 3. Add it.
+curl -s "$HAIL_API_URL/v1/knowledge/documents" \
+  -H "Authorization: Bearer $HAIL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"upload_id": "<upload_id>", "name": "NS-5000 manual"}'
+# → {"id": "<document_id>", "status": "pending", ...}
+```
+
+Poll `GET /v1/knowledge/documents/{id}` until `status` is `ready` or `failed` (`error` says why). The full contract is in the [OpenAPI spec](../../openapi/openapi.yaml) under the `knowledge` tag: add, list, get, delete and search.
+
+| Type     | `content_type`                                                            | Read as                               |
+| -------- | ------------------------------------------------------------------------- | ------------------------------------- |
+| PDF      | `application/pdf`                                                         | Text by page. Scans (no text) fail    |
+| Word     | `application/vnd.openxmlformats-officedocument.wordprocessingml.document` | Paragraphs, headings and tables       |
+| Text     | `text/plain`                                                              | Paragraphs                            |
+| Markdown | `text/markdown`                                                           | Paragraphs, `#` headings              |
+| CSV      | `text/csv`                                                                | One piece per row: `Header: value; …` |
+
+Early-access limits per workspace: 10 documents, 20 MB per file, 1,000 pieces. One file gives at most 1,500 pieces whatever the workspace limit; split a larger one. A piece is about 300 to 500 words of text, or one CSV row. Ask Hail support for more.
+
+### What the agent does with it
+
+- **Calls**: when a call starts, Hail loads the workspace's pieces while the greeting plays. On each caller turn it finds the best 3 pieces and gives them to the model with that turn. Filler like "yes, thanks" is not searched, in calls, texts or email. The agent is told to use the pieces only when they answer the question.
+- **Texts and email**: each reply gets the best 5 pieces for the message.
+- **Search** works by meaning and by words together. A question in Italian finds an English manual. Part numbers and error codes match however they are spoken or typed: "NS BAT 48 V 100" finds "NS-BAT-48V-100".
+- Document text is treated as reference data, never as instructions to the agent.
+- Delete a document with `DELETE /v1/knowledge/documents/{id}` (or `hail knowledge delete <id>`): its file and pieces go at once.
+
+In the [MCP server](mcp.md): `create_file_upload` (purpose `knowledge_document`), `add_knowledge_document`, `list_knowledge_documents`, `get_knowledge_document`, `delete_knowledge_document`, `search_knowledge`, and `knowledge` on `create_agent` / `update_agent`. In the Python SDK: `client.knowledge.add_document(...)`, `search(...)`.
+
 ## What happens on an inbound call
 
 1. The carrier sends the call to LiveKit. LiveKit creates a room and

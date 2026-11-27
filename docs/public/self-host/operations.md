@@ -296,7 +296,10 @@ docker compose -f docker-compose.yml -f docker-compose.local.yml run --rm api al
 docker compose -f docker-compose.yml -f docker-compose.local.yml up -d
 ```
 
-**Managed Postgres (Neon / Supabase / RDS / …)** — use only the base file:
+**Managed Postgres (Neon / Supabase / RDS / …)** — use only the base file.
+The database needs the `pgvector` extension (0.5 or newer; the knowledge base
+migration runs `CREATE EXTENSION vector`, into an `extensions` schema when one
+exists, as on Supabase). The bundled container is `pgvector/pgvector`.
 
 ```bash
 # 1. Provision the DB; grab the postgres URL (sslmode=require for most hosted providers)
@@ -804,6 +807,40 @@ burst of legitimate STOPs, not abuse). Otherwise, the next hourly tick
 suspends the org again. There is no cooldown/backoff yet, so a
 persistently-abusive org trips again on the next run. If you see false
 positives, tune `HAIL_SMS_ABUSE_MAX_OPT_OUT_RATE` up.
+
+## Knowledge base
+
+Off for every workspace until you add its limits row. The defaults (10
+documents, 20 MB per file, 1,000 pieces) apply; pass columns to change them:
+
+```bash
+# Turn it on for one workspace
+psql "$DATABASE_URL" -c \
+  "INSERT INTO organization_knowledge (organization_id) VALUES ('<org-uuid>');"
+
+# Turn it off (documents stay; agents stop using them; adding and search
+# answer 403; listing, reading and deleting still work)
+psql "$DATABASE_URL" -c \
+  "DELETE FROM organization_knowledge WHERE organization_id = '<org-uuid>';"
+```
+
+- The API reads uploaded files in its ingest worker (needs `HAIL_MAIL_BUCKET`:
+  files live under `knowledge-documents/` in the mail bucket; the Terraform
+  module grants it).
+- Embeddings come from a hosted, OpenAI-compatible `/embeddings` API. The
+  default is Gemini's (`gemini-embedding-001`, 1536 dimensions) with
+  `GOOGLE_API_KEY`. Another provider: set `HAIL_EMBEDDING_BASE_URL`,
+  `HAIL_EMBEDDING_API_KEY`, `HAIL_EMBEDDING_MODEL` and
+  `HAIL_EMBEDDING_MIN_SIMILARITY`; the ingest worker re-embeds every piece,
+  and keyword search works meanwhile. With no key, the knowledge base
+  searches by keywords only.
+- The database needs pgvector 0.8.0 or later (`halfvec` and iterative
+  index scans).
+- All knowledge data together is capped at 300 MB of live data (each
+  piece's text and search words plus about 6 KB for its vector and row;
+  new uploads answer 409 past it).
+  The abuse monitor also emails `HAIL_SUPPORT_EMAIL` once a day while the
+  whole database is over 200 MB (needs `HAIL_MAIL_BASE_DOMAIN`).
 
 ## Carry-forwards / open work
 

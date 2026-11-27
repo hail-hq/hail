@@ -83,6 +83,7 @@ __all__ = [
     "emails_sent_on_call",
     "finish_reply",
     "is_authenticated",
+    "plain_body",
     "prior_reply",
     "proves_sender",
     "queue_decision",
@@ -786,7 +787,7 @@ def _html_text(body_html: str) -> str:
     return " ".join(" ".join(parser.parts).split())
 
 
-def _plain_body(email: Email) -> str:
+def plain_body(email: Email) -> str:
     body = email.body_text
     if not (body or "").strip() and email.body_html:
         body = _html_text(email.body_html)
@@ -855,13 +856,13 @@ def build_chat_messages(
         if row.direction == "inbound":
             text = (
                 f"Email from {row.from_address}\n"
-                f"Subject: {(row.subject or '')[:MAX_SUBJECT_CHARS]}\n\n{_plain_body(row)}"
+                f"Subject: {(row.subject or '')[:MAX_SUBJECT_CHARS]}\n\n{plain_body(row)}"
             )
             messages.append({"role": "user", "content": text})
         elif _agent_wrote(row):
-            messages.append({"role": "assistant", "content": _plain_body(row)})
+            messages.append({"role": "assistant", "content": plain_body(row)})
         else:
-            text = f"{TEAM_EMAIL_LABEL}\nSubject: {(row.subject or '')[:MAX_SUBJECT_CHARS]}\n\n{_plain_body(row)}"
+            text = f"{TEAM_EMAIL_LABEL}\nSubject: {(row.subject or '')[:MAX_SUBJECT_CHARS]}\n\n{plain_body(row)}"
             messages.append({"role": "user", "content": text})
     return messages
 

@@ -245,6 +245,23 @@ class _HailHTTP:
             return None
         return resp.json()
 
+    async def put_upload(self, upload_url: str, content: bytes) -> Any:
+        """PUT raw bytes to an upload link (``POST /uploads``). The link's
+        token is its only credential: no Authorization header is sent.
+        Never retried, like :meth:`request_multipart`."""
+        client = self._ensure_client()
+        resp = await client.put(
+            upload_url,
+            content=content,
+            headers={
+                "Content-Type": "application/octet-stream",
+                "Accept": "application/json",
+                "User-Agent": "hail-sdk-python",
+            },
+        )
+        _raise_for_status(resp)
+        return resp.json() if resp.content else None
+
 
 def generate_idempotency_key() -> str:
     """Fresh UUIDv4 — used when the caller doesn't pass one explicitly."""

@@ -61,6 +61,7 @@ from hailhq.voicebot.chat_loop import (
     run_chat,
     tool_args,
 )
+from hailhq.voicebot.knowledge import reply_knowledge, with_knowledge
 from hailhq.voicebot.pipeline import ProviderKeyError, build_llm, resolve_org_configs
 from hailhq.voicebot.tools import wrap_tool
 from livekit.agents.llm import FunctionToolCall
@@ -155,7 +156,13 @@ async def _prepare(claimed: ClaimedReply) -> list[dict[str, Any]]:
     """Load the thread on a short session; nothing stays open afterwards."""
     async with session_scope() as db:
         history = await thread_history_for_reply(db, claimed.sms, claimed.agent)
-    return build_chat_messages(claimed.agent, history, clock=reply_clock(claimed.sms))
+    messages = build_chat_messages(
+        claimed.agent, history, clock=reply_clock(claimed.sms)
+    )
+    section = await reply_knowledge(
+        claimed.agent.organization_id, claimed.agent.id, claimed.sms.body or ""
+    )
+    return with_knowledge(messages, section)
 
 
 async def _settle(

@@ -1051,7 +1051,7 @@ def test_html_only_mail_reaches_the_model_as_text():
         body_text=None,
         body_html="<style>x</style><script>y</script><p>Hi &amp; bye</p>",
     )
-    assert email_agent._plain_body(row) == "Hi & bye"
+    assert email_agent.plain_body(row) == "Hi & bye"
 
 
 # Named bodies: a long string as a parameter becomes the test id, and pytest -v
@@ -1071,14 +1071,14 @@ _CRAFTED_HTML = {
 def test_crafted_html_costs_bounded_time(name):
     row = Email(body_text=None, body_html=_CRAFTED_HTML[name])
     started = time.perf_counter()
-    text_out = email_agent._plain_body(row)
+    text_out = email_agent.plain_body(row)
     assert time.perf_counter() - started < 2
     assert len(text_out) <= email_agent.MAX_EMAIL_CHARS
 
 
 def test_html_past_the_cap_is_not_read():
     body = "<p>kept</p>" + " " * email_agent.MAX_HTML_CHARS + "<p>past</p>"
-    assert email_agent._plain_body(Email(body_text=None, body_html=body)) == "kept"
+    assert email_agent.plain_body(Email(body_text=None, body_html=body)) == "kept"
 
 
 @pytest.mark.parametrize(

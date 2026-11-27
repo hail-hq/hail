@@ -89,6 +89,7 @@ _BODY_ID_METHODS = {
     "submit_verification",
     "check_verification",
     "check_verification_documents",
+    "add_knowledge_document",
 }
 
 
@@ -109,6 +110,8 @@ def _id_methods() -> list[tuple[str, list[str]]]:
 
 def test_the_id_method_list_is_the_expected_one() -> None:
     assert {n for n, _ in _id_methods()} == {
+        "get_knowledge_document",
+        "delete_knowledge_document",
         "get_call",
         "route_number",
         "route_email_domain",
