@@ -79,6 +79,15 @@ data "aws_iam_policy_document" "main" {
     resources = ["${aws_s3_bucket.inbound.arn}/knowledge-documents/*"]
   }
 
+  # Direct uploads from the console (routes/knowledge_uploads.py): the API
+  # presigns multipart requests, so its user needs every multipart right.
+  # PutObject covers starting, sending parts and finishing.
+  statement {
+    sid       = "KnowledgeDocumentsMultipart"
+    actions   = ["s3:AbortMultipartUpload", "s3:ListMultipartUploadParts"]
+    resources = ["${aws_s3_bucket.inbound.arn}/knowledge-documents/*"]
+  }
+
   # Deleting a document lists its attempt objects; deleting a workspace's
   # knowledge base (account closure) lists its folder.
   statement {

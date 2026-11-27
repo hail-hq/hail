@@ -12,6 +12,7 @@ import regex
 from hailhq.core.contact_ids import normalize_contact_id
 from hailhq.core.file_uploads import (
     KNOWLEDGE_FILE_TYPES,
+    KNOWLEDGE_MAX_FILE_BYTES,
     VERIFICATION_FILE_TYPES,
     Purpose,
     valid_content_type,
@@ -4314,6 +4315,148 @@ class KnowledgeDocumentCreate(BaseModel):
             "PUT), stored and not yet used by another document."
         )
     )
+    name: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=255,
+        description="Display name. Omitted: the upload's filename.",
+    )
+
+    @field_validator("name")
+    @classmethod
+    def _name_printable(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip()
+        if not v or any(ord(c) < 0x20 or ord(c) == 0x7F for c in v):
+            raise ValueError("name must be printable and not blank")
+        return v
+
+
+class KnowledgeUploadCreate(BaseModel):
+    """Body of ``POST /knowledge/uploads``: the file a browser will send
+    straight to storage."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    filename: str = Field(
+        min_length=1,
+        max_length=255,
+        description="The file's name, 1 to 255 chars, no control characters.",
+    )
+    content_type: str = Field(
+        description=(
+            "`application/pdf`, "
+            "`application/vnd.openxmlformats-officedocument.wordprocessingml.document`, "
+            "`text/plain`, `text/markdown` or `text/csv`. The upload must "
+            "send this type."
+        )
+    )
+    size_bytes: int = Field(
+        ge=1,
+        le=KNOWLEDGE_MAX_FILE_BYTES,
+        description=(
+            "The file's size in bytes. At most the workspace's file limit; "
+            "the stored file must have exactly this size."
+        ),
+    )
+
+    @field_validator("filename")
+    @classmethod
+    def _filename_printable(cls, v: str) -> str:
+        if any(ord(c) < 0x20 or ord(c) == 0x7F for c in v):
+            raise ValueError("filename must not contain control characters")
+        return v
+
+    @field_validator("content_type")
+    @classmethod
+    def _knowledge_type(cls, v: str) -> str:
+        if v not in KNOWLEDGE_FILE_TYPES:
+            raise ValueError(
+                "content_type must be one of: " + ", ".join(KNOWLEDGE_FILE_TYPES)
+            )
+        return v
+
+
+class KnowledgeUploadResponse(BaseModel):
+    """Returned by ``POST /knowledge/uploads``: a reserved storage key."""
+
+    id: UUID = Field(description="The upload's id, for `/sign` and `/complete`.")
+    key: str = Field(
+        description=(
+            "The storage key Hail chose for the file. Every signed request is "
+            "for this key."
+        )
+    )
+    content_type: str = Field(description="The type the upload must send.")
+    max_bytes: int = Field(description="The workspace's file limit in bytes.")
+    expires_at: datetime = Field(
+        description=(
+            "Sign requests until then. Call `/complete` at most 15 minutes " "later."
+        )
+    )
+
+
+class KnowledgeUploadSign(BaseModel):
+    """Body of ``POST /knowledge/uploads/{id}/sign``: one storage request to
+    sign. The six allowed shapes are `PUT` (put the whole file), `POST`
+    (start a multipart upload), `PUT` with `s3_upload_id` and `part_number`
+    (one part), `GET` with `s3_upload_id` (list parts), `POST` with
+    `s3_upload_id` (finish the multipart upload) and `DELETE` with
+    `s3_upload_id` (cancel it)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    method: Literal["PUT", "POST", "GET", "DELETE"] = Field(
+        description="The HTTP method of the storage request."
+    )
+    s3_upload_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=1024,
+        pattern=r"^[A-Za-z0-9._~-]+$",
+        description="The multipart upload id storage returned. Multipart requests only.",
+    )
+    part_number: int | None = Field(
+        default=None,
+        ge=1,
+        le=10000,
+        description="The part number, from 1. Part uploads only.",
+    )
+
+    @model_validator(mode="after")
+    def _one_of_six(self) -> "KnowledgeUploadSign":
+        if self.part_number is not None and not (
+            self.method == "PUT" and self.s3_upload_id is not None
+        ):
+            raise ValueError("part_number goes only with PUT and s3_upload_id")
+        if (
+            self.method == "PUT"
+            and self.s3_upload_id is not None
+            and self.part_number is None
+        ):
+            raise ValueError("a part upload needs part_number")
+        if self.method in ("GET", "DELETE") and self.s3_upload_id is None:
+            raise ValueError(f"{self.method} needs s3_upload_id")
+        return self
+
+
+class KnowledgeUploadSignResponse(BaseModel):
+    """A presigned storage URL for one request."""
+
+    url: str = Field(description="Send the request to this URL.")
+    key: str = Field(description="The upload's storage key.")
+    headers: dict[str, str] = Field(
+        description="Send these headers with the request, exactly."
+    )
+    expires_at: datetime = Field(description="The URL works until then.")
+
+
+class KnowledgeUploadComplete(BaseModel):
+    """Body of ``POST /knowledge/uploads/{id}/complete``."""
+
+    model_config = ConfigDict(extra="forbid")
+
     name: str | None = Field(
         default=None,
         min_length=1,

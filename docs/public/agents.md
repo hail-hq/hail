@@ -270,6 +270,16 @@ curl -s "$HAIL_API_URL/v1/knowledge/documents" \
 
 Poll `GET /v1/knowledge/documents/{id}` until `status` is `ready` or `failed` (`error` says why). The full contract is in the [OpenAPI spec](../../openapi/openapi.yaml) under the `knowledge` tag: add, list, get, delete and search.
 
+### Add a document from a browser
+
+A web page can send the file straight to storage, without the bytes passing through the API. This flow suits [Uppy's `@uppy/aws-s3`](https://uppy.io/docs/aws-s3/) `signRequest`:
+
+1. `POST /v1/knowledge/uploads` with `{"filename", "content_type", "size_bytes"}` reserves a storage `key` (15 minutes).
+2. For each storage request, call `POST /v1/knowledge/uploads/{id}/sign` with `{"method", "s3_upload_id", "part_number"}`. It returns `{"url", "key", "headers"}`. Send the request to `url` with those `headers`. It signs a whole-file `PUT`, plus the multipart steps: start, part, list, finish, cancel.
+3. `POST /v1/knowledge/uploads/{id}/complete` checks the stored file's size, type and first bytes, then answers like `POST /v1/knowledge/documents`. A file that does not match is deleted (`422`).
+
+`DELETE /v1/knowledge/uploads/{id}` cancels an upload. One never completed is deleted by itself after it expires. Self-hosting: list your web origins in `HAIL_ASSET_ALLOWED_ORIGINS`, then run `terragrunt apply`. This sets the bucket's CORS rules.
+
 | Type     | `content_type`                                                            | Read as                               |
 | -------- | ------------------------------------------------------------------------- | ------------------------------------- |
 | PDF      | `application/pdf`                                                         | Text by page. Scans (no text) fail    |
