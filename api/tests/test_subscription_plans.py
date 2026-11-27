@@ -9,9 +9,11 @@ from decimal import Decimal
 from unittest.mock import AsyncMock
 
 import pytest
+from hailhq.api.number_orders import finish_order
 from hailhq.core.billing import get_balance_cents, has_funds, monthly_fee_ref
 from hailhq.core.call_allowance import hold_parts, plan_minutes_left, plan_split
 from hailhq.core.config import settings
+from hailhq.core.db import org_lock
 from hailhq.core.internal_webhook import CallQuote
 from hailhq.core.models import (
     AccountCredit,
@@ -20,6 +22,7 @@ from hailhq.core.models import (
     NumberOffer,
     OrganizationCallSettings,
     OrganizationPlan,
+    PhoneNumber,
     PlanAllowance,
 )
 from hailhq.core.number_offers import CarrierOffer
@@ -381,3 +384,88 @@ async def test_numbers_beyond_the_plan_are_paid_from_credits(
     await _plan(async_session, org, numbers=1, used_numbers=1)
     r = await _buy(client, async_session, monkeypatch, org, key, monthly=115)
     assert r.status_code == 402
+
+
+async def _pending(session, org, allowance, *, monthly=150, plan_cents=150):
+    offer = CarrierOffer(
+        provider="twilio",
+        e164=f"+1415555{uuid.uuid4().int % 10000:04d}",
+        country_code="US",
+        number_type="local",
+        capabilities=["voice"]  # no SMS setup step,
+        monthly_cents=monthly,
+        setup_cents=0,
+        readiness="ready",
+    )
+    number = PhoneNumber(
+        organization_id=org,
+        e164=offer.e164,
+        country_code="US",
+        number_type="local",
+        capabilities=offer.capabilities,
+        provider="twilio",
+        provisioning_state="pending",
+        provisioning_metadata={
+            "offer": offer.model_dump(mode="json"),
+            "billed": True,
+            "plan_allowance_id": str(allowance.id),
+            "plan_cents": plan_cents,
+        },
+    )
+    session.add(number)
+    await session.commit()
+    return number
+
+
+async def test_late_order_after_the_plan_stopped_is_paid_from_credits(
+    async_session,
+):
+    org, _, _ = await insert_org_and_key(async_session, initial_credit_cents=500)
+    allowance = await _plan(async_session, org, numbers=1, used_numbers=1)
+    number = await _pending(async_session, org, allowance)
+    plan = await async_session.get(OrganizationPlan, allowance.plan_id)
+    plan.status = "past_due"
+    await async_session.commit()
+    await org_lock(async_session, org)
+    await finish_order(async_session, number, resource_id="PN_late")
+    rows = await _rows(async_session, org)
+    fee = monthly_fee_ref(org, number.id, datetime.now(timezone.utc))
+    assert rows[fee].kind == "debit" and rows[fee].amount_cents == -150
+    await async_session.refresh(allowance)
+    assert allowance.used_numbers == 0
+
+
+async def test_late_order_in_a_new_month_takes_that_months_slot(async_session):
+    org, _, _ = await insert_org_and_key(async_session, initial_credit_cents=500)
+    current = await _plan(async_session, org, numbers=1)
+    old = PlanAllowance(
+        organization_id=org,
+        plan_id=current.plan_id,
+        period_start=current.period_start - timedelta(days=30),
+        period_end=current.period_start,
+        included_minutes=Decimal(0),
+        included_texts=0,
+        included_emails=0,
+        included_numbers=1,
+        used_numbers=1,
+        number_fee_cap_cents=Decimal(200),
+    )
+    async_session.add(old)
+    await async_session.commit()
+    number = await _pending(async_session, org, old)
+    await org_lock(async_session, org)
+    await finish_order(async_session, number, resource_id="PN_late")
+    rows = await _rows(async_session, org)
+    fee = monthly_fee_ref(org, number.id, datetime.now(timezone.utc))
+    assert rows[fee].kind == "plan"
+    await async_session.refresh(current)
+    await async_session.refresh(old)
+    assert (current.used_numbers, old.used_numbers) == (1, 0)
+
+
+async def test_purchase_402_names_what_credits_pay(client, async_session, monkeypatch):
+    org, _, key = await insert_org_and_key(async_session, initial_credit_cents=10)
+    await _plan(async_session, org, numbers=1, cap=100)
+    r = await _buy(client, async_session, monkeypatch, org, key, monthly=250)
+    assert r.status_code == 402
+    assert "$1.50 from credits" in r.json()["detail"]

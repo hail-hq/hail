@@ -168,12 +168,18 @@ async def finish_order(
             )
         fee_ref = monthly_fee_ref(number.organization_id, number.id, now)
         if plan_cents and not failed:
-            # An order the carrier finished later: the plan pays only if the
-            # month whose slot it took is still the current, paid one.
+            # An order the carrier finished later: its slot belongs to the
+            # month it was ordered in. In a new month it takes that month's
+            # slot if one is left. With the plan off (a failed payment),
+            # credits pay, as for every included number; the balance can
+            # then dip by at most the plan's per-number cap.
             current = await current_allowance(db, number.organization_id)
             if current is None or str(current.id) != meta["plan_allowance_id"]:
                 await return_number_slot(db, UUID(meta["plan_allowance_id"]))
-                plan_cents = 0
+                slot = await take_number_slot(
+                    db, number.organization_id, offer.monthly_cents
+                )
+                plan_cents = slot[1] if slot else 0
         if failed and plan_cents:
             await return_number_slot(db, UUID(meta["plan_allowance_id"]))
         elif not failed and plan_cents:
@@ -663,35 +669,29 @@ async def acquire_offer(
         )
     approval = pick_approval(offer, subject_type, verification_id)
     total = offer.monthly_cents + offer.setup_cents
-    # What credits pay: an included plan number pays (part of) its first
-    # month (hailhq.core.plans). Read again under the lock below.
-    slot = (
-        await take_number_slot(db, org, offer.monthly_cents, take=False)
-        if billed
-        else None
-    )
-    no_funds = HTTPException(
-        status_code=402,
-        detail=f"insufficient credits; setup and the first month cost ${(total - (slot[1] if slot else 0)) / 100:.2f} from credits; top up at {BILLING_URL}",
-    )
 
-    async def short_of_funds() -> bool:
-        """The balance plus the credit the chosen verification set aside
-        (it pays for this purchase) is below the total, less what an
-        included plan number pays toward the first month."""
+    async def short_of_funds() -> HTTPException | None:
+        """A 402 when the balance plus the credit the chosen verification
+        set aside (it pays for this purchase) is below what credits pay: the
+        total, less what an included plan number pays toward the first
+        month (hailhq.core.plans)."""
         held = (
             await verification_hold.open_hold_cents(db, org, approval.row_id)
             if approval is not None
             else 0
         )
         slot = await take_number_slot(db, org, offer.monthly_cents, take=False)
-        return await get_balance_cents(db, org) + held < total - (
-            slot[1] if slot else 0
+        need = total - (slot[1] if slot else 0)
+        if await get_balance_cents(db, org) + held >= need:
+            return None
+        return HTTPException(
+            status_code=402,
+            detail=f"insufficient credits; setup and the first month cost ${need / 100:.2f} from credits; top up at {BILLING_URL}",
         )
 
     # Cheap check first so an empty balance never costs a carrier round-trip.
     # Re-checked under the lock below, after the slow discovery.
-    if billed and await short_of_funds():
+    if billed and (no_funds := await short_of_funds()):
         raise no_funds
     # Hail's rows decide which approvals exist now; the carrier re-check
     # below only confirms they are still valid.
@@ -752,7 +752,7 @@ async def acquire_offer(
     if row.number_id:
         # A concurrent request consumed this quote while we were checking.
         return await db.get(PhoneNumber, row.number_id)
-    if billed and await short_of_funds():
+    if billed and (no_funds := await short_of_funds()):
         raise no_funds
     existing = (
         await db.execute(
