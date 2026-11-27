@@ -11,6 +11,14 @@ live hold. A handover dial adds the second line's price and grows the hold.
 
 Billing rounds carrier minutes up, so the cap is whole minutes less
 ``SAFETY_SECONDS`` for the goodbye the voicebot says when the cap fires.
+
+A workspace's plan pays too (hailhq.core.plans). The quote says how many
+plan minutes a call minute uses and what part of its price they pay
+(``CallQuote``). A call first runs on the plan minutes left (the month's
+less what it used less every live call's plan hold), paying only the rest
+of the price from the balance, then on the balance alone. The hold keeps
+both parts: ``cents`` from the balance and ``plan_minutes`` from the plan.
+With no plan, or a quote without the plan fields, it is the balance alone.
 """
 
 from __future__ import annotations
@@ -20,6 +28,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
+from hailhq.core.internal_webhook import CallQuote
 from hailhq.core.models import CallBalanceHold
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
 from sqlalchemy import bindparam, case, func, null, or_, select, text
@@ -71,6 +80,50 @@ def minutes_affordable(
     return minutes
 
 
+def _floor_tenth(cents: Decimal) -> Decimal:
+    return Decimal(math.floor(cents * 10)) / 10
+
+
+def plan_split(
+    available_cents: Decimal,
+    plan_minutes: Decimal,
+    quote: CallQuote,
+    fee: Decimal,
+) -> tuple[int, int]:
+    """Whole minutes a call may run on ``plan_minutes`` (plan minutes left)
+    and ``available_cents`` together, and how many of them the plan pays.
+    The balance pays ``fee`` once, ``cents_per_minute -
+    plan_cents_per_minute`` for each plan-paid minute, and the full price
+    after them; ``hold_parts`` stores what this allows."""
+    weight = quote.plan_minutes_per_minute
+    per_minute = quote.cents_per_minute
+    on_plan = int(plan_minutes // weight) if weight > 0 and plan_minutes > 0 else 0
+    if on_plan == 0:
+        return minutes_affordable(available_cents, per_minute, fee), 0
+    rest_price = per_minute - quote.plan_cents_per_minute
+    if rest_price > 0:
+        covered = min(on_plan, minutes_affordable(available_cents, rest_price, fee))
+    elif fee == 0 or round_up_tenth(fee) <= _floor_tenth(available_cents):
+        covered = on_plan
+    else:
+        covered = 0
+    if covered < on_plan:
+        return covered, covered
+    after = minutes_affordable(available_cents, per_minute, fee + rest_price * on_plan)
+    return on_plan + after, on_plan
+
+
+def hold_parts(
+    quote: CallQuote, fee: Decimal, billed: int, on_plan: int
+) -> tuple[Decimal, Decimal]:
+    """What ``billed`` minutes set aside, the first ``on_plan`` of them paid
+    by the plan: ``(cents from the balance, plan minutes)``."""
+    paid = min(billed, on_plan)
+    rest_price = quote.cents_per_minute - quote.plan_cents_per_minute
+    cents = fee + rest_price * paid + quote.cents_per_minute * (billed - paid)
+    return cents, quote.plan_minutes_per_minute * paid
+
+
 def cap_seconds(minutes: int, extra: int = 0) -> int:
     """The time limit that ``minutes`` paid minutes allow, less the goodbye
     and ``extra`` seconds billed outside the limit (0 when none left)."""
@@ -108,21 +161,19 @@ def hold_until(now: datetime, seconds: int) -> datetime:
 # A call in a final status with no end time counts from its last update.
 # A voice ref is the call id, plus an optional ':<suffix>' (the rater
 # parses it the same way); usage_events_voice_ref_idx serves the match.
-_HELD_QUERY = """
+# The plan minutes a hold counts follow the same branches, except that an
+# ended, unpriced call counts all of them (the rater settles them).
+_HELD_TEMPLATE = """
     SELECT COALESCE(SUM(
       CASE
         WHEN c.ended_at IS NULL AND c.status NOT IN :terminal THEN
-          CASE WHEN h.hold_until > :now THEN h.cents ELSE 0 END
+          CASE WHEN h.hold_until > :now THEN h.{col} ELSE 0 END
         WHEN NOT (c.answered_at IS NOT NULL OR c.status = 'completed') THEN 0
         WHEN u.unpriced THEN
-          CASE WHEN h.hold_until > :unpriced_until THEN LEAST(
-            h.cents,
-            h.cents_per_minute * (CEIL(u.ms / 60000.0) + 1 + h.dials)
-              + h.cents_per_call * (1 + h.dials)
-          ) ELSE 0 END
+          CASE WHEN h.hold_until > :unpriced_until THEN {unpriced} ELSE 0 END
         WHEN u.unpriced IS NULL
           AND h.hold_until > :now
-          AND COALESCE(c.ended_at, c.updated_at) > :debit_window THEN h.cents
+          AND COALESCE(c.ended_at, c.updated_at) > :debit_window THEN h.{col}
         ELSE 0
       END
     ), 0)
@@ -141,6 +192,18 @@ _HELD_QUERY = """
       -- No branch counts a hold this old; skip its usage lookup.
       AND h.hold_until > :unpriced_until
 """
+_HELD_QUERY = _HELD_TEMPLATE.format(
+    col="cents",
+    unpriced="""LEAST(
+            h.cents,
+            h.cents_per_minute * (CEIL(u.ms / 60000.0) + 1 + h.dials)
+              + h.cents_per_call * (1 + h.dials)
+          )""",
+)
+_HELD_PLAN_QUERY = (
+    _HELD_TEMPLATE.format(col="plan_minutes", unpriced="h.plan_minutes")
+    + "      AND h.plan_minutes > 0\n"
+)
 _HELD_SQL = text(_HELD_QUERY).bindparams(bindparam("terminal", expanding=True))
 
 # The ledger and the holds in one statement, so both come from the same
@@ -149,6 +212,23 @@ _HELD_SQL = text(_HELD_QUERY).bindparams(bindparam("terminal", expanding=True))
 _AVAILABLE_SQL = text(
     "SELECT (SELECT COALESCE(SUM(amount_cents), 0) FROM account_credits"
     " WHERE organization_id = :org) - (" + _HELD_QUERY + ")"
+).bindparams(bindparam("terminal", expanding=True))
+
+
+# The plan minutes left this month: included less used less every live
+# call's plan hold, in one statement, so a rater commit (it raises
+# used_minutes and stamps the usage priced together) is counted once. NULL
+# when the plan is off or no month covers now.
+_PLAN_LEFT_SQL = text(
+    "SELECT a.included_minutes - a.used_minutes - (" + _HELD_PLAN_QUERY + """)
+    FROM plan_allowances a
+    JOIN organization_plans p ON p.id = a.plan_id
+    WHERE a.organization_id = :org
+      AND a.period_start <= :now AND a.period_end > :now
+      AND p.ended_at IS NULL AND p.status = 'active'
+    ORDER BY a.period_start DESC
+    LIMIT 1
+    """
 ).bindparams(bindparam("terminal", expanding=True))
 
 
@@ -195,6 +275,23 @@ async def available_cents(
     return Decimal(result.scalar_one())
 
 
+async def plan_minutes_left(
+    db: AsyncSession,
+    organization_id: uuid.UUID,
+    *,
+    exclude: uuid.UUID | None = None,
+    now: datetime | None = None,
+) -> Decimal:
+    """The plan minutes the workspace's live calls have not set aside yet
+    this month (0 with no plan). Take ``org_lock`` first, as for
+    ``available_cents``."""
+    now = now or datetime.now(UTC)
+    left = (
+        await db.execute(_PLAN_LEFT_SQL, _held_params(organization_id, exclude, now))
+    ).scalar_one_or_none()
+    return max(Decimal(left or 0), Decimal(0))
+
+
 async def hold(
     db: AsyncSession,
     call_id: uuid.UUID,
@@ -204,6 +301,7 @@ async def hold(
     cents_per_minute: Decimal | None,
     cents_per_call: Decimal | None,
     dial: bool = False,
+    plan_minutes: Decimal = Decimal(0),
 ) -> None:
     """Set aside ``cents`` for a call until ``until``, or grow its hold to
     at least that: a hold never shrinks, even when two handovers race. The
@@ -211,7 +309,8 @@ async def hold(
     (the highest held for the call is kept) set what the hold counts once
     the call ends (_HELD_SQL). None means a price Hail does not know: the
     full hold counts, and the prices stay None from then on. ``dial``
-    counts one more approved handover dial. Also deletes up to 100 holds a
+    counts one more approved handover dial. ``plan_minutes`` sets aside
+    plan minutes the same way (only grows). Also deletes up to 100 holds a
     day past their end, skipping rows another transaction has locked, so no
     call waits on another's cleanup."""
     await db.execute(_PRUNE_SQL, {"days": UNPRICED_HOLD_DAYS})
@@ -222,6 +321,7 @@ async def hold(
         cents_per_minute=cents_per_minute,
         cents_per_call=cents_per_call,
         dials=1 if dial else 0,
+        plan_minutes=plan_minutes,
     )
     await db.execute(
         stmt.on_conflict_do_update(
@@ -238,6 +338,9 @@ async def hold(
                     CallBalanceHold.cents_per_call, stmt.excluded.cents_per_call
                 ),
                 "dials": CallBalanceHold.dials + stmt.excluded.dials,
+                "plan_minutes": func.greatest(
+                    CallBalanceHold.plan_minutes, stmt.excluded.plan_minutes
+                ),
             },
         )
     )

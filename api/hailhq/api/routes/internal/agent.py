@@ -25,6 +25,7 @@ import asyncio
 import logging
 import re
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from math import ceil
 from typing import Annotated, Any, Literal
 from uuid import UUID
@@ -74,9 +75,11 @@ from hailhq.core.call_allowance import (
     forget_price,
     handover_dials,
     hold,
+    hold_parts,
     hold_until,
-    minutes_affordable,
     paid_minutes,
+    plan_minutes_left,
+    plan_split,
 )
 from hailhq.core.carrier_routing import PBX, voice_route
 from hailhq.core.compliance_gate import (
@@ -2235,7 +2238,7 @@ async def _handover_cap(
         )
         await db.commit()
         return None
-    per_minute, per_call = both
+    per_minute, per_call = both.cents_per_minute, both.cents_per_call
     await org_lock(db, call.organization_id)
     # Read under the lock: each earlier approved dial is counted, even one
     # whose result the voicebot has not posted yet.
@@ -2247,16 +2250,32 @@ async def _handover_cap(
     # minute (it picked up and failed the pickup check) and its per-call fee.
     # Counted for every dial: Hail cannot tell which ones picked up, so it
     # holds more.
+    talked = used + HANDOVER_RING_MINUTES
+    # The workspace's plan pays first (hailhq.core.call_allowance): the time
+    # talked and the ring at the call's own plan share, then the handover.
+    plan_left = (
+        await plan_minutes_left(db, call.organization_id, exclude=call.id, now=now)
+        if both.plan_minutes_per_minute > 0 or alone.plan_minutes_per_minute > 0
+        else Decimal(0)
+    )
+    talked_on_plan = (
+        min(talked, int(plan_left // alone.plan_minutes_per_minute))
+        if alone.plan_minutes_per_minute > 0
+        else 0
+    )
+    plan_left -= alone.plan_minutes_per_minute * talked_on_plan
     spent = (
-        alone[0] * (used + HANDOVER_RING_MINUTES)
-        + (per_minute - alone[0] + per_call - alone[1]) * tries
+        alone.cents_per_minute * talked
+        - alone.plan_cents_per_minute * talked_on_plan
+        + (per_minute - alone.cents_per_minute + per_call - alone.cents_per_call)
+        * tries
         + per_call
     )
     available = await available_cents(
         db, call.organization_id, exclude=call.id, now=now
     )
     # spent goes in as the fee, so the check rounds the same sum hold() stores.
-    affordable = minutes_affordable(available, per_minute, spent)
+    affordable, on_plan = plan_split(available, plan_left, both, spent)
     # Both lines run from pickup; the limit starts after the pickup check.
     seconds = min(cap_seconds(affordable, HANDOVER_PICKUP_SECONDS), limit)
     if seconds < HANDOVER_MIN_SECONDS:
@@ -2264,16 +2283,18 @@ async def _handover_cap(
     if seconds > 0:
         # Hold only the minutes the handover can use.
         minutes = paid_minutes(seconds, HANDOVER_PICKUP_SECONDS)
+        cents, plan = hold_parts(both, spent, minutes, on_plan)
         await hold(
             db,
             call.id,
-            spent + per_minute * minutes,
+            cents,
             hold_until(
                 now, (HANDOVER_RING_MINUTES * 60) + HANDOVER_PICKUP_SECONDS + seconds
             ),
             cents_per_minute=per_minute,
             cents_per_call=per_call,
             dial=True,
+            plan_minutes=alone.plan_minutes_per_minute * talked_on_plan + plan,
         )
     await db.commit()
     return seconds

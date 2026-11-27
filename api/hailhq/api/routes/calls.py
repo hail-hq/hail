@@ -45,9 +45,11 @@ from hailhq.core.call_allowance import (
     available_cents,
     cap_seconds,
     hold,
+    hold_parts,
     hold_until,
-    minutes_affordable,
     paid_minutes,
+    plan_minutes_left,
+    plan_split,
 )
 from hailhq.core.call_analysis import call_transcript
 from hailhq.core.call_end_reasons import CallEndReason
@@ -199,10 +201,10 @@ async def _cap_to_balance(
     max_duration_seconds: int,
     *,
     legs: list[dict[str, str]],
-) -> tuple[int, tuple[Decimal, datetime, Decimal, Decimal] | None]:
-    """Shorten the call's time limit to what the balance pays for, and the
-    hold to set aside for it (cents, until, the price per minute and per
-    call; see hailhq.core.call_allowance).
+) -> tuple[int, tuple[Decimal, datetime, Decimal, Decimal, Decimal] | None]:
+    """Shorten the call's time limit to what the plan and the balance pay
+    for, and the hold to set aside for it (cents, until, the price per
+    minute and per call, plan minutes; see hailhq.core.call_allowance).
     Takes the org lock, held until the call row is committed. 402 when the
     balance does not pay for one minute. When the price is unknown (the
     quote failed), the limit is at most the default and nothing is held."""
@@ -219,11 +221,16 @@ async def _cap_to_balance(
             ),
             None,
         )
-    per_minute, per_call = quote
+    per_minute, per_call = quote.cents_per_minute, quote.cents_per_call
     await org_lock(db, org)
     now = datetime.now(timezone.utc)
-    minutes = minutes_affordable(
-        await available_cents(db, org, now=now), per_minute, per_call
+    on_plan_left = (
+        await plan_minutes_left(db, org, now=now)
+        if quote.plan_minutes_per_minute > 0
+        else Decimal(0)
+    )
+    minutes, on_plan = plan_split(
+        await available_cents(db, org, now=now), on_plan_left, quote, per_call
     )
     if minutes < 1:
         await db.rollback()
@@ -249,13 +256,8 @@ async def _cap_to_balance(
             detail=_NO_FUNDS_FOR_DESTINATION,
         )
     seconds = _shorter_limit(max_duration_seconds, cap_seconds(minutes))
-    billed = paid_minutes(seconds)
-    return seconds, (
-        per_minute * billed + per_call,
-        hold_until(now, seconds),
-        per_minute,
-        per_call,
-    )
+    cents, plan = hold_parts(quote, per_call, paid_minutes(seconds), on_plan)
+    return seconds, (cents, hold_until(now, seconds), per_minute, per_call, plan)
 
 
 async def _cleanup_partial_livekit(
@@ -629,7 +631,7 @@ async def create_call(
     if pool_number is not None:
         pool_number.reserved_call_id = call.id
     if balance_hold is not None:
-        cents, until, per_minute, per_call = balance_hold
+        cents, until, per_minute, per_call, plan = balance_hold
         await hold(
             db,
             call.id,
@@ -637,6 +639,7 @@ async def create_call(
             until,
             cents_per_minute=per_minute,
             cents_per_call=per_call,
+            plan_minutes=plan,
         )
 
     await db.commit()

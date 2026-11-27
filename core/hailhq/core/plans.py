@@ -21,11 +21,12 @@ from typing import Final, Literal
 
 from hailhq.core.internal_webhook import quotes_enabled
 from hailhq.core.models import OrganizationPlan, PlanAllowance
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = [
     "FEATURE_TIERS",
+    "OVER_PLAN_REF_SUFFIX",
     "PLAN_LEDGER_SOURCE",
     "PLAN_NUMBER_SOURCE",
     "Feature",
@@ -36,6 +37,8 @@ __all__ = [
     "plan_allows",
     "plan_covers",
     "plan_usage_ref",
+    "return_number_slot",
+    "take_number_slot",
 ]
 
 Feature = Literal["porting", "connected_phone_systems"]
@@ -50,6 +53,10 @@ FEATURE_TIERS: Final[dict[str, frozenset[str]]] = {
 # account_credits.source of "paid from plan" rows (kind = 'plan').
 PLAN_LEDGER_SOURCE: Final = "plan"
 PLAN_NUMBER_SOURCE: Final = "plan.monthly_fee"
+# A number's monthly fee above the plan's per-number cap is a debit with the
+# month's fee ref plus this; the plan row takes the fee ref itself, so the
+# billing site's renewal rater sees the month as billed.
+OVER_PLAN_REF_SUFFIX: Final = ":over_plan"
 
 
 def plan_usage_ref(ref: str) -> str:
@@ -145,3 +152,37 @@ async def plan_allows(
         return True
     plan = await active_plan(db, organization_id)
     return plan is not None and plan.tier in FEATURE_TIERS[feature]
+
+
+async def take_number_slot(
+    db: AsyncSession,
+    organization_id: uuid.UUID,
+    monthly_cents: int,
+    *,
+    take: bool = True,
+) -> tuple[uuid.UUID, int] | None:
+    """Take one of this month's included numbers for a number being bought:
+    ``(allowance id, whole cents the plan pays toward its first month)``, or
+    None when the plan is off or every included number is taken. The plan
+    pays at most ``number_fee_cap_cents``; the rest is paid from credits.
+    ``take=False`` only reads (an early funds check). The caller holds
+    ``org_lock`` (the billing site's monthly fee rater takes it too) and
+    gives the slot back with ``return_number_slot`` if the order fails."""
+    row = await current_allowance(db, organization_id, for_update=take)
+    if row is None or row.used_numbers >= row.included_numbers:
+        return None
+    plan_cents = min(monthly_cents, int(Decimal(row.number_fee_cap_cents)))
+    if plan_cents <= 0:
+        return None
+    if take:
+        row.used_numbers += 1
+    return row.id, plan_cents
+
+
+async def return_number_slot(db: AsyncSession, allowance_id: uuid.UUID) -> None:
+    """Give back a slot ``take_number_slot`` took (the order failed)."""
+    await db.execute(
+        update(PlanAllowance)
+        .where(PlanAllowance.id == allowance_id, PlanAllowance.used_numbers > 0)
+        .values(used_numbers=PlanAllowance.used_numbers - 1)
+    )
