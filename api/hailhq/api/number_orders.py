@@ -176,6 +176,7 @@ async def finish_order(
                 db, number.organization_id, offer.monthly_cents, number.id
             )
         )
+        meta["plan_cents"] = plan_cents
         if plan_cents:
             db.add(plan_paid(number, fee_ref))
             if offer.monthly_cents > plan_cents:

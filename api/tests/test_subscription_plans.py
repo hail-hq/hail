@@ -391,22 +391,22 @@ async def test_numbers_beyond_the_plan_are_paid_from_credits(
     assert r.status_code == 402
 
 
-async def _older_number(session, org, e164="+14155550101"):
-    """An active number bought before, holding an included number."""
-    session.add(
-        PhoneNumber(
-            organization_id=org,
-            e164=e164,
-            country_code="US",
-            number_type="local",
-            capabilities=["voice"],
-            provider="twilio",
-            provider_resource_id="PN_old",
-            provisioning_state="active",
-            created_at=datetime.now(timezone.utc) - timedelta(days=40),
-        )
+async def _older_number(session, org, e164="+14155550101", state="active"):
+    """A number bought before; an active one holds an included number."""
+    number = PhoneNumber(
+        organization_id=org,
+        e164=e164,
+        country_code="US",
+        number_type="local",
+        capabilities=["voice"],
+        provider="twilio",
+        provider_resource_id="PN_old",
+        provisioning_state=state,
+        created_at=datetime.now(timezone.utc) - timedelta(days=40),
     )
+    session.add(number)
     await session.commit()
+    return number
 
 
 async def _pending(session, org, *, monthly=150, plan_cents=150, e164="+14155550142"):
@@ -491,3 +491,33 @@ async def test_purchase_402_names_what_credits_pay(client, async_session, monkey
     # $2.50 less the plan's $1.00, less the $0.10 balance.
     assert "at least $1.40" in r.json()["detail"]
     assert "cost $1.50 from credits" in r.json()["detail"]
+
+
+async def test_failed_orders_hold_no_included_place(async_session):
+    org, _, _ = await insert_org_and_key(async_session, initial_credit_cents=500)
+    await _plan(async_session, org, numbers=1)
+    await _older_number(async_session, org, state="failed")
+    number = await _pending(async_session, org)
+    rows, fee = await _finish(async_session, org, number)
+    assert rows[fee].kind == "plan"
+
+
+async def test_released_number_keeps_its_place_for_the_month(async_session):
+    org, _, _ = await insert_org_and_key(async_session, initial_credit_cents=500)
+    await _plan(async_session, org, numbers=1)
+    old = await _older_number(async_session, org, state="released")
+    async_session.add(
+        AccountCredit(
+            organization_id=org,
+            kind="plan",
+            channel="voice",
+            amount_cents=0,
+            plan_units=1,
+            ref=monthly_fee_ref(org, old.id, datetime.now(timezone.utc)),
+            source=PLAN_NUMBER_SOURCE,
+        )
+    )
+    await async_session.commit()
+    number = await _pending(async_session, org)
+    rows, fee = await _finish(async_session, org, number)
+    assert rows[fee].kind == "debit" and rows[fee].amount_cents == -150

@@ -21,8 +21,13 @@ from typing import Final, Literal
 
 from hailhq.core.carrier_routing import PBX
 from hailhq.core.internal_webhook import quotes_enabled
-from hailhq.core.models import OrganizationPlan, PhoneNumber, PlanAllowance
-from sqlalchemy import func, literal, select, tuple_
+from hailhq.core.models import (
+    AccountCredit,
+    OrganizationPlan,
+    PhoneNumber,
+    PlanAllowance,
+)
+from sqlalchemy import Text, and_, cast, exists, func, literal, or_, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = [
@@ -157,30 +162,51 @@ async def plan_number_cents(
     """Whole cents the plan pays toward one month's fee of a number: the
     plan pays the fees of the workspace's ``included_numbers`` oldest
     numbers with a monthly fee (not pool or connected numbers; active or
-    being ordered), up to ``number_fee_cap_cents`` each, while the plan is
-    on. ``number_id=None`` asks for a number about to be ordered (the
+    being ordered; ranked by ``(created_at, id)``), up to
+    ``number_fee_cap_cents`` each, while the plan is on. A number the plan
+    already paid this calendar month keeps its place until the month ends. ``number_id=None`` asks for a number about to be ordered (the
     newest). 0 when the plan does not pay. The billing site's renewal rater
     uses the same rule each month. Take ``org_lock`` first, so two orders
     do not both take the last included number."""
     row = await current_allowance(db, organization_id, now=now)
     if row is None or row.included_numbers <= 0:
         return 0
+    now = now or datetime.now(UTC)
     held = [
-        PhoneNumber.organization_id == organization_id,
         PhoneNumber.is_pool.is_(False),
         PhoneNumber.provider != PBX,
         PhoneNumber.provisioning_state.in_(("active", "pending")),
     ]
+    others = [PhoneNumber.organization_id == organization_id]
     if number_id is not None:
         me = await db.get(PhoneNumber, number_id)
         if me is None:
             return 0
+        others.append(PhoneNumber.id != number_id)
         held.append(
             tuple_(PhoneNumber.created_at, PhoneNumber.id)
             < tuple_(literal(me.created_at), literal(me.id))
         )
+    # A number the plan already paid this calendar month keeps its place
+    # until the month ends, even once released: a release and a new
+    # purchase never get a second included first month. Same ref format as
+    # hailhq.core.billing.monthly_fee_ref.
+    fee_ref = (
+        literal(f"monthly_fee:{organization_id}:")
+        + cast(PhoneNumber.id, Text)
+        + literal(f":dedicated_number:{now:%Y-%m}")
+    )
+    paid_this_month = exists().where(
+        AccountCredit.organization_id == organization_id,
+        AccountCredit.kind == "plan",
+        AccountCredit.ref == fee_ref,
+    )
     older = (
-        await db.execute(select(func.count()).select_from(PhoneNumber).where(*held))
+        await db.execute(
+            select(func.count())
+            .select_from(PhoneNumber)
+            .where(*others, or_(and_(*held), paid_this_month))
+        )
     ).scalar_one()
     if older >= row.included_numbers:
         return 0
