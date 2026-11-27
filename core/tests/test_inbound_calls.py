@@ -1302,3 +1302,23 @@ async def test_a_pbx_caller_from_another_workspace_or_a_carrier_call_is_kept(
     carrier_number = carrier[2]
     out = await inbound_calls._caller_of(async_session, carrier_number, "+14155550144")
     assert out == "+14155550144"
+
+
+async def test_a_failed_order_is_not_the_workspace_number(async_session):
+    """A number whose order failed belongs to someone else: its owner is a
+    real caller."""
+    org, _agent, number = await _pbx_seed(async_session)
+    async_session.add(
+        PhoneNumber(
+            organization_id=org,
+            e164="+14155550145",
+            country_code="US",
+            number_type="local",
+            capabilities=["voice"],
+            provider="twilio",
+            provisioning_state="failed",
+        )
+    )
+    await async_session.flush()
+    out = await inbound_calls._caller_of(async_session, number, "+14155550145")
+    assert out == "+14155550145"

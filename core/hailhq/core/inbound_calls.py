@@ -204,7 +204,9 @@ async def _caller_of(db: AsyncSession, number: PhoneNumber, raw: str) -> str:
     """The caller Hail records. A PBX caller that is one of the workspace's
     own numbers is not the real caller: the phone system replaced it (3CX
     sends its trunk number by default). Recorded as hidden, so callers never
-    share call history, contacts or a thread."""
+    share call history, contacts or a thread. A call the workspace places
+    from one of its own numbers to its phone system is hidden too: it is
+    not a customer."""
     caller = await _read_caller(db, number, raw)
     if number.provider != "pbx" or not (
         caller.startswith("+") and looks_like_phone_number(caller)
@@ -216,6 +218,7 @@ async def _caller_of(db: AsyncSession, number: PhoneNumber, raw: str) -> str:
             PhoneNumber.organization_id == number.organization_id,
             PhoneNumber.e164 == caller,
             PhoneNumber.released_at.is_(None),
+            PhoneNumber.provisioning_state.not_in(("released", "failed")),
         )
         .limit(1)
     )
