@@ -32,6 +32,7 @@ from hailhq.core.email_agent import (
     claim_pending_reply,
     email_thread,
     finish_reply,
+    plain_body,
     prior_reply,
     reply_clock,
     retry_reply,
@@ -55,6 +56,7 @@ from hailhq.voicebot.chat_loop import (
     run_chat,
     tool_args,
 )
+from hailhq.voicebot.knowledge import reply_knowledge, with_knowledge
 from hailhq.voicebot.pipeline import ProviderKeyError, build_llm, resolve_org_configs
 from hailhq.voicebot.tools import wrap_tool
 from livekit.agents.llm import FunctionToolCall
@@ -207,6 +209,14 @@ async def _prepare(
             ]
     messages = build_chat_messages(
         claimed.agent, thread, trust=trust, sends_tried=sent > 0, clock=clock
+    )
+    messages = with_knowledge(
+        messages,
+        await reply_knowledge(
+            claimed.agent.organization_id,
+            claimed.agent.id,
+            f"{email.subject or ''}\n{plain_body(email)}",
+        ),
     )
     messages.append(
         {

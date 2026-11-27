@@ -35,12 +35,14 @@
 ### Task 1: `purpose` column, model, response schema
 
 **Files:**
+
 - Create: `api/migrations/versions/0057_verification_purpose.py`
 - Modify: `core/hailhq/core/models.py:1692-1745` (`CarrierVerification`)
 - Modify: `core/hailhq/core/schemas.py:2538-2566` (`VerificationResponse`)
 - Test: `api/tests/test_verifications_api.py`
 
 **Interfaces:**
+
 - Produces: `CarrierVerification.purpose: str` (`'number'` | `'sms'`), `VerificationResponse.purpose: str`.
 
 - [ ] **Step 1: Write the failing test**
@@ -169,6 +171,7 @@ git commit -m "feat(verifications): purpose column (number | sms)"
 ### Task 2: Routes carry `purpose`; registry keyed by purpose; fee debit at creation
 
 **Files:**
+
 - Modify: `core/hailhq/core/providers/verification/__init__.py`
 - Modify: `core/hailhq/core/providers/verification/base.py` (add `SmsRegistrationProvider`)
 - Create: `core/hailhq/core/sms_registration_fees.py`
@@ -177,6 +180,7 @@ git commit -m "feat(verifications): purpose column (number | sms)"
 - Test: `api/tests/test_verifications_api.py`, `core/tests/test_sms_registration_fees.py`
 
 **Interfaces:**
+
 - Consumes: `CarrierVerification.purpose` (Task 1).
 - Produces:
   - `register_verification_provider(name, factory, purpose="number")`, `get_verification_provider(name, purpose="number")`, `default_verification_provider_name(purpose="number")`.
@@ -234,15 +238,31 @@ Expected: FAIL with `ModuleNotFoundError`.
       "provider": "twilio",
       "last_verified": "2026-10-13",
       "source_url": "https://support.twilio.com/hc/en-us/articles/1260803965530",
-      "person": { "brand_usd": "4.50", "campaign_vetting_usd": "15.00", "campaign_monthly_usd": "2.00" },
-      "business": { "brand_usd": "46.00", "campaign_vetting_usd": "15.00", "campaign_monthly_usd": "10.00" }
+      "person": {
+        "brand_usd": "4.50",
+        "campaign_vetting_usd": "15.00",
+        "campaign_monthly_usd": "2.00"
+      },
+      "business": {
+        "brand_usd": "46.00",
+        "campaign_vetting_usd": "15.00",
+        "campaign_monthly_usd": "10.00"
+      }
     },
     {
       "provider": "telnyx",
       "last_verified": "2026-10-13",
       "source_url": "https://telnyx.com/pricing/messaging",
-      "person": { "brand_usd": "4.50", "campaign_vetting_usd": "15.00", "campaign_monthly_usd": "2.00" },
-      "business": { "brand_usd": "46.00", "campaign_vetting_usd": "15.00", "campaign_monthly_usd": "10.00" }
+      "person": {
+        "brand_usd": "4.50",
+        "campaign_vetting_usd": "15.00",
+        "campaign_monthly_usd": "2.00"
+      },
+      "business": {
+        "brand_usd": "46.00",
+        "campaign_vetting_usd": "15.00",
+        "campaign_monthly_usd": "10.00"
+      }
     }
   ]
 }
@@ -720,10 +740,12 @@ git commit -m "feat(verifications): purpose=sms rows, registry by purpose, filin
 ### Task 3: Shared 10DLC form definition and campaign text builder
 
 **Files:**
+
 - Create: `core/hailhq/core/providers/verification/sms_form.py`
 - Test: `core/tests/test_sms_form.py`
 
 **Interfaces:**
+
 - Produces:
   - `sms_requirements(provider: str, subject_type: SubjectType) -> Requirements`
   - `campaign_text(fields: dict[str, str], subject_type: SubjectType) -> CampaignText` where `CampaignText` has `description: str`, `message_flow: str`, `samples: list[str]`, `has_links: bool`, `use_case: str` (`"MIXED"` or `"SOLE_PROPRIETOR"`).
@@ -949,11 +971,13 @@ git commit -m "feat(verifications): shared 10DLC form and campaign text"
 ### Task 4: Twilio 10DLC plug-in
 
 **Files:**
+
 - Create: `core/hailhq/core/providers/verification/twilio_sms.py`
 - Modify: `core/hailhq/core/providers/verification/__init__.py` (`_register_builtin`)
 - Test: `core/tests/test_twilio_sms_registration.py`
 
 **Interfaces:**
+
 - Consumes: `SmsRegistrationProvider` (Task 2), `sms_requirements`, `campaign_text` (Task 3).
 - Produces: `TwilioSmsRegistrationProvider(account_sid=None, auth_token=None, client=None)` registered as `("twilio", "sms")`. `refs` keys: `profile_sid`, `trust_sid`, `brand_sid`, `messaging_service_sid`, `campaign_sid`, `subject_type`, `campaign` (the fixed campaign text, no personal data), `otp_sent_at`.
 
@@ -1535,11 +1559,13 @@ git commit -m "feat(verifications): Twilio 10DLC registration plug-in"
 ### Task 5: Telnyx 10DLC plug-in
 
 **Files:**
+
 - Create: `core/hailhq/core/providers/verification/telnyx_sms.py`
 - Modify: `core/hailhq/core/providers/verification/__init__.py`
 - Test: `core/tests/test_telnyx_sms_registration.py`
 
 **Interfaces:**
+
 - Consumes: `SmsRegistrationProvider`, `sms_requirements`, `campaign_text`, `TelnyxClient.request(method, path, params=None, json=None)` from `core/hailhq/core/providers/telnyx.py`.
 - Produces: `TelnyxSmsRegistrationProvider(api_key=None, client=None)` registered as `("telnyx", "sms")`. `refs` keys: `brand_id`, `campaign_id`, `messaging_profile_id`, `subject_type`, `campaign`.
 
@@ -1877,12 +1903,14 @@ git commit -m "feat(verifications): Telnyx 10DLC registration plug-in"
 ### Task 6: Send gate on US-to-US long-code texts
 
 **Files:**
+
 - Create: `core/hailhq/core/sms_registration_gate.py`
 - Modify: `api/hailhq/api/routes/sms.py:301-306` (after `from_number` resolves)
 - Modify: `core/hailhq/core/config.py`, `.env.example`, worktree `.env`
 - Test: `api/tests/test_sms_api.py` (find the file that tests `POST /sms`; `grep -ln "no dedicated SMS-capable" api/tests/*.py`)
 
 **Interfaces:**
+
 - Produces: `async def us_registration_block(db, organization_id, from_number: PhoneNumber, to_e164: str) -> str | None` returning the 422 message, or `None` when the send may proceed.
 - The gate is always on; there is no setting.
 
@@ -2026,6 +2054,7 @@ git commit -m "feat(sms): block US-to-US texts from unregistered long codes"
 ### Task 7: Attach numbers on approval and on activation
 
 **Files:**
+
 - Create: `api/hailhq/api/sms_registration.py`
 - Modify: `api/hailhq/api/routes/verifications.py` (`_apply_status` callers: `_refresh`, `list_verifications`)
 - Modify: `core/hailhq/core/sms_setup.py` (`ensure_sms`)
@@ -2033,6 +2062,7 @@ git commit -m "feat(sms): block US-to-US texts from unregistered long codes"
 - Test: `api/tests/test_verifications_api.py`
 
 **Interfaces:**
+
 - Produces: `async def attach_org_numbers(db, row: CarrierVerification, provider: SmsRegistrationProvider) -> bool` (True when every active US long code of the org on that carrier is attached; False when one failed). `async def attach_if_registered(db, number: PhoneNumber, registry) -> None`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -2250,6 +2280,7 @@ git commit -m "feat(verifications): attach US numbers to the approved SMS regist
 ### Task 8: OpenAPI, CLI, SDK, docs, changelog, abuse monitor note
 
 **Files:**
+
 - Modify: `openapi/openapi.yaml` (regenerated), `cli/internal/client/client.gen.go` (regenerated), `cli/internal/cmd/number.go`, `sdk/hail/client.py`
 - Modify: `core/hailhq/core/abuse_monitor.py:1-9`
 - Modify: `docs/operations/carrier-verification.md`, `docs/public/self-host/twilio.md:54-58`, `docs/public/self-host/telnyx.md`, `CHANGELOG.md`
@@ -2299,6 +2330,7 @@ git commit -m "feat(sms): OpenAPI, CLI, SDK and docs for US SMS registration"
 ### Task 9: MCP tools carry `purpose`
 
 **Files:**
+
 - Modify: `mcp/hailhq/mcp/tools.py`, `mcp/hailhq/mcp/hail_client.py`, `docs/public/mcp.md`
 - Test: `mcp/tests/test_tools.py` (or the file that tests the verification tools)
 
@@ -2358,6 +2390,7 @@ Expected: all checks green. Fix failures on the branch; do not merge.
 ### Task 11: Console (hail-website): wizard, Numbers card, monthly fee
 
 **Files (repo `hail-website`, in a worktree, branch `feat/us-sms-registration`):**
+
 - Modify: `lib/verification.ts` (`VerificationRow.purpose`)
 - Modify: `app/console/numbers/verification-actions.ts` (`purpose` through both actions)
 - Modify: `app/console/numbers/VerificationWizard.tsx` (`purpose` prop, fee line, person copy)
@@ -2383,28 +2416,70 @@ import { UsTextingCard } from "../UsTextingCard";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 
-const base = { id: "v1", provider: "twilio", country_code: "US", number_type: "local",
-  subject_type: "business", purpose: "sms" as const, rejection_reason: null,
-  created_at: "2026-10-13T00:00:00Z", updated_at: "2026-10-13T00:00:00Z",
-  submitted_at: "2026-10-13T00:00:00Z", approved_at: null };
+const base = {
+  id: "v1",
+  provider: "twilio",
+  country_code: "US",
+  number_type: "local",
+  subject_type: "business",
+  purpose: "sms" as const,
+  rejection_reason: null,
+  created_at: "2026-10-13T00:00:00Z",
+  updated_at: "2026-10-13T00:00:00Z",
+  submitted_at: "2026-10-13T00:00:00Z",
+  approved_at: null,
+};
 
 describe("UsTextingCard", () => {
   it("offers registration when the org has a US long code and no row", () => {
-    render(<UsTextingCard carriers={["twilio"]} rows={[]} fees={{ twilio: { business: 6100, person: 1950 } }} canManage />);
-    expect(screen.getByRole("button", { name: "Register for US texting" })).toBeInTheDocument();
+    render(
+      <UsTextingCard
+        carriers={["twilio"]}
+        rows={[]}
+        fees={{ twilio: { business: 6100, person: 1950 } }}
+        canManage
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: "Register for US texting" }),
+    ).toBeInTheDocument();
   });
   it("shows In review with the filing date", () => {
-    render(<UsTextingCard carriers={["twilio"]} rows={[{ ...base, state: "submitted" }]} fees={{}} canManage />);
+    render(
+      <UsTextingCard
+        carriers={["twilio"]}
+        rows={[{ ...base, state: "submitted" }]}
+        fees={{}}
+        canManage
+      />,
+    );
     expect(screen.getByText(/In review/)).toBeInTheDocument();
     expect(screen.getByText(/1 to 7 business days/)).toBeInTheDocument();
   });
   it("shows the carrier reason and Try again when rejected", () => {
-    render(<UsTextingCard carriers={["twilio"]} rows={[{ ...base, state: "rejected", rejection_reason: "EIN does not match" }]} fees={{}} canManage />);
+    render(
+      <UsTextingCard
+        carriers={["twilio"]}
+        rows={[
+          {
+            ...base,
+            state: "rejected",
+            rejection_reason: "EIN does not match",
+          },
+        ]}
+        fees={{}}
+        canManage
+      />,
+    );
     expect(screen.getByText("EIN does not match")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Try again" }),
+    ).toBeInTheDocument();
   });
   it("renders nothing without US long codes", () => {
-    const { container } = render(<UsTextingCard carriers={[]} rows={[]} fees={{}} canManage />);
+    const { container } = render(
+      <UsTextingCard carriers={[]} rows={[]} fees={{}} canManage />,
+    );
     expect(container).toBeEmptyDOMElement();
   });
 });

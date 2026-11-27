@@ -397,6 +397,7 @@ class AgentResponse(BaseModel):
     voice_enabled: bool = True
     sms_enabled: bool = True
     email_enabled: bool = True
+    knowledge: bool = False
     status: AgentStatus = "live"
     http_tools: list[AgentHttpTool] = Field(default_factory=list)
     # Signs HTTP tool requests. Set only on the response that created or
@@ -1029,6 +1030,45 @@ class ProviderValidateResult(BaseModel):
     message: str | None
 
 
+KnowledgeDocumentStatus = Literal["pending", "processing", "ready", "failed"]
+
+
+class KnowledgeDocumentResponse(BaseModel):
+    """A knowledge base document (``/knowledge/documents``). Poll until
+    ``status`` is ``ready`` (agents answer from it) or ``failed``
+    (``error`` says why)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    name: str
+    content_type: str
+    size_bytes: int
+    status: KnowledgeDocumentStatus
+    error: str | None = None
+    piece_count: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+
+class KnowledgeDocumentListResponse(BaseModel):
+    items: list[KnowledgeDocumentResponse]
+    next_cursor: str | None = None
+
+
+class KnowledgeSearchResult(BaseModel):
+    document_id: UUID
+    document_name: str
+    text: str
+    page: int | None = None
+    row: int | None = None
+    score: float
+
+
+class KnowledgeSearchResponse(BaseModel):
+    results: list[KnowledgeSearchResult]
+
+
 __all__ = [
     "DOMAIN_NAME",
     "E164",
@@ -1064,6 +1104,11 @@ __all__ = [
     "EmailStatus",
     "EmailSummary",
     "EventStreamResponse",
+    "KnowledgeDocumentListResponse",
+    "KnowledgeDocumentResponse",
+    "KnowledgeDocumentStatus",
+    "KnowledgeSearchResponse",
+    "KnowledgeSearchResult",
     "LLMConfig",
     "NumberOffer",
     "NumberQuotesResponse",

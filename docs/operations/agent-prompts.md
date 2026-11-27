@@ -260,7 +260,6 @@ Email readiness resolves the SES adapter's AWS credential chain in a bounded
 background thread. It sends no test message. SMS readiness includes the
 carrier credentials and webhook verification key.
 
-
 ## Attachments in incoming-email runs
 
 The email worker uses `read_email` with the claimed inbound email ID. It never

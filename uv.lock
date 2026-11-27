@@ -530,14 +530,11 @@ wheels = [
 
 [[package]]
 name = "click"
-version = "8.3.3"
+version = "8.5.1"
 source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "colorama", marker = "sys_platform == 'win32'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/bb/63/f9e1ea081ce35720d8b92acde70daaedace594dc93b693c869e0d5910718/click-8.3.3.tar.gz", hash = "sha256:398329ad4837b2ff7cbe1dd166a4c0f8900c3ca3a218de04466f38f6497f18a2", size = 328061, upload-time = "2026-04-22T15:11:27.506Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/45/37/edbf1b0707709013c0cf2e8317e03d97ed29bf4cac709fe328904ae92a38/click-8.5.1.tar.gz", hash = "sha256:9bbfada76703fd1d784b83eea012e3e8c6a001a876543ef104fa56aaaeb072b4", size = 399151, upload-time = "2026-11-06T17:37:01.021Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ae/44/c1221527f6a71a01ec6fbad7fa78f1d50dfa02217385cf0fa3eec7087d59/click-8.3.3-py3-none-any.whl", hash = "sha256:a2bf429bb3033c89fa4936ffb35d5cb471e3719e1f3c8a7c3fff0b8314305613", size = 110502, upload-time = "2026-04-22T15:11:25.044Z" },
+    { url = "https://files.pythonhosted.org/packages/31/7d/164b7ffc8624fe9efb4221bf9af485d5c1e41b9ae118045d2b6dc5457d8b/click-8.5.1-py3-none-any.whl", hash = "sha256:8bb5376d2006950386f8c6427613334a2acadc5f559cb80e638d00b4df957e37", size = 126163, upload-time = "2026-11-06T17:36:59.287Z" },
 ]
 
 [[package]]
@@ -1105,7 +1102,7 @@ dependencies = [
     { name = "asyncpg" },
     { name = "fastapi" },
     { name = "greenlet" },
-    { name = "hailhq-core" },
+    { name = "hailhq-core", extra = ["knowledge"] },
     { name = "httpx" },
     { name = "limits" },
     { name = "logfire", extra = ["fastapi"] },
@@ -1134,7 +1131,7 @@ requires-dist = [
     { name = "asyncpg", specifier = ">=0.30" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "greenlet", specifier = ">=3.0" },
-    { name = "hailhq-core", editable = "core" },
+    { name = "hailhq-core", extras = ["knowledge"], editable = "core" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "limits", specifier = ">=3" },
     { name = "logfire", extras = ["fastapi"], specifier = ">=5.6.0" },
@@ -1191,6 +1188,9 @@ dev = [
     { name = "ruff" },
     { name = "testcontainers" },
 ]
+knowledge = [
+    { name = "numpy" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -1203,6 +1203,7 @@ requires-dist = [
     { name = "livekit-api", specifier = ">=1.1" },
     { name = "logfire", extras = ["aiohttp-client", "httpx", "requests", "sqlalchemy"], specifier = ">=5.6.0" },
     { name = "mypy", marker = "extra == 'dev'" },
+    { name = "numpy", marker = "extra == 'knowledge'", specifier = ">=2" },
     { name = "phonenumbers", specifier = ">=9.0.39" },
     { name = "pillow", specifier = ">=12" },
     { name = "psycopg", extras = ["binary"], marker = "extra == 'dev'", specifier = ">=3.2" },
@@ -1222,7 +1223,7 @@ requires-dist = [
     { name = "twilio", specifier = ">=9.3" },
     { name = "yarl", specifier = ">=1.23.0" },
 ]
-provides-extras = ["dev"]
+provides-extras = ["knowledge", "dev"]
 
 [[package]]
 name = "hailhq-mcp"
@@ -1277,7 +1278,7 @@ source = { editable = "voicebot" }
 dependencies = [
     { name = "asyncpg" },
     { name = "grpcio" },
-    { name = "hailhq-core" },
+    { name = "hailhq-core", extra = ["knowledge"] },
     { name = "livekit" },
     { name = "livekit-agents" },
     { name = "livekit-plugins-anthropic" },
@@ -1308,7 +1309,7 @@ dev = [
 requires-dist = [
     { name = "asyncpg", specifier = ">=0.30" },
     { name = "grpcio", specifier = ">=1.83" },
-    { name = "hailhq-core", editable = "core" },
+    { name = "hailhq-core", extras = ["knowledge"], editable = "core" },
     { name = "livekit", specifier = "==1.1.20" },
     { name = "livekit-agents", specifier = "~=1.8.8" },
     { name = "livekit-plugins-anthropic", specifier = "~=1.8.8" },
