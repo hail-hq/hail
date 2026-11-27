@@ -96,7 +96,7 @@ from hailhq.core.telemetry_identity import (
     tag_context,
 )
 from hailhq.core.url_guard import assert_public_https_url
-from hailhq.core.webhook_fanout import fanout_call_event
+from hailhq.core.webhook_fanout import caller_hidden_data, fanout_call_event
 from hailhq.voicebot import text_watch
 from hailhq.voicebot.amd import (
     MACHINE_HANGUP_CATEGORIES,
@@ -2030,12 +2030,13 @@ async def mark_call_answered(call_id: UUID) -> bool:
                 Call.from_e164,
                 Call.to_e164,
                 Call.agent_id,
+                Call.metadata_,
             )
         )
         row = result.one_or_none()
         transitioned = row is not None
         if transitioned:
-            organization_id, direction, from_e164, to_e164, agent_id = row
+            organization_id, direction, from_e164, to_e164, agent_id, meta = row
             # Outbound calls are `dialing` here (we never write `ringing` for
             # them); inbound rows are written `ringing` by `open_inbound_call`.
             session.add(
@@ -2060,6 +2061,7 @@ async def mark_call_answered(call_id: UUID) -> bool:
                     "from": from_e164,
                     "to": to_e164,
                     "agent_id": str(agent_id) if agent_id else None,
+                    **caller_hidden_data(direction, meta),
                 },
             )
         await session.commit()
@@ -2244,6 +2246,7 @@ async def on_call_end(
                         "to": to_e164,
                         "agent_id": str(agent_id) if agent_id else None,
                         "end_reason": final_end_reason,
+                        **caller_hidden_data(direction, call_metadata),
                         **(
                             {"failure_message": failure_message}
                             if failure_message

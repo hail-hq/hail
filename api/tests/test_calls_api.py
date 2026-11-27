@@ -2078,12 +2078,15 @@ async def test_post_calls_rejects_reserved_recording_metadata(
     livekit_mock.create_room.assert_not_awaited()
 
 
-@pytest.mark.parametrize("key", ["pbx_check_number_id", "pbx_check_code_sha256"])
+@pytest.mark.parametrize(
+    "key", ["pbx_check_number_id", "pbx_check_code_sha256", "caller_hidden_reason"]
+)
 async def test_post_calls_rejects_reserved_pbx_check_metadata(
     client, async_session, org_and_key, livekit_mock, add_phone_number, key
 ):
-    """Ownership check state is Hail-owned: a caller must not make its own
-    call look like Hail's check call for a number it does not own."""
+    """Ownership check state and the hidden caller reason are Hail-owned: a
+    caller must not make its own call look like Hail's check call for a
+    number it does not own, or plant why a caller was hidden."""
     org_id, _, plain = org_and_key
     await add_phone_number(async_session, org_id)
     response = await client.post(

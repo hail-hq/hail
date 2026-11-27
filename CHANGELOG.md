@@ -6,8 +6,26 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Added
 
-- Knowledge base (early access): upload manuals, FAQs and part lists, and agents answer calls, texts and email from them, in any supported language (`/v1/knowledge`, `knowledge` on agents, CLI `hail knowledge`, SDK and MCP).
 - Plans: the call minutes, texts, emails and numbers a workspace's plan includes are used first, then credits pay the rest.
+
+## [0.42.0] (2026-11-27)
+
+Agents answer calls, texts and email from your own documents with the
+knowledge base (early access). A call whose phone system sent one of your own
+numbers as the caller now says why its caller is hidden.
+
+Component versions cut alongside this release:
+**`cli-v0.39.0`** (Homebrew + GitHub Releases), **`sdk-v0.27.0`** (PyPI),
+MCP registry **0.4.0**. One database migration (the knowledge base).
+
+### Added
+
+- Knowledge base (early access): upload manuals, FAQs and part lists, and agents answer calls, texts and email from them, in any supported language (`/v1/knowledge`, `knowledge` on agents, CLI `hail knowledge`, SDK and MCP).
+- A call whose phone system sent one of your own numbers as the caller says why its caller is `anonymous`: `caller_hidden_reason` on the call and its `call.*` webhooks.
+
+### Changed
+
+- `POST /v1/calls` reserves the `caller_hidden_reason` metadata key.
 
 ## [0.41.0] (2026-11-27)
 
