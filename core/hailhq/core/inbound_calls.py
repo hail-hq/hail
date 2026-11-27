@@ -208,7 +208,7 @@ async def _caller_of(db: AsyncSession, number: PhoneNumber, raw: str) -> str:
     from one of its own numbers to its phone system is hidden too: it is
     not a customer."""
     caller = await _read_caller(db, number, raw)
-    if number.provider != "pbx" or not (
+    if number.provider != PBX or not (
         caller.startswith("+") and looks_like_phone_number(caller)
     ):
         return caller
@@ -238,7 +238,7 @@ async def _read_caller(db: AsyncSession, number: PhoneNumber, raw: str) -> str:
     (it names the phone system's country), else with the country of the
     number called; when that gives no valid number, with the countries of the
     connection's other numbers. A carrier caller only gets a leading ``+``."""
-    if number.provider == "pbx":
+    if number.provider == PBX:
         try:
             conn = await connection_of(db, number)
         except ValueError:
