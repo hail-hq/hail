@@ -144,12 +144,13 @@ def _no_tollfree_cache():
     twilio._tollfree_approved_until.clear()
 
 
-def _tollfree_sms(records):
+def _tollfree_sms(records, *, next_records=None):
     """A Twilio SMS provider whose number PN1 has these TFV records."""
     from hailhq.core.providers.sms.twilio import TwilioSmsProvider
 
     provider, http = sdk_provider()
     account = provider.account_sid
+    next_page = "https://messaging.twilio.com/v1/Tollfree/Verifications?PageToken=next"
 
     def request(method, uri, **kwargs):
         http.calls.append((method, uri, kwargs))
@@ -160,6 +161,13 @@ def _tollfree_sms(records):
                 "phone_number": "+18005550100",
             }
         else:
+            if (kwargs.get("params") or {}).get("PageSize", 0) > 50:
+                return Response(
+                    400,
+                    json.dumps(
+                        {"code": 20007, "message": "Page size must be between 1 and 50"}
+                    ),
+                )
             payload = {
                 "verifications": [
                     {
@@ -168,10 +176,14 @@ def _tollfree_sms(records):
                         "tollfree_phone_number_sid": "PN1",
                         **record,
                     }
-                    for i, record in enumerate(records)
+                    for i, record in enumerate(
+                        next_records if uri == next_page else records
+                    )
                 ],
                 "meta": {"key": "verifications"},
             }
+            if next_records is not None and uri != next_page:
+                payload["meta"]["next_page_url"] = next_page
         return Response(200, json.dumps(payload))
 
     http.request = request
@@ -219,6 +231,19 @@ async def test_tollfree_approval_caches_yes_only():
             provider_resource_id="PN1", e164="+18005550100"
         )
     assert len(http.calls) == 2  # One phone fetch and one record list.
+
+
+async def test_tollfree_approval_reads_later_pages_within_carrier_page_limit():
+    sms, http = _tollfree_sms(
+        [{"status": "TWILIO_REJECTED", "date_created": "2026-11-01T00:00:00Z"}],
+        next_records=[
+            {"status": "TWILIO_APPROVED", "date_created": "2026-11-02T00:00:00Z"}
+        ],
+    )
+    assert await sms.tollfree_approved(
+        provider_resource_id="PN1", e164="+18005550100", fresh=True
+    )
+    assert len(http.calls) == 3  # One phone fetch and two verification pages.
 
 
 async def test_tollfree_approval_does_not_cache_no():

@@ -9,9 +9,8 @@ uses the length of speech, never its words, so it works the same in every
 language. Speech that starts while the agent is silent is never dropped.
 
 Known limits:
-- A one-word answer said while the agent is still talking is dropped. The
-  agent pauses between reply parts (reply_limit.py), and a word said in a
-  pause is heard.
+- A one-word answer said while the agent is still talking is dropped. Said
+  once the agent stops, it is heard.
 - While a slow model is still writing a reply, the agent counts as speaking
   although its first part has already played.
 """

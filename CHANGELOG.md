@@ -7,8 +7,27 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 ### Changed
 
 - Calls: a short sound said while the agent talks no longer stops it. Speaking over it for about a second does, in every language.
-- Calls: a longer reply is spoken about two sentences at a time, with a short pause in which the other party can speak.
+- Calls: the agent gives a long answer in short parts and checks in between, even when its instructions ask for detail.
 - Calls: when the agent hears speech that does not fit the conversation (a TV, a radio, other people), it says so and asks instead of answering it.
+
+## [0.42.0] (2026-11-27)
+
+Agents answer calls, texts and email from your own documents with the
+knowledge base (early access). A call whose phone system sent one of your own
+numbers as the caller now says why its caller is hidden.
+
+Component versions cut alongside this release:
+**`cli-v0.39.0`** (Homebrew + GitHub Releases), **`sdk-v0.27.0`** (PyPI),
+MCP registry **0.4.0**. One database migration (the knowledge base).
+
+### Added
+
+- Knowledge base (early access): upload manuals, FAQs and part lists, and agents answer calls, texts and email from them, in any supported language (`/v1/knowledge`, `knowledge` on agents, CLI `hail knowledge`, SDK and MCP).
+- A call whose phone system sent one of your own numbers as the caller says why its caller is `anonymous`: `caller_hidden_reason` on the call and its `call.*` webhooks.
+
+### Changed
+
+- `POST /v1/calls` reserves the `caller_hidden_reason` metadata key.
 
 ## [0.41.0] (2026-11-27)
 
@@ -61,9 +80,6 @@ MCP registry **0.3.0**. One database migration (connected phone systems).
 ### Fixed
 
 - Webhooks: a delivery that cannot reach its endpoint shows a short reason, such as a TLS or connection failure.
-
-### Changed
-
 
 ## [0.38.0] (2026-11-24)
 

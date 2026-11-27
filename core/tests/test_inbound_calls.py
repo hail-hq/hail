@@ -21,6 +21,7 @@ from hailhq.core.models import (
     WebhookDelivery,
     WebhookSubscription,
 )
+from hailhq.core.schemas import CALLER_HIDDEN_OWN_NUMBER, CallResponse
 from hailhq.core.secret_cipher import generate_key
 from hailhq.core.sip_connections import (
     CHECK_CALL_META,
@@ -29,6 +30,7 @@ from hailhq.core.sip_connections import (
     CHECK_WINDOW,
     hash_check_code,
 )
+from hailhq.core.webhook_fanout import call_event_data
 from sqlalchemy import func, select, text
 
 DIALED = "+14155550100"
@@ -1204,7 +1206,8 @@ async def test_a_pbx_caller_is_read_with_the_called_numbers_country(
     """No connection country: each call uses its own number's country, so one
     connection can hold numbers from several countries."""
     _org, _agent, number = await _pbx_seed(async_session, country_code=number_country)
-    assert await inbound_calls._caller_of(async_session, number, raw) == expected
+    caller, _hidden = await inbound_calls._caller_of(async_session, number, raw)
+    assert caller == expected
 
 
 async def test_a_caller_the_called_numbers_country_cannot_read_tries_the_others(
@@ -1226,7 +1229,9 @@ async def test_a_caller_the_called_numbers_country_cannot_read_tries_the_others(
         )
     )
     await async_session.flush()
-    out = await inbound_calls._caller_of(async_session, us_number, "0033123456789")
+    out, _hidden = await inbound_calls._caller_of(
+        async_session, us_number, "0033123456789"
+    )
     assert out == "+33123456789"
 
 
@@ -1242,5 +1247,162 @@ async def test_a_stated_phone_system_country_is_read_first(
     conn = await async_session.get(SipConnection, number.sip_connection_id)
     conn.default_region = region
     await async_session.flush()
-    out = await inbound_calls._caller_of(async_session, number, "2079460018")
+    out, _hidden = await inbound_calls._caller_of(async_session, number, "2079460018")
     assert out == expected
+
+
+@pytest.mark.parametrize(
+    "raw",
+    # The number called, as the phone system writes it, and in + form.
+    ["4155550100", "+14155550100"],
+)
+async def test_a_pbx_caller_that_is_the_number_called_is_hidden(async_session, raw):
+    """3CX sends its trunk number as the caller by default: every caller would
+    look like one person and share call history."""
+    _org, _agent, number = await _pbx_seed(async_session)
+    out = await inbound_calls._caller_of(async_session, number, raw)
+    assert out == (inbound_calls.HIDDEN_CALLER, CALLER_HIDDEN_OWN_NUMBER)
+
+
+async def test_a_pbx_caller_that_is_another_workspace_number_is_hidden(
+    async_session,
+):
+    org, _agent, number = await _pbx_seed(async_session)
+    async_session.add(
+        PhoneNumber(
+            organization_id=org,
+            e164="+14155550142",
+            country_code="US",
+            number_type="local",
+            capabilities=["voice"],
+            provider="twilio",
+            provisioning_state="active",
+        )
+    )
+    await async_session.flush()
+    out = await inbound_calls._caller_of(async_session, number, "+14155550142")
+    assert out == (inbound_calls.HIDDEN_CALLER, CALLER_HIDDEN_OWN_NUMBER)
+
+
+async def test_a_pbx_caller_from_another_workspace_or_a_carrier_call_is_kept(
+    async_session,
+):
+    _org, _agent, number = await _pbx_seed(async_session)
+    async_session.add(
+        PhoneNumber(
+            organization_id=uuid.uuid4(),
+            e164="+14155550143",
+            country_code="US",
+            number_type="local",
+            capabilities=["voice"],
+            provider="twilio",
+            provisioning_state="active",
+        )
+    )
+    await async_session.flush()
+    out = await inbound_calls._caller_of(async_session, number, "+14155550143")
+    assert out == ("+14155550143", None)
+    # The guard is for phone systems only: a carrier caller stays as sent.
+    carrier = await _seed(async_session, org=uuid.uuid4(), e164="+14155550144")
+    carrier_number = carrier[2]
+    out = await inbound_calls._caller_of(async_session, carrier_number, "+14155550144")
+    assert out == ("+14155550144", None)
+
+
+@pytest.mark.parametrize("state", ["failed", "pending", "unverified"])
+async def test_a_number_that_is_not_active_is_not_the_workspace_number(
+    async_session, state
+):
+    """A failed order, an order still in progress, and a connected number
+    whose ownership check has not passed may belong to someone else: their
+    owner is a real caller."""
+    org, _agent, number = await _pbx_seed(async_session)
+    async_session.add(
+        PhoneNumber(
+            organization_id=org,
+            e164="+14155550145",
+            country_code="US",
+            number_type="local",
+            capabilities=["voice"],
+            provider="twilio",
+            provisioning_state=state,
+        )
+    )
+    await async_session.flush()
+    out = await inbound_calls._caller_of(async_session, number, "+14155550145")
+    assert out == ("+14155550145", None)
+
+
+async def test_a_hidden_caller_says_why_on_the_call_and_its_webhook(async_session):
+    """The customer can tell a caller their phone system replaced from a
+    caller who withheld their number."""
+    await _pbx_seed(async_session)
+    outcome = await inbound_calls.open_inbound_call(
+        async_session, _attrs(caller=DIALED, trunk_id="ST_in_pbx")
+    )
+    assert isinstance(outcome, inbound_calls.Accepted)
+    call = (await async_session.execute(select(Call))).scalar_one()
+    assert call.from_e164 == inbound_calls.HIDDEN_CALLER
+    assert call.caller_hidden_reason == CALLER_HIDDEN_OWN_NUMBER
+    assert CallResponse.model_validate(call).caller_hidden_reason == (
+        CALLER_HIDDEN_OWN_NUMBER
+    )
+    (delivery,) = await _deliveries(async_session, "call.received")
+    assert delivery.payload["data"]["caller_hidden_reason"] == (
+        CALLER_HIDDEN_OWN_NUMBER
+    )
+
+
+async def test_a_refused_call_with_a_hidden_caller_says_why(async_session):
+    await _pbx_seed(async_session)
+    outcome = await inbound_calls.open_inbound_call(
+        async_session, _attrs(caller=DIALED, trunk_id="ST_in_tw")
+    )
+    assert isinstance(outcome, inbound_calls.Rejected)
+    call = (await async_session.execute(select(Call))).scalar_one()
+    assert call.status == "failed"
+    assert call.caller_hidden_reason == CALLER_HIDDEN_OWN_NUMBER
+    (delivery,) = await _deliveries(async_session, "call.failed")
+    assert delivery.payload["data"]["caller_hidden_reason"] == (
+        CALLER_HIDDEN_OWN_NUMBER
+    )
+
+
+async def test_a_kept_caller_has_no_hidden_reason(async_session):
+    await _pbx_seed(async_session)
+    outcome = await inbound_calls.open_inbound_call(
+        async_session, _attrs(trunk_id="ST_in_pbx")
+    )
+    assert isinstance(outcome, inbound_calls.Accepted)
+    call = (await async_session.execute(select(Call))).scalar_one()
+    assert call.from_e164 == CALLER
+    assert CallResponse.model_validate(call).caller_hidden_reason is None
+    (delivery,) = await _deliveries(async_session, "call.received")
+    assert "caller_hidden_reason" not in delivery.payload["data"]
+
+
+@pytest.mark.parametrize(
+    ("direction", "value"),
+    [
+        # Before the key was reserved, POST /calls stored any value under it.
+        ("outbound", CALLER_HIDDEN_OWN_NUMBER),
+        ("inbound", "vip"),
+        ("inbound", 7),
+        ("inbound", ["phone_system_sent_own_number"]),
+    ],
+)
+def test_only_a_reason_hail_writes_reads_back(direction, value):
+    call = Call(
+        id=uuid.uuid4(),
+        organization_id=uuid.uuid4(),
+        from_e164=CALLER,
+        to_e164=DIALED,
+        direction=direction,
+        status="completed",
+        voice_config={},
+        requested_at=datetime.now(timezone.utc),
+        metadata_={"caller_hidden_reason": value},
+    )
+    assert call.caller_hidden_reason is None
+    assert CallResponse.model_validate(call).caller_hidden_reason is None
+    assert "caller_hidden_reason" not in call_event_data(call)

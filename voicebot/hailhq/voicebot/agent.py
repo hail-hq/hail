@@ -96,7 +96,7 @@ from hailhq.core.telemetry_identity import (
     tag_context,
 )
 from hailhq.core.url_guard import assert_public_https_url
-from hailhq.core.webhook_fanout import fanout_call_event
+from hailhq.core.webhook_fanout import caller_hidden_data, fanout_call_event
 from hailhq.voicebot import text_watch
 from hailhq.voicebot.amd import (
     MACHINE_HANGUP_CATEGORIES,
@@ -111,6 +111,7 @@ from hailhq.voicebot.audio import prewarm_audio, room_options
 from hailhq.voicebot.browser import run_browser_session
 from hailhq.voicebot.handover_watch import contact_speaks
 from hailhq.voicebot.ivr import PhoneMenu
+from hailhq.voicebot.knowledge import CallKnowledge, last_user_text
 from hailhq.voicebot.leg_tracker import LegTracker
 from hailhq.voicebot.pipeline import (
     ProviderKeyError,
@@ -122,7 +123,6 @@ from hailhq.voicebot.pipeline import (
 )
 from hailhq.voicebot.recording import start_recording, stop_recording
 from hailhq.voicebot.recovery import ConversationRecovery
-from hailhq.voicebot.reply_limit import ReplyContinuation, limit_reply
 from hailhq.voicebot.short_speech import SpeechLength, Verdict, drop_short_speech
 from hailhq.voicebot.spoken_lines import spoken_lines
 from hailhq.voicebot.telemetry import connect_livekit_tracing
@@ -240,12 +240,18 @@ class SpeechSanitizingAgent(Agent):
     documented ``Agent.default.tts_node`` delegation pattern.
     """
 
-    def __init__(self, *, opening_pending: bool = False, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        *,
+        opening_pending: bool = False,
+        knowledge: CallKnowledge | None = None,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(**kwargs)
         self._opening_pending = opening_pending
+        self.knowledge = knowledge
         self._held_words: list[str] = []
         self.phone_menu: PhoneMenu | None = None
-        self.continuation: ReplyContinuation | None = None
         self.speech_length = SpeechLength()
 
     def release_opening(self) -> str | None:
@@ -317,18 +323,13 @@ class SpeechSanitizingAgent(Agent):
             chat_ctx.add_message(
                 role="system", content=ivr_navigation_instructions(None, names)
             )
-            return Agent.default.llm_node(self, chat_ctx, tools, model_settings)
-        # A long reply leaves no room to speak: it is spoken in short parts
-        # with a pause between them (reply_limit.py).
-        rest = self.continuation
-        if rest is None:
-            # Nothing could speak the rest: do not cut the reply.
-            return Agent.default.llm_node(self, chat_ctx, tools, model_settings)
-        rest.drop()
-        return limit_reply(
-            Agent.default.llm_node(self, chat_ctx, tools, model_settings),
-            on_rest=rest.keep,
-        )
+        elif self.knowledge is not None:
+            # This model call only (a copy): pieces never stay in the history.
+            section = await self.knowledge.context_for(last_user_text(chat_ctx))
+            if section:
+                chat_ctx = chat_ctx.copy()
+                chat_ctx.add_message(role="system", content=section)
+        return Agent.default.llm_node(self, chat_ctx, tools, model_settings)
 
     async def stt_node(self, audio: Any, model_settings: Any) -> Any:
         # A short sound said over the agent does not stop it (short_speech.py).
@@ -346,6 +347,20 @@ class SpeechSanitizingAgent(Agent):
         if self.phone_menu is not None and self.phone_menu.active:
             return None
         return Agent.default.tts_node(self, _sanitize_tts_stream(text), model_settings)
+
+
+def call_knowledge(metadata: dict[str, Any]) -> CallKnowledge | None:
+    """Start loading the call's knowledge base in the background, when the
+    dispatch names an agent and its organization. Whether the agent and the
+    workspace use it is checked in the database by the load itself."""
+    try:
+        org_id = UUID(str(metadata["organization_id"]))
+        agent_id = UUID(str(metadata["agent_id"]))
+    except (KeyError, TypeError, ValueError):
+        return None
+    knowledge = CallKnowledge(org_id, agent_id)
+    knowledge.start()
+    return knowledge
 
 
 def build_instructions(
@@ -2029,12 +2044,13 @@ async def mark_call_answered(call_id: UUID) -> bool:
                 Call.from_e164,
                 Call.to_e164,
                 Call.agent_id,
+                Call.metadata_,
             )
         )
         row = result.one_or_none()
         transitioned = row is not None
         if transitioned:
-            organization_id, direction, from_e164, to_e164, agent_id = row
+            organization_id, direction, from_e164, to_e164, agent_id, meta = row
             # Outbound calls are `dialing` here (we never write `ringing` for
             # them); inbound rows are written `ringing` by `open_inbound_call`.
             session.add(
@@ -2059,6 +2075,7 @@ async def mark_call_answered(call_id: UUID) -> bool:
                     "from": from_e164,
                     "to": to_e164,
                     "agent_id": str(agent_id) if agent_id else None,
+                    **caller_hidden_data(direction, meta),
                 },
             )
         await session.commit()
@@ -2243,6 +2260,7 @@ async def on_call_end(
                         "to": to_e164,
                         "agent_id": str(agent_id) if agent_id else None,
                         "end_reason": final_end_reason,
+                        **caller_hidden_data(direction, call_metadata),
                         **(
                             {"failure_message": failure_message}
                             if failure_message
@@ -2748,6 +2766,7 @@ async def _run_call(
             agent_speaking=session.agent_state == "speaking",
         )
 
+    knowledge = call_knowledge(metadata)
     other_party_task = asyncio.create_task(other_party(call_id))
     agent_tools, agent_api = await build_tools_safely(
         metadata,
@@ -2781,6 +2800,7 @@ async def _run_call(
 
     agent = SpeechSanitizingAgent(
         opening_pending=not inbound,
+        knowledge=knowledge,
         instructions=build_instructions(
             metadata.get("system_prompt"),
             metadata.get("direction"),
@@ -2905,17 +2925,6 @@ async def _run_call(
         ),
         call_id=call_id,
     )
-    agent.continuation = ReplyContinuation(
-        session,
-        can_continue=lambda: (
-            not shutting_down
-            and captured["end_reason"] is None
-            and (agent.phone_menu is None or not agent.phone_menu.active)
-            and not bridge_state.get("picked_up")
-            and not bridge_state.get("connected")
-        ),
-    )
-
     # AMD's clients. Its classifier also backs the phone menu check, so it
     # closes only at shutdown, after AMD and the last check end.
     amd_models: AMDModels | None = None

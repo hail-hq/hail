@@ -211,6 +211,7 @@ async def test_ringing_inbound_call_is_answered_once(async_session) -> None:
         direction="inbound",
         status="ringing",
         voice_config={},
+        metadata_={"caller_hidden_reason": "phone_system_sent_own_number"},
     )
     async_session.add(call)
     async_session.add(
@@ -246,6 +247,9 @@ async def test_ringing_inbound_call_is_answered_once(async_session) -> None:
     assert len(deliveries) == 1
     assert deliveries[0].payload["data"]["direction"] == "inbound"
     assert deliveries[0].payload["data"]["from"] == "+33612345678"
+    assert deliveries[0].payload["data"]["caller_hidden_reason"] == (
+        "phone_system_sent_own_number"
+    )
 
 
 async def test_numbers_without_plus_are_normalised(

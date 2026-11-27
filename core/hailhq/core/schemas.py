@@ -11,6 +11,7 @@ import phonenumbers
 import regex
 from hailhq.core.contact_ids import normalize_contact_id
 from hailhq.core.file_uploads import (
+    KNOWLEDGE_FILE_TYPES,
     VERIFICATION_FILE_TYPES,
     Purpose,
     valid_content_type,
@@ -228,6 +229,26 @@ RESERVED_CALL_METADATA_PREFIX = "recording_"
 # Call.metadata keys of an ownership check call (hailhq.core.sip_connections);
 # POST /calls rejects them too.
 PBX_CHECK_METADATA_PREFIX = "pbx_check_"
+# Call.metadata key Hail writes when it hides an inbound caller, read back as
+# ``CallResponse.caller_hidden_reason``; POST /calls rejects it.
+CALLER_HIDDEN_META = "caller_hidden_reason"
+# The phone system sent one of the workspace's own numbers as the caller.
+CALLER_HIDDEN_OWN_NUMBER = "phone_system_sent_own_number"
+CALLER_HIDDEN_REASONS = frozenset({CALLER_HIDDEN_OWN_NUMBER})
+
+
+def caller_hidden_reason(direction: str, metadata: dict | None) -> str | None:
+    """Why Hail hid an inbound call's caller, or None. Only a reason Hail
+    writes counts: calls placed before the key was reserved may hold any
+    value under it."""
+    value = (metadata or {}).get(CALLER_HIDDEN_META)
+    if (
+        direction != "inbound"
+        or not isinstance(value, str)
+        or value not in CALLER_HIDDEN_REASONS
+    ):
+        return None
+    return value
 
 
 class CallCreate(ConsentAttestationMixin):
@@ -299,7 +320,8 @@ class CallCreate(ConsentAttestationMixin):
         description=(
             "Free-form JSON object attached to the call and echoed back on "
             "reads. Not interpreted by Hail. Keys starting with "
-            "'recording_' and the key 'failure_code' are reserved and rejected."
+            "'recording_' and the keys 'failure_code' and "
+            "'caller_hidden_reason' are reserved and rejected."
         ),
     )
 
@@ -316,7 +338,7 @@ class CallCreate(ConsentAttestationMixin):
             if isinstance(k, str)
             and (
                 k.startswith((RESERVED_CALL_METADATA_PREFIX, PBX_CHECK_METADATA_PREFIX))
-                or k == "failure_code"
+                or k in ("failure_code", CALLER_HIDDEN_META)
             )
         )
         if bad:
@@ -413,6 +435,17 @@ class CallResponse(BaseModel):
     )
     from_e164: str = Field(description="Caller-id phone number used, E.164 format.")
     to_e164: str = Field(description="Recipient phone number, E.164 format.")
+    caller_hidden_reason: Literal["phone_system_sent_own_number"] | None = Field(
+        default=None,
+        description=(
+            "Why Hail recorded an inbound caller as 'anonymous'. "
+            "'phone_system_sent_own_number': the connected phone system sent "
+            "one of your own numbers as the caller, not the real caller's "
+            "number. Set your phone system to pass the caller's number. Null "
+            "when Hail kept the caller as sent, including a caller who "
+            "withheld their number."
+        ),
+    )
     direction: Literal["outbound", "inbound"] = Field(
         description="'outbound' for calls Hail placed, 'inbound' for calls received."
     )
@@ -1619,6 +1652,14 @@ class AgentCreate(BaseModel):
         default=True,
         description="Answer email on addresses that route email to this agent.",
     )
+    knowledge: bool = Field(
+        default=False,
+        description=(
+            "Answer from the workspace's knowledge base (POST "
+            "/v1/knowledge/documents) on calls, texts and email. Needs the "
+            "knowledge base turned on for the workspace (403 otherwise)."
+        ),
+    )
     status: AgentStatus = Field(
         default="live",
         description="'paused' agents do not answer; calls to their numbers fail with end_reason 'no_agent'.",
@@ -1713,6 +1754,14 @@ class AgentUpdate(BaseModel):
     email_enabled: bool | None = Field(
         default=None, description="Whether the agent answers email."
     )
+    knowledge: bool | None = Field(
+        default=None,
+        description=(
+            "Whether the agent answers from the workspace's knowledge base. "
+            "Turning it on needs the knowledge base turned on for the "
+            "workspace (403 otherwise)."
+        ),
+    )
     status: AgentStatus | None = Field(default=None, description="'live' or 'paused'.")
     handover_contacts: list[HandoverContactIn] | None = Field(
         default=None,
@@ -1773,6 +1822,10 @@ class AgentResponse(BaseModel):
     sms_enabled: bool = Field(description="Whether the agent answers texts.")
     email_enabled: bool = Field(
         default=True, description="Whether the agent answers email."
+    )
+    knowledge: bool = Field(
+        default=False,
+        description="Whether the agent answers from the workspace's knowledge base.",
     )
     status: AgentStatus = Field(description="'live' or 'paused'.")
     handover_contacts: list[HandoverContactOut] = Field(
@@ -3039,7 +3092,9 @@ class FileUploadCreate(BaseModel):
             "id works as the `upload.<slot>` part of `POST /v1/verifications` "
             "and `POST /v1/verifications/check`. `sms_evidence`: a US texting "
             "consent screenshot; the PUT returns a public `url` for an "
-            "`*_evidence_url` field, like `POST /v1/verifications/sms/evidence`."
+            "`*_evidence_url` field, like `POST /v1/verifications/sms/evidence`. "
+            "`knowledge_document`: the id works in `POST /v1/knowledge/documents`; "
+            "needs the knowledge base turned on for the workspace."
         )
     )
     filename: str = Field(
@@ -3051,8 +3106,11 @@ class FileUploadCreate(BaseModel):
         description=(
             "MIME type, `type/subtype` with no parameters. A "
             "`verification_document` or `sms_evidence` takes `image/jpeg`, "
-            "`image/png` or `application/pdf` only. This type is stored; the "
-            "PUT request's own `Content-Type` header is not used."
+            "`image/png` or `application/pdf` only. A `knowledge_document` takes "
+            "`application/pdf`, "
+            "`application/vnd.openxmlformats-officedocument.wordprocessingml.document`, "
+            "`text/plain`, `text/markdown` or `text/csv`. This type is "
+            "stored; the PUT request's own `Content-Type` header is not used."
         )
     )
 
@@ -3083,6 +3141,14 @@ class FileUploadCreate(BaseModel):
         ):
             raise ValueError(
                 f"a {self.purpose} must be image/jpeg, image/png or application/pdf"
+            )
+        if (
+            self.purpose == "knowledge_document"
+            and self.content_type not in KNOWLEDGE_FILE_TYPES
+        ):
+            raise ValueError(
+                "a knowledge_document must be one of: "
+                + ", ".join(KNOWLEDGE_FILE_TYPES)
             )
         return self
 
@@ -4231,4 +4297,105 @@ class VerificationResponse(BaseModel):
             "one top-up lets them all go. It follows the balance, so read it "
             "again before you pay."
         ),
+    )
+
+
+KnowledgeDocumentStatus = Literal["pending", "processing", "ready", "failed"]
+
+
+class KnowledgeDocumentCreate(BaseModel):
+    """Body of ``POST /knowledge/documents``: an uploaded file to add."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    upload_id: UUID = Field(
+        description=(
+            "A `knowledge_document` upload (`POST /v1/uploads`, then the "
+            "PUT), stored and not yet used by another document."
+        )
+    )
+    name: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=255,
+        description="Display name. Omitted: the upload's filename.",
+    )
+
+    @field_validator("name")
+    @classmethod
+    def _name_printable(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip()
+        if not v or any(ord(c) < 0x20 or ord(c) == 0x7F for c in v):
+            raise ValueError("name must be printable and not blank")
+        return v
+
+
+class KnowledgeDocumentResponse(BaseModel):
+    """One knowledge base document and how far its reading got."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID = Field(description="The document's id.")
+    name: str = Field(description="Display name.")
+    content_type: str = Field(description="The file's MIME type.")
+    size_bytes: int = Field(description="The file's size in bytes.")
+    status: KnowledgeDocumentStatus = Field(
+        description=(
+            "`pending`: waiting to be read. `processing`: being read and "
+            "indexed. `ready`: agents answer from it. `failed`: see `error`."
+        )
+    )
+    error: str | None = Field(
+        description="Why the document failed, in plain words. Null otherwise."
+    )
+    piece_count: int = Field(
+        description="Searchable pieces made from the file (0 until ready)."
+    )
+    created_at: datetime = Field(description="ISO 8601 timestamp.")
+    updated_at: datetime = Field(description="ISO 8601 timestamp.")
+
+
+class KnowledgeDocumentListResponse(BaseModel):
+    items: list[KnowledgeDocumentResponse] = Field(
+        description="Documents in this page, newest first."
+    )
+    next_cursor: str | None = Field(
+        default=None,
+        description="Opaque cursor for the next page. Null when there are no more results.",
+    )
+
+
+class KnowledgeSearchRequest(BaseModel):
+    """Body of ``POST /knowledge/search``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    query: str = Field(
+        min_length=1,
+        max_length=1000,
+        description="A question or keywords, in any supported language.",
+    )
+    limit: int = Field(
+        default=5, ge=1, le=10, description="How many pieces to return (1 to 10)."
+    )
+
+
+class KnowledgeSearchResult(BaseModel):
+    document_id: UUID = Field(description="The document the piece comes from.")
+    document_name: str = Field(description="That document's name.")
+    text: str = Field(description="The piece's text.")
+    page: int | None = Field(description="The PDF page it starts on, or null.")
+    row: int | None = Field(
+        description="The CSV data row (1 = first row under the header), or null."
+    )
+    score: float = Field(
+        description="Fused rank score; higher is better. Compare within one response only."
+    )
+
+
+class KnowledgeSearchResponse(BaseModel):
+    results: list[KnowledgeSearchResult] = Field(
+        description="The best pieces, best first. Empty when nothing matches well."
     )

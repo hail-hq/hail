@@ -41,7 +41,7 @@ def database_url() -> Iterator[str]:
 
     from testcontainers.postgres import PostgresContainer
 
-    with PostgresContainer("postgres:16-alpine") as pg:
+    with PostgresContainer("pgvector/pgvector:0.8.0-pg16") as pg:
         yield pg.get_connection_url().replace("psycopg2", "psycopg")
 
 
@@ -69,6 +69,8 @@ def prepare_database(
     if recreate or database_url not in database_schemas:
         database_schemas.discard(database_url)
         conn.exec_driver_sql("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
+        # knowledge_pieces.embedding (pgvector image, see docker-compose.local.yml).
+        conn.exec_driver_sql("CREATE EXTENSION IF NOT EXISTS vector;")
         Base.metadata.drop_all(conn)
         Base.metadata.create_all(conn)
     else:

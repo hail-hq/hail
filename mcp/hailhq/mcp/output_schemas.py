@@ -108,6 +108,7 @@ _PREVIEW = _model(CampaignText)
 _PREVIEW["properties"]["schema_version"]["minimum"] = 1
 _PREVIEW["additionalProperties"] = False
 _AGENT = _result(_model(api.AgentResponse))
+_KNOWLEDGE_DOCUMENT = _result(_model(api.KnowledgeDocumentResponse))
 _NUMBER = _result(_model(api.PhoneNumberResponse))
 _CONTACTS = _result(_model(api.ContactListResponse))
 _MANUAL_CONTACT = _model(api.ContactEntry)
@@ -197,4 +198,13 @@ OUTPUT_SCHEMAS = {
     "list_email_domains": _result(_model(api.EmailDomainListResponse)),
     "whoami": _result(_model(api.WhoamiResponse)),
     "create_contact": _result(_MANUAL_CONTACT),
+    "add_knowledge_document": _KNOWLEDGE_DOCUMENT,
+    "get_knowledge_document": _KNOWLEDGE_DOCUMENT,
+    "list_knowledge_documents": _result(_model(api.KnowledgeDocumentListResponse)),
+    "delete_knowledge_document": _result(
+        _object({"deleted": _TRUE, "document_id": _STRING, "name": _STRING})
+    ),
+    "search_knowledge": _result(
+        _model(api.KnowledgeSearchResponse, extra={"note": _STRING})
+    ),
 }

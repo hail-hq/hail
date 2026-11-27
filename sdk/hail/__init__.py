@@ -48,6 +48,11 @@ from hail.models import (
     EmailStatus,
     EmailSummary,
     EventStreamResponse,
+    KnowledgeDocumentListResponse,
+    KnowledgeDocumentResponse,
+    KnowledgeDocumentStatus,
+    KnowledgeSearchResponse,
+    KnowledgeSearchResult,
     LLMConfig,
     NumberOffer,
     NumberQuotesResponse,
@@ -71,7 +76,7 @@ from hail.models import (
     WhoamiResponse,
 )
 
-__version__ = "0.26.0"
+__version__ = "0.27.0"
 
 __all__ = [
     # helpers
@@ -117,6 +122,11 @@ __all__ = [
     "HailNotFoundError",
     "HailServerError",
     "HailValidationError",
+    "KnowledgeDocumentListResponse",
+    "KnowledgeDocumentResponse",
+    "KnowledgeDocumentStatus",
+    "KnowledgeSearchResponse",
+    "KnowledgeSearchResult",
     "LLMConfig",
     "NumberOffer",
     "NumberQuotesResponse",

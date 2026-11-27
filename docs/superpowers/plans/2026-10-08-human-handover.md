@@ -38,47 +38,49 @@
 
 Backend (`hail`, branch `feat/human-handover`):
 
-| File | Change |
-|---|---|
-| `core/hailhq/core/models.py` | add `AgentHandoverContact` |
-| `api/migrations/versions/0053_agent_handover_contacts.py` | new table |
-| `core/hailhq/core/telephony_catalog.py` | add `sells_in(country_code, provider)` |
-| `core/hailhq/core/handover.py` | new: validate, replace, load, targets, dial check |
-| `core/hailhq/core/schemas.py` | agent fields, `call.transferred` |
-| `api/hailhq/api/routes/agents.py` | save + return handover contacts |
-| `api/hailhq/api/routes/calls.py`, `core/hailhq/core/inbound_calls.py` | metadata `handover_targets` |
-| `api/hailhq/api/routes/internal/agent.py` | `/handover`, `/handover-result` |
-| `core/hailhq/core/agent_tools/spec.py` | `ToolSpec.bind`, `ToolContext.bridge`, `BridgeRoute`, `BridgeOutcome` |
-| `core/hailhq/core/agent_tools/transfer_call.py` | new tool |
-| `core/hailhq/core/agent_tools/registry.py` | register |
-| `voicebot/hailhq/voicebot/tools.py` | apply `bind`, pass `bridge` |
-| `voicebot/hailhq/voicebot/agent.py` | `make_agent_bridge`, disconnect handling |
-| `openapi/openapi.yaml`, `cli/…`, `mcp/hailhq/mcp/tools.py` | regen + agent field |
-| `docs/public/agents.md`, `docs/public/webhooks.md` (whichever lists call events), `CHANGELOG.md` | docs |
+| File                                                                                             | Change                                                                |
+| ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------- |
+| `core/hailhq/core/models.py`                                                                     | add `AgentHandoverContact`                                            |
+| `api/migrations/versions/0053_agent_handover_contacts.py`                                        | new table                                                             |
+| `core/hailhq/core/telephony_catalog.py`                                                          | add `sells_in(country_code, provider)`                                |
+| `core/hailhq/core/handover.py`                                                                   | new: validate, replace, load, targets, dial check                     |
+| `core/hailhq/core/schemas.py`                                                                    | agent fields, `call.transferred`                                      |
+| `api/hailhq/api/routes/agents.py`                                                                | save + return handover contacts                                       |
+| `api/hailhq/api/routes/calls.py`, `core/hailhq/core/inbound_calls.py`                            | metadata `handover_targets`                                           |
+| `api/hailhq/api/routes/internal/agent.py`                                                        | `/handover`, `/handover-result`                                       |
+| `core/hailhq/core/agent_tools/spec.py`                                                           | `ToolSpec.bind`, `ToolContext.bridge`, `BridgeRoute`, `BridgeOutcome` |
+| `core/hailhq/core/agent_tools/transfer_call.py`                                                  | new tool                                                              |
+| `core/hailhq/core/agent_tools/registry.py`                                                       | register                                                              |
+| `voicebot/hailhq/voicebot/tools.py`                                                              | apply `bind`, pass `bridge`                                           |
+| `voicebot/hailhq/voicebot/agent.py`                                                              | `make_agent_bridge`, disconnect handling                              |
+| `openapi/openapi.yaml`, `cli/…`, `mcp/hailhq/mcp/tools.py`                                       | regen + agent field                                                   |
+| `docs/public/agents.md`, `docs/public/webhooks.md` (whichever lists call events), `CHANGELOG.md` | docs                                                                  |
 
 Console (`hail-website`, branch `feat/human-handover`):
 
-| File | Change |
-|---|---|
-| `lib/agent-queries.ts` | `handoverContacts` on `AgentRow`, `phoneContacts(orgId)` |
-| `app/console/agents/actions.ts` | `handover_contacts` in `AgentInput` |
-| `app/console/agents/agent-form.ts` | form state, `formToInput`, `validateForm` |
-| `app/console/agents/HandoverStep.tsx` | new UI step |
-| `app/console/agents/AgentSheet.tsx`, `new/page.tsx`, `[id]/page.tsx` | wire step + contacts prop |
-| `app/console/activity/ActivityDrawer.tsx` | `handover` event line |
-| `app/console/console.css` | `ag-ho-*` styles |
+| File                                                                 | Change                                                   |
+| -------------------------------------------------------------------- | -------------------------------------------------------- |
+| `lib/agent-queries.ts`                                               | `handoverContacts` on `AgentRow`, `phoneContacts(orgId)` |
+| `app/console/agents/actions.ts`                                      | `handover_contacts` in `AgentInput`                      |
+| `app/console/agents/agent-form.ts`                                   | form state, `formToInput`, `validateForm`                |
+| `app/console/agents/HandoverStep.tsx`                                | new UI step                                              |
+| `app/console/agents/AgentSheet.tsx`, `new/page.tsx`, `[id]/page.tsx` | wire step + contacts prop                                |
+| `app/console/activity/ActivityDrawer.tsx`                            | `handover` event line                                    |
+| `app/console/console.css`                                            | `ag-ho-*` styles                                         |
 
 ---
 
 ### Task 1: Table, model, catalog helper
 
 **Files:**
+
 - Modify: `core/hailhq/core/models.py` (after `class Agent`, ~line 458)
 - Create: `api/migrations/versions/0053_agent_handover_contacts.py`
 - Modify: `core/hailhq/core/telephony_catalog.py`
 - Test: `core/tests/test_telephony_catalog.py` (exists; add tests)
 
 **Interfaces:**
+
 - Produces: `AgentHandoverContact(agent_id, contact_id, note, position, created_at)`; `telephony_catalog.sells_in(country_code: str, provider: str = "auto") -> bool`.
 
 - [ ] **Step 1: Failing test for `sells_in`**
@@ -219,10 +221,12 @@ Check `git ls-files api/migrations/versions | sort | tail -2` first; if main mov
 ### Task 2: Core handover helpers
 
 **Files:**
+
 - Create: `core/hailhq/core/handover.py`
 - Test: `core/tests/test_handover.py`
 
 **Interfaces:**
+
 - Consumes: `AgentHandoverContact`, `Contact`, `check_call_allowed`, `sells_in`.
 - Produces:
   - `MAX_HANDOVER_CONTACTS = 10`
@@ -512,11 +516,13 @@ async def handover_targets(db: AsyncSession, agent_id: UUID | None) -> list[dict
 ### Task 3: Agent API field
 
 **Files:**
+
 - Modify: `core/hailhq/core/schemas.py` (`AgentCreate` ~686, `AgentUpdate` ~760, `AgentResponse` ~817)
 - Modify: `api/hailhq/api/routes/agents.py`
 - Test: `api/tests/test_agents_api.py`
 
 **Interfaces:**
+
 - Consumes: `validate_handover`, `replace_handover`, `load_handover`, `HandoverItem`, `HandoverInvalid`.
 - Produces: JSON field `handover_contacts` on create/update (`[{contact_id, note}]`, update `null` = leave unchanged, `[]` = clear) and response (`[{contact_id, name, phone_e164, note}]`).
 
@@ -679,6 +685,7 @@ async def _respond(db, agents: list[Agent]) -> list[AgentResponse]:
 ```
 
 Then:
+
 - `create_agent`: after `_check_tools`, `handover = await _check_handover(db, principal.organization_id, body.handover_contacts)`. Build `Agent(...)` as today; after `db.add(agent)` do `await db.flush()` then `await replace_handover(db, agent.id, handover)` inside the existing try (an `IntegrityError` on flush is still the name conflict). Return `(await _respond(db, [agent]))[0]`.
 - `update_agent`: pop `handover_contacts` out of `changes` before the setattr loop: `handover = changes.pop("handover_contacts", None)`; if `handover is not None`: `items = await _check_handover(db, org, body.handover_contacts)`; `await replace_handover(db, agent.id, items)`; and make sure the commit branch runs (`if changes or handover is not None:`), with `"handover_contacts"` added to the audit `fields`.
 - `list_agents` and `get_agent`: return via `_respond`.
@@ -694,11 +701,13 @@ Then:
 ### Task 4: Dispatch metadata
 
 **Files:**
+
 - Modify: `api/hailhq/api/routes/calls.py:556-571`
 - Modify: `core/hailhq/core/inbound_calls.py:246-260`
 - Test: `api/tests/test_calls_api.py`, `core/tests/test_inbound_calls.py` (the existing files that assert dispatch metadata; find with `grep -rn '"org_name"' api/tests core/tests`)
 
 **Interfaces:**
+
 - Consumes: `handover_targets(db, agent_id)`.
 - Produces: metadata key `handover_targets: list[{contact_id: str, label: str, note: str}]` (always present; `[]` when none).
 
@@ -745,11 +754,13 @@ Import `from hailhq.core.handover import handover_targets` in both. In `calls.py
 ### Task 5: Internal handover endpoints + webhook type
 
 **Files:**
+
 - Modify: `api/hailhq/api/routes/internal/agent.py`
 - Modify: `core/hailhq/core/schemas.py` (`WebhookEventType` literal ~1891)
 - Test: `api/tests/test_internal_agent_handover.py` (new)
 
 **Interfaces:**
+
 - Consumes: `AgentHandoverContact`, `Contact`, `check_call_allowed`, `country_of`, `sells_in`, `voice_route`, `fanout_call_event`, `call_event_data`.
 - Produces:
   - `POST /internal/agent/handover` body `{call_id, contact_id}` → `{ok, spoken, to_e164?, from_e164?, trunk_id?, headers?}`
@@ -1107,12 +1118,14 @@ Imports to add: `from typing import Literal`, `AgentHandoverContact, CallEvent, 
 ### Task 6: Core tool `transfer_call`
 
 **Files:**
+
 - Modify: `core/hailhq/core/agent_tools/spec.py`
 - Create: `core/hailhq/core/agent_tools/transfer_call.py`
 - Modify: `core/hailhq/core/agent_tools/registry.py`
 - Test: `core/tests/test_transfer_call.py` (new), `core/tests/test_agent_tools.py:29-44` (name set)
 
 **Interfaces:**
+
 - Produces in `spec.py`:
 
 ```python
@@ -1133,8 +1146,9 @@ class BridgeOutcome:
     ring_ms: int
 ```
 
-  `ToolContext.bridge: Callable[[BridgeRoute], Awaitable[BridgeOutcome]] | None = None` (default so existing constructors keep working).
-  `ToolSpec.bind: Callable[[dict[str, Any]], "ToolSpec | None"] | None = None` — per-call shaping from dispatch metadata; `None` result hides the tool.
+`ToolContext.bridge: Callable[[BridgeRoute], Awaitable[BridgeOutcome]] | None = None` (default so existing constructors keep working).
+`ToolSpec.bind: Callable[[dict[str, Any]], "ToolSpec | None"] | None = None` — per-call shaping from dispatch metadata; `None` result hides the tool.
+
 - `transfer_call.SPEC` (static, for allowlists) and `transfer_call.bind(metadata) -> ToolSpec | None`.
 
 - [ ] **Step 1: Failing tests** `core/tests/test_transfer_call.py`:
@@ -1396,22 +1410,26 @@ __all__ = ["MAX_REASON_CHARS", "SPEC", "bind"]
 ### Task 7: Voicebot bridge handle
 
 **Files:**
+
 - Modify: `voicebot/hailhq/voicebot/tools.py`
 - Modify: `voicebot/hailhq/voicebot/agent.py` (`make_agent_bridge` next to `make_agent_send_dtmf` ~279; `build_tools_safely` ~303; `_on_participant_disconnected` ~1391; wiring ~1574)
 - Modify: `voicebot/tests/_fakes.py`
 - Test: `voicebot/tests/test_agent.py`, `voicebot/tests/test_tools.py`
 
 **Interfaces:**
+
 - Consumes: `BridgeRoute`, `BridgeOutcome`, `ToolSpec.bind`.
 - Produces: `make_agent_bridge(ctx, session, call_id, bridge_state) -> Callable[[BridgeRoute], Awaitable[BridgeOutcome]]`; `bridge_state: dict` with keys `"human"` (identity or None) and `"connected"` (bool); `build_agent_tools(metadata, *, call_id, hangup, send_dtmf, bridge=None)`.
 
 Behavior of the handle:
+
 1. `bridge_state["human"] = f"human-{call_id}"`.
 2. `await ctx.api.sip.create_sip_participant(CreateSIPParticipantRequest(sip_trunk_id=route.trunk_id, sip_call_to=route.to_e164, sip_number=route.from_e164, room_name=ctx.room.name, participant_identity=f"human-{call_id}", participant_name=route.name, headers=route.headers or {}, wait_until_answered=True, ringing_timeout=Duration(seconds=30), play_dialtone=True))`. Measure `ring_ms` with `time.monotonic()`.
 3. `SipCallError` → map `sip_status_code`: 486/600/603 → `busy`, 408/480/487 → `no_answer`, else `failed`. `asyncio.TimeoutError` → `no_answer`. Any other exception → `failed` (log it). Set `bridge_state["human"] = None`, return outcome.
 4. Answered: `bridge_state["connected"] = True`; `await session.say(f"Hi {route.name}, I have a caller about {route.reason or 'a question'}. Connecting you now.", allow_interruptions=False)` then `await handle.wait_for_playout()`; `session.input.set_audio_enabled(False)`; `session.output.set_audio_enabled(False)`; return `BridgeOutcome("answered", None, ring_ms)`.
 
 Disconnect handling in `_on_participant_disconnected`:
+
 - If `participant.identity == bridge_state["human"]`: do NOT run `disconnect_reason_to_status`. If `bridge_state["connected"]`: the person hung up → stamp `captured["end_reason"] = NORMAL_HANGUP` if unset, delete the room, shutdown. Else (failed during ringing): return (the handle reports it).
 - Else (the caller) and `bridge_state["human"]` is set: run today's mapping, then `asyncio.ensure_future(ctx.delete_room())` so the contact's leg (ringing or connected) is dropped, then `ctx.shutdown(reason="caller_left")`.
 
@@ -1538,6 +1556,7 @@ Follow the existing setup in `test_tools.py` for the DB session / settings fixtu
 ### Task 8: OpenAPI, CLI, MCP, docs
 
 **Files:**
+
 - Modify: `openapi/openapi.yaml` (regenerated), `cli/` (codegen), `cli/internal/cmd/agents.go`, `mcp/hailhq/mcp/tools.py` (~1240-1300), `docs/public/agents.md`, the public webhooks doc (`grep -rln "call.no_answer" docs/public`), `CHANGELOG.md` (`[Unreleased]`)
 
 - [ ] **Step 1: Regenerate**
@@ -1564,10 +1583,12 @@ cd ../cli && make codegen && go build ./... && go test ./...
 Work in a new worktree: `git -C <hail-website root> worktree add -b feat/human-handover .claude/worktrees/human-handover origin/master`. `node_modules`: symlink `../../../node_modules` like earlier worktrees.
 
 **Files:**
+
 - Modify: `lib/agent-queries.ts`, `app/console/agents/actions.ts`, `app/console/agents/agent-form.ts`, `app/console/agents/AgentSheet.tsx` (`fromAgent` only), `app/console/agents/new/page.tsx`, `app/console/agents/[id]/page.tsx`
 - Test: `app/console/agents/__tests__/agent-form.test.ts`
 
 **Interfaces:**
+
 - Produces:
   - `AgentRow.handoverContacts: HandoverContactRow[]` where `type HandoverContactRow = { contactId: string; name: string; phone: string | null; note: string }`
   - `type PhoneContact = { id: string; name: string; phone: string }`; `phoneContacts(orgId: string | null): Promise<PhoneContact[]>` (`SELECT id, name, phone_e164 FROM contacts WHERE organization_id = $1 AND phone_e164 IS NOT NULL ORDER BY lower(name)`)
@@ -1582,38 +1603,79 @@ describe("handover", () => {
   const ws = { line: DEFAULT_INBOUND_LINE, maxMinutes: 10 };
 
   it("formToInput sends the list in order, trimmed", () => {
-    const f = { ...emptyForm(ws), name: "A", systemPrompt: "B",
-      handover: [{ contactId: "c2", note: " Billing " }, { contactId: "c1", note: "Sales" }] };
+    const f = {
+      ...emptyForm(ws),
+      name: "A",
+      systemPrompt: "B",
+      handover: [
+        { contactId: "c2", note: " Billing " },
+        { contactId: "c1", note: "Sales" },
+      ],
+    };
     expect(formToInput(f, ws).handover_contacts).toEqual([
-      { contact_id: "c2", note: "Billing" }, { contact_id: "c1", note: "Sales" },
+      { contact_id: "c2", note: "Billing" },
+      { contact_id: "c1", note: "Sales" },
     ]);
   });
 
   it("formToInput adds transfer_call to an explicit tools list when contacts are set", () => {
-    const f = { ...emptyForm(ws), name: "A", systemPrompt: "B", tools: ["end_call"],
-      handover: [{ contactId: "c1", note: "x" }] };
+    const f = {
+      ...emptyForm(ws),
+      name: "A",
+      systemPrompt: "B",
+      tools: ["end_call"],
+      handover: [{ contactId: "c1", note: "x" }],
+    };
     expect(formToInput(f, ws).tools).toEqual(["end_call", "transfer_call"]);
   });
 
   it("formToInput removes transfer_call when the list is empty", () => {
-    const f = { ...emptyForm(ws), name: "A", systemPrompt: "B", tools: ["end_call", "transfer_call"], handover: [] };
+    const f = {
+      ...emptyForm(ws),
+      name: "A",
+      systemPrompt: "B",
+      tools: ["end_call", "transfer_call"],
+      handover: [],
+    };
     expect(formToInput(f, ws).tools).toEqual(["end_call"]);
   });
 
   it("formToInput keeps null tools (all) as null", () => {
-    const f = { ...emptyForm(ws), name: "A", systemPrompt: "B", handover: [{ contactId: "c1", note: "x" }] };
+    const f = {
+      ...emptyForm(ws),
+      name: "A",
+      systemPrompt: "B",
+      handover: [{ contactId: "c1", note: "x" }],
+    };
     expect(formToInput(f, ws).tools).toBeNull();
   });
 
   it("validateForm needs a note on every row", () => {
-    const f = { ...emptyForm(ws), name: "A", systemPrompt: "B", handover: [{ contactId: "c1", note: "  " }] };
-    expect(validateForm(f).handover).toEqual({ index: 0, message: "Say when to hand over to this person." });
+    const f = {
+      ...emptyForm(ws),
+      name: "A",
+      systemPrompt: "B",
+      handover: [{ contactId: "c1", note: "  " }],
+    };
+    expect(validateForm(f).handover).toEqual({
+      index: 0,
+      message: "Say when to hand over to this person.",
+    });
   });
 
   it("validateForm caps at 10", () => {
-    const rows = Array.from({ length: 11 }, (_, i) => ({ contactId: `c${i}`, note: "x" }));
-    expect(validateForm({ ...emptyForm(ws), name: "A", systemPrompt: "B", handover: rows }).handover?.message)
-      .toBe("Up to 10 people.");
+    const rows = Array.from({ length: 11 }, (_, i) => ({
+      contactId: `c${i}`,
+      note: "x",
+    }));
+    expect(
+      validateForm({
+        ...emptyForm(ws),
+        name: "A",
+        systemPrompt: "B",
+        handover: rows,
+      }).handover?.message,
+    ).toBe("Up to 10 people.");
   });
 });
 ```
@@ -1632,17 +1694,21 @@ Read the current `validateForm` return shape in `agent-form.ts` and match it (ad
 
 ```ts
 /** transfer_call follows the handover list; it is not a checkbox. */
-export function withHandoverTool(tools: string[] | null, on: boolean): string[] | null {
+export function withHandoverTool(
+  tools: string[] | null,
+  on: boolean,
+): string[] | null {
   if (tools === null) return null;
   const rest = tools.filter((t) => t !== "transfer_call");
   return on ? [...rest, "transfer_call"] : rest;
 }
 ```
 
-  and in `validateForm`: >10 → `{ index: 10, message: "Up to 10 people." }`; first blank note → `{ index, message: "Say when to hand over to this person." }`; note > 200 chars → `{ index, message: "Keep it under 200 characters." }`.
-  - `actions.ts`: `handover_contacts` in `AgentInput`. Show the API's 422 `detail` on save as today.
-  - `agent-queries.ts`: after loading agents, one query `SELECT h.agent_id, h.contact_id, h.note, c.name, c.phone_e164 FROM agent_handover_contacts h JOIN contacts c ON c.id = h.contact_id WHERE h.agent_id = ANY($1) ORDER BY h.agent_id, h.position`, grouped into `handoverContacts`. Add `phoneContacts`.
-  - `AgentSheet.tsx` `fromAgent`: `handover: a.handoverContacts.map((h) => ({ contactId: h.contactId, note: h.note }))`. Add `contacts: PhoneContact[]` to `Props`; both pages load `phoneContacts(orgId)` and pass it.
+and in `validateForm`: >10 → `{ index: 10, message: "Up to 10 people." }`; first blank note → `{ index, message: "Say when to hand over to this person." }`; note > 200 chars → `{ index, message: "Keep it under 200 characters." }`.
+
+- `actions.ts`: `handover_contacts` in `AgentInput`. Show the API's 422 `detail` on save as today.
+- `agent-queries.ts`: after loading agents, one query `SELECT h.agent_id, h.contact_id, h.note, c.name, c.phone_e164 FROM agent_handover_contacts h JOIN contacts c ON c.id = h.contact_id WHERE h.agent_id = ANY($1) ORDER BY h.agent_id, h.position`, grouped into `handoverContacts`. Add `phoneContacts`.
+- `AgentSheet.tsx` `fromAgent`: `handover: a.handoverContacts.map((h) => ({ contactId: h.contactId, note: h.note }))`. Add `contacts: PhoneContact[]` to `Props`; both pages load `phoneContacts(orgId)` and pass it.
 
 - [ ] **Step 4: Run, expect PASS** — `pnpm vitest run app/console/agents` and `pnpm tsc --noEmit`.
 
@@ -1655,6 +1721,7 @@ export function withHandoverTool(tools: string[] | null, on: boolean): string[] 
 **First action: invoke the `frontend-design:frontend-design` skill** (user asked for it). Design inside the existing console language: plain CSS tokens in `app/console/console.css` (`--c-ink`, `--c-bg`, `--c-paper`, `--c-mute`, `--c-tape`, `--c-live`), fonts Space Grotesk / Instrument Serif / JetBrains Mono, `ag-*` class family, `<Step label=…>` sections. No new UI library.
 
 **Files:**
+
 - Create: `app/console/agents/HandoverStep.tsx`
 - Modify: `app/console/agents/AgentSheet.tsx` (new `<Step label="Hand over">` after "Tools", ~line 510)
 - Modify: `app/console/activity/ActivityDrawer.tsx` (`eventSummary` ~341)
@@ -1662,6 +1729,7 @@ export function withHandoverTool(tools: string[] | null, on: boolean): string[] 
 - Test: `app/console/activity/__tests__/` (existing drawer tests, or new `event-summary.test.ts` if `eventSummary` gets exported)
 
 UI requirements (from the spec):
+
 - Lede line: "If the caller needs a person, the agent can call one of these people and connect them. They see your Hail number. Numbers stay hidden from the AI."
 - Picker: search contacts with a phone by name; already-picked contacts hidden from results.
 - Row: name, number (mono), "when to use" text input (placeholder "e.g. billing questions"), up/down reorder buttons (keyboard-usable; no drag library), remove button.

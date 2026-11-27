@@ -68,6 +68,10 @@ paths:
           description:
             An agent with this name already exists, or a handover contact
             changed while saving.
+        "403":
+          description:
+            "`knowledge` is true but the knowledge base is not turned on
+            for this workspace."
         "422":
           description: Validation Error
           content:
@@ -250,6 +254,10 @@ paths:
           description:
             An agent with this name already exists, or a handover contact
             changed while saving.
+        "403":
+          description:
+            "`knowledge` is true but the knowledge base is not turned on
+            for this workspace."
         "422":
           description: Validation Error
           content:
@@ -757,7 +765,11 @@ paths:
 
         The PUT answers with `size_bytes` and `sha256` of what was stored. An
 
-        organization may hold at most 50 unused, unexpired links.
+        organization may hold at most 50 unused, unexpired links. A
+
+        `knowledge_document` needs the knowledge base turned on for the
+
+        workspace (403), and `max_bytes` is the workspace's file limit.
 
 
         For `sms_evidence` the PUT also answers with `url`, the public link for
@@ -810,10 +822,15 @@ paths:
               description: Seconds until the current window resets.
               schema:
                 type: integer
+        "403":
+          description:
+            A `knowledge_document` while the knowledge base is not turned
+            on for this workspace.
         "409":
           description:
             An `sms_evidence` link for an organization that keeps 100 evidence
-            files, the most allowed.
+            files, the most allowed. Or a `knowledge_document` while Hail's knowledge
+            storage is full.
         "503":
           description:
             "File uploads are not configured on this server. For `sms_evidence`,
@@ -852,7 +869,9 @@ paths:
 
         Empty body: 422. A verification document or SMS evidence file whose
 
-        first bytes are not the declared JPEG, PNG or PDF: 422.
+        first bytes are not the declared JPEG, PNG or PDF, or a knowledge
+
+        document that is not its declared PDF, DOCX or UTF-8 text: 422.
 
 
         For `sms_evidence` the answer also has `url`, the public link to put in
@@ -911,18 +930,25 @@ paths:
             file could not be stored at the end: another PUT used the link first,
             the link was removed, or storing ended more than 15 minutes after the
             expiry. If your file is not stored, make a new link and send it again."
-        "409":
-          description:
-            An `sms_evidence` link for an organization that keeps 100 evidence
-            files, the most allowed.
         "408":
           description:
             The body did not arrive before the link expired, or within
             10 minutes. The link is not used up.
         "410":
           description: The link had expired when the PUT started. Make a new link.
+        "403":
+          description:
+            A `knowledge_document` link whose workspace no longer has the
+            knowledge base turned on.
+        "409":
+          description:
+            An `sms_evidence` link for an organization that keeps 100 evidence
+            files, the most allowed. Or a `knowledge_document` link while Hail's knowledge
+            storage is full.
         "413":
-          description: The file is larger than the link's `max_bytes`.
+          description:
+            The file is larger than the link's `max_bytes` (for a `knowledge_document`,
+            the workspace's file limit now).
         "503":
           description:
             File uploads are not configured on this server, storage failed,
@@ -4858,6 +4884,353 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
+  /v1/knowledge/documents:
+    post:
+      tags:
+        - knowledge
+      summary: Create Knowledge Document
+      description: "Add an uploaded file to the knowledge base.
+
+
+        The file must be a `knowledge_document` upload (`POST /v1/uploads`)
+
+        whose bytes were sent. Hail reads it in the background: poll
+
+        `GET /v1/knowledge/documents/{id}` until `status` is `ready` (agents
+
+        answer from it) or `failed` (`error` says why). PDF (text only, no
+
+        scans), DOCX, TXT, Markdown and CSV (one piece per row) are read."
+      operationId: create_knowledge_document
+      parameters:
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KnowledgeDocumentCreate"
+      responses:
+        "201":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeDocumentResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "403":
+          description:
+            The knowledge base is not turned on for this workspace. Contact
+            Hail support.
+        "404":
+          description: No stored `knowledge_document` upload with this id.
+        "409":
+          description:
+            The upload is already a document, the workspace holds its limit
+            of documents, or Hail's knowledge storage is full.
+        "413":
+          description: The file is larger than the workspace's file limit.
+        "503":
+          description:
+            Another request or the upload sweep holds this upload; try
+            again in a few seconds.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+    get:
+      tags:
+        - knowledge
+      summary: List Knowledge Documents
+      description:
+        "List the workspace's knowledge documents, newest first. Works
+        while
+
+        the knowledge base is off too, so a workspace can see and remove its
+
+        files."
+      operationId: list_knowledge_documents
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Cursor
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 100
+            minimum: 1
+            default: 50
+            title: Limit
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeDocumentListResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /v1/knowledge/documents/{document_id}:
+    get:
+      tags:
+        - knowledge
+      summary: Get Knowledge Document
+      description:
+        "One knowledge document and its reading status. Works while the
+
+        knowledge base is off too."
+      operationId: get_knowledge_document
+      parameters:
+        - name: document_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Document Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeDocumentResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "404":
+          description: No such document in this workspace.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+    delete:
+      tags:
+        - knowledge
+      summary: Delete Knowledge Document
+      description:
+        "Delete a document: its file in storage, then its pieces. Agents
+        stop
+
+        using it for new calls and messages at once. Works while the knowledge
+
+        base is off too, so a workspace can always remove its files."
+      operationId: delete_knowledge_document
+      parameters:
+        - name: document_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Document Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "204":
+          description: Successful Response
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "404":
+          description: No such document in this workspace.
+        "503":
+          description: The file could not be deleted from storage; try again.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /v1/knowledge/search:
+    post:
+      tags:
+        - knowledge
+      summary: Search Knowledge
+      description:
+        "Search the workspace's ready documents, the way its agents do:
+        by
+
+        meaning (a multilingual model, so a question in one language finds a
+
+        document in another) and by words (IDs and part numbers match however
+
+        they are spaced or dashed), merged by rank. Returns the best pieces."
+      operationId: search_knowledge
+      parameters:
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KnowledgeSearchRequest"
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeSearchResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "403":
+          description:
+            The knowledge base is not turned on for this workspace. Contact
+            Hail support.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
   /v1/whoami:
     get:
       tags:
@@ -7303,6 +7676,14 @@ components:
           title: Email Enabled
           description: Answer email on addresses that route email to this agent.
           default: true
+        knowledge:
+          type: boolean
+          title: Knowledge
+          description:
+            Answer from the workspace's knowledge base (POST /v1/knowledge/documents)
+            on calls, texts and email. Needs the knowledge base turned on for the
+            workspace (403 otherwise).
+          default: false
         status:
           type: string
           enum:
@@ -7439,6 +7820,11 @@ components:
           title: Email Enabled
           description: Whether the agent answers email.
           default: true
+        knowledge:
+          type: boolean
+          title: Knowledge
+          description: Whether the agent answers from the workspace's knowledge base.
+          default: false
         status:
           type: string
           enum:
@@ -7594,6 +7980,15 @@ components:
             - type: "null"
           title: Email Enabled
           description: Whether the agent answers email.
+        knowledge:
+          anyOf:
+            - type: boolean
+            - type: "null"
+          title: Knowledge
+          description:
+            Whether the agent answers from the workspace's knowledge base.
+            Turning it on needs the knowledge base turned on for the workspace (403
+            otherwise).
         status:
           anyOf:
             - type: string
@@ -7757,7 +8152,7 @@ components:
           description:
             Free-form JSON object attached to the call and echoed back
             on reads. Not interpreted by Hail. Keys starting with 'recording_' and
-            the key 'failure_code' are reserved and rejected.
+            the keys 'failure_code' and 'caller_hidden_reason' are reserved and rejected.
         tools:
           anyOf:
             - items:
@@ -7829,6 +8224,18 @@ components:
           type: string
           title: To E164
           description: Recipient phone number, E.164 format.
+        caller_hidden_reason:
+          anyOf:
+            - type: string
+              const: phone_system_sent_own_number
+            - type: "null"
+          title: Caller Hidden Reason
+          description:
+            "Why Hail recorded an inbound caller as 'anonymous'. 'phone_system_sent_own_number':
+            the connected phone system sent one of your own numbers as the caller,
+            not the real caller's number. Set your phone system to pass the caller's
+            number. Null when Hail kept the caller as sent, including a caller who
+            withheld their number."
         direction:
           type: string
           enum:
@@ -10102,13 +10509,16 @@ components:
             - email_attachment
             - verification_document
             - sms_evidence
+            - knowledge_document
           title: Purpose
           description:
             "What the file is for. `email_attachment`: the id works in
             `POST /v1/emails` `attachment_ids`. `verification_document`: the id works
             as the `upload.<slot>` part of `POST /v1/verifications` and `POST /v1/verifications/check`.
             `sms_evidence`: a US texting consent screenshot; the PUT returns a public
-            `url` for an `*_evidence_url` field, like `POST /v1/verifications/sms/evidence`."
+            `url` for an `*_evidence_url` field, like `POST /v1/verifications/sms/evidence`.
+            `knowledge_document`: the id works in `POST /v1/knowledge/documents`;
+            needs the knowledge base turned on for the workspace."
         filename:
           type: string
           maxLength: 255
@@ -10121,8 +10531,9 @@ components:
           description:
             MIME type, `type/subtype` with no parameters. A `verification_document`
             or `sms_evidence` takes `image/jpeg`, `image/png` or `application/pdf`
-            only. This type is stored; the PUT request's own `Content-Type` header
-            is not used.
+            only. A `knowledge_document` takes `application/pdf`, `application/vnd.openxmlformats-officedocument.wordprocessingml.document`,
+            `text/plain`, `text/markdown` or `text/csv`. This type is stored; the
+            PUT request's own `Content-Type` header is not used.
       type: object
       required:
         - purpose
@@ -10145,6 +10556,7 @@ components:
             - email_attachment
             - verification_document
             - sms_evidence
+            - knowledge_document
           title: Purpose
           description: What the file is for.
         upload_url:
@@ -10198,6 +10610,7 @@ components:
             - email_attachment
             - verification_document
             - sms_evidence
+            - knowledge_document
           title: Purpose
           description: What the file is for.
         filename:
@@ -10553,6 +10966,187 @@ components:
         - size_bytes
       title: KeptFileInfo
       description: A file Hail keeps for a resubmit. The bytes are never returned.
+    KnowledgeDocumentCreate:
+      properties:
+        upload_id:
+          type: string
+          format: uuid
+          title: Upload Id
+          description:
+            A `knowledge_document` upload (`POST /v1/uploads`, then the
+            PUT), stored and not yet used by another document.
+        name:
+          anyOf:
+            - type: string
+              maxLength: 255
+              minLength: 1
+            - type: "null"
+          title: Name
+          description: "Display name. Omitted: the upload's filename."
+      additionalProperties: false
+      type: object
+      required:
+        - upload_id
+      title: KnowledgeDocumentCreate
+      description: "Body of ``POST /knowledge/documents``: an uploaded file to add."
+    KnowledgeDocumentListResponse:
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/KnowledgeDocumentResponse"
+          type: array
+          title: Items
+          description: Documents in this page, newest first.
+        next_cursor:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Next Cursor
+          description:
+            Opaque cursor for the next page. Null when there are no more
+            results.
+      type: object
+      required:
+        - items
+      title: KnowledgeDocumentListResponse
+    KnowledgeDocumentResponse:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+          description: The document's id.
+        name:
+          type: string
+          title: Name
+          description: Display name.
+        content_type:
+          type: string
+          title: Content Type
+          description: The file's MIME type.
+        size_bytes:
+          type: integer
+          title: Size Bytes
+          description: The file's size in bytes.
+        status:
+          type: string
+          enum:
+            - pending
+            - processing
+            - ready
+            - failed
+          title: Status
+          description:
+            "`pending`: waiting to be read. `processing`: being read and
+            indexed. `ready`: agents answer from it. `failed`: see `error`."
+        error:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Error
+          description: Why the document failed, in plain words. Null otherwise.
+        piece_count:
+          type: integer
+          title: Piece Count
+          description: Searchable pieces made from the file (0 until ready).
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+          description: ISO 8601 timestamp.
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+          description: ISO 8601 timestamp.
+      type: object
+      required:
+        - id
+        - name
+        - content_type
+        - size_bytes
+        - status
+        - error
+        - piece_count
+        - created_at
+        - updated_at
+      title: KnowledgeDocumentResponse
+      description: One knowledge base document and how far its reading got.
+    KnowledgeSearchRequest:
+      properties:
+        query:
+          type: string
+          maxLength: 1000
+          minLength: 1
+          title: Query
+          description: A question or keywords, in any supported language.
+        limit:
+          type: integer
+          maximum: 10.0
+          minimum: 1.0
+          title: Limit
+          description: How many pieces to return (1 to 10).
+          default: 5
+      additionalProperties: false
+      type: object
+      required:
+        - query
+      title: KnowledgeSearchRequest
+      description: Body of ``POST /knowledge/search``.
+    KnowledgeSearchResponse:
+      properties:
+        results:
+          items:
+            $ref: "#/components/schemas/KnowledgeSearchResult"
+          type: array
+          title: Results
+          description: The best pieces, best first. Empty when nothing matches well.
+      type: object
+      required:
+        - results
+      title: KnowledgeSearchResponse
+    KnowledgeSearchResult:
+      properties:
+        document_id:
+          type: string
+          format: uuid
+          title: Document Id
+          description: The document the piece comes from.
+        document_name:
+          type: string
+          title: Document Name
+          description: That document's name.
+        text:
+          type: string
+          title: Text
+          description: The piece's text.
+        page:
+          anyOf:
+            - type: integer
+            - type: "null"
+          title: Page
+          description: The PDF page it starts on, or null.
+        row:
+          anyOf:
+            - type: integer
+            - type: "null"
+          title: Row
+          description: The CSV data row (1 = first row under the header), or null.
+        score:
+          type: number
+          title: Score
+          description:
+            Fused rank score; higher is better. Compare within one response
+            only.
+      type: object
+      required:
+        - document_id
+        - document_name
+        - text
+        - page
+        - row
+        - score
+      title: KnowledgeSearchResult
     LLMConfig:
       properties:
         base_url:
