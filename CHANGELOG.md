@@ -4,6 +4,10 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+### Changed
+
+- Calls: on a call the agent places, it starts speaking sooner after a one-word pickup such as "Hello?": after about 1.3 seconds, instead of about 2.5.
+
 ## [0.41.0] (2026-11-27)
 
 Connect your phone system needs no country: Hail reads each caller with the
@@ -58,7 +62,6 @@ MCP registry **0.3.0**. One database migration (connected phone systems).
 
 ### Changed
 
-- Calls: on a call the agent places, it starts speaking sooner after a one-word pickup such as "Hello?": after about 1.3 seconds, instead of about 2.5.
 
 ## [0.38.0] (2026-11-24)
 

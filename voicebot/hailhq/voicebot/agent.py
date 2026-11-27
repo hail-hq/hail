@@ -1122,10 +1122,7 @@ async def speak_greeting(
         # generated opening only through pickup_transcript (AMD's transcript
         # at the verdict). A first_message opening does not answer them. Not
         # when a person just spoke on the menu path (generate_opening=False):
-        # there the turn loop answers them. A one-word pickup settles before
-        # AMD has a transcript, so take the words the session heard so far.
-        if not pickup_transcript:
-            pickup_transcript = _heard_so_far(session)
+        # there the turn loop answers them.
         try:
             session.clear_user_turn()
         except RuntimeError:
@@ -3010,6 +3007,18 @@ async def _run_call(
         amd_result = await run_amd(
             session, call_id, models=models, on_ready=signal_ready, room=ctx.room
         )
+    # A one-word pickup settles before AMD has a transcript. Take the words
+    # the session heard, for the opening and for the record. Only on that
+    # verdict: after a menu or a timeout the unfinished turn can be a
+    # recording. Known limit: the session's transcription is pinned to the
+    # call language, and words played before the answer can be in the turn.
+    pickup_words = amd_result.transcript if amd_result else None
+    if (
+        amd_result is not None
+        and amd_result.reason == "short_greeting"
+        and not pickup_words
+    ):
+        pickup_words = _heard_so_far(session)
     if not inbound:
         await write_call_event(
             call_id,
@@ -3019,9 +3028,7 @@ async def _run_call(
                 # Truncated like the `error` payload above: an IVR menu or a
                 # rambling voicemail greeting can run to multiple KB, and this
                 # row is written on every single call.
-                "transcript": (
-                    (amd_result.transcript or "")[:500] if amd_result else None
-                ),
+                "transcript": ((pickup_words or "")[:500] if amd_result else None),
                 "reason": amd_result.reason if amd_result else "detection_failed",
                 "delay": amd_result.delay if amd_result else None,
             },
@@ -3086,7 +3093,7 @@ async def _run_call(
             await speak_greeting(
                 session,
                 metadata,
-                pickup_transcript=amd_result.transcript if amd_result else None,
+                pickup_transcript=pickup_words,
                 on_opened=agent.release_opening,
                 language=language,
             )

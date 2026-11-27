@@ -1197,7 +1197,8 @@ async def test_a_one_word_pickup_is_a_person_without_the_classifier(monkeypatch)
     classifier = await _timed_classifier(monkeypatch, llm)
     try:
         classifier.on_user_speech_started()
-        await asyncio.sleep(amd_mod.SHORT_PICKUP_SPEECH_SECONDS * 0.1 * 0.6)
+        # Set the length directly: a sleep can overshoot on a busy runner.
+        classifier._speech_started_at -= amd_mod.SHORT_PICKUP_SPEECH_SECONDS * 0.06
         classifier.on_user_speech_ended(silence_duration=0)
         await asyncio.wait_for(classifier._verdict_ready.wait(), timeout=0.5)
         assert classifier._verdict_result.category == AMDCategory.HUMAN
@@ -1214,7 +1215,8 @@ async def test_a_short_pickup_with_a_transcript_goes_to_the_classifier(monkeypat
     classifier = await _timed_classifier(monkeypatch, llm)
     try:
         classifier.on_user_speech_started()
-        await asyncio.sleep(amd_mod.SHORT_PICKUP_SPEECH_SECONDS * 0.1 * 0.6)
+        # Set the length directly: a sleep can overshoot on a busy runner.
+        classifier._speech_started_at -= amd_mod.SHORT_PICKUP_SPEECH_SECONDS * 0.06
         classifier.on_user_speech_ended(silence_duration=0)
         classifier.push_text("Hi, leave a message after the tone.")
         classifier.on_end_of_turn()
@@ -1230,7 +1232,7 @@ async def test_speech_over_the_limit_is_never_a_person_by_length(monkeypatch):
     classifier = await _timed_classifier(monkeypatch, llm)
     try:
         classifier.on_user_speech_started()
-        await asyncio.sleep(amd_mod.SHORT_PICKUP_SPEECH_SECONDS * 0.1 * 1.5)
+        classifier._speech_started_at -= amd_mod.SHORT_PICKUP_SPEECH_SECONDS * 0.15
         classifier.on_user_speech_ended(silence_duration=0)
         await asyncio.sleep(amd_mod.SHORT_PICKUP_SILENCE_SECONDS * 0.1 * 1.5)
         verdict = classifier._verdict_result

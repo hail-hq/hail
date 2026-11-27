@@ -4,7 +4,11 @@ import asyncio
 from unittest.mock import AsyncMock, Mock, PropertyMock
 
 import pytest
-from hailhq.voicebot.agent import SpeechSanitizingAgent, speak_greeting
+from hailhq.voicebot.agent import (
+    SpeechSanitizingAgent,
+    _heard_so_far,
+    speak_greeting,
+)
 from livekit.agents import AgentSession, StopResponse
 from livekit.agents.llm import ChatContext, ChatMessage
 
@@ -192,3 +196,12 @@ async def test_outbound_opening_cancels_the_pending_end_of_turn(
     cancelled_after: list[int] = []
     await speak_greeting(session, metadata, generate_opening=generate_opening)
     assert cancelled_after == ([0] if cancelled else [])
+
+
+def test_heard_so_far_reads_the_words_of_the_unfinished_turn():
+    session = Mock()
+    session._activity._audio_recognition._current_transcript = " Hello? "
+    assert _heard_so_far(session) == "Hello?"
+    session._activity._audio_recognition._current_transcript = ""
+    assert _heard_so_far(session) is None
+    assert _heard_so_far(object()) is None  # no activity yet
