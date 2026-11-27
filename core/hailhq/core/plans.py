@@ -159,8 +159,9 @@ async def take_number_slot(
     pays at most ``number_fee_cap_cents``; the rest is paid from credits.
     ``take=False`` only reads (an early funds check). The caller holds
     ``org_lock`` (the billing site's monthly fee rater takes it too) and
-    gives the slot back with ``return_number_slot`` when the plan does not
-    pay after all (the order failed, or finished late outside that month)."""
+    gives the slot back with ``return_number_slot`` when the order fails or
+    finishes outside the month that reserved it (it may then take the new
+    month's slot instead)."""
     row = await current_allowance(db, organization_id, for_update=take)
     if row is None or row.used_numbers >= row.included_numbers:
         return None
@@ -174,7 +175,8 @@ async def take_number_slot(
 
 async def return_number_slot(db: AsyncSession, allowance_id: uuid.UUID) -> None:
     """Give back a slot ``take_number_slot`` took: the order failed, or it
-    finished when no month row it can use covers now."""
+    finished outside the month that reserved it (it may take the new
+    month's slot instead)."""
     await db.execute(
         update(PlanAllowance)
         .where(PlanAllowance.id == allowance_id, PlanAllowance.used_numbers > 0)
