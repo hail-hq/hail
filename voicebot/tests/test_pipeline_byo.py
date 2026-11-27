@@ -29,6 +29,10 @@ def house_keys(monkeypatch):
     monkeypatch.setattr(settings, "cartesia_model", "sonic-3.5")
     monkeypatch.setattr(settings, "cartesia_voice_id", "house-voice")
     monkeypatch.setattr(settings, "eleven_api_key", "")
+    monkeypatch.setattr(settings, "google_api_key", "")
+    monkeypatch.setattr(settings, "google_cloud_project", "")
+    monkeypatch.setattr(settings, "xai_api_key", "")
+    monkeypatch.setattr(settings, "assemblyai_api_key", "")
     monkeypatch.setattr(settings, "deepgram_model", "nova-3")
     monkeypatch.setattr(settings, "speechmatics_model", "linden-1")
     monkeypatch.setattr(settings, "openai_model", "gpt-4.1")
@@ -397,6 +401,50 @@ def test_explicit_preset_voice_without_its_key_uses_house_defaults(
     assert build_tts(voice_id_override="aai-audrey", language="en").label == "cartesia"
     constructor.assert_not_called()
     assert captured_plugins["cartesia"][0].kwargs["voice"] == "house-voice"
+
+
+@pytest.mark.parametrize(
+    ("provider", "setting", "field", "default_voice"),
+    [
+        ("gemini", "google_cloud_project", "voice_name", "Kore"),
+        ("xai", "xai_api_key", "voice", "ara"),
+        ("assemblyai", "assemblyai_api_key", "voice", "aai-audrey"),
+    ],
+)
+@pytest.mark.parametrize("voice", [None, "legacy-voice", "Charon", "ara", "aai-audrey"])
+def test_preset_only_host_speaks_any_english_call(
+    monkeypatch, captured_plugins, provider, setting, field, default_voice, voice
+):
+    monkeypatch.setattr(settings, "cartesia_api_key", "")
+    monkeypatch.setattr(settings, "gemini_voice_id", "Kore")
+    monkeypatch.setattr(settings, setting, "house-speech")
+
+    class AssemblyAI:
+        label = "assemblyai"
+
+        def __init__(self, **kwargs):
+            captured_plugins.setdefault("assemblyai", []).append(Captured(kwargs))
+
+    monkeypatch.setattr(pipeline.assemblyai_plugin, "TTS", AssemblyAI)
+
+    assert build_tts(voice_id_override=voice, language="en").label == provider
+    own_voice = pipeline.preset_voice_provider(voice) == provider
+    spoken = captured_plugins[provider][-1].kwargs[field]
+    assert spoken == (voice if own_voice else default_voice)
+
+
+@pytest.mark.parametrize(
+    ("setting", "value"),
+    [("xai_api_key", "house-xai"), ("assemblyai_api_key", "house-aai")],
+)
+def test_preset_only_host_names_the_language_it_cannot_speak(
+    monkeypatch, setting, value
+):
+    monkeypatch.setattr(settings, "cartesia_api_key", "")
+    monkeypatch.setattr(settings, setting, value)
+
+    with pytest.raises(ProviderKeyError, match="cannot speak language 'fr'"):
+        build_tts(language="fr")
 
 
 def test_gemini_only_host_names_the_language_it_cannot_speak(monkeypatch):

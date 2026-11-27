@@ -410,7 +410,12 @@ async def preset_credentials_available(provider: str) -> bool:
         gemini_vertex_location()
         async with asyncio.timeout(_GOOGLE_AUTH_TIMEOUT):
             await asyncio.to_thread(_vertex_credentials)
-    except (GoogleAuthError, OSError, ValueError, TimeoutError):
+    except TimeoutError:
+        # The lookup thread keeps running; do not start another one per load.
+        if _vertex_auth["credentials"] is None:
+            _vertex_auth["failed_at"] = time.monotonic()
+        return False
+    except (GoogleAuthError, OSError, ValueError):
         return False
     return True
 

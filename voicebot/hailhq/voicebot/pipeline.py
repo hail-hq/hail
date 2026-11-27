@@ -619,6 +619,19 @@ def _house_tts(
     return instances
 
 
+def _any_house_preset(language: str | None) -> list[agents_tts.TTS]:
+    """Use the first configured preset that speaks the language, default voice."""
+    allowed = tts_providers_for(language)
+    for provider in TTS_PRESET_MODELS:
+        if provider not in allowed or not tts_preset_configured(provider):
+            continue
+        try:
+            return [_org_tts(ResolvedLayer(provider, None, {}, False), None, language)]
+        except (GoogleAuthError, ValueError):
+            logger.warning("Could not configure Hail's %s speech.", provider)
+    return []
+
+
 def _org_tts(
     org: ResolvedLayer, voice_id_override: str | None, language: str | None
 ) -> agents_tts.TTS:
@@ -802,12 +815,18 @@ def build_tts(
         voice_id_override, language, override_provider=override_provider
     )
     if not instances:
+        # Calls work while any house voice can speak the language.
+        instances = _any_house_preset(language)
+    if not instances:
         # Distinguish between no keys configured vs. language filtering all keys out.
         if (
             settings.cartesia_api_key
             or settings.eleven_api_key
-            or tts_preset_configured("gemini")
-            and "gemini" not in tts_providers_for(language)
+            or any(
+                tts_preset_configured(provider)
+                and provider not in tts_providers_for(language)
+                for provider in TTS_PRESET_MODELS
+            )
         ):
             # Keys exist but the language filtered them all out. (Every
             # supported language has at least Cartesia, so `providers` is

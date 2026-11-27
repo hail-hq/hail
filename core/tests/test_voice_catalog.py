@@ -86,6 +86,26 @@ async def test_vertex_credentials_are_looked_up_once(monkeypatch):
     assert len(lookups) == 2
 
 
+async def test_slow_vertex_lookup_is_not_repeated_on_each_load(monkeypatch):
+    monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
+    monkeypatch.setattr(settings, "google_cloud_location", "global")
+    monkeypatch.setattr(catalog, "_GOOGLE_AUTH_TIMEOUT", 0.01)
+    monkeypatch.setattr(
+        catalog, "_vertex_auth", {"credentials": None, "failed_at": None}
+    )
+    lookups = []
+
+    def slow(**kwargs):
+        lookups.append(kwargs)
+        catalog.time.sleep(0.2)
+        raise catalog.GoogleAuthError("no credentials")
+
+    monkeypatch.setattr(catalog.google.auth, "default", slow)
+    assert not await catalog.preset_credentials_available("gemini")
+    assert not await catalog.preset_credentials_available("gemini")
+    assert len(lookups) == 1
+
+
 @pytest.fixture(autouse=True)
 def catalogue_settings(monkeypatch):
     catalog._cache.clear()
