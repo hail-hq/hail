@@ -225,6 +225,7 @@ _PLAN_LEFT_SQL = text(
     JOIN organization_plans p ON p.id = a.plan_id
     WHERE a.organization_id = :org
       AND a.period_start <= :now AND a.period_end > :now
+      AND a.period_start < p.current_period_end
       AND p.ended_at IS NULL AND p.status = 'active'
     ORDER BY a.period_start DESC
     LIMIT 1

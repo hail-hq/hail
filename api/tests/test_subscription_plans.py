@@ -130,6 +130,19 @@ async def test_used_up_or_unpaid_plan_fails_the_gate(async_session):
     assert await current_allowance(async_session, other) is None
 
 
+async def test_month_past_the_paid_period_does_not_count(async_session):
+    """A plan month that starts at or after the plan's current period end
+    is not spent from, even when it covers now."""
+    org, _, _ = await insert_org_and_key(async_session, initial_credit_cents=0)
+    row = await _plan(async_session, org)
+    plan = await async_session.get(OrganizationPlan, row.plan_id)
+    plan.current_period_end = row.period_start
+    await async_session.commit()
+    assert await current_allowance(async_session, org) is None
+    assert not await has_funds(async_session, org, "call")
+    assert await plan_minutes_left(async_session, org) == 0
+
+
 # ---------------------------------------------------------------------------
 # Schema
 

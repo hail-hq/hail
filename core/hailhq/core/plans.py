@@ -102,6 +102,9 @@ async def current_allowance(
             PlanAllowance.organization_id == organization_id,
             PlanAllowance.period_start <= now,
             PlanAllowance.period_end > now,
+            # Only a month inside the plan's current period counts, the
+            # same rule the billing site's raters use.
+            PlanAllowance.period_start < OrganizationPlan.current_period_end,
             *_on(),
         )
         .order_by(PlanAllowance.period_start.desc())
