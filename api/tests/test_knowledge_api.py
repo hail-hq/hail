@@ -37,6 +37,7 @@ _MD = b"# Warranty\n\nThe NS-5000 inverter has a ten year warranty.\n"
 def s3(monkeypatch: pytest.MonkeyPatch):
     store = AsyncMock()
     app.dependency_overrides[get_s3_mail_optional] = lambda: store
+    monkeypatch.setattr(knowledge_routes, "get_s3_mail_optional", lambda: store)
     monkeypatch.setattr(settings, "hail_api_url", "https://api.example.test/")
     try:
         yield store
@@ -158,6 +159,24 @@ async def test_file_redirect_signs_the_stored_key_and_original_filename(
         ),
         response_cache_control="no-store",
     )
+
+
+async def test_file_reports_when_storage_initialization_fails(
+    client, async_session, org_and_key, monkeypatch, s3
+) -> None:
+    org, _, plain = org_and_key
+    await _turn_on(async_session, org)
+    doc = await _add_document(client, plain, await _stored_upload(async_session, org))
+
+    def unavailable_storage():
+        raise OSError("test storage initialization failed")
+
+    app.dependency_overrides[get_s3_mail_optional] = unavailable_storage
+    monkeypatch.setattr(knowledge_routes, "get_s3_mail_optional", unavailable_storage)
+    response = await client.get(
+        f"/v1/knowledge/documents/{doc['id']}/file", headers=_auth(plain)
+    )
+    assert response.status_code == 503
 
 
 @pytest.mark.parametrize(

@@ -26,6 +26,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi import status as http_status
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import RedirectResponse
 from hailhq.api.audit import actor_of, write_audit_log
 from hailhq.api.deps import (
@@ -382,7 +383,6 @@ async def get_knowledge_document_file(
     document_id: UUID,
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
-    s3: Annotated[S3MailClient | None, Depends(get_s3_mail_optional)],
 ) -> Response:
     """Open a document's original file. PDFs open inline. Other files download."""
     org = principal.organization_id
@@ -404,12 +404,6 @@ async def get_knowledge_document_file(
         raise HTTPException(
             status_code=http_status.HTTP_404_NOT_FOUND, detail=_NOT_FOUND
         )
-    unavailable = "the original file is unavailable; try again"
-    if s3 is None:
-        raise HTTPException(
-            status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE, detail=unavailable
-        )
-
     key, filename, content_type = stored
     await db.rollback()
     if content_type not in KNOWLEDGE_FILE_TYPES:
@@ -418,23 +412,28 @@ async def get_knowledge_document_file(
     basename = "".join(c for c in basename if c.isprintable()).strip()
     filename = basename if basename not in {"", ".", ".."} else "document"
     disposition = "inline" if content_type == "application/pdf" else "attachment"
+    url = None
     try:
-        url = await s3.presign_get(
-            key,
-            ttl_seconds=300,
-            response_content_type=content_type,
-            response_content_disposition=(
-                f"{disposition}; filename*=UTF-8''{quote(filename, safe='')}"
-            ),
-            response_cache_control="no-store",
-        )
+        s3 = await run_in_threadpool(get_s3_mail_optional)
+        if s3 is not None:
+            url = await s3.presign_get(
+                key,
+                ttl_seconds=300,
+                response_content_type=content_type,
+                response_content_disposition=(
+                    f"{disposition}; filename*=UTF-8''{quote(filename, safe='')}"
+                ),
+                response_cache_control="no-store",
+            )
     except Exception as exc:
         logger.warning(
             "knowledge: could not sign original file (%s)", type(exc).__name__
         )
+    if url is None:
         raise HTTPException(
-            status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE, detail=unavailable
-        ) from exc
+            status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="the original file is unavailable; try again",
+        )
     return RedirectResponse(
         url=url,
         status_code=http_status.HTTP_302_FOUND,
