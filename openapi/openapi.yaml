@@ -5327,9 +5327,13 @@ paths:
 
         and `DELETE` with `s3_upload_id` (cancel). Send the request to `url`
 
-        with `headers`, exactly. The URL works for 5 minutes at most, never
+        with `headers`, exactly. A whole-file `PUT` must send exactly
 
-        past the upload's `expires_at`."
+        `size_bytes`; each part exactly 5 MiB (5242880 bytes), the last part
+
+        the rest: storage refuses any other size. The URL works for 5 minutes
+
+        at most, never past the upload's `expires_at`."
       operationId: sign_knowledge_upload
       parameters:
         - name: upload_id
@@ -5405,9 +5409,10 @@ paths:
         base.
 
 
-        Call it after the upload (for a multipart upload, after it finished),
+        Call it after the upload (for a multipart upload, after it finished:
 
-        at most 15 minutes after `expires_at`. Hail checks the size, the type
+        one still open is cancelled), at most 15 minutes after `expires_at`. Hail
+        checks the size, the type
 
         and the first bytes, like an upload link's PUT. On a mismatch the file
 
@@ -5477,9 +5482,9 @@ paths:
           description: No such upload in this workspace, or completed.
         "409":
           description:
-            The file is not in storage yet (finish the upload, then call
+            "The file is not in storage yet (finish the upload, then call
             again), the workspace holds its limit of documents, or Hail's knowledge
-            storage is full.
+            storage is full. The upload is kept: call again after making room."
         "410":
           description: The upload expired more than 15 minutes ago. Start a new one.
         "413":
@@ -11504,12 +11509,12 @@ components:
             type."
         size_bytes:
           type: integer
-          maximum: 26214400.0
           minimum: 1.0
           title: Size Bytes
           description:
-            The file's size in bytes. At most the workspace's file limit;
-            the stored file must have exactly this size.
+            "The file's size in bytes. At most the workspace's file limit
+            (413). Every signed upload request is bound to it: storage refuses a body
+            of any other size."
       additionalProperties: false
       type: object
       required:
@@ -11587,7 +11592,9 @@ components:
               minimum: 1.0
             - type: "null"
           title: Part Number
-          description: The part number, from 1. Part uploads only.
+          description:
+            The part number, from 1. Part uploads only. Parts are 5 MiB
+            (5242880 bytes), the last one the rest of the file.
       additionalProperties: false
       type: object
       required:

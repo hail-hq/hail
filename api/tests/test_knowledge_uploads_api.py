@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
+from datetime import timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
 from hailhq.api.deps import get_s3_mail_optional
 from hailhq.api.main import app
+from hailhq.api.routes import knowledge_uploads
 from hailhq.core.email_attachment_gc import EmailAttachmentGcWorker
 from hailhq.core.file_uploads import MAX_PENDING_LINKS
 from hailhq.core.models import FileUpload, KnowledgeDocument, OrganizationKnowledge
@@ -26,6 +29,9 @@ class FakeS3:
     def __init__(self) -> None:
         self.objects: dict[str, tuple[bytes, str]] = {}
         self.signed: list[dict[str, Any]] = []
+        # Unfinished multipart uploads: key -> upload ids.
+        self.multipart: dict[str, list[str]] = {}
+        self.aborted: list[str] = []
 
     def put(self, key: str, data: bytes, content_type: str) -> None:
         self.objects[key] = (data, content_type)
@@ -54,6 +60,12 @@ class FakeS3:
         )
         return f"https://storage.example.test/{key}?op={operation}"
 
+    async def abort_multipart_uploads(self, prefix: str) -> int:
+        keys = [k for k in self.multipart if k.startswith(prefix)]
+        for k in keys:
+            self.aborted.extend(self.multipart.pop(k))
+        return len(keys)
+
     async def delete(self, key: str) -> None:
         self.objects.pop(key, None)
 
@@ -62,6 +74,14 @@ class FakeS3:
         for k in gone:
             del self.objects[k]
         return len(gone)
+
+
+@pytest.fixture(autouse=True)
+async def late_sweeps_now(monkeypatch: pytest.MonkeyPatch):
+    """Late sweeps run at once, and finish before the test ends."""
+    monkeypatch.setattr(knowledge_uploads, "LATE_SWEEP_AFTER", timedelta(0))
+    yield
+    await asyncio.gather(*knowledge_uploads._late_sweeps)
 
 
 @pytest.fixture()
@@ -132,6 +152,7 @@ async def test_reserve_checks_access_type_and_limits(
     assert (await _reserve(client, plain)).status_code == 403
     await _turn_on(async_session, org, max_file_bytes=100, max_documents=1)
     assert (await _reserve(client, plain, size=101)).status_code == 413
+    assert (await _reserve(client, plain, size=30 * 1024 * 1024)).status_code == 413
     assert (await _reserve(client, plain, content_type="image/png")).status_code == 422
     assert (await _reserve(client, plain, size=0)).status_code == 422
     upload_id = (await _reserve(client, plain)).json()["id"]
@@ -184,6 +205,32 @@ async def test_sign_maps_the_six_requests_to_the_upload_key(
         assert 0 < signed["ttl"] <= 300
     assert s3.signed[2]["PartNumber"] == 3 and s3.signed[2]["UploadId"] == "U1"
     assert s3.signed[0]["ContentType"] == "text/markdown"
+    # Every body is bound to its exact size.
+    assert s3.signed[0]["ContentLength"] == 12 * 1024 * 1024
+    assert s3.signed[2]["ContentLength"] == 2 * 1024 * 1024
+    for signed in s3.signed[1:2] + s3.signed[3:]:
+        assert "ContentLength" not in signed
+
+
+async def test_sign_binds_each_part_to_its_size(
+    client, async_session, org_and_key, s3
+) -> None:
+    org, _, plain = org_and_key
+    await _turn_on(async_session, org)
+    size = 2 * 5 * 1024 * 1024 + 7
+    up = (await _reserve(client, plain, size=size)).json()
+    for part, length in ((1, 5 * 1024 * 1024), (2, 5 * 1024 * 1024), (3, 7)):
+        resp = await _sign(
+            client, plain, up["id"], method="PUT", s3_upload_id="U1", part_number=part
+        )
+        assert resp.status_code == 200
+        assert s3.signed[-1]["ContentLength"] == length
+        # The browser sets Content-Length itself; it is never a header to send.
+        assert "content-length" not in resp.json()["headers"]
+    resp = await _sign(
+        client, plain, up["id"], method="PUT", s3_upload_id="U1", part_number=4
+    )
+    assert resp.status_code == 422
 
 
 async def test_sign_refuses_other_requests(
@@ -414,3 +461,67 @@ async def test_sweep_removes_an_abandoned_reservation(
     assert await worker.tick() == 1
     assert s3.objects == {}
     assert (await _complete(client, plain, up["id"])).status_code == 404
+
+
+async def test_complete_aborts_open_multipart_uploads(
+    client, async_session, org_and_key, s3
+) -> None:
+    org, _, plain = org_and_key
+    await _turn_on(async_session, org)
+    up = (await _reserve(client, plain)).json()
+    s3.put(up["key"], _MD, "text/markdown")
+    s3.multipart[up["key"]] = ["U1", "U2"]
+    resp = await _complete(client, plain, up["id"])
+    assert resp.status_code == 201, resp.text
+    assert s3.aborted == ["U1", "U2"] and s3.multipart == {}
+
+
+async def test_complete_without_room_keeps_the_upload(
+    client, async_session, org_and_key, s3
+) -> None:
+    org, _, plain = org_and_key
+    await _turn_on(async_session, org, max_documents=1)
+    first = (await _reserve(client, plain)).json()
+    second = (await _reserve(client, plain)).json()
+    s3.put(first["key"], _MD, "text/markdown")
+    s3.put(second["key"], _MD, "text/markdown")
+    doc = (await _complete(client, plain, first["id"])).json()
+    resp = await _complete(client, plain, second["id"])
+    assert resp.status_code == 409
+    # The browser's file stays, and only it: the check's copy is gone.
+    assert second["key"] in s3.objects
+    assert not [
+        k
+        for k in s3.objects
+        if k.startswith(second["key"].rsplit(".", 1)[0]) and k != second["key"]
+    ]
+    resp = await client.delete(
+        f"/v1/knowledge/documents/{doc['id']}", headers=_auth(plain)
+    )
+    assert resp.status_code == 204
+    assert (await _complete(client, plain, second["id"])).status_code == 201
+
+
+async def test_late_sweep_removes_what_an_old_url_wrote(
+    client, async_session, org_and_key, s3, monkeypatch
+) -> None:
+    org, _, plain = org_and_key
+    await _turn_on(async_session, org)
+    up = (await _reserve(client, plain)).json()
+    s3.put(up["key"], _MD, "text/markdown")
+    # The sweep waits; a signed PUT still working writes meanwhile.
+    gate = asyncio.Event()
+
+    async def wait() -> None:
+        await gate.wait()
+
+    monkeypatch.setattr(knowledge_uploads, "_until_urls_expire", wait)
+    resp = await client.delete(
+        f"/v1/knowledge/uploads/{up['id']}", headers=_auth(plain)
+    )
+    assert resp.status_code == 204
+    s3.put(up["key"], _MD, "text/markdown")
+    s3.multipart[up["key"]] = ["U9"]
+    gate.set()
+    await asyncio.gather(*knowledge_uploads._late_sweeps)
+    assert s3.objects == {} and s3.aborted == ["U9"]

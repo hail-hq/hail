@@ -192,17 +192,81 @@ def test_presign_signs_the_content_type():
     assert query["X-Amz-SignedHeaders"] == ["content-type;host"]
 
 
-@pytest.mark.parametrize("code", ["404", "403"])
-def test_head_treats_missing_and_forbidden_as_none(code):
+def test_head_treats_404_as_missing():
     from botocore.stub import Stubber
 
     raw = _real_client()
     with Stubber(raw) as stub:
         stub.add_client_error(
-            "head_object", service_error_code=code, http_status_code=int(code)
+            "head_object", service_error_code="404", http_status_code=404
         )
         client = S3MailClient(client=raw, bucket="example-bucket")
         assert asyncio.run(client.head("knowledge-documents/o/u.a")) is None
+
+
+def test_head_raises_on_403():
+    """A missing storage right must not read as a missing file."""
+    from botocore.exceptions import ClientError
+    from botocore.stub import Stubber
+
+    raw = _real_client()
+    with Stubber(raw) as stub:
+        stub.add_client_error(
+            "head_object", service_error_code="403", http_status_code=403
+        )
+        client = S3MailClient(client=raw, bucket="example-bucket")
+        with pytest.raises(ClientError):
+            asyncio.run(client.head("k"))
+
+
+def test_presign_binds_the_content_length():
+    from urllib.parse import parse_qs, urlsplit
+
+    client = S3MailClient(client=_real_client(), bucket="example-bucket")
+    url = asyncio.run(
+        client.presign(
+            "upload_part",
+            "knowledge-documents/o/u.a",
+            ttl_seconds=60,
+            http_method="PUT",
+            UploadId="U1",
+            PartNumber=1,
+            ContentLength=5242880,
+        )
+    )
+    query = parse_qs(urlsplit(url).query)
+    assert query["X-Amz-SignedHeaders"] == ["content-length;host"]
+
+
+def test_abort_multipart_uploads_aborts_each_under_the_prefix():
+    from botocore.stub import Stubber
+
+    raw = _real_client()
+    with Stubber(raw) as stub:
+        stub.add_response(
+            "list_multipart_uploads",
+            {
+                "Uploads": [
+                    {"Key": "knowledge-documents/o/u.a", "UploadId": "U1"},
+                    {"Key": "knowledge-documents/o/u.b", "UploadId": "U2"},
+                ]
+            },
+            {"Bucket": "example-bucket", "Prefix": "knowledge-documents/o/u"},
+        )
+        for key, upload_id in (
+            ("knowledge-documents/o/u.a", "U1"),
+            ("knowledge-documents/o/u.b", "U2"),
+        ):
+            stub.add_response(
+                "abort_multipart_upload",
+                {},
+                {"Bucket": "example-bucket", "Key": key, "UploadId": upload_id},
+            )
+        client = S3MailClient(client=raw, bucket="example-bucket")
+        assert (
+            asyncio.run(client.abort_multipart_uploads("knowledge-documents/o/u")) == 2
+        )
+        stub.assert_no_pending_responses()
 
 
 def test_head_reads_size_and_type():

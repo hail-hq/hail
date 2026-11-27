@@ -140,16 +140,16 @@ class S3MailClient:
 
     async def head(self, key: str) -> dict[str, Any] | None:
         """The object's ``ContentLength`` and ``ContentType``, or None when
-        it does not exist. S3 answers 403 instead of 404 for a missing key
-        when the caller's ``s3:ListBucket`` grant does not cover it, so both
-        mean missing."""
+        it does not exist (404). S3 answers 403 instead for a missing key
+        outside the caller's ``s3:ListBucket`` grant: that raises, so a
+        missing right never reads as a missing file."""
 
         def _do() -> dict[str, Any] | None:
             try:
                 resp = self._client.head_object(Bucket=self._bucket, Key=key)
             except ClientError as exc:
                 code = str(exc.response.get("Error", {}).get("Code", ""))
-                if code in ("404", "403", "NoSuchKey", "NotFound", "AccessDenied"):
+                if code in ("404", "NoSuchKey", "NotFound"):
                     return None
                 raise
             return {
@@ -184,6 +184,27 @@ class S3MailClient:
             MetadataDirective="REPLACE",
             ContentType=content_type,
         )
+
+    async def abort_multipart_uploads(self, prefix: str) -> int:
+        """Abort every unfinished multipart upload under ``prefix``; returns
+        how many. Needs ``s3:ListBucketMultipartUploads`` on the bucket."""
+
+        def _do() -> int:
+            aborted = 0
+            pages = self._client.get_paginator("list_multipart_uploads").paginate(
+                Bucket=self._bucket, Prefix=prefix
+            )
+            for page in pages:
+                for upload in page.get("Uploads", []):
+                    self._client.abort_multipart_upload(
+                        Bucket=self._bucket,
+                        Key=upload["Key"],
+                        UploadId=upload["UploadId"],
+                    )
+                    aborted += 1
+            return aborted
+
+        return await asyncio.to_thread(_do)
 
     async def presign(
         self,

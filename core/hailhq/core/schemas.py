@@ -12,7 +12,6 @@ import regex
 from hailhq.core.contact_ids import normalize_contact_id
 from hailhq.core.file_uploads import (
     KNOWLEDGE_FILE_TYPES,
-    KNOWLEDGE_MAX_FILE_BYTES,
     VERIFICATION_FILE_TYPES,
     Purpose,
     valid_content_type,
@@ -4354,10 +4353,10 @@ class KnowledgeUploadCreate(BaseModel):
     )
     size_bytes: int = Field(
         ge=1,
-        le=KNOWLEDGE_MAX_FILE_BYTES,
         description=(
-            "The file's size in bytes. At most the workspace's file limit; "
-            "the stored file must have exactly this size."
+            "The file's size in bytes. At most the workspace's file limit "
+            "(413). Every signed upload request is bound to it: storage "
+            "refuses a body of any other size."
         ),
     )
 
@@ -4421,7 +4420,10 @@ class KnowledgeUploadSign(BaseModel):
         default=None,
         ge=1,
         le=10000,
-        description="The part number, from 1. Part uploads only.",
+        description=(
+            "The part number, from 1. Part uploads only. Parts are 5 MiB "
+            "(5242880 bytes), the last one the rest of the file."
+        ),
     )
 
     @model_validator(mode="after")

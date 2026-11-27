@@ -10,14 +10,23 @@ bytes go through the API.
    key.
 2. ``POST /knowledge/uploads/{id}/sign`` presigns one storage request for
    that key: put the whole file, or the multipart steps (start, one part,
-   list parts, finish, cancel). Nothing else is signed. Each URL works for
-   at most ``SIGN_TTL`` and never past the reservation's expiry.
+   list parts, finish, cancel). Nothing else is signed. A whole-file PUT is
+   signed with the declared size and each part with its exact size
+   (``PART_BYTES``, the last part the rest), so storage refuses any other
+   body. Each URL works for at most ``SIGN_TTL`` and never past the
+   reservation's expiry.
 3. ``POST /knowledge/uploads/{id}/complete`` checks the stored file and
-   makes the document like ``POST /knowledge/documents``. The file is first
+   makes the document like ``POST /knowledge/documents``. It first aborts
+   any multipart upload still open on the key. The file is then
    copied to a new key no URL was signed for, so a signed PUT still working
    cannot change it after the checks. Size, type and first bytes are checked
    on that copy (``matches_declared_type``, the upload link's own check).
-   Any mismatch deletes the files and the reservation.
+   Any mismatch deletes the files and the reservation. No room (409)
+   keeps them, so a retry needs no new upload.
+
+Signed URLs outlive the request that ends an upload (complete, a mismatch,
+cancel) by up to ``SIGN_TTL``: ``sweep_later`` deletes what they wrote once
+they expired.
 
 Abandoned reservations: the upload-link sweep (``email_attachment_gc``)
 deletes a row never completed ``LINK_SWEEP_GRACE`` past its expiry, and
@@ -28,6 +37,7 @@ organization's ``MAX_PENDING_LINKS`` unused upload links.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 from datetime import timedelta
@@ -87,6 +97,10 @@ router = APIRouter(
 
 # The longest a signed URL works.
 SIGN_TTL = timedelta(minutes=5)
+# After this, no URL signed for an upload works any more.
+LATE_SWEEP_AFTER = SIGN_TTL + timedelta(seconds=30)
+# Running late sweeps, so none is garbage collected before it runs.
+_late_sweeps: set[asyncio.Task] = set()
 # S3's smallest part (all but the last); a part number past
 # ceil(size / PART_BYTES) cannot belong to this file.
 PART_BYTES = 5 * 1024 * 1024
@@ -118,6 +132,12 @@ _OFF = {
     }
 }
 _NO_STORAGE = {503: {"description": "File uploads are not configured on this server."}}
+
+
+def part_bytes(size: int, part_number: int) -> int:
+    """The exact size of one part of a ``size``-byte file in
+    ``PART_BYTES`` parts: the last part holds the rest."""
+    return min(PART_BYTES, size - (part_number - 1) * PART_BYTES)
 
 
 def _unavailable() -> HTTPException:
@@ -278,8 +298,10 @@ async def sign_knowledge_upload(
     upload), `PUT` with `s3_upload_id` and `part_number` (one part), `GET`
     with `s3_upload_id` (list parts), `POST` with `s3_upload_id` (finish)
     and `DELETE` with `s3_upload_id` (cancel). Send the request to `url`
-    with `headers`, exactly. The URL works for 5 minutes at most, never
-    past the upload's `expires_at`.
+    with `headers`, exactly. A whole-file `PUT` must send exactly
+    `size_bytes`; each part exactly 5 MiB (5242880 bytes), the last part
+    the rest: storage refuses any other size. The URL works for 5 minutes
+    at most, never past the upload's `expires_at`.
     """
     if s3 is None:
         raise _unavailable()
@@ -315,14 +337,19 @@ async def sign_knowledge_upload(
         headers["content-type"] = content_type
     if has_id:
         params["UploadId"] = body.s3_upload_id
+    size = size or 0
+    if operation == "put_object":
+        # Storage refuses a body of any other size.
+        params["ContentLength"] = size
     if has_part:
-        most = max(1, math.ceil((size or 0) / PART_BYTES))
+        most = max(1, math.ceil(size / PART_BYTES))
         if body.part_number > most:
             raise unprocessable(
                 f"part_number must be at most {most} for this file's size",
                 loc=["body", "part_number"],
             )
         params["PartNumber"] = body.part_number
+        params["ContentLength"] = part_bytes(size, body.part_number)
     ttl = int(min(SIGN_TTL, expires - db_now).total_seconds())
     if ttl < 1:
         raise _expired()
@@ -356,7 +383,8 @@ class _Rejected(Exception):
             "description": (
                 "The file is not in storage yet (finish the upload, then call "
                 "again), the workspace holds its limit of documents, or Hail's "
-                "knowledge storage is full."
+                "knowledge storage is full. The upload is kept: call again "
+                "after making room."
             )
         },
         410: {
@@ -390,8 +418,8 @@ async def complete_knowledge_upload(
 ) -> KnowledgeDocumentResponse:
     """Check the file the browser stored and add it to the knowledge base.
 
-    Call it after the upload (for a multipart upload, after it finished),
-    at most 15 minutes after `expires_at`. Hail checks the size, the type
+    Call it after the upload (for a multipart upload, after it finished:
+    one still open is cancelled), at most 15 minutes after `expires_at`. Hail checks the size, the type
     and the first bytes, like an upload link's PUT. On a mismatch the file
     is deleted (422 or 413). Then it works like `POST /v1/knowledge/documents`:
     poll `GET /v1/knowledge/documents/{id}` until `status` is `ready` or
@@ -421,6 +449,8 @@ async def complete_knowledge_upload(
     await db.rollback()
 
     try:
+        # No unfinished multipart upload may write the key after the check.
+        await s3.abort_multipart_uploads(object_prefix(key))
         stored = await s3.head(key)
     except Exception as exc:
         raise _storage_failed() from exc
@@ -456,20 +486,24 @@ async def complete_knowledge_upload(
     except HTTPException as exc:
         await db.rollback()
         if exc.status_code in (
-            http_status.HTTP_404_NOT_FOUND,
-            http_status.HTTP_503_SERVICE_UNAVAILABLE,
+            http_status.HTTP_413_CONTENT_TOO_LARGE,
+            http_status.HTTP_422_UNPROCESSABLE_CONTENT,
         ):
-            await _forget_copy(db, s3, upload_id, final)
-        else:
             await _discard(db, s3, org, upload_id, final)
+        else:
+            # 409 (no room), 403, 404, 503: the file is fine. The browser's
+            # upload stays reserved, so a retry needs no new upload.
+            await _forget_copy(db, s3, upload_id, final)
         raise
     except BaseException:
         await db.rollback()
         await _forget_copy(db, s3, upload_id, final)
         raise
     # The browser's own objects (the signed key, any other attempt). After
-    # the response; a failure only logs.
+    # the response; a failure only logs. Once more after the last signed URL
+    # has expired.
     background.add_task(_delete_others, s3, upload_id, final)
+    sweep_later(s3, upload_id, object_prefix(final), keep=final)
     return doc
 
 
@@ -587,6 +621,36 @@ async def _discard(
             upload_id,
             exc_info=True,
         )
+    sweep_later(s3, upload_id, object_prefix(gone))
+
+
+def sweep_later(
+    s3: S3MailClient, upload_id: UUID, prefix: str, *, keep: str | None = None
+) -> None:
+    """Abort and delete what a signed URL still working wrote under the
+    upload's key, once every URL has expired (``LATE_SWEEP_AFTER``). In
+    this process only, best effort: a restart loses it. Signing stops at
+    once, so only URLs signed before are left."""
+    task = asyncio.create_task(_sweep_late(s3, upload_id, prefix, keep))
+    _late_sweeps.add(task)
+    task.add_done_callback(_late_sweeps.discard)
+
+
+async def _until_urls_expire() -> None:
+    await asyncio.sleep(LATE_SWEEP_AFTER.total_seconds())
+
+
+async def _sweep_late(
+    s3: S3MailClient, upload_id: UUID, prefix: str, keep: str | None
+) -> None:
+    await _until_urls_expire()
+    try:
+        await s3.abort_multipart_uploads(prefix)
+        await s3.delete_prefix(prefix, keep=keep)
+    except Exception:
+        logger.warning(
+            "knowledge upload %s: the late sweep failed", upload_id, exc_info=True
+        )
 
 
 async def _delete_others(s3: S3MailClient, upload_id: UUID, keep: str) -> None:
@@ -633,11 +697,13 @@ async def delete_knowledge_upload(
     if key is None:
         raise _not_found()
     try:
+        await s3.abort_multipart_uploads(object_prefix(key))
         await delete_upload_objects(s3, key)
     except Exception:
         logger.warning(
             "knowledge upload %s: could not delete its files", upload_id, exc_info=True
         )
+    sweep_later(s3, upload_id, object_prefix(key))
     return Response(status_code=http_status.HTTP_204_NO_CONTENT)
 
 
