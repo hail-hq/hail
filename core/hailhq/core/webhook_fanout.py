@@ -16,6 +16,7 @@ from uuid import UUID
 
 from hailhq.core.call_failures import call_failure_message
 from hailhq.core.models import Call, WebhookDelivery, WebhookSubscription
+from hailhq.core.schemas import caller_hidden_reason
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -152,10 +153,18 @@ async def fanout_sms_event(
     )
 
 
+def caller_hidden_data(direction: str, metadata: dict | None) -> dict[str, str]:
+    """The ``caller_hidden_reason`` entry of a ``call.*`` event's ``data``:
+    empty unless Hail hid the caller. For events built without a ``Call``."""
+    reason = caller_hidden_reason(direction, metadata)
+    return {} if reason is None else {"caller_hidden_reason": reason}
+
+
 def call_event_data(call: Call, **extra: Any) -> dict[str, Any]:
     """The ``data`` object of every ``call.*`` event: id and status, plus the
     fields that tell an inbound call from an outbound one. ``end_reason`` is
-    included only once the call is terminal."""
+    included only once the call is terminal, ``caller_hidden_reason`` only
+    when Hail hid the caller."""
     data: dict[str, Any] = {
         "id": str(call.id),
         "status": call.status,
@@ -166,6 +175,7 @@ def call_event_data(call: Call, **extra: Any) -> dict[str, Any]:
     }
     if call.end_reason is not None:
         data["end_reason"] = call.end_reason
+    data.update(caller_hidden_data(call.direction, call.metadata_))
     data.update(extra)
     if data["status"] == "failed":
         data["failure_message"] = call_failure_message(

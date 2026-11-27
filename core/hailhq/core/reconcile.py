@@ -32,10 +32,10 @@ from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.call_failures import call_failure_message
 from hailhq.core.handover import ANSWERED_HANDOVER_SQL, HANDOVER_BACKSTOP_SECONDS
 from hailhq.core.models import Call, CallEvent
-from hailhq.core.schemas import TERMINAL_CALL_STATUSES
+from hailhq.core.schemas import CALLER_HIDDEN_META, TERMINAL_CALL_STATUSES
 from hailhq.core.sip_connections import CHECK_CALL_META
 from hailhq.core.threads import requeue_skipped_for_call
-from hailhq.core.webhook_fanout import fanout_call_event
+from hailhq.core.webhook_fanout import caller_hidden_data, fanout_call_event
 from sqlalchemy import bindparam, func, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -116,7 +116,8 @@ async def sweep_stale_calls(
     select_stmt = text(f"""
         SELECT c.id, c.status, c.organization_id,
                c.direction, c.from_e164, c.to_e164, c.agent_id,
-               c.metadata ->> :check_key IS NOT NULL AS is_check
+               c.metadata ->> :check_key IS NOT NULL AS is_check,
+               c.metadata ->> :hidden_key AS caller_hidden
           FROM calls c
          WHERE c.transport = 'phone' AND c.status NOT IN :terminal_statuses
            AND c.max_duration_seconds IS NOT NULL
@@ -139,6 +140,7 @@ async def sweep_stale_calls(
                 "backstop_s": HANDOVER_BACKSTOP_SECONDS,
                 "terminal_statuses": list(TERMINAL_CALL_STATUSES),
                 "check_key": CHECK_CALL_META,
+                "hidden_key": CALLER_HIDDEN_META,
             },
         )
     ).fetchall()
@@ -164,6 +166,7 @@ async def sweep_stale_calls(
         to_e164,
         agent_id,
         is_check,
+        caller_hidden,
     ) in rows:
         session.add(
             CallEvent(
@@ -192,6 +195,9 @@ async def sweep_stale_calls(
                     "to": to_e164,
                     "agent_id": str(agent_id) if agent_id else None,
                     "end_reason": CallEndReason.SWEEPER_TIMEOUT.value,
+                    **caller_hidden_data(
+                        direction, {CALLER_HIDDEN_META: caller_hidden}
+                    ),
                     "failure_message": call_failure_message(
                         "failed", {}, CallEndReason.SWEEPER_TIMEOUT.value
                     ),

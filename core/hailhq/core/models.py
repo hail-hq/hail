@@ -6,7 +6,7 @@ from hailhq.core.call_end_reasons import CallEndReasonDB
 from hailhq.core.call_failures import call_failure_message
 from hailhq.core.file_uploads import LINK_SWEEP_GRACE
 from hailhq.core.hail_mail import ROLE_MAILBOXES
-from hailhq.core.schemas import TERMINAL_CALL_STATUSES
+from hailhq.core.schemas import TERMINAL_CALL_STATUSES, caller_hidden_reason
 from sqlalchemy import (
     ARRAY,
     DDL,
@@ -1049,6 +1049,10 @@ class Call(Base):
     def recording_status(self) -> str:
         value = (self.metadata_ or {}).get("recording_status")
         return value if isinstance(value, str) else "disabled"
+
+    @property
+    def caller_hidden_reason(self) -> str | None:
+        return caller_hidden_reason(self.direction, self.metadata_)
 
 
 class CallBalanceHold(Base):
