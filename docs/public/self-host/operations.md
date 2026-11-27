@@ -112,6 +112,7 @@ Put new adapters under `core/hailhq/core/providers/<channel>/<name>.py`. Each ad
 - **Speechmatics** (STT, optional): API key. Enables language-specific STT routing and end-of-utterance detection for 22 languages. Deepgram-only self-hosts keep working; if absent, calls fall back to Deepgram with VAD turn detection.
 - **Cartesia** (primary TTS): API key + a voice ID from the Cartesia voice library.
 - **ElevenLabs** (fallback TTS, optional): API key + a voice ID. If `ELEVEN_API_KEY` is set, the system uses it automatically when Cartesia fails.
+- **Gemini, xAI, AssemblyAI** (English TTS, optional): `GOOGLE_API_KEY` (or `GOOGLE_CLOUD_PROJECT` with Cloud credentials), `XAI_API_KEY`, `ASSEMBLYAI_API_KEY`. Each key adds its voice to the English voice list. A call whose provider has no key uses the other configured voices. Settings with code defaults, which you can set in `.env` to override: `GEMINI_VOICE_ID` (`Charon`) and `GOOGLE_CLOUD_LOCATION` (`global`, `us` or `eu`).
 - **At least one LLM provider**: OpenAI / Gemini / Anthropic API key. The voicebot's mode-A FallbackAdapter chains all three. Mode-B uses a caller-provided OpenAI-compatible endpoint for each call.
 
 For detailed setup walkthroughs, see [Twilio](./twilio.md),

@@ -51,11 +51,9 @@ class Settings(BaseSettings):
     hail_logfire_sample_rate: float = Field(default=1.0, ge=0, le=1)
 
     # LLM providers
-    openai_api_base_url: str = "https://api.openai.com/v1"
     openai_api_key: str = ""
     google_api_key: str = ""
     google_application_credentials: str = ""
-    google_service_account_json_b64: str = ""
     google_cloud_project: str = ""
     google_genai_use_vertexai: bool = True
     anthropic_api_key: str = ""
@@ -90,6 +88,7 @@ class Settings(BaseSettings):
     cartesia_api_key: str = ""
     eleven_api_key: str = ""
     speechmatics_api_key: str = ""
+    # Vertex AI location for Gemini speech: global, us, or eu.
     google_cloud_location: str = "global"
     xai_api_key: str = ""
     assemblyai_api_key: str = ""
@@ -97,6 +96,7 @@ class Settings(BaseSettings):
     # STT/TTS, model names set via .env / .env.local.
     deepgram_model: str = ""
     speechmatics_model: str = ""
+    # Gemini voice for calls that inherit Hail's English voice.
     gemini_voice_id: str = Field(
         default="Charon", min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$"
     )

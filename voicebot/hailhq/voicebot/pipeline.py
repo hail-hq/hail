@@ -746,13 +746,9 @@ def build_tts(
             org.provider,
             language,
         )
-        if org.provider in TTS_PRESET_MODELS:
-            if voice_id_explicit:
-                override_provider = configured_house_voice_provider(
-                    voice_id_override, language
-                )
-            if override_provider is None:
-                voice_id_override = None
+        # Keep the chosen voice. A known one goes to its own provider; a
+        # preset voice is filtered out in _house_tts.
+        override_provider = configured_house_voice_provider(voice_id_override, language)
         org = None
     if org is not None:
         preset_provider = org.provider in TTS_PRESET_MODELS
@@ -772,7 +768,10 @@ def build_tts(
                     primary_voice = None
             byo = _org_tts(org, primary_voice, language)
         except (GoogleAuthError, ValueError):
-            if not preset_provider or not org.fallback_enabled:
+            # A row without its own key runs on Hail's credentials, so it may
+            # use Hail's other voices when those are missing.
+            house_backed = org.api_key is None
+            if not preset_provider or not (org.fallback_enabled or house_backed):
                 raise
             logger.warning(
                 "Could not configure %s speech. Using the house chain.", org.provider

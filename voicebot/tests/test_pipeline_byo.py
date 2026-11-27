@@ -469,11 +469,18 @@ def test_workspace_gemini_uses_an_explicit_per_call_voice(
 
 
 @pytest.mark.parametrize(
-    "voice_id",
-    ["Charon", "21m00Tcm4TlvDq8ikWAM", "228fca29-3a0a-435c-8728-5cb483251068"],
+    ("voice_id", "spoken"),
+    [
+        ("Charon", None),
+        ("21m00Tcm4TlvDq8ikWAM", "21m00Tcm4TlvDq8ikWAM"),
+        (
+            "228fca29-3a0a-435c-8728-5cb483251068",
+            "228fca29-3a0a-435c-8728-5cb483251068",
+        ),
+    ],
 )
-def test_workspace_gemini_language_fallback_uses_configured_voices(
-    monkeypatch, captured_plugins, voice_id
+def test_workspace_gemini_language_fallback_keeps_the_chosen_voice(
+    monkeypatch, captured_plugins, voice_id, spoken
 ):
     org = ResolvedLayer("gemini", "workspace", {"voice_id": "Charon"}, True)
     monkeypatch.setattr(settings, "eleven_api_key", "house-eleven")
@@ -482,8 +489,10 @@ def test_workspace_gemini_language_fallback_uses_configured_voices(
     chain = build_tts(org, voice_id, "fr", voice_id_explicit=True)
 
     assert [item.label for item in chain._tts_instances] == ["cartesia", "elevenlabs"]
-    assert captured_plugins["cartesia"][0].kwargs["voice"] == "house-voice"
-    assert captured_plugins["elevenlabs"][0].kwargs["voice_id"] == "eleven-house-voice"
+    cartesia = captured_plugins["cartesia"][0].kwargs["voice"]
+    elevenlabs = captured_plugins["elevenlabs"][0].kwargs["voice_id"]
+    assert cartesia == (spoken or "house-voice")
+    assert elevenlabs == (spoken or "eleven-house-voice")
 
 
 @pytest.mark.parametrize("provider", ["cartesia", "elevenlabs"])
@@ -566,13 +575,18 @@ def test_explicit_workspace_voice_keeps_its_legacy_fallback_order(
     ]
 
 
-def test_removed_xai_key_uses_house_speech_only_with_consent(
-    monkeypatch, captured_plugins
+@pytest.mark.parametrize("fallback", [False, True])
+def test_missing_house_xai_key_uses_other_house_speech(
+    monkeypatch, captured_plugins, fallback
 ):
     monkeypatch.setattr(settings, "xai_api_key", "")
-    org = ResolvedLayer("xai", None, {"voice_id": "ara"}, True)
-    build_tts(org, language="en")
+    org = ResolvedLayer("xai", None, {"voice_id": "ara"}, fallback)
+
+    assert build_tts(org, language="en").label == "cartesia"
     assert captured_plugins["cartesia"][0].kwargs["voice"] == "house-voice"
-    strict = ResolvedLayer("xai", None, {"voice_id": "ara"}, False)
+
+
+def test_workspace_xai_key_without_consent_keeps_its_error(monkeypatch):
+    org = ResolvedLayer("xai", " ", {"voice_id": "ara"}, False)
     with pytest.raises(ValueError, match="No workspace or Hail key"):
-        build_tts(strict, language="en")
+        build_tts(org, language="en")
