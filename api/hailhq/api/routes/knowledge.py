@@ -409,7 +409,7 @@ async def get_knowledge_document_file(
     operation_id="update_knowledge_document_tag",
     responses={
         403: {
-            "description": "Signed-in members need owner or admin access to edit tags."
+            "description": "User credentials need workspace owner or admin access to edit tags."
         },
         404: {"description": "No such document in this workspace."},
     },
@@ -422,9 +422,12 @@ async def update_knowledge_document_tag(
 ) -> KnowledgeDocumentResponse:
     """Set or clear a document's tag without changing its other tags."""
     org = principal.organization_id
-    if principal.auth_kind == "jwt" and not (
-        principal.console_session and principal.superadmin
-    ):
+    is_staff = (
+        principal.auth_kind == "jwt"
+        and principal.console_session
+        and principal.superadmin
+    )
+    if principal.auth_kind != "shared" and not is_staff:
         role = await organization_member_role(db, org, principal.user_id)
         if role not in ("owner", "admin"):
             raise HTTPException(
@@ -435,7 +438,7 @@ async def update_knowledge_document_tag(
     doc = await _owned(db, document_id, org, lock=True)
     value_key = None
     if body.value is not None:
-        value_key = normalize("NFC", body.value.casefold())
+        value_key = normalize("NFC", normalize("NFD", body.value).casefold())
         await db.execute(
             insert(KnowledgeTagValue)
             .values(
