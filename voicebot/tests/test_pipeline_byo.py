@@ -634,6 +634,22 @@ def test_missing_house_xai_key_uses_other_house_speech(
     assert captured_plugins["cartesia"][0].kwargs["voice"] == "house-voice"
 
 
+@pytest.mark.parametrize(
+    ("voice", "spoken"),
+    [("chosen-cartesia-voice", "chosen-cartesia-voice"), ("ara", "house-voice")],
+)
+def test_missing_house_xai_key_keeps_the_chosen_voice(
+    monkeypatch, captured_plugins, voice, spoken
+):
+    monkeypatch.setattr(settings, "xai_api_key", "")
+    org = ResolvedLayer("xai", None, {}, False)
+
+    chain = build_tts(org, voice, "en", voice_id_explicit=True)
+
+    assert chain.label == "cartesia"
+    assert captured_plugins["cartesia"][0].kwargs["voice"] == spoken
+
+
 def test_workspace_xai_key_without_consent_keeps_its_error(monkeypatch):
     org = ResolvedLayer("xai", " ", {"voice_id": "ara"}, False)
     with pytest.raises(ValueError, match="No workspace or Hail key"):

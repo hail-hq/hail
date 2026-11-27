@@ -789,7 +789,9 @@ def build_tts(
             logger.warning(
                 "Could not configure %s speech. Using the house chain.", org.provider
             )
-            return build_tts(None, fallback_voice, language)
+            # Not BYO: keep the chosen voice, as a call with no row would.
+            house_voice = voice_id_override if house_backed else fallback_voice
+            return build_tts(None, house_voice, language)
         if org.fallback_enabled:
             same_house_gemini = (
                 org.provider == "gemini"
