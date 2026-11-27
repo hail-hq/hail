@@ -19,7 +19,7 @@ A customer's phone system (PBX) connects to Hail over a SIP trunk. Each connecti
 
 3. Do this before the first connection is created, and after the per-carrier trunks of the [inbound trunk runbook](inbound-trunk-lockdown.md) are applied.
 
-Who can use it: staff console sessions only while `OPEN_TO_ALL_WORKSPACES` is `False` in `api/hailhq/api/routes/sip_connections.py` (everyone else gets 404), with the console feature `connectedPhoneSystems` in hail-website `lib/console-features.ts`. Open both together. Once open, the API shows the LiveKit project's SIP host to every workspace that connects a phone system.
+Who can use it: every workspace, while `OPEN_TO_ALL_WORKSPACES` is `True` in `api/hailhq/api/routes/sip_connections.py` (`False`: staff console sessions only, everyone else gets 404), with the console feature `connectedPhoneSystems` in hail-website `lib/console-features.ts`. Change both together. A workspace sees only the first characters of the SIP server (`sip_host_masked: true`); staff console sessions and the shared key see it in full. Support sends the full address to the customer during setup.
 
 ## 2. Commands
 
@@ -27,8 +27,8 @@ Run on the API host, from the compose project directory:
 
 ```bash
 docker compose exec api python -m hailhq.api.connected_numbers_ops create \
-  --org <org uuid> --label "Main office" --region US \
-  [--pbx-host <host>] [--pbx-port 5060] [--pbx-transport auto]
+  --org <org uuid> --label "Main office" \
+  [--region <phone system country; read first for callers on every number>] [--pbx-host <host>] [--pbx-port 5060] [--pbx-transport auto]
 docker compose exec api python -m hailhq.api.connected_numbers_ops add \
   --connection <connection uuid> --number +14155550100
 docker compose exec api python -m hailhq.api.connected_numbers_ops check \
@@ -62,8 +62,8 @@ docker compose exec api python -m hailhq.api.connected_numbers_ops release-claim
 The check calls the number from a Hail line and sends a 6-digit code as key presses.
 
 - `active`: the call arrived on this connection's trunk with the right code.
-- `no_call_arrived`: the PBX route, host, port or credentials are wrong. LiveKit refuses a call without valid digest auth before Hail sees it. Check the outbound route for this number, the PBX host and port, and the username and password.
-- `not_authenticated`: the call reached Hail only on another trunk, never on the connection's own trunk before the check ended. Most likely the dialed number is not in +E.164 form.
+- `no_call_arrived`: the PBX route, host, port or credentials are wrong, or the dialed number is not in +E.164 form. LiveKit refuses a call without valid digest auth before Hail sees it. A number not in +E.164 form is refused by LiveKit, or reaches Hail and is dropped as an unknown number (log line "inbound call to unknown/pool number … dropped"). Check the outbound route for this number and its + and country code, the PBX host and port, and the username and password.
+- `not_authenticated`: the call reached Hail only on another trunk, never on the connection's own trunk before the check ended. For example, the PBX used another connection's username and password.
 - `code_not_received`: the call arrived but the code did not. The PBX drops key presses, or a digit was pressed before the code.
 
 ## 5. Limits
@@ -86,7 +86,7 @@ Re-run the probe if LiveKit changes how trunks or caller IDs work.
 
 ## 7. Six calls at once
 
-Before the first customer, place 6 calls at the same time on one connection. Watch:
+Before the first customer, place 6 calls at the same time on one connection. On a 3CX connection each agent call holds 2 of 3CX's simultaneous calls: the test needs a 3CX licence with at least 12, or place half the licence's count. Watch:
 
 - Voicebot CPU stays below 70%.
 - LiveKit project limits shared by every call. Past them a recording fails while the call continues, and interruption detection falls back to voice activity detection:
@@ -95,37 +95,6 @@ Before the first customer, place 6 calls at the same time on one connection. Wat
   - Adaptive interruption concurrent connections stay below the project's limit.
 - Read the limits in the LiveKit Cloud console for the project.
 
-## 8. 3CX V20 field notes
+## 8. 3CX
 
-Menu names are from 3CX V20 Update 10.
-
-**Trunk** (Admin > Voice & Chat > Add Trunk > Generic SIP Trunk):
-
-- Registrar/Server: the SIP server from the connection, port 5060.
-- Authentication ID and password: the connection's username and password. Seen working on one install with type of authentication `Do not require – IP based` (3CX still answered LiveKit's digest challenge); not checked in 3CX's docs. If calls never reach Hail, try a type that authenticates.
-- Main Trunk Number is required. 3CX sends it as the caller on every call through the trunk (see caller ID below).
-- DTMF: RFC 2833.
-
-**Outbound rule** (Admin > Outbound Rules, move it to the top):
-
-- Do not match the number itself. 3CX's E.164 setting ("remove the country code if same country") rewrites `+<cc>…` to the national form before rules run, so a `+<cc>` prefix never matches, and each number would need its own rule.
-- Match a dial-prefix tag no other rule uses (for example `7799`). Route 1: the Hail trunk, strip the tag's digits, prepend `+<country code>`. One rule serves every number.
-- Countries that drop the national trunk prefix in E.164 (the leading `0` in GB, DE and most others): strip the tag and that `0` too (5 digits for a 4-digit tag). Countries that keep it (IT): strip only the tag.
-- "Calls from extension(s)", "Calls to numbers with a length of" and "Outbound Caller ID" stay empty. A length value makes the rule never match; an Outbound Caller ID replaces the real caller.
-
-**Sending calls to the trunk**: forward to outside number `<tag><national number>`. Example in GB: the national `020 7946 0018` is forwarded to `779902079460018`; the rule strips 5 digits and prepends `+44`, so Hail receives `+442079460018`, the number on the connection.
-
-- Testing: Admin > Advanced > CID Rules, one rule per caller (a staff mobile), on the trunk that receives the number, forward to `<tag><national number>`. Other callers keep reaching the business.
-- The ownership check calls from a Hail pool line, often a different number on each check. Read the check call's number in 3CX's call history and match its start in the form 3CX shows it (with `+`, with `00`, or with neither). If no rule matches, 3CX answers the check itself (reception or menu) and the check ends `no_call_arrived`.
-- Go-live: the number's inbound rule (office hours, out of office, or one menu option) forwards to `<tag><national number>`. Remove the test CID rules.
-
-**Caller ID**: by default 3CX sends the Main Trunk Number as the caller, so every caller looks like the business's own number. Agents find earlier calls and texts by the caller's number, so callers' histories would mix. Fix it before go-live: V20 has no Outbound Parameters tab, so set `FromUserPart` to `$OriginatorCallerId` in a copy of the trunk's provider template (Advanced > Templates > SIP Trunk Providers) or in an exported trunk file, then import it. A test call from a mobile must show the mobile's number in Hail. Not yet checked in 3CX's own docs: the P-Asserted-Identity and Remote-Party-ID fields.
-
-**3CX Event Log** (Admin > Event Log, errors and warnings only):
-
-- `403` from another trunk's address: the call left on the business's normal line, so the Hail rule did not match (prefix, an empty field not empty, or rule order).
-- `401` or `407` from the SIP server: wrong username or password.
-- `486 Busy Here` from the SIP server: Hail refused the call (seen for a number with no agent routed). Read the failed call's end reason in Hail: `no_agent`, `insufficient_funds` and the like.
-- No line at all and Hail says `no_call_arrived`: the CID or inbound rule did not catch the call.
-
-**Agent voice**: set a voice native to the call's language; with no voice set, the default voice speaks with a foreign accent. Write brand names in the instructions and greeting as words ("Northgate"), not capitals ("NORTHGATE"): text-to-speech spells capitals letter by letter.
+What a 3CX V20 admin enters, how to route a number to Hail, and how to read failures: [3cx-field-notes.md](3cx-field-notes.md).

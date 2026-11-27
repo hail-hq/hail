@@ -98,7 +98,7 @@ def carrier_caller(raw: str) -> str:
     return raw
 
 
-def normalize_caller(raw: str, default_region: str) -> str:
+def normalize_caller(raw: str, default_region: str | None) -> str:
     """A PBX caller as E.164 where possible. An extension (1 to 6 digits) and
     anything that is not a number (``anonymous``) stay as given."""
     raw = (raw or "").strip()
@@ -114,6 +114,30 @@ def normalize_caller(raw: str, default_region: str) -> str:
     if not phonenumbers.is_valid_number(parsed):
         return raw
     return phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
+
+
+def looks_like_phone_number(raw: str) -> bool:
+    """More than an extension: 7 or more digits, with or without ``+``."""
+    digits = (raw or "").strip().removeprefix("+")
+    return _ascii_digits(digits) and len(digits) > 6
+
+
+def read_caller(raw: str, regions: list[str | None]) -> str:
+    """A PBX caller read with the first of ``regions`` that gives a valid
+    number; as given when none does. Non-ISO regions (``001``) are skipped."""
+    tried: set[str] = set()
+    for region in regions:
+        if (
+            not region
+            or region in tried
+            or region not in phonenumbers.SUPPORTED_REGIONS
+        ):
+            continue
+        tried.add(region)
+        out = normalize_caller(raw, region)
+        if out.startswith("+"):
+            return out
+    return normalize_caller(raw, None)
 
 
 def new_inbound_username() -> str:

@@ -1185,3 +1185,62 @@ async def test_twilio_call_on_a_connection_trunk_still_needs_the_secret(
     )
     assert isinstance(outcome, inbound_calls.Rejected)
     assert outcome.reason == "carrier_route_failed"
+
+
+@pytest.mark.parametrize(
+    "number_country,raw,expected",
+    [
+        # A local caller in the national form of the number called.
+        ("GB", "02079460018", "+442079460018"),
+        ("US", "4155550123", "+14155550123"),
+        # A caller from abroad keeps its international prefix.
+        ("GB", "0014155550123", "+14155550123"),
+        ("GB", "+14155550123", "+14155550123"),
+    ],
+)
+async def test_a_pbx_caller_is_read_with_the_called_numbers_country(
+    async_session, number_country, raw, expected
+):
+    """No connection country: each call uses its own number's country, so one
+    connection can hold numbers from several countries."""
+    _org, _agent, number = await _pbx_seed(async_session, country_code=number_country)
+    assert await inbound_calls._caller_of(async_session, number, raw) == expected
+
+
+async def test_a_caller_the_called_numbers_country_cannot_read_tries_the_others(
+    async_session,
+):
+    """A UK phone system hosting a US number writes a caller from France with
+    the UK international prefix: the connection's GB number reads it."""
+    org, _agent, us_number = await _pbx_seed(async_session, country_code="US")
+    async_session.add(
+        PhoneNumber(
+            organization_id=org,
+            e164="+442079460018",
+            country_code="GB",
+            number_type="local",
+            capabilities=["voice"],
+            provider="pbx",
+            sip_connection_id=us_number.sip_connection_id,
+            provisioning_state="active",
+        )
+    )
+    await async_session.flush()
+    out = await inbound_calls._caller_of(async_session, us_number, "0033123456789")
+    assert out == "+33123456789"
+
+
+@pytest.mark.parametrize(
+    "region,expected",
+    # "2079460018" is valid in both: a stated phone system country wins.
+    [(None, "+12079460018"), ("GB", "+442079460018")],
+)
+async def test_a_stated_phone_system_country_is_read_first(
+    async_session, region, expected
+):
+    _org, _agent, number = await _pbx_seed(async_session, country_code="US")
+    conn = await async_session.get(SipConnection, number.sip_connection_id)
+    conn.default_region = region
+    await async_session.flush()
+    out = await inbound_calls._caller_of(async_session, number, "2079460018")
+    assert out == expected

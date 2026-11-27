@@ -181,7 +181,7 @@ async def create_connection(
     *,
     organization_id: UUID,
     label: str,
-    default_region: str,
+    default_region: str | None = None,
     pbx_host: str | None = None,
     pbx_port: int = 5060,
     pbx_transport: str = "auto",
@@ -191,7 +191,10 @@ async def create_connection(
     """Create a connection and its trunks. Returns the row and the inbound
     password in plain text."""
     label = _clean_label(label)
-    _check_region(default_region)
+    # Optional: the phone system's country, tried first to read callers
+    # (core inbound_calls._caller_of).
+    if default_region is not None:
+        _check_region(default_region)
     pbx_host = _check_host(pbx_host)
     _check_port(pbx_port)
     _check_transport(pbx_transport)
@@ -269,6 +272,7 @@ async def update_connection(
     pbx_transport: Any = UNSET,
     pbx_username: Any = UNSET,
     pbx_password: Any = UNSET,
+    default_region: Any = UNSET,
 ) -> SipConnection:
     """Change a connection; the outbound trunk follows ``pbx_host``. Under
     the org lock, so it cannot race ``delete_connection``. A failed commit
@@ -288,6 +292,12 @@ async def update_connection(
     try:
         _live(connection)
         new_label = connection.label if label is UNSET else _clean_label(label)
+        if default_region is UNSET:
+            region = connection.default_region
+        elif default_region is None:
+            region = None
+        else:
+            region = _check_region(default_region)
         host = old_host if pbx_host is UNSET else _check_host(pbx_host)
         port = old_port if pbx_port is UNSET else _check_port(pbx_port)
         transport = (
@@ -363,6 +373,7 @@ async def update_connection(
 
     try:
         connection.label = new_label
+        connection.default_region = region
         connection.pbx_host = host
         connection.pbx_port = port
         connection.pbx_transport = transport

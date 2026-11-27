@@ -8,6 +8,23 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 - Knowledge base (early access): upload manuals, FAQs and part lists, and agents answer calls, texts and email from them, in any supported language (`/v1/knowledge`, `knowledge` on agents, CLI `hail knowledge`, SDK and MCP).
 
+## [0.40.0] (2026-11-25)
+
+Connect your phone system is open to every workspace, in the console, the API
+and the CLI. A failed ownership check names the cause and the next step.
+
+Component versions cut alongside this release:
+**`cli-v0.37.0`** (Homebrew + GitHub Releases). No SDK or MCP change. No
+database migration.
+
+### Added
+
+- Connect your phone system is open to every workspace, in the console, the API and the CLI (`hail sip-connections`).
+
+### Fixed
+
+- A failed ownership check of a connected number names the cause and the next step.
+
 ## [0.39.0] (2026-11-25)
 
 Connect your phone system: keep your number and your phone system (PBX), and

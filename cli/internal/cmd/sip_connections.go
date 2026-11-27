@@ -22,8 +22,6 @@ func newSipConnectionsCmd(opts *Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "sip-connections",
 		Short: "Connect your phone system (PBX) to Hail agents",
-		// Hidden from help while the API opens these routes to staff only.
-		Hidden: true,
 		Long: `hail sip-connections: connect your own phone system (PBX).
 
 1. create        gives the SIP server, username and password for a generic
@@ -31,10 +29,10 @@ func newSipConnectionsCmd(opts *Options) *cobra.Command {
 2. add-number    adds a number your phone system holds (state unverified).
 3. verify        Hail calls the number to prove you own it (up to 2 minutes,
                  billed as a normal outbound call).
-4. hail numbers update <number_id> --voice-agent <agent_id>
+4. hail numbers route <number_id> --calls <agent_id>
 
 Example:
-  hail sip-connections create --label "Main office" --region US --pbx-host pbx.example.com
+  hail sip-connections create --label "Main office" --pbx-host pbx.example.com
   hail sip-connections add-number <connection_id> +14155550100
   hail sip-connections verify <connection_id> <number_id>`,
 	}
@@ -74,8 +72,8 @@ func newSipConnectionsCreateCmd(opts *Options) *cobra.Command {
 		Short: "Connect a phone system; prints the SIP trunk settings",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if f.label == "" || f.region == "" {
-				return requireInputs(cmd, "--label and --region")
+			if f.label == "" {
+				return requireInputs(cmd, "--label")
 			}
 			password, err := readSecretFlag(f.password, "--pbx-password", cmd.InOrStdin())
 			if err != nil {
@@ -83,7 +81,7 @@ func newSipConnectionsCreateCmd(opts *Options) *cobra.Command {
 			}
 			body := client.SipConnectionCreate{
 				Label:         f.label,
-				DefaultRegion: f.region,
+				DefaultRegion: strPtr(strings.ToUpper(strings.TrimSpace(f.region))),
 				PbxHost:       strPtr(f.host),
 				PbxUsername:   strPtr(f.username),
 				PbxPassword:   strPtr(password),
@@ -111,9 +109,9 @@ func newSipConnectionsCreateCmd(opts *Options) *cobra.Command {
 				return printJSON(opts.Stdout, resp.JSON201)
 			}
 			c := resp.JSON201
-			fmt.Fprintln(opts.Stderr, "Put the password in your phone system's trunk. Staff can read it again in the console.")
+			fmt.Fprintln(opts.Stderr, "Put the password in your phone system's trunk. You can read it again later.")
 			fmt.Fprintf(opts.Stdout, "✓ Connection %s: %s\n", c.Label, c.Id)
-			fmt.Fprintf(opts.Stdout, "  SIP server:    %s\n", c.SipHost)
+			fmt.Fprintf(opts.Stdout, "  SIP server:    %s\n", sipHostText(c.SipHost, c.SipHostMasked))
 			fmt.Fprintf(opts.Stdout, "  Username:      %s\n", c.Username)
 			fmt.Fprintf(opts.Stdout, "  Password:      %s\n", c.Password)
 			fmt.Fprintln(opts.Stdout, "  Audio:         G.711 (PCMU or PCMA)")
@@ -123,7 +121,7 @@ func newSipConnectionsCreateCmd(opts *Options) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&f.label, "label", "", "Name, such as \"Main office\" (required)")
-	cmd.Flags().StringVar(&f.region, "region", "", "2-letter country of the phone system, such as US (required)")
+	cmd.Flags().StringVar(&f.region, "region", "", "Optional 2-letter country of the phone system, read first for callers; most leave it out")
 	cmd.Flags().StringVar(&f.host, "pbx-host", "", "Public address Hail dials for calls out and handover")
 	cmd.Flags().IntVar(&f.port, "pbx-port", 5060, "SIP port of the phone system")
 	cmd.Flags().StringVar(&f.transport, "pbx-transport", "", "auto, udp, tcp or tls (default auto)")
@@ -181,7 +179,7 @@ func newSipConnectionsListCmd(opts *Options) *cobra.Command {
 				if c.PbxHost != nil {
 					host = *c.PbxHost
 				}
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", c.Id, c.Label, c.DefaultRegion, host)
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", c.Id, c.Label, regionText(c.DefaultRegion), host)
 			}
 			return w.Flush()
 		},
@@ -192,15 +190,32 @@ func newSipConnectionsListCmd(opts *Options) *cobra.Command {
 	return cmd
 }
 
+// regionText is the phone system's country, or "-" when Hail uses each
+// called number's country.
+func regionText(region *string) string {
+	if region == nil || *region == "" {
+		return "-"
+	}
+	return *region
+}
+
+// sipHostText is the SIP server line: a masked server says where to get it.
+func sipHostText(host string, masked bool) string {
+	if masked {
+		return host + " (ask support for the full address)"
+	}
+	return host
+}
+
 func printSipConnection(opts *Options, c *client.SipConnectionResponse) error {
 	if opts.JSON {
 		return printJSON(opts.Stdout, c)
 	}
 	fmt.Fprintf(opts.Stdout, "Connection %s: %s\n", c.Label, c.Id)
-	fmt.Fprintf(opts.Stdout, "  SIP server: %s\n", c.SipHost)
+	fmt.Fprintf(opts.Stdout, "  SIP server: %s\n", sipHostText(c.SipHost, c.SipHostMasked))
 	fmt.Fprintf(opts.Stdout, "  Username:   %s\n", c.Username)
 	fmt.Fprintf(opts.Stdout, "  Password:   ••••%s\n", c.PasswordLast4)
-	fmt.Fprintf(opts.Stdout, "  Region:     %s\n", c.DefaultRegion)
+	fmt.Fprintf(opts.Stdout, "  Region:     %s\n", regionText(c.DefaultRegion))
 	if c.PbxHost != nil {
 		fmt.Fprintf(opts.Stdout, "  PBX:        %s:%d (%s)\n", *c.PbxHost, c.PbxPort, c.PbxTransport)
 	} else {
@@ -241,9 +256,9 @@ func newSipConnectionsGetCmd(opts *Options) *cobra.Command {
 // --------------------------------------------------------------------------- //
 
 type sipUpdateFlags struct {
-	label, host, transport, username, password string
-	port                                       int
-	clearHost, clearUsername                   bool
+	label, host, transport, username, password, region string
+	port                                               int
+	clearHost, clearUsername, clearRegion              bool
 }
 
 func newSipConnectionsUpdateCmd(opts *Options) *cobra.Command {
@@ -270,6 +285,16 @@ A new host, port or transport needs --pbx-password again when a username is set.
 				}
 			}
 			set("label", "label", f.label)
+			if cmd.Flags().Changed("region") {
+				region := strings.ToUpper(strings.TrimSpace(f.region))
+				if region == "" {
+					return fmt.Errorf("--region needs a 2-letter country; use --clear-region to remove it")
+				}
+				patch["default_region"] = region
+			}
+			if f.clearRegion {
+				patch["default_region"] = nil
+			}
 			set("pbx-host", "pbx_host", f.host)
 			set("pbx-port", "pbx_port", f.port)
 			set("pbx-transport", "pbx_transport", f.transport)
@@ -312,6 +337,8 @@ A new host, port or transport needs --pbx-password again when a username is set.
 		},
 	}
 	cmd.Flags().StringVar(&f.label, "label", "", "New name")
+	cmd.Flags().StringVar(&f.region, "region", "", "Country of the phone system, read first for callers, such as GB")
+	cmd.Flags().BoolVar(&f.clearRegion, "clear-region", false, "Use each called number's country instead")
 	cmd.Flags().StringVar(&f.host, "pbx-host", "", "New public address of the phone system")
 	cmd.Flags().BoolVar(&f.clearHost, "clear-pbx-host", false, "Remove the address (answer only)")
 	cmd.Flags().IntVar(&f.port, "pbx-port", 5060, "New SIP port")
@@ -320,6 +347,7 @@ A new host, port or transport needs --pbx-password again when a username is set.
 	cmd.Flags().StringVar(&f.password, "pbx-password", "", "New password Hail sends; \"-\" reads it from stdin (keeps it out of shell history)")
 	cmd.Flags().BoolVar(&f.clearUsername, "clear-pbx-username", false, "Remove the username and password")
 	cmd.MarkFlagsMutuallyExclusive("pbx-host", "clear-pbx-host")
+	cmd.MarkFlagsMutuallyExclusive("region", "clear-region")
 	cmd.MarkFlagsMutuallyExclusive("pbx-username", "clear-pbx-username")
 	cmd.MarkFlagsMutuallyExclusive("pbx-password", "clear-pbx-username")
 	return cmd
@@ -447,8 +475,8 @@ func readSecretFlag(flag, name string, stdin io.Reader) (string, error) {
 
 // checkReasons turns a failed check's reason into the next step.
 var checkReasons = map[client.ConnectedNumberCheckReason]string{
-	"no_call_arrived":   "No call arrived. Check the SIP trunk and the routing rule.",
-	"not_authenticated": "The call came in without this connection's username and password.",
+	"no_call_arrived":   "No call arrived. Check the SIP trunk and its username and password, and that a routing rule sends this number to Hail with + and the country code.",
+	"not_authenticated": "The call came in on another connection's trunk, for example with another connection's username and password.",
 	"code_not_received": "The check code did not come through. Turn on RFC 2833 key presses on the trunk.",
 }
 

@@ -20,6 +20,7 @@ func sampleSipConnection(withPassword bool) map[string]any {
 		"label":            "Main office",
 		"default_region":   "US",
 		"sip_host":         "example.sip.livekit.cloud",
+		"sip_host_masked":  false,
 		"username":         "hail-user-1",
 		"password_last4":   "wxyz",
 		"pbx_host":         "pbx.example.com",
@@ -39,7 +40,7 @@ func TestSipConnectionsCreatePrintsPasswordOnce(t *testing.T) {
 	srv := newFakeServer(t, http.StatusCreated, sampleSipConnection(true))
 	stdout, stderr, err := runRoot(t,
 		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
-		"sip-connections", "create", "--label", "Main office", "--region", "US",
+		"sip-connections", "create", "--label", "Main office",
 		"--pbx-host", "pbx.example.com",
 	)
 	if err != nil {
@@ -52,7 +53,7 @@ func TestSipConnectionsCreatePrintsPasswordOnce(t *testing.T) {
 	if err := json.Unmarshal(srv.lastBody, &body); err != nil {
 		t.Fatalf("body: %v", err)
 	}
-	if body["label"] != "Main office" || body["default_region"] != "US" || body["pbx_host"] != "pbx.example.com" {
+	if body["label"] != "Main office" || body["default_region"] != nil || body["pbx_host"] != "pbx.example.com" {
 		t.Errorf("body = %s", srv.lastBody)
 	}
 	if strings.Count(stdout, "abcdefghijklmnopqrstuvwxyz") != 1 {
@@ -100,7 +101,7 @@ func TestSipConnectionsVerifyNoCallArrived(t *testing.T) {
 	if err == nil {
 		t.Fatal("want an error (exit 1)")
 	}
-	if !strings.Contains(err.Error(), "No call arrived. Check the SIP trunk and the routing rule.") {
+	if !strings.Contains(err.Error(), "No call arrived. Check the SIP trunk and its username and password, and that a routing rule sends this number to Hail with + and the country code.") {
 		t.Errorf("err = %v", err)
 	}
 }
@@ -182,7 +183,7 @@ func TestSipConnectionsCreatePasswordFromStdin(t *testing.T) {
 	_, _, err := runRootStdin(t,
 		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
 		"s3cret-from-stdin\n",
-		"sip-connections", "create", "--label", "Main office", "--region", "US",
+		"sip-connections", "create", "--label", "Main office",
 		"--pbx-host", "pbx.example.com", "--pbx-username", "hail", "--pbx-password", "-",
 	)
 	if err != nil {
@@ -206,5 +207,32 @@ func TestSipConnectionsUpdateRefusesSetAndClear(t *testing.T) {
 	}
 	if srv.hits != 0 {
 		t.Fatalf("server called %d times", srv.hits)
+	}
+}
+
+func TestSipConnectionsMaskedHostSaysWhereToGetIt(t *testing.T) {
+	c := sampleSipConnection(false)
+	c["sip_host"] = "examp••••••••••••"
+	c["sip_host_masked"] = true
+	srv := newFakeServer(t, http.StatusOK, c)
+	stdout, _, err := runRoot(t,
+		map[string]string{"HAIL_API_KEY": "sk_test", "HAIL_API_URL": srv.URL},
+		"sip-connections", "get", testConnID,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout, "examp•••••••••••• (ask support for the full address)") {
+		t.Errorf("masked host line: %q", stdout)
+	}
+}
+
+func TestSipConnectionsShowsInHelp(t *testing.T) {
+	stdout, _, err := runRoot(t, map[string]string{"HAIL_API_KEY": "sk_test"}, "--help")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout, "sip-connections") {
+		t.Errorf("sip-connections missing from help: %q", stdout)
 	}
 }

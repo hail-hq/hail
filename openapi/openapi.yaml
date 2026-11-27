@@ -8442,10 +8442,11 @@ components:
             - type: "null"
           title: Reason
           description: "Why the check failed. 'no_call_arrived': no call reached
-            this connection; check the trunk and the routing rule. 'not_authenticated':
-            the call came without this connection's username and password, or to
-            another trunk. 'code_not_received': the check code did not come through;
-            turn on RFC 2833 key presses."
+            this connection; check the trunk and its username and password, and that
+            a routing rule sends this number to Hail with + and the country code.
+            'not_authenticated': the call came in on another connection's trunk,
+            for example with another connection's username and password. 'code_not_received':
+            the check code did not come through; turn on RFC 2833 key presses."
         call_id:
           anyOf:
             - type: string
@@ -12140,12 +12141,16 @@ components:
           title: Label
           description: A name, such as 'Main office'.
         default_region:
-          type: string
-          pattern: ^[A-Z]{2}$
+          anyOf:
+            - type: string
+              pattern: ^[A-Z]{2}$
+            - type: "null"
           title: Default Region
           description:
-            ISO alpha-2 country of the phone system. Hail reads national
-            caller numbers with it.
+            "Optional ISO alpha-2 country of the phone system; most connections
+            leave it out. Set: Hail reads callers with it first. Left out: with the
+            country of the number that was called, then of the connection's other
+            numbers."
         pbx_host:
           anyOf:
             - type: string
@@ -12187,7 +12192,6 @@ components:
       type: object
       required:
         - label
-        - default_region
       title: SipConnectionCreate
     SipConnectionCreated:
       properties:
@@ -12201,13 +12205,26 @@ components:
           title: Label
           description: Name of the connection.
         default_region:
-          type: string
+          anyOf:
+            - type: string
+            - type: "null"
           title: Default Region
-          description: ISO alpha-2 country of the phone system.
+          description:
+            Optional country of the phone system, tried first to read callers
+            (see create). Null for most connections.
         sip_host:
           type: string
           title: Sip Host
-          description: SIP server your phone system sends calls to (the trunk's host).
+          description:
+            "SIP server your phone system sends calls to (the trunk's host).\
+            \ When sip_host_masked is true it shows only its first characters, followed\
+            \ by '\u2022' characters that are not part of the host."
+        sip_host_masked:
+          type: boolean
+          title: Sip Host Masked
+          description:
+            "True: sip_host shows only its first characters. Support sends
+            you the full address."
         username:
           type: string
           title: Username
@@ -12259,6 +12276,7 @@ components:
         - label
         - default_region
         - sip_host
+        - sip_host_masked
         - username
         - password_last4
         - pbx_host
@@ -12347,6 +12365,15 @@ components:
             - type: "null"
           title: Pbx Password
           description: New password Hail sends. Stored encrypted.
+        default_region:
+          anyOf:
+            - type: string
+              pattern: ^[A-Z]{2}$
+            - type: "null"
+          title: Default Region
+          description:
+            "New country of the phone system, tried first to read callers.
+            Null clears it: Hail then uses the country of the number called."
       additionalProperties: false
       type: object
       title: SipConnectionPatch
@@ -12363,13 +12390,26 @@ components:
           title: Label
           description: Name of the connection.
         default_region:
-          type: string
+          anyOf:
+            - type: string
+            - type: "null"
           title: Default Region
-          description: ISO alpha-2 country of the phone system.
+          description:
+            Optional country of the phone system, tried first to read callers
+            (see create). Null for most connections.
         sip_host:
           type: string
           title: Sip Host
-          description: SIP server your phone system sends calls to (the trunk's host).
+          description:
+            "SIP server your phone system sends calls to (the trunk's host).\
+            \ When sip_host_masked is true it shows only its first characters, followed\
+            \ by '\u2022' characters that are not part of the host."
+        sip_host_masked:
+          type: boolean
+          title: Sip Host Masked
+          description:
+            "True: sip_host shows only its first characters. Support sends
+            you the full address."
         username:
           type: string
           title: Username
@@ -12417,6 +12457,7 @@ components:
         - label
         - default_region
         - sip_host
+        - sip_host_masked
         - username
         - password_last4
         - pbx_host

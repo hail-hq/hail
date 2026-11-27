@@ -68,3 +68,75 @@ jobs:
           [ "$size" -gt 30 ] || { echo "::error::robots.txt body too small ($size bytes)"; exit 1; }
           grep -q "Sitemap:" <<< "$body" || { echo "::error::robots.txt missing Sitemap"; exit 1; }
           grep -q "User-agent: \*" <<< "$body" || { echo "::error::robots.txt missing User-agent"; exit 1; }
+      - name: Probe public agent discovery
+        if: ${{ !cancelled() }}
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from "node:assert/strict";
+
+          async function readPublic(url, mediaType, { method = "GET", headers } = {}) {
+            const request = `${method} ${url}`;
+            const response = await fetch(url, {
+              method,
+              headers,
+              redirect: "error",
+              signal: AbortSignal.timeout(20_000),
+            }).catch((cause) => {
+              throw new Error(`${request} failed`, { cause });
+            });
+            assert.equal(response.status, 200, `${request} status`);
+            const contentType = response.headers.get("content-type")?.split(";")[0].trim().toLowerCase();
+            assert.equal(contentType, mediaType, `${request} content type`);
+            return response;
+          }
+
+          const manifestUrl = "https://hail.so/.well-known/mcp.json";
+          const whoamiUrl = new URL("https://api.hail.so/v1/whoami");
+
+          async function probeManifestGet() {
+            const response = await readPublic(manifestUrl, "application/json", {
+              headers: { Accept: "text/markdown" },
+            });
+            const manifest = await response.json();
+            assert.equal(manifest.name, "io.github.hail-hq/hail-mcp", "MCP registry name");
+            const endpoint = new URL("https://mcp.hail.so");
+            const hasMcpRemote = manifest.remotes?.some((remote) =>
+              remote.type === "streamable-http" && new URL(remote.url).href === endpoint.href,
+            );
+            assert.ok(hasMcpRemote, "MCP streamable HTTP remote");
+            console.log("MCP discovery manifest served as JSON on GET");
+          }
+
+          async function probeManifestHead() {
+            await readPublic(manifestUrl, "application/json", { method: "HEAD" });
+            console.log("MCP discovery manifest served JSON headers on HEAD");
+          }
+
+          async function probeSkill() {
+            const skill = await readPublic("https://hail.so/skill.md", "text/markdown");
+            const [, frontMatter, body] =
+              (await skill.text()).match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)([\s\S]*)$/) ?? [];
+            assert.match(frontMatter ?? "", /^name:[ \t]*hail[ \t]*\r?$/m, "Hail skill front matter");
+            const visibleBody = body?.replace(/<!--[\s\S]*?-->/g, "") ?? "";
+            assert.ok(visibleBody.includes(whoamiUrl.href), "Hail skill API setup example");
+            console.log("Hosted Hail skill includes the API setup example");
+          }
+
+          async function probeOpenApi() {
+            const openapiUrl = new URL("/openapi.json", whoamiUrl);
+            const api = await readPublic(openapiUrl.href, "application/json");
+            const spec = await api.json();
+            assert.match(spec.openapi ?? "", /^\d+\.\d+\.\d+$/, "OpenAPI version");
+            assert.ok(spec.paths?.[whoamiUrl.pathname]?.get, `OpenAPI GET ${whoamiUrl.pathname}`);
+            console.log(`OpenAPI document describes GET ${whoamiUrl.pathname}`);
+          }
+
+          const results = await Promise.allSettled([
+            probeManifestGet(),
+            probeManifestHead(),
+            probeSkill(),
+            probeOpenApi(),
+          ]);
+          const errors = results.filter((result) => result.status === "rejected").map((result) => result.reason);
+          if (errors.length) throw new AggregateError(errors, "Public agent discovery probe failed");
+          NODE

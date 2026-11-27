@@ -11,7 +11,7 @@ what your phone system needs and what the setup does.
 
 Add a generic SIP trunk with:
 
-- **SIP server**: from Hail's setup.
+- **SIP server**: Hail's team sends you the full address. The console and the API show its first characters.
 - **Username and password**: from Hail's setup. Lost the password? Hail makes a new one.
 - **Audio**: G.711 (PCMU or PCMA).
 - **Key presses**: RFC 2833 / RFC 4733 (telephone events). The ownership check needs them.
@@ -30,8 +30,8 @@ Hail through your connection and carry a code that Hail sends as key
 presses. A call you send yourself cannot pass.
 
 - Billed as a normal outbound call.
-- `no_call_arrived`: check the trunk, the routing rule for this number, and the address.
-- `not_authenticated`: the call came without this connection's username and password, or not in `+` format.
+- `no_call_arrived`: check the trunk and its username and password, the address, and that a routing rule sends this number to Hail with `+` and the country code. A number without them never reaches Hail.
+- `not_authenticated`: the call came in on another connection's trunk, for example with another connection's username and password.
 - `code_not_received`: turn on RFC 2833 key presses.
 - Run the check soon after you add a number. Until it passes, someone else can buy or connect the number, and Hail removes numbers left unchecked.
 

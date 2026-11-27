@@ -2254,14 +2254,14 @@ type ConnectedNumberCheck struct {
 	// CallId The check call, billed as an outbound call.
 	CallId *openapi_types.UUID `json:"call_id,omitempty"`
 
-	// Reason Why the check failed. 'no_call_arrived': no call reached this connection; check the trunk and the routing rule. 'not_authenticated': the call came without this connection's username and password, or to another trunk. 'code_not_received': the check code did not come through; turn on RFC 2833 key presses.
+	// Reason Why the check failed. 'no_call_arrived': no call reached this connection; check the trunk and its username and password, and that a routing rule sends this number to Hail with + and the country code. 'not_authenticated': the call came in on another connection's trunk, for example with another connection's username and password. 'code_not_received': the check code did not come through; turn on RFC 2833 key presses.
 	Reason *ConnectedNumberCheckReason `json:"reason,omitempty"`
 
 	// State 'active': the number passed and can be routed to an agent.
 	State ConnectedNumberCheckState `json:"state"`
 }
 
-// ConnectedNumberCheckReason Why the check failed. 'no_call_arrived': no call reached this connection; check the trunk and the routing rule. 'not_authenticated': the call came without this connection's username and password, or to another trunk. 'code_not_received': the check code did not come through; turn on RFC 2833 key presses.
+// ConnectedNumberCheckReason Why the check failed. 'no_call_arrived': no call reached this connection; check the trunk and its username and password, and that a routing rule sends this number to Hail with + and the country code. 'not_authenticated': the call came in on another connection's trunk, for example with another connection's username and password. 'code_not_received': the check code did not come through; turn on RFC 2833 key presses.
 type ConnectedNumberCheckReason string
 
 // ConnectedNumberCheckState 'active': the number passed and can be routed to an agent.
@@ -3940,8 +3940,8 @@ type SenderIdResponse struct {
 
 // SipConnectionCreate defines model for SipConnectionCreate.
 type SipConnectionCreate struct {
-	// DefaultRegion ISO alpha-2 country of the phone system. Hail reads national caller numbers with it.
-	DefaultRegion string `json:"default_region"`
+	// DefaultRegion Optional ISO alpha-2 country of the phone system; most connections leave it out. Set: Hail reads callers with it first. Left out: with the country of the number that was called, then of the connection's other numbers.
+	DefaultRegion *string `json:"default_region,omitempty"`
 
 	// Label A name, such as 'Main office'.
 	Label string `json:"label"`
@@ -3970,8 +3970,8 @@ type SipConnectionCreated struct {
 	// CreatedAt When the connection was created.
 	CreatedAt time.Time `json:"created_at"`
 
-	// DefaultRegion ISO alpha-2 country of the phone system.
-	DefaultRegion string `json:"default_region"`
+	// DefaultRegion Optional country of the phone system, tried first to read callers (see create). Null for most connections.
+	DefaultRegion *string `json:"default_region"`
 
 	// Id Unique identifier for this connection.
 	Id openapi_types.UUID `json:"id"`
@@ -4000,8 +4000,11 @@ type SipConnectionCreated struct {
 	// PbxUsername Username Hail sends to your phone system. Null: none.
 	PbxUsername *string `json:"pbx_username"`
 
-	// SipHost SIP server your phone system sends calls to (the trunk's host).
+	// SipHost SIP server your phone system sends calls to (the trunk's host). When sip_host_masked is true it shows only its first characters, followed by '•' characters that are not part of the host.
 	SipHost string `json:"sip_host"`
+
+	// SipHostMasked True: sip_host shows only its first characters. Support sends you the full address.
+	SipHostMasked bool `json:"sip_host_masked"`
 
 	// Username Username your phone system sends to Hail.
 	Username string `json:"username"`
@@ -4024,6 +4027,9 @@ type SipConnectionPassword struct {
 
 // SipConnectionPatch Fields left out stay as they are; “null“ clears a nullable field.
 type SipConnectionPatch struct {
+	// DefaultRegion New country of the phone system, tried first to read callers. Null clears it: Hail then uses the country of the number called.
+	DefaultRegion *string `json:"default_region,omitempty"`
+
 	// Label New name.
 	Label *string `json:"label,omitempty"`
 
@@ -4051,8 +4057,8 @@ type SipConnectionResponse struct {
 	// CreatedAt When the connection was created.
 	CreatedAt time.Time `json:"created_at"`
 
-	// DefaultRegion ISO alpha-2 country of the phone system.
-	DefaultRegion string `json:"default_region"`
+	// DefaultRegion Optional country of the phone system, tried first to read callers (see create). Null for most connections.
+	DefaultRegion *string `json:"default_region"`
 
 	// Id Unique identifier for this connection.
 	Id openapi_types.UUID `json:"id"`
@@ -4078,8 +4084,11 @@ type SipConnectionResponse struct {
 	// PbxUsername Username Hail sends to your phone system. Null: none.
 	PbxUsername *string `json:"pbx_username"`
 
-	// SipHost SIP server your phone system sends calls to (the trunk's host).
+	// SipHost SIP server your phone system sends calls to (the trunk's host). When sip_host_masked is true it shows only its first characters, followed by '•' characters that are not part of the host.
 	SipHost string `json:"sip_host"`
+
+	// SipHostMasked True: sip_host shows only its first characters. Support sends you the full address.
+	SipHostMasked bool `json:"sip_host_masked"`
 
 	// Username Username your phone system sends to Hail.
 	Username string `json:"username"`
