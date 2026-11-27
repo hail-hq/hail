@@ -7,6 +7,9 @@ all calls, after hours, overflow, or one menu option.
 Hail's team sets up the connection with you: email hi@hail.so. Below is
 what your phone system needs and what the setup does.
 
+Using 3CX? Follow the [3CX setup guide](https://hail.so/blog/3cx-ai-receptionist),
+step by step with screenshots.
+
 ## Set up the trunk on your phone system
 
 Add a generic SIP trunk with:
