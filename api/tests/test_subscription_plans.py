@@ -521,3 +521,21 @@ async def test_released_number_keeps_its_place_for_the_month(async_session):
     number = await _pending(async_session, org)
     rows, fee = await _finish(async_session, org, number)
     assert rows[fee].kind == "debit" and rows[fee].amount_cents == -150
+
+
+async def test_buy_release_buy_gets_one_included_month(
+    client, async_session, monkeypatch
+):
+    """Releasing a plan-paid number does not free its place this month: a
+    second purchase pays from credits."""
+    org, _, key = await insert_org_and_key(async_session, initial_credit_cents=0)
+    await _plan(async_session, org, numbers=1, cap=200)
+    first = await _buy(client, async_session, monkeypatch, org, key, monthly=115)
+    assert first.status_code == 201, first.text
+    async_session.expire_all()
+    number = await async_session.get(PhoneNumber, uuid.UUID(first.json()["id"]))
+    number.provisioning_state = "released"
+    number.released_at = datetime.now(timezone.utc)
+    await async_session.commit()
+    again = await _buy(client, async_session, monkeypatch, org, key, monthly=115)
+    assert again.status_code == 402
