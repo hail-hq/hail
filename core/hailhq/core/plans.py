@@ -183,8 +183,10 @@ async def plan_number_cents(
         me = await db.get(PhoneNumber, number_id)
         if me is None:
             return 0
-        # Only numbers ranked before it count.
-        others.append(
+        others.append(PhoneNumber.id != number_id)
+        # Held numbers count only when ranked before it; one the plan paid
+        # this month counts whatever its rank.
+        held.append(
             tuple_(PhoneNumber.created_at, PhoneNumber.id)
             < tuple_(literal(me.created_at), literal(me.id))
         )

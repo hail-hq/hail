@@ -539,3 +539,27 @@ async def test_buy_release_buy_gets_one_included_month(
     await async_session.commit()
     again = await _buy(client, async_session, monkeypatch, org, key, monthly=115)
     assert again.status_code == 402
+
+
+async def test_newer_number_paid_this_month_keeps_its_place(async_session):
+    """A number bought after this order, paid by the plan and released, still
+    holds the month's included place."""
+    org, _, _ = await insert_org_and_key(async_session, initial_credit_cents=500)
+    await _plan(async_session, org, numbers=1)
+    number = await _pending(async_session, org)
+    newer = await _older_number(async_session, org, state="released")
+    newer.created_at = datetime.now(timezone.utc) + timedelta(minutes=1)
+    async_session.add(
+        AccountCredit(
+            organization_id=org,
+            kind="plan",
+            channel="voice",
+            amount_cents=0,
+            plan_units=1,
+            ref=monthly_fee_ref(org, newer.id, datetime.now(timezone.utc)),
+            source=PLAN_NUMBER_SOURCE,
+        )
+    )
+    await async_session.commit()
+    rows, fee = await _finish(async_session, org, number)
+    assert rows[fee].kind == "debit" and rows[fee].amount_cents == -150
