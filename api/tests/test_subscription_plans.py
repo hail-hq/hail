@@ -264,10 +264,11 @@ async def test_call_runs_on_plan_minutes(
     await _plan(async_session, org, minutes=12)
     r = await _call(client, key)
     assert r.status_code == 201, r.text
-    call = await async_session.get(Call, uuid.UUID(r.json()["id"]))
-    assert call.max_duration_seconds == 12 * 60 - 10
+    call_id = uuid.UUID(r.json()["id"])
     async_session.expire_all()
-    hold = await async_session.get(CallBalanceHold, call.id)
+    call = await async_session.get(Call, call_id)
+    assert call.max_duration_seconds == 12 * 60 - 10
+    hold = await async_session.get(CallBalanceHold, call_id)
     assert hold.cents == 0
     assert hold.plan_minutes == 12
     # The live call holds every plan minute: the next call is refused.
@@ -288,11 +289,12 @@ async def test_quote_without_plan_fields_is_todays_cap(
     await _plan(async_session, org, minutes=600)
     r = await _call(client, key)
     assert r.status_code == 201, r.text
-    call = await async_session.get(Call, uuid.UUID(r.json()["id"]))
+    call_id = uuid.UUID(r.json()["id"])
+    async_session.expire_all()
+    call = await async_session.get(Call, call_id)
     # $5 at 40¢: 12 minutes, the plan unused.
     assert call.max_duration_seconds == 710
-    async_session.expire_all()
-    hold = await async_session.get(CallBalanceHold, call.id)
+    hold = await async_session.get(CallBalanceHold, call_id)
     assert hold.plan_minutes == 0
 
 
@@ -303,9 +305,9 @@ async def test_quote_without_plan_fields_is_todays_cap(
 async def _buy(client, session, monkeypatch, org, key, *, monthly):
     offer = CarrierOffer(
         provider="twilio",
-        e164="+14155550199",
-        country_code="US",
-        number_type="local",
+        e164="+447700900001",
+        country_code="GB",
+        number_type="mobile",
         capabilities=["voice", "sms"],
         monthly_cents=monthly,
         setup_cents=0,
@@ -328,7 +330,7 @@ async def _buy(client, session, monkeypatch, org, key, *, monthly):
     )
     return await client.post(
         "/numbers",
-        json={"country_code": "US", "quote_id": str(quote.id)},
+        json={"country_code": "GB", "quote_id": str(quote.id)},
         headers={"Authorization": f"Bearer {key}"},
     )
 
@@ -427,9 +429,11 @@ async def test_late_order_after_the_plan_stopped_is_paid_from_credits(
     plan.status = "past_due"
     await async_session.commit()
     await org_lock(async_session, org)
+    await async_session.refresh(number)
+    number_id = number.id
     await finish_order(async_session, number, resource_id="PN_late")
     rows = await _rows(async_session, org)
-    fee = monthly_fee_ref(org, number.id, datetime.now(timezone.utc))
+    fee = monthly_fee_ref(org, number_id, datetime.now(timezone.utc))
     assert rows[fee].kind == "debit" and rows[fee].amount_cents == -150
     await async_session.refresh(allowance)
     assert allowance.used_numbers == 0
@@ -454,9 +458,11 @@ async def test_late_order_in_a_new_month_takes_that_months_slot(async_session):
     await async_session.commit()
     number = await _pending(async_session, org, old)
     await org_lock(async_session, org)
+    await async_session.refresh(number)
+    number_id = number.id
     await finish_order(async_session, number, resource_id="PN_late")
     rows = await _rows(async_session, org)
-    fee = monthly_fee_ref(org, number.id, datetime.now(timezone.utc))
+    fee = monthly_fee_ref(org, number_id, datetime.now(timezone.utc))
     assert rows[fee].kind == "plan"
     await async_session.refresh(current)
     await async_session.refresh(old)

@@ -143,8 +143,14 @@ def upgrade() -> None:
         "account_credits",
         "kind IN ('credit', 'debit', 'plan')",
     )
-    op.drop_constraint(
-        "account_credits_amount_sign_check", "account_credits", type_="check"
+    # The sign rule was created unnamed (Postgres named it
+    # account_credits_check); it now gets the name the model uses.
+    op.execute(
+        "ALTER TABLE account_credits DROP CONSTRAINT IF EXISTS account_credits_check"
+    )
+    op.execute(
+        "ALTER TABLE account_credits"
+        " DROP CONSTRAINT IF EXISTS account_credits_amount_sign_check"
     )
     op.create_check_constraint(
         "account_credits_amount_sign_check",
@@ -191,7 +197,7 @@ def downgrade() -> None:
         "account_credits_amount_sign_check", "account_credits", type_="check"
     )
     op.create_check_constraint(
-        "account_credits_amount_sign_check",
+        "account_credits_check",
         "account_credits",
         "(kind = 'credit' AND amount_cents > 0) OR "
         "(kind = 'debit' AND amount_cents < 0)",
