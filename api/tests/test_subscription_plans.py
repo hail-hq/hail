@@ -335,6 +335,12 @@ async def _buy(client, session, monkeypatch, org, key, *, monthly):
     )
 
 
+async def _fee_ref(session, org, number_id):
+    """The month's fee ref for the month the number was bought in."""
+    number = await session.get(PhoneNumber, number_id)
+    return monthly_fee_ref(org, number_id, number.acquired_at)
+
+
 async def _rows(session, org):
     session.expire_all()
     return {
@@ -356,7 +362,7 @@ async def test_included_number_first_month_is_paid_by_the_plan(
     assert r.status_code == 201, r.text
     number_id = uuid.UUID(r.json()["id"])
     rows = await _rows(async_session, org)
-    fee = monthly_fee_ref(org, number_id, datetime.now(timezone.utc))
+    fee = await _fee_ref(async_session, org, number_id)
     assert rows[fee].kind == "plan"
     assert rows[fee].source == PLAN_NUMBER_SOURCE
     assert rows[fee].plan_units == 1
@@ -373,7 +379,7 @@ async def test_number_above_the_cap_pays_the_rest(client, async_session, monkeyp
     assert r.status_code == 201, r.text
     number_id = uuid.UUID(r.json()["id"])
     rows = await _rows(async_session, org)
-    fee = monthly_fee_ref(org, number_id, datetime.now(timezone.utc))
+    fee = await _fee_ref(async_session, org, number_id)
     assert rows[fee].kind == "plan"
     assert rows[f"{fee}{OVER_PLAN_REF_SUFFIX}"].amount_cents == -50
     assert await get_balance_cents(async_session, org) == 50
@@ -435,7 +441,7 @@ async def test_late_order_after_the_plan_stopped_is_paid_from_credits(
     number_id = number.id
     await finish_order(async_session, number, resource_id="PN_late")
     rows = await _rows(async_session, org)
-    fee = monthly_fee_ref(org, number_id, datetime.now(timezone.utc))
+    fee = await _fee_ref(async_session, org, number_id)
     assert rows[fee].kind == "debit" and rows[fee].amount_cents == -150
     await async_session.refresh(allowance)
     assert allowance.used_numbers == 0
@@ -464,7 +470,7 @@ async def test_late_order_in_a_new_month_takes_that_months_slot(async_session):
     number_id = number.id
     await finish_order(async_session, number, resource_id="PN_late")
     rows = await _rows(async_session, org)
-    fee = monthly_fee_ref(org, number_id, datetime.now(timezone.utc))
+    fee = await _fee_ref(async_session, org, number_id)
     assert rows[fee].kind == "plan"
     await async_session.refresh(current)
     await async_session.refresh(old)
@@ -496,7 +502,7 @@ async def test_late_order_before_the_new_months_row_is_paid_from_credits(
     number_id = number.id
     await finish_order(async_session, number, resource_id="PN_late")
     rows = await _rows(async_session, org)
-    fee = monthly_fee_ref(org, number_id, datetime.now(timezone.utc))
+    fee = await _fee_ref(async_session, org, number_id)
     assert rows[fee].kind == "debit" and rows[fee].amount_cents == -150
     await async_session.refresh(allowance)
     assert allowance.used_numbers == 0
@@ -527,7 +533,7 @@ async def test_late_order_in_a_full_new_month_is_paid_from_credits(async_session
     number_id = number.id
     await finish_order(async_session, number, resource_id="PN_late")
     rows = await _rows(async_session, org)
-    fee = monthly_fee_ref(org, number_id, datetime.now(timezone.utc))
+    fee = await _fee_ref(async_session, org, number_id)
     assert rows[fee].kind == "debit" and rows[fee].amount_cents == -150
     await async_session.refresh(current)
     await async_session.refresh(old)

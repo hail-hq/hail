@@ -156,6 +156,10 @@ def upgrade() -> None:
              AND pg_get_constraintdef(oid) LIKE '%amount_cents%'
              AND pg_get_constraintdef(oid) LIKE '%kind%';
           EXECUTE format('ALTER TABLE account_credits DROP CONSTRAINT %I', c);
+        EXCEPTION
+          WHEN NO_DATA_FOUND OR TOO_MANY_ROWS THEN
+            RAISE EXCEPTION
+              'expected exactly one account_credits sign check (kind and amount_cents)';
         END
         $$;
         """)

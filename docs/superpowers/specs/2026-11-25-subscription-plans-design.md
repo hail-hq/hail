@@ -149,7 +149,7 @@ When the plan is on and `used_numbers < included_numbers`, the first month of a 
 
 The purchase's funds check needs only the credits part. An order the carrier finishes later is paid by the plan only from a month row that covers the finish time: the one whose slot it took, or the new month's if a slot is left there. Otherwise (plan off, the new month's row not written yet, or no slot left) the slot goes back and credits pay, as for any number beyond the plan.
 
-The billing site's monthly fee rater pays later months the same way: oldest numbers first, up to `included_numbers`, each month. When it creates a month's row it gives the included numbers to the workspace's active numbers, oldest first, in the same transaction and under the workspace lock (their plan rows and `used_numbers`). A purchase then takes only a slot that is left.
+The billing site's monthly fee rater pays later months the same way: oldest numbers first, up to `included_numbers`, each month. When it creates a month's row it gives the included numbers to the workspace's active numbers, oldest first, in the same transaction and under the workspace lock (their plan rows and `used_numbers`). A purchase then takes only a slot that is left. It skips a number whose month fee ref already has a row (bought this month, or finished late and paid from credits) and does not raise `used_numbers` for it. Fee refs are UTC calendar months, as today; a plan month (Stripe period) may start mid-month, so the rater gives a number at most one plan row per calendar month.
 
 ## Feature gates (`hailhq.core.plans`)
 
