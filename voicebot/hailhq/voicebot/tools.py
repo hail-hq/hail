@@ -12,7 +12,6 @@ returns a speakable apology to the LLM.
 
 from __future__ import annotations
 
-import dataclasses
 import logging
 import math
 import time
@@ -23,10 +22,14 @@ from hailhq.core.agent_tools import transfer_call
 from hailhq.core.agent_tools.client import AgentApiClient
 from hailhq.core.agent_tools.http_tool import Conversation, load_http_tool_specs
 from hailhq.core.agent_tools.registry import call_tools
-from hailhq.core.agent_tools.spec import SPOKEN_FALLBACK, ToolContext, ToolSpec
+from hailhq.core.agent_tools.spec import (
+    SPOKEN_FALLBACK,
+    ToolContext,
+    ToolSpec,
+    fit_descriptions,
+)
 from hailhq.core.config import settings
 from hailhq.core.db import session_scope
-from hailhq.core.prompts import fit_to_tools
 from hailhq.voicebot.attachment_reader import inspect_tool_file
 from livekit.agents.llm import function_tool
 from livekit.agents.voice import RunContext
@@ -185,23 +188,9 @@ def every_call_tools(
 
 
 def _wrap_fitted(specs: list[ToolSpec], tctx: ToolContext) -> list:
-    """Wrap ``specs`` with each built-in description fitted to this call's
-    tools: a description that names a tool the call lacks (see ToolLine)
-    would make the model write that name as text. A saved agent's HTTP tool
-    descriptions are the customer's words and stay as written."""
-    names = [s.name for s in specs]
-    hail_written = {s.name for s in call_tools()} | {transfer_call.CANCEL_SPEC.name}
-    return [
-        wrap_tool(
-            (
-                dataclasses.replace(s, description=fit_to_tools(s.description, names))
-                if s.name in hail_written
-                else s
-            ),
-            tctx,
-        )
-        for s in specs
-    ]
+    """Wrap ``specs`` with each Hail-written description fitted to this
+    call's tools (see :func:`fit_descriptions`)."""
+    return [wrap_tool(s, tctx) for s in fit_descriptions(specs)]
 
 
 async def build_agent_tools(

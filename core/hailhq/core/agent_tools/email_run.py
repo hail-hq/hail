@@ -18,7 +18,7 @@ from hailhq.core.agent_tools import (
     send_sms,
 )
 from hailhq.core.agent_tools.http_tool import Conversation, http_tool_specs
-from hailhq.core.agent_tools.spec import ToolSpec
+from hailhq.core.agent_tools.spec import ToolSpec, fit_descriptions
 from hailhq.core.models import Agent
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -72,7 +72,7 @@ async def email_run_tools(
         except Exception:
             logger.exception("http tools failed to load for email %s", email_id)
             await session.rollback()
-    return specs
+    return fit_descriptions(specs)
 
 
 __all__ = ["email_run_tools"]

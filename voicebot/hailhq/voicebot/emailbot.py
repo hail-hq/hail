@@ -206,7 +206,12 @@ async def _prepare(
                 for row in rows
             ]
     messages = build_chat_messages(
-        claimed.agent, thread, trust=trust, sends_tried=sent > 0, clock=clock
+        claimed.agent,
+        thread,
+        trust=trust,
+        sends_tried=sent > 0,
+        clock=clock,
+        tool_names=[spec.name for spec in specs],
     )
     messages.append(
         {

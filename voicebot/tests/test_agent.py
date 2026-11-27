@@ -19,7 +19,13 @@ from uuid import UUID
 
 import pytest
 from cryptography.fernet import InvalidToken
-from hailhq.core.agent_tools import transfer_call
+from hailhq.core.agent_tools import (
+    list_contacts,
+    read_email,
+    send_email,
+    send_sms,
+    transfer_call,
+)
 from hailhq.core.agent_tools.registry import call_tools
 from hailhq.core.agent_tools.spec import BridgeRoute
 from hailhq.core.call_end_reasons import CallEndReason
@@ -28,6 +34,7 @@ from hailhq.core.pool import CALL_META_FROM_POOL
 from hailhq.core.prompts import (
     PRIVACY_REMINDER,
     TOOL_LINES,
+    build_email_instructions,
     fit_to_tools,
     other_party_section,
 )
@@ -2583,9 +2590,22 @@ def test_an_empty_tools_list_gets_no_missing_tool_names():
             assert name not in text
 
 
+def _email_run_descriptions():
+    return [
+        s.description
+        for s in (
+            read_email.SPEC,
+            list_contacts.EMAIL_RUN_SPEC,
+            send_email.EMAIL_RUN_SPEC,
+            send_sms.EMAIL_RUN_SPEC,
+        )
+    ]
+
+
 def test_every_tool_line_is_still_in_its_prompt():
     """A reworded prompt sentence would stop matching its ToolLine, and the
     swap would silently stop working."""
-    full = "\n".join(_hail_prompts(None))
+    email = [build_email_instructions("Answer mail."), *_email_run_descriptions()]
+    full = "\n".join([*_hail_prompts(None), *email])
     for line in (*TOOL_LINES, *IVR_TOOL_LINES):
         assert line.text.replace("{name}", "Sam Lee") in full, line.text
