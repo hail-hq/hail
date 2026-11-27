@@ -9,6 +9,21 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 - Knowledge base (early access): upload manuals, FAQs and part lists, and agents answer calls, texts and email from them, in any supported language (`/v1/knowledge`, `knowledge` on agents, CLI `hail knowledge`, SDK and MCP).
 - Plans: the call minutes, texts, emails and numbers a workspace's plan includes are used first, then credits pay the rest.
 
+## [0.41.0] (2026-11-27)
+
+Connect your phone system needs no country: Hail reads each caller with the
+country of the number called. The SIP server shows its first characters,
+then dots, until Hail's team sends the full address.
+
+Component versions cut alongside this release:
+**`cli-v0.38.0`** (Homebrew + GitHub Releases). No SDK or MCP change. One
+database migration (the connection's country becomes optional).
+
+### Changed
+
+- Connect your phone system needs no country: Hail reads each caller with the country of the number called. `hail sip-connections create --region` is optional, and `update --region` / `--clear-region` set or clear it.
+- The masked SIP server shows its first characters, then dots.
+
 ## [0.40.0] (2026-11-25)
 
 Connect your phone system is open to every workspace, in the console, the API
