@@ -256,7 +256,9 @@ async def test_sweep_webhook_says_why_the_caller_was_hidden(async_session):
         max_duration_seconds=300,
         metadata={"caller_hidden_reason": "phone_system_sent_own_number"},
     )
+    # An inbound call links the number it reached, not the one it came from.
     call.direction = "inbound"
+    call.to_number_id, call.from_number_id = call.from_number_id, None
     async_session.add(
         WebhookSubscription(
             organization_id=call.organization_id,
