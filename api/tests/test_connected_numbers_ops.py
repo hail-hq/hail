@@ -42,6 +42,12 @@ def no_io(monkeypatch):
     return db
 
 
+def test_bad_region_is_an_argument_error():
+    assert (
+        main(["create", "--org", ORG, "--label", "Main office", "--region", "usa"]) == 2
+    )
+
+
 def test_create_prints_password_once(capsys, monkeypatch):
     conn = fake_conn()
     create = AsyncMock(return_value=(conn, "P" * 32))
@@ -54,8 +60,6 @@ def test_create_prints_password_once(capsys, monkeypatch):
                 ORG,
                 "--label",
                 "Main office",
-                "--region",
-                "US",
                 "--pbx-host",
                 "pbx.example.com",
             ]
@@ -116,12 +120,6 @@ def test_missing_row_exits_1(capsys, no_io):
     assert "not_found" in capsys.readouterr().out
 
 
-def test_bad_region_is_an_argument_error():
-    assert (
-        main(["create", "--org", ORG, "--label", "Main office", "--region", "usa"]) == 2
-    )
-
-
 def test_bad_uuid_is_an_argument_error():
     assert main(["check", "--number-id", "nope"]) == 2
 
@@ -164,11 +162,27 @@ def test_password_is_in_no_log_record(caplog, capsys, monkeypatch):
     monkeypatch.setattr("hailhq.core.livekit.api.LiveKitAPI", lambda *a, **k: fake_api)
     monkeypatch.setattr(ops, "LiveKitClient", LiveKitClient)
     with caplog.at_level("DEBUG"):
-        assert main(["create", "--org", ORG, "--label", "x", "--region", "US"]) == 0
+        assert main(["create", "--org", ORG, "--label", "x"]) == 0
     out = capsys.readouterr().out
-    password = out.split("(shown once): ")[1].split()[0]
+    password = out.split("inbound password: ")[1].split()[0]
     assert len(password) >= 24
     assert caplog.records
     for record in caplog.records:
         assert password not in record.getMessage()
     assert password not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "released,out,code", [(True, "released", 0), (False, "not an unchecked claim", 1)]
+)
+def test_release_claim(capsys, monkeypatch, released, out, code):
+    give_way = AsyncMock(return_value=released)
+    monkeypatch.setattr(ops, "give_way_unchecked_claim", give_way)
+    assert main(["release-claim", "--number", "+1 415 555 0100"]) == code
+    assert out in capsys.readouterr().out
+    assert give_way.await_args.args[2] == "+14155550100"
+
+
+def test_release_claim_bad_number_is_an_argument_error(capsys):
+    assert main(["release-claim", "--number", "4155550100x"]) == 2
+    assert "not a phone number" in capsys.readouterr().err

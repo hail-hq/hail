@@ -348,6 +348,7 @@ or pass --api-key.`,
 	root.AddCommand(newCallCmd(opts))
 	root.AddCommand(newSmsCmd(opts))
 	root.AddCommand(newNumberCmd(opts))
+	root.AddCommand(newSipConnectionsCmd(opts))
 	root.AddCommand(newEmailCmd(opts))
 	root.AddCommand(newContactsCmd(opts))
 	root.AddCommand(newAgentsCmd(opts))

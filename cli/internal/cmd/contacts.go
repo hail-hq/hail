@@ -114,9 +114,10 @@ func runContactsList(ctx context.Context, opts *Options, f *contactsListFlags) e
 // --------------------------------------------------------------------------- //
 
 type contactsCreateFlags struct {
-	phone   string
-	email   string
-	idemKey string
+	phone     string
+	email     string
+	extension string
+	idemKey   string
 }
 
 func newContactsCreateCmd(opts *Options) *cobra.Command {
@@ -126,20 +127,23 @@ func newContactsCreateCmd(opts *Options) *cobra.Command {
 		Short: "Add a manual contact",
 		Long: `hail contacts create — add a manual contact to the directory.
 
-At least one of --phone or --email is required (the API rejects a contact
-with neither).
+At least one of --phone, --email or --extension is required (the API rejects
+a contact with none). --extension is an extension on your connected phone
+system (1 to 6 digits, * or #), for handover on calls to a connected number.
 
-Example:
-  hail contacts create "Jane Doe" --phone +15551234567 --email jane@example.com`,
+Examples:
+  hail contacts create "Jane Doe" --phone +15551234567 --email jane@example.com
+  hail contacts create "Support line" --extension 800`,
 		Args: argsOrHelp(1, "<name>"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runContactsCreate(cmd.Context(), cmd, opts, f, args[0])
 		},
 	}
-	cmd.Flags().StringVar(&f.phone, "phone", "", "E.164 phone number — one of --phone/--email required")
-	cmd.Flags().StringVar(&f.email, "email", "", "Email address — one of --phone/--email required")
+	cmd.Flags().StringVar(&f.phone, "phone", "", "E.164 phone number (one of --phone/--email/--extension is required)")
+	cmd.Flags().StringVar(&f.email, "email", "", "Email address (one of --phone/--email/--extension is required)")
+	cmd.Flags().StringVar(&f.extension, "extension", "", "Extension on your connected phone system (1-6 digits, * or #)")
 	cmd.Flags().StringVar(&f.idemKey, "idempotency-key", "", "Defaults to a fresh UUID")
-	markOneOfRequired(cmd, "contact-info", "phone", "email")
+	markOneOfRequired(cmd, "contact-info", "phone", "email", "extension")
 	return cmd
 }
 
@@ -148,14 +152,15 @@ func runContactsCreate(ctx context.Context, cmd *cobra.Command, opts *Options, f
 	// (see root.go's oneOfRequiredAnnotation doc-comment); the API's own
 	// 422 for "neither phone nor email" is mirrored here so the failure is
 	// local and instant instead of a round trip.
-	if f.phone == "" && f.email == "" {
-		return requireInputs(cmd, "--phone or --email")
+	if f.phone == "" && f.email == "" && f.extension == "" {
+		return requireInputs(cmd, "--phone, --email or --extension")
 	}
 
 	body := client.ContactCreate{
 		Name:      name,
 		PhoneE164: strPtr(f.phone),
 		Email:     strPtr(f.email),
+		Extension: strPtr(f.extension),
 	}
 
 	apiClient, err := opts.newClientWithIdempotency(f.idemKey)
@@ -179,16 +184,17 @@ func runContactsCreate(ctx context.Context, cmd *cobra.Command, opts *Options, f
 // --------------------------------------------------------------------------- //
 
 type contactsUpdateFlags struct {
-	name  string
-	phone string
-	email string
+	name      string
+	phone     string
+	email     string
+	extension string
 }
 
 func newContactsUpdateCmd(opts *Options) *cobra.Command {
 	f := &contactsUpdateFlags{}
 	cmd := &cobra.Command{
 		Use:   "update <id>",
-		Short: "Update a manual contact's name, phone, or email",
+		Short: "Update a manual contact's name, phone, email, or extension",
 		Long: `hail contacts update — patch one or more fields of an existing contact.
 
 <id> is the id shown by 'hail contacts list' — a manual contact's UUID.
@@ -204,6 +210,7 @@ Example:
 	cmd.Flags().StringVar(&f.name, "name", "", "New name")
 	cmd.Flags().StringVar(&f.phone, "phone", "", "New E.164 phone number")
 	cmd.Flags().StringVar(&f.email, "email", "", "New email address")
+	cmd.Flags().StringVar(&f.extension, "extension", "", "New extension on your connected phone system")
 	return cmd
 }
 
@@ -211,14 +218,15 @@ func runContactsUpdate(ctx context.Context, cmd *cobra.Command, opts *Options, f
 	// With no flags every ContactPatch field is nil/omitempty: the request
 	// would be `{}`, the API would 200 the unchanged row, and the CLI would
 	// print "✓ Contact updated" having changed nothing. Fail locally instead.
-	if f.name == "" && f.phone == "" && f.email == "" {
-		return requireInputs(cmd, "--name, --phone, or --email")
+	if f.name == "" && f.phone == "" && f.email == "" && f.extension == "" {
+		return requireInputs(cmd, "--name, --phone, --email, or --extension")
 	}
 
 	body := client.ContactPatch{
 		Name:      strPtr(f.name),
 		PhoneE164: strPtr(f.phone),
 		Email:     strPtr(f.email),
+		Extension: strPtr(f.extension),
 	}
 
 	apiClient, err := opts.newClient()
@@ -375,6 +383,9 @@ func printContactEntry(opts *Options, c *client.ContactEntry, verb string) error
 	}
 	if c.Email != nil && *c.Email != "" {
 		fmt.Fprintf(opts.Stdout, "  Email: %s\n", *c.Email)
+	}
+	if c.Extension != nil && *c.Extension != "" {
+		fmt.Fprintf(opts.Stdout, "  Ext:   %s\n", *c.Extension)
 	}
 	return nil
 }

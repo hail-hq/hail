@@ -1424,3 +1424,251 @@ async def test_sms_price_breakdown_reserved_once_and_persisted(
     again = await buy(async_session, org, row)
     assert again.id == number.id
     assert await get_balance_cents(async_session, org) == 99590
+
+
+# Unchecked connected-number claims give way to a purchase.
+
+
+async def _claim(db, org, e164, state="unverified"):
+    from hailhq.core.models import SipConnection
+
+    conn = SipConnection(
+        organization_id=org,
+        label="Office",
+        inbound_username=f"hail-{uuid4().hex}",
+        encrypted_inbound_password="x",
+        default_region="PT",
+        livekit_inbound_trunk_id="ST_claim",
+    )
+    db.add(conn)
+    await db.flush()
+    number = PhoneNumber(
+        organization_id=org,
+        e164=e164,
+        country_code="PT",
+        number_type="local",
+        capabilities=["voice"],
+        provider="pbx",
+        sip_connection_id=conn.id,
+        provisioning_state=state,
+    )
+    db.add(number)
+    await db.commit()
+    return number.id
+
+
+async def _state(db, number_id):
+    return await db.scalar(
+        select(PhoneNumber.provisioning_state)
+        .where(PhoneNumber.id == number_id)
+        .execution_options(populate_existing=True)
+    )
+
+
+def _pending_wire(monkeypatch, offer):
+    monkeypatch.setattr(
+        "hailhq.api.number_orders.discover_offers",
+        AsyncMock(return_value=([offer], [])),
+    )
+    monkeypatch.setattr("hailhq.core.config.settings.telnyx_api_key", "test")
+    wire = AsyncMock(return_value={"data": {"id": str(uuid4()), "status": "pending"}})
+    monkeypatch.setattr("hailhq.core.providers.telnyx.TelnyxClient.request", wire)
+    return wire
+
+
+@pytest.mark.parametrize("claim_org", ["rival", "self"])
+async def test_purchase_takes_over_unverified_claim(
+    async_session, org_and_key, monkeypatch, claim_org
+):
+    import asyncio
+
+    org, _, _ = org_and_key
+    row, offer = await seed_quote(async_session, org)
+    owner = (
+        org
+        if claim_org == "self"
+        else (await insert_org_and_key(async_session, org_slug="rival"))[0]
+    )
+    claim_id = await _claim(async_session, owner, offer.e164)
+    _pending_wire(monkeypatch, offer)
+    lk = AsyncMock()
+    number = await asyncio.wait_for(
+        acquire_offer(
+            async_session, org, row.id, country="PT", kind="local", billed=True, lk=lk
+        ),
+        10,
+    )
+    assert number.provisioning_state == "pending"
+    assert await _state(async_session, claim_id) == "released"
+    lk.remove_inbound_number.assert_awaited_once_with("ST_claim", offer.e164)
+
+
+async def test_purchase_blocked_by_running_check(
+    async_session, org_and_key, monkeypatch
+):
+    from hailhq.core.models import Call
+    from hailhq.core.sip_connections import CHECK_CALL_META
+
+    org, _, _ = org_and_key
+    row, offer = await seed_quote(async_session, org)
+    rival = (await insert_org_and_key(async_session, org_slug="rival"))[0]
+    claim_id = await _claim(async_session, rival, offer.e164)
+    pool = PhoneNumber(
+        organization_id=None,
+        e164="+14155550199",
+        country_code="US",
+        number_type="local",
+        capabilities=["voice"],
+        provider="twilio",
+        provider_resource_id="PN_pool",
+        provisioning_state="active",
+        is_pool=True,
+    )
+    async_session.add(pool)
+    await async_session.flush()
+    async_session.add(
+        Call(
+            organization_id=rival,
+            from_number_id=pool.id,
+            from_e164=pool.e164,
+            to_e164=offer.e164,
+            provider="twilio",
+            direction="outbound",
+            status="ringing",
+            voice_config={},
+            max_duration_seconds=90,
+            requested_at=datetime.now(timezone.utc),
+            metadata_={CHECK_CALL_META: str(claim_id)},
+        )
+    )
+    await async_session.commit()
+    wire = _pending_wire(monkeypatch, offer)
+    lk = AsyncMock()
+    with pytest.raises(HTTPException) as exc:
+        await acquire_offer(
+            async_session, org, row.id, country="PT", kind="local", billed=True, lk=lk
+        )
+    assert exc.value.status_code == 409
+    assert exc.value.detail == "This number is being checked. Try again in 2 minutes."
+    wire.assert_not_awaited()
+    lk.remove_inbound_number.assert_not_awaited()
+    assert await _state(async_session, claim_id) == "unverified"
+    assert await get_balance_cents(async_session, org) == 100000
+
+
+@pytest.mark.parametrize("problem", ["expired", "consumed", "by_request"])
+async def test_failing_purchase_keeps_the_claim(
+    async_session, org_and_key, monkeypatch, problem
+):
+    org, _, _ = org_and_key
+    row, offer = await seed_quote(async_session, org)
+    rival = (await insert_org_and_key(async_session, org_slug="rival"))[0]
+    claim_id = await _claim(async_session, rival, offer.e164)
+    if problem == "expired":
+        row.expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+    elif problem == "consumed":
+        row.number_id = claim_id
+    else:
+        row.offer = {**row.offer, "by_request": True}
+    await async_session.commit()
+    _pending_wire(monkeypatch, offer)
+    lk = AsyncMock()
+    try:
+        await acquire_offer(
+            async_session, org, row.id, country="PT", kind="local", billed=True, lk=lk
+        )
+    except HTTPException:
+        assert problem != "consumed"  # a consumed quote replays, no error
+    lk.remove_inbound_number.assert_not_awaited()
+    assert await _state(async_session, claim_id) == "unverified"
+
+
+async def _seed_running_check(db, org, e164):
+    from hailhq.core.models import Call
+    from hailhq.core.sip_connections import CHECK_CALL_META
+
+    claim_id = await _claim(db, org, e164)
+    pool = PhoneNumber(
+        organization_id=None,
+        e164="+14155550198",
+        country_code="US",
+        number_type="local",
+        capabilities=["voice"],
+        provider="twilio",
+        provider_resource_id="PN_pool2",
+        provisioning_state="active",
+        is_pool=True,
+    )
+    db.add(pool)
+    await db.flush()
+    db.add(
+        Call(
+            organization_id=org,
+            from_number_id=pool.id,
+            from_e164=pool.e164,
+            to_e164=e164,
+            provider="twilio",
+            direction="outbound",
+            status="ringing",
+            voice_config={},
+            max_duration_seconds=90,
+            requested_at=datetime.now(timezone.utc),
+            metadata_={CHECK_CALL_META: str(claim_id)},
+        )
+    )
+    await db.commit()
+    return claim_id
+
+
+async def test_running_check_409_is_not_kept_under_the_idempotency_key(
+    client, async_session, org_and_key, monkeypatch, livekit_mock
+):
+    org, _, key = org_and_key
+    row, offer = await seed_quote(async_session, org)
+    rival = (await insert_org_and_key(async_session, org_slug="rival"))[0]
+    await _seed_running_check(async_session, rival, offer.e164)
+    _pending_wire(monkeypatch, offer)
+    headers = {"Authorization": f"Bearer {key}", "Idempotency-Key": "busy-1"}
+    for _ in range(2):
+        resp = await client.post(
+            "/numbers",
+            json={"country_code": "PT", "quote_id": str(row.id)},
+            headers=headers,
+        )
+        assert resp.status_code == 409
+        assert (
+            resp.json()["detail"]
+            == "This number is being checked. Try again in 2 minutes."
+        )
+        # Not a replay: once the check ends, the same key can buy.
+        assert "Idempotency-Replay" not in resp.headers
+
+
+@pytest.mark.parametrize("problem", ["expected_total", "no_funds"])
+async def test_purchase_that_fails_its_checks_keeps_the_claim(
+    async_session, org_and_key, monkeypatch, problem
+):
+    org, _, _ = org_and_key
+    row, offer = await seed_quote(async_session, org)
+    rival = (await insert_org_and_key(async_session, org_slug="rival"))[0]
+    claim_id = await _claim(async_session, rival, offer.e164)
+    _pending_wire(monkeypatch, offer)
+    if problem == "no_funds":
+        await async_session.execute(
+            text("DELETE FROM account_credits WHERE organization_id = :o"), {"o": org}
+        )
+        await async_session.commit()
+    lk = AsyncMock()
+    with pytest.raises(HTTPException):
+        await acquire_offer(
+            async_session,
+            org,
+            row.id,
+            country="PT",
+            kind="local",
+            billed=True,
+            lk=lk,
+            expected_total_cents=1 if problem == "expected_total" else None,
+        )
+    lk.remove_inbound_number.assert_not_awaited()
+    assert await _state(async_session, claim_id) == "unverified"

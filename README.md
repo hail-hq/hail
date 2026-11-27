@@ -246,6 +246,7 @@ A checked box is a released feature. Per-artifact changelogs (GitHub Releases fo
   - [x] Twilio
   - [x] Telnyx
   - [x] DIDWW
+- [x] [Your own phone system (PBX)](docs/public/connect-phone-system.md): answer, call out, hand over to extensions
 
 ### SMS
 

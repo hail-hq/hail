@@ -19,6 +19,7 @@ from uuid import UUID, uuid4
 
 import aiohttp
 import phonenumbers
+from hailhq.api.audit import write_audit_log
 from hailhq.core.billing import CALL_META_BILLED, has_funds
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.carrier_routing import voice_route
@@ -180,7 +181,7 @@ async def create_connection(
     *,
     organization_id: UUID,
     label: str,
-    default_region: str,
+    default_region: str | None = None,
     pbx_host: str | None = None,
     pbx_port: int = 5060,
     pbx_transport: str = "auto",
@@ -188,9 +189,12 @@ async def create_connection(
     pbx_password: str | None = None,
 ) -> tuple[SipConnection, str]:
     """Create a connection and its trunks. Returns the row and the inbound
-    password in plain text (shown once)."""
+    password in plain text."""
     label = _clean_label(label)
-    _check_region(default_region)
+    # Optional: the phone system's country, tried first to read callers
+    # (core inbound_calls._caller_of).
+    if default_region is not None:
+        _check_region(default_region)
     pbx_host = _check_host(pbx_host)
     _check_port(pbx_port)
     _check_transport(pbx_transport)
@@ -268,6 +272,7 @@ async def update_connection(
     pbx_transport: Any = UNSET,
     pbx_username: Any = UNSET,
     pbx_password: Any = UNSET,
+    default_region: Any = UNSET,
 ) -> SipConnection:
     """Change a connection; the outbound trunk follows ``pbx_host``. Under
     the org lock, so it cannot race ``delete_connection``. A failed commit
@@ -287,6 +292,12 @@ async def update_connection(
     try:
         _live(connection)
         new_label = connection.label if label is UNSET else _clean_label(label)
+        if default_region is UNSET:
+            region = connection.default_region
+        elif default_region is None:
+            region = None
+        else:
+            region = _check_region(default_region)
         host = old_host if pbx_host is UNSET else _check_host(pbx_host)
         port = old_port if pbx_port is UNSET else _check_port(pbx_port)
         transport = (
@@ -362,6 +373,7 @@ async def update_connection(
 
     try:
         connection.label = new_label
+        connection.default_region = region
         connection.pbx_host = host
         connection.pbx_port = port
         connection.pbx_transport = transport
@@ -484,6 +496,90 @@ async def delete_connection(
         raise
 
 
+async def _unverified_count(db: AsyncSession, org_id: UUID) -> int:
+    return await db.scalar(
+        select(func.count())
+        .select_from(PhoneNumber)
+        .where(
+            PhoneNumber.organization_id == org_id,
+            PhoneNumber.provider == "pbx",
+            PhoneNumber.provisioning_state == "unverified",
+        )
+    )
+
+
+def _too_many_unverified() -> ConnectedNumberError:
+    return ConnectedNumberError(
+        "too_many_unverified",
+        None,
+        "check or remove the numbers waiting for their check first",
+    )
+
+
+CHECK_IN_PROGRESS_MESSAGE: Final = (
+    "This number is being checked. Try again in 2 minutes."
+)
+
+
+async def give_way_unchecked_claim(
+    db: AsyncSession,
+    lk: LiveKitClient | None,
+    e164: str,
+    *,
+    keep_connection_id: UUID | None = None,
+    now: datetime | None = None,
+) -> bool:
+    """Release an unchecked claim on ``e164`` so a purchase or another
+    connection can take the number. Returns True when a claim was released.
+
+    Call it before the caller takes any lock. With a claim to look at, it
+    takes the claim's org lock and ends the caller's transaction (a commit
+    when it writes nothing, so the caller's loaded rows stay usable). A claim with a running ownership check, an
+    ``active`` row, or a claim on ``keep_connection_id`` (the same
+    connection adding it again) stays; the caller's own unique checks then
+    decide."""
+    claim = await db.scalar(
+        select(PhoneNumber).where(
+            PhoneNumber.e164 == e164,
+            PhoneNumber.provider == "pbx",
+            PhoneNumber.provisioning_state == "unverified",
+        )
+    )
+    if (
+        claim is None
+        or lk is None
+        or (
+            keep_connection_id is not None
+            and claim.sip_connection_id == keep_connection_id
+        )
+    ):
+        return False  # read only, no lock: the caller's transaction goes on
+    org_id, number_id = claim.organization_id, claim.id
+    await org_lock(db, org_id)
+    await db.refresh(claim)
+    if claim.provisioning_state != "unverified":
+        await db.commit()  # nothing written; ends the transaction
+        return False
+    if await check_in_flight(db, number_id, now or datetime.now(timezone.utc)):
+        await db.commit()  # nothing written; ends the transaction
+        raise ConnectedNumberError(
+            "check_in_progress", "e164", CHECK_IN_PROGRESS_MESSAGE
+        )
+    # Same session and transaction: the org lock is re-entrant.
+    await remove_connected_number(db, lk, claim, only_state="unverified")
+    logger.info("unchecked claim %s on %s gave way", number_id, e164)
+    await write_audit_log(
+        org_id,
+        None,
+        "number.claim_released",
+        "phone_number",
+        number_id,
+        {"e164": e164},
+        actor_kind="system",
+    )
+    return True
+
+
 async def add_connected_number(
     db: AsyncSession, lk: LiveKitClient, connection: SipConnection, e164: str
 ) -> PhoneNumber:
@@ -500,25 +596,20 @@ async def add_connected_number(
     e164 = phonenumbers.format_number(
         phonenumbers.parse(e164, None), phonenumbers.PhoneNumberFormat.E164
     )
-    await org_lock(db, connection.organization_id)
+    connection_id, org_id = connection.id, connection.organization_id
+    # Free another claim only for a request that passes its own checks first
+    # (they run again under the org lock below). A later failure (LiveKit,
+    # the unique index) leaves that claim released: claims give way first.
+    _live(connection)
+    if await _unverified_count(db, org_id) >= UNVERIFIED_PER_ORG:
+        raise _too_many_unverified()
+    await give_way_unchecked_claim(db, lk, e164, keep_connection_id=connection_id)
+    await org_lock(db, org_id)
     await db.refresh(connection)
     try:
         _live(connection)
-        unverified = await db.scalar(
-            select(func.count())
-            .select_from(PhoneNumber)
-            .where(
-                PhoneNumber.organization_id == connection.organization_id,
-                PhoneNumber.provider == "pbx",
-                PhoneNumber.provisioning_state == "unverified",
-            )
-        )
-        if unverified >= UNVERIFIED_PER_ORG:
-            raise ConnectedNumberError(
-                "too_many_unverified",
-                None,
-                "check or remove the numbers waiting for their check first",
-            )
+        if await _unverified_count(db, org_id) >= UNVERIFIED_PER_ORG:
+            raise _too_many_unverified()
     except BaseException:
         await db.rollback()
         raise

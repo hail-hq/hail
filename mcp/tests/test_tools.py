@@ -1342,6 +1342,34 @@ async def test_create_contact_posts_body_and_surfaces_409(client: HailClient) ->
     assert result == {"error": "a contact with that phone or email already exists"}
 
 
+@respx.mock
+async def test_create_contact_passes_extension(client: HailClient) -> None:
+    captured: dict = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = request.read().decode("utf-8")
+        return httpx.Response(
+            201,
+            json={
+                "id": "4b8f3c1e-0000-0000-0000-000000000001",
+                "kind": "manual",
+                "name": "Support line",
+                "phone_e164": None,
+                "email": None,
+                "extension": "800",
+                "role": None,
+            },
+        )
+
+    respx.post(f"{_BASE_URL}/contacts").mock(side_effect=_handler)
+    result = await tools.create_contact(
+        client=client, name="Support line", extension="800"
+    )
+    body = httpx.Response(200, content=captured["body"]).json()
+    assert body == {"name": "Support line", "extension": "800"}
+    assert result["extension"] == "800"
+
+
 # --------------------------------------------------------------------------- #
 # Error mapping
 # --------------------------------------------------------------------------- #

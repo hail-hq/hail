@@ -1848,3 +1848,160 @@ async def test_setup_failure_log_never_holds_the_code(
     assert [r for r in caplog.records if "failed at agent_dispatch" in r.getMessage()]
     for record in caplog.records:
         assert "482913" not in record.getMessage() + (record.exc_text or "")
+
+
+# --------------------------------------------------------------------------- #
+# Unchecked claims give way
+# --------------------------------------------------------------------------- #
+
+ORG_B = UUID("00000000-0000-0000-0000-0000000000b8")
+
+
+async def _conn_of(session, lk, org, inbound="ST_in_b"):
+    lk.create_pbx_inbound_trunk.return_value = inbound
+    lk.create_pbx_outbound_trunk.return_value = inbound + "_out"
+    row, _ = await create_connection(
+        session, lk, organization_id=org, label="Other", default_region="US"
+    )
+    lk.reset_mock()
+    return row
+
+
+async def _audit(session, org, action):
+    from hailhq.core.models import AuditLog
+
+    return (
+        (
+            await session.execute(
+                select(AuditLog).where(
+                    AuditLog.organization_id == org, AuditLog.action == action
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+async def test_add_number_takes_over_other_workspace_unverified_claim(
+    async_session, lk, conn
+):
+    claim = await _number(async_session, conn, "unverified")
+    claim = SimpleNamespace(id=claim.id, e164=claim.e164)
+    trunk = conn.livekit_inbound_trunk_id
+    other = await _conn_of(async_session, lk, ORG_B)
+    n = await add_connected_number(async_session, lk, other, "+14155550100")
+    assert await _state_of(async_session, claim) == "released"
+    lk.remove_inbound_number.assert_awaited_once_with(trunk, "+14155550100")
+    lk.add_inbound_number.assert_awaited_once_with("ST_in_b", "+14155550100")
+    assert (n.organization_id, n.provisioning_state) == (ORG_B, "unverified")
+    logs = await _audit(async_session, ORG, "number.claim_released")
+    assert [log.payload for log in logs] == [{"e164": "+14155550100"}]
+
+
+async def test_add_number_takes_over_own_unverified_claim(async_session, lk, conn):
+    claim = await _number(async_session, conn, "unverified")
+    claim = SimpleNamespace(id=claim.id, e164=claim.e164)
+    second = await _conn_of(async_session, lk, ORG, inbound="ST_in_2")
+    n = await asyncio.wait_for(
+        add_connected_number(async_session, lk, second, "+14155550100"), 5
+    )
+    assert await _state_of(async_session, claim) == "released"
+    assert n.sip_connection_id == second.id
+
+
+async def test_same_connection_claim_is_number_taken(async_session, lk, conn):
+    claim = await _number(async_session, conn, "unverified")
+    claim = SimpleNamespace(id=claim.id, e164=claim.e164)
+    with pytest.raises(ConnectedNumberError) as e:
+        await add_connected_number(async_session, lk, conn, "+14155550100")
+    assert e.value.code == "number_taken"
+    assert await _state_of(async_session, claim) == "unverified"
+    lk.remove_inbound_number.assert_not_awaited()
+
+
+async def test_active_claim_does_not_give_way(async_session, lk, conn):
+    claim = await _number(async_session, conn, "active")
+    claim = SimpleNamespace(id=claim.id, e164=claim.e164)
+    other = await _conn_of(async_session, lk, ORG_B)
+    with pytest.raises(ConnectedNumberError) as e:
+        await add_connected_number(async_session, lk, other, "+14155550100")
+    assert e.value.code == "number_taken"
+    assert await _state_of(async_session, claim) == "active"
+    lk.remove_inbound_number.assert_not_awaited()
+
+
+async def test_claim_with_running_check_does_not_give_way(async_session, lk, conn):
+    claim = await _number(async_session, conn, "unverified")
+    claim = SimpleNamespace(id=claim.id, e164=claim.e164)
+    pool = await _pool(async_session)
+    await _check_call_row(
+        async_session,
+        pool,
+        claim.id,
+        status="ringing",
+        requested_at=datetime.now(timezone.utc),
+        e164=claim.e164,
+    )
+    other = await _conn_of(async_session, lk, ORG_B)
+    with pytest.raises(ConnectedNumberError) as e:
+        await add_connected_number(async_session, lk, other, "+14155550100")
+    assert e.value.code == "check_in_progress"
+    assert str(e.value) == "This number is being checked. Try again in 2 minutes."
+    assert await _state_of(async_session, claim) == "unverified"
+    lk.remove_inbound_number.assert_not_awaited()
+    lk.add_inbound_number.assert_not_awaited()
+
+
+async def test_give_way_livekit_failure_keeps_claim(async_session, lk, conn):
+    claim = await _number(async_session, conn, "unverified")
+    claim = SimpleNamespace(id=claim.id, e164=claim.e164)
+    other = await _conn_of(async_session, lk, ORG_B)
+    lk.remove_inbound_number.side_effect = ServerError(
+        "unavailable", "down", status=503
+    )
+    with pytest.raises(ConnectedNumberError) as e:
+        await add_connected_number(async_session, lk, other, "+14155550100")
+    assert e.value.code == "livekit_failed"
+    assert await _state_of(async_session, claim) == "unverified"
+    assert await _count(async_session, "+14155550100") == 1
+
+
+async def test_add_number_on_deleted_connection_keeps_others_claim(
+    async_session, lk, conn
+):
+    claim = await _number(async_session, conn, "unverified")
+    claim = SimpleNamespace(id=claim.id)
+    other = await _conn_of(async_session, lk, ORG_B)
+    other.deleted_at = datetime.now(timezone.utc)
+    await async_session.commit()
+    with pytest.raises(ConnectedNumberError) as e:
+        await add_connected_number(async_session, lk, other, "+14155550100")
+    assert e.value.code == "connection_deleted"
+    assert await _state_of(async_session, claim) == "unverified"
+    lk.remove_inbound_number.assert_not_awaited()
+
+
+async def test_add_number_over_cap_keeps_others_claim(async_session, lk, conn):
+    claim = await _number(async_session, conn, "unverified")
+    claim = SimpleNamespace(id=claim.id)
+    other = await _conn_of(async_session, lk, ORG_B)
+    for i in range(connected_numbers.UNVERIFIED_PER_ORG):
+        async_session.add(
+            PhoneNumber(
+                organization_id=ORG_B,
+                e164=f"+1415555{200 + i:04d}",
+                country_code="US",
+                number_type="local",
+                capabilities=["voice"],
+                provider="pbx",
+                sip_connection_id=other.id,
+                provisioning_state="unverified",
+            )
+        )
+    await async_session.commit()
+    with pytest.raises(ConnectedNumberError) as e:
+        await add_connected_number(async_session, lk, other, "+14155550100")
+    assert e.value.code == "too_many_unverified"
+    assert await _state_of(async_session, claim) == "unverified"
+    lk.remove_inbound_number.assert_not_awaited()
