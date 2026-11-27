@@ -11,36 +11,36 @@ stores amounts only, never prices.
 
 ## Who writes what
 
-| Table / column | Written by | Read by |
-|---|---|---|
-| `organization_plans` | billing site (Stripe sync) | hail gates, billing site |
-| `plan_allowances` included amounts, `text_countries`, `number_fee_cap_cents` | billing site, at each period start and on a plan change | hail gates |
-| `plan_allowances.used_minutes`, `used_texts`, `used_emails` | billing site raters | hail gates |
-| `plan_allowances.used_numbers` | hail (number bought in the API), billing site (monthly fee rater) | both |
-| `account_credits` rows with `kind = 'plan'` | billing site raters; hail for a number's first month | console, both |
-| `call_balance_holds.plan_minutes` | hail (call start, handover) | hail call cap |
-| `organization_knowledge` (`source = 'plan'` rows) | billing site, from the plan | hail knowledge base |
-| `organization_knowledge` (`source = 'staff'` rows) | Hail staff | hail knowledge base |
+| Table / column                                                               | Written by                                                        | Read by                  |
+| ---------------------------------------------------------------------------- | ----------------------------------------------------------------- | ------------------------ |
+| `organization_plans`                                                         | billing site (Stripe sync)                                        | hail gates, billing site |
+| `plan_allowances` included amounts, `text_countries`, `number_fee_cap_cents` | billing site, at each period start and on a plan change           | hail gates               |
+| `plan_allowances.used_minutes`, `used_texts`, `used_emails`                  | billing site raters                                               | hail gates               |
+| `plan_allowances.used_numbers`                                               | hail (number bought in the API), billing site (monthly fee rater) | both                     |
+| `account_credits` rows with `kind = 'plan'`                                  | billing site raters; hail for a number's first month              | console, both            |
+| `call_balance_holds.plan_minutes`                                            | hail (call start, handover)                                       | hail call cap            |
+| `organization_knowledge` (`source = 'plan'` rows)                            | billing site, from the plan                                       | hail knowledge base      |
+| `organization_knowledge` (`source = 'staff'` rows)                           | Hail staff                                                        | hail knowledge base      |
 
 ## Schema
 
 ### `organization_plans`: one row per subscription
 
-| Column | Type | Rule |
-|---|---|---|
-| `id` | uuid PK | `gen_random_uuid()` |
-| `organization_id` | uuid NOT NULL | no FK (`organizations` is the billing site's table) |
-| `tier` | text NOT NULL | `pro`, `business`, `enterprise` |
-| `step_hours` | int NOT NULL | > 0 (Standard hours a month) |
-| `billing_interval` | text NOT NULL | `month`, `year` |
-| `status` | text NOT NULL | Stripe's: `incomplete`, `incomplete_expired`, `trialing`, `active`, `past_due`, `canceled`, `unpaid`, `paused` |
-| `stripe_customer_id` | text NOT NULL | |
-| `stripe_subscription_id` | text NOT NULL UNIQUE | |
-| `started_at` | timestamptz NOT NULL | |
-| `current_period_end` | timestamptz NOT NULL | from `items.data[].current_period_end` |
-| `cancel_at_period_end` | bool NOT NULL default false | |
-| `ended_at` | timestamptz NULL | set when the subscription is deleted |
-| `created_at`, `updated_at` | timestamptz | |
+| Column                     | Type                        | Rule                                                                                                           |
+| -------------------------- | --------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `id`                       | uuid PK                     | `gen_random_uuid()`                                                                                            |
+| `organization_id`          | uuid NOT NULL               | no FK (`organizations` is the billing site's table)                                                            |
+| `tier`                     | text NOT NULL               | `pro`, `business`, `enterprise`                                                                                |
+| `step_hours`               | int NOT NULL                | > 0 (Standard hours a month)                                                                                   |
+| `billing_interval`         | text NOT NULL               | `month`, `year`                                                                                                |
+| `status`                   | text NOT NULL               | Stripe's: `incomplete`, `incomplete_expired`, `trialing`, `active`, `past_due`, `canceled`, `unpaid`, `paused` |
+| `stripe_customer_id`       | text NOT NULL               |                                                                                                                |
+| `stripe_subscription_id`   | text NOT NULL UNIQUE        |                                                                                                                |
+| `started_at`               | timestamptz NOT NULL        |                                                                                                                |
+| `current_period_end`       | timestamptz NOT NULL        | from `items.data[].current_period_end`                                                                         |
+| `cancel_at_period_end`     | bool NOT NULL default false |                                                                                                                |
+| `ended_at`                 | timestamptz NULL            | set when the subscription is deleted                                                                           |
+| `created_at`, `updated_at` | timestamptz                 |                                                                                                                |
 
 - Partial unique index `organization_plans_open_uq` on `(organization_id) WHERE ended_at IS NULL`: one open row per workspace.
 - CHECK: a row in `canceled` or `incomplete_expired` has `ended_at` set.
@@ -50,20 +50,20 @@ stores amounts only, never prices.
 
 ### `plan_allowances`: one row per workspace per plan month
 
-| Column | Type | Rule |
-|---|---|---|
-| `id` | uuid PK | |
-| `organization_id` | uuid NOT NULL | |
-| `plan_id` | uuid NOT NULL | FK `organization_plans(id) ON DELETE CASCADE` |
-| `period_start`, `period_end` | timestamptz NOT NULL | `period_end > period_start`; UNIQUE `(organization_id, period_start)` |
-| `included_minutes` | numeric(14,3) NOT NULL | plan minutes (Standard minute = 1, Plus minute = 2) |
-| `used_minutes` | numeric(14,3) NOT NULL default 0 | |
-| `included_texts`, `used_texts` | int NOT NULL | text segments |
-| `included_emails`, `used_emails` | int NOT NULL | messages (sent, received or forwarded) |
-| `included_numbers`, `used_numbers` | int NOT NULL | numbers whose monthly fee the plan pays this month |
-| `text_countries` | text[] NOT NULL default `{}` | destination countries (ISO alpha-2) whose texts use included texts |
-| `number_fee_cap_cents` | numeric(14,1) NOT NULL default 0 | the most the plan pays toward one included number's monthly fee |
-| `created_at`, `updated_at` | timestamptz | |
+| Column                             | Type                             | Rule                                                                  |
+| ---------------------------------- | -------------------------------- | --------------------------------------------------------------------- |
+| `id`                               | uuid PK                          |                                                                       |
+| `organization_id`                  | uuid NOT NULL                    |                                                                       |
+| `plan_id`                          | uuid NOT NULL                    | FK `organization_plans(id) ON DELETE CASCADE`                         |
+| `period_start`, `period_end`       | timestamptz NOT NULL             | `period_end > period_start`; UNIQUE `(organization_id, period_start)` |
+| `included_minutes`                 | numeric(14,3) NOT NULL           | plan minutes (Standard minute = 1, Plus minute = 2)                   |
+| `used_minutes`                     | numeric(14,3) NOT NULL default 0 |                                                                       |
+| `included_texts`, `used_texts`     | int NOT NULL                     | text segments                                                         |
+| `included_emails`, `used_emails`   | int NOT NULL                     | messages (sent, received or forwarded)                                |
+| `included_numbers`, `used_numbers` | int NOT NULL                     | numbers whose monthly fee the plan pays this month                    |
+| `text_countries`                   | text[] NOT NULL default `{}`     | destination countries (ISO alpha-2) whose texts use included texts    |
+| `number_fee_cap_cents`             | numeric(14,1) NOT NULL default 0 | the most the plan pays toward one included number's monthly fee       |
+| `created_at`, `updated_at`         | timestamptz                      |                                                                       |
 
 - All amounts are >= 0 (CHECK).
 - Yearly plans get a row for each month too.
@@ -96,16 +96,20 @@ The ledger gets a third kind next to `credit` and `debit`:
 `POST /api/internal/voice-rates/quote` (billing site) adds two fields to its reply. Request unchanged. Reply example for a Standard leg with recording on:
 
 ```json
-{"cents_per_minute": 11, "cents_per_call": 0,
- "plan_minutes_per_minute": 1, "plan_cents_per_minute": 10}
+{
+  "cents_per_minute": 11,
+  "cents_per_call": 0,
+  "plan_minutes_per_minute": 1,
+  "plan_cents_per_minute": 10
+}
 ```
 
 Two lines (handover), one Standard and one Plus: `plan_minutes_per_minute: 3`, `plan_cents_per_minute: 30`. An Other leg adds 0 to both.
 
-| Field | Meaning | Absent |
-|---|---|---|
-| `plan_minutes_per_minute` | plan minutes one call minute uses: the sum over the legs of each leg's group weight (Standard 1, Plus 2, Other 0) | 0 |
-| `plan_cents_per_minute` | the part of `cents_per_minute` a plan minute pays (the legs' Standard and Plus group prices; not recording, not Other legs) | 0 |
+| Field                     | Meaning                                                                                                                     | Absent |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ------ |
+| `plan_minutes_per_minute` | plan minutes one call minute uses: the sum over the legs of each leg's group weight (Standard 1, Plus 2, Other 0)           | 0      |
+| `plan_cents_per_minute`   | the part of `cents_per_minute` a plan minute pays (the legs' Standard and Plus group prices; not recording, not Other legs) | 0      |
 
 - `0 <= plan_cents_per_minute <= cents_per_minute`, and both fields are 0 or both above 0. Otherwise hail ignores both and logs a warning (`hailhq.core.internal_webhook.CallQuote`).
 - The route returns them for every workspace. hail decides whether a plan month exists.
@@ -143,7 +147,7 @@ When the plan is on and `used_numbers < included_numbers`, the first month of a 
 - a debit for the part above the cap, ref + `:over_plan`;
 - the setup fee and numbers beyond the included count are paid from credits, as today.
 
-The purchase's funds check needs only the credits part. An order the carrier finishes later is paid by the plan only while the month whose slot it took is still the current, paid one; otherwise the slot goes back and credits pay, as today.
+The purchase's funds check needs only the credits part. An order the carrier finishes later is paid by the plan only from a month row that covers the finish time: the one whose slot it took, or the new month's if a slot is left there. Otherwise (plan off, the new month's row not written yet, or no slot left) the slot goes back and credits pay, as for any number beyond the plan.
 
 The billing site's monthly fee rater pays later months the same way: oldest numbers first, up to `included_numbers`, each month. When it creates a month's row it gives the included numbers to the workspace's active numbers, oldest first, in the same transaction and under the workspace lock (their plan rows and `used_numbers`). A purchase then takes only a slot that is left.
 
@@ -160,21 +164,21 @@ The billing site's monthly fee rater pays later months the same way: oldest numb
 
 hail reads `organization_knowledge`. No row means the knowledge base is off. This change adds two columns:
 
-| Column | Type | Rule |
-|---|---|---|
-| `max_total_bytes` | bigint NULL | > 0. The most live knowledge data the workspace may hold, counted like the global cap (sum of its `knowledge_documents.stored_bytes`). NULL: no workspace cap (staff and older rows) |
-| `source` | text NOT NULL default `staff` | `plan` or `staff`. The billing site writes and deletes only `plan` rows and never touches a `staff` row |
+| Column            | Type                          | Rule                                                                                                                                                                                 |
+| ----------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `max_total_bytes` | bigint NULL                   | > 0. The most live knowledge data the workspace may hold, counted like the global cap (sum of its `knowledge_documents.stored_bytes`). NULL: no workspace cap (staff and older rows) |
+| `source`          | text NOT NULL default `staff` | `plan` or `staff`. The billing site writes and deletes only `plan` rows and never touches a `staff` row                                                                              |
 
 hail checks `max_total_bytes` where it checks the global cap: upload links, upload bodies and new documents (early refusals, 409), and the ingest worker under the global cap's lock (the document fails with "this workspace's knowledge base is full").
 
 The billing site writes the row from the plan (the sizes come from its plan table, never from hail):
 
-| Event | Billing site writes |
-|---|---|
-| plan on (`active`) | upsert with `source = 'plan'`: `max_total_bytes` (Pro 100 MB, Business 1 GB), `max_file_bytes` 20 MB, `max_documents` and `max_pieces` high enough not to bind before the bytes (CHECK limits: 1,000 and 100,000) |
-| payment failed (`past_due`, `unpaid`) | delete the row: the knowledge base is off, files are kept |
-| payment back (`active`) | upsert the row again |
-| subscription deleted | leave the row deleted, set `ended_at` on the plan; the file delete below runs |
+| Event                                 | Billing site writes                                                                                                                                                                                               |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| plan on (`active`)                    | upsert with `source = 'plan'`: `max_total_bytes` (Pro 100 MB, Business 1 GB), `max_file_bytes` 20 MB, `max_documents` and `max_pieces` high enough not to bind before the bytes (CHECK limits: 1,000 and 100,000) |
+| payment failed (`past_due`, `unpaid`) | delete the row: the knowledge base is off, files are kept                                                                                                                                                         |
+| payment back (`active`)               | upsert the row again                                                                                                                                                                                              |
+| subscription deleted                  | leave the row deleted, set `ended_at` on the plan; the file delete below runs                                                                                                                                     |
 
 Deleting files at the period end uses the knowledge base's one delete function (`delete_org_knowledge`). It deletes the files, their rows and the limits row, and is safe to run again. Until a scheduled sweep exists, staff run it with `python -m hailhq.core.knowledge.access delete <org-id>` (knowledge base runbook). The sweep (follow-up, after the knowledge base PR merges) runs it daily for each workspace whose last plan ended `canceled` and that still has knowledge files and no open plan.
 
