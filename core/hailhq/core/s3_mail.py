@@ -132,12 +132,26 @@ class S3MailClient:
 
         return await asyncio.to_thread(_do)
 
-    async def presign_get(self, key: str, *, ttl_seconds: int = 300) -> str:
-        def _do() -> str:
-            return self._client.generate_presigned_url(
-                "get_object",
-                Params={"Bucket": self._bucket, "Key": key},
-                ExpiresIn=ttl_seconds,
-            )
-
-        return await asyncio.to_thread(_do)
+    async def presign_get(
+        self,
+        key: str,
+        *,
+        ttl_seconds: int = 300,
+        response_content_type: str | None = None,
+        response_content_disposition: str | None = None,
+        response_cache_control: str | None = None,
+    ) -> str:
+        params = {"Bucket": self._bucket, "Key": key}
+        for name, value in (
+            ("ResponseContentType", response_content_type),
+            ("ResponseContentDisposition", response_content_disposition),
+            ("ResponseCacheControl", response_cache_control),
+        ):
+            if value is not None:
+                params[name] = value
+        return await asyncio.to_thread(
+            self._client.generate_presigned_url,
+            "get_object",
+            Params=params,
+            ExpiresIn=ttl_seconds,
+        )

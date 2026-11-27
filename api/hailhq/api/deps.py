@@ -456,6 +456,20 @@ async def _resolve_current_principal(
     raise _unauthorized("invalid API key")
 
 
+async def organization_member_role(
+    db: AsyncSession, organization_id: uuid.UUID, user_id: uuid.UUID | None
+) -> str | None:
+    """Read a user's current role in the workspace, if they are a member."""
+    return (
+        await db.execute(
+            select(OrganizationMember.role).where(
+                OrganizationMember.organization_id == organization_id,
+                OrganizationMember.user_id == user_id,
+            )
+        )
+    ).scalar_one_or_none()
+
+
 def get_s3_mail() -> S3MailClient:
     """Shared mail-bucket S3 client, used by every route touching an
     attachment (inbound reads, outbound uploads, outbound sends)."""

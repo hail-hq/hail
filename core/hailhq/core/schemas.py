@@ -4332,6 +4332,37 @@ class KnowledgeDocumentCreate(BaseModel):
         return v
 
 
+class KnowledgeDocumentTagUpdate(BaseModel):
+    """Set or clear one type of tag on a document."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["brand"] = Field(description="Type of tag to set.")
+    value: str | None = Field(
+        min_length=1,
+        max_length=255,
+        description=(
+            "Tag name. Existing tags reuse the workspace's display spelling regardless "
+            "of case. Send null to clear the tag. A manual choice overrides automatic tagging."
+        ),
+    )
+
+    @field_validator("value")
+    @classmethod
+    def _value_printable(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value or not value.isprintable():
+            raise ValueError("tag value must be printable and not blank")
+        return value
+
+
+class KnowledgeDocumentTagResponse(BaseModel):
+    type: str = Field(description="Type of tag, for example `brand`.")
+    value: str = Field(description="The workspace's display spelling of the tag.")
+
+
 class KnowledgeDocumentResponse(BaseModel):
     """One knowledge base document and how far its reading got."""
 
@@ -4355,6 +4386,9 @@ class KnowledgeDocumentResponse(BaseModel):
     )
     created_at: datetime = Field(description="ISO 8601 timestamp.")
     updated_at: datetime = Field(description="ISO 8601 timestamp.")
+    tags: list[KnowledgeDocumentTagResponse] = Field(
+        default_factory=list, description="Assigned tags, ordered by type."
+    )
 
 
 class KnowledgeDocumentListResponse(BaseModel):
