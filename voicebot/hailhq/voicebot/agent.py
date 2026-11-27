@@ -98,7 +98,6 @@ from hailhq.core.telemetry_identity import (
 from hailhq.core.url_guard import assert_public_https_url
 from hailhq.core.webhook_fanout import fanout_call_event
 from hailhq.voicebot import text_watch
-from hailhq.voicebot.acknowledgments import drop_acknowledgments
 from hailhq.voicebot.amd import (
     MACHINE_HANGUP_CATEGORIES,
     MACHINE_IVR_CATEGORY,
@@ -124,6 +123,7 @@ from hailhq.voicebot.pipeline import (
 from hailhq.voicebot.recording import start_recording, stop_recording
 from hailhq.voicebot.recovery import ConversationRecovery
 from hailhq.voicebot.reply_limit import ReplyContinuation, limit_reply
+from hailhq.voicebot.short_speech import SpeechLength, drop_short_speech
 from hailhq.voicebot.spoken_lines import spoken_lines
 from hailhq.voicebot.telemetry import connect_livekit_tracing
 from hailhq.voicebot.tools import SpeechTracker, build_agent_tools, every_call_tools
@@ -246,6 +246,7 @@ class SpeechSanitizingAgent(Agent):
         self._held_words: list[str] = []
         self.phone_menu: PhoneMenu | None = None
         self.continuation: ReplyContinuation | None = None
+        self.speech_length = SpeechLength()
 
     def release_opening(self) -> str | None:
         """Let replies through. Returns what the person said while held."""
@@ -330,19 +331,21 @@ class SpeechSanitizingAgent(Agent):
         )
 
     async def stt_node(self, audio: Any, model_settings: Any) -> Any:
-        # An "okay" said over the agent does not stop it (acknowledgments.py).
-        # A phone menu is not a person: everything it says is kept.
+        # A short sound said over the agent does not stop it (short_speech.py).
         events = Agent.default.stt_node(self, audio, model_settings)
-        async for event in drop_acknowledgments(events, self._speaking_to_a_person):
+        async for event in drop_short_speech(events, self._drop_as_short_speech):
             yield event
 
-    def _speaking_to_a_person(self) -> bool:
+    def _drop_as_short_speech(self) -> bool:
+        # A phone menu is not a person: everything it says is kept.
         if self.phone_menu is not None and self.phone_menu.active:
             return False
         try:
-            return self.session.agent_state == "speaking"
+            if self.session.agent_state != "speaking":
+                return False
         except Exception:
             return False  # no session: drop nothing
+        return not self.speech_length.insisting(time.monotonic())
 
     async def tts_node(self, text: Any, model_settings: Any) -> Any:
         if self.phone_menu is not None and self.phone_menu.active:
@@ -2744,6 +2747,7 @@ async def _run_call(
     @session.on("user_state_changed")
     def _on_speech_state(ev: Any) -> None:
         speech.on_state(getattr(ev, "new_state", None), time.monotonic())
+        agent.speech_length.on_state(getattr(ev, "new_state", None), time.monotonic())
 
     other_party_task = asyncio.create_task(other_party(call_id))
     agent_tools, agent_api = await build_tools_safely(

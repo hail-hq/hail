@@ -810,8 +810,8 @@ def startup_capability_warnings() -> list[str]:
 
 
 # What stops the agent mid-reply: one transcribed word, not VAD energy alone
-# (the only setting that differs from the SDK defaults). Filler words said
-# over the agent never reach this check: see acknowledgments.py.
+# (the only setting that differs from the SDK defaults). Short sounds said
+# over the agent never reach this check: see short_speech.py.
 INTERRUPTION: dict[str, Any] = {"min_words": 1}
 
 
