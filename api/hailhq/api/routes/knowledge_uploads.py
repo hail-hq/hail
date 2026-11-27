@@ -418,10 +418,12 @@ async def complete_knowledge_upload(
 ) -> KnowledgeDocumentResponse:
     """Check the file the browser stored and add it to the knowledge base.
 
-    Call it after the upload (for a multipart upload, after it finished:
-    one still open is cancelled), at most 15 minutes after `expires_at`. Hail checks the size, the type
+    Call it after the upload (for a multipart upload, after it finished),
+    at most 15 minutes after `expires_at`. Hail checks the size, the type
     and the first bytes, like an upload link's PUT. On a mismatch the file
-    is deleted (422 or 413). Then it works like `POST /v1/knowledge/documents`:
+    is deleted (422 or 413). Without room (409) the upload is kept: call
+    again after making room. A multipart upload still open on the key is
+    cancelled once the file is found. Then it works like `POST /v1/knowledge/documents`:
     poll `GET /v1/knowledge/documents/{id}` until `status` is `ready` or
     `failed`.
     """
@@ -449,8 +451,6 @@ async def complete_knowledge_upload(
     await db.rollback()
 
     try:
-        # No unfinished multipart upload may write the key after the check.
-        await s3.abort_multipart_uploads(object_prefix(key))
         stored = await s3.head(key)
     except Exception as exc:
         raise _storage_failed() from exc
@@ -459,6 +459,9 @@ async def complete_knowledge_upload(
             status_code=http_status.HTTP_409_CONFLICT,
             detail="the file is not in storage yet; finish the upload, then call again",
         )
+    # The file is there, so the upload finished: no multipart upload still
+    # open may write the key later. Best effort: the checks run on a copy.
+    await _abort_multipart(s3, upload_id, object_prefix(key))
     final = f"{object_prefix(key)}.{uuid4().hex}"
     try:
         size = await _check(s3, key, final, stored, content_type, declared, limit)
@@ -483,19 +486,10 @@ async def complete_knowledge_upload(
         upload.size_bytes = size
         upload.s3_key = final
         doc = await add_document(db, principal, upload, limits, body and body.name)
-    except HTTPException as exc:
-        await db.rollback()
-        if exc.status_code in (
-            http_status.HTTP_413_CONTENT_TOO_LARGE,
-            http_status.HTTP_422_UNPROCESSABLE_CONTENT,
-        ):
-            await _discard(db, s3, org, upload_id, final)
-        else:
-            # 409 (no room), 403, 404, 503: the file is fine. The browser's
-            # upload stays reserved, so a retry needs no new upload.
-            await _forget_copy(db, s3, upload_id, final)
-        raise
     except BaseException:
+        # The file passed its checks: the browser's upload stays reserved
+        # (409 no room, a limit lowered meanwhile), so a retry needs no new
+        # upload. Only this request's copy goes.
         await db.rollback()
         await _forget_copy(db, s3, upload_id, final)
         raise
@@ -624,6 +618,19 @@ async def _discard(
     sweep_later(s3, upload_id, object_prefix(gone))
 
 
+async def _abort_multipart(s3: S3MailClient, upload_id: UUID, prefix: str) -> None:
+    """Abort the multipart uploads open under ``prefix``. Best effort: S3
+    drops unfinished ones after a day anyway (lifecycle rule)."""
+    try:
+        await s3.abort_multipart_uploads(prefix)
+    except Exception:
+        logger.warning(
+            "knowledge upload %s: could not abort open multipart uploads",
+            upload_id,
+            exc_info=True,
+        )
+
+
 def sweep_later(
     s3: S3MailClient, upload_id: UUID, prefix: str, *, keep: str | None = None
 ) -> None:
@@ -644,8 +651,8 @@ async def _sweep_late(
     s3: S3MailClient, upload_id: UUID, prefix: str, keep: str | None
 ) -> None:
     await _until_urls_expire()
+    await _abort_multipart(s3, upload_id, prefix)
     try:
-        await s3.abort_multipart_uploads(prefix)
         await s3.delete_prefix(prefix, keep=keep)
     except Exception:
         logger.warning(
@@ -696,8 +703,8 @@ async def delete_knowledge_upload(
     await db.commit()
     if key is None:
         raise _not_found()
+    await _abort_multipart(s3, upload_id, object_prefix(key))
     try:
-        await s3.abort_multipart_uploads(object_prefix(key))
         await delete_upload_objects(s3, key)
     except Exception:
         logger.warning(

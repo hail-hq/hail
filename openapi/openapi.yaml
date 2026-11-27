@@ -5409,14 +5409,17 @@ paths:
         base.
 
 
-        Call it after the upload (for a multipart upload, after it finished:
+        Call it after the upload (for a multipart upload, after it finished),
 
-        one still open is cancelled), at most 15 minutes after `expires_at`. Hail
-        checks the size, the type
+        at most 15 minutes after `expires_at`. Hail checks the size, the type
 
         and the first bytes, like an upload link's PUT. On a mismatch the file
 
-        is deleted (422 or 413). Then it works like `POST /v1/knowledge/documents`:
+        is deleted (422 or 413). Without room (409) the upload is kept: call
+
+        again after making room. A multipart upload still open on the key is
+
+        cancelled once the file is found. Then it works like `POST /v1/knowledge/documents`:
 
         poll `GET /v1/knowledge/documents/{id}` until `status` is `ready` or
 
