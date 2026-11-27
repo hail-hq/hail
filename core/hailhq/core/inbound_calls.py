@@ -195,7 +195,40 @@ async def _refuse(
     return Rejected(end_reason.value, call.id)
 
 
+# What a PBX caller is recorded as when the phone system sends one of the
+# workspace's own numbers instead of the real caller (3CX does by default).
+HIDDEN_CALLER = "anonymous"
+
+
 async def _caller_of(db: AsyncSession, number: PhoneNumber, raw: str) -> str:
+    """The caller Hail records. A PBX caller that is one of the workspace's
+    own numbers is not the real caller: the phone system replaced it (3CX
+    sends its trunk number by default). Recorded as hidden, so callers never
+    share call history, contacts or a thread."""
+    caller = await _read_caller(db, number, raw)
+    if number.provider != "pbx" or not (
+        caller.startswith("+") and looks_like_phone_number(caller)
+    ):
+        return caller
+    own = await db.scalar(
+        select(PhoneNumber.id)
+        .where(
+            PhoneNumber.organization_id == number.organization_id,
+            PhoneNumber.e164 == caller,
+            PhoneNumber.released_at.is_(None),
+        )
+        .limit(1)
+    )
+    if own is None:
+        return caller
+    logger.info(
+        "pbx call to number %s: caller is the workspace's own number; recorded as hidden",
+        number.id,
+    )
+    return HIDDEN_CALLER
+
+
+async def _read_caller(db: AsyncSession, number: PhoneNumber, raw: str) -> str:
     """A phone system writes local callers in its country's national form and
     callers from abroad with that country's international prefix. Hail reads
     a PBX caller with the connection's ``default_region`` first when it is set

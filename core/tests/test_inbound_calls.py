@@ -1244,3 +1244,61 @@ async def test_a_stated_phone_system_country_is_read_first(
     await async_session.flush()
     out = await inbound_calls._caller_of(async_session, number, "2079460018")
     assert out == expected
+
+
+@pytest.mark.parametrize(
+    "raw",
+    # The number called, as the phone system writes it, and in + form.
+    ["4155550100", "+14155550100"],
+)
+async def test_a_pbx_caller_that_is_the_number_called_is_hidden(async_session, raw):
+    """3CX sends its trunk number as the caller by default: every caller would
+    look like one person and share call history."""
+    _org, _agent, number = await _pbx_seed(async_session)
+    out = await inbound_calls._caller_of(async_session, number, raw)
+    assert out == inbound_calls.HIDDEN_CALLER
+
+
+async def test_a_pbx_caller_that_is_another_workspace_number_is_hidden(
+    async_session,
+):
+    org, _agent, number = await _pbx_seed(async_session)
+    async_session.add(
+        PhoneNumber(
+            organization_id=org,
+            e164="+14155550142",
+            country_code="US",
+            number_type="local",
+            capabilities=["voice"],
+            provider="twilio",
+            provisioning_state="active",
+        )
+    )
+    await async_session.flush()
+    out = await inbound_calls._caller_of(async_session, number, "+14155550142")
+    assert out == inbound_calls.HIDDEN_CALLER
+
+
+async def test_a_pbx_caller_from_another_workspace_or_a_carrier_call_is_kept(
+    async_session,
+):
+    _org, _agent, number = await _pbx_seed(async_session)
+    async_session.add(
+        PhoneNumber(
+            organization_id=uuid.uuid4(),
+            e164="+14155550143",
+            country_code="US",
+            number_type="local",
+            capabilities=["voice"],
+            provider="twilio",
+            provisioning_state="active",
+        )
+    )
+    await async_session.flush()
+    out = await inbound_calls._caller_of(async_session, number, "+14155550143")
+    assert out == "+14155550143"
+    # The guard is for phone systems only: a carrier caller stays as sent.
+    carrier = await _seed(async_session, org=uuid.uuid4(), e164="+14155550144")
+    carrier_number = carrier[2]
+    out = await inbound_calls._caller_of(async_session, carrier_number, "+14155550144")
+    assert out == "+14155550144"

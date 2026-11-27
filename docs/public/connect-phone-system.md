@@ -16,6 +16,7 @@ Add a generic SIP trunk with:
 - **Audio**: G.711 (PCMU or PCMA).
 - **Key presses**: RFC 2833 / RFC 4733 (telephone events). The ownership check needs them.
 - **Dialed number**: `+` and the country code, like `+14155550100`, on every call to Hail (an outbound rule that adds them).
+- **Caller number**: pass the original caller's number, not your own. Your agent knows returning callers by their number. A call that shows one of your own numbers as the caller reaches your agent as a hidden caller.
 - Send calls straight to the trunk, not through a queue or menu that answers first.
 
 A call to Hail uses 2 of your phone system's call channels; a handover uses 1 more.
