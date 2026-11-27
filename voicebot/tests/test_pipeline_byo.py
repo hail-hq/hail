@@ -399,6 +399,15 @@ def test_explicit_preset_voice_without_its_key_uses_house_defaults(
     assert captured_plugins["cartesia"][0].kwargs["voice"] == "house-voice"
 
 
+def test_gemini_only_host_names_the_language_it_cannot_speak(monkeypatch):
+    monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
+    monkeypatch.setattr(settings, "cartesia_api_key", "")
+    monkeypatch.setattr(settings, "eleven_api_key", "")
+
+    with pytest.raises(ProviderKeyError, match="cannot speak language 'fr'"):
+        build_tts(language="fr")
+
+
 def test_workspace_gemini_can_fall_back_to_house_credentials(
     monkeypatch, captured_plugins
 ):
