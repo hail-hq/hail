@@ -144,14 +144,24 @@ def upgrade() -> None:
         "kind IN ('credit', 'debit', 'plan')",
     )
     # The sign rule was created unnamed (Postgres named it
-    # account_credits_check); it now gets the name the model uses.
-    op.execute(
-        "ALTER TABLE account_credits DROP CONSTRAINT IF EXISTS account_credits_check"
-    )
-    op.execute(
-        "ALTER TABLE account_credits"
-        " DROP CONSTRAINT IF EXISTS account_credits_amount_sign_check"
-    )
+    # account_credits_check); find it by what it checks, whatever its name,
+    # and give it the name the model uses. None found: fail here, not at the
+    # first plan row.
+    op.execute("""
+        DO $$
+        DECLARE c text;
+        BEGIN
+          SELECT conname INTO c FROM pg_constraint
+           WHERE conrelid = 'account_credits'::regclass AND contype = 'c'
+             AND pg_get_constraintdef(oid) LIKE '%amount_cents%'
+             AND pg_get_constraintdef(oid) LIKE '%kind%';
+          IF c IS NULL THEN
+            RAISE EXCEPTION 'account_credits sign check not found';
+          END IF;
+          EXECUTE format('ALTER TABLE account_credits DROP CONSTRAINT %I', c);
+        END
+        $$;
+        """)
     op.create_check_constraint(
         "account_credits_amount_sign_check",
         "account_credits",

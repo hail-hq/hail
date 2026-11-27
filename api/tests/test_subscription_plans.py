@@ -388,10 +388,12 @@ async def test_numbers_beyond_the_plan_are_paid_from_credits(
     assert r.status_code == 402
 
 
-async def _pending(session, org, allowance, *, monthly=150, plan_cents=150):
+async def _pending(
+    session, org, allowance, *, monthly=150, plan_cents=150, e164="+14155550142"
+):
     offer = CarrierOffer(
         provider="twilio",
-        e164=f"+1415555{uuid.uuid4().int % 10000:04d}",
+        e164=e164,
         country_code="US",
         number_type="local",
         capabilities=["voice"],  # no SMS setup step
@@ -474,4 +476,24 @@ async def test_purchase_402_names_what_credits_pay(client, async_session, monkey
     await _plan(async_session, org, numbers=1, cap=100)
     r = await _buy(client, async_session, monkeypatch, org, key, monthly=250)
     assert r.status_code == 402
-    assert "$1.50 from credits" in r.json()["detail"]
+    # $2.50 less the plan's $1.00, less the $0.10 balance.
+    assert "at least $1.40" in r.json()["detail"]
+
+
+async def test_late_order_before_the_new_months_row_keeps_its_slot(async_session):
+    org, _, _ = await insert_org_and_key(async_session, initial_credit_cents=500)
+    allowance = await _plan(async_session, org, numbers=1, used_numbers=1)
+    # The month ended; the billing site has not written the next one yet.
+    allowance.period_start -= timedelta(days=30)
+    allowance.period_end = datetime.now(timezone.utc) - timedelta(minutes=5)
+    await async_session.commit()
+    number = await _pending(async_session, org, allowance)
+    await org_lock(async_session, org)
+    await async_session.refresh(number)
+    number_id = number.id
+    await finish_order(async_session, number, resource_id="PN_late")
+    rows = await _rows(async_session, org)
+    fee = monthly_fee_ref(org, number_id, datetime.now(timezone.utc))
+    assert rows[fee].kind == "plan"
+    await async_session.refresh(allowance)
+    assert allowance.used_numbers == 1

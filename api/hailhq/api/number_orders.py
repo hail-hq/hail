@@ -32,6 +32,7 @@ from hailhq.core.number_offers import CarrierOffer, discover_offers
 from hailhq.core.plans import (
     OVER_PLAN_REF_SUFFIX,
     PLAN_NUMBER_SOURCE,
+    active_plan,
     current_allowance,
     return_number_slot,
     take_number_slot,
@@ -168,18 +169,28 @@ async def finish_order(
             )
         fee_ref = monthly_fee_ref(number.organization_id, number.id, now)
         if plan_cents and not failed:
-            # An order the carrier finished later: its slot belongs to the
-            # month it was ordered in. In a new month it takes that month's
-            # slot if one is left. With the plan off (a failed payment),
-            # credits pay, as for every included number; the balance can
-            # then dip by at most the plan's per-number cap.
+            # An order the carrier finished later. With the plan off (a
+            # failed payment), credits pay, as for every included number
+            # (the balance can dip by at most the per-number cap). In a new
+            # month whose row exists, it takes that month's slot if one is
+            # left. Before the billing site writes the new month's row, it
+            # keeps the slot it took.
             current = await current_allowance(db, number.organization_id)
-            if current is None or str(current.id) != meta["plan_allowance_id"]:
-                await return_number_slot(db, UUID(meta["plan_allowance_id"]))
+            stored = meta["plan_allowance_id"]
+            if await active_plan(db, number.organization_id) is None:
+                await return_number_slot(db, UUID(stored))
+                plan_cents = 0
+            elif current is not None and str(current.id) != stored:
+                await return_number_slot(db, UUID(stored))
                 slot = await take_number_slot(
                     db, number.organization_id, offer.monthly_cents
                 )
                 plan_cents = slot[1] if slot else 0
+                if slot:
+                    meta["plan_allowance_id"] = str(slot[0])
+            if not plan_cents:
+                meta.pop("plan_allowance_id", None)
+            meta["plan_cents"] = plan_cents
         if failed and plan_cents:
             await return_number_slot(db, UUID(meta["plan_allowance_id"]))
         elif not failed and plan_cents:
@@ -682,11 +693,12 @@ async def acquire_offer(
         )
         slot = await take_number_slot(db, org, offer.monthly_cents, take=False)
         need = total - (slot[1] if slot else 0)
-        if await get_balance_cents(db, org) + held >= need:
+        short = need - (await get_balance_cents(db, org) + held)
+        if short <= 0:
             return None
         return HTTPException(
             status_code=402,
-            detail=f"insufficient credits; setup and the first month cost ${need / 100:.2f} from credits; top up at {BILLING_URL}",
+            detail=f"insufficient credits; add at least ${short / 100:.2f} for setup and the first month; top up at {BILLING_URL}",
         )
 
     # Cheap check first so an empty balance never costs a carrier round-trip.
