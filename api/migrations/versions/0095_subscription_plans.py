@@ -24,6 +24,11 @@ Tables checked first:
   new.
 * ``call_balance_holds``: what a live call sets aside. A call that the plan
   pays for also sets aside plan minutes, so the hold gets ``plan_minutes``.
+* ``organization_knowledge``: the knowledge base limits of a workspace. A
+  plan sets them too, so the row gets ``max_total_bytes`` (the workspace's
+  cap on live knowledge data; NULL: none, as for existing rows) and
+  ``source`` (``plan`` or ``staff``), so the billing site writes and deletes
+  only the rows it owns.
 
 ``organization_plans``: one row per subscription. At most one open row
 (``ended_at IS NULL``) per workspace. The plan is on only while ``status`` is
@@ -161,9 +166,22 @@ def upgrade() -> None:
           CONSTRAINT call_balance_holds_plan_minutes_check
           CHECK (plan_minutes >= 0)
         """)
+    op.execute("""
+        ALTER TABLE organization_knowledge
+          ADD COLUMN max_total_bytes BIGINT
+            CONSTRAINT organization_knowledge_total_bytes_check
+            CHECK (max_total_bytes IS NULL OR max_total_bytes > 0),
+          ADD COLUMN source TEXT NOT NULL DEFAULT 'staff'
+            CONSTRAINT organization_knowledge_source_check
+            CHECK (source IN ('plan', 'staff'))
+        """)
 
 
 def downgrade() -> None:
+    op.execute(
+        "ALTER TABLE organization_knowledge"
+        " DROP COLUMN source, DROP COLUMN max_total_bytes"
+    )
     op.execute("ALTER TABLE call_balance_holds DROP COLUMN plan_minutes")
     op.execute("DELETE FROM account_credits WHERE kind = 'plan'")
     op.drop_constraint(

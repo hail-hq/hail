@@ -32,9 +32,11 @@ from hailhq.core.file_uploads import delete_upload_objects
 from hailhq.core.knowledge.access import (
     KNOWLEDGE_OFF,
     STORAGE_FULL,
+    WORKSPACE_FULL,
     knowledge_limits,
     knowledge_lock,
     storage_full,
+    workspace_full,
 )
 from hailhq.core.knowledge.embed import EmbeddingUnavailable, get_embedder
 from hailhq.core.knowledge.search import search_pieces
@@ -200,6 +202,10 @@ async def create_knowledge_document(
     if await storage_full(db):
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT, detail=STORAGE_FULL
+        )
+    if await workspace_full(db, limits):
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT, detail=WORKSPACE_FULL
         )
     doc = KnowledgeDocument(
         organization_id=org,

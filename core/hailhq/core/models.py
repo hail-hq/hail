@@ -2854,6 +2854,14 @@ class OrganizationKnowledge(Base):
     max_pieces: Mapped[int] = mapped_column(
         Integer, server_default=text("1000"), nullable=False
     )
+    # The most live knowledge data the workspace may hold, counted like the
+    # global cap (knowledge_documents.stored_bytes). NULL: no workspace cap.
+    max_total_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # Who wrote the row: 'plan' (the billing site, from the workspace's
+    # plan; it also deletes it) or 'staff' (Hail by hand).
+    source: Mapped[str] = mapped_column(
+        Text, server_default=text("'staff'"), nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(
         TS, server_default=text("now()"), nullable=False
     )
@@ -2862,6 +2870,14 @@ class OrganizationKnowledge(Base):
     )
 
     __table_args__ = (
+        CheckConstraint(
+            "max_total_bytes IS NULL OR max_total_bytes > 0",
+            name="organization_knowledge_total_bytes_check",
+        ),
+        CheckConstraint(
+            "source IN ('plan', 'staff')",
+            name="organization_knowledge_source_check",
+        ),
         CheckConstraint(
             "max_documents BETWEEN 1 AND 1000",
             name="organization_knowledge_documents_check",
