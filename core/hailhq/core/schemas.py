@@ -228,6 +228,11 @@ RESERVED_CALL_METADATA_PREFIX = "recording_"
 # Call.metadata keys of an ownership check call (hailhq.core.sip_connections);
 # POST /calls rejects them too.
 PBX_CHECK_METADATA_PREFIX = "pbx_check_"
+# Call.metadata key Hail writes when it hides an inbound caller, read back as
+# ``CallResponse.caller_hidden_reason``; POST /calls rejects it.
+CALLER_HIDDEN_META = "caller_hidden_reason"
+# The phone system sent one of the workspace's own numbers as the caller.
+CALLER_HIDDEN_OWN_NUMBER = "phone_system_sent_own_number"
 
 
 class CallCreate(ConsentAttestationMixin):
@@ -299,7 +304,8 @@ class CallCreate(ConsentAttestationMixin):
         description=(
             "Free-form JSON object attached to the call and echoed back on "
             "reads. Not interpreted by Hail. Keys starting with "
-            "'recording_' and the key 'failure_code' are reserved and rejected."
+            "'recording_' and the keys 'failure_code' and "
+            "'caller_hidden_reason' are reserved and rejected."
         ),
     )
 
@@ -316,7 +322,7 @@ class CallCreate(ConsentAttestationMixin):
             if isinstance(k, str)
             and (
                 k.startswith((RESERVED_CALL_METADATA_PREFIX, PBX_CHECK_METADATA_PREFIX))
-                or k == "failure_code"
+                or k in ("failure_code", CALLER_HIDDEN_META)
             )
         )
         if bad:
@@ -413,6 +419,17 @@ class CallResponse(BaseModel):
     )
     from_e164: str = Field(description="Caller-id phone number used, E.164 format.")
     to_e164: str = Field(description="Recipient phone number, E.164 format.")
+    caller_hidden_reason: Literal["phone_system_sent_own_number"] | None = Field(
+        default=None,
+        description=(
+            "Why Hail recorded an inbound caller as 'anonymous'. "
+            "'phone_system_sent_own_number': the connected phone system sent "
+            "one of your own numbers as the caller, not the real caller's "
+            "number. Set your phone system to pass the caller's number. Null "
+            "when Hail kept the caller as sent, including a caller who "
+            "withheld their number."
+        ),
+    )
     direction: Literal["outbound", "inbound"] = Field(
         description="'outbound' for calls Hail placed, 'inbound' for calls received."
     )

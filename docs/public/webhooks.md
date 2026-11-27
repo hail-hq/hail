@@ -151,7 +151,8 @@ The catalog and subscription validation share the `WebhookEventType` registry in
 
 Every `call.*` payload's `data` carries `id`, `status`, `direction`
 (`inbound` or `outbound`), `from`, `to`, `agent_id` (null for calls placed
-with an inline prompt) and, once terminal, `end_reason`
+with an inline prompt), once terminal, `end_reason`, and, when Hail recorded
+the caller as `anonymous` for a reason, `caller_hidden_reason`
 ([`call_event_data`](https://github.com/hail-hq/hail/blob/main/core/hailhq/core/webhook_fanout.py)):
 
 Failed call responses and `call.failed` events also carry `failure_message`.

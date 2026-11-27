@@ -2082,7 +2082,7 @@ type CallCreate struct {
 	// MessageType 'marketing' additionally requires a non-empty consent_source. Use 'informational' for transactional/service communications.
 	MessageType *CallCreateMessageType `json:"message_type,omitempty"`
 
-	// Metadata Free-form JSON object attached to the call and echoed back on reads. Not interpreted by Hail. Keys starting with 'recording_' and the key 'failure_code' are reserved and rejected.
+	// Metadata Free-form JSON object attached to the call and echoed back on reads. Not interpreted by Hail. Keys starting with 'recording_' and the keys 'failure_code' and 'caller_hidden_reason' are reserved and rejected.
 	Metadata *map[string]interface{} `json:"metadata,omitempty"`
 
 	// RecipientConsent Attestation that you have obtained the lawful consent required to contact this recipient. Hail does not verify consent itself — you are responsible for a lawful basis under TCPA/ePrivacy/PECR/CAN-SPAM/GDPR as applicable. Rejected (422) if not true.
@@ -2121,6 +2121,9 @@ type CallResponse struct {
 
 	// AnsweredAt When the callee answered, ISO 8601 timestamp. Null if never answered.
 	AnsweredAt *time.Time `json:"answered_at"`
+
+	// CallerHiddenReason Why Hail recorded an inbound caller as 'anonymous'. 'phone_system_sent_own_number': the connected phone system sent one of your own numbers as the caller, not the real caller's number. Set your phone system to pass the caller's number. Null when Hail kept the caller as sent, including a caller who withheld their number.
+	CallerHiddenReason *string `json:"caller_hidden_reason,omitempty"`
 
 	// Direction 'outbound' for calls Hail placed, 'inbound' for calls received.
 	Direction CallResponseDirection `json:"direction"`

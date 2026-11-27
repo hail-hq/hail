@@ -155,7 +155,8 @@ async def fanout_sms_event(
 def call_event_data(call: Call, **extra: Any) -> dict[str, Any]:
     """The ``data`` object of every ``call.*`` event: id and status, plus the
     fields that tell an inbound call from an outbound one. ``end_reason`` is
-    included only once the call is terminal."""
+    included only once the call is terminal, ``caller_hidden_reason`` only
+    when Hail hid the caller."""
     data: dict[str, Any] = {
         "id": str(call.id),
         "status": call.status,
@@ -166,6 +167,8 @@ def call_event_data(call: Call, **extra: Any) -> dict[str, Any]:
     }
     if call.end_reason is not None:
         data["end_reason"] = call.end_reason
+    if call.caller_hidden_reason is not None:
+        data["caller_hidden_reason"] = call.caller_hidden_reason
     data.update(extra)
     if data["status"] == "failed":
         data["failure_message"] = call_failure_message(

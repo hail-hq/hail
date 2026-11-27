@@ -7757,7 +7757,7 @@ components:
           description:
             Free-form JSON object attached to the call and echoed back
             on reads. Not interpreted by Hail. Keys starting with 'recording_' and
-            the key 'failure_code' are reserved and rejected.
+            the keys 'failure_code' and 'caller_hidden_reason' are reserved and rejected.
         tools:
           anyOf:
             - items:
@@ -7829,6 +7829,18 @@ components:
           type: string
           title: To E164
           description: Recipient phone number, E.164 format.
+        caller_hidden_reason:
+          anyOf:
+            - type: string
+              const: phone_system_sent_own_number
+            - type: "null"
+          title: Caller Hidden Reason
+          description:
+            "Why Hail recorded an inbound caller as 'anonymous'. 'phone_system_sent_own_number':
+            the connected phone system sent one of your own numbers as the caller,
+            not the real caller's number. Set your phone system to pass the caller's
+            number. Null when Hail kept the caller as sent, including a caller who
+            withheld their number."
         direction:
           type: string
           enum:
