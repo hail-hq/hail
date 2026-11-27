@@ -164,7 +164,8 @@ async def plan_number_cents(
     numbers with a monthly fee (not pool or connected numbers; active or
     being ordered; ranked by ``(created_at, id)``), up to
     ``number_fee_cap_cents`` each, while the plan is on. A number the plan
-    already paid this calendar month keeps its place until the month ends.
+    already paid this calendar month keeps its place until the month ends
+    and counts against every other number, whatever its rank or state.
     ``number_id=None`` asks for a number about to be ordered (the
     newest). 0 when the plan does not pay. The billing site's renewal rater
     uses the same rule each month. Take ``org_lock`` first, so two orders
@@ -181,7 +182,7 @@ async def plan_number_cents(
     others = [PhoneNumber.organization_id == organization_id]
     if number_id is not None:
         me = await db.get(PhoneNumber, number_id)
-        if me is None:
+        if me is None or me.organization_id != organization_id:
             return 0
         others.append(PhoneNumber.id != number_id)
         # Held numbers count only when ranked before it; one the plan paid
@@ -199,10 +200,17 @@ async def plan_number_cents(
         + cast(PhoneNumber.id, Text)
         + literal(f":dedicated_number:{now:%Y-%m}")
     )
-    paid_this_month = exists().where(
-        AccountCredit.organization_id == organization_id,
-        AccountCredit.kind == "plan",
-        AccountCredit.ref == fee_ref,
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    paid_this_month = and_(
+        # Only rows that can hold this month's ref: not failed orders, not
+        # numbers released before the month began.
+        PhoneNumber.provisioning_state != "failed",
+        or_(PhoneNumber.released_at.is_(None), PhoneNumber.released_at >= month_start),
+        exists().where(
+            AccountCredit.organization_id == organization_id,
+            AccountCredit.kind == "plan",
+            AccountCredit.ref == fee_ref,
+        ),
     )
     older = (
         await db.execute(

@@ -154,8 +154,9 @@ async def finish_order(
         # The order reserved the total less what an included plan number
         # paid toward the first month then (hailhq.core.plans). What the plan
         # pays is decided again now: the order may finish later, after the
-        # plan stopped or older numbers took the included ones (the balance
-        # can then dip by at most the per-number cap).
+        # plan stopped, older numbers took the included ones, or the plan
+        # paid another number this month (the balance can then dip by at
+        # most the per-number cap).
         reserved = (
             offer.monthly_cents + offer.setup_cents - int(meta.get("plan_cents") or 0)
         )
