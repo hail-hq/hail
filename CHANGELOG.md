@@ -4,6 +4,12 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+### Changed
+
+- Calls: a short sound said while the agent talks no longer stops it. Speaking over it for about a second does, in every language.
+- Calls: a longer reply is spoken about two sentences at a time, with a short pause in which the other party can speak.
+- Calls: when the agent hears speech that does not fit the conversation (a TV, a radio, other people), it says so and asks instead of answering it.
+
 ## [0.41.0] (2026-11-27)
 
 Connect your phone system needs no country: Hail reads each caller with the
@@ -58,9 +64,6 @@ MCP registry **0.3.0**. One database migration (connected phone systems).
 
 ### Changed
 
-- Calls: a short sound said while the agent talks no longer stops it. Speaking over it for about a second does, in every language.
-- Calls: a longer reply is spoken about two sentences at a time, with a short pause in which the other party can speak.
-- Calls: when the agent hears speech that does not fit the conversation (a TV, a radio, other people), it says so and asks instead of answering it.
 
 ## [0.38.0] (2026-11-24)
 

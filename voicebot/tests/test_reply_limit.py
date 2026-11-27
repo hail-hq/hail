@@ -200,6 +200,14 @@ def test_abbreviations_and_dates_do_not_cut_a_sentence(text):
     assert split_reply(text) == (text, "")
 
 
+def test_a_date_after_an_unknown_abbreviation_is_not_cut():
+    text = (
+        "Thanks for calling Northgate Dental today. Your appointment is on "
+        "Dec. 5 at three in the afternoon."
+    )
+    assert split_reply(text) == (text, "")
+
+
 def test_other_scripts_and_run_on_replies_are_cut_too():
     hindi = (
         "\u092f\u0939 \u090f\u0915 \u0932\u0902\u092c\u093e \u0935\u093e\u0915\u094d\u092f \u0939\u0948\u0964 "

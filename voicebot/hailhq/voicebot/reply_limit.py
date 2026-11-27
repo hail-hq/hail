@@ -95,8 +95,10 @@ class ReplyLimiter:
                 if ch.isspace():
                     self._held += ch
                     continue
-                # "3.5" and "www.x" are not sentence ends.
-                ended = self._held[-1].isspace() and not ch.islower()
+                # "3.5", "www.x" and "Dec. 5" are not sentence ends.
+                ended = (
+                    self._held[-1].isspace() and not ch.islower() and not ch.isdigit()
+                )
                 out.append(self._flush(ended))
                 if self.done:
                     self.rest += text[i:]
