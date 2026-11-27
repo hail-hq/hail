@@ -513,7 +513,7 @@ async def create_call(
             ),
         )
 
-    await require_funds(db, principal, idem)
+    await require_funds(db, principal, idem, "call")
     await require_agent_send_allowed(db, principal, "voice", [body.to], idem)
 
     # 1. Resolve the from-number: explicit `from` → org-owned active → shared

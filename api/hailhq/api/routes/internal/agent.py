@@ -141,6 +141,7 @@ from hailhq.core.models import (
     PhoneNumber,
     Sms,
 )
+from hailhq.core.plans import PlanUse
 from hailhq.core.provider_config import load_org_provider_configs
 from hailhq.core.providers.email import EmailProvider
 from hailhq.core.providers.email.ses import SES_NOT_ACCEPTED_FAILURES
@@ -780,9 +781,13 @@ async def _send_email_to(
     return AgentSendResponse(ok=True, spoken=_SPOKEN_EMAIL_SENT)
 
 
-async def _shared_denial(db: AsyncSession, call: Call) -> tuple[str, str] | None:
+async def _shared_denial(
+    db: AsyncSession, call: Call, use: PlanUse, to: str | None = None
+) -> tuple[str, str] | None:
     """The funds check shared by the send routes. Each send is billed like
     any text or email; phone-call emails also have ``MAX_CALL_EMAILS``.
+    ``use`` and the text's destination ``to`` let the plan count
+    (hailhq.core.plans).
 
     Returns ``(spoken, audit_reason)`` on denial or None when the send may
     proceed. The audit reason distinguishes which gate fired; the spoken
@@ -791,7 +796,9 @@ async def _shared_denial(db: AsyncSession, call: Call) -> tuple[str, str] | None
     if (
         call.metadata_.get(CALL_META_BILLED)
         or (call.transport == "browser" and not call.metadata_.get("browser_trial"))
-    ) and not await has_funds(db, call.organization_id):
+    ) and not await has_funds(
+        db, call.organization_id, use, country=country_of(to) if to else None
+    ):
         return _SPOKEN_NOT_ALLOWED, "insufficient_funds"
     return None
 
@@ -844,7 +851,7 @@ async def agent_send_sms(
             spoken="Enter your mobile number and agree to receive test texts before starting a new conversation.",
         )
 
-    denial = await _shared_denial(db, call)
+    denial = await _shared_denial(db, call, "text", counterpart)
     if denial is not None:
         spoken, reason = denial
         return await _deny(
@@ -1113,7 +1120,7 @@ async def agent_reply_sms(
 
     if await replies_in_thread(db, inbound) >= MAX_REPLIES_PER_THREAD:
         return AgentReplySmsResponse(ok=False, state="skipped", reason=THREAD_CAP_SKIP)
-    if not await has_funds(db, org):
+    if not await has_funds(db, org, "text", country=country_of(inbound.from_e164)):
         return AgentReplySmsResponse(
             ok=False, state="skipped", reason=INSUFFICIENT_FUNDS_SKIP
         )
@@ -1707,7 +1714,7 @@ async def agent_send_email(
     if call.status != "in_progress":
         return AgentSendResponse(ok=False, spoken=_SPOKEN_CALL_UNAVAILABLE)
 
-    denial = await _shared_denial(db, call)
+    denial = await _shared_denial(db, call, "email")
     if denial is not None:
         spoken, reason = denial
         return await _deny(
@@ -2104,7 +2111,7 @@ async def agent_handover(
     if await has_answered_handover(db, call.id):
         return AgentHandoverResponse(ok=False, spoken=_SPOKEN_HANDOVER_DONE)
     if call.metadata_.get(CALL_META_BILLED) and not await has_funds(
-        db, call.organization_id
+        db, call.organization_id, "call"
     ):
         return await _deny_handover(call, body, "insufficient_funds")
     # The Hail number row: outbound dials from it, inbound rang it.
@@ -2398,7 +2405,7 @@ async def agent_handover_sms(
     # the trial number may send it.
     if cannot_text and not await _trial_may_send(db, org, to):
         return AgentHandoverSmsResponse(sms="skipped:number_cannot_text")
-    denial = await _shared_denial(db, call)
+    denial = await _shared_denial(db, call, "text", to)
     if denial is not None:
         return AgentHandoverSmsResponse(
             sms=await _notice_blocked(call, body, "sms", denial[1])
@@ -2513,7 +2520,7 @@ async def agent_handover_email(
         sd = await resolve_sender(db, org, None, allow_ambiguous=True)
     except HTTPException:
         return AgentHandoverEmailResponse(email="skipped:no_sender")
-    denial = await _shared_denial(db, call)
+    denial = await _shared_denial(db, call, "email")
     if denial is not None:
         return AgentHandoverEmailResponse(
             email=await _notice_blocked(call, body, "email", denial[1])

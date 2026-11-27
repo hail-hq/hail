@@ -551,7 +551,7 @@ async def _answer_or_refuse(
         return await _refuse(db, number, attrs, agent, CallEndReason.NO_AGENT)
     if await check_channel_suspended(db, org_id, "voice"):
         return await _refuse(db, number, attrs, agent, CallEndReason.USER_REJECTED)
-    if not await has_funds(db, org_id):
+    if not await has_funds(db, org_id, "call"):
         return await _refuse(db, number, attrs, agent, CallEndReason.INSUFFICIENT_FUNDS)
 
     workspace = await db.get(OrganizationCallSettings, org_id)
