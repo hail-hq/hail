@@ -56,6 +56,10 @@ MCP registry **0.3.0**. One database migration (connected phone systems).
 
 - Webhooks: a delivery that cannot reach its endpoint shows a short reason, such as a TLS or connection failure.
 
+### Changed
+
+- Calls: on a call the agent places, it starts speaking sooner after a one-word pickup such as "Hello?": after about 1.3 seconds, instead of about 2.5.
+
 ## [0.38.0] (2026-11-24)
 
 Calls can always hang up: every call keeps `end_call` and `send_dtmf`, whatever

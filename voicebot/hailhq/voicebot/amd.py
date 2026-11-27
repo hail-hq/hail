@@ -342,10 +342,22 @@ _END_REASON_BY_CATEGORY: dict[str, CallEndReason] = {
 # before hearing anything. Classification uncertainty must not mean dead air.
 NO_SPEECH_THRESHOLD_SECONDS = 3.0
 
+# A one-word pickup ("Hello?") followed by silence is a person: greet without
+# waiting for the greeting transcript and the classifier, which took about
+# 2.5 s on real calls. This is LiveKit's own rule for short greetings, with a
+# much stricter length and a longer silence than its defaults (2.5 s and
+# 0.5 s): one second of speech fits a word or two, not "Hi, this is Sam" or a
+# company welcome. It applies only while no greeting transcript has arrived;
+# with one, the classifier decides as before. Not covered: a recording that
+# says one short word and then pauses for the silence below.
+# https://docs.livekit.io/telephony/features/answering-machine-detection/#parameters
+SHORT_PICKUP_SPEECH_SECONDS = 1.0
+SHORT_PICKUP_SILENCE_SECONDS = 1.0
+
 # Starts at SIP answer, unlike the dispatch-wide backstop below. Keep the
 # SDK's standard 20s budget so a recorded greeting can finish and be
-# transcribed before fallback. Silence still releases at 3s above; short
-# human greetings release as soon as classified. Keep wait_until_finished
+# transcribed before fallback. Silence still releases at 3s above; a one-word
+# pickup releases by the rule above, other human greetings once classified. Keep wait_until_finished
 # false so continuous noise or a failed classifier cannot hold indefinitely.
 # https://docs.livekit.io/telephony/features/answering-machine-detection/#parameters
 POST_ANSWER_TIMEOUT_SECONDS = 20.0
@@ -497,7 +509,8 @@ async def run_amd(
             detection_options={
                 "timeout": POST_ANSWER_TIMEOUT_SECONDS,
                 "no_speech_threshold": NO_SPEECH_THRESHOLD_SECONDS,
-                "human_speech_threshold": 0.0,
+                "human_speech_threshold": SHORT_PICKUP_SPEECH_SECONDS,
+                "human_silence_threshold": SHORT_PICKUP_SILENCE_SECONDS,
                 "prompt": GREETING_CLASSIFICATION_PROMPT,
             },
         ) as detector:

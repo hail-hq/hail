@@ -1050,6 +1050,18 @@ def greeting_with_ai_line(first_message: str, ai_line: str) -> str:
     return f"{head} {ai_line} {tail}"
 
 
+def _heard_so_far(session: Any) -> str | None:
+    """The words of the turn in progress, before it is cleared.
+
+    Private in livekit-agents 1.8.8; test_opening_order.py fails if it moves.
+    """
+    recognition = getattr(
+        getattr(session, "_activity", None), "_audio_recognition", None
+    )
+    text = getattr(recognition, "_current_transcript", None)
+    return text.strip() or None if isinstance(text, str) else None
+
+
 async def speak_greeting(
     session: AgentSession,
     metadata: dict[str, Any],
@@ -1110,7 +1122,10 @@ async def speak_greeting(
         # generated opening only through pickup_transcript (AMD's transcript
         # at the verdict). A first_message opening does not answer them. Not
         # when a person just spoke on the menu path (generate_opening=False):
-        # there the turn loop answers them.
+        # there the turn loop answers them. A one-word pickup settles before
+        # AMD has a transcript, so take the words the session heard so far.
+        if not pickup_transcript:
+            pickup_transcript = _heard_so_far(session)
         try:
             session.clear_user_turn()
         except RuntimeError:

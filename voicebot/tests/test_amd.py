@@ -37,6 +37,7 @@ from livekit.agents.llm import (
 )
 from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS
 from livekit.agents.voice.amd import AMDCategory, AMDPredictionEvent
+from livekit.agents.voice.amd.classifier import _AMDClassifier
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing_extensions import Self
@@ -104,7 +105,8 @@ async def test_run_amd_passes_session_layers_and_identity(
     assert kwargs["detection_options"] == {
         "timeout": amd_mod.POST_ANSWER_TIMEOUT_SECONDS,
         "no_speech_threshold": NO_SPEECH_THRESHOLD_SECONDS,
-        "human_speech_threshold": 0.0,
+        "human_speech_threshold": amd_mod.SHORT_PICKUP_SPEECH_SECONDS,
+        "human_silence_threshold": amd_mod.SHORT_PICKUP_SILENCE_SECONDS,
         "prompt": amd_mod.GREETING_CLASSIFICATION_PROMPT,
     }
     assert kwargs["wait_until_finished"] is False
@@ -149,7 +151,6 @@ async def test_audio_ready_is_published_after_amd_is_armed(monkeypatch):
 
 async def test_post_answer_deadline_releases_continuous_speech(monkeypatch):
     """The real classifier must release speech even without end-of-turn."""
-    from livekit.agents.voice.amd.classifier import _AMDClassifier
 
     monkeypatch.setattr(amd_mod, "AMD", _RecordingAMD)
     monkeypatch.setattr(amd_mod, "POST_ANSWER_TIMEOUT_SECONDS", 0.03)
@@ -212,15 +213,19 @@ class _GreetingStream(LLMStream):
 
 async def _timed_classifier(monkeypatch, llm):
     """Use production detection options with time scaled 10x for SDK tests."""
-    from livekit.agents.voice.amd.classifier import _AMDClassifier
 
     monkeypatch.setattr(amd_mod, "AMD", _RecordingAMD)
     _RecordingAMD.result = _prediction("human")
     await run_amd(_session_with_layers(), UUID(int=1))
     kwargs = _RecordingAMD.last_kwargs
     options = dict(kwargs["detection_options"])
-    options["timeout"] *= 0.1
-    options["no_speech_threshold"] *= 0.1
+    for timed in (
+        "timeout",
+        "no_speech_threshold",
+        "human_speech_threshold",
+        "human_silence_threshold",
+    ):
+        options[timed] *= 0.1
     classifier = _AMDClassifier(
         llm=llm,
         wait_until_finished=kwargs["wait_until_finished"],
@@ -1183,3 +1188,52 @@ def test_menu_prompt_without_keys_waits_then_ends_on_repeats():
     without = ivr_navigation_instructions("Press 1 for sales.", ["end_call"])
     assert "cannot press keys" in without
     assert "three times" in without
+
+
+async def test_a_one_word_pickup_is_a_person_without_the_classifier(monkeypatch):
+    """Production options, time scaled 10x: speech within the limit, then
+    silence and no transcript, settles as a person."""
+    llm = _GreetingLLM("machine-vm")
+    classifier = await _timed_classifier(monkeypatch, llm)
+    try:
+        classifier.on_user_speech_started()
+        await asyncio.sleep(amd_mod.SHORT_PICKUP_SPEECH_SECONDS * 0.1 * 0.6)
+        classifier.on_user_speech_ended(silence_duration=0)
+        await asyncio.wait_for(classifier._verdict_ready.wait(), timeout=0.5)
+        assert classifier._verdict_result.category == AMDCategory.HUMAN
+        assert classifier._verdict_result.reason == "short_greeting"
+        assert llm.transcripts == []
+    finally:
+        await classifier.close()
+
+
+async def test_a_short_pickup_with_a_transcript_goes_to_the_classifier(monkeypatch):
+    """A recording can open with a short word. Once its text is there, the
+    classifier decides, not the length."""
+    llm = _GreetingLLM("machine-vm")
+    classifier = await _timed_classifier(monkeypatch, llm)
+    try:
+        classifier.on_user_speech_started()
+        await asyncio.sleep(amd_mod.SHORT_PICKUP_SPEECH_SECONDS * 0.1 * 0.6)
+        classifier.on_user_speech_ended(silence_duration=0)
+        classifier.push_text("Hi, leave a message after the tone.")
+        classifier.on_end_of_turn()
+        await asyncio.wait_for(classifier._verdict_ready.wait(), timeout=0.5)
+        assert classifier._verdict_result.category == AMDCategory.MACHINE_VM
+        assert classifier._verdict_result.reason == "llm"
+    finally:
+        await classifier.close()
+
+
+async def test_speech_over_the_limit_is_never_a_person_by_length(monkeypatch):
+    llm = _GreetingLLM("machine-vm")
+    classifier = await _timed_classifier(monkeypatch, llm)
+    try:
+        classifier.on_user_speech_started()
+        await asyncio.sleep(amd_mod.SHORT_PICKUP_SPEECH_SECONDS * 0.1 * 1.5)
+        classifier.on_user_speech_ended(silence_duration=0)
+        await asyncio.sleep(amd_mod.SHORT_PICKUP_SILENCE_SECONDS * 0.1 * 1.5)
+        verdict = classifier._verdict_result
+        assert verdict is None or verdict.reason != "short_greeting"
+    finally:
+        await classifier.close()
