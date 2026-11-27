@@ -7,6 +7,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 ### Added
 
 - Knowledge base (early access): upload manuals, FAQs and part lists, and agents answer calls, texts and email from them, in any supported language (`/v1/knowledge`, `knowledge` on agents, CLI `hail knowledge`, SDK and MCP).
+- Plans: the call minutes, texts, emails and numbers a workspace's plan includes are used first, then credits pay the rest.
 
 ## [0.40.0] (2026-11-25)
 

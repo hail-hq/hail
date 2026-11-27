@@ -19,7 +19,8 @@ stores amounts only, never prices.
 | `plan_allowances.used_numbers` | hail (number bought in the API), billing site (monthly fee rater) | both |
 | `account_credits` rows with `kind = 'plan'` | billing site raters; hail for a number's first month | console, both |
 | `call_balance_holds.plan_minutes` | hail (call start, handover) | hail call cap |
-| `organization_knowledge` | billing site (from the plan), staff | hail knowledge base |
+| `organization_knowledge` (`source = 'plan'` rows) | billing site, from the plan | hail knowledge base |
+| `organization_knowledge` (`source = 'staff'` rows) | Hail staff | hail knowledge base |
 
 ## Schema
 
@@ -92,14 +93,22 @@ The ledger gets a third kind next to `credit` and `debit`:
 
 ## Call price quote: two new optional fields
 
-`POST /api/internal/voice-rates/quote` (billing site) adds two fields to its reply:
+`POST /api/internal/voice-rates/quote` (billing site) adds two fields to its reply. Request unchanged. Reply example for a Standard leg with recording on:
+
+```json
+{"cents_per_minute": 11, "cents_per_call": 0,
+ "plan_minutes_per_minute": 1, "plan_cents_per_minute": 10}
+```
+
+Two lines (handover), one Standard and one Plus: `plan_minutes_per_minute: 3`, `plan_cents_per_minute: 30`. An Other leg adds 0 to both.
 
 | Field | Meaning | Absent |
 |---|---|---|
 | `plan_minutes_per_minute` | plan minutes one call minute uses: the sum over the legs of each leg's group weight (Standard 1, Plus 2, Other 0) | 0 |
 | `plan_cents_per_minute` | the part of `cents_per_minute` a plan minute pays (the legs' Standard and Plus group prices; not recording, not Other legs) | 0 |
 
-- `0 <= plan_cents_per_minute <= cents_per_minute`. Out of range: hail ignores both fields.
+- `0 <= plan_cents_per_minute <= cents_per_minute`, and both fields are 0 or both above 0. Otherwise hail ignores both and logs a warning (`hailhq.core.internal_webhook.CallQuote`).
+- The route returns them for every workspace. hail decides whether a plan month exists.
 - With both fields absent, or no plan, the cap is exactly today's. hail can deploy first.
 
 ## Funds gate
@@ -147,21 +156,27 @@ The purchase's funds check needs only the credits part. The billing site's month
 
 ## Knowledge base
 
-hail reads `organization_knowledge` (knowledge base PR). No row means the knowledge base is off. The billing site writes the row from the plan:
+hail reads `organization_knowledge`. No row means the knowledge base is off. This change adds two columns:
+
+| Column | Type | Rule |
+|---|---|---|
+| `max_total_bytes` | bigint NULL | > 0. The most live knowledge data the workspace may hold, counted like the global cap (sum of its `knowledge_documents.stored_bytes`). NULL: no workspace cap (staff and older rows) |
+| `source` | text NOT NULL default `staff` | `plan` or `staff`. The billing site writes and deletes only `plan` rows and never touches a `staff` row |
+
+hail checks `max_total_bytes` where it checks the global cap: upload links, upload bodies and new documents (early refusals, 409), and the ingest worker under the global cap's lock (the document fails with "this workspace's knowledge base is full").
+
+The billing site writes the row from the plan (the sizes come from its plan table, never from hail):
 
 | Event | Billing site writes |
 |---|---|
-| plan on (`active`) | upsert the row with the tier's limits: `max_file_bytes` 20 MB; `max_documents` and `max_pieces` from the tier |
+| plan on (`active`) | upsert with `source = 'plan'`: `max_total_bytes` (Pro 100 MB, Business 1 GB), `max_file_bytes` 20 MB, `max_documents` and `max_pieces` high enough not to bind before the bytes (CHECK limits: 1,000 and 100,000) |
 | payment failed (`past_due`, `unpaid`) | delete the row: the knowledge base is off, files are kept |
 | payment back (`active`) | upsert the row again |
 | subscription deleted | leave the row deleted, set `ended_at` on the plan; the file delete below runs |
 
 Deleting files at the period end uses the knowledge base's one delete function (`delete_org_knowledge`). It deletes the files, their rows and the limits row, and is safe to run again. Until a scheduled sweep exists, staff run it with `python -m hailhq.core.knowledge.access delete <org-id>` (knowledge base runbook). The sweep (follow-up, after the knowledge base PR merges) runs it daily for each workspace whose last plan ended `canceled` and that still has knowledge files and no open plan.
 
-Gaps for the knowledge base PR, so the billing site can write plan rows:
-
-- No per-workspace total size cap (Pro 100 MB, Business 1 GB). Today only `max_documents`, `max_file_bytes` and `max_pieces` exist, plus a cap on all workspaces together.
-- No `source` column (`plan` or `staff`), so the billing site cannot tell a row it owns from a staff row.
+The cap on all workspaces together (`GLOBAL_MAX_BYTES` in `hailhq.core.knowledge.access`) still applies on top. Raise it before a workspace needs more than it allows.
 
 ## Self-host
 
