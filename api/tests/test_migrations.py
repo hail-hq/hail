@@ -1106,8 +1106,8 @@ def test_0054_handover_members(empty_db: str) -> None:
         assert _constraint_exists(conn, "agent_handover_contacts_pkey")
 
 
-def test_0093_knowledge_tables(empty_db: str) -> None:
-    """0093 installs pgvector and the knowledge tables, and widens the
+def test_0094_knowledge_tables(empty_db: str) -> None:
+    """0094 installs pgvector and the knowledge tables, and widens the
     upload purposes."""
     _run_alembic(empty_db, ["upgrade", "head"])
     with psycopg.connect(_to_libpq_url(to_sync_url(empty_db))) as conn:
@@ -1135,7 +1135,7 @@ def test_0093_knowledge_tables(empty_db: str) -> None:
             "content_type, s3_key) VALUES (gen_random_uuid(), 'sms_evidence', "
             "'consent.png', 'image/png', 'sms-evidence/x')"
         )
-    _run_alembic(empty_db, ["downgrade", "0092"])
+    _run_alembic(empty_db, ["downgrade", "0093"])
     with psycopg.connect(_to_libpq_url(to_sync_url(empty_db))) as conn:
         assert not _table_exists(conn, "knowledge_pieces")
         assert "sms_evidence" in (
@@ -1150,9 +1150,9 @@ def test_0093_knowledge_tables(empty_db: str) -> None:
         )
 
 
-def test_0093_uses_an_extensions_schema(empty_db: str) -> None:
+def test_0094_uses_an_extensions_schema(empty_db: str) -> None:
     """Supabase keeps extensions in an ``extensions`` schema on the search
-    path: 0093 installs pgvector there and its tables still work."""
+    path: 0094 installs pgvector there and its tables still work."""
     url = _to_libpq_url(to_sync_url(empty_db))
     with psycopg.connect(url, autocommit=True) as conn:
         conn.execute("DROP EXTENSION IF EXISTS vector CASCADE")
