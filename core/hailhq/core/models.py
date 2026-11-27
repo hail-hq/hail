@@ -2527,8 +2527,9 @@ class OrganizationPlan(Base):
 class PlanAllowance(Base):
     """One plan month of a workspace: what it includes and what it used.
     Written by the billing site (included amounts at each period start, used
-    amounts by its raters); hail reads it and raises ``used_numbers`` when a
-    number bought in the API is paid by the plan (hailhq.core.plans)."""
+    amounts by its raters); hail reads it (hailhq.core.plans). The plan pays
+    the monthly fees of the ``included_numbers`` oldest numbers, so numbers
+    have no used counter."""
 
     __tablename__ = "plan_allowances"
 
@@ -2560,9 +2561,6 @@ class PlanAllowance(Base):
         Integer, server_default="0", nullable=False
     )
     included_numbers: Mapped[int] = mapped_column(Integer, nullable=False)
-    used_numbers: Mapped[int] = mapped_column(
-        Integer, server_default="0", nullable=False
-    )
     # Destination countries (ISO 3166-1 alpha-2) whose texts use included
     # texts; texts elsewhere are paid from credits.
     text_countries: Mapped[list[str]] = mapped_column(
@@ -2587,7 +2585,7 @@ class PlanAllowance(Base):
             "included_minutes >= 0 AND used_minutes >= 0"
             " AND included_texts >= 0 AND used_texts >= 0"
             " AND included_emails >= 0 AND used_emails >= 0"
-            " AND included_numbers >= 0 AND used_numbers >= 0"
+            " AND included_numbers >= 0"
             " AND number_fee_cap_cents >= 0",
             name="plan_allowances_amounts_check",
         ),

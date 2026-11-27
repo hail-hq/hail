@@ -53,7 +53,6 @@ async def _plan(
     texts=10,
     emails=10,
     numbers=2,
-    used_numbers=0,
     cap=200,
     countries=("US",),
 ) -> PlanAllowance:
@@ -81,7 +80,6 @@ async def _plan(
         included_texts=texts,
         included_emails=emails,
         included_numbers=numbers,
-        used_numbers=used_numbers,
         text_countries=list(countries),
         number_fee_cap_cents=Decimal(cap),
     )
@@ -357,7 +355,7 @@ async def test_included_number_first_month_is_paid_by_the_plan(
     client, async_session, monkeypatch
 ):
     org, _, key = await insert_org_and_key(async_session, initial_credit_cents=0)
-    allowance = await _plan(async_session, org, numbers=1, cap=200)
+    await _plan(async_session, org, numbers=1, cap=200)
     r = await _buy(client, async_session, monkeypatch, org, key, monthly=115)
     assert r.status_code == 201, r.text
     number_id = uuid.UUID(r.json()["id"])
@@ -368,8 +366,6 @@ async def test_included_number_first_month_is_paid_by_the_plan(
     assert rows[fee].plan_units == 1
     assert f"{fee}{OVER_PLAN_REF_SUFFIX}" not in rows
     assert await get_balance_cents(async_session, org) == 0
-    await async_session.refresh(allowance)
-    assert allowance.used_numbers == 1
 
 
 async def test_number_above_the_cap_pays_the_rest(client, async_session, monkeypatch):
@@ -389,14 +385,31 @@ async def test_numbers_beyond_the_plan_are_paid_from_credits(
     client, async_session, monkeypatch
 ):
     org, _, key = await insert_org_and_key(async_session, initial_credit_cents=0)
-    await _plan(async_session, org, numbers=1, used_numbers=1)
+    await _plan(async_session, org, numbers=1)
+    await _older_number(async_session, org)
     r = await _buy(client, async_session, monkeypatch, org, key, monthly=115)
     assert r.status_code == 402
 
 
-async def _pending(
-    session, org, allowance, *, monthly=150, plan_cents=150, e164="+14155550142"
-):
+async def _older_number(session, org, e164="+14155550101"):
+    """An active number bought before, holding an included number."""
+    session.add(
+        PhoneNumber(
+            organization_id=org,
+            e164=e164,
+            country_code="US",
+            number_type="local",
+            capabilities=["voice"],
+            provider="twilio",
+            provider_resource_id="PN_old",
+            provisioning_state="active",
+            created_at=datetime.now(timezone.utc) - timedelta(days=40),
+        )
+    )
+    await session.commit()
+
+
+async def _pending(session, org, *, monthly=150, plan_cents=150, e164="+14155550142"):
     offer = CarrierOffer(
         provider="twilio",
         e164=e164,
@@ -418,7 +431,6 @@ async def _pending(
         provisioning_metadata={
             "offer": offer.model_dump(mode="json"),
             "billed": True,
-            "plan_allowance_id": str(allowance.id),
             "plan_cents": plan_cents,
         },
     )
@@ -427,54 +439,48 @@ async def _pending(
     return number
 
 
+async def _finish(session, org, number):
+    await org_lock(session, org)
+    await session.refresh(number)
+    number_id = number.id
+    await finish_order(session, number, resource_id="PN_late")
+    return await _rows(session, org), await _fee_ref(session, org, number_id)
+
+
 async def test_late_order_after_the_plan_stopped_is_paid_from_credits(
     async_session,
 ):
     org, _, _ = await insert_org_and_key(async_session, initial_credit_cents=500)
-    allowance = await _plan(async_session, org, numbers=1, used_numbers=1)
-    number = await _pending(async_session, org, allowance)
+    allowance = await _plan(async_session, org, numbers=1)
+    number = await _pending(async_session, org)
     plan = await async_session.get(OrganizationPlan, allowance.plan_id)
     plan.status = "past_due"
     await async_session.commit()
-    await org_lock(async_session, org)
-    await async_session.refresh(number)
-    number_id = number.id
-    await finish_order(async_session, number, resource_id="PN_late")
-    rows = await _rows(async_session, org)
-    fee = await _fee_ref(async_session, org, number_id)
+    rows, fee = await _finish(async_session, org, number)
     assert rows[fee].kind == "debit" and rows[fee].amount_cents == -150
-    await async_session.refresh(allowance)
-    assert allowance.used_numbers == 0
+    # The reservation was 0 (the plan paid it all then): 150 from credits.
+    assert await get_balance_cents(async_session, org) == 350
 
 
-async def test_late_order_in_a_new_month_takes_that_months_slot(async_session):
+async def test_late_order_still_included_is_paid_by_the_plan(async_session):
     org, _, _ = await insert_org_and_key(async_session, initial_credit_cents=500)
-    current = await _plan(async_session, org, numbers=1)
-    old = PlanAllowance(
-        organization_id=org,
-        plan_id=current.plan_id,
-        period_start=current.period_start - timedelta(days=30),
-        period_end=current.period_start,
-        included_minutes=Decimal(0),
-        included_texts=0,
-        included_emails=0,
-        included_numbers=1,
-        used_numbers=1,
-        number_fee_cap_cents=Decimal(200),
-    )
-    async_session.add(old)
-    await async_session.commit()
-    number = await _pending(async_session, org, old)
-    await org_lock(async_session, org)
-    await async_session.refresh(number)
-    number_id = number.id
-    await finish_order(async_session, number, resource_id="PN_late")
-    rows = await _rows(async_session, org)
-    fee = await _fee_ref(async_session, org, number_id)
+    await _plan(async_session, org, numbers=2)
+    await _older_number(async_session, org)
+    number = await _pending(async_session, org)
+    rows, fee = await _finish(async_session, org, number)
     assert rows[fee].kind == "plan"
-    await async_session.refresh(current)
-    await async_session.refresh(old)
-    assert (current.used_numbers, old.used_numbers) == (1, 0)
+    assert await get_balance_cents(async_session, org) == 500
+
+
+async def test_late_order_beyond_the_included_numbers_is_paid_from_credits(
+    async_session,
+):
+    org, _, _ = await insert_org_and_key(async_session, initial_credit_cents=500)
+    await _plan(async_session, org, numbers=1)
+    await _older_number(async_session, org)
+    number = await _pending(async_session, org)
+    rows, fee = await _finish(async_session, org, number)
+    assert rows[fee].kind == "debit" and rows[fee].amount_cents == -150
 
 
 async def test_purchase_402_names_what_credits_pay(client, async_session, monkeypatch):
@@ -485,56 +491,3 @@ async def test_purchase_402_names_what_credits_pay(client, async_session, monkey
     # $2.50 less the plan's $1.00, less the $0.10 balance.
     assert "at least $1.40" in r.json()["detail"]
     assert "cost $1.50 from credits" in r.json()["detail"]
-
-
-async def test_late_order_before_the_new_months_row_is_paid_from_credits(
-    async_session,
-):
-    org, _, _ = await insert_org_and_key(async_session, initial_credit_cents=500)
-    allowance = await _plan(async_session, org, numbers=1, used_numbers=1)
-    # The month ended; the billing site has not written the next one yet.
-    allowance.period_start -= timedelta(days=30)
-    allowance.period_end = datetime.now(timezone.utc) - timedelta(minutes=5)
-    await async_session.commit()
-    number = await _pending(async_session, org, allowance)
-    await org_lock(async_session, org)
-    await async_session.refresh(number)
-    number_id = number.id
-    await finish_order(async_session, number, resource_id="PN_late")
-    rows = await _rows(async_session, org)
-    fee = await _fee_ref(async_session, org, number_id)
-    assert rows[fee].kind == "debit" and rows[fee].amount_cents == -150
-    await async_session.refresh(allowance)
-    assert allowance.used_numbers == 0
-    await async_session.refresh(number)
-    assert "plan_allowance_id" not in number.provisioning_metadata
-
-
-async def test_late_order_in_a_full_new_month_is_paid_from_credits(async_session):
-    org, _, _ = await insert_org_and_key(async_session, initial_credit_cents=500)
-    current = await _plan(async_session, org, numbers=1, used_numbers=1)
-    old = PlanAllowance(
-        organization_id=org,
-        plan_id=current.plan_id,
-        period_start=current.period_start - timedelta(days=30),
-        period_end=current.period_start,
-        included_minutes=Decimal(0),
-        included_texts=0,
-        included_emails=0,
-        included_numbers=1,
-        used_numbers=1,
-        number_fee_cap_cents=Decimal(200),
-    )
-    async_session.add(old)
-    await async_session.commit()
-    number = await _pending(async_session, org, old)
-    await org_lock(async_session, org)
-    await async_session.refresh(number)
-    number_id = number.id
-    await finish_order(async_session, number, resource_id="PN_late")
-    rows = await _rows(async_session, org)
-    fee = await _fee_ref(async_session, org, number_id)
-    assert rows[fee].kind == "debit" and rows[fee].amount_cents == -150
-    await async_session.refresh(current)
-    await async_session.refresh(old)
-    assert (current.used_numbers, old.used_numbers) == (1, 0)

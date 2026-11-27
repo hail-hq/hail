@@ -106,7 +106,6 @@ def upgrade() -> None:
           included_emails INTEGER NOT NULL,
           used_emails INTEGER NOT NULL DEFAULT 0,
           included_numbers INTEGER NOT NULL,
-          used_numbers INTEGER NOT NULL DEFAULT 0,
           -- Destination countries (ISO 3166-1 alpha-2) whose texts use
           -- included texts. Texts elsewhere are paid from credits.
           text_countries TEXT[] NOT NULL DEFAULT '{}',
@@ -120,7 +119,7 @@ def upgrade() -> None:
             included_minutes >= 0 AND used_minutes >= 0
             AND included_texts >= 0 AND used_texts >= 0
             AND included_emails >= 0 AND used_emails >= 0
-            AND included_numbers >= 0 AND used_numbers >= 0
+            AND included_numbers >= 0
             AND number_fee_cap_cents >= 0),
           CONSTRAINT plan_allowances_org_period_uq
             UNIQUE (organization_id, period_start)

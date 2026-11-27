@@ -11,16 +11,15 @@ stores amounts only, never prices.
 
 ## Who writes what
 
-| Table / column                                                               | Written by                                                        | Read by                  |
-| ---------------------------------------------------------------------------- | ----------------------------------------------------------------- | ------------------------ |
-| `organization_plans`                                                         | billing site (Stripe sync)                                        | hail gates, billing site |
-| `plan_allowances` included amounts, `text_countries`, `number_fee_cap_cents` | billing site, at each period start and on a plan change           | hail gates               |
-| `plan_allowances.used_minutes`, `used_texts`, `used_emails`                  | billing site raters                                               | hail gates               |
-| `plan_allowances.used_numbers`                                               | hail (number bought in the API), billing site (monthly fee rater) | both                     |
-| `account_credits` rows with `kind = 'plan'`                                  | billing site raters; hail for a number's first month              | console, both            |
-| `call_balance_holds.plan_minutes`                                            | hail (call start, handover)                                       | hail call cap            |
-| `organization_knowledge` (`source = 'plan'` rows)                            | billing site, from the plan                                       | hail knowledge base      |
-| `organization_knowledge` (`source = 'staff'` rows)                           | Hail staff                                                        | hail knowledge base      |
+| Table / column                                                               | Written by                                              | Read by                  |
+| ---------------------------------------------------------------------------- | ------------------------------------------------------- | ------------------------ |
+| `organization_plans`                                                         | billing site (Stripe sync)                              | hail gates, billing site |
+| `plan_allowances` included amounts, `text_countries`, `number_fee_cap_cents` | billing site, at each period start and on a plan change | hail gates               |
+| `plan_allowances.used_minutes`, `used_texts`, `used_emails`                  | billing site raters                                     | hail gates               |
+| `account_credits` rows with `kind = 'plan'`                                  | billing site raters; hail for a number's first month    | console, both            |
+| `call_balance_holds.plan_minutes`                                            | hail (call start, handover)                             | hail call cap            |
+| `organization_knowledge` (`source = 'plan'` rows)                            | billing site, from the plan                             | hail knowledge base      |
+| `organization_knowledge` (`source = 'staff'` rows)                           | Hail staff                                              | hail knowledge base      |
 
 ## Schema
 
@@ -50,20 +49,20 @@ stores amounts only, never prices.
 
 ### `plan_allowances`: one row per workspace per plan month
 
-| Column                             | Type                             | Rule                                                                  |
-| ---------------------------------- | -------------------------------- | --------------------------------------------------------------------- |
-| `id`                               | uuid PK                          |                                                                       |
-| `organization_id`                  | uuid NOT NULL                    |                                                                       |
-| `plan_id`                          | uuid NOT NULL                    | FK `organization_plans(id) ON DELETE CASCADE`                         |
-| `period_start`, `period_end`       | timestamptz NOT NULL             | `period_end > period_start`; UNIQUE `(organization_id, period_start)` |
-| `included_minutes`                 | numeric(14,3) NOT NULL           | plan minutes (Standard minute = 1, Plus minute = 2)                   |
-| `used_minutes`                     | numeric(14,3) NOT NULL default 0 |                                                                       |
-| `included_texts`, `used_texts`     | int NOT NULL                     | text segments                                                         |
-| `included_emails`, `used_emails`   | int NOT NULL                     | messages (sent, received or forwarded)                                |
-| `included_numbers`, `used_numbers` | int NOT NULL                     | numbers whose monthly fee the plan pays this month                    |
-| `text_countries`                   | text[] NOT NULL default `{}`     | destination countries (ISO alpha-2) whose texts use included texts    |
-| `number_fee_cap_cents`             | numeric(14,1) NOT NULL default 0 | the most the plan pays toward one included number's monthly fee       |
-| `created_at`, `updated_at`         | timestamptz                      |                                                                       |
+| Column                           | Type                             | Rule                                                                                                           |
+| -------------------------------- | -------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `id`                             | uuid PK                          |                                                                                                                |
+| `organization_id`                | uuid NOT NULL                    |                                                                                                                |
+| `plan_id`                        | uuid NOT NULL                    | FK `organization_plans(id) ON DELETE CASCADE`                                                                  |
+| `period_start`, `period_end`     | timestamptz NOT NULL             | `period_end > period_start`; UNIQUE `(organization_id, period_start)`                                          |
+| `included_minutes`               | numeric(14,3) NOT NULL           | plan minutes (Standard minute = 1, Plus minute = 2)                                                            |
+| `used_minutes`                   | numeric(14,3) NOT NULL default 0 |                                                                                                                |
+| `included_texts`, `used_texts`   | int NOT NULL                     | text segments                                                                                                  |
+| `included_emails`, `used_emails` | int NOT NULL                     | messages (sent, received or forwarded)                                                                         |
+| `included_numbers`               | int NOT NULL                     | how many numbers the plan pays the monthly fee of: the workspace's oldest numbers with a fee (no used counter) |
+| `text_countries`                 | text[] NOT NULL default `{}`     | destination countries (ISO alpha-2) whose texts use included texts                                             |
+| `number_fee_cap_cents`           | numeric(14,1) NOT NULL default 0 | the most the plan pays toward one included number's monthly fee                                                |
+| `created_at`, `updated_at`       | timestamptz                      |                                                                                                                |
 
 - All amounts are >= 0 (CHECK).
 - Yearly plans get a row for each month too.
@@ -139,17 +138,19 @@ A call may run for what the plan and the balance pay together.
 
 A handover prices the time already talked and the ring with the one-line quote (plan first), then the handover with the two-line quote on the plan minutes left.
 
-## Number purchase
+## Numbers
 
-When the plan is on and `used_numbers < included_numbers`, the first month of a number bought in the API is paid by the plan, up to `number_fee_cap_cents`:
+One rule, used by hail for a purchase and by the billing site's renewal rater each month: while the plan is on, it pays the monthly fee of the workspace's `included_numbers` **oldest** numbers that have a fee (not pool numbers, not connected phone system numbers; active or being ordered), up to `number_fee_cap_cents` each. A dearer number pays the rest from credits. Every other number is paid from credits, as today. There is no used counter: the rank decides (`hailhq.core.plans.plan_number_cents`).
 
-- plan row (`kind = 'plan'`, `plan_units = 1`, ref = the month's fee ref, source `plan.monthly_fee`), and `used_numbers + 1`;
-- a debit for the part above the cap, ref + `:over_plan`;
-- the setup fee and numbers beyond the included count are paid from credits, as today.
+- A calendar month's fee is decided when it is charged, from the plan month row that covers that moment. Fee refs stay UTC calendar months.
+- Releasing a number moves the next oldest into the included ones from its next fee.
 
-The purchase's funds check needs only the credits part. An order the carrier finishes later is paid by the plan only from a month row that covers the finish time: the one whose slot it took, or the new month's if a slot is left there. Otherwise (plan off, the new month's row not written yet, or no slot left) the slot goes back and credits pay, as for any number beyond the plan.
+Number bought in the API, when the rule says the plan pays:
 
-The billing site's monthly fee rater pays later months the same way: oldest numbers first, up to `included_numbers`, each month. When it creates a month's row it gives the included numbers to the workspace's active numbers, oldest first, in the same transaction and under the workspace lock (their plan rows and `used_numbers`). A purchase then takes only a slot that is left. It skips a number whose month fee ref already has a row (bought this month, or finished late and paid from credits) and does not raise `used_numbers` for it. Fee refs are UTC calendar months, as today, and a plan month (Stripe period) may start mid-month. The rule: a calendar month's fee is paid from the plan month row that covers the moment it is charged (the renewal rater charges at the start of the calendar month; a purchase charges when it finishes). Example: with plan months starting on the 15th, the row of Nov 15 to Dec 15 pays the December fees on Dec 1, and the row of Dec 15 to Jan 15 pays the January fees. Each number gets at most one plan row per calendar month.
+- the order reserves only the credits part (setup plus the rest of the first month), and its 402 names that amount;
+- when the order finishes, the rule is checked again (the plan may have stopped, or the order finished late). Plan pays: a plan row (`kind = 'plan'`, `plan_units = 1`, ref = the month's fee ref, source `plan.monthly_fee`), plus a debit for the part above the cap with ref + `:over_plan`. Otherwise the full fee is debited, as today.
+
+The renewal rater writes the same rows each month for the numbers the rule covers. It skips a month whose fee ref already has a row, as today.
 
 ## Feature gates (`hailhq.core.plans`)
 
@@ -201,5 +202,5 @@ The cap on all workspaces together (`GLOBAL_MAX_BYTES` in `hailhq.core.knowledge
 - Migration: upgrade and downgrade; constraints refuse a bad tier, status, a `plan` row with cents, a second open plan.
 - `has_funds`: plan on with minutes left and an empty wallet passes for calls; `past_due` fails; texts pass only for `text_countries`; no plan is today's result.
 - Cap: no plan or no quote fields gives today's limit and hold; plan minutes extend the limit; two live calls share the plan minutes; recording is paid from credits.
-- Number purchase: included number writes the plan row and raises `used_numbers`; over the cap writes the `:over_plan` debit; beyond the included count is today's charge.
+- Number purchase: an included number writes the plan row; over the cap writes the `:over_plan` debit; a number beyond the oldest included ones, or a plan that stopped before a late order finished, is today's charge.
 - `plan_allows`: tier table, billing off is allowed.

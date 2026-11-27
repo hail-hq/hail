@@ -32,9 +32,7 @@ from hailhq.core.number_offers import CarrierOffer, discover_offers
 from hailhq.core.plans import (
     OVER_PLAN_REF_SUFFIX,
     PLAN_NUMBER_SOURCE,
-    current_allowance,
-    return_number_slot,
-    take_number_slot,
+    plan_number_cents,
 )
 from hailhq.core.providers.verification import get_verification_provider
 from hailhq.core.providers.verification.rejections import customer_reason
@@ -153,10 +151,14 @@ async def finish_order(
     offer = CarrierOffer.model_validate(meta["offer"])
     now = datetime.now(timezone.utc)
     if meta["billed"]:
-        # The part of the first month an included plan number pays
-        # (hailhq.core.plans); the order reserved only the rest.
-        plan_cents = int(meta.get("plan_cents") or 0)
-        reserved = offer.monthly_cents + offer.setup_cents - plan_cents
+        # The order reserved the total less what an included plan number
+        # paid toward the first month then (hailhq.core.plans). What the plan
+        # pays is decided again now: the order may finish later, after the
+        # plan stopped or older numbers took the included ones (the balance
+        # can then dip by at most the per-number cap).
+        reserved = (
+            offer.monthly_cents + offer.setup_cents - int(meta.get("plan_cents") or 0)
+        )
         if reserved > 0:
             db.add(
                 credit(
@@ -167,32 +169,14 @@ async def finish_order(
                 )
             )
         fee_ref = monthly_fee_ref(number.organization_id, number.id, now)
-        if plan_cents and not failed:
-            # An order the carrier finished later. The plan pays only from a
-            # month row that covers now: the one whose slot it took, or the
-            # new month's if a slot is left there. Otherwise (the plan is
-            # off, the new month has no row yet or no slot left) the slot
-            # goes back and credits pay, as for any number beyond the plan;
-            # the balance can then dip by at most the per-number cap.
-            current = await current_allowance(db, number.organization_id)
-            stored = meta["plan_allowance_id"]
-            if current is None:
-                await return_number_slot(db, UUID(stored))
-                plan_cents = 0
-            elif str(current.id) != stored:
-                await return_number_slot(db, UUID(stored))
-                slot = await take_number_slot(
-                    db, number.organization_id, offer.monthly_cents
-                )
-                plan_cents = slot[1] if slot else 0
-                if slot:
-                    meta["plan_allowance_id"] = str(slot[0])
-            if not plan_cents:
-                meta.pop("plan_allowance_id", None)
-            meta["plan_cents"] = plan_cents
-        if failed and plan_cents:
-            await return_number_slot(db, UUID(meta["plan_allowance_id"]))
-        elif not failed and plan_cents:
+        plan_cents = (
+            0
+            if failed
+            else await plan_number_cents(
+                db, number.organization_id, offer.monthly_cents, number.id
+            )
+        )
+        if plan_cents:
             db.add(plan_paid(number, fee_ref))
             if offer.monthly_cents > plan_cents:
                 db.add(
@@ -690,8 +674,7 @@ async def acquire_offer(
             if approval is not None
             else 0
         )
-        slot = await take_number_slot(db, org, offer.monthly_cents, take=False)
-        need = total - (slot[1] if slot else 0)
+        need = total - await plan_number_cents(db, org, offer.monthly_cents)
         short = need - (await get_balance_cents(db, org) + held)
         if short <= 0:
             return None
@@ -804,13 +787,11 @@ async def acquire_offer(
             "order_state": "submitting",
         },
     )
-    if billed and (slot := await take_number_slot(db, org, offer.monthly_cents)):
+    if billed and (plan_cents := await plan_number_cents(db, org, offer.monthly_cents)):
         # An included plan number: the plan pays (part of) its first month,
         # so the order reserves only the rest (hailhq.core.plans).
-        allowance_id, plan_cents = slot
         number.provisioning_metadata = {
             **number.provisioning_metadata,
-            "plan_allowance_id": str(allowance_id),
             "plan_cents": plan_cents,
         }
     db.add(number)
