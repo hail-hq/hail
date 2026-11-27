@@ -16,13 +16,13 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi import status as http_status
-from hailhq.api.deps import Principal, get_current_principal
+from hailhq.api.deps import Principal, get_current_principal, organization_member_role
 from hailhq.api.errors import unprocessable
 from hailhq.api.pagination import fetch_cursor_page
 from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.core.contacts import MEMBER_ID_PREFIX, contact_to_entry, contacts_union_stmt
 from hailhq.core.db import get_session
-from hailhq.core.models import Contact, OrganizationMember, User
+from hailhq.core.models import Contact, User
 from hailhq.core.schemas import (
     ContactCreate,
     ContactEntry,
@@ -66,22 +66,6 @@ async def _get_manual_or_404(
             status_code=http_status.HTTP_404_NOT_FOUND, detail="contact not found"
         )
     return row
-
-
-async def _member_role(db: AsyncSession, org_id: UUID, user_id: UUID) -> str | None:
-    """Org role for ``user_id``, or ``None`` if they aren't a member of
-    ``org_id``. Shared by the phone-target self-or-admin check below — used
-    for the target's role lookup always, and for the caller's role lookup
-    when the caller isn't a superadmin (who counts as owner without a row
-    here)."""
-    return (
-        await db.execute(
-            select(OrganizationMember.role).where(
-                OrganizationMember.organization_id == org_id,
-                OrganizationMember.user_id == user_id,
-            )
-        )
-    ).scalar_one_or_none()
 
 
 @router.get(
@@ -245,7 +229,7 @@ async def _resolve_phone_target(
                 f"invalid user id: {user_id}", loc=["path", "user_id"]
             ) from exc
 
-    target_role = await _member_role(db, principal.organization_id, target)
+    target_role = await organization_member_role(db, principal.organization_id, target)
     if target_role is None:
         raise HTTPException(
             status_code=http_status.HTTP_404_NOT_FOUND, detail="member not found"
@@ -255,7 +239,9 @@ async def _resolve_phone_target(
         caller_role = (
             "owner"
             if principal.superadmin
-            else await _member_role(db, principal.organization_id, principal.user_id)
+            else await organization_member_role(
+                db, principal.organization_id, principal.user_id
+            )
         )
         if caller_role not in ("owner", "admin"):
             raise HTTPException(

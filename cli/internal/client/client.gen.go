@@ -3441,12 +3441,33 @@ type KnowledgeDocumentResponse struct {
 	// Status `pending`: waiting to be read. `processing`: being read and indexed. `ready`: agents answer from it. `failed`: see `error`.
 	Status KnowledgeDocumentResponseStatus `json:"status"`
 
+	// Tags Assigned tags, ordered by type.
+	Tags *[]KnowledgeDocumentTagResponse `json:"tags,omitempty"`
+
 	// UpdatedAt ISO 8601 timestamp.
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // KnowledgeDocumentResponseStatus `pending`: waiting to be read. `processing`: being read and indexed. `ready`: agents answer from it. `failed`: see `error`.
 type KnowledgeDocumentResponseStatus string
+
+// KnowledgeDocumentTagResponse defines model for KnowledgeDocumentTagResponse.
+type KnowledgeDocumentTagResponse struct {
+	// Type Type of tag, for example `brand`.
+	Type string `json:"type"`
+
+	// Value The workspace's display spelling of the tag.
+	Value string `json:"value"`
+}
+
+// KnowledgeDocumentTagUpdate Set or clear one type of tag on a document.
+type KnowledgeDocumentTagUpdate struct {
+	// Type Type of tag to set.
+	Type string `json:"type"`
+
+	// Value Tag name. Existing tags reuse the workspace's display spelling regardless of case. Send null to clear the tag. A manual choice overrides automatic tagging.
+	Value *string `json:"value"`
+}
 
 // KnowledgeSearchRequest Body of “POST /knowledge/search“.
 type KnowledgeSearchRequest struct {
@@ -5168,6 +5189,16 @@ type GetKnowledgeDocumentParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
+// GetKnowledgeDocumentFileParams defines parameters for GetKnowledgeDocumentFile.
+type GetKnowledgeDocumentFileParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// UpdateKnowledgeDocumentTagParams defines parameters for UpdateKnowledgeDocumentTag.
+type UpdateKnowledgeDocumentTagParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
 // SearchKnowledgeParams defines parameters for SearchKnowledge.
 type SearchKnowledgeParams struct {
 	Authorization *string `json:"authorization,omitempty"`
@@ -5588,6 +5619,9 @@ type CreateEmailV1EmailsPostJSONRequestBody = EmailCreate
 
 // CreateKnowledgeDocumentJSONRequestBody defines body for CreateKnowledgeDocument for application/json ContentType.
 type CreateKnowledgeDocumentJSONRequestBody = KnowledgeDocumentCreate
+
+// UpdateKnowledgeDocumentTagJSONRequestBody defines body for UpdateKnowledgeDocumentTag for application/json ContentType.
+type UpdateKnowledgeDocumentTagJSONRequestBody = KnowledgeDocumentTagUpdate
 
 // SearchKnowledgeJSONRequestBody defines body for SearchKnowledge for application/json ContentType.
 type SearchKnowledgeJSONRequestBody = KnowledgeSearchRequest
@@ -6167,6 +6201,14 @@ type ClientInterface interface {
 
 	// GetKnowledgeDocument request
 	GetKnowledgeDocument(ctx context.Context, documentId openapi_types.UUID, params *GetKnowledgeDocumentParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetKnowledgeDocumentFile request
+	GetKnowledgeDocumentFile(ctx context.Context, documentId openapi_types.UUID, params *GetKnowledgeDocumentFileParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// UpdateKnowledgeDocumentTagWithBody request with any body
+	UpdateKnowledgeDocumentTagWithBody(ctx context.Context, documentId openapi_types.UUID, params *UpdateKnowledgeDocumentTagParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	UpdateKnowledgeDocumentTag(ctx context.Context, documentId openapi_types.UUID, params *UpdateKnowledgeDocumentTagParams, body UpdateKnowledgeDocumentTagJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// SearchKnowledgeWithBody request with any body
 	SearchKnowledgeWithBody(ctx context.Context, params *SearchKnowledgeParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -6999,6 +7041,42 @@ func (c *Client) DeleteKnowledgeDocument(ctx context.Context, documentId openapi
 
 func (c *Client) GetKnowledgeDocument(ctx context.Context, documentId openapi_types.UUID, params *GetKnowledgeDocumentParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetKnowledgeDocumentRequest(c.Server, documentId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetKnowledgeDocumentFile(ctx context.Context, documentId openapi_types.UUID, params *GetKnowledgeDocumentFileParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetKnowledgeDocumentFileRequest(c.Server, documentId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) UpdateKnowledgeDocumentTagWithBody(ctx context.Context, documentId openapi_types.UUID, params *UpdateKnowledgeDocumentTagParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpdateKnowledgeDocumentTagRequestWithBody(c.Server, documentId, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) UpdateKnowledgeDocumentTag(ctx context.Context, documentId openapi_types.UUID, params *UpdateKnowledgeDocumentTagParams, body UpdateKnowledgeDocumentTagJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpdateKnowledgeDocumentTagRequest(c.Server, documentId, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -10542,6 +10620,117 @@ func NewGetKnowledgeDocumentRequest(server string, documentId openapi_types.UUID
 	if err != nil {
 		return nil, err
 	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewGetKnowledgeDocumentFileRequest generates requests for GetKnowledgeDocumentFile
+func NewGetKnowledgeDocumentFileRequest(server string, documentId openapi_types.UUID, params *GetKnowledgeDocumentFileParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "document_id", documentId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/knowledge/documents/%s/file", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewUpdateKnowledgeDocumentTagRequest calls the generic UpdateKnowledgeDocumentTag builder with application/json body
+func NewUpdateKnowledgeDocumentTagRequest(server string, documentId openapi_types.UUID, params *UpdateKnowledgeDocumentTagParams, body UpdateKnowledgeDocumentTagJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewUpdateKnowledgeDocumentTagRequestWithBody(server, documentId, params, "application/json", bodyReader)
+}
+
+// NewUpdateKnowledgeDocumentTagRequestWithBody generates requests for UpdateKnowledgeDocumentTag with any type of body
+func NewUpdateKnowledgeDocumentTagRequestWithBody(server string, documentId openapi_types.UUID, params *UpdateKnowledgeDocumentTagParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "document_id", documentId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/knowledge/documents/%s/tags", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("PATCH", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
 
 	if params != nil {
 
@@ -14624,6 +14813,14 @@ type ClientWithResponsesInterface interface {
 	// GetKnowledgeDocumentWithResponse request
 	GetKnowledgeDocumentWithResponse(ctx context.Context, documentId openapi_types.UUID, params *GetKnowledgeDocumentParams, reqEditors ...RequestEditorFn) (*GetKnowledgeDocumentResponse, error)
 
+	// GetKnowledgeDocumentFileWithResponse request
+	GetKnowledgeDocumentFileWithResponse(ctx context.Context, documentId openapi_types.UUID, params *GetKnowledgeDocumentFileParams, reqEditors ...RequestEditorFn) (*GetKnowledgeDocumentFileResponse, error)
+
+	// UpdateKnowledgeDocumentTagWithBodyWithResponse request with any body
+	UpdateKnowledgeDocumentTagWithBodyWithResponse(ctx context.Context, documentId openapi_types.UUID, params *UpdateKnowledgeDocumentTagParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateKnowledgeDocumentTagResponse, error)
+
+	UpdateKnowledgeDocumentTagWithResponse(ctx context.Context, documentId openapi_types.UUID, params *UpdateKnowledgeDocumentTagParams, body UpdateKnowledgeDocumentTagJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateKnowledgeDocumentTagResponse, error)
+
 	// SearchKnowledgeWithBodyWithResponse request with any body
 	SearchKnowledgeWithBodyWithResponse(ctx context.Context, params *SearchKnowledgeParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SearchKnowledgeResponse, error)
 
@@ -15784,6 +15981,51 @@ func (r GetKnowledgeDocumentResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r GetKnowledgeDocumentResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetKnowledgeDocumentFileResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r GetKnowledgeDocumentFileResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetKnowledgeDocumentFileResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type UpdateKnowledgeDocumentTagResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *KnowledgeDocumentResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r UpdateKnowledgeDocumentTagResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r UpdateKnowledgeDocumentTagResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -17760,6 +18002,32 @@ func (c *ClientWithResponses) GetKnowledgeDocumentWithResponse(ctx context.Conte
 		return nil, err
 	}
 	return ParseGetKnowledgeDocumentResponse(rsp)
+}
+
+// GetKnowledgeDocumentFileWithResponse request returning *GetKnowledgeDocumentFileResponse
+func (c *ClientWithResponses) GetKnowledgeDocumentFileWithResponse(ctx context.Context, documentId openapi_types.UUID, params *GetKnowledgeDocumentFileParams, reqEditors ...RequestEditorFn) (*GetKnowledgeDocumentFileResponse, error) {
+	rsp, err := c.GetKnowledgeDocumentFile(ctx, documentId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetKnowledgeDocumentFileResponse(rsp)
+}
+
+// UpdateKnowledgeDocumentTagWithBodyWithResponse request with arbitrary body returning *UpdateKnowledgeDocumentTagResponse
+func (c *ClientWithResponses) UpdateKnowledgeDocumentTagWithBodyWithResponse(ctx context.Context, documentId openapi_types.UUID, params *UpdateKnowledgeDocumentTagParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateKnowledgeDocumentTagResponse, error) {
+	rsp, err := c.UpdateKnowledgeDocumentTagWithBody(ctx, documentId, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUpdateKnowledgeDocumentTagResponse(rsp)
+}
+
+func (c *ClientWithResponses) UpdateKnowledgeDocumentTagWithResponse(ctx context.Context, documentId openapi_types.UUID, params *UpdateKnowledgeDocumentTagParams, body UpdateKnowledgeDocumentTagJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateKnowledgeDocumentTagResponse, error) {
+	rsp, err := c.UpdateKnowledgeDocumentTag(ctx, documentId, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUpdateKnowledgeDocumentTagResponse(rsp)
 }
 
 // SearchKnowledgeWithBodyWithResponse request with arbitrary body returning *SearchKnowledgeResponse
@@ -19813,6 +20081,65 @@ func ParseGetKnowledgeDocumentResponse(rsp *http.Response) (*GetKnowledgeDocumen
 	}
 
 	response := &GetKnowledgeDocumentResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest KnowledgeDocumentResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetKnowledgeDocumentFileResponse parses an HTTP response from a GetKnowledgeDocumentFileWithResponse call
+func ParseGetKnowledgeDocumentFileResponse(rsp *http.Response) (*GetKnowledgeDocumentFileResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetKnowledgeDocumentFileResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseUpdateKnowledgeDocumentTagResponse parses an HTTP response from a UpdateKnowledgeDocumentTagWithResponse call
+func ParseUpdateKnowledgeDocumentTagResponse(rsp *http.Response) (*UpdateKnowledgeDocumentTagResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &UpdateKnowledgeDocumentTagResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}

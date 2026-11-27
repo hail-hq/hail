@@ -14,17 +14,21 @@ from hailhq.api.routes import knowledge as knowledge_routes
 from hailhq.api.routes import uploads as uploads_routes
 from hailhq.core.config import settings
 from hailhq.core.file_uploads import object_key
+from hailhq.core.knowledge.access import delete_org_knowledge
 from hailhq.core.knowledge.search import vector_literal
 from hailhq.core.knowledge.text import terms
 from hailhq.core.models import (
     FileUpload,
     KnowledgeDocument,
+    Organization,
     OrganizationKnowledge,
+    OrganizationMember,
 )
 from hailhq.core.testing.knowledge import FakeEmbedder
 from sqlalchemy import select, text
 
 from .conftest import insert_org_and_key
+from .test_auth_jwt import _configure_env, _install_test_jwks
 
 _MD = b"# Warranty\n\nThe NS-5000 inverter has a ten year warranty.\n"
 
@@ -91,6 +95,249 @@ async def _stored_upload(session, org, data=_MD) -> FileUpload:
     session.add(row)
     await session.commit()
     return row
+
+
+async def _add_document(client, plain, upload, *, name=None):
+    response = await client.post(
+        "/v1/knowledge/documents",
+        json={"upload_id": str(upload.id), "name": name},
+        headers=_auth(plain),
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+@pytest.mark.parametrize(
+    ("suffix", "declared_type", "signed_type", "disposition"),
+    [
+        (".attempt", "text/markdown", "text/markdown", "attachment"),
+        (f".{'a' * 32}", "application/pdf", "application/pdf", "inline"),
+        (".attempt", "text/html", "application/octet-stream", "attachment"),
+    ],
+)
+async def test_file_redirect_signs_the_stored_key_and_original_filename(
+    client,
+    async_session,
+    org_and_key,
+    s3,
+    suffix,
+    declared_type,
+    signed_type,
+    disposition,
+) -> None:
+    org, _, plain = org_and_key
+    await _turn_on(async_session, org)
+    upload = await _stored_upload(async_session, org)
+    key = object_key("knowledge_document", org, upload.id) + suffix
+    upload.s3_key = key
+    upload.filename = 'folder\\Hällo "manual"'
+    upload.content_type = declared_type
+    await async_session.commit()
+    doc = await _add_document(client, plain, upload, name="Warranty instructions")
+    path = f"/v1/knowledge/documents/{doc['id']}/file"
+    s3.presign_get.return_value = "https://storage.example.test/signed"
+
+    assert (await client.get(path)).status_code == 401
+    other_org, _, other_plain = await insert_org_and_key(
+        async_session, org_name="Other", org_slug="other"
+    )
+    await _turn_on(async_session, other_org)
+    assert (await client.get(path, headers=_auth(other_plain))).status_code == 404
+    s3.presign_get.assert_not_awaited()
+    response = await client.get(path, headers=_auth(plain), follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "https://storage.example.test/signed"
+    assert response.headers["cache-control"] == "no-store"
+    s3.presign_get.assert_awaited_once_with(
+        key,
+        ttl_seconds=300,
+        response_content_type=signed_type,
+        response_content_disposition=(
+            f"{disposition}; filename*=UTF-8''H%C3%A4llo%20%22manual%22"
+        ),
+        response_cache_control="no-store",
+    )
+
+
+async def test_brand_tags_reuse_the_first_spelling_within_a_workspace(
+    client, async_session, org_and_key, s3
+) -> None:
+    org, _, plain = org_and_key
+    other_org, _, other_plain = await insert_org_and_key(
+        async_session, org_name="Other", org_slug="other"
+    )
+    await _turn_on(async_session, org)
+    await _turn_on(async_session, other_org)
+    documents = [
+        await _add_document(
+            client, token, await _stored_upload(async_session, workspace)
+        )
+        for workspace, token in [(org, plain), (org, plain), (other_org, other_plain)]
+    ]
+    assert all(doc["tags"] == [] for doc in documents)
+
+    for doc, token, value, expected in zip(
+        documents,
+        [plain, plain, other_plain],
+        [" Straße  ", "STRASSE", "STRASSE"],
+        ["Straße", "Straße", "STRASSE"],
+        strict=True,
+    ):
+        path = f"/v1/knowledge/documents/{doc['id']}"
+        tags = [{"type": "brand", "value": expected}]
+        response = await client.patch(
+            f"{path}/tags", json={"type": "brand", "value": value}, headers=_auth(token)
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["tags"] == tags
+        assert (await client.get(path, headers=_auth(token))).json()["tags"] == tags
+
+    listed = await client.get("/v1/knowledge/documents", headers=_auth(plain))
+    assert {doc["id"] for doc in listed.json()["items"]} == {
+        documents[0]["id"],
+        documents[1]["id"],
+    }
+    assert all(
+        doc["tags"] == [{"type": "brand", "value": "Straße"}]
+        for doc in listed.json()["items"]
+    )
+    for doc in documents[:2]:
+        response = await client.delete(
+            f"/v1/knowledge/documents/{doc['id']}", headers=_auth(plain)
+        )
+        assert response.status_code == 204
+    remaining = await async_session.execute(
+        text("SELECT value FROM knowledge_tag_values")
+    )
+    assert remaining.scalars().all() == ["STRASSE"]
+
+
+async def test_brand_move_replaces_the_value_and_clear_keeps_manual_choice(
+    client, async_session, org_and_key
+) -> None:
+    org, _, plain = org_and_key
+    await _turn_on(async_session, org)
+    doc = await _add_document(client, plain, await _stored_upload(async_session, org))
+    path = f"/v1/knowledge/documents/{doc['id']}/tags"
+
+    for value, expected in [
+        ("Ardent", [{"type": "brand", "value": "Ardent"}]),
+        ("Coast", [{"type": "brand", "value": "Coast"}]),
+        (None, []),
+        (None, []),
+    ]:
+        response = await client.patch(
+            path, json={"type": "brand", "value": value}, headers=_auth(plain)
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["tags"] == expected
+
+    assignment = await async_session.execute(
+        text(
+            "SELECT value_key, is_manual FROM knowledge_document_tags "
+            "WHERE document_id = :doc AND type = 'brand'"
+        ),
+        {"doc": doc["id"]},
+    )
+    assert assignment.one() == (None, True)
+    assert (
+        await async_session.scalar(text("SELECT count(*) FROM knowledge_tag_values"))
+        == 0
+    )
+
+    response = await client.patch(
+        path, json={"type": "brand", "value": "Ardent"}, headers=_auth(plain)
+    )
+    assert response.status_code == 200
+    assert await delete_org_knowledge(async_session, org, None) == 1
+    for table in ("knowledge_document_tags", "knowledge_tag_values"):
+        assert await async_session.scalar(text(f"SELECT count(*) FROM {table}")) == 0
+
+
+async def test_tag_update_rejects_other_workspaces_and_invalid_values(
+    client, async_session, org_and_key
+) -> None:
+    org, _, plain = org_and_key
+    await _turn_on(async_session, org)
+    doc = await _add_document(client, plain, await _stored_upload(async_session, org))
+    path = f"/v1/knowledge/documents/{doc['id']}/tags"
+    _, _, other_plain = await insert_org_and_key(
+        async_session, org_name="Other", org_slug="other"
+    )
+    body = {"type": "brand", "value": "Ardent"}
+    assert (await client.patch(path, json=body)).status_code == 401
+    assert (
+        await client.patch(path, json=body, headers=_auth(other_plain))
+    ).status_code == 404
+    for invalid in (
+        {"type": "unsupported", "value": "Ardent"},
+        {"type": "brand"},
+        {"type": "brand", "value": "   "},
+        {"type": "brand", "value": "invalid\x00tag"},
+    ):
+        assert (
+            await client.patch(path, json=invalid, headers=_auth(plain))
+        ).status_code == 422
+
+
+@pytest.mark.parametrize(
+    ("role", "claims", "expected"),
+    [
+        ("member", {}, 403),
+        ("owner", {}, 200),
+        ("admin", {}, 200),
+        (None, {"superadmin": True}, 200),
+        ("member", {"superadmin": True, "azp": "oauth-client"}, 403),
+    ],
+    ids=["member", "owner", "admin", "first-party-superadmin", "oauth-member"],
+)
+async def test_tag_update_requires_a_workspace_admin_for_jwt_users(
+    client,
+    async_session,
+    org_and_key,
+    monkeypatch,
+    jwks_client_factory,
+    base_claims,
+    sign_jwt,
+    role,
+    claims,
+    expected,
+) -> None:
+    _configure_env(monkeypatch)
+    _install_test_jwks(monkeypatch, jwks_client_factory)
+    org, _, plain = org_and_key
+    await _turn_on(async_session, org)
+    doc = await _add_document(client, plain, await _stored_upload(async_session, org))
+    user = uuid4()
+    async_session.add(Organization(id=org))
+    if role:
+        async_session.add(
+            OrganizationMember(
+                id=uuid4(),
+                organization_id=org,
+                user_id=user,
+                role=role,
+                created_at=datetime.now(timezone.utc),
+            )
+        )
+    await async_session.commit()
+
+    token = sign_jwt(
+        dict(base_claims(sub=str(user)), activeOrganizationId=str(org), **claims)
+    )
+    path = f"/v1/knowledge/documents/{doc['id']}"
+    response = await client.patch(
+        f"{path}/tags",
+        json={"type": "brand", "value": "Ardent"},
+        headers=_auth(token),
+    )
+    assert response.status_code == expected, response.text
+    read = await client.get(path, headers=_auth(token))
+    assert read.status_code == 200
+    assert read.json()["tags"] == (
+        [{"type": "brand", "value": "Ardent"}] if expected == 200 else []
+    )
 
 
 async def _piece(session, org, doc_id, body: str, ordinal: int = 0) -> None:

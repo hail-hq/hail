@@ -15,6 +15,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     Numeric,
@@ -2782,6 +2783,7 @@ class KnowledgeDocument(Base):
 
     __table_args__ = (
         UniqueConstraint("file_upload_id", name="knowledge_documents_upload_uq"),
+        UniqueConstraint("organization_id", "id", name="knowledge_documents_org_id_uq"),
         CheckConstraint(
             "status IN ('pending', 'processing', 'ready', 'failed')",
             name="knowledge_documents_status_check",
@@ -2796,6 +2798,76 @@ class KnowledgeDocument(Base):
             "knowledge_documents_queue_idx",
             "created_at",
             postgresql_where=text("status IN ('pending', 'processing')"),
+        ),
+    )
+
+
+class KnowledgeTagValue(Base):
+    """The first display spelling of a typed tag value in a workspace."""
+
+    __tablename__ = "knowledge_tag_values"
+
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True
+    )
+    type: Mapped[str] = mapped_column(Text, primary_key=True)
+    value_key: Mapped[str] = mapped_column(Text, primary_key=True)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
+
+    __table_args__ = (
+        CheckConstraint(
+            "type ~ '^[a-z][a-z0-9_]{0,31}$'", name="knowledge_tag_values_type_check"
+        ),
+        CheckConstraint(
+            "char_length(value) BETWEEN 1 AND 255 AND char_length(value_key) > 0",
+            name="knowledge_tag_values_length_check",
+        ),
+    )
+
+
+class KnowledgeDocumentTag(Base):
+    """One assignment per tag type. A manual clear keeps a row with no value."""
+
+    __tablename__ = "knowledge_document_tags"
+
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True
+    )
+    document_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    type: Mapped[str] = mapped_column(Text, primary_key=True)
+    value_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_manual: Mapped[bool] = mapped_column(Boolean, nullable=False)
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["organization_id", "document_id"],
+            ["knowledge_documents.organization_id", "knowledge_documents.id"],
+            name="knowledge_document_tags_document_fkey",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["organization_id", "type", "value_key"],
+            [
+                "knowledge_tag_values.organization_id",
+                "knowledge_tag_values.type",
+                "knowledge_tag_values.value_key",
+            ],
+            name="knowledge_document_tags_value_fkey",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            "type ~ '^[a-z][a-z0-9_]{0,31}$'", name="knowledge_document_tags_type_check"
+        ),
+        CheckConstraint(
+            "is_manual OR value_key IS NOT NULL",
+            name="knowledge_document_tags_manual_clear_check",
+        ),
+        Index(
+            "knowledge_document_tags_value_idx",
+            "organization_id",
+            "type",
+            "value_key",
+            postgresql_where=text("value_key IS NOT NULL"),
         ),
     )
 

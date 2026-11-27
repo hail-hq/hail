@@ -23,6 +23,7 @@ _DOC = {
     "created_at": "2026-11-21T12:00:00Z",
     "updated_at": "2026-11-21T12:00:00Z",
 }
+_TAGS = [{"type": "brand", "value": "Example"}]
 
 
 @respx.mock
@@ -33,17 +34,19 @@ async def test_add_and_get_document(monkeypatch) -> None:
         return_value=httpx.Response(201, json={**_DOC, "status": "pending"})
     )
     respx.get(f"{_BASE_URL}/knowledge/documents/{_DOC_ID}").mock(
-        return_value=httpx.Response(200, json=_DOC)
+        return_value=httpx.Response(200, json={**_DOC, "tags": _TAGS})
     )
     out = await srv.mcp_app.call_tool(
         "add_knowledge_document", {"upload_id": upload_id}
     )
     assert out.structured_content["status"] == "pending"
+    assert out.structured_content["tags"] == []
     assert json.loads(add.calls[0].request.read()) == {"upload_id": upload_id}
     out = await srv.mcp_app.call_tool(
         "get_knowledge_document", {"document_id": _DOC_ID}
     )
     assert out.structured_content["piece_count"] == 3
+    assert out.structured_content["tags"] == _TAGS
     out = await srv.mcp_app.call_tool(
         "add_knowledge_document", {"upload_id": "not-an-id"}
     )
@@ -129,8 +132,8 @@ async def test_knowledge_tools_publish_output_schemas(monkeypatch) -> None:
     srv = await _real_server(monkeypatch)
     tools = {t.name: t for t in await srv.mcp_app.list_tools()}
     doc = Draft202012Validator(tools["get_knowledge_document"].output_schema)
-    assert doc.is_valid(_DOC)
-    assert not doc.is_valid({**_DOC, "status": "lost"})
+    assert doc.is_valid({**_DOC, "tags": _TAGS})
+    assert not doc.is_valid({**_DOC, "tags": _TAGS, "status": "lost"})
     gone = Draft202012Validator(tools["delete_knowledge_document"].output_schema)
     assert gone.is_valid({"deleted": True, "document_id": _DOC_ID, "name": "m"})
     found = Draft202012Validator(tools["search_knowledge"].output_schema)
