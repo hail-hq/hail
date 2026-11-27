@@ -98,6 +98,7 @@ from hailhq.core.telemetry_identity import (
 from hailhq.core.url_guard import assert_public_https_url
 from hailhq.core.webhook_fanout import fanout_call_event
 from hailhq.voicebot import text_watch
+from hailhq.voicebot.acknowledgments import drop_acknowledgments
 from hailhq.voicebot.amd import (
     MACHINE_HANGUP_CATEGORIES,
     MACHINE_IVR_CATEGORY,
@@ -327,6 +328,21 @@ class SpeechSanitizingAgent(Agent):
             Agent.default.llm_node(self, chat_ctx, tools, model_settings),
             on_rest=rest.keep,
         )
+
+    async def stt_node(self, audio: Any, model_settings: Any) -> Any:
+        # An "okay" said over the agent does not stop it (acknowledgments.py).
+        # A phone menu is not a person: everything it says is kept.
+        events = Agent.default.stt_node(self, audio, model_settings)
+        async for event in drop_acknowledgments(events, self._speaking_to_a_person):
+            yield event
+
+    def _speaking_to_a_person(self) -> bool:
+        if self.phone_menu is not None and self.phone_menu.active:
+            return False
+        try:
+            return self.session.agent_state == "speaking"
+        except Exception:
+            return False  # no session: drop nothing
 
     async def tts_node(self, text: Any, model_settings: Any) -> Any:
         if self.phone_menu is not None and self.phone_menu.active:

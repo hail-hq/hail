@@ -58,7 +58,7 @@ MCP registry **0.3.0**. One database migration (connected phone systems).
 
 ### Changed
 
-- Calls: a short "okay" or "mhmm" no longer stops the agent. Someone who insists still does.
+- Calls: a filler word such as "okay" or "mhmm" said while the agent talks no longer stops it (English). Any other word, such as "stop" or "no", still does.
 - Calls: a longer reply is spoken about two sentences at a time, with a short pause in which the other party can speak.
 - Calls: when the agent hears speech that does not fit the conversation (a TV, a radio, other people), it says so and asks instead of answering it.
 
