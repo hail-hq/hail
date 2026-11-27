@@ -8,6 +8,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 - Pick and preview new English voices from Gemini, xAI, and AssemblyAI.
 - Connect your own Gemini, xAI, or AssemblyAI API keys for speech.
+- Knowledge base (early access): upload manuals, FAQs and part lists, and agents answer calls, texts and email from them, in any supported language (`/v1/knowledge`, `knowledge` on agents, CLI `hail knowledge`, SDK and MCP).
 
 ### Changed
 

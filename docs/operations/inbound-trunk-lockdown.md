@@ -174,6 +174,7 @@ LiveKit Cloud checks `allowed_addresses` only once LiveKit enables that check fo
   - an origination URL already sends a different secret, and `--rotate` is not given.
 
   The allowed addresses are applied either way, so the weekly IP fix never waits for the secret.
+
 - LiveKit's field update cannot set the map, so the first `apply` replaces the whole trunk with a copy read just before. Header maps other than `X-Hail-Secret` stay.
   - After the replace it reads the trunk again and adds back, one at a time, any number of the copy it lost (`re-add ...`). A number LiveKit refuses prints `could not re-add <number>` and stops with an error: add it by hand (`lk sip inbound update --numbers`).
   - If any other field differs from the copy (allowed addresses, digest user and the rest), it prints `the replace changed <field>: <before> -> <now>` and stops with an error: restore those fields by hand (`lk sip inbound update`), then run `apply` again.

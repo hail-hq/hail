@@ -6,7 +6,7 @@ license = { text = "AGPL-3.0-or-later" }
 requires-python = ">=3.11"
 classifiers = ["Private :: Do Not Upload"]
 dependencies = [
-    "hailhq-core",
+    "hailhq-core[knowledge]",
     "asyncpg>=0.30",
     "sqlalchemy[asyncio]>=2.1.5",
     # google-auth needs post-quantum TLS support from grpcio 1.83 (April 2027).

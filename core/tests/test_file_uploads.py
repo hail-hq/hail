@@ -38,7 +38,22 @@ from sqlalchemy import select
         (b"\x89PNG\r\n\x1a\n rest", "image/png", True),
         (b"PNG", "image/png", False),
         (b"%PDF-1.4", "image/png", False),
-        (b"%PDF-1.4", "text/plain", False),
+        (b"%PDF-1.4", "application/zip", False),
+        # Knowledge documents: UTF-8 text, and DOCX as a zip.
+        (b"Part,Name\nNS-1,Bracket\n", "text/csv", True),
+        ("Garantía".encode(), "text/plain", True),
+        (b"a\x00b", "text/markdown", False),
+        (b"caf\xe9", "text/plain", False),
+        (
+            b"PK\x03\x04rest",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            True,
+        ),
+        (
+            b"%PDF-1.4",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            False,
+        ),
     ],
 )
 def test_matches_declared_type(content: bytes, content_type: str, ok: bool) -> None:

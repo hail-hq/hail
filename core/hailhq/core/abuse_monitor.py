@@ -11,6 +11,9 @@ polish.
 Thresholds (core/hailhq/core/config.py's hail_sms_abuse_* settings) are
 explicitly a starting guess pending real traffic data, per the design
 spec's own caution — expect to tune post-launch.
+
+Each tick also runs the database size alert
+(``hailhq.core.db_size_alert``), another platform guard.
 """
 
 from __future__ import annotations
@@ -20,6 +23,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from hailhq.core.config import settings
+from hailhq.core.db_size_alert import Sender, check_database_size
 from hailhq.core.models import ChannelSuspension, Suppression, UsageEvent
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -112,9 +116,16 @@ class AbuseMonitorWorker:
     plugs into ``main.py``'s lifespan and ``_stop_worker`` helper unchanged.
     """
 
-    def __init__(self, *, session_factory, poll_interval: float = 3600.0) -> None:
+    def __init__(
+        self,
+        *,
+        session_factory,
+        poll_interval: float = 3600.0,
+        size_alert: Sender | None = None,
+    ) -> None:
         self._session_factory = session_factory
         self._poll_interval = poll_interval
+        self._size_alert = size_alert
         self._stop = asyncio.Event()
 
     async def run_forever(self) -> None:
@@ -137,4 +148,8 @@ class AbuseMonitorWorker:
             await session.commit()
             if count:
                 logger.info("abuse monitor suspended %d org(s) this run", count)
-            return count
+        # Platform guard too: the database size alert (at most once a day).
+        # Its own session; it never raises.
+        async with self._session_factory() as session:
+            await check_database_size(session, self._size_alert)
+        return count

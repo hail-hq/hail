@@ -227,4 +227,3 @@ email) is described here rather than implied through verification endpoints.
   worth doing, but that spec's Phase 1/Phase 2 workflow is a separate effort.
 
 ## Follow-ups (not blocking)
-

@@ -88,9 +88,8 @@ class TwilioSmsProvider(SmsProvider):
                 # Every page: the list order is not documented, and the
                 # newest record decides.
                 tollfree_phone_number_sid=provider_resource_id,
-                # One page holds every record of a number in practice, so the
-                # read stays inside the 5 second wait below.
-                page_size=100,
+                # The toll-free verification endpoint accepts up to 50 per page.
+                page_size=50,
             )
             if not records or any(
                 r.tollfree_phone_number_sid != provider_resource_id
