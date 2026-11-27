@@ -173,10 +173,12 @@ async def finish_order(
             0
             if failed
             else await plan_number_cents(
-                db, number.organization_id, offer.monthly_cents, number.id
+                db, number.organization_id, offer.monthly_cents, number.id, now=now
             )
         )
-        meta["plan_cents"] = plan_cents
+        # What the plan paid in the end; "plan_cents" stays what the
+        # reservation left out.
+        meta["plan_cents_paid"] = plan_cents
         if plan_cents:
             db.add(plan_paid(number, fee_ref))
             if offer.monthly_cents > plan_cents:

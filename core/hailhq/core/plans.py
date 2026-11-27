@@ -164,7 +164,8 @@ async def plan_number_cents(
     numbers with a monthly fee (not pool or connected numbers; active or
     being ordered; ranked by ``(created_at, id)``), up to
     ``number_fee_cap_cents`` each, while the plan is on. A number the plan
-    already paid this calendar month keeps its place until the month ends. ``number_id=None`` asks for a number about to be ordered (the
+    already paid this calendar month keeps its place until the month ends.
+    ``number_id=None`` asks for a number about to be ordered (the
     newest). 0 when the plan does not pay. The billing site's renewal rater
     uses the same rule each month. Take ``org_lock`` first, so two orders
     do not both take the last included number."""
@@ -182,8 +183,8 @@ async def plan_number_cents(
         me = await db.get(PhoneNumber, number_id)
         if me is None:
             return 0
-        others.append(PhoneNumber.id != number_id)
-        held.append(
+        # Only numbers ranked before it count.
+        others.append(
             tuple_(PhoneNumber.created_at, PhoneNumber.id)
             < tuple_(literal(me.created_at), literal(me.id))
         )
