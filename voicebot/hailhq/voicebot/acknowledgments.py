@@ -23,7 +23,41 @@ _TEXT_EVENTS = (
     SpeechEventType.FINAL_TRANSCRIPT,
 )
 _ACKNOWLEDGMENTS = frozenset(
-    ["ok", "okay", "k", "kay", "mhm", "mhmm", "mm", "mmm", "hmm", "hm", "uh", "huh", "uhhuh", "um", "umm", "yeah", "yep", "yup", "right", "alright", "sure", "hello", "hi", "hey", "oh", "ah", "i", "see", "got", "it", "cool", "great", "nice"]
+    [
+        "ok",
+        "okay",
+        "k",
+        "kay",
+        "mhm",
+        "mhmm",
+        "mm",
+        "mmm",
+        "hmm",
+        "hm",
+        "uh",
+        "huh",
+        "uhhuh",
+        "um",
+        "umm",
+        "yeah",
+        "yep",
+        "yup",
+        "right",
+        "alright",
+        "sure",
+        "hello",
+        "hi",
+        "hey",
+        "oh",
+        "ah",
+        "i",
+        "see",
+        "got",
+        "it",
+        "cool",
+        "great",
+        "nice",
+    ]
 )
 _WORD = re.compile(r"[^\W\d_]+", re.UNICODE)
 
