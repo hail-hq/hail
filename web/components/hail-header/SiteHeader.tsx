@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useRef, type ReactNode } from "react";
 import { AnswerButton } from "./AnswerButton";
 import { useDropdown } from "./useDropdown";
 import { Mascot } from "./Mascot";
@@ -8,6 +8,7 @@ import styles from "./SiteHeader.module.css";
 
 export type SiteHeaderActive =
   | "product"
+  | "use-cases"
   | "setup"
   | "pricing"
   | "docs"
@@ -32,6 +33,35 @@ const RESOURCES = [
       { label: "Compare platforms", href: "/compare" },
       { label: "Free tools", href: "/tools" },
       { label: "AI model pricing", href: "/costs" },
+    ],
+  },
+];
+
+const SOLUTIONS = [
+  {
+    label: "Answer and route",
+    items: [
+      { label: "AI receptionist", href: "/receptionist" },
+      { label: "Answer calls for trades", href: "/trades" },
+      { label: "AI phone agent", href: "/phone-agent" },
+      { label: "Call routing", href: "/call-routing" },
+      { label: "Call center overflow", href: "/call-center" },
+    ],
+  },
+  {
+    label: "Follow up",
+    items: [
+      { label: "Bookings and support tickets", href: "/follow-up" },
+      { label: "AI secretary", href: "/secretary" },
+      { label: "Outbound callbacks", href: "/outbound" },
+    ],
+  },
+  {
+    label: "Set up and estimate",
+    items: [
+      { label: "Keep your business number", href: "/keep-number" },
+      { label: "Test before going live", href: "/test-calls" },
+      { label: "Estimate answering costs", href: "/answering-cost" },
     ],
   },
 ];
@@ -69,6 +99,15 @@ function navLinkClass(isActive: boolean, extra?: string) {
   return classes.join(" ");
 }
 
+function usesDesktopNav() {
+  return window.matchMedia?.("(width > 900px)").matches;
+}
+
+function hasKeyboardFocusedLink(root: HTMLDivElement | null) {
+  const focused = document.activeElement;
+  return focused?.matches("a:focus-visible") && root?.contains(focused);
+}
+
 /** Shared marketing navigation with a collapsible mobile menu. */
 export function SiteHeader({
   active = null,
@@ -85,19 +124,44 @@ export function SiteHeader({
 }) {
   const current = active;
   const siteHref = (path: string) => new URL(path, origin).href;
-  const { open, setOpen, ref } = useDropdown();
-  const {
-    open: setupOpen,
-    setOpen: setSetupOpen,
-    ref: setupRef,
-  } = useDropdown();
+  const product = useDropdown(false, { escapeHandledInside: true });
+  const solutions = useDropdown(false, { escapeHandledInside: true });
+  const setup = useDropdown(false, { escapeHandledInside: true });
+  const menus = [
+    { section: "product", label: "Product", groups: RESOURCES, menu: product },
+    {
+      section: "use-cases",
+      label: "Solutions",
+      groups: SOLUTIONS,
+      menu: solutions,
+    },
+    {
+      section: "setup",
+      label: "Setup guide",
+      groups: SETUP_GUIDES,
+      menu: setup,
+    },
+  ] as const;
+  const hoveredMenu = useRef<SiteHeaderActive>(null);
   const {
     open: mobileOpen,
     setOpen: setMobileOpen,
     ref: mobileRef,
-  } = useDropdown();
+  } = useDropdown(false, { escapeHandledInside: true });
   const menuButton = useRef<HTMLButtonElement>(null);
   const navId = useId();
+
+  const { setOpen: setProductOpen } = product;
+  const { setOpen: setSolutionsOpen } = solutions;
+  const { setOpen: setSetupOpen } = setup;
+  const openMenu = useCallback(
+    (section: SiteHeaderActive) => {
+      setProductOpen(section === "product");
+      setSolutionsOpen(section === "use-cases");
+      setSetupOpen(section === "setup");
+    },
+    [setProductOpen, setSolutionsOpen, setSetupOpen],
+  );
 
   useEffect(() => {
     const media = window.matchMedia?.("(max-width: 900px)");
@@ -105,14 +169,21 @@ export function SiteHeader({
     const previous = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const closeOnDesktop = () => {
-      if (!media.matches) setMobileOpen(false);
+      if (media.matches) return;
+      const focusedDropdown = document.activeElement?.closest(
+        `.${styles.dropdown}`,
+      );
+      focusedDropdown?.querySelector("button")?.focus();
+      hoveredMenu.current = null;
+      openMenu(null);
+      setMobileOpen(false);
     };
     media.addEventListener("change", closeOnDesktop);
     return () => {
       document.body.style.overflow = previous;
       media.removeEventListener("change", closeOnDesktop);
     };
-  }, [mobileOpen, setMobileOpen]);
+  }, [mobileOpen, openMenu, setMobileOpen]);
 
   return (
     <header className={styles.header} data-public-header>
@@ -122,8 +193,7 @@ export function SiteHeader({
         onKeyDown={(event) => {
           if (event.key === "Escape" && mobileOpen) {
             setMobileOpen(false);
-            setOpen(false);
-            setSetupOpen(false);
+            openMenu(null);
             menuButton.current?.focus();
           }
           // The open phone menu covers the page: Tab cycles between the toggle and the menu links.
@@ -159,125 +229,137 @@ export function SiteHeader({
           className={`${styles.nav} ${mobileOpen ? styles.navOpen : ""}`}
           aria-label="main navigation"
           onClick={(event) => {
-            if ((event.target as HTMLElement).closest("a")) {
-              setMobileOpen(false);
-              setOpen(false);
-              setSetupOpen(false);
-            }
+            const link = (event.target as Element).closest<HTMLAnchorElement>(
+              "a[href]",
+            );
+            if (
+              !link ||
+              event.button !== 0 ||
+              event.metaKey ||
+              event.ctrlKey ||
+              event.shiftKey ||
+              event.altKey
+            )
+              return;
+            if (link.target && link.target !== "_self") return;
+            setMobileOpen(false);
+            openMenu(null);
           }}
         >
-          <div
-            className={styles.dropdown}
-            ref={ref}
-            onKeyDown={(event) => {
-              if (event.key === "Escape" && open) {
-                setOpen(false);
-                ref.current?.querySelector("button")?.focus();
-              }
-            }}
-          >
-            <button
-              type="button"
-              className={navLinkClass(current === "product")}
-              aria-current={current === "product" ? "true" : undefined}
-              aria-haspopup="true"
-              aria-expanded={open}
-              onClick={() => {
-                setOpen(!open);
-                setSetupOpen(false);
-              }}
-            >
-              Product
-              <svg
-                className={styles.chev}
-                width="10"
-                height="10"
-                viewBox="0 0 10 10"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
+          {menus.map(
+            ({ section, label, groups, menu: { open, setOpen, ref } }) => (
+              <div
+                key={section}
+                className={styles.dropdown}
+                ref={ref}
+                onPointerEnter={(event) => {
+                  if (event.pointerType !== "mouse" || !usesDesktopNav())
+                    return;
+                  hoveredMenu.current = section;
+                  if (
+                    menus.some(
+                      (item) =>
+                        item.section !== section &&
+                        hasKeyboardFocusedLink(item.menu.ref.current),
+                    )
+                  )
+                    return;
+                  openMenu(section);
+                }}
+                onPointerLeave={(event) => {
+                  if (
+                    event.pointerType !== "mouse" ||
+                    hoveredMenu.current !== section
+                  )
+                    return;
+                  hoveredMenu.current = null;
+                  if (!hasKeyboardFocusedLink(ref.current)) setOpen(false);
+                }}
+                onBlur={(event) => {
+                  // Phone panels must stay in place until the next click lands.
+                  if (!usesDesktopNav()) return;
+                  if (
+                    open &&
+                    event.relatedTarget &&
+                    !event.currentTarget.contains(event.relatedTarget) &&
+                    hoveredMenu.current !== section
+                  ) {
+                    openMenu(hoveredMenu.current);
+                  }
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape" && open) {
+                    setOpen(false);
+                    ref.current?.querySelector("button")?.focus();
+                  }
+                }}
               >
-                <path d="M2 3.5 5 6.5 8 3.5" />
-              </svg>
-            </button>
-            {open && (
-              <div className={styles.panel}>
-                {RESOURCES.map((group) => (
-                  <div key={group.label}>
-                    <div className={styles.panelGroup}>{group.label}</div>
-                    {group.items.map((item) => (
-                      <a
-                        key={item.href}
-                        href={siteHref(item.href)}
-                        onClick={() => setOpen(false)}
-                      >
-                        {item.label}
-                      </a>
-                    ))}
+                <button
+                  type="button"
+                  className={navLinkClass(current === section)}
+                  aria-current={current === section ? "true" : undefined}
+                  aria-haspopup={section === "use-cases" ? undefined : "true"}
+                  aria-expanded={open}
+                  onClick={(event) => {
+                    const pointerType = (event.nativeEvent as PointerEvent)
+                      .pointerType;
+                    const mouseClick =
+                      event.detail > 0 &&
+                      (!pointerType || pointerType === "mouse");
+                    openMenu(
+                      (mouseClick && hoveredMenu.current === section) || !open
+                        ? section
+                        : null,
+                    );
+                  }}
+                >
+                  {label}
+                  <svg
+                    className={styles.chev}
+                    width="10"
+                    height="10"
+                    viewBox="0 0 10 10"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M2 3.5 5 6.5 8 3.5" />
+                  </svg>
+                </button>
+                {open && (
+                  <div
+                    className={
+                      section === "use-cases"
+                        ? `${styles.panelPosition} ${styles.solutionsPosition}`
+                        : styles.panelPosition
+                    }
+                  >
+                    <div
+                      className={
+                        section === "use-cases"
+                          ? `${styles.panel} ${styles.solutionsPanel}`
+                          : styles.panel
+                      }
+                    >
+                      {groups.map((group) => (
+                        <div key={group.label}>
+                          <div className={styles.panelGroup}>{group.label}</div>
+                          {group.items.map((item) => (
+                            <a key={item.href} href={siteHref(item.href)}>
+                              {item.label}
+                            </a>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                ))}
+                )}
               </div>
-            )}
-          </div>
-          <div
-            className={styles.dropdown}
-            ref={setupRef}
-            onKeyDown={(event) => {
-              if (event.key === "Escape" && setupOpen) {
-                setSetupOpen(false);
-                setupRef.current?.querySelector("button")?.focus();
-              }
-            }}
-          >
-            <button
-              type="button"
-              className={navLinkClass(current === "setup")}
-              aria-current={current === "setup" ? "true" : undefined}
-              aria-haspopup="true"
-              aria-expanded={setupOpen}
-              onClick={() => {
-                setSetupOpen(!setupOpen);
-                setOpen(false);
-              }}
-            >
-              Setup guide
-              <svg
-                className={styles.chev}
-                width="10"
-                height="10"
-                viewBox="0 0 10 10"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M2 3.5 5 6.5 8 3.5" />
-              </svg>
-            </button>
-            {setupOpen && (
-              <div className={styles.panel}>
-                {SETUP_GUIDES.map((group) => (
-                  <div key={group.label}>
-                    <div className={styles.panelGroup}>{group.label}</div>
-                    {group.items.map((item) => (
-                      <a
-                        key={item.href}
-                        href={siteHref(item.href)}
-                        onClick={() => setSetupOpen(false)}
-                      >
-                        {item.label}
-                      </a>
-                    ))}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+            ),
+          )}
           <a
             href={siteHref("/docs")}
             aria-current={current === "docs" ? "true" : undefined}
@@ -354,8 +436,7 @@ export function SiteHeader({
             aria-controls={navId}
             onClick={() => {
               setMobileOpen(!mobileOpen);
-              setOpen(false);
-              setSetupOpen(false);
+              openMenu(null);
             }}
           >
             <span aria-hidden="true" />

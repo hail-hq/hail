@@ -64,8 +64,13 @@ function canReceiveClick(target: EventTarget | null) {
  * - Escape.
  * Attach `ref` to the menu's root element and drive the trigger button with
  * `open` / `setOpen`. Document listeners are bound only while open.
+ * Set `escapeHandledInside` when the caller handles Escape inside the menu
+ * to restore focus before the panel is removed.
  */
-export function useDropdown(initialOpen = false) {
+export function useDropdown(
+  initialOpen = false,
+  { escapeHandledInside = false } = {},
+) {
   const [open, setOpen] = useState(initialOpen);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -116,7 +121,8 @@ export function useDropdown(initialOpen = false) {
       // A key press starts a new action: a press inside that sent no click
       // (right-click, cancelled touch scroll) must not keep the menu open.
       pressedInside = false;
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape" && !(escapeHandledInside && !outside(e)))
+        setOpen(false);
     }
     // A press that ended without a click, such as a touch scroll.
     function onPointerCancel(e: PointerEvent) {
@@ -149,7 +155,7 @@ export function useDropdown(initialOpen = false) {
       document.removeEventListener("pointercancel", onPointerCancel, true);
       document.removeEventListener("contextmenu", onContextMenu, true);
     };
-  }, [open]);
+  }, [escapeHandledInside, open]);
 
   return { open, setOpen, ref };
 }

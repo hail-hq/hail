@@ -36,6 +36,9 @@
   color: inherit;
   text-decoration: none;
 }
+.header.header a:hover {
+  text-decoration: none;
+}
 .shell {
   width: min(1240px, calc(100% - var(--public-gutter, 32px) * 2));
   min-height: calc(var(--hail-header-h) - 1px);
@@ -82,25 +85,20 @@
   transition: color 200ms var(--ease);
 }
 .navLink:hover,
-.navLink.active {
+.navLink.active,
+.navLink[aria-expanded="true"] {
   color: var(--ink);
 }
 .navLink.active {
-  text-decoration: underline;
-  text-underline-offset: 6px;
-  text-decoration-thickness: 1px;
+  font-weight: 600;
 }
 .dropdown {
   position: relative;
 }
 .panel {
-  position: absolute;
-  top: calc(100% + 10px);
-  left: -12px;
   display: flex;
   flex-direction: column;
   gap: 18px;
-  min-width: 245px;
   max-height: 65vh;
   padding: 16px;
   overflow-y: auto;
@@ -123,9 +121,12 @@
   color: var(--ink);
 }
 .panelGroup {
-  margin: 0 10px 4px;
-  color: var(--public-muted, #626b79);
+  margin: 0 10px 6px;
+  padding-bottom: 7px;
+  border-bottom: 1px solid var(--public-line, #e0e2e7);
+  color: var(--ink);
   font-size: 12px;
+  font-weight: 650;
   line-height: 16px;
 }
 .navActions {
@@ -257,6 +258,25 @@
     gap: 6px;
   }
 }
+@media (width > 900px) {
+  .panelPosition {
+    position: absolute;
+    top: 100%;
+    left: -12px;
+    min-width: 245px;
+    /* Keep the gap below the button inside the hover area. */
+    padding-top: 10px;
+  }
+  .solutionsPosition {
+    left: -110px;
+    width: 560px;
+  }
+  .solutionsPanel {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 900px) {
   :global(:root) {
     --hail-header-h: 82px;
@@ -337,8 +357,6 @@
     margin-left: auto;
   }
   .panel {
-    position: static;
-    min-width: 0;
     max-height: none;
     margin-block: 4px 12px;
     padding: 12px 0 12px 12px;
