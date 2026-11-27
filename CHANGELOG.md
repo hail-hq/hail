@@ -4,6 +4,16 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+## [0.42.0] (2026-11-27)
+
+Agents answer calls, texts and email from your own documents with the
+knowledge base (early access). A call whose phone system sent one of your own
+numbers as the caller now says why its caller is hidden.
+
+Component versions cut alongside this release:
+**`cli-v0.39.0`** (Homebrew + GitHub Releases), **`sdk-v0.27.0`** (PyPI),
+MCP registry **0.4.0**. One database migration (the knowledge base).
+
 ### Added
 
 - Knowledge base (early access): upload manuals, FAQs and part lists, and agents answer calls, texts and email from them, in any supported language (`/v1/knowledge`, `knowledge` on agents, CLI `hail knowledge`, SDK and MCP).
