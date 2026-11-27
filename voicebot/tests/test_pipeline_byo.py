@@ -83,6 +83,7 @@ def captured_plugins(monkeypatch):
     monkeypatch.setattr(pipeline.google_plugin, "LLM", make("google"))
     monkeypatch.setattr(pipeline.google_plugin.beta, "GeminiTTS", make("gemini"))
     monkeypatch.setattr(pipeline.anthropic_plugin, "LLM", make("anthropic"))
+    monkeypatch.setattr(pipeline.xai_plugin, "TTS", make("xai"))
     return calls
 
 
@@ -358,6 +359,44 @@ def test_explicit_charon_works_when_gemini_is_the_only_house_provider(
     monkeypatch.setattr(settings, "eleven_api_key", "")
     assert build_tts(voice_id_override="Charon", language="en").label == "gemini"
     assert captured_plugins["gemini"][-1].kwargs["voice_name"] == "Charon"
+
+
+@pytest.mark.parametrize(
+    ("voice", "provider", "field"),
+    [("Charon", "gemini", "voice_name"), ("ara", "xai", "voice")],
+)
+def test_explicit_preset_voice_leads_the_house_chain(
+    monkeypatch, captured_plugins, voice, provider, field
+):
+    monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
+    monkeypatch.setattr(settings, "gemini_voice_id", "Kore")
+    monkeypatch.setattr(settings, "xai_api_key", "house-xai")
+    monkeypatch.setattr(settings, "eleven_api_key", "house-eleven")
+    monkeypatch.setattr(settings, "elevenlabs_voice_id", "eleven-house-voice")
+
+    chain = build_tts(voice_id_override=voice, language="en")
+
+    assert [item.label for item in chain._tts_instances] == [
+        provider,
+        "cartesia",
+        "elevenlabs",
+    ]
+    assert captured_plugins[provider][0].kwargs[field] == voice
+    assert captured_plugins["cartesia"][0].kwargs["voice"] == "house-voice"
+    assert captured_plugins["elevenlabs"][0].kwargs["voice_id"] == "eleven-house-voice"
+
+
+def test_explicit_preset_voice_without_its_key_uses_house_defaults(
+    monkeypatch, captured_plugins
+):
+    monkeypatch.setattr(settings, "assemblyai_api_key", "")
+
+    constructor = Mock()
+    monkeypatch.setattr(pipeline.assemblyai_plugin, "TTS", constructor)
+
+    assert build_tts(voice_id_override="aai-audrey", language="en").label == "cartesia"
+    constructor.assert_not_called()
+    assert captured_plugins["cartesia"][0].kwargs["voice"] == "house-voice"
 
 
 def test_workspace_gemini_can_fall_back_to_house_credentials(

@@ -54,6 +54,38 @@ async def test_unsupported_vertex_location_makes_gemini_unavailable(monkeypatch)
     assert not await catalog.preset_credentials_available("gemini")
 
 
+async def test_vertex_credentials_are_looked_up_once(monkeypatch):
+    monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
+    monkeypatch.setattr(settings, "google_cloud_location", "global")
+    monkeypatch.setattr(
+        catalog, "_vertex_auth", {"credentials": None, "failed_at": None}
+    )
+    lookups = []
+
+    def missing(**kwargs):
+        lookups.append(kwargs)
+        raise catalog.GoogleAuthError("no credentials")
+
+    monkeypatch.setattr(catalog.google.auth, "default", missing)
+    assert not await catalog.preset_credentials_available("gemini")
+    assert not await catalog.preset_credentials_available("gemini")
+    assert len(lookups) == 1
+
+    found = object()
+    monkeypatch.setattr(catalog, "_vertex_auth", {"credentials": None, "failed_at": 0})
+    monkeypatch.setattr(catalog.time, "monotonic", lambda: 1000.0)
+
+    def available(**kwargs):
+        lookups.append(kwargs)
+        return found, "hail-speech"
+
+    monkeypatch.setattr(catalog.google.auth, "default", available)
+    assert await catalog.preset_credentials_available("gemini")
+    assert await catalog.preset_credentials_available("gemini")
+    assert catalog._vertex_credentials() is found
+    assert len(lookups) == 2
+
+
 @pytest.fixture(autouse=True)
 def catalogue_settings(monkeypatch):
     catalog._cache.clear()

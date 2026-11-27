@@ -43,6 +43,10 @@ _ENGLISH_PRESETS = (
     ("assemblyai", "Audrey", "female"),
 )
 _GOOGLE_AUTH_TIMEOUT = 4.0
+# Reuse one credentials object (it refreshes its own token). After a failed
+# lookup, wait before asking again so picker loads do not each wait on it.
+_GOOGLE_AUTH_RETRY_SECONDS = 60.0
+_vertex_auth: dict[str, object] = {"credentials": None, "failed_at": None}
 SAMPLE_RATE = 24000
 
 
@@ -381,9 +385,21 @@ async def voice_catalogue(language: str, *, include_direct: bool = False) -> dic
 
 
 def _vertex_credentials():
-    credentials, _ = google.auth.default(
-        scopes=["https://www.googleapis.com/auth/cloud-platform"]
-    )
+    if _vertex_auth["credentials"] is not None:
+        return _vertex_auth["credentials"]
+    failed_at = _vertex_auth["failed_at"]
+    if failed_at is not None and time.monotonic() - failed_at < (
+        _GOOGLE_AUTH_RETRY_SECONDS
+    ):
+        raise GoogleAuthError("Google Cloud credentials were unavailable.")
+    try:
+        credentials, _ = google.auth.default(
+            scopes=["https://www.googleapis.com/auth/cloud-platform"]
+        )
+    except (GoogleAuthError, OSError):
+        _vertex_auth["failed_at"] = time.monotonic()
+        raise
+    _vertex_auth.update(credentials=credentials, failed_at=None)
     return credentials
 
 

@@ -6,8 +6,6 @@ The call worker and picker both read `GEMINI_VOICE_ID`. An operator can change t
 
 **Architecture** — Keep voice and credential settings in the existing provider rows. Use LiveKit's direct provider plugins for call synthesis and the existing signed API endpoint for samples. Hail uses Vertex AI when a Google Cloud project is configured. Workspaces supply Gemini API keys through the existing provider settings.
 
-[Voice audition and rollout plan](https://chatgpt.com/space/page_dcec800738c88191bdefd7c8e9232056)
-
 ## Backend
 
 - [x] Add regression tests for provider routing, legacy explicit selections, authentication, and advertised voices.

@@ -99,6 +99,24 @@ def tts_preset(provider: str) -> tuple[str, str]:
     }[provider]
 
 
+def preset_voice_provider(voice_id: str | None) -> str | None:
+    """Name the preset provider whose voice this is, or None."""
+    if not voice_id:
+        return None
+    return next(
+        (
+            provider
+            for provider in TTS_PRESET_MODELS
+            if (
+                is_gemini_voice(voice_id)
+                if provider == "gemini"
+                else voice_id == tts_preset(provider)[0]
+            )
+        ),
+        None,
+    )
+
+
 def tts_preset_configured(provider: str) -> bool:
     return bool(
         tts_preset(provider)[1].strip()

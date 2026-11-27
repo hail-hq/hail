@@ -81,6 +81,7 @@ from hailhq.core.provider_config import (
     gemini_vertex_location,
     is_gemini_voice,
     load_org_provider_configs,
+    preset_voice_provider,
     provider_cipher,
     tts_preset,
     tts_preset_configured,
@@ -567,7 +568,9 @@ def _house_tts(
 ) -> list[agents_tts.TTS]:
     allowed = tts_providers_for(language)
     legacy: dict[str, agents_tts.TTS] = {}
-    unscoped_voice = None if override_provider else voice_id_override
+    # A preset voice ID means nothing to Cartesia or ElevenLabs.
+    preset = None if override_provider else preset_voice_provider(voice_id_override)
+    unscoped_voice = None if override_provider or preset else voice_id_override
     cartesia_voice = unscoped_voice or settings.cartesia_voice_id
     elevenlabs_voice = unscoped_voice or settings.elevenlabs_voice_id
     if settings.cartesia_api_key and "cartesia" in allowed:
@@ -599,24 +602,20 @@ def _house_tts(
             )
             instances.append(_org_tts(selection, None, language))
     instances.extend(legacy.values())
-    if (
-        include_gemini
-        and "gemini" in allowed
-        and tts_preset_configured("gemini")
-        and (
-            not voice_id_override
-            or is_gemini_voice(voice_id_override)
-            and not (settings.cartesia_api_key or settings.eleven_api_key)
-        )
-    ):
+    # An explicit preset voice leads; inherited voices start with Gemini.
+    lead = preset or (None if voice_id_override else "gemini")
+    if lead == "gemini" and not include_gemini:
+        lead = None
+    if lead and lead in allowed and tts_preset_configured(lead):
         try:
-            gemini = _org_tts(
-                ResolvedLayer("gemini", None, {}, False), voice_id_override, language
+            speaker = _org_tts(
+                ResolvedLayer(lead, None, {}, False), voice_id_override, language
             )
         except (GoogleAuthError, ValueError):
-            logger.warning("Could not configure Hail's Gemini speech.")
+            logger.warning("Could not configure Hail's %s speech.", lead)
         else:
-            instances.insert(len(instances) if gemini_last else 0, gemini)
+            last = gemini_last and lead == "gemini"
+            instances.insert(len(instances) if last else 0, speaker)
     return instances
 
 
@@ -805,7 +804,12 @@ def build_tts(
     )
     if not instances:
         # Distinguish between no keys configured vs. language filtering all keys out.
-        if settings.cartesia_api_key or settings.eleven_api_key:
+        if (
+            settings.cartesia_api_key
+            or settings.eleven_api_key
+            or tts_preset_configured("gemini")
+            and "gemini" not in tts_providers_for(language)
+        ):
             # Keys exist but the language filtered them all out. (Every
             # supported language has at least Cartesia, so `providers` is
             # never empty here.)
