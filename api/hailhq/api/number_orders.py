@@ -32,6 +32,7 @@ from hailhq.core.number_offers import CarrierOffer, discover_offers
 from hailhq.core.plans import (
     OVER_PLAN_REF_SUFFIX,
     PLAN_NUMBER_SOURCE,
+    current_allowance,
     return_number_slot,
     take_number_slot,
 )
@@ -166,6 +167,13 @@ async def finish_order(
                 )
             )
         fee_ref = monthly_fee_ref(number.organization_id, number.id, now)
+        if plan_cents and not failed:
+            # An order the carrier finished later: the plan pays only if the
+            # month whose slot it took is still the current, paid one.
+            current = await current_allowance(db, number.organization_id)
+            if current is None or str(current.id) != meta["plan_allowance_id"]:
+                await return_number_slot(db, UUID(meta["plan_allowance_id"]))
+                plan_cents = 0
         if failed and plan_cents:
             await return_number_slot(db, UUID(meta["plan_allowance_id"]))
         elif not failed and plan_cents:
@@ -655,9 +663,16 @@ async def acquire_offer(
         )
     approval = pick_approval(offer, subject_type, verification_id)
     total = offer.monthly_cents + offer.setup_cents
+    # What credits pay: an included plan number pays (part of) its first
+    # month (hailhq.core.plans). Read again under the lock below.
+    slot = (
+        await take_number_slot(db, org, offer.monthly_cents, take=False)
+        if billed
+        else None
+    )
     no_funds = HTTPException(
         status_code=402,
-        detail=f"insufficient credits; setup and the first month cost ${total / 100:.2f}; top up at {BILLING_URL}",
+        detail=f"insufficient credits; setup and the first month cost ${(total - (slot[1] if slot else 0)) / 100:.2f} from credits; top up at {BILLING_URL}",
     )
 
     async def short_of_funds() -> bool:

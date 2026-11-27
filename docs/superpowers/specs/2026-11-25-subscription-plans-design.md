@@ -128,7 +128,7 @@ Two lines (handover), one Standard and one Plus: `plan_minutes_per_minute: 3`, `
 
 A call may run for what the plan and the balance pay together.
 
-1. `plan_left = included_minutes - used_minutes - held plan minutes of other calls` (one statement, `plan_minutes_available`).
+1. `plan_left = included_minutes - used_minutes - held plan minutes of other calls` (one statement, `plan_minutes_left`).
 2. `P = floor(plan_left / plan_minutes_per_minute)` call minutes from the plan.
 3. During plan minutes the balance pays `cents_per_minute - plan_cents_per_minute` a minute (recording, Other legs) plus `cents_per_call`. After them it pays the full price.
 4. The hold stores the balance part in `cents` and `plan_minutes_per_minute x plan minutes` in `plan_minutes`.
@@ -143,7 +143,9 @@ When the plan is on and `used_numbers < included_numbers`, the first month of a 
 - a debit for the part above the cap, ref + `:over_plan`;
 - the setup fee and numbers beyond the included count are paid from credits, as today.
 
-The purchase's funds check needs only the credits part. The billing site's monthly fee rater pays later months the same way: oldest numbers first, up to `included_numbers`, each month.
+The purchase's funds check needs only the credits part. An order the carrier finishes later is paid by the plan only while the month whose slot it took is still the current, paid one; otherwise the slot goes back and credits pay, as today.
+
+The billing site's monthly fee rater pays later months the same way: oldest numbers first, up to `included_numbers`, each month. When it creates a month's row it gives the included numbers to the workspace's active numbers, oldest first, in the same transaction and under the workspace lock (their plan rows and `used_numbers`). A purchase then takes only a slot that is left.
 
 ## Feature gates (`hailhq.core.plans`)
 
@@ -187,7 +189,8 @@ The cap on all workspaces together (`GLOBAL_MAX_BYTES` in `hailhq.core.knowledge
 
 1. The knowledge base PR merges and deploys (this migration runs after its migration).
 2. This PR merges and deploys (hail GHA deploy runs the migration).
-3. The billing site's plans and Stripe PR, then its metering PR (quote fields, plan rows, counters).
+3. The billing site's plans and Stripe PR. It writes `organization_plans` and `organization_knowledge`, but **no `plan_allowances` rows**: hail passes use on a month's row, and without the raters raising `used_*`, that row would let use through with no end.
+4. The billing site's metering PR: `plan_allowances` rows, the raters that raise `used_*` and write plan rows, the quote fields. Its first allowance rows ship with it, never before.
 
 ## Tests
 

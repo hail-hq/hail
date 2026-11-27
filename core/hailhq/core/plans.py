@@ -27,7 +27,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 __all__ = [
     "FEATURE_TIERS",
     "OVER_PLAN_REF_SUFFIX",
-    "PLAN_LEDGER_SOURCE",
     "PLAN_NUMBER_SOURCE",
     "Feature",
     "PlanUse",
@@ -36,7 +35,6 @@ __all__ = [
     "current_allowance",
     "plan_allows",
     "plan_covers",
-    "plan_usage_ref",
     "return_number_slot",
     "take_number_slot",
 ]
@@ -50,19 +48,13 @@ FEATURE_TIERS: Final[dict[str, frozenset[str]]] = {
     "connected_phone_systems": frozenset({"business", "enterprise"}),
 }
 
-# account_credits.source of "paid from plan" rows (kind = 'plan').
-PLAN_LEDGER_SOURCE: Final = "plan"
+# account_credits.source of a number fee the plan pays (kind = 'plan'). The
+# billing site's raters write usage rows with source 'plan' (spec).
 PLAN_NUMBER_SOURCE: Final = "plan.monthly_fee"
 # A number's monthly fee above the plan's per-number cap is a debit with the
 # month's fee ref plus this; the plan row takes the fee ref itself, so the
 # billing site's renewal rater sees the month as billed.
 OVER_PLAN_REF_SUFFIX: Final = ":over_plan"
-
-
-def plan_usage_ref(ref: str) -> str:
-    """Ledger ref of the plan part of a use whose credits part has ``ref``:
-    one use can be part plan, part credits, and refs are unique per org."""
-    return f"plan:{ref}"
 
 
 def billing_enabled() -> bool:
