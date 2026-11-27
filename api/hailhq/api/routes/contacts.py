@@ -120,6 +120,7 @@ async def list_contacts(
             name=row.name,
             phone_e164=row.phone_e164,
             email=row.email,
+            extension=row.extension,
             role=row.role,
         )
         for row in rows
@@ -137,9 +138,10 @@ async def create_contact(
     principal: Annotated[Principal, Depends(get_current_principal)],
     db: Annotated[AsyncSession, Depends(get_session)],
 ) -> ContactEntry:
-    """Create a manual contact with a phone and/or an email.
+    """Create a manual contact with a phone, an email or an extension.
 
-    Requires at least one of phone_e164 or email. Fails with 409 if a
+    Requires at least one of phone_e164, email or extension (an extension
+    on your connected phone system, for handover). Fails with 409 if a
     contact with the same phone or email already exists in this
     organization.
     """
@@ -148,6 +150,7 @@ async def create_contact(
         name=body.name,
         phone_e164=body.phone_e164,
         email=body.email,
+        extension=body.extension,
         created_by=principal.user_id,
     )
     db.add(row)
@@ -177,15 +180,18 @@ async def patch_contact(
 
     Manual contacts only — a member: id (org members synced from
     membership) returns 422; edit those via the membership APIs instead.
-    The contact must still have at least one of phone_e164 or email after
-    the update. Fails with 409 on a duplicate phone/email.
+    The contact must still have at least one of phone_e164, email or
+    extension after the update. Fails with 409 on a duplicate phone/email.
     """
     row = await _get_manual_or_404(db, principal.organization_id, contact_id)
     data = body.model_dump(exclude_unset=True)
     next_phone = data.get("phone_e164", row.phone_e164)
     next_email = data.get("email", row.email)
-    if next_phone is None and next_email is None:
-        raise unprocessable("a contact needs at least one of phone_e164 or email")
+    next_extension = data.get("extension", row.extension)
+    if next_phone is None and next_email is None and next_extension is None:
+        raise unprocessable(
+            "a contact needs at least one of phone_e164, email or extension"
+        )
     for field, value in data.items():
         setattr(row, field, value)
     try:

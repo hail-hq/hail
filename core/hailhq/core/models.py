@@ -841,6 +841,13 @@ class PhoneNumber(Base):
         return self.inbound_registered_at is not None
 
     @property
+    def source(self) -> str:
+        """Read by ``PhoneNumberResponse``: ``connected`` for a number on the
+        customer's own phone system, ``purchased`` for one bought at a
+        carrier."""
+        return "connected" if self.provider == "pbx" else "purchased"
+
+    @property
     def subject_type(self) -> str | None:
         """Read by ``PhoneNumberResponse``: subject type of the verification
         the purchase used, from the stored offer. None when none was used."""
@@ -895,8 +902,9 @@ class SipConnection(Base):
     )
     pbx_username: Mapped[str | None] = mapped_column(Text, nullable=True)
     encrypted_pbx_password: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # ISO country, to read national caller numbers.
-    default_region: Mapped[str] = mapped_column(Text, nullable=False)
+    # Optional phone system country, tried first to read callers
+    # (inbound_calls._caller_of); NULL: the called number's country.
+    default_region: Mapped[str | None] = mapped_column(Text, nullable=True)
     livekit_inbound_trunk_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     livekit_outbound_trunk_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(

@@ -53,6 +53,21 @@ export function rowPrice(row: Row, usdField: string, fractionDigits: number): st
   return money(amount(row, usdField), currencyOf(row), fractionDigits);
 }
 
+/** A TTS price with its vendor's billing unit. */
+export function ttsPrice(row: Partial<TTSRow>): string {
+  const components = [
+    ['price_per_1m_chars_usd', '1M characters'],
+    ['price_per_1m_text_tokens_usd', '1M text tokens'],
+    ['price_per_1m_audio_tokens_usd', '1M audio tokens'],
+  ];
+  const prices = components
+    .filter(([field]) => amount(row, field) !== undefined)
+    .map(([field, unit]) => `${rowPrice(row, field, 2)} / ${unit}`);
+  if (prices.length === 0) return '—';
+  if (row.promo_ends_at) prices.push(`Introductory through ${row.promo_ends_at}`);
+  return prices.join(' · ');
+}
+
 /** Sort value: USD rows only. EUR rows sort last. */
 export function usdSort(row: Row, usdField: string): number | undefined {
   return isUsd(row) ? numOpt(field(row, usdField)) : undefined;

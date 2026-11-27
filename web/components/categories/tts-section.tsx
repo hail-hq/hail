@@ -5,7 +5,7 @@ import type { TTSRow } from "@/lib/types";
 import { CategorySection } from "../category-section";
 import { ModelIdCell } from "../model-id-cell";
 import { VerifiedCell } from "../verified-cell";
-import { formatCloning, langs, priceLabel, rowPrice, rowRange, rowsOf, usdSort } from "@/lib/format";
+import { formatCloning, langs, rowRange, ttsPrice, usdSort } from "@/lib/format";
 
 const columns: ColumnDef<TTSRow>[] = [
   {
@@ -18,15 +18,19 @@ const columns: ColumnDef<TTSRow>[] = [
         <div style={{ fontSize: 13, marginTop: 2 }}>
           {row.original.display_name}
         </div>
-        <ModelIdCell modelId={row.original.model_id} />
+        {row.original.api_endpoint ? (
+          <code>{new URL(row.original.api_endpoint).pathname}</code>
+        ) : (
+          <ModelIdCell modelId={row.original.model_id} />
+        )}
       </div>
     ),
   },
   {
     id: "price",
     accessorFn: (row) => usdSort(row, "price_per_1m_chars_usd"),
-    header: ({ table }) => priceLabel(rowsOf(table), "$/1M chars", "Price/1M chars"),
-    cell: ({ row }) => rowPrice(row.original, "price_per_1m_chars_usd", 2),
+    header: "Price (sort by $/1M characters)",
+    cell: ({ row }) => ttsPrice(row.original),
     sortingFn: "basic",
     sortUndefined: "last",
     meta: { num: true, killer: true },

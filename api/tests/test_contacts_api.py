@@ -556,3 +556,50 @@ async def test_superadmin_sets_other_phone_with_no_membership_row(
         await async_session.execute(select(User).where(User.id == other_uid))
     ).scalar_one()
     assert row.phone_number == "+14155550210"
+
+
+# --------------------------------------------------------------------------- #
+# Extension contacts (a phone system extension, for handover)
+# --------------------------------------------------------------------------- #
+
+
+async def test_create_contact_with_extension_only(
+    client: httpx.AsyncClient, org_and_key: tuple
+) -> None:
+    _org, _key, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    body = await _create_manual(client, headers, name="Support line", extension="800")
+    assert body["extension"] == "800"
+    assert body["phone_e164"] is None
+    listed = (await client.get("/contacts", headers=headers)).json()["items"]
+    assert [c["extension"] for c in listed if c["kind"] == "manual"] == ["800"]
+
+
+@pytest.mark.parametrize("ext", ["1234567", "12a", ""])
+async def test_create_contact_rejects_bad_extension(
+    client: httpx.AsyncClient, org_and_key: tuple, ext: str
+) -> None:
+    _org, _key, plain = org_and_key
+    resp = await client.post(
+        "/contacts",
+        json={"name": "Desk", "extension": ext},
+        headers={"Authorization": f"Bearer {plain}"},
+    )
+    assert resp.status_code == 422
+
+
+async def test_patch_contact_cannot_clear_all_reachability(
+    client: httpx.AsyncClient, org_and_key: tuple
+) -> None:
+    _org, _key, plain = org_and_key
+    headers = {"Authorization": f"Bearer {plain}"}
+    row = await _create_manual(client, headers, name="Support line", extension="800")
+    resp = await client.patch(
+        f"/contacts/{row['id']}", json={"extension": None}, headers=headers
+    )
+    assert resp.status_code == 422
+    resp = await client.patch(
+        f"/contacts/{row['id']}", json={"extension": "*12#"}, headers=headers
+    )
+    assert resp.status_code == 200
+    assert resp.json()["extension"] == "*12#"

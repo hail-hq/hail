@@ -39,8 +39,18 @@
         { "required": ["price_per_1m_chars_usd"] },
         { "required": ["price_per_1m_chars_eur"] },
         { "required": ["price_per_second_usd"] },
-        { "required": ["price_per_second_eur"] }
+        { "required": ["price_per_second_eur"] },
+        {
+          "required": [
+            "price_per_1m_text_tokens_usd",
+            "price_per_1m_audio_tokens_usd"
+          ]
+        }
       ],
+      "dependentRequired": {
+        "price_per_1m_text_tokens_usd": ["price_per_1m_audio_tokens_usd"],
+        "price_per_1m_audio_tokens_usd": ["price_per_1m_text_tokens_usd"]
+      },
       "if": {
         "anyOf": [
           { "required": ["price_per_1m_chars_eur"] },
@@ -51,7 +61,8 @@
         "not": {
           "anyOf": [
             { "required": ["price_per_1m_chars_usd"] },
-            { "required": ["price_per_second_usd"] }
+            { "required": ["price_per_second_usd"] },
+            { "required": ["price_per_1m_text_tokens_usd"] }
           ]
         }
       },
@@ -59,6 +70,11 @@
         "provider": { "type": "string", "minLength": 1 },
         "provider_url": { "type": "string", "format": "uri" },
         "model_id": { "type": "string", "minLength": 1 },
+        "api_endpoint": {
+          "type": "string",
+          "format": "uri",
+          "description": "Direct vendor endpoint for a service selected by voice ID."
+        },
         "display_name": { "type": "string", "minLength": 1 },
         "featured": {
           "type": "boolean",
@@ -68,6 +84,8 @@
         "price_per_1m_chars_eur": { "$ref": "#/$defs/decimal" },
         "price_per_second_usd": { "$ref": "#/$defs/decimal" },
         "price_per_second_eur": { "$ref": "#/$defs/decimal" },
+        "price_per_1m_text_tokens_usd": { "$ref": "#/$defs/decimal" },
+        "price_per_1m_audio_tokens_usd": { "$ref": "#/$defs/decimal" },
         "voice_quality": { "enum": ["standard", "neural", "cloned"] },
         "voice_count": { "type": "integer", "minimum": 1 },
         "voices_count": { "type": "integer", "minimum": 1 },

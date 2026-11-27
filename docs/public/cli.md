@@ -94,6 +94,26 @@ hail numbers register-sms --subject-type business --field legal_name="Acme Inc" 
 
 `register-sms` files a US SMS registration (`purpose=sms` on [`POST /verifications`](../../openapi/openapi.yaml)). `--subject-type` (`person` or `business`) is required. Hail picks the carrier from your US numbers. Pass `--number-id <id>` when your US numbers are with more than one carrier.
 
+## Phone system (PBX)
+
+Connect your own phone system: it sends the calls you choose to a Hail agent over a SIP trunk. Setup: [Connect your phone system](connect-phone-system.md).
+
+```bash
+hail sip-connections create --label "Main office"   # SIP server, username and password (shown once)
+hail sip-connections list
+hail sip-connections get <connection_id>
+hail sip-connections update <connection_id> --label "Front desk"
+hail sip-connections update <connection_id> --region GB        # the phone system's country, read first for callers on every number; --clear-region undoes it
+hail sip-connections rotate-password <connection_id>
+hail sip-connections add-number <connection_id> +14155550100   # unverified until the check passes
+hail sip-connections verify <connection_id> <number_id>        # Hail calls the number (up to 2 minutes)
+hail numbers route <number_id> --calls <agent_id>             # the agent that answers
+hail sip-connections remove-number <connection_id> <number_id>
+hail sip-connections delete <connection_id>
+```
+
+The SIP server shows its first characters; Hail's team sends you the full address (hi@hail.so). Hail reads each caller with the country of the number that was called, so most connections need no `--region`. A phone system whose numbers come from several countries should set its own country with `--region`: it is then read first for callers on every number.
+
 ## Email
 
 ```bash
@@ -179,7 +199,7 @@ hail contacts set-phone me --phone +15551234567
 hail contacts clear-phone me
 ```
 
-`create` requires one of `--phone` / `--email`. `list` takes `--q`, `--limit`, `--cursor`, `--all`.
+`create` requires one of `--phone` / `--email` / `--extension` (an extension on your connected phone system, 1 to 6 digits, `*` or `#`, for handover). `list` takes `--q`, `--limit`, `--cursor`, `--all`.
 
 ## Providers
 

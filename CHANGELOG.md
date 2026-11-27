@@ -4,6 +4,54 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+## [0.41.0] (2026-11-27)
+
+Connect your phone system needs no country: Hail reads each caller with the
+country of the number called. The SIP server shows its first characters,
+then dots, until Hail's team sends the full address.
+
+Component versions cut alongside this release:
+**`cli-v0.38.0`** (Homebrew + GitHub Releases). No SDK or MCP change. One
+database migration (the connection's country becomes optional).
+
+### Changed
+
+- Connect your phone system needs no country: Hail reads each caller with the country of the number called. `hail sip-connections create --region` is optional, and `update --region` / `--clear-region` set or clear it.
+- The masked SIP server shows its first characters, then dots.
+
+## [0.40.0] (2026-11-25)
+
+Connect your phone system is open to every workspace, in the console, the API
+and the CLI. A failed ownership check names the cause and the next step.
+
+Component versions cut alongside this release:
+**`cli-v0.37.0`** (Homebrew + GitHub Releases). No SDK or MCP change. No
+database migration.
+
+### Added
+
+- Connect your phone system is open to every workspace, in the console, the API and the CLI (`hail sip-connections`).
+
+### Fixed
+
+- A failed ownership check of a connected number names the cause and the next step.
+
+## [0.39.0] (2026-11-25)
+
+Connect your phone system: keep your number and your phone system (PBX), and
+send the calls you choose to a Hail agent. Hail's team sets it up with you.
+Contacts can be phone system extensions, for handover. A failed webhook
+delivery shows a short reason, such as a TLS or connection failure.
+
+Component versions cut alongside this release:
+**`cli-v0.36.0`** (Homebrew + GitHub Releases), **`sdk-v0.26.0`** (PyPI),
+MCP registry **0.3.0**. One database migration (connected phone systems).
+
+### Added
+
+- Connect your phone system: keep your number and phone system, and send its calls to a Hail agent. Hail's team sets it up with you.
+- Contacts can be phone system extensions, for handover.
+
 ### Fixed
 
 - Webhooks: a delivery that cannot reach its endpoint shows a short reason, such as a TLS or connection failure.
