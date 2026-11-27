@@ -618,6 +618,7 @@ func (e FieldSpecKind) Valid() bool {
 // Defines values for FileUploadCreatePurpose.
 const (
 	FileUploadCreatePurposeEmailAttachment      FileUploadCreatePurpose = "email_attachment"
+	FileUploadCreatePurposeKnowledgeDocument    FileUploadCreatePurpose = "knowledge_document"
 	FileUploadCreatePurposeSmsEvidence          FileUploadCreatePurpose = "sms_evidence"
 	FileUploadCreatePurposeVerificationDocument FileUploadCreatePurpose = "verification_document"
 )
@@ -626,6 +627,8 @@ const (
 func (e FileUploadCreatePurpose) Valid() bool {
 	switch e {
 	case FileUploadCreatePurposeEmailAttachment:
+		return true
+	case FileUploadCreatePurposeKnowledgeDocument:
 		return true
 	case FileUploadCreatePurposeSmsEvidence:
 		return true
@@ -639,6 +642,7 @@ func (e FileUploadCreatePurpose) Valid() bool {
 // Defines values for FileUploadLinkResponsePurpose.
 const (
 	FileUploadLinkResponsePurposeEmailAttachment      FileUploadLinkResponsePurpose = "email_attachment"
+	FileUploadLinkResponsePurposeKnowledgeDocument    FileUploadLinkResponsePurpose = "knowledge_document"
 	FileUploadLinkResponsePurposeSmsEvidence          FileUploadLinkResponsePurpose = "sms_evidence"
 	FileUploadLinkResponsePurposeVerificationDocument FileUploadLinkResponsePurpose = "verification_document"
 )
@@ -647,6 +651,8 @@ const (
 func (e FileUploadLinkResponsePurpose) Valid() bool {
 	switch e {
 	case FileUploadLinkResponsePurposeEmailAttachment:
+		return true
+	case FileUploadLinkResponsePurposeKnowledgeDocument:
 		return true
 	case FileUploadLinkResponsePurposeSmsEvidence:
 		return true
@@ -660,6 +666,7 @@ func (e FileUploadLinkResponsePurpose) Valid() bool {
 // Defines values for FileUploadResponsePurpose.
 const (
 	EmailAttachment      FileUploadResponsePurpose = "email_attachment"
+	KnowledgeDocument    FileUploadResponsePurpose = "knowledge_document"
 	SmsEvidence          FileUploadResponsePurpose = "sms_evidence"
 	VerificationDocument FileUploadResponsePurpose = "verification_document"
 )
@@ -668,6 +675,8 @@ const (
 func (e FileUploadResponsePurpose) Valid() bool {
 	switch e {
 	case EmailAttachment:
+		return true
+	case KnowledgeDocument:
 		return true
 	case SmsEvidence:
 		return true
@@ -711,6 +720,30 @@ func (e ForwardTargetResponseStatus) Valid() bool {
 	case ForwardTargetResponseStatusStopped:
 		return true
 	case ForwardTargetResponseStatusVerified:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for KnowledgeDocumentResponseStatus.
+const (
+	KnowledgeDocumentResponseStatusFailed     KnowledgeDocumentResponseStatus = "failed"
+	KnowledgeDocumentResponseStatusPending    KnowledgeDocumentResponseStatus = "pending"
+	KnowledgeDocumentResponseStatusProcessing KnowledgeDocumentResponseStatus = "processing"
+	KnowledgeDocumentResponseStatusReady      KnowledgeDocumentResponseStatus = "ready"
+)
+
+// Valid indicates whether the value is a known member of the KnowledgeDocumentResponseStatus enum.
+func (e KnowledgeDocumentResponseStatus) Valid() bool {
+	switch e {
+	case KnowledgeDocumentResponseStatusFailed:
+		return true
+	case KnowledgeDocumentResponseStatusPending:
+		return true
+	case KnowledgeDocumentResponseStatusProcessing:
+		return true
+	case KnowledgeDocumentResponseStatusReady:
 		return true
 	default:
 		return false
@@ -977,22 +1010,22 @@ func (e QuoteOfferReadiness) Valid() bool {
 
 // Defines values for QuoteOfferRegulatoryFriction.
 const (
-	Documents   QuoteOfferRegulatoryFriction = "documents"
-	Information QuoteOfferRegulatoryFriction = "information"
-	None        QuoteOfferRegulatoryFriction = "none"
-	Unknown     QuoteOfferRegulatoryFriction = "unknown"
+	QuoteOfferRegulatoryFrictionDocuments   QuoteOfferRegulatoryFriction = "documents"
+	QuoteOfferRegulatoryFrictionInformation QuoteOfferRegulatoryFriction = "information"
+	QuoteOfferRegulatoryFrictionNone        QuoteOfferRegulatoryFriction = "none"
+	QuoteOfferRegulatoryFrictionUnknown     QuoteOfferRegulatoryFriction = "unknown"
 )
 
 // Valid indicates whether the value is a known member of the QuoteOfferRegulatoryFriction enum.
 func (e QuoteOfferRegulatoryFriction) Valid() bool {
 	switch e {
-	case Documents:
+	case QuoteOfferRegulatoryFrictionDocuments:
 		return true
-	case Information:
+	case QuoteOfferRegulatoryFrictionInformation:
 		return true
-	case None:
+	case QuoteOfferRegulatoryFrictionNone:
 		return true
-	case Unknown:
+	case QuoteOfferRegulatoryFrictionUnknown:
 		return true
 	default:
 		return false
@@ -1890,6 +1923,9 @@ type AgentCreate struct {
 	// HttpTools Your APIs the agent may call during calls, texts and email (up to 10). Each request is signed with the agent's http_tool_secret; see docs/public/agents.md.
 	HttpTools *[]HttpToolIn `json:"http_tools,omitempty"`
 
+	// Knowledge Answer from the workspace's knowledge base (POST /v1/knowledge/documents) on calls, texts and email. Needs the knowledge base turned on for the workspace (403 otherwise).
+	Knowledge *bool `json:"knowledge,omitempty"`
+
 	// MaxDurationSeconds Soft cap per call in seconds (60..3600). Omitted: the workspace limit.
 	MaxDurationSeconds *int `json:"max_duration_seconds,omitempty"`
 
@@ -1957,6 +1993,9 @@ type AgentResponse struct {
 	// Id Unique identifier for this agent.
 	Id openapi_types.UUID `json:"id"`
 
+	// Knowledge Whether the agent answers from the workspace's knowledge base.
+	Knowledge *bool `json:"knowledge,omitempty"`
+
 	// MaxDurationSeconds Soft cap per call; null means the workspace limit.
 	MaxDurationSeconds *int `json:"max_duration_seconds"`
 
@@ -2018,6 +2057,9 @@ type AgentUpdate struct {
 
 	// HttpTools New HTTP tool list; replaces the old one. [] removes all; null leaves it. A tool sent without headers keeps the saved headers of the tool with the same name.
 	HttpTools *[]HttpToolIn `json:"http_tools,omitempty"`
+
+	// Knowledge Whether the agent answers from the workspace's knowledge base. Turning it on needs the knowledge base turned on for the workspace (403 otherwise).
+	Knowledge *bool `json:"knowledge,omitempty"`
 
 	// MaxDurationSeconds New soft cap per call; null returns to the workspace limit.
 	MaxDurationSeconds *int `json:"max_duration_seconds,omitempty"`
@@ -3148,17 +3190,17 @@ type FieldSpecKind string
 
 // FileUploadCreate Body of “POST /uploads“: what the file is for, and its name and type.
 type FileUploadCreate struct {
-	// ContentType MIME type, `type/subtype` with no parameters. A `verification_document` or `sms_evidence` takes `image/jpeg`, `image/png` or `application/pdf` only. This type is stored; the PUT request's own `Content-Type` header is not used.
+	// ContentType MIME type, `type/subtype` with no parameters. A `verification_document` or `sms_evidence` takes `image/jpeg`, `image/png` or `application/pdf` only. A `knowledge_document` takes `application/pdf`, `application/vnd.openxmlformats-officedocument.wordprocessingml.document`, `text/plain`, `text/markdown` or `text/csv`. This type is stored; the PUT request's own `Content-Type` header is not used.
 	ContentType string `json:"content_type"`
 
 	// Filename The file's name, 1 to 255 chars, no control characters.
 	Filename string `json:"filename"`
 
-	// Purpose What the file is for. `email_attachment`: the id works in `POST /v1/emails` `attachment_ids`. `verification_document`: the id works as the `upload.<slot>` part of `POST /v1/verifications` and `POST /v1/verifications/check`. `sms_evidence`: a US texting consent screenshot; the PUT returns a public `url` for an `*_evidence_url` field, like `POST /v1/verifications/sms/evidence`.
+	// Purpose What the file is for. `email_attachment`: the id works in `POST /v1/emails` `attachment_ids`. `verification_document`: the id works as the `upload.<slot>` part of `POST /v1/verifications` and `POST /v1/verifications/check`. `sms_evidence`: a US texting consent screenshot; the PUT returns a public `url` for an `*_evidence_url` field, like `POST /v1/verifications/sms/evidence`. `knowledge_document`: the id works in `POST /v1/knowledge/documents`; needs the knowledge base turned on for the workspace.
 	Purpose FileUploadCreatePurpose `json:"purpose"`
 }
 
-// FileUploadCreatePurpose What the file is for. `email_attachment`: the id works in `POST /v1/emails` `attachment_ids`. `verification_document`: the id works as the `upload.<slot>` part of `POST /v1/verifications` and `POST /v1/verifications/check`. `sms_evidence`: a US texting consent screenshot; the PUT returns a public `url` for an `*_evidence_url` field, like `POST /v1/verifications/sms/evidence`.
+// FileUploadCreatePurpose What the file is for. `email_attachment`: the id works in `POST /v1/emails` `attachment_ids`. `verification_document`: the id works as the `upload.<slot>` part of `POST /v1/verifications` and `POST /v1/verifications/check`. `sms_evidence`: a US texting consent screenshot; the PUT returns a public `url` for an `*_evidence_url` field, like `POST /v1/verifications/sms/evidence`. `knowledge_document`: the id works in `POST /v1/knowledge/documents`; needs the knowledge base turned on for the workspace.
 type FileUploadCreatePurpose string
 
 // FileUploadLinkResponse Returned by “POST /uploads“: a one-time link to send the bytes to.
@@ -3353,6 +3395,93 @@ type KeptFileInfo struct {
 
 	// Slot The document slot it was filed for.
 	Slot string `json:"slot"`
+}
+
+// KnowledgeDocumentCreate Body of “POST /knowledge/documents“: an uploaded file to add.
+type KnowledgeDocumentCreate struct {
+	// Name Display name. Omitted: the upload's filename.
+	Name *string `json:"name,omitempty"`
+
+	// UploadId A `knowledge_document` upload (`POST /v1/uploads`, then the PUT), stored and not yet used by another document.
+	UploadId openapi_types.UUID `json:"upload_id"`
+}
+
+// KnowledgeDocumentListResponse defines model for KnowledgeDocumentListResponse.
+type KnowledgeDocumentListResponse struct {
+	// Items Documents in this page, newest first.
+	Items []KnowledgeDocumentResponse `json:"items"`
+
+	// NextCursor Opaque cursor for the next page. Null when there are no more results.
+	NextCursor *string `json:"next_cursor,omitempty"`
+}
+
+// KnowledgeDocumentResponse One knowledge base document and how far its reading got.
+type KnowledgeDocumentResponse struct {
+	// ContentType The file's MIME type.
+	ContentType string `json:"content_type"`
+
+	// CreatedAt ISO 8601 timestamp.
+	CreatedAt time.Time `json:"created_at"`
+
+	// Error Why the document failed, in plain words. Null otherwise.
+	Error *string `json:"error"`
+
+	// Id The document's id.
+	Id openapi_types.UUID `json:"id"`
+
+	// Name Display name.
+	Name string `json:"name"`
+
+	// PieceCount Searchable pieces made from the file (0 until ready).
+	PieceCount int `json:"piece_count"`
+
+	// SizeBytes The file's size in bytes.
+	SizeBytes int `json:"size_bytes"`
+
+	// Status `pending`: waiting to be read. `processing`: being read and indexed. `ready`: agents answer from it. `failed`: see `error`.
+	Status KnowledgeDocumentResponseStatus `json:"status"`
+
+	// UpdatedAt ISO 8601 timestamp.
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// KnowledgeDocumentResponseStatus `pending`: waiting to be read. `processing`: being read and indexed. `ready`: agents answer from it. `failed`: see `error`.
+type KnowledgeDocumentResponseStatus string
+
+// KnowledgeSearchRequest Body of “POST /knowledge/search“.
+type KnowledgeSearchRequest struct {
+	// Limit How many pieces to return (1 to 10).
+	Limit *int `json:"limit,omitempty"`
+
+	// Query A question or keywords, in any supported language.
+	Query string `json:"query"`
+}
+
+// KnowledgeSearchResponse defines model for KnowledgeSearchResponse.
+type KnowledgeSearchResponse struct {
+	// Results The best pieces, best first. Empty when nothing matches well.
+	Results []KnowledgeSearchResult `json:"results"`
+}
+
+// KnowledgeSearchResult defines model for KnowledgeSearchResult.
+type KnowledgeSearchResult struct {
+	// DocumentId The document the piece comes from.
+	DocumentId openapi_types.UUID `json:"document_id"`
+
+	// DocumentName That document's name.
+	DocumentName string `json:"document_name"`
+
+	// Page The PDF page it starts on, or null.
+	Page *int `json:"page"`
+
+	// Row The CSV data row (1 = first row under the header), or null.
+	Row *int `json:"row"`
+
+	// Score Fused rank score; higher is better. Compare within one response only.
+	Score float32 `json:"score"`
+
+	// Text The piece's text.
+	Text string `json:"text"`
 }
 
 // LLMConfig defines model for LLMConfig.
@@ -5017,6 +5146,33 @@ type ResendForwardConfirmV1ForwardTargetsAddressResendPostParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
+// ListKnowledgeDocumentsParams defines parameters for ListKnowledgeDocuments.
+type ListKnowledgeDocumentsParams struct {
+	Cursor        *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit         *int    `form:"limit,omitempty" json:"limit,omitempty"`
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// CreateKnowledgeDocumentParams defines parameters for CreateKnowledgeDocument.
+type CreateKnowledgeDocumentParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// DeleteKnowledgeDocumentParams defines parameters for DeleteKnowledgeDocument.
+type DeleteKnowledgeDocumentParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// GetKnowledgeDocumentParams defines parameters for GetKnowledgeDocument.
+type GetKnowledgeDocumentParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// SearchKnowledgeParams defines parameters for SearchKnowledge.
+type SearchKnowledgeParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
 // DeleteMemberPhoneV1MembersUserIdPhoneDeleteParams defines parameters for DeleteMemberPhoneV1MembersUserIdPhoneDelete.
 type DeleteMemberPhoneV1MembersUserIdPhoneDeleteParams struct {
 	Authorization *string `json:"authorization,omitempty"`
@@ -5429,6 +5585,12 @@ type PatchEmailDomainV1EmailDomainsDomainIdPatchJSONRequestBody = EmailDomainPat
 
 // CreateEmailV1EmailsPostJSONRequestBody defines body for CreateEmailV1EmailsPost for application/json ContentType.
 type CreateEmailV1EmailsPostJSONRequestBody = EmailCreate
+
+// CreateKnowledgeDocumentJSONRequestBody defines body for CreateKnowledgeDocument for application/json ContentType.
+type CreateKnowledgeDocumentJSONRequestBody = KnowledgeDocumentCreate
+
+// SearchKnowledgeJSONRequestBody defines body for SearchKnowledge for application/json ContentType.
+type SearchKnowledgeJSONRequestBody = KnowledgeSearchRequest
 
 // PutMemberPhoneV1MembersUserIdPhonePutJSONRequestBody defines body for PutMemberPhoneV1MembersUserIdPhonePut for application/json ContentType.
 type PutMemberPhoneV1MembersUserIdPhonePutJSONRequestBody = MemberPhonePut
@@ -5991,6 +6153,25 @@ type ClientInterface interface {
 
 	// ResendForwardConfirmV1ForwardTargetsAddressResendPost request
 	ResendForwardConfirmV1ForwardTargetsAddressResendPost(ctx context.Context, address string, params *ResendForwardConfirmV1ForwardTargetsAddressResendPostParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListKnowledgeDocuments request
+	ListKnowledgeDocuments(ctx context.Context, params *ListKnowledgeDocumentsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateKnowledgeDocumentWithBody request with any body
+	CreateKnowledgeDocumentWithBody(ctx context.Context, params *CreateKnowledgeDocumentParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	CreateKnowledgeDocument(ctx context.Context, params *CreateKnowledgeDocumentParams, body CreateKnowledgeDocumentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DeleteKnowledgeDocument request
+	DeleteKnowledgeDocument(ctx context.Context, documentId openapi_types.UUID, params *DeleteKnowledgeDocumentParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetKnowledgeDocument request
+	GetKnowledgeDocument(ctx context.Context, documentId openapi_types.UUID, params *GetKnowledgeDocumentParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// SearchKnowledgeWithBody request with any body
+	SearchKnowledgeWithBody(ctx context.Context, params *SearchKnowledgeParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	SearchKnowledge(ctx context.Context, params *SearchKnowledgeParams, body SearchKnowledgeJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// DeleteMemberPhoneV1MembersUserIdPhoneDelete request
 	DeleteMemberPhoneV1MembersUserIdPhoneDelete(ctx context.Context, userId string, params *DeleteMemberPhoneV1MembersUserIdPhoneDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -6758,6 +6939,90 @@ func (c *Client) ListForwardTargetsV1ForwardTargetsGet(ctx context.Context, para
 
 func (c *Client) ResendForwardConfirmV1ForwardTargetsAddressResendPost(ctx context.Context, address string, params *ResendForwardConfirmV1ForwardTargetsAddressResendPostParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewResendForwardConfirmV1ForwardTargetsAddressResendPostRequest(c.Server, address, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) ListKnowledgeDocuments(ctx context.Context, params *ListKnowledgeDocumentsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListKnowledgeDocumentsRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreateKnowledgeDocumentWithBody(ctx context.Context, params *CreateKnowledgeDocumentParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateKnowledgeDocumentRequestWithBody(c.Server, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreateKnowledgeDocument(ctx context.Context, params *CreateKnowledgeDocumentParams, body CreateKnowledgeDocumentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateKnowledgeDocumentRequest(c.Server, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) DeleteKnowledgeDocument(ctx context.Context, documentId openapi_types.UUID, params *DeleteKnowledgeDocumentParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteKnowledgeDocumentRequest(c.Server, documentId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetKnowledgeDocument(ctx context.Context, documentId openapi_types.UUID, params *GetKnowledgeDocumentParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetKnowledgeDocumentRequest(c.Server, documentId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) SearchKnowledgeWithBody(ctx context.Context, params *SearchKnowledgeParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSearchKnowledgeRequestWithBody(c.Server, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) SearchKnowledge(ctx context.Context, params *SearchKnowledgeParams, body SearchKnowledgeJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSearchKnowledgeRequest(c.Server, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -10044,6 +10309,294 @@ func NewResendForwardConfirmV1ForwardTargetsAddressResendPostRequest(server stri
 	if err != nil {
 		return nil, err
 	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewListKnowledgeDocumentsRequest generates requests for ListKnowledgeDocuments
+func NewListKnowledgeDocumentsRequest(server string, params *ListKnowledgeDocumentsParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/knowledge/documents")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.Cursor != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "cursor", *params.Cursor, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewCreateKnowledgeDocumentRequest calls the generic CreateKnowledgeDocument builder with application/json body
+func NewCreateKnowledgeDocumentRequest(server string, params *CreateKnowledgeDocumentParams, body CreateKnowledgeDocumentJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreateKnowledgeDocumentRequestWithBody(server, params, "application/json", bodyReader)
+}
+
+// NewCreateKnowledgeDocumentRequestWithBody generates requests for CreateKnowledgeDocument with any type of body
+func NewCreateKnowledgeDocumentRequestWithBody(server string, params *CreateKnowledgeDocumentParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/knowledge/documents")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewDeleteKnowledgeDocumentRequest generates requests for DeleteKnowledgeDocument
+func NewDeleteKnowledgeDocumentRequest(server string, documentId openapi_types.UUID, params *DeleteKnowledgeDocumentParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "document_id", documentId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/knowledge/documents/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("DELETE", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewGetKnowledgeDocumentRequest generates requests for GetKnowledgeDocument
+func NewGetKnowledgeDocumentRequest(server string, documentId openapi_types.UUID, params *GetKnowledgeDocumentParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "document_id", documentId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/knowledge/documents/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewSearchKnowledgeRequest calls the generic SearchKnowledge builder with application/json body
+func NewSearchKnowledgeRequest(server string, params *SearchKnowledgeParams, body SearchKnowledgeJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewSearchKnowledgeRequestWithBody(server, params, "application/json", bodyReader)
+}
+
+// NewSearchKnowledgeRequestWithBody generates requests for SearchKnowledge with any type of body
+func NewSearchKnowledgeRequestWithBody(server string, params *SearchKnowledgeParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/knowledge/search")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
 
 	if params != nil {
 
@@ -14057,6 +14610,25 @@ type ClientWithResponsesInterface interface {
 	// ResendForwardConfirmV1ForwardTargetsAddressResendPostWithResponse request
 	ResendForwardConfirmV1ForwardTargetsAddressResendPostWithResponse(ctx context.Context, address string, params *ResendForwardConfirmV1ForwardTargetsAddressResendPostParams, reqEditors ...RequestEditorFn) (*ResendForwardConfirmV1ForwardTargetsAddressResendPostResponse, error)
 
+	// ListKnowledgeDocumentsWithResponse request
+	ListKnowledgeDocumentsWithResponse(ctx context.Context, params *ListKnowledgeDocumentsParams, reqEditors ...RequestEditorFn) (*ListKnowledgeDocumentsResponse, error)
+
+	// CreateKnowledgeDocumentWithBodyWithResponse request with any body
+	CreateKnowledgeDocumentWithBodyWithResponse(ctx context.Context, params *CreateKnowledgeDocumentParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateKnowledgeDocumentResponse, error)
+
+	CreateKnowledgeDocumentWithResponse(ctx context.Context, params *CreateKnowledgeDocumentParams, body CreateKnowledgeDocumentJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateKnowledgeDocumentResponse, error)
+
+	// DeleteKnowledgeDocumentWithResponse request
+	DeleteKnowledgeDocumentWithResponse(ctx context.Context, documentId openapi_types.UUID, params *DeleteKnowledgeDocumentParams, reqEditors ...RequestEditorFn) (*DeleteKnowledgeDocumentResponse, error)
+
+	// GetKnowledgeDocumentWithResponse request
+	GetKnowledgeDocumentWithResponse(ctx context.Context, documentId openapi_types.UUID, params *GetKnowledgeDocumentParams, reqEditors ...RequestEditorFn) (*GetKnowledgeDocumentResponse, error)
+
+	// SearchKnowledgeWithBodyWithResponse request with any body
+	SearchKnowledgeWithBodyWithResponse(ctx context.Context, params *SearchKnowledgeParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SearchKnowledgeResponse, error)
+
+	SearchKnowledgeWithResponse(ctx context.Context, params *SearchKnowledgeParams, body SearchKnowledgeJSONRequestBody, reqEditors ...RequestEditorFn) (*SearchKnowledgeResponse, error)
+
 	// DeleteMemberPhoneV1MembersUserIdPhoneDeleteWithResponse request
 	DeleteMemberPhoneV1MembersUserIdPhoneDeleteWithResponse(ctx context.Context, userId string, params *DeleteMemberPhoneV1MembersUserIdPhoneDeleteParams, reqEditors ...RequestEditorFn) (*DeleteMemberPhoneV1MembersUserIdPhoneDeleteResponse, error)
 
@@ -15121,6 +15693,120 @@ func (r ResendForwardConfirmV1ForwardTargetsAddressResendPostResponse) Status() 
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r ResendForwardConfirmV1ForwardTargetsAddressResendPostResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type ListKnowledgeDocumentsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *KnowledgeDocumentListResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r ListKnowledgeDocumentsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListKnowledgeDocumentsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type CreateKnowledgeDocumentResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON201      *KnowledgeDocumentResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateKnowledgeDocumentResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateKnowledgeDocumentResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type DeleteKnowledgeDocumentResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r DeleteKnowledgeDocumentResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeleteKnowledgeDocumentResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetKnowledgeDocumentResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *KnowledgeDocumentResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r GetKnowledgeDocumentResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetKnowledgeDocumentResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type SearchKnowledgeResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *KnowledgeSearchResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r SearchKnowledgeResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r SearchKnowledgeResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -17030,6 +17716,67 @@ func (c *ClientWithResponses) ResendForwardConfirmV1ForwardTargetsAddressResendP
 		return nil, err
 	}
 	return ParseResendForwardConfirmV1ForwardTargetsAddressResendPostResponse(rsp)
+}
+
+// ListKnowledgeDocumentsWithResponse request returning *ListKnowledgeDocumentsResponse
+func (c *ClientWithResponses) ListKnowledgeDocumentsWithResponse(ctx context.Context, params *ListKnowledgeDocumentsParams, reqEditors ...RequestEditorFn) (*ListKnowledgeDocumentsResponse, error) {
+	rsp, err := c.ListKnowledgeDocuments(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListKnowledgeDocumentsResponse(rsp)
+}
+
+// CreateKnowledgeDocumentWithBodyWithResponse request with arbitrary body returning *CreateKnowledgeDocumentResponse
+func (c *ClientWithResponses) CreateKnowledgeDocumentWithBodyWithResponse(ctx context.Context, params *CreateKnowledgeDocumentParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateKnowledgeDocumentResponse, error) {
+	rsp, err := c.CreateKnowledgeDocumentWithBody(ctx, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateKnowledgeDocumentResponse(rsp)
+}
+
+func (c *ClientWithResponses) CreateKnowledgeDocumentWithResponse(ctx context.Context, params *CreateKnowledgeDocumentParams, body CreateKnowledgeDocumentJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateKnowledgeDocumentResponse, error) {
+	rsp, err := c.CreateKnowledgeDocument(ctx, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateKnowledgeDocumentResponse(rsp)
+}
+
+// DeleteKnowledgeDocumentWithResponse request returning *DeleteKnowledgeDocumentResponse
+func (c *ClientWithResponses) DeleteKnowledgeDocumentWithResponse(ctx context.Context, documentId openapi_types.UUID, params *DeleteKnowledgeDocumentParams, reqEditors ...RequestEditorFn) (*DeleteKnowledgeDocumentResponse, error) {
+	rsp, err := c.DeleteKnowledgeDocument(ctx, documentId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeleteKnowledgeDocumentResponse(rsp)
+}
+
+// GetKnowledgeDocumentWithResponse request returning *GetKnowledgeDocumentResponse
+func (c *ClientWithResponses) GetKnowledgeDocumentWithResponse(ctx context.Context, documentId openapi_types.UUID, params *GetKnowledgeDocumentParams, reqEditors ...RequestEditorFn) (*GetKnowledgeDocumentResponse, error) {
+	rsp, err := c.GetKnowledgeDocument(ctx, documentId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetKnowledgeDocumentResponse(rsp)
+}
+
+// SearchKnowledgeWithBodyWithResponse request with arbitrary body returning *SearchKnowledgeResponse
+func (c *ClientWithResponses) SearchKnowledgeWithBodyWithResponse(ctx context.Context, params *SearchKnowledgeParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SearchKnowledgeResponse, error) {
+	rsp, err := c.SearchKnowledgeWithBody(ctx, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSearchKnowledgeResponse(rsp)
+}
+
+func (c *ClientWithResponses) SearchKnowledgeWithResponse(ctx context.Context, params *SearchKnowledgeParams, body SearchKnowledgeJSONRequestBody, reqEditors ...RequestEditorFn) (*SearchKnowledgeResponse, error) {
+	rsp, err := c.SearchKnowledge(ctx, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSearchKnowledgeResponse(rsp)
 }
 
 // DeleteMemberPhoneV1MembersUserIdPhoneDeleteWithResponse request returning *DeleteMemberPhoneV1MembersUserIdPhoneDeleteResponse
@@ -18948,6 +19695,164 @@ func ParseResendForwardConfirmV1ForwardTargetsAddressResendPostResponse(rsp *htt
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest ForwardTargetResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListKnowledgeDocumentsResponse parses an HTTP response from a ListKnowledgeDocumentsWithResponse call
+func ParseListKnowledgeDocumentsResponse(rsp *http.Response) (*ListKnowledgeDocumentsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListKnowledgeDocumentsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest KnowledgeDocumentListResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCreateKnowledgeDocumentResponse parses an HTTP response from a CreateKnowledgeDocumentWithResponse call
+func ParseCreateKnowledgeDocumentResponse(rsp *http.Response) (*CreateKnowledgeDocumentResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateKnowledgeDocumentResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest KnowledgeDocumentResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDeleteKnowledgeDocumentResponse parses an HTTP response from a DeleteKnowledgeDocumentWithResponse call
+func ParseDeleteKnowledgeDocumentResponse(rsp *http.Response) (*DeleteKnowledgeDocumentResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeleteKnowledgeDocumentResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetKnowledgeDocumentResponse parses an HTTP response from a GetKnowledgeDocumentWithResponse call
+func ParseGetKnowledgeDocumentResponse(rsp *http.Response) (*GetKnowledgeDocumentResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetKnowledgeDocumentResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest KnowledgeDocumentResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseSearchKnowledgeResponse parses an HTTP response from a SearchKnowledgeWithResponse call
+func ParseSearchKnowledgeResponse(rsp *http.Response) (*SearchKnowledgeResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &SearchKnowledgeResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest KnowledgeSearchResponse
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

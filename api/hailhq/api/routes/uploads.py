@@ -51,6 +51,7 @@ from hailhq.core.config import settings
 from hailhq.core.db import get_session, key_lock
 from hailhq.core.file_uploads import (
     EVIDENCE_PURPOSE,
+    KNOWLEDGE_MAX_FILE_BYTES,
     LINK_SWEEP_GRACE,
     LINK_TTL,
     MAX_PENDING_LINKS,
@@ -60,6 +61,13 @@ from hailhq.core.file_uploads import (
     new_token,
     object_key,
     object_prefix,
+)
+from hailhq.core.knowledge.access import (
+    KNOWLEDGE_OFF,
+    STORAGE_FULL,
+    knowledge_limits,
+    knowledge_lock,
+    storage_full,
 )
 from hailhq.core.models import FileUpload
 from hailhq.core.s3_mail import S3MailClient
@@ -109,14 +117,6 @@ _org_reads: dict[UUID, int] = {}
 # The longest one body read may take. Never past the link's expiry either.
 MAX_BODY_READ_SECONDS = 600.0
 _UNAVAILABLE = "file uploads are not configured on this server"
-_EVIDENCE_FULL = {
-    409: {
-        "description": (
-            "An `sms_evidence` link for an organization that keeps 100 "
-            "evidence files, the most allowed."
-        )
-    }
-}
 
 _PENDING_CAP_RESPONSES = merge_rate_limited_responses(
     GENERAL_RATE_LIMITED_RESPONSES,
@@ -170,7 +170,19 @@ def _too_large(limit: int) -> HTTPException:
     operation_id="create_file_upload",
     responses={
         **_PENDING_CAP_RESPONSES,
-        **_EVIDENCE_FULL,
+        403: {
+            "description": (
+                "A `knowledge_document` while the knowledge base is not turned "
+                "on for this workspace."
+            )
+        },
+        409: {
+            "description": (
+                "An `sms_evidence` link for an organization that keeps 100 "
+                "evidence files, the most allowed. Or a `knowledge_document` "
+                "while Hail's knowledge storage is full."
+            )
+        },
         503: {
             "description": (
                 "File uploads are not configured on this server. For "
@@ -198,7 +210,9 @@ async def create_file_upload(
     ```
 
     The PUT answers with `size_bytes` and `sha256` of what was stored. An
-    organization may hold at most 50 unused, unexpired links.
+    organization may hold at most 50 unused, unexpired links. A
+    `knowledge_document` needs the knowledge base turned on for the
+    workspace (403), and `max_bytes` is the workspace's file limit.
 
     For `sms_evidence` the PUT also answers with `url`, the public link for
     an `*_evidence_url` field of a US texting registration. It works like
@@ -214,6 +228,9 @@ async def create_file_upload(
             raise evidence_unavailable()
         # Before the lock: no storage call while it is held.
         await ensure_evidence_room(s3, org)
+    limit = max_bytes(body.purpose)
+    if body.purpose == "knowledge_document":
+        limit = await _knowledge_file_limit(db, org)
     # Two links made at once must not both pass the cap. Not org_lock: that
     # one is held through SMS carrier calls.
     await key_lock(db, f"upload-links:{org}")
@@ -263,9 +280,26 @@ async def create_file_upload(
         upload_url=upload_url,
         method="PUT",
         content_type=row.content_type,
-        max_bytes=max_bytes(row.purpose),
+        max_bytes=limit,
         expires_at=row.link_expires_at,
     )
+
+
+async def _knowledge_file_limit(db: AsyncSession, org: UUID) -> int:
+    """The largest knowledge file the workspace may send: 403 when its
+    knowledge base is off, 409 when Hail's knowledge storage is full. Under
+    the workspace's knowledge lock, held until the caller commits."""
+    await knowledge_lock(db, org)
+    limits = await knowledge_limits(db, org)
+    if limits is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_403_FORBIDDEN, detail=KNOWLEDGE_OFF
+        )
+    if await storage_full(db):
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT, detail=STORAGE_FULL
+        )
+    return min(KNOWLEDGE_MAX_FILE_BYTES, limits.max_file_bytes)
 
 
 def _server_full() -> bool:
@@ -328,7 +362,6 @@ async def _read_body(request: Request, limit: int) -> bytes:
                 "file is not stored, make a new link and send it again."
             )
         },
-        **_EVIDENCE_FULL,
         408: {
             "description": (
                 "The body did not arrive before the link expired, or within "
@@ -341,7 +374,25 @@ async def _read_body(request: Request, limit: int) -> bytes:
                 "The link had expired when the PUT started. Make a new link."
             )
         },
-        413: {"description": "The file is larger than the link's `max_bytes`."},
+        403: {
+            "description": (
+                "A `knowledge_document` link whose workspace no longer has the "
+                "knowledge base turned on."
+            )
+        },
+        409: {
+            "description": (
+                "An `sms_evidence` link for an organization that keeps 100 "
+                "evidence files, the most allowed. Or a `knowledge_document` "
+                "link while Hail's knowledge storage is full."
+            )
+        },
+        413: {
+            "description": (
+                "The file is larger than the link's `max_bytes` (for a "
+                "`knowledge_document`, the workspace's file limit now)."
+            )
+        },
         503: {
             "description": (
                 "File uploads are not configured on this server, storage "
@@ -387,7 +438,8 @@ async def put_file_upload(
     a lost answer cannot be read again: make a new link and send the file
     again. The file stored first stays, and counts toward the 100.
     Empty body: 422. A verification document or SMS evidence file whose
-    first bytes are not the declared JPEG, PNG or PDF: 422.
+    first bytes are not the declared JPEG, PNG or PDF, or a knowledge
+    document that is not its declared PDF, DOCX or UTF-8 text: 422.
 
     For `sms_evidence` the answer also has `url`, the public link to put in
     an `*_evidence_url` field. An organization that already keeps 100
@@ -416,12 +468,29 @@ async def put_file_upload(
     if not is_open:
         raise _expired()
     org = row.organization_id
+    limit = max_bytes(row.purpose)
+    if row.purpose == "knowledge_document":
+        # The workspace's limit now: it may have been lowered, or the
+        # knowledge base turned off, since the link was made.
+        limits = await knowledge_limits(db, org)
+        if limits is None:
+            await db.rollback()
+            raise HTTPException(
+                status_code=http_status.HTTP_403_FORBIDDEN, detail=KNOWLEDGE_OFF
+            )
+        if await storage_full(db):
+            await db.rollback()
+            raise HTTPException(
+                status_code=http_status.HTTP_409_CONFLICT, detail=STORAGE_FULL
+            )
+        limit = min(limit, limits.max_file_bytes)
     link = {
         "organization_id": org,
         "expires": row.link_expires_at,
         "purpose": row.purpose,
         "content_type": row.content_type,
         "base_key": row.s3_key,
+        "limit": limit,
     }
     # Nothing is held open while the body arrives.
     await db.rollback()
@@ -460,6 +529,7 @@ async def _store(
     purpose: str,
     content_type: str,
     base_key: str,
+    limit: int,
 ) -> FileUploadResponse:
     """Read the body, store it, then mark the link used in one atomic update.
 
@@ -482,7 +552,7 @@ async def _store(
     try:
         # Both times from the database clock.
         async with asyncio.timeout(_read_deadline(expires, db_now)):
-            payload = await _read_body(request, max_bytes(purpose))
+            payload = await _read_body(request, limit)
     except TimeoutError:
         raise HTTPException(
             status_code=http_status.HTTP_408_REQUEST_TIMEOUT,
@@ -493,9 +563,10 @@ async def _store(
         ) from None
     if not payload:
         raise unprocessable("the file is empty", loc=["body"])
-    if purpose == "verification_document" and not matches_declared_type(
-        payload, content_type
-    ):
+    if purpose in (
+        "verification_document",
+        "knowledge_document",
+    ) and not matches_declared_type(payload, content_type):
         raise unprocessable(f"the file does not look like {content_type}", loc=["body"])
     if base is not None:
         # The evidence route's own check: the file must start with the

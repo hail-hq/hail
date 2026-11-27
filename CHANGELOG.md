@@ -6,6 +6,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Added
 
+- Knowledge base (early access): upload manuals, FAQs and part lists, and agents answer calls, texts and email from them, in any supported language (`/v1/knowledge`, `knowledge` on agents, CLI `hail knowledge`, SDK and MCP).
 - A call whose phone system sent one of your own numbers as the caller says why its caller is `anonymous`: `caller_hidden_reason` on the call and its `call.*` webhooks.
 
 ### Changed

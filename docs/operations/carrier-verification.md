@@ -14,10 +14,10 @@ Some countries require the buyer of a phone number to be verified first (ID, add
 
 ## Configuration
 
-| Variable                                  | Default                                                                     | Where                                                                    | Effect                                                                                                                               |
-| ----------------------------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Variable                                  | Default                                                                     | Where                                                | Effect                                                                                                                               |
+| ----------------------------------------- | --------------------------------------------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | `HAIL_VERIFICATION_POLL_SECONDS`          | `600` (in [`core/hailhq/core/config.py`](../../core/hailhq/core/config.py)) | `.env` on the host running `api` (the server `.env`) | Seconds between background passes. `0` disables the pass.                                                                            |
-| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` | empty                                                                       | same `.env`                                                              | Without both, no verification provider is configured and `POST /verifications` answers 404 `no verification provider is configured`. |
+| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` | empty                                                                       | same `.env`                                          | Without both, no verification provider is configured and `POST /verifications` answers 404 `no verification provider is configured`. |
 
 Nothing else needs to be set. A `.env` without `HAIL_VERIFICATION_POLL_SECONDS` runs the pass every 600 seconds because the code default applies. The pass starts inside the API process at boot ([`api/hailhq/api/main.py`](../../api/hailhq/api/main.py), `VerificationWorker`); there is no separate container.
 

@@ -5,6 +5,7 @@
 **Goal:** Customers connect their own phone system (PBX) to Hail by themselves: through the API, the CLI and the console. A number someone claims but never checks can not block its real owner.
 
 **Architecture:** Plan 1 (backend) shipped the service layer in `api/hailhq/api/connected_numbers.py` and an ops command. This plan adds:
+
 - the "unchecked claims give way" rule in that service;
 - thin FastAPI routes over it, the OpenAPI file and the Go CLI generated from it;
 - the new number fields in the MCP and SDK models;
@@ -49,7 +50,7 @@ hail-website then gets the console panel and, last, one pricing line.
 5. **Verify request length.** The check can take up to `CHECK_WINDOW` (107 s). Expected:
    - the console action allows 120 s (`maxDuration`) and aborts its fetch at 115 s;
    - the CLI sets no shorter timeout.
-   Test: the console `verifyConnectedNumber` test checks the signal; a CLI test checks `verify` sends no timeout under 120 s.
+     Test: the console `verifyConnectedNumber` test checks the signal; a CLI test checks `verify` sends no timeout under 120 s.
 
 ---
 
@@ -60,6 +61,7 @@ Branch `feat/pbx-connected-numbers-api`. Worktree `.claude/worktrees/feat-pbx-co
 ### Task A1: Unchecked claims give way
 
 **Files:**
+
 - Modify: `api/hailhq/api/connected_numbers.py` (new function; `add_connected_number` calls it before its org lock)
 - Modify: `api/hailhq/api/number_orders.py` (`acquire_offer` calls it before its first `org_lock`)
 - Modify: `api/hailhq/api/routes/numbers.py` (acquire route gets `lk: LiveKitClient | None = Depends(get_livekit_optional)` and passes it through; maps `ConnectedNumberError` codes from the give-way)
@@ -68,6 +70,7 @@ Branch `feat/pbx-connected-numbers-api`. Worktree `.claude/worktrees/feat-pbx-co
 - Test: `api/tests/test_connected_numbers.py`, `api/tests/test_number_orders.py` (or the existing acquire route test file)
 
 **Interfaces:**
+
 - Consumes: `remove_connected_number(db, lk, number, only_state="unverified")`, `check_in_flight(db, number_id, now)` (`core/hailhq/core/sip_connections.py`), `org_lock`, `write_audit_log` (`api/hailhq/api/audit.py`).
 - Produces:
 
@@ -91,6 +94,7 @@ async def give_way_unchecked_claim(
 ```
 
 Callers:
+
 - `add_connected_number`: right after the e164 is normalized, before `org_lock`.
 - `acquire_offer`: read the quote's e164 with `load_quote` and no lock, call `give_way_unchecked_claim`, then continue as today. Today's live-row check and the `IntegrityError` 409 stay as the final judge. The org lock is taken again after the call.
 - Route error mapping for the purchase:
@@ -121,15 +125,17 @@ Callers:
 ### Task A2: Contacts take an extension
 
 **Files:**
+
 - Modify: `core/hailhq/core/schemas.py`:
   - `ContactCreate`, `ContactPatch`, `ContactEntry` get `extension: str | None`, pattern `^[0-9*#]{1,6}$`.
   - The `ContactCreate` validator becomes "phone, email or extension".
 - Modify: `core/hailhq/core/contacts.py` (`contact_to_entry` copies `extension`), `api/hailhq/api/routes/contacts.py` (create and patch write it). A patch that would leave no phone, email or extension: 422 "a contact needs a phone, an email or an extension".
-- Modify: `mcp/hailhq/mcp/tools.py` and `mcp/hailhq/mcp/hail_client.py`. `create_contact` gets `extension: str | None = None`, described as "PBX extension (1 to 6 digits, * or #) for handover on a connected phone system".
+- Modify: `mcp/hailhq/mcp/tools.py` and `mcp/hailhq/mcp/hail_client.py`. `create_contact` gets `extension: str | None = None`, described as "PBX extension (1 to 6 digits, \* or #) for handover on a connected phone system".
 - Modify: `cli/internal/cmd/contacts.go`: `create` and `update` get `--extension`.
 - Test: `api/tests/test_contacts_api.py` (or the existing contacts route test), `mcp/tests/test_tools.py` (existing create_contact test file), `cli/internal/cmd/contacts_test.go`
 
 **Interfaces:**
+
 - Consumes: `Contact.extension` and the DB CHECKs from plan 1.
 - Produces: `ContactEntry.extension: str | None` (read by the console contact list in Part B).
 
@@ -147,6 +153,7 @@ Callers:
 ### Task A3: Number fields `source` and `sip_connection_id`
 
 **Files:**
+
 - Modify: `core/hailhq/core/schemas.py`, `PhoneNumberResponse`:
   - `source: Literal["purchased", "connected"]`. Computed: `"connected"` when `provider == "pbx"`, else `"purchased"`. Add a `source` property on `PhoneNumber` in `core/hailhq/core/models.py`, so `from_attributes` reads it.
   - `sip_connection_id: UUID | None`.
@@ -172,12 +179,14 @@ Callers:
 ### Task A4: `/v1/sip-connections` routes
 
 **Files:**
+
 - Create: `api/hailhq/api/routes/sip_connections.py`. Register it in `_CUSTOMER_ROUTERS` in `api/hailhq/api/main.py`.
 - Modify: `core/hailhq/core/config.py` (`livekit_sip_host: str = ""`), `.env.example` (under "LiveKit Cloud": `# Host a customer's phone system sends calls to (connected numbers), shown in the console and API. Empty = connected numbers are off.` then `LIVEKIT_SIP_HOST=`), the main checkout `.env` (real value, same place).
 - Modify: `core/hailhq/core/schemas.py` (models below).
 - Test: `api/tests/test_sip_connections_api.py`
 
 **Interfaces:**
+
 - Consumes: plan 1's service functions (plan 1, "Interfaces for plan 2"), `CheckResult`, `ConnectedNumberError`.
 - Produces (schemas in `core/hailhq/core/schemas.py`):
 
@@ -234,29 +243,29 @@ class ConnectedNumberCheck(BaseModel):
 
 Routes (all org-scoped; another org's id gives 404):
 
-| Route | Success | Service call |
-|---|---|---|
-| `POST /sip-connections` | 201 `SipConnectionCreated` | `create_connection` |
-| `GET /sip-connections` | 200 `SipConnectionListResponse` (`limit` 1-100, default 50; `cursor`; newest first; skips deleted) | query |
-| `GET /sip-connections/{id}` | 200 `SipConnectionResponse` | query |
-| `PATCH /sip-connections/{id}` | 200 `SipConnectionResponse` | `update_connection` (only fields present in the body; others `UNSET`) |
-| `POST /sip-connections/{id}/rotate-password` | 200 `SipConnectionPassword` | `rotate_inbound_password` |
-| `DELETE /sip-connections/{id}` | 204 | `delete_connection` |
-| `POST /sip-connections/{id}/numbers` | 201 `PhoneNumberResponse` | `add_connected_number` (which gives way, Task A1) |
-| `POST /sip-connections/{id}/numbers/{number_id}/verify` | 200 `ConnectedNumberCheck` | `check_connected_number` |
-| `DELETE /sip-connections/{id}/numbers/{number_id}` | 204 | `remove_connected_number` |
+| Route                                                   | Success                                                                                            | Service call                                                          |
+| ------------------------------------------------------- | -------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `POST /sip-connections`                                 | 201 `SipConnectionCreated`                                                                         | `create_connection`                                                   |
+| `GET /sip-connections`                                  | 200 `SipConnectionListResponse` (`limit` 1-100, default 50; `cursor`; newest first; skips deleted) | query                                                                 |
+| `GET /sip-connections/{id}`                             | 200 `SipConnectionResponse`                                                                        | query                                                                 |
+| `PATCH /sip-connections/{id}`                           | 200 `SipConnectionResponse`                                                                        | `update_connection` (only fields present in the body; others `UNSET`) |
+| `POST /sip-connections/{id}/rotate-password`            | 200 `SipConnectionPassword`                                                                        | `rotate_inbound_password`                                             |
+| `DELETE /sip-connections/{id}`                          | 204                                                                                                | `delete_connection`                                                   |
+| `POST /sip-connections/{id}/numbers`                    | 201 `PhoneNumberResponse`                                                                          | `add_connected_number` (which gives way, Task A1)                     |
+| `POST /sip-connections/{id}/numbers/{number_id}/verify` | 200 `ConnectedNumberCheck`                                                                         | `check_connected_number`                                              |
+| `DELETE /sip-connections/{id}/numbers/{number_id}`      | 204                                                                                                | `remove_connected_number`                                             |
 
 Error map, one function `_http_error(exc: ConnectedNumberError) -> HTTPException`. The detail is the exception message, which must read as customer copy; reword plan 1 messages that do not.
 
-| Code | Status |
-|---|---|
-| `invalid_input`, `invalid_number`, `host_not_allowed`, `password_required`, `not_callable` | 422 |
-| `number_taken`, `has_numbers`, `connection_deleted`, `not_unverified`, `check_in_progress`, `too_many_unverified`, `pool_exhausted` | 409 |
-| `check_limit` | 429 |
-| `no_funds` | 402 |
-| `not_found` | 404 |
-| `livekit_failed` | 502 |
-| `not_configured` (also: `settings.livekit_sip_host` empty or no LiveKit client) | 503 |
+| Code                                                                                                                                | Status |
+| ----------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| `invalid_input`, `invalid_number`, `host_not_allowed`, `password_required`, `not_callable`                                          | 422    |
+| `number_taken`, `has_numbers`, `connection_deleted`, `not_unverified`, `check_in_progress`, `too_many_unverified`, `pool_exhausted` | 409    |
+| `check_limit`                                                                                                                       | 429    |
+| `no_funds`                                                                                                                          | 402    |
+| `not_found`                                                                                                                         | 404    |
+| `livekit_failed`                                                                                                                    | 502    |
+| `not_configured` (also: `settings.livekit_sip_host` empty or no LiveKit client)                                                     | 503    |
 
 No `idempotency_dep` on create or rotate (Review Focus 4). The audit payload of create, rotate and delete holds the id and label only.
 
@@ -279,7 +288,7 @@ No `idempotency_dep` on create or rotate (Review Focus 4). The audit payload of 
   - `test_remove_number_route`: 204, and the number is `released`.
 - [ ] **Step 2: Run** `cd api && uv run pytest tests/test_sip_connections_api.py -v`. Expected: FAIL (404s).
 - [ ] **Step 3: Implement** the schemas, the routes and the setting. Add the `.env.example` lines and the `.env` value, then run the parity diff:
-  `diff <(sed -E 's/^([A-Z][A-Z0-9_]*)=.*/\1=/' .env) <(sed -E 's/^([A-Z][A-Z0-9_]*)=.*/\1=/' .env.example)` prints nothing (run it in the main checkout).
+      `diff <(sed -E 's/^([A-Z][A-Z0-9_]*)=.*/\1=/' .env) <(sed -E 's/^([A-Z][A-Z0-9_]*)=.*/\1=/' .env.example)` prints nothing (run it in the main checkout).
   - The worktree's own `.env` gets the same key.
 - [ ] **Step 4: Run** the test file and the full API suite `cd api && uv run pytest -q`. Expected: PASS.
 - [ ] **Step 5: Commit** `feat(api): /v1/sip-connections routes for connected phone systems`.
@@ -287,6 +296,7 @@ No `idempotency_dep` on create or rotate (Review Focus 4). The audit payload of 
 ### Task A5: OpenAPI, Go client, CLI commands
 
 **Files:**
+
 - Modify: `openapi/openapi.yaml`. Run the API, then the command in `docs/public/contributing.md` (curl `/openapi.json` piped to `yaml.safe_dump`).
 - Modify: `cli/internal/client/client.gen.go` (`cd cli && make codegen`)
 - Create: `cli/internal/cmd/sip_connections.go`, `cli/internal/cmd/sip_connections_test.go`; register it in `cli/internal/cmd/root.go`
@@ -327,6 +337,7 @@ hail sip-connections remove-number <id> <number_id>
 ### Task A6: Docs and changelog
 
 **Files:**
+
 - Create: `docs/public/connect-phone-system.md`, added to `docs/public/meta.json` after `agents`. Content:
   - one runnable curl flow (spec section 8, steps 1 to 4);
   - the generic SIP trunk fields;
@@ -373,6 +384,7 @@ Branch `feat/pbx-connect-console`, worktree `hail-website/.claude/worktrees/feat
 ### Task B1: Numbers list knows connected numbers
 
 **Files:**
+
 - Modify: `lib/sms-queries.ts` `getNumbers`:
   - also select `n.provider = 'pbx' AS connected`, `n.sip_connection_id`, and the connection label (`LEFT JOIN sip_connections`);
   - widen the state filter to include `'unverified'` for `pbx` rows only.
@@ -397,6 +409,7 @@ Branch `feat/pbx-connect-console`, worktree `hail-website/.claude/worktrees/feat
 ### Task B2: "Connect your phone system" panel
 
 **Files:**
+
 - Create: `app/console/numbers/ConnectPhoneSystemPanel.tsx`, `app/console/numbers/connect-actions.ts` (`"use server"`, through `orgApiAction` and `callHailApiAsOrg`)
 - Modify: `app/console/numbers/page.tsx`:
   - two choices at the top, "Buy a number" and "Connect your phone system" (`Button look="choice"`);
@@ -415,6 +428,7 @@ removeConnectedNumber(connectionId: string, numberId: string): Promise<Result<{}
 ```
 
 Steps on screen (spec section 8 mock-up). Copy:
+
 1. "Name it" (label) and Country (`select` with the shared chevron).
 2. "Add this SIP trunk to your phone system". Rows, each value with `CopyButton iconOnly` in `.c-copy-value`:
    - SIP server;
@@ -447,7 +461,8 @@ Steps on screen (spec section 8 mock-up). Copy:
 ### Task B3: Contacts and calls
 
 **Files:**
-- Modify: `app/console/contacts/ContactsClient.tsx`, `app/console/contacts/actions.ts`: an "Extension" box (1 to 6 characters: digits, * or #), hint "For handover on your phone system". A contact may have only an extension.
+
+- Modify: `app/console/contacts/ContactsClient.tsx`, `app/console/contacts/actions.ts`: an "Extension" box (1 to 6 characters: digits, \* or #), hint "For handover on your phone system". A contact may have only an extension.
 - Modify: the call list and the call drawer (`app/console/activity/`, the component that shows a call's number). A call on a `pbx` number shows "Your phone system" next to the number.
 - Modify: `lib/agent-skill-doc.ts`: review it for numbers and contacts (AGENTS.md "Product facts"). Change it only if a claim there is now wrong.
 - Test: the existing contacts and activity tests: `contact with only an extension saves`, `call on a connected number shows Your phone system`.
@@ -472,6 +487,7 @@ Branch `feat/pbx-pricing-line` from `master`.
 ### Task B5: One pricing line
 
 **Files:**
+
 - Modify: `app/(marketing)/pricing/page.tsx`. One line in the voice section: "Connect your phone system: {callCentsPerMinute}¢ a minute, no monthly fee". The value comes from `providerPolicy("pbx")`.
 - Test: `app/(marketing)/pricing/__tests__/pricing-estimate.test.tsx` (or a new `pricing-pbx-line.test.tsx`): `renders the connected phone system price from PROVIDER_POLICIES`.
   - Change `callCentsPerMinute` in the test's mocked policy to 12.

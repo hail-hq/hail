@@ -124,6 +124,7 @@ type agentFlags struct {
 	name            string
 	handover        []string
 	httpToolsFile   string
+	knowledge       bool
 }
 
 func (f *agentFlags) bind(cmd *cobra.Command) {
@@ -142,6 +143,7 @@ func (f *agentFlags) bind(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&f.noCalls, "no-calls", false, "Do not answer calls")
 	cmd.Flags().StringVar(&f.status, "status", "", "live or paused")
 	cmd.Flags().StringArrayVar(&f.handover, "handover", nil, "Person the agent may hand a live call to: <contact_id>=<note>, where contact_id is a contact id or member:<user id> (repeatable, max 10; replaces the list)")
+	cmd.Flags().BoolVar(&f.knowledge, "knowledge", false, "Answer from the workspace's knowledge base (hail knowledge); --knowledge=false turns it off")
 	cmd.Flags().StringVar(&f.httpToolsFile, "http-tools-file", "", "JSON file with a list of HTTP tools the agent may call (max 10; replaces the list). See docs/public/agents.md")
 }
 
@@ -230,6 +232,9 @@ func (f *agentFlags) body(cmd *cobra.Command, create bool, voice map[string]any)
 	}
 	if changed("no-calls") {
 		b["voice_enabled"] = !f.noCalls
+	}
+	if changed("knowledge") {
+		b["knowledge"] = f.knowledge
 	}
 	if changed("status") && f.status != "" {
 		b["status"] = f.status
@@ -588,6 +593,7 @@ func printAgent(opts *Options, a *client.AgentResponse, banner bool) error {
 	fmt.Fprintf(opts.Stdout, "  Calls:         %s\n", yesNo(a.VoiceEnabled))
 	fmt.Fprintf(opts.Stdout, "  Texts:         %s\n", yesNo(a.SmsEnabled))
 	fmt.Fprintf(opts.Stdout, "  Email:         %s\n", yesNo(a.EmailEnabled == nil || *a.EmailEnabled))
+	fmt.Fprintf(opts.Stdout, "  Knowledge:     %s\n", yesNo(a.Knowledge != nil && *a.Knowledge))
 	if a.MaxDurationSeconds != nil {
 		fmt.Fprintf(opts.Stdout, "  Max length:    %d min\n", *a.MaxDurationSeconds/60)
 	}

@@ -10,6 +10,7 @@ from hailhq.core.schemas import TERMINAL_CALL_STATUSES, caller_hidden_reason
 from sqlalchemy import (
     ARRAY,
     DDL,
+    BigInteger,
     Boolean,
     CheckConstraint,
     DateTime,
@@ -25,12 +26,13 @@ from sqlalchemy import (
     or_,
     text,
 )
-from sqlalchemy.dialects.postgresql import INET, JSONB, UUID
+from sqlalchemy.dialects.postgresql import INET, JSONB, TSVECTOR, UUID
 from sqlalchemy.orm import (
     DeclarativeBase,
     Mapped,
     mapped_column,
 )
+from sqlalchemy.types import UserDefinedType
 
 
 class Base(DeclarativeBase):
@@ -557,6 +559,11 @@ class Agent(Base):
         Boolean, server_default=text("TRUE"), nullable=False
     )
     status: Mapped[str] = mapped_column(Text, server_default="live", nullable=False)
+    # Answer from the workspace's knowledge base (knowledge_documents). Works
+    # only while the workspace has an organization_knowledge row.
+    knowledge: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("FALSE"), nullable=False
+    )
     # Signs this agent's HTTP tool requests (AgentHttpTool). Fernet ciphertext
     # under HAIL_PROVIDER_SECRET_KEY; NULL until the agent gets its first one.
     http_tool_secret_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -2103,6 +2110,12 @@ class FileUpload(Base):
     * ``verification_document``: a document for one carrier verification.
       ``POST /verifications`` reads it and deletes it; rows left over are
       deleted 1 hour after upload.
+    * ``knowledge_document``: a file for the knowledge base. ``POST
+      /knowledge/documents`` turns it into a ``KnowledgeDocument`` (and sets
+      ``first_used_at``); deleting the upload row deletes the document and
+      its pieces. Rows never turned into a document are deleted 24h after
+      upload. A knowledge base delete also sets ``first_used_at`` (so none
+      becomes a document) and removes those rows itself.
     * ``verification_kept``: Hail's own encrypted copy of a file a number
       registration was filed with, for ``verification_id`` and ``slot``,
       kept for a resubmit. Deleted 30 days after submit, or when the
@@ -2182,7 +2195,7 @@ class FileUpload(Base):
     __table_args__ = (
         CheckConstraint(
             "purpose IN ('email_attachment', 'verification_document', "
-            "'verification_kept', 'sms_evidence')",
+            "'verification_kept', 'sms_evidence', 'knowledge_document')",
             name="file_uploads_purpose_check",
         ),
         # A kept file always names its verification and slot; no other
@@ -2630,4 +2643,227 @@ class CarrierVerification(Base):
             ),
         ),
         Index("carrier_verifications_org_idx", "organization_id"),
+    )
+
+
+class HalfVector(UserDefinedType):
+    """pgvector's ``halfvec(n)``: half-precision floats (pgvector 0.7.0 or
+    later). Bound and read as its text form (``[0.1,0.2]``), so it needs no
+    driver codec (asyncpg or psycopg)."""
+
+    cache_ok = True
+
+    def __init__(self, dims: int) -> None:
+        self.dims = dims
+
+    def get_col_spec(self, **kw) -> str:
+        return f"halfvec({self.dims})"
+
+    def bind_processor(self, dialect):
+        def process(value):
+            if value is None or isinstance(value, str):
+                return value
+            return "[" + ",".join(f"{float(x):.7g}" for x in value) + "]"
+
+        return process
+
+    def result_processor(self, dialect, coltype):
+        def process(value):
+            if value is None or not isinstance(value, str):
+                return value
+            return [float(x) for x in value.strip("[]").split(",") if x]
+
+        return process
+
+
+# The width of a stored embedding (hailhq.core.knowledge.embed.DIMS).
+EMBEDDING_DIMS = 1536
+
+
+class OrganizationKnowledge(Base):
+    """The knowledge base limits of one workspace. No row: the knowledge base
+    is off (every knowledge route answers 403). Hail adds the row by hand
+    for a paying customer (docs/operations/knowledge-base.md); no API or
+    console path writes it, so a customer can never raise its own limits.
+    The column defaults are the early-access limits."""
+
+    __tablename__ = "organization_knowledge"
+
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True
+    )
+    max_documents: Mapped[int] = mapped_column(
+        Integer, server_default=text("10"), nullable=False
+    )
+    max_file_bytes: Mapped[int] = mapped_column(
+        Integer, server_default=text("20971520"), nullable=False
+    )
+    max_pieces: Mapped[int] = mapped_column(
+        Integer, server_default=text("1000"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "max_documents BETWEEN 1 AND 1000",
+            name="organization_knowledge_documents_check",
+        ),
+        # The upload body is read into memory (routes/uploads.py), so a file
+        # stays at most 25 MB, like an email attachment.
+        CheckConstraint(
+            "max_file_bytes BETWEEN 1 AND 26214400",
+            name="organization_knowledge_file_bytes_check",
+        ),
+        CheckConstraint(
+            "max_pieces BETWEEN 1 AND 100000",
+            name="organization_knowledge_pieces_check",
+        ),
+    )
+
+
+class KnowledgeDocument(Base):
+    """One file of a workspace's knowledge base and its ingest state.
+
+    ``pending`` until the ingest worker (``hailhq.core.knowledge.ingest``)
+    claims it, ``processing`` while it reads, cuts and embeds the file,
+    then ``ready`` (its ``knowledge_pieces`` are written) or ``failed``
+    (``error`` says why, in words for the customer). ``attempts`` and
+    ``claimed_at`` are the worker's lease: a ``processing`` row whose claim
+    is old is taken again. The bytes stay in ``file_uploads``; deleting that
+    row deletes this one and its pieces."""
+
+    __tablename__ = "knowledge_documents"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
+    file_upload_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "file_uploads.id",
+            name="knowledge_documents_file_upload_id_fkey",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    content_type: Mapped[str] = mapped_column(Text, nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(
+        Text, server_default=text("'pending'"), nullable=False
+    )
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    piece_count: Mapped[int] = mapped_column(
+        Integer, server_default=text("0"), nullable=False
+    )
+    # The live bytes its pieces count toward the global knowledge cap
+    # (hailhq.core.knowledge.access.piece_bytes), set when it is ready.
+    stored_bytes: Mapped[int] = mapped_column(
+        BigInteger, server_default=text("0"), nullable=False
+    )
+    attempts: Mapped[int] = mapped_column(
+        SmallInteger, server_default=text("0"), nullable=False
+    )
+    claimed_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint("file_upload_id", name="knowledge_documents_upload_uq"),
+        CheckConstraint(
+            "status IN ('pending', 'processing', 'ready', 'failed')",
+            name="knowledge_documents_status_check",
+        ),
+        Index(
+            "knowledge_documents_org_created_idx",
+            "organization_id",
+            "created_at",
+            "id",
+        ),
+        Index(
+            "knowledge_documents_queue_idx",
+            "created_at",
+            postgresql_where=text("status IN ('pending', 'processing')"),
+        ),
+    )
+
+
+class KnowledgePiece(Base):
+    """One searchable piece of a knowledge document: a passage of about 300
+    to 500 tokens, or one CSV row as a short card. ``terms`` holds the
+    piece's search words from ``hailhq.core.knowledge.text.terms`` (the same
+    words the in-call keyword search uses), as lexemes with no parsing, so
+    keyword search works for every language. ``organization_id`` is copied
+    from the document so every search filters on it directly."""
+
+    __tablename__ = "knowledge_pieces"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "knowledge_documents.id",
+            name="knowledge_pieces_document_id_fkey",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    # Where the piece starts: a PDF page, or a CSV data row (1 = the first
+    # row under the header). Null for other files.
+    page: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    csv_row: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # The unit vector and the model id that made it, both set or both null.
+    # Null until the ingest worker's embedding pass reaches the piece; a
+    # vector of another model than the configured one is replaced by that
+    # pass and ignored by search meanwhile. Keyword search finds the piece
+    # either way.
+    embedding: Mapped[list[float] | None] = mapped_column(
+        HalfVector(EMBEDDING_DIMS), nullable=True
+    )
+    embedding_model: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The model whose API refused this piece on its own (a 400, 413 or 422
+    # while a probe text passed): the embedding pass leaves it to keyword
+    # search until the configured model changes or a day passes.
+    embedding_refused: Mapped[str | None] = mapped_column(Text, nullable=True)
+    embedding_refused_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
+    terms: Mapped[str] = mapped_column(TSVECTOR, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "document_id", "ordinal", name="knowledge_pieces_document_ordinal_uq"
+        ),
+        CheckConstraint(
+            "page IS NULL OR csv_row IS NULL", name="knowledge_pieces_locator_check"
+        ),
+        CheckConstraint(
+            "(embedding IS NULL) = (embedding_model IS NULL)",
+            name="knowledge_pieces_embedding_check",
+        ),
+        Index("knowledge_pieces_org_idx", "organization_id"),
+        Index("knowledge_pieces_terms_idx", "terms", postgresql_using="gin"),
+        Index(
+            "knowledge_pieces_embedding_idx",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_ops={"embedding": "halfvec_cosine_ops"},
+        ),
     )
