@@ -30,6 +30,7 @@ from hailhq.core.sip_connections import (
     CHECK_WINDOW,
     hash_check_code,
 )
+from hailhq.core.webhook_fanout import call_event_data
 from sqlalchemy import func, select, text
 
 DIALED = "+14155550100"
@@ -1378,3 +1379,30 @@ async def test_a_kept_caller_has_no_hidden_reason(async_session):
     assert CallResponse.model_validate(call).caller_hidden_reason is None
     (delivery,) = await _deliveries(async_session, "call.received")
     assert "caller_hidden_reason" not in delivery.payload["data"]
+
+
+@pytest.mark.parametrize(
+    ("direction", "value"),
+    [
+        # Before the key was reserved, POST /calls stored any value under it.
+        ("outbound", CALLER_HIDDEN_OWN_NUMBER),
+        ("inbound", "vip"),
+        ("inbound", 7),
+        ("inbound", ["phone_system_sent_own_number"]),
+    ],
+)
+def test_only_a_reason_hail_writes_reads_back(direction, value):
+    call = Call(
+        id=uuid.uuid4(),
+        organization_id=uuid.uuid4(),
+        from_e164=CALLER,
+        to_e164=DIALED,
+        direction=direction,
+        status="completed",
+        voice_config={},
+        requested_at=datetime.now(timezone.utc),
+        metadata_={"caller_hidden_reason": value},
+    )
+    assert call.caller_hidden_reason is None
+    assert CallResponse.model_validate(call).caller_hidden_reason is None
+    assert "caller_hidden_reason" not in call_event_data(call)

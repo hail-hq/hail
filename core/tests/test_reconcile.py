@@ -247,6 +247,46 @@ async def test_sweep_emits_call_failed_webhook(async_session):
 
 
 @pytest.mark.asyncio
+async def test_sweep_webhook_says_why_the_caller_was_hidden(async_session):
+    now = datetime.now(timezone.utc)
+    call = await _make_call(
+        async_session,
+        status="ringing",
+        started_at=now - timedelta(seconds=600),
+        max_duration_seconds=300,
+        metadata={"caller_hidden_reason": "phone_system_sent_own_number"},
+    )
+    call.direction = "inbound"
+    async_session.add(
+        WebhookSubscription(
+            organization_id=call.organization_id,
+            target_url="https://example.com/firehose",
+            secret_encrypted="hash",
+            event_types=["call.failed"],
+        )
+    )
+    await async_session.commit()
+
+    await sweep_stale_calls(async_session, grace_seconds=120)
+    await async_session.commit()
+
+    (row,) = (
+        (
+            await async_session.execute(
+                select(WebhookDelivery).where(
+                    WebhookDelivery.event_type == "call.failed"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert row.payload["data"]["caller_hidden_reason"] == (
+        "phone_system_sent_own_number"
+    )
+
+
+@pytest.mark.asyncio
 async def test_sweep_handles_multiple_calls_in_one_pass(async_session):
     now = datetime.now(timezone.utc)
     a = await _make_call(

@@ -6,7 +6,7 @@ from hailhq.core.call_end_reasons import CallEndReasonDB
 from hailhq.core.call_failures import call_failure_message
 from hailhq.core.file_uploads import LINK_SWEEP_GRACE
 from hailhq.core.hail_mail import ROLE_MAILBOXES
-from hailhq.core.schemas import CALLER_HIDDEN_META, TERMINAL_CALL_STATUSES
+from hailhq.core.schemas import TERMINAL_CALL_STATUSES, caller_hidden_reason
 from sqlalchemy import (
     ARRAY,
     DDL,
@@ -1045,8 +1045,7 @@ class Call(Base):
 
     @property
     def caller_hidden_reason(self) -> str | None:
-        value = (self.metadata_ or {}).get(CALLER_HIDDEN_META)
-        return value if isinstance(value, str) else None
+        return caller_hidden_reason(self.direction, self.metadata_)
 
 
 class CallBalanceHold(Base):

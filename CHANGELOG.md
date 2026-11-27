@@ -4,6 +4,14 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- A call whose phone system sent one of your own numbers as the caller says why its caller is `anonymous`: `caller_hidden_reason` on the call and its `call.*` webhooks.
+
+### Changed
+
+- `POST /v1/calls` reserves the `caller_hidden_reason` metadata key.
+
 ## [0.41.0] (2026-11-27)
 
 Connect your phone system needs no country: Hail reads each caller with the

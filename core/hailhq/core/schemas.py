@@ -233,6 +233,21 @@ PBX_CHECK_METADATA_PREFIX = "pbx_check_"
 CALLER_HIDDEN_META = "caller_hidden_reason"
 # The phone system sent one of the workspace's own numbers as the caller.
 CALLER_HIDDEN_OWN_NUMBER = "phone_system_sent_own_number"
+CALLER_HIDDEN_REASONS = frozenset({CALLER_HIDDEN_OWN_NUMBER})
+
+
+def caller_hidden_reason(direction: str, metadata: dict | None) -> str | None:
+    """Why Hail hid an inbound call's caller, or None. Only a reason Hail
+    writes counts: calls placed before the key was reserved may hold any
+    value under it."""
+    value = (metadata or {}).get(CALLER_HIDDEN_META)
+    if (
+        direction != "inbound"
+        or not isinstance(value, str)
+        or value not in CALLER_HIDDEN_REASONS
+    ):
+        return None
+    return value
 
 
 class CallCreate(ConsentAttestationMixin):
