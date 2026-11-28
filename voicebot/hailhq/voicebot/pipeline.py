@@ -602,34 +602,28 @@ def _house_tts(
             )
             instances.append(_org_tts(selection, None, language))
     instances.extend(legacy.values())
-    # An explicit preset voice leads; inherited voices start with Gemini.
+    # Every configured preset joins the chain, so a call speaks while any
+    # house voice can. An explicit preset voice leads; inherited voices
+    # start with Gemini. The others are backups with their default voice.
     lead = preset or (None if voice_id_override else "gemini")
-    if lead == "gemini" and not include_gemini:
-        lead = None
-    if lead and lead in allowed and tts_preset_configured(lead):
-        try:
-            speaker = _org_tts(
-                ResolvedLayer(lead, None, {}, False), voice_id_override, language
-            )
-        except (GoogleAuthError, ValueError):
-            logger.warning("Could not configure Hail's %s speech.", lead)
-        else:
-            last = gemini_last and lead == "gemini"
-            instances.insert(len(instances) if last else 0, speaker)
-    return instances
-
-
-def _any_house_preset(language: str | None) -> list[agents_tts.TTS]:
-    """Use the first configured preset that speaks the language, default voice."""
-    allowed = tts_providers_for(language)
     for provider in TTS_PRESET_MODELS:
+        if provider == "gemini" and not include_gemini:
+            continue
         if provider not in allowed or not tts_preset_configured(provider):
             continue
+        voice = voice_id_override if provider == preset else None
         try:
-            return [_org_tts(ResolvedLayer(provider, None, {}, False), None, language)]
+            speaker = _org_tts(
+                ResolvedLayer(provider, None, {}, False), voice, language
+            )
         except (GoogleAuthError, ValueError):
             logger.warning("Could not configure Hail's %s speech.", provider)
-    return []
+            continue
+        if provider == lead and not (gemini_last and provider == "gemini"):
+            instances.insert(0, speaker)
+        else:
+            instances.append(speaker)
+    return instances
 
 
 def _org_tts(
@@ -780,11 +774,11 @@ def build_tts(
                     # A saved, unscoped agent voice may belong to an old provider.
                     primary_voice = None
             byo = _org_tts(org, primary_voice, language)
-        except (GoogleAuthError, ValueError):
+        except (GoogleAuthError, ValueError, ProviderKeyError):
             # A row without its own key runs on Hail's credentials, so it may
             # use Hail's other voices when those are missing.
             house_backed = org.api_key is None
-            if not preset_provider or not (org.fallback_enabled or house_backed):
+            if not (house_backed or preset_provider and org.fallback_enabled):
                 raise
             logger.warning(
                 "Could not configure %s speech. Using the house chain.", org.provider
@@ -807,8 +801,8 @@ def build_tts(
             house = _house_tts(
                 fallback_voice,
                 language,
-                include_gemini=not (same_house_gemini or explicit_legacy_voice),
-                gemini_last=org.provider == "gemini",
+                include_gemini=not same_house_gemini,
+                gemini_last=org.provider == "gemini" or bool(explicit_legacy_voice),
             )
             if house:
                 return agents_tts.FallbackAdapter([byo, *house])
@@ -816,9 +810,6 @@ def build_tts(
     instances = _house_tts(
         voice_id_override, language, override_provider=override_provider
     )
-    if not instances:
-        # Calls work while any house voice can speak the language.
-        instances = _any_house_preset(language)
     if not instances:
         # Distinguish between no keys configured vs. language filtering all keys out.
         if (
@@ -842,8 +833,8 @@ def build_tts(
             # A configured preset failed to build; its warning names it.
             raise ProviderKeyError("Hail's configured speech could not be set up.")
         raise ProviderKeyError(
-            "No TTS provider configured: configure Gemini or set "
-            "CARTESIA_API_KEY or ELEVEN_API_KEY."
+            "No TTS provider configured: set at least one speech provider "
+            "key (see the speech section of .env.example)."
         )
     if len(instances) == 1:
         return instances[0]

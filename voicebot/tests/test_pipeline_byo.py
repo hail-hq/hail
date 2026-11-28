@@ -366,11 +366,11 @@ def test_explicit_charon_works_when_gemini_is_the_only_house_provider(
 
 
 @pytest.mark.parametrize(
-    ("voice", "provider", "field"),
-    [("Charon", "gemini", "voice_name"), ("ara", "xai", "voice")],
+    ("voice", "provider", "field", "backup"),
+    [("Charon", "gemini", "voice_name", "xai"), ("ara", "xai", "voice", "gemini")],
 )
 def test_explicit_preset_voice_leads_the_house_chain(
-    monkeypatch, captured_plugins, voice, provider, field
+    monkeypatch, captured_plugins, voice, provider, field, backup
 ):
     monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
     monkeypatch.setattr(settings, "gemini_voice_id", "Kore")
@@ -384,6 +384,7 @@ def test_explicit_preset_voice_leads_the_house_chain(
         provider,
         "cartesia",
         "elevenlabs",
+        backup,
     ]
     assert captured_plugins[provider][0].kwargs[field] == voice
     assert captured_plugins["cartesia"][0].kwargs["voice"] == "house-voice"
@@ -629,6 +630,7 @@ def test_explicit_workspace_voice_keeps_its_legacy_fallback_order(
         "cartesia",
         "cartesia",
         "elevenlabs",
+        "gemini",
     ]
 
 
@@ -663,3 +665,39 @@ def test_workspace_xai_key_without_consent_keeps_its_error(monkeypatch):
     org = ResolvedLayer("xai", " ", {"voice_id": "ara"}, False)
     with pytest.raises(ValueError, match="No workspace or Hail key"):
         build_tts(org, language="en")
+
+
+@pytest.fixture()
+def xai_only(monkeypatch):
+    monkeypatch.setattr(settings, "cartesia_api_key", "")
+    monkeypatch.setattr(settings, "xai_api_key", "house-xai")
+
+
+def test_keyless_legacy_row_speaks_with_any_house_voice(xai_only, captured_plugins):
+    org = ResolvedLayer("cartesia", None, {"voice_id": "saved"}, False)
+
+    assert build_tts(org, language="en").label == "xai"
+
+
+def test_workspace_row_gets_every_house_voice_as_backup(
+    xai_only, monkeypatch, captured_plugins
+):
+    monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
+    org = ResolvedLayer("cartesia", "workspace", {}, True)
+
+    chain = build_tts(org, language="en")
+
+    assert [item.label for item in chain._tts_instances] == [
+        "cartesia",
+        "gemini",
+        "xai",
+    ]
+
+
+def test_two_house_presets_back_each_other_up(xai_only, monkeypatch, captured_plugins):
+    monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
+
+    chain = build_tts(voice_id_override="ara", language="en")
+
+    assert [item.label for item in chain._tts_instances] == ["xai", "gemini"]
+    assert captured_plugins["xai"][0].kwargs["voice"] == "ara"

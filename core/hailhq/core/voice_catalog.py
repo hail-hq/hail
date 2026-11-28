@@ -458,6 +458,12 @@ async def synthesize_preset(
                 async with asyncio.timeout(_GOOGLE_AUTH_TIMEOUT):
                     headers = await asyncio.to_thread(_vertex_headers, url)
             except (GoogleAuthError, OSError, TimeoutError) as exc:
+                if (
+                    isinstance(exc, TimeoutError)
+                    and _vertex_auth["credentials"] is None
+                ):
+                    # The lookup thread keeps running; do not start one per preview.
+                    _vertex_auth["failed_at"] = time.monotonic()
                 raise ValueError(
                     "Google Cloud speech credentials are unavailable."
                 ) from exc
