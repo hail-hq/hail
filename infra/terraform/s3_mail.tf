@@ -62,11 +62,41 @@ resource "aws_s3_bucket_lifecycle_configuration" "inbound" {
     }
   }
 
+  # Knowledge files a browser sends straight to storage
+  # (routes/knowledge_uploads.py): parts of a multipart upload never
+  # finished are dropped after a day. No expiration: a document's file is
+  # kept while the document lives.
+  rule {
+    id     = "abort-knowledge-multipart"
+    status = "Enabled"
+    filter {
+      prefix = "knowledge-documents/"
+    }
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 1
+    }
+  }
+
   # No bucket-wide expiration rule for outbound-attachments/: those objects
   # are retained per the app-level contract (used attachments are kept
   # indefinitely and reusable across sends; only never-used uploads expire,
   # 24h after upload, via EmailAttachmentGcWorker). A blanket time-based S3
   # rule here would silently delete objects still backing sent emails.
+}
+
+# The console sends knowledge files straight to the bucket with URLs the API
+# presigns (routes/knowledge_uploads.py, Uppy's @uppy/aws-s3). A presigned
+# URL is the only credential; CORS only lets the console's pages read the
+# answers (ETag of each part). Same origins as the assets bucket.
+resource "aws_s3_bucket_cors_configuration" "inbound" {
+  bucket = aws_s3_bucket.inbound.id
+  cors_rule {
+    allowed_headers = ["content-type"]
+    allowed_methods = ["PUT", "POST", "GET", "DELETE"]
+    allowed_origins = var.asset_allowed_origins
+    expose_headers  = ["ETag", "Location"]
+    max_age_seconds = 3000
+  }
 }
 
 data "aws_iam_policy_document" "ses_write" {
