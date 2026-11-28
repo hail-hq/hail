@@ -709,3 +709,31 @@ async def test_non_english_picker_keeps_the_regular_voices_first(monkeypatch):
         "xai",
         "assemblyai",
     }
+
+
+@respx.mock
+async def test_a_failed_reload_keeps_the_last_good_voice_list(live_lists, monkeypatch):
+    route = respx.get("https://api.x.ai/v1/tts/voices")
+    route.side_effect = [
+        httpx.Response(200, json={"voices": [{"voice_id": "rex", "name": "Rex"}]}),
+        httpx.Response(500),
+    ]
+    assert await catalog.is_preset_voice("xai", "rex")
+    loaded_at, rows = catalog._preset_lists["xai"]
+    catalog._preset_lists["xai"] = (loaded_at - catalog._PRESET_LIST_TTL - 1, rows)
+
+    # An old list answers at once while a new one loads in the background.
+    assert await catalog.is_preset_voice("xai", "rex")
+    await catalog._preset_tasks["xai"]
+    assert route.call_count == 2
+    assert await catalog.is_preset_voice("xai", "rex")
+    assert catalog.known_preset_voice_owner("rex") == "xai"
+
+
+@respx.mock
+async def test_a_voice_list_that_is_not_an_object_counts_as_failed(live_lists):
+    route = respx.get("https://api.x.ai/v1/tts/voices").respond(200, json=[])
+
+    assert await catalog.preset_voices("xai") == []
+    assert await catalog.preset_voices("xai") == []
+    assert route.call_count == 1

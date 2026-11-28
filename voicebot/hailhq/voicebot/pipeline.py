@@ -88,6 +88,7 @@ from hailhq.core.provider_config import (
 from hailhq.core.providers.llm.bedrock import bedrock_client, is_bedrock_client
 from hailhq.core.providers.llm.thinking import thinking_off
 from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
+from hailhq.core.voice_catalog import known_preset_voice_owner
 from livekit.agents import (
     AgentSession,
     APIConnectOptions,
@@ -749,6 +750,8 @@ def build_tts(
     voicebot ever sees it; this is defense-in-depth for direct LiveKit
     dispatches that bypass the API.
     """
+    # Callers that did not look the voice up still know the saved defaults.
+    voice_provider = voice_provider or known_preset_voice_owner(voice_id_override)
     override_provider = None
     if (
         org is not None
@@ -788,7 +791,7 @@ def build_tts(
                 and (foreign_preset or not voice_id_explicit)
                 and voice_provider != org.provider
                 and not keeps_row_voice
-            ):
+            ) or (not preset_provider and foreign_preset):
                 # The voice belongs to another provider: use the row's own.
                 primary_voice = None
             byo = _org_tts(org, primary_voice, language)
@@ -803,18 +806,27 @@ def build_tts(
             )
             # Not BYO: keep the chosen voice, as a call with no row would.
             house_voice = voice_id_override if house_backed else fallback_voice
-            return build_tts(None, house_voice, language, voice_provider=voice_provider)
+            return build_tts(
+                None,
+                house_voice,
+                language,
+                voice_provider=voice_provider if house_voice else None,
+            )
         if org.fallback_enabled:
             # A row on Hail's key and default voice is that house voice already.
+            house_default = tts_preset(org.provider)[0] if preset_provider else ""
+            row_voice = primary_voice or org.params.get("voice_id") or house_default
             same_house_preset = (
                 preset_provider
                 and org.api_key is None
                 and (
-                    primary_voice
-                    or org.params.get("voice_id")
-                    or tts_preset(org.provider)[0]
+                    row_voice == house_default
+                    # Gemini voice names match in any case.
+                    or (
+                        org.provider == "gemini"
+                        and row_voice.casefold() == house_default.casefold()
+                    )
                 )
-                == tts_preset(org.provider)[0]
             )
             explicit_legacy_voice = not preset_provider and org.params.get("voice_id")
             house = _house_tts(

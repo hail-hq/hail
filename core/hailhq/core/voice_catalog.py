@@ -42,7 +42,9 @@ _catalogue_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 # voice comes from the provider's own list, cached here. AssemblyAI has no list.
 _PRESET_LIST_TTL = 900.0
 _PRESET_LIST_RETRY_SECONDS = 60.0
-_preset_lists: dict[str, tuple[float, list[dict] | None]] = {}
+_preset_lists: dict[str, tuple[float, list[dict]]] = {}
+# When a provider's last list load failed. A failed load keeps the old list.
+_preset_failed_at: dict[str, float] = {}
 _preset_tasks: dict[str, asyncio.Task] = {}
 _GOOGLE_AUTH_TIMEOUT = 4.0
 # Reuse one credentials object (it refreshes its own token). After a failed
@@ -404,7 +406,8 @@ async def _fetch_preset_voices(provider: str, key: str) -> list[dict]:
                 headers={"Authorization": f"Bearer {key}"},
             )
             response.raise_for_status()
-            rows = response.json().get("voices")
+            body = response.json()
+            rows = body.get("voices") if isinstance(body, dict) else None
             if not isinstance(rows, list):
                 raise TypeError("Invalid voice list")
             # Every xAI voice speaks every language xAI supports.
@@ -431,6 +434,8 @@ async def _fetch_preset_voices(provider: str, key: str) -> list[dict]:
             )
             response.raise_for_status()
             body = response.json()
+            if not isinstance(body, dict):
+                raise TypeError("Invalid voice list")
             rows = body.get("voices")
             if not isinstance(rows, list):
                 raise TypeError("Invalid voice list")
@@ -456,10 +461,13 @@ async def _fetch_preset_voices(provider: str, key: str) -> list[dict]:
 async def _refresh_preset_voices(provider: str, key: str) -> list[dict]:
     try:
         rows = await _fetch_preset_voices(provider, key)
-    except (httpx.HTTPError, ValueError, KeyError, TypeError):
-        log.warning("Voice list could not load for %s", provider)
-        _preset_lists[provider] = (time.monotonic(), None)
-        return []
+    except Exception:
+        # Fail open: keep the last good list, and wait before asking again.
+        log.warning("Voice list could not load for %s", provider, exc_info=True)
+        _preset_failed_at[provider] = time.monotonic()
+        cached = _preset_lists.get(provider)
+        return cached[1] if cached else []
+    _preset_failed_at.pop(provider, None)
     _preset_lists[provider] = (time.monotonic(), rows)
     return rows
 
@@ -467,38 +475,64 @@ async def _refresh_preset_voices(provider: str, key: str) -> list[dict]:
 async def preset_voices(provider: str, *, timeout: float | None = 10.0) -> list[dict]:
     """The provider's live voices; [] when it has no list or it is unavailable.
 
-    A failed load is not retried for a minute. A load that outlives ``timeout``
-    keeps running, so the next caller gets its result.
+    A failed load is not retried for a minute and keeps the last good list.
+    An old list is returned at once while a new one loads. A load that
+    outlives ``timeout`` keeps running, so the next caller gets its result.
     """
     key = _list_key(provider)
     if not key:
         return []
     cached = _preset_lists.get(provider)
     now = time.monotonic()
-    if cached and cached[1] is not None and now - cached[0] < _PRESET_LIST_TTL:
+    if cached and now - cached[0] < _PRESET_LIST_TTL:
         return cached[1]
-    if cached and cached[1] is None and now - cached[0] < _PRESET_LIST_RETRY_SECONDS:
-        return []
+    failed_at = _preset_failed_at.get(provider)
+    if failed_at is not None and now - failed_at < _PRESET_LIST_RETRY_SECONDS:
+        return cached[1] if cached else []
     loop = asyncio.get_running_loop()
     task = _preset_tasks.get(provider)
     if task is None or task.done() or task.get_loop() is not loop:
         task = loop.create_task(_refresh_preset_voices(provider, key))
         _preset_tasks[provider] = task
+    if cached:
+        return cached[1]
     try:
         return await asyncio.wait_for(asyncio.shield(task), timeout)
     except TimeoutError:
-        return cached[1] if cached and cached[1] is not None else []
+        return []
+
+
+async def warm_preset_voices(timeout: float) -> None:
+    """Load every voice list once, so a new call worker starts with them."""
+    await asyncio.gather(
+        *(preset_voices(p, timeout=timeout) for p in TTS_PRESET_MODELS)
+    )
 
 
 def reset_preset_voice_cache() -> None:
     """Forget loaded voice lists (tests, and a key change in one process)."""
     _preset_lists.clear()
+    _preset_failed_at.clear()
     _preset_tasks.clear()
 
 
 def _same_voice(provider: str, a: str, b: str) -> bool:
     # Gemini voice names match in any case ("Charon" and "charon").
     return a.casefold() == b.casefold() if provider == "gemini" else a == b
+
+
+def known_preset_voice_owner(voice_id: str | None) -> str | None:
+    """The owner from the saved defaults and loaded lists, without loading."""
+    if not voice_id:
+        return None
+    for provider in TTS_PRESET_MODELS:
+        if _same_voice(provider, voice_id, tts_preset(provider)[0]):
+            return provider
+    for provider in TTS_PRESET_MODELS:
+        rows = _preset_lists.get(provider, (0.0, []))[1]
+        if any(_same_voice(provider, voice_id, row["id"]) for row in rows):
+            return provider
+    return None
 
 
 async def preset_voice_owner(voice_id: str | None, *, timeout: float = 1.0):

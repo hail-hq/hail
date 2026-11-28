@@ -794,3 +794,22 @@ def test_workspace_preset_does_not_speak_another_providers_voice(monkeypatch):
     build_tts(org, "Charon", "en", voice_id_explicit=True, voice_provider="gemini")
 
     assert constructor.call_args.kwargs["voice"] == "rex"
+
+
+def test_a_call_without_a_lookup_still_knows_the_saved_preset_voices(
+    xai_only, monkeypatch, captured_plugins
+):
+    monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
+
+    chain = build_tts(voice_id_override="ara", language="en")
+
+    assert [item.label for item in chain._tts_instances] == ["xai", "gemini"]
+    assert captured_plugins["xai"][0].kwargs["voice"] == "ara"
+
+
+def test_legacy_workspace_row_does_not_speak_a_preset_voice(captured_plugins):
+    org = ResolvedLayer("cartesia", "workspace-key", {"voice_id": "row-voice"}, False)
+
+    build_tts(org, "rex", "en", voice_id_explicit=True, voice_provider="xai")
+
+    assert captured_plugins["cartesia"][0].kwargs["voice"] == "row-voice"

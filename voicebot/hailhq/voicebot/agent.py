@@ -96,7 +96,7 @@ from hailhq.core.telemetry_identity import (
     tag_context,
 )
 from hailhq.core.url_guard import assert_public_https_url
-from hailhq.core.voice_catalog import preset_voice_owner
+from hailhq.core.voice_catalog import preset_voice_owner, warm_preset_voices
 from hailhq.core.webhook_fanout import caller_hidden_data, fanout_call_event
 from hailhq.voicebot import text_watch
 from hailhq.voicebot.amd import (
@@ -1554,6 +1554,12 @@ def prewarm(proc: JobProcess) -> None:
     """
     prewarm_audio()
     proc.userdata["vad"] = silero.VAD.load()
+    # Each call runs in its own process, so load the voice lists here and
+    # not while a caller waits. Fail open: a call still looks them up.
+    try:
+        asyncio.run(warm_preset_voices(timeout=3.0))
+    except Exception:
+        logger.warning("Voice lists could not load before the call", exc_info=True)
 
 
 def parse_metadata(raw: str | None) -> dict[str, Any]:

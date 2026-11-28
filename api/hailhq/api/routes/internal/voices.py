@@ -2,7 +2,7 @@
 
 Previews speak fixed text only: one greeting per language, for the current
 three recommendations. They are shared in memory across orgs for one hour
-(at most three per supported language).
+(at most three, plus one per speech preset, per supported language).
 
 The line route speaks only a workspace's own first line, at most 400
 characters, in a catalogue voice. The website calls it after it checks the
@@ -159,7 +159,7 @@ async def preview_voice(body: PreviewIn) -> Response:
     try:
         model = await _catalogue_model(body)
         text = _HELLO[body.language]
-        cap = 3 * len(SUPPORTED_LANGUAGES) + len(TTS_PRESET_MODELS)
+        cap = (3 + len(TTS_PRESET_MODELS)) * len(SUPPORTED_LANGUAGES)
         return _wav(await _audio(body, model, text, _samples, cap))
     except (httpx.HTTPError, ValueError) as exc:
         raise HTTPException(503, "This sample could not play. Try again.") from exc
