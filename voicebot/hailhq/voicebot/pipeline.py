@@ -562,7 +562,7 @@ def _house_tts(
     voice_id_override: str | None,
     language: str | None,
     *,
-    include_gemini: bool = True,
+    skip_preset: str | None = None,
     gemini_last: bool = False,
     override_provider: TTSProvider | None = None,
 ) -> list[agents_tts.TTS]:
@@ -607,7 +607,7 @@ def _house_tts(
     # start with Gemini. The others are backups with their default voice.
     lead = preset or (None if voice_id_override else "gemini")
     for provider in TTS_PRESET_MODELS:
-        if provider == "gemini" and not include_gemini:
+        if provider == skip_preset:
             continue
         if provider not in allowed or not tts_preset_configured(provider):
             continue
@@ -716,11 +716,11 @@ def build_tts(
     ``org`` present (mode C): the org's provider is used, with Hail's house
     TTS instances appended as a fallback only if ``org.fallback_enabled``.
     Inherited English voices start with Gemini when credentials are available.
-    ``org`` absent (mode A): Cartesia, then ElevenLabs, a
-    provider is included only when its API key is configured, so a
-    single-key self-host still works (tenet 4). With both keys set the two
-    are wrapped in a ``FallbackAdapter`` with Cartesia first. With one key
-    set that provider is used directly with no adapter.
+    ``org`` absent (mode A): Cartesia and ElevenLabs, plus every configured
+    Gemini, xAI or AssemblyAI voice that speaks the language. A provider is
+    included only when its key is configured, so a single-key self-host
+    still works (tenet 4). Two or more are wrapped in a ``FallbackAdapter``;
+    one is used directly with no adapter.
 
     ``language`` is the per-call ``voice_config.language`` (ISO 639-1); it is
     applied to every instance built here, BYO and house fallbacks alike,
@@ -778,7 +778,7 @@ def build_tts(
             # A row without its own key runs on Hail's credentials, so it may
             # use Hail's other voices when those are missing.
             house_backed = org.api_key is None
-            if not (house_backed or preset_provider and org.fallback_enabled):
+            if not (house_backed or (preset_provider and org.fallback_enabled)):
                 raise
             logger.warning(
                 "Could not configure %s speech. Using the house chain.", org.provider
@@ -787,21 +787,22 @@ def build_tts(
             house_voice = voice_id_override if house_backed else fallback_voice
             return build_tts(None, house_voice, language)
         if org.fallback_enabled:
-            same_house_gemini = (
-                org.provider == "gemini"
+            # A row on Hail's key and default voice is that house voice already.
+            same_house_preset = (
+                preset_provider
                 and org.api_key is None
                 and (
                     primary_voice
                     or org.params.get("voice_id")
-                    or settings.gemini_voice_id
+                    or tts_preset(org.provider)[0]
                 )
-                == settings.gemini_voice_id
+                == tts_preset(org.provider)[0]
             )
             explicit_legacy_voice = not preset_provider and org.params.get("voice_id")
             house = _house_tts(
                 fallback_voice,
                 language,
-                include_gemini=not same_house_gemini,
+                skip_preset=org.provider if same_house_preset else None,
                 gemini_last=org.provider == "gemini" or bool(explicit_legacy_voice),
             )
             if house:

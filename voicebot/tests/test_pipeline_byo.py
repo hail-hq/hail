@@ -701,3 +701,14 @@ def test_two_house_presets_back_each_other_up(xai_only, monkeypatch, captured_pl
 
     assert [item.label for item in chain._tts_instances] == ["xai", "gemini"]
     assert captured_plugins["xai"][0].kwargs["voice"] == "ara"
+
+
+def test_house_backed_preset_row_is_not_repeated_in_its_backups(
+    xai_only, monkeypatch, captured_plugins
+):
+    monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
+    org = ResolvedLayer("xai", None, {}, True)
+
+    chain = build_tts(org, language="en")
+
+    assert [item.label for item in chain._tts_instances] == ["xai", "gemini"]

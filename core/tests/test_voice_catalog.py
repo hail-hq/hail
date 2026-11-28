@@ -118,6 +118,37 @@ async def test_slow_vertex_lookup_is_not_repeated_on_each_load(monkeypatch):
     assert len(lookups) == 1
 
 
+async def test_slow_vertex_lookup_in_a_preview_starts_the_retry_wait(monkeypatch):
+    monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
+    monkeypatch.setattr(settings, "google_cloud_location", "global")
+    monkeypatch.setattr(catalog, "_GOOGLE_AUTH_TIMEOUT", 0.05)
+    auth = {"credentials": None, "failed_at": None}
+    monkeypatch.setattr(catalog, "_vertex_auth", auth)
+    lookups = []
+    release = threading.Event()
+
+    def slow(**kwargs):
+        lookups.append(kwargs)
+        release.wait(5)
+        raise catalog.GoogleAuthError("no credentials")
+
+    monkeypatch.setattr(catalog.google.auth, "default", slow)
+    async with httpx.AsyncClient() as client:
+        for _ in range(2):
+            with pytest.raises(ValueError, match="credentials are unavailable"):
+                await catalog.synthesize_preset(client, "gemini", "Charon", "Hi.")
+
+    timed_out_at = auth["failed_at"]
+    assert timed_out_at is not None
+    release.set()
+    for _ in range(200):
+        if auth["failed_at"] != timed_out_at:
+            break
+        await asyncio.sleep(0.01)
+    assert auth["failed_at"] != timed_out_at
+    assert len(lookups) == 1
+
+
 @pytest.fixture(autouse=True)
 def catalogue_settings(monkeypatch):
     catalog._cache.clear()
