@@ -11,6 +11,7 @@ import pytest
 from hailhq.core.config import VoicePreference, settings
 from hailhq.core.models import OrgProviderConfig
 from hailhq.core.secret_cipher import generate_key
+from hailhq.core.voice_catalog import known_preset_voice_owner
 from hailhq.voicebot import pipeline
 from hailhq.voicebot.pipeline import (
     ProviderKeyError,
@@ -813,3 +814,19 @@ def test_legacy_workspace_row_does_not_speak_a_preset_voice(captured_plugins):
     build_tts(org, "rex", "en", voice_id_explicit=True, voice_provider="xai")
 
     assert captured_plugins["cartesia"][0].kwargs["voice"] == "row-voice"
+
+
+def test_legacy_row_with_fallback_keeps_the_preset_voice_for_the_house_chain(
+    xai_only, monkeypatch, captured_plugins
+):
+    monkeypatch.setattr(settings, "cartesia_api_key", "house-cartesia")
+    org = ResolvedLayer("cartesia", "workspace-key", {"voice_id": "row-voice"}, True)
+
+    chain = build_tts(org, "rex", "en", voice_id_explicit=True, voice_provider="xai")
+
+    assert chain._tts_instances[1].label == "xai"
+    assert captured_plugins["xai"][0].kwargs["voice"] == "rex"
+
+
+def test_a_voice_id_that_is_not_text_does_not_break_the_lookup():
+    assert known_preset_voice_owner(42) is None

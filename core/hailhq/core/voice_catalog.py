@@ -523,7 +523,7 @@ def _same_voice(provider: str, a: str, b: str) -> bool:
 
 def known_preset_voice_owner(voice_id: str | None) -> str | None:
     """The owner from the saved defaults and loaded lists, without loading."""
-    if not voice_id:
+    if not isinstance(voice_id, str) or not voice_id:
         return None
     for provider in TTS_PRESET_MODELS:
         if _same_voice(provider, voice_id, tts_preset(provider)[0]):
