@@ -44,12 +44,13 @@ __all__ = [
     "plan_number_cents",
 ]
 
-Feature = Literal["porting"]
+Feature = Literal["porting", "connected_phone_systems"]
 PlanUse = Literal["call", "text", "email"]
 
 # The tiers that include each paid feature. A new feature is one entry here.
 FEATURE_TIERS: Final[dict[str, frozenset[str]]] = {
     "porting": frozenset({"pro", "business", "enterprise"}),
+    "connected_phone_systems": frozenset({"business", "enterprise"}),
 }
 
 # account_credits.source of a number fee the plan pays (kind = 'plan'). The
