@@ -3717,7 +3717,7 @@ type PhoneNumberResponse struct {
 	// NumberType Kind of number: 'local', 'mobile', 'toll_free', or 'national'.
 	NumberType string `json:"number_type"`
 
-	// ProvisioningState 'pending', 'active', 'failed', or 'released'. A connected number is 'unverified' until it passes its check (POST /sip-connections/{id}/numbers/{number_id}/verify).
+	// ProvisioningState 'pending', 'active', 'failed', or 'released'. A connected number is 'unverified' until it passes its ownership check (POST /sip-connections/{id}/numbers/{number_id}/verify).
 	ProvisioningState string `json:"provisioning_state"`
 
 	// SipConnectionId The phone system connection of a connected number. Null for a purchased number.

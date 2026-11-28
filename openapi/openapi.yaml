@@ -2458,8 +2458,8 @@ paths:
             expected_total_cents differs from the quoted total, or the carrier rejected
             or failed the order. In the last case the credit hold is refunded and
             the detail gives the reason. Also returned when the quote's number was
-            released since it was bought, and while another workspace checks that
-            number as a connected number.
+            released since it was bought, and while another workspace runs the ownership
+            check on that number as a connected number.
         "503":
           description:
             The carrier lookup or number price is unavailable, or no inventory
@@ -7699,7 +7699,7 @@ paths:
         "Add a number your phone system holds. It starts ``unverified``:
         send
 
-        its incoming calls to Hail, then check it (verify) soon:
+        its incoming calls to Hail, then run the ownership check (verify) soon:
 
         until it passes, someone else can buy or connect the number, and Hail
 
@@ -12130,7 +12130,7 @@ components:
           title: Provisioning State
           description:
             "'pending', 'active', 'failed', or 'released'. A connected
-            number is 'unverified' until it passes its check (POST /sip-connections/{id}/numbers/{number_id}/verify)."
+            number is 'unverified' until it passes its ownership check (POST /sip-connections/{id}/numbers/{number_id}/verify)."
         source:
           type: string
           enum:
