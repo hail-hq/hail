@@ -838,6 +838,9 @@ def build_tts(
                 f"Configured TTS providers cannot speak language '{language}'; "
                 f"language requires: {', '.join(sorted(providers))}."
             )
+        if any(tts_preset_configured(provider) for provider in TTS_PRESET_MODELS):
+            # A configured preset failed to build; its warning names it.
+            raise ProviderKeyError("Hail's configured speech could not be set up.")
         raise ProviderKeyError(
             "No TTS provider configured: configure Gemini or set "
             "CARTESIA_API_KEY or ELEVEN_API_KEY."
@@ -960,8 +963,11 @@ def startup_capability_warnings() -> list[str]:
         available_tts_providers = set()
         if settings.eleven_api_key:
             available_tts_providers.add("elevenlabs")
-        if tts_preset_configured("gemini"):
-            available_tts_providers.add("gemini")
+        available_tts_providers.update(
+            provider
+            for provider in TTS_PRESET_MODELS
+            if tts_preset_configured(provider)
+        )
 
         # Find languages that have no available TTS provider
         unservable_langs = []

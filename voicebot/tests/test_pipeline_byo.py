@@ -456,6 +456,15 @@ def test_gemini_only_host_names_the_language_it_cannot_speak(monkeypatch):
         build_tts(language="fr")
 
 
+def test_preset_only_host_that_cannot_build_its_speech_says_so(monkeypatch):
+    monkeypatch.setattr(settings, "google_api_key", "house-gemini")
+    monkeypatch.setattr(settings, "cartesia_api_key", "")
+    monkeypatch.setenv("GOOGLE_GEMINI_BASE_URL", "https://gemini.example.test")
+
+    with pytest.raises(ProviderKeyError, match="could not be set up"):
+        build_tts(language="en")
+
+
 def test_workspace_gemini_can_fall_back_to_house_credentials(
     monkeypatch, captured_plugins
 ):

@@ -1,4 +1,6 @@
+import asyncio
 import json
+import threading
 from unittest.mock import AsyncMock
 
 import httpx
@@ -89,20 +91,30 @@ async def test_vertex_credentials_are_looked_up_once(monkeypatch):
 async def test_slow_vertex_lookup_is_not_repeated_on_each_load(monkeypatch):
     monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
     monkeypatch.setattr(settings, "google_cloud_location", "global")
-    monkeypatch.setattr(catalog, "_GOOGLE_AUTH_TIMEOUT", 0.01)
-    monkeypatch.setattr(
-        catalog, "_vertex_auth", {"credentials": None, "failed_at": None}
-    )
+    monkeypatch.setattr(catalog, "_GOOGLE_AUTH_TIMEOUT", 0.05)
+    auth = {"credentials": None, "failed_at": None}
+    monkeypatch.setattr(catalog, "_vertex_auth", auth)
     lookups = []
+    release = threading.Event()
 
     def slow(**kwargs):
         lookups.append(kwargs)
-        catalog.time.sleep(0.2)
+        release.wait(5)
         raise catalog.GoogleAuthError("no credentials")
 
     monkeypatch.setattr(catalog.google.auth, "default", slow)
     assert not await catalog.preset_credentials_available("gemini")
     assert not await catalog.preset_credentials_available("gemini")
+
+    # Let the lookup thread finish before the patched state is restored.
+    timed_out_at = auth["failed_at"]
+    assert timed_out_at is not None
+    release.set()
+    for _ in range(200):
+        if auth["failed_at"] != timed_out_at:
+            break
+        await asyncio.sleep(0.01)
+    assert auth["failed_at"] != timed_out_at
     assert len(lookups) == 1
 
 
