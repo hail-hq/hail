@@ -44,6 +44,7 @@ from hailhq.core.config import settings
 from hailhq.core.db import get_session, independent_session_scope
 from hailhq.core.livekit import LiveKitClient
 from hailhq.core.models import AuditLog, PhoneNumber, SipConnection
+from hailhq.core.plans import plan_allows
 from hailhq.core.schemas import (
     ConnectedNumberCheck,
     ConnectedNumberCreate,
@@ -71,6 +72,13 @@ router = APIRouter(
 # website minted with superadmin) reaches these routes, everyone else gets
 # 404. Change it together with hail-website's `connectedPhoneSystems` feature.
 OPEN_TO_ALL_WORKSPACES: Final = True
+
+# A new connection needs a plan that includes it (Business, Enterprise;
+# hailhq.core.plans.FEATURE_TIERS). Existing connections keep working.
+NEEDS_BUSINESS: Final = (
+    "Connecting your phone system comes with the Business plan. "
+    "Choose it in the console under Billing."
+)
 
 # Characters of the SIP server a workspace sees; Hail's team sends the full
 # address (see _sees_full_host).
@@ -279,7 +287,10 @@ async def record_password_read(principal: Principal, connection_id: UUID) -> Non
     "",
     response_model=SipConnectionCreated,
     status_code=http_status.HTTP_201_CREATED,
-    responses=_ERROR_RESPONSES,
+    responses={
+        **_ERROR_RESPONSES,
+        403: {"description": "The workspace's plan does not include it."},
+    },
 )
 async def create_sip_connection(
     body: SipConnectionCreate,
@@ -292,6 +303,12 @@ async def create_sip_connection(
     and password to it as a generic SIP trunk. Read the password again with
     GET /sip-connections/{id}/password, or rotate it to get a new one. With ``pbx_host``, agents can
     also call out and hand calls over through your phone system."""
+    if not _is_staff(principal) and not await plan_allows(
+        db, principal.organization_id, "connected_phone_systems"
+    ):
+        raise HTTPException(
+            status_code=http_status.HTTP_403_FORBIDDEN, detail=NEEDS_BUSINESS
+        )
     lk = _livekit_or_503(lk)
     try:
         row, password = await create_connection(

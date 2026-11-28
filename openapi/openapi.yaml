@@ -7366,6 +7366,8 @@ paths:
           description: Hail could not reach its call service.
         "503":
           description: Connected phone systems are not set up on this server.
+        "403":
+          description: The workspace's plan does not include it.
     get:
       tags:
         - sip-connections

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -10,7 +11,7 @@ import pytest
 from hailhq.api import connected_numbers
 from hailhq.api.connected_numbers import CheckResult, ConnectedNumberError
 from hailhq.core.config import settings
-from hailhq.core.models import AuditLog, IdempotencyKey, PhoneNumber
+from hailhq.core.models import AuditLog, IdempotencyKey, OrganizationPlan, PhoneNumber
 from hailhq.core.secret_cipher import generate_key
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -739,3 +740,32 @@ async def test_patch_sets_and_clears_the_phone_system_country(
     assert resp.json()["default_region"] is None
     bad = await client.patch(url, json={"default_region": "gb"}, headers=_auth(plain))
     assert bad.status_code == 422
+
+
+async def test_new_connection_needs_a_business_plan(
+    client: httpx.AsyncClient, org_and_key: tuple, async_session, monkeypatch
+) -> None:
+    """With billing on, a workspace without a Business (or Enterprise) plan
+    cannot create a connection; with one it can."""
+    monkeypatch.setattr(settings, "hail_internal_secret", "test-internal-secret")
+    monkeypatch.setattr(settings, "hail_base_url", "https://billing.example")
+    org, _key, plain = org_and_key
+    body = {"label": "Main office", "default_region": "US"}
+    resp = await client.post("/sip-connections", json=body, headers=_auth(plain))
+    assert resp.status_code == 403 and "Business plan" in resp.text
+    now = datetime.now(timezone.utc)
+    async_session.add(
+        OrganizationPlan(
+            organization_id=org,
+            tier="business",
+            step_hours=10,
+            billing_interval="month",
+            status="active",
+            stripe_customer_id="cus_test",
+            stripe_subscription_id=f"sub_{uuid4().hex}",
+            started_at=now,
+            current_period_end=now + timedelta(days=30),
+        )
+    )
+    await async_session.commit()
+    await _create(client, plain)
