@@ -172,7 +172,7 @@ def test_prompt_text_is_pinned() -> None:
         "37e9a0b5058e8c60355db926a963a8fba59c0fc4dd43d9ede4c7116e464e9e8b"
     )
     assert _sha(prompts.VOICE_CONFIGURATION_HELP) == (
-        "bc88d1a24fb6b25d598ce4d9e4e4e5c312194852c50d9a3290b095199990066a"
+        "a4b69812db94bf67d5fd35fe4c38c842c53dbf6e037a02a5f3439455d1b99db3"
     )
 
 
@@ -350,7 +350,9 @@ def test_onboarding_voice_help_names_the_optional_trial_settings():
 def test_help_says_how_the_knowledge_base_is_set() -> None:
     help_text = prompts.VOICE_CONFIGURATION_HELP
     assert "knowledge base" in help_text
-    assert "not in the console" in help_text
+    assert "If the Hail console shows Documents" in help_text
+    assert "an owner or admin opens Documents and uploads the files" in help_text
+    assert "turn on Answer from your documents, and press Save" in help_text
 
 
 def test_knowledge_section_quotes_documents_as_data() -> None:

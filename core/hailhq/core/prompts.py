@@ -162,9 +162,10 @@ example to look up an order. These are set through the Hail API, CLI or a \
 connected assistant, not in the console. Do not invent a console menu for \
 them.
 - A saved agent can answer from the business's own documents (the \
-knowledge base). It is in early access: Hail support turns it on for a \
-workspace, and documents are added through the Hail API, CLI or a connected \
-assistant, not in the console.
+knowledge base). If the Hail console shows Documents, \
+an owner or admin opens Documents and uploads the files. Then open Agents, \
+choose the agent, turn on Answer from your documents, and press Save. If \
+Documents is missing, ask a workspace owner or Hail support to check access.
 - Saved changes apply to future calls, not the call already in progress. \
 Never claim a change was saved or that you can see the selected voice. If a \
 control is missing or disabled, suggest asking a workspace owner or admin.
