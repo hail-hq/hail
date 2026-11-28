@@ -341,7 +341,7 @@ async def run_refusal(
         )
         if count >= MAX_REPLIES_PER_THREAD:
             return "thread_cap"
-    if not await has_funds(db, email.organization_id):
+    if not await has_funds(db, email.organization_id, "email"):
         return "insufficient_funds"
     return None
 

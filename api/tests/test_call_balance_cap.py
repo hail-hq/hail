@@ -19,6 +19,7 @@ from hailhq.core.call_allowance import (
     round_up_tenth,
 )
 from hailhq.core.config import settings
+from hailhq.core.internal_webhook import CallQuote
 from hailhq.core.models import (
     AccountCredit,
     Agent,
@@ -52,7 +53,7 @@ def quote(monkeypatch):
 
     async def fake(org, legs, recording):
         Quote.legs.append(legs)
-        return Quote.price
+        return CallQuote(*Quote.price) if Quote.price else None
 
     monkeypatch.setattr(settings, "hail_internal_secret", SECRET)
     for module in ("calls", "internal.agent"):
@@ -323,8 +324,9 @@ async def _handover(
     hold=None,
     limit=None,
     tries=0,
+    org=None,
 ):
-    org = uuid.uuid4()
+    org = org or uuid.uuid4()
     if cents:
         async_session.add(
             AccountCredit(
@@ -600,7 +602,7 @@ async def test_handover_counts_earlier_attempts(
     async def fake(org, legs, recording):
         # The call alone 10¢ a minute; both lines 20¢ plus the second
         # line's per-call fee.
-        return (Decimal(10 * len(legs)), Decimal(fee * (len(legs) - 1)))
+        return CallQuote(Decimal(10 * len(legs)), Decimal(fee * (len(legs) - 1)))
 
     monkeypatch.setattr("hailhq.api.routes.internal.agent.quote_call_price", fake)
     monkeypatch.setattr("hailhq.api.routes.internal.agent.quotes_enabled", lambda: True)
@@ -663,7 +665,7 @@ async def test_priced_handover_counts_an_earlier_unpriced_dial(
 
     async def fake(org, legs, recording):
         # The call alone 10¢ a minute; both lines 20¢.
-        return (Decimal(10 * len(legs)), Decimal(0))
+        return CallQuote(Decimal(10 * len(legs)), Decimal(0))
 
     monkeypatch.setattr("hailhq.api.routes.internal.agent.quote_call_price", fake)
     contact = (

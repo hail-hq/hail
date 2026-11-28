@@ -39,17 +39,33 @@ import hmac
 import logging
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from hailhq.core.billing import CALL_META_BILLED, has_funds
+from hailhq.core.billing import CALL_META_BILLED, get_balance_cents, has_funds
+from hailhq.core.call_allowance import (
+    available_cents,
+    cap_seconds,
+    hold,
+    hold_parts,
+    hold_until,
+    paid_minutes,
+    plan_minutes_left,
+    plan_split,
+    shorter_limit,
+)
 from hailhq.core.call_end_reasons import CallEndReason
 from hailhq.core.carrier_routing import PBX, inbound_trunk
 from hailhq.core.compliance_gate import check_channel_suspended
 from hailhq.core.config import SELF_HOSTED_ORG_ID, SIP_SECRET_PATTERN, settings
 from hailhq.core.db import org_lock, session_scope
 from hailhq.core.handover import handover_limit, handover_targets
-from hailhq.core.internal_webhook import fetch_organization_name
+from hailhq.core.internal_webhook import (
+    fetch_organization_name,
+    quote_call_price,
+    quotes_enabled,
+)
 from hailhq.core.models import (
     Agent,
     Call,
@@ -588,6 +604,53 @@ async def _can_hand_over(db: AsyncSession, number: PhoneNumber) -> bool:
     return conn.livekit_outbound_trunk_id is not None
 
 
+async def _plan_cap(
+    db: AsyncSession,
+    number: PhoneNumber,
+    org_id: UUID,
+    attrs: SipAttributes,
+    max_duration: int,
+    recording: bool,
+) -> tuple[int, tuple[Decimal, datetime, Decimal, Decimal, Decimal]] | None:
+    """The time limit of a call that only the plan pays for (the balance is
+    0 or below), and the hold that sets its minutes aside (cents, until,
+    the price per minute and per call, plan minutes), as POST /calls does.
+    Takes the org lock, held until the call row is committed. None when the
+    price is unknown or the plan and the balance do not pay for one
+    minute."""
+    quote = await quote_call_price(
+        str(org_id),
+        [
+            {
+                "direction": "inbound",
+                "carrier": number.provider,
+                "number_e164": attrs.dialed,
+                "caller_e164": attrs.caller or "",
+            }
+        ],
+        recording,
+    )
+    if quote is None:
+        logger.warning("inbound call price unknown for org %s; no credits", org_id)
+        return None
+    per_minute, per_call = quote.cents_per_minute, quote.cents_per_call
+    await org_lock(db, org_id)
+    now = datetime.now(timezone.utc)
+    plan_left = (
+        await plan_minutes_left(db, org_id, now=now)
+        if quote.plan_minutes_per_minute > 0
+        else Decimal(0)
+    )
+    minutes, on_plan = plan_split(
+        await available_cents(db, org_id, now=now), plan_left, quote, per_call
+    )
+    if minutes < 1:
+        return None
+    seconds = shorter_limit(max_duration, cap_seconds(minutes))
+    cents, plan = hold_parts(quote, per_call, paid_minutes(seconds), on_plan)
+    return seconds, (cents, hold_until(now, seconds), per_minute, per_call, plan)
+
+
 async def _answer_or_refuse(
     db: AsyncSession,
     number: PhoneNumber,
@@ -602,7 +665,7 @@ async def _answer_or_refuse(
         return await _refuse(db, number, attrs, agent, CallEndReason.NO_AGENT)
     if await check_channel_suspended(db, org_id, "voice"):
         return await _refuse(db, number, attrs, agent, CallEndReason.USER_REJECTED)
-    if not await has_funds(db, org_id):
+    if not await has_funds(db, org_id, "call"):
         return await _refuse(db, number, attrs, agent, CallEndReason.INSUFFICIENT_FUNDS)
 
     workspace = await db.get(OrganizationCallSettings, org_id)
@@ -614,6 +677,31 @@ async def _answer_or_refuse(
     disclosure_line = agent.ai_disclosure_line or (
         workspace.ai_disclosure_line if workspace else None
     )
+    recording_meta = recording_call_metadata(
+        workspace,
+        override=agent.recording_enabled,
+        # Same rule as outbound: only the shared-key sentinel org is
+        # self-hosted, never every org on a deploy that sets the key.
+        self_hosted=org_id == SELF_HOSTED_ORG_ID,
+    )
+    plan_hold = None
+    if quotes_enabled() and await get_balance_cents(db, org_id) <= 0:
+        # Only the plan pays (has_funds passed on its minutes): the call is
+        # cut at the minutes left, and they are set aside, so calls at the
+        # same time share them.
+        capped = await _plan_cap(
+            db,
+            number,
+            org_id,
+            attrs,
+            max_duration,
+            bool(recording_meta.get("recording_enabled")),
+        )
+        if capped is None:
+            return await _refuse(
+                db, number, attrs, agent, CallEndReason.INSUFFICIENT_FUNDS
+            )
+        max_duration, plan_hold = capped
     now = datetime.now(timezone.utc)
     call = Call(
         organization_id=org_id,
@@ -633,17 +721,22 @@ async def _answer_or_refuse(
         metadata_={
             CALL_META_BILLED: True,
             **_caller_meta(attrs),
-            **recording_call_metadata(
-                workspace,
-                override=agent.recording_enabled,
-                # Same rule as outbound: only the shared-key sentinel org is
-                # self-hosted, never every org on a deploy that sets the key.
-                self_hosted=org_id == SELF_HOSTED_ORG_ID,
-            ),
+            **recording_meta,
         },
     )
     db.add(call)
     await db.flush()
+    if plan_hold is not None:
+        cents, until, per_minute, per_call, plan = plan_hold
+        await hold(
+            db,
+            call.id,
+            cents,
+            until,
+            cents_per_minute=per_minute,
+            cents_per_call=per_call,
+            plan_minutes=plan,
+        )
     db.add(
         CallEvent(
             call_id=call.id,

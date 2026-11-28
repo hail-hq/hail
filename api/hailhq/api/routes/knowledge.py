@@ -32,9 +32,11 @@ from hailhq.core.file_uploads import KNOWLEDGE_MAX_FILE_BYTES, delete_upload_obj
 from hailhq.core.knowledge.access import (
     KNOWLEDGE_OFF,
     STORAGE_FULL,
+    WORKSPACE_FULL,
     knowledge_limits,
     knowledge_lock,
     storage_full,
+    workspace_full,
 )
 from hailhq.core.knowledge.embed import EmbeddingUnavailable, get_embedder
 from hailhq.core.knowledge.search import search_pieces
@@ -131,7 +133,7 @@ async def ensure_room(
 ) -> int:
     """Refuse a new file of ``size_bytes`` the workspace has no room for;
     returns its file limit. 413 over the file limit; 409 when it holds its
-    limit of documents or Hail's knowledge storage is full. The one place
+    limit of documents, its plan's storage, or Hail's knowledge storage is full. The one place
     for every limit a new document is checked against: ``add_document``
     and ``POST /knowledge/uploads``. Under the workspace's knowledge lock."""
     limit = min(KNOWLEDGE_MAX_FILE_BYTES, limits.max_file_bytes)
@@ -158,6 +160,10 @@ async def ensure_room(
     if await storage_full(db):
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT, detail=STORAGE_FULL
+        )
+    if await workspace_full(db, limits, adding=size_bytes):
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT, detail=WORKSPACE_FULL
         )
     return limit
 

@@ -29,6 +29,11 @@ from hailhq.core.models import (
     PhoneNumber,
 )
 from hailhq.core.number_offers import CarrierOffer, discover_offers
+from hailhq.core.plans import (
+    OVER_PLAN_REF_SUFFIX,
+    PLAN_NUMBER_SOURCE,
+    plan_number_cents,
+)
 from hailhq.core.providers.verification import get_verification_provider
 from hailhq.core.providers.verification.rejections import customer_reason
 from hailhq.core.providers.voice import (
@@ -91,11 +96,30 @@ def catalog_capabilities(
     return caps
 
 
+def _channel(number: PhoneNumber) -> str:
+    return "voice" if "voice" in number.capabilities else "sms"
+
+
+def plan_paid(number: PhoneNumber, ref: str) -> AccountCredit:
+    """The ledger row of a monthly fee the plan pays (hailhq.core.plans):
+    0 cents, one included number, the month's own fee ref."""
+    return AccountCredit(
+        organization_id=number.organization_id,
+        kind="plan",
+        channel=_channel(number),
+        amount_cents=0,
+        plan_units=1,
+        qty=1,
+        ref=ref,
+        source=PLAN_NUMBER_SOURCE,
+    )
+
+
 def credit(number: PhoneNumber, amount: int, ref: str, source: str) -> AccountCredit:
     return AccountCredit(
         organization_id=number.organization_id,
         kind="credit" if amount > 0 else "debit",
-        channel="voice" if "voice" in number.capabilities else "sms",
+        channel=_channel(number),
         amount_cents=amount,
         qty=1,
         ref=ref,
@@ -127,23 +151,48 @@ async def finish_order(
     offer = CarrierOffer.model_validate(meta["offer"])
     now = datetime.now(timezone.utc)
     if meta["billed"]:
-        db.add(
-            credit(
-                number,
-                offer.monthly_cents + offer.setup_cents,
-                f"number_reservation_return:{number.id}",
-                "number_reservation",
-            )
+        # The order reserved the total less what an included plan number
+        # paid toward the first month then (hailhq.core.plans). What the plan
+        # pays is decided again now: the order may finish later, after the
+        # plan stopped, older numbers took the included ones, or the plan
+        # paid another number this month (the balance can then dip by at
+        # most the per-number cap).
+        reserved = (
+            offer.monthly_cents + offer.setup_cents - int(meta.get("plan_cents") or 0)
         )
-        if not failed:
+        if reserved > 0:
             db.add(
                 credit(
                     number,
-                    -offer.monthly_cents,
-                    monthly_fee_ref(number.organization_id, number.id, now),
-                    "monthly_fee",
+                    reserved,
+                    f"number_reservation_return:{number.id}",
+                    "number_reservation",
                 )
             )
+        fee_ref = monthly_fee_ref(number.organization_id, number.id, now)
+        plan_cents = (
+            0
+            if failed
+            else await plan_number_cents(
+                db, number.organization_id, offer.monthly_cents, number.id, now=now
+            )
+        )
+        # What the plan paid in the end; "plan_cents" stays what the
+        # reservation left out.
+        meta["plan_cents_paid"] = plan_cents
+        if plan_cents:
+            db.add(plan_paid(number, fee_ref))
+            if offer.monthly_cents > plan_cents:
+                db.add(
+                    credit(
+                        number,
+                        plan_cents - offer.monthly_cents,
+                        f"{fee_ref}{OVER_PLAN_REF_SUFFIX}",
+                        "monthly_fee",
+                    )
+                )
+        elif not failed:
+            db.add(credit(number, -offer.monthly_cents, fee_ref, "monthly_fee"))
         if offer.setup_cents and (not failed or keep_setup):
             db.add(
                 credit(
@@ -618,24 +667,29 @@ async def acquire_offer(
         )
     approval = pick_approval(offer, subject_type, verification_id)
     total = offer.monthly_cents + offer.setup_cents
-    no_funds = HTTPException(
-        status_code=402,
-        detail=f"insufficient credits; setup and the first month cost ${total / 100:.2f}; top up at {BILLING_URL}",
-    )
 
-    async def short_of_funds() -> bool:
-        """The balance plus the credit the chosen verification set aside
-        (it pays for this purchase) is below the total."""
+    async def short_of_funds() -> HTTPException | None:
+        """A 402 when the balance plus the credit the chosen verification
+        set aside (it pays for this purchase) is below what credits pay: the
+        total, less what an included plan number pays toward the first
+        month (hailhq.core.plans)."""
         held = (
             await verification_hold.open_hold_cents(db, org, approval.row_id)
             if approval is not None
             else 0
         )
-        return await get_balance_cents(db, org) + held < total
+        need = total - await plan_number_cents(db, org, offer.monthly_cents)
+        short = need - (await get_balance_cents(db, org) + held)
+        if short <= 0:
+            return None
+        return HTTPException(
+            status_code=402,
+            detail=f"insufficient credits; add at least ${short / 100:.2f} (setup and the first month cost ${need / 100:.2f} from credits); top up at {BILLING_URL}",
+        )
 
     # Cheap check first so an empty balance never costs a carrier round-trip.
     # Re-checked under the lock below, after the slow discovery.
-    if billed and await short_of_funds():
+    if billed and (no_funds := await short_of_funds()):
         raise no_funds
     # Hail's rows decide which approvals exist now; the carrier re-check
     # below only confirms they are still valid.
@@ -696,7 +750,7 @@ async def acquire_offer(
     if row.number_id:
         # A concurrent request consumed this quote while we were checking.
         return await db.get(PhoneNumber, row.number_id)
-    if billed and await short_of_funds():
+    if billed and (no_funds := await short_of_funds()):
         raise no_funds
     existing = (
         await db.execute(
@@ -737,12 +791,23 @@ async def acquire_offer(
             "order_state": "submitting",
         },
     )
+    if billed and (plan_cents := await plan_number_cents(db, org, offer.monthly_cents)):
+        # An included plan number: the plan pays (part of) its first month,
+        # so the order reserves only the rest (hailhq.core.plans).
+        number.provisioning_metadata = {
+            **number.provisioning_metadata,
+            "plan_cents": plan_cents,
+        }
     db.add(number)
     row.number_id = number.id
-    if billed:
+    reserved = total - int(number.provisioning_metadata.get("plan_cents") or 0)
+    if billed and reserved > 0:
         db.add(
             credit(
-                number, -total, f"number_reservation:{number.id}", "number_reservation"
+                number,
+                -reserved,
+                f"number_reservation:{number.id}",
+                "number_reservation",
             )
         )
     # Persist BEFORE the non-transactional carrier operation. A retry sees this

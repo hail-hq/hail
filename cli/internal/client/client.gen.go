@@ -750,6 +750,30 @@ func (e KnowledgeDocumentResponseStatus) Valid() bool {
 	}
 }
 
+// Defines values for KnowledgeUploadSignMethod.
+const (
+	DELETE KnowledgeUploadSignMethod = "DELETE"
+	GET    KnowledgeUploadSignMethod = "GET"
+	POST   KnowledgeUploadSignMethod = "POST"
+	PUT    KnowledgeUploadSignMethod = "PUT"
+)
+
+// Valid indicates whether the value is a known member of the KnowledgeUploadSignMethod enum.
+func (e KnowledgeUploadSignMethod) Valid() bool {
+	switch e {
+	case DELETE:
+		return true
+	case GET:
+		return true
+	case POST:
+		return true
+	case PUT:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for NumberAcquireRequestNumberType.
 const (
 	NumberAcquireRequestNumberTypeLocal    NumberAcquireRequestNumberType = "local"
@@ -3484,6 +3508,78 @@ type KnowledgeSearchResult struct {
 	Text string `json:"text"`
 }
 
+// KnowledgeUploadComplete Body of “POST /knowledge/uploads/{id}/complete“.
+type KnowledgeUploadComplete struct {
+	// Name Display name. Omitted: the upload's filename.
+	Name *string `json:"name,omitempty"`
+}
+
+// KnowledgeUploadCreate Body of “POST /knowledge/uploads“: the file a browser will send
+// straight to storage.
+type KnowledgeUploadCreate struct {
+	// ContentType `application/pdf`, `application/vnd.openxmlformats-officedocument.wordprocessingml.document`, `text/plain`, `text/markdown` or `text/csv`. The upload must send this type.
+	ContentType string `json:"content_type"`
+
+	// Filename The file's name, 1 to 255 chars, no control characters.
+	Filename string `json:"filename"`
+
+	// SizeBytes The file's size in bytes. At most the workspace's file limit (413). Every signed upload request is bound to it: storage refuses a body of any other size.
+	SizeBytes int `json:"size_bytes"`
+}
+
+// KnowledgeUploadResponse Returned by “POST /knowledge/uploads“: a reserved storage key.
+type KnowledgeUploadResponse struct {
+	// ContentType The type the upload must send.
+	ContentType string `json:"content_type"`
+
+	// ExpiresAt Sign requests until then. Call `/complete` at most 15 minutes later.
+	ExpiresAt time.Time `json:"expires_at"`
+
+	// Id The upload's id, for `/sign` and `/complete`.
+	Id openapi_types.UUID `json:"id"`
+
+	// Key The storage key Hail chose for the file. Every signed request is for this key.
+	Key string `json:"key"`
+
+	// MaxBytes The workspace's file limit in bytes.
+	MaxBytes int `json:"max_bytes"`
+}
+
+// KnowledgeUploadSign Body of “POST /knowledge/uploads/{id}/sign“: one storage request to
+// sign. The six allowed shapes are `PUT` (put the whole file), `POST`
+// (start a multipart upload), `PUT` with `s3_upload_id` and `part_number`
+// (one part), `GET` with `s3_upload_id` (list parts), `POST` with
+// `s3_upload_id` (finish the multipart upload) and `DELETE` with
+// `s3_upload_id` (cancel it).
+type KnowledgeUploadSign struct {
+	// Method The HTTP method of the storage request.
+	Method KnowledgeUploadSignMethod `json:"method"`
+
+	// PartNumber The part number, from 1. Part uploads only. Parts are 5 MiB (5242880 bytes), the last one the rest of the file.
+	PartNumber *int `json:"part_number,omitempty"`
+
+	// S3UploadId The multipart upload id storage returned. Multipart requests only.
+	S3UploadId *string `json:"s3_upload_id,omitempty"`
+}
+
+// KnowledgeUploadSignMethod The HTTP method of the storage request.
+type KnowledgeUploadSignMethod string
+
+// KnowledgeUploadSignResponse A presigned storage URL for one request.
+type KnowledgeUploadSignResponse struct {
+	// ExpiresAt The URL works until then.
+	ExpiresAt time.Time `json:"expires_at"`
+
+	// Headers Send these headers with the request, exactly.
+	Headers map[string]string `json:"headers"`
+
+	// Key The upload's storage key.
+	Key string `json:"key"`
+
+	// Url Send the request to this URL.
+	Url string `json:"url"`
+}
+
 // LLMConfig defines model for LLMConfig.
 type LLMConfig struct {
 	// ApiKey API key sent to the BYO LLM endpoint. Write-only — never echoed back.
@@ -5173,6 +5269,29 @@ type SearchKnowledgeParams struct {
 	Authorization *string `json:"authorization,omitempty"`
 }
 
+// CreateKnowledgeUploadParams defines parameters for CreateKnowledgeUpload.
+type CreateKnowledgeUploadParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// DeleteKnowledgeUploadParams defines parameters for DeleteKnowledgeUpload.
+type DeleteKnowledgeUploadParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// CompleteKnowledgeUploadJSONBody defines parameters for CompleteKnowledgeUpload.
+type CompleteKnowledgeUploadJSONBody = KnowledgeUploadComplete
+
+// CompleteKnowledgeUploadParams defines parameters for CompleteKnowledgeUpload.
+type CompleteKnowledgeUploadParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
+// SignKnowledgeUploadParams defines parameters for SignKnowledgeUpload.
+type SignKnowledgeUploadParams struct {
+	Authorization *string `json:"authorization,omitempty"`
+}
+
 // DeleteMemberPhoneV1MembersUserIdPhoneDeleteParams defines parameters for DeleteMemberPhoneV1MembersUserIdPhoneDelete.
 type DeleteMemberPhoneV1MembersUserIdPhoneDeleteParams struct {
 	Authorization *string `json:"authorization,omitempty"`
@@ -5591,6 +5710,15 @@ type CreateKnowledgeDocumentJSONRequestBody = KnowledgeDocumentCreate
 
 // SearchKnowledgeJSONRequestBody defines body for SearchKnowledge for application/json ContentType.
 type SearchKnowledgeJSONRequestBody = KnowledgeSearchRequest
+
+// CreateKnowledgeUploadJSONRequestBody defines body for CreateKnowledgeUpload for application/json ContentType.
+type CreateKnowledgeUploadJSONRequestBody = KnowledgeUploadCreate
+
+// CompleteKnowledgeUploadJSONRequestBody defines body for CompleteKnowledgeUpload for application/json ContentType.
+type CompleteKnowledgeUploadJSONRequestBody = CompleteKnowledgeUploadJSONBody
+
+// SignKnowledgeUploadJSONRequestBody defines body for SignKnowledgeUpload for application/json ContentType.
+type SignKnowledgeUploadJSONRequestBody = KnowledgeUploadSign
 
 // PutMemberPhoneV1MembersUserIdPhonePutJSONRequestBody defines body for PutMemberPhoneV1MembersUserIdPhonePut for application/json ContentType.
 type PutMemberPhoneV1MembersUserIdPhonePutJSONRequestBody = MemberPhonePut
@@ -6172,6 +6300,24 @@ type ClientInterface interface {
 	SearchKnowledgeWithBody(ctx context.Context, params *SearchKnowledgeParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	SearchKnowledge(ctx context.Context, params *SearchKnowledgeParams, body SearchKnowledgeJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateKnowledgeUploadWithBody request with any body
+	CreateKnowledgeUploadWithBody(ctx context.Context, params *CreateKnowledgeUploadParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	CreateKnowledgeUpload(ctx context.Context, params *CreateKnowledgeUploadParams, body CreateKnowledgeUploadJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DeleteKnowledgeUpload request
+	DeleteKnowledgeUpload(ctx context.Context, uploadId openapi_types.UUID, params *DeleteKnowledgeUploadParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CompleteKnowledgeUploadWithBody request with any body
+	CompleteKnowledgeUploadWithBody(ctx context.Context, uploadId openapi_types.UUID, params *CompleteKnowledgeUploadParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	CompleteKnowledgeUpload(ctx context.Context, uploadId openapi_types.UUID, params *CompleteKnowledgeUploadParams, body CompleteKnowledgeUploadJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// SignKnowledgeUploadWithBody request with any body
+	SignKnowledgeUploadWithBody(ctx context.Context, uploadId openapi_types.UUID, params *SignKnowledgeUploadParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	SignKnowledgeUpload(ctx context.Context, uploadId openapi_types.UUID, params *SignKnowledgeUploadParams, body SignKnowledgeUploadJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// DeleteMemberPhoneV1MembersUserIdPhoneDelete request
 	DeleteMemberPhoneV1MembersUserIdPhoneDelete(ctx context.Context, userId string, params *DeleteMemberPhoneV1MembersUserIdPhoneDeleteParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -7023,6 +7169,90 @@ func (c *Client) SearchKnowledgeWithBody(ctx context.Context, params *SearchKnow
 
 func (c *Client) SearchKnowledge(ctx context.Context, params *SearchKnowledgeParams, body SearchKnowledgeJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewSearchKnowledgeRequest(c.Server, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreateKnowledgeUploadWithBody(ctx context.Context, params *CreateKnowledgeUploadParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateKnowledgeUploadRequestWithBody(c.Server, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreateKnowledgeUpload(ctx context.Context, params *CreateKnowledgeUploadParams, body CreateKnowledgeUploadJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateKnowledgeUploadRequest(c.Server, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) DeleteKnowledgeUpload(ctx context.Context, uploadId openapi_types.UUID, params *DeleteKnowledgeUploadParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteKnowledgeUploadRequest(c.Server, uploadId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CompleteKnowledgeUploadWithBody(ctx context.Context, uploadId openapi_types.UUID, params *CompleteKnowledgeUploadParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCompleteKnowledgeUploadRequestWithBody(c.Server, uploadId, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CompleteKnowledgeUpload(ctx context.Context, uploadId openapi_types.UUID, params *CompleteKnowledgeUploadParams, body CompleteKnowledgeUploadJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCompleteKnowledgeUploadRequest(c.Server, uploadId, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) SignKnowledgeUploadWithBody(ctx context.Context, uploadId openapi_types.UUID, params *SignKnowledgeUploadParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSignKnowledgeUploadRequestWithBody(c.Server, uploadId, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) SignKnowledgeUpload(ctx context.Context, uploadId openapi_types.UUID, params *SignKnowledgeUploadParams, body SignKnowledgeUploadJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSignKnowledgeUploadRequest(c.Server, uploadId, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -10582,6 +10812,234 @@ func NewSearchKnowledgeRequestWithBody(server string, params *SearchKnowledgePar
 	}
 
 	operationPath := fmt.Sprintf("/v1/knowledge/search")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewCreateKnowledgeUploadRequest calls the generic CreateKnowledgeUpload builder with application/json body
+func NewCreateKnowledgeUploadRequest(server string, params *CreateKnowledgeUploadParams, body CreateKnowledgeUploadJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreateKnowledgeUploadRequestWithBody(server, params, "application/json", bodyReader)
+}
+
+// NewCreateKnowledgeUploadRequestWithBody generates requests for CreateKnowledgeUpload with any type of body
+func NewCreateKnowledgeUploadRequestWithBody(server string, params *CreateKnowledgeUploadParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/knowledge/uploads")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewDeleteKnowledgeUploadRequest generates requests for DeleteKnowledgeUpload
+func NewDeleteKnowledgeUploadRequest(server string, uploadId openapi_types.UUID, params *DeleteKnowledgeUploadParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "upload_id", uploadId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/knowledge/uploads/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("DELETE", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewCompleteKnowledgeUploadRequest calls the generic CompleteKnowledgeUpload builder with application/json body
+func NewCompleteKnowledgeUploadRequest(server string, uploadId openapi_types.UUID, params *CompleteKnowledgeUploadParams, body CompleteKnowledgeUploadJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCompleteKnowledgeUploadRequestWithBody(server, uploadId, params, "application/json", bodyReader)
+}
+
+// NewCompleteKnowledgeUploadRequestWithBody generates requests for CompleteKnowledgeUpload with any type of body
+func NewCompleteKnowledgeUploadRequestWithBody(server string, uploadId openapi_types.UUID, params *CompleteKnowledgeUploadParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "upload_id", uploadId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/knowledge/uploads/%s/complete", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.Authorization != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("authorization", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewSignKnowledgeUploadRequest calls the generic SignKnowledgeUpload builder with application/json body
+func NewSignKnowledgeUploadRequest(server string, uploadId openapi_types.UUID, params *SignKnowledgeUploadParams, body SignKnowledgeUploadJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewSignKnowledgeUploadRequestWithBody(server, uploadId, params, "application/json", bodyReader)
+}
+
+// NewSignKnowledgeUploadRequestWithBody generates requests for SignKnowledgeUpload with any type of body
+func NewSignKnowledgeUploadRequestWithBody(server string, uploadId openapi_types.UUID, params *SignKnowledgeUploadParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "upload_id", uploadId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/knowledge/uploads/%s/sign", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -14629,6 +15087,24 @@ type ClientWithResponsesInterface interface {
 
 	SearchKnowledgeWithResponse(ctx context.Context, params *SearchKnowledgeParams, body SearchKnowledgeJSONRequestBody, reqEditors ...RequestEditorFn) (*SearchKnowledgeResponse, error)
 
+	// CreateKnowledgeUploadWithBodyWithResponse request with any body
+	CreateKnowledgeUploadWithBodyWithResponse(ctx context.Context, params *CreateKnowledgeUploadParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateKnowledgeUploadResponse, error)
+
+	CreateKnowledgeUploadWithResponse(ctx context.Context, params *CreateKnowledgeUploadParams, body CreateKnowledgeUploadJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateKnowledgeUploadResponse, error)
+
+	// DeleteKnowledgeUploadWithResponse request
+	DeleteKnowledgeUploadWithResponse(ctx context.Context, uploadId openapi_types.UUID, params *DeleteKnowledgeUploadParams, reqEditors ...RequestEditorFn) (*DeleteKnowledgeUploadResponse, error)
+
+	// CompleteKnowledgeUploadWithBodyWithResponse request with any body
+	CompleteKnowledgeUploadWithBodyWithResponse(ctx context.Context, uploadId openapi_types.UUID, params *CompleteKnowledgeUploadParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CompleteKnowledgeUploadResponse, error)
+
+	CompleteKnowledgeUploadWithResponse(ctx context.Context, uploadId openapi_types.UUID, params *CompleteKnowledgeUploadParams, body CompleteKnowledgeUploadJSONRequestBody, reqEditors ...RequestEditorFn) (*CompleteKnowledgeUploadResponse, error)
+
+	// SignKnowledgeUploadWithBodyWithResponse request with any body
+	SignKnowledgeUploadWithBodyWithResponse(ctx context.Context, uploadId openapi_types.UUID, params *SignKnowledgeUploadParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SignKnowledgeUploadResponse, error)
+
+	SignKnowledgeUploadWithResponse(ctx context.Context, uploadId openapi_types.UUID, params *SignKnowledgeUploadParams, body SignKnowledgeUploadJSONRequestBody, reqEditors ...RequestEditorFn) (*SignKnowledgeUploadResponse, error)
+
 	// DeleteMemberPhoneV1MembersUserIdPhoneDeleteWithResponse request
 	DeleteMemberPhoneV1MembersUserIdPhoneDeleteWithResponse(ctx context.Context, userId string, params *DeleteMemberPhoneV1MembersUserIdPhoneDeleteParams, reqEditors ...RequestEditorFn) (*DeleteMemberPhoneV1MembersUserIdPhoneDeleteResponse, error)
 
@@ -15807,6 +16283,95 @@ func (r SearchKnowledgeResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r SearchKnowledgeResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type CreateKnowledgeUploadResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON201      *KnowledgeUploadResponse
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateKnowledgeUploadResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateKnowledgeUploadResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type DeleteKnowledgeUploadResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON422      *HTTPValidationError
+}
+
+// Status returns HTTPResponse.Status
+func (r DeleteKnowledgeUploadResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeleteKnowledgeUploadResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type CompleteKnowledgeUploadResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON201      *KnowledgeDocumentResponse
+}
+
+// Status returns HTTPResponse.Status
+func (r CompleteKnowledgeUploadResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CompleteKnowledgeUploadResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type SignKnowledgeUploadResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *KnowledgeUploadSignResponse
+}
+
+// Status returns HTTPResponse.Status
+func (r SignKnowledgeUploadResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r SignKnowledgeUploadResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -17777,6 +18342,66 @@ func (c *ClientWithResponses) SearchKnowledgeWithResponse(ctx context.Context, p
 		return nil, err
 	}
 	return ParseSearchKnowledgeResponse(rsp)
+}
+
+// CreateKnowledgeUploadWithBodyWithResponse request with arbitrary body returning *CreateKnowledgeUploadResponse
+func (c *ClientWithResponses) CreateKnowledgeUploadWithBodyWithResponse(ctx context.Context, params *CreateKnowledgeUploadParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateKnowledgeUploadResponse, error) {
+	rsp, err := c.CreateKnowledgeUploadWithBody(ctx, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateKnowledgeUploadResponse(rsp)
+}
+
+func (c *ClientWithResponses) CreateKnowledgeUploadWithResponse(ctx context.Context, params *CreateKnowledgeUploadParams, body CreateKnowledgeUploadJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateKnowledgeUploadResponse, error) {
+	rsp, err := c.CreateKnowledgeUpload(ctx, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateKnowledgeUploadResponse(rsp)
+}
+
+// DeleteKnowledgeUploadWithResponse request returning *DeleteKnowledgeUploadResponse
+func (c *ClientWithResponses) DeleteKnowledgeUploadWithResponse(ctx context.Context, uploadId openapi_types.UUID, params *DeleteKnowledgeUploadParams, reqEditors ...RequestEditorFn) (*DeleteKnowledgeUploadResponse, error) {
+	rsp, err := c.DeleteKnowledgeUpload(ctx, uploadId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeleteKnowledgeUploadResponse(rsp)
+}
+
+// CompleteKnowledgeUploadWithBodyWithResponse request with arbitrary body returning *CompleteKnowledgeUploadResponse
+func (c *ClientWithResponses) CompleteKnowledgeUploadWithBodyWithResponse(ctx context.Context, uploadId openapi_types.UUID, params *CompleteKnowledgeUploadParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CompleteKnowledgeUploadResponse, error) {
+	rsp, err := c.CompleteKnowledgeUploadWithBody(ctx, uploadId, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCompleteKnowledgeUploadResponse(rsp)
+}
+
+func (c *ClientWithResponses) CompleteKnowledgeUploadWithResponse(ctx context.Context, uploadId openapi_types.UUID, params *CompleteKnowledgeUploadParams, body CompleteKnowledgeUploadJSONRequestBody, reqEditors ...RequestEditorFn) (*CompleteKnowledgeUploadResponse, error) {
+	rsp, err := c.CompleteKnowledgeUpload(ctx, uploadId, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCompleteKnowledgeUploadResponse(rsp)
+}
+
+// SignKnowledgeUploadWithBodyWithResponse request with arbitrary body returning *SignKnowledgeUploadResponse
+func (c *ClientWithResponses) SignKnowledgeUploadWithBodyWithResponse(ctx context.Context, uploadId openapi_types.UUID, params *SignKnowledgeUploadParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SignKnowledgeUploadResponse, error) {
+	rsp, err := c.SignKnowledgeUploadWithBody(ctx, uploadId, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSignKnowledgeUploadResponse(rsp)
+}
+
+func (c *ClientWithResponses) SignKnowledgeUploadWithResponse(ctx context.Context, uploadId openapi_types.UUID, params *SignKnowledgeUploadParams, body SignKnowledgeUploadJSONRequestBody, reqEditors ...RequestEditorFn) (*SignKnowledgeUploadResponse, error) {
+	rsp, err := c.SignKnowledgeUpload(ctx, uploadId, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSignKnowledgeUploadResponse(rsp)
 }
 
 // DeleteMemberPhoneV1MembersUserIdPhoneDeleteWithResponse request returning *DeleteMemberPhoneV1MembersUserIdPhoneDeleteResponse
@@ -19864,6 +20489,117 @@ func ParseSearchKnowledgeResponse(rsp *http.Response) (*SearchKnowledgeResponse,
 			return nil, err
 		}
 		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCreateKnowledgeUploadResponse parses an HTTP response from a CreateKnowledgeUploadWithResponse call
+func ParseCreateKnowledgeUploadResponse(rsp *http.Response) (*CreateKnowledgeUploadResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateKnowledgeUploadResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest KnowledgeUploadResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDeleteKnowledgeUploadResponse parses an HTTP response from a DeleteKnowledgeUploadWithResponse call
+func ParseDeleteKnowledgeUploadResponse(rsp *http.Response) (*DeleteKnowledgeUploadResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeleteKnowledgeUploadResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCompleteKnowledgeUploadResponse parses an HTTP response from a CompleteKnowledgeUploadWithResponse call
+func ParseCompleteKnowledgeUploadResponse(rsp *http.Response) (*CompleteKnowledgeUploadResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CompleteKnowledgeUploadResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest KnowledgeDocumentResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseSignKnowledgeUploadResponse parses an HTTP response from a SignKnowledgeUploadWithResponse call
+func ParseSignKnowledgeUploadResponse(rsp *http.Response) (*SignKnowledgeUploadResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &SignKnowledgeUploadResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest KnowledgeUploadSignResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
 
 	}
 

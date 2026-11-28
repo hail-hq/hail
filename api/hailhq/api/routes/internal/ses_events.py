@@ -28,7 +28,7 @@ from fastapi import status as http_status
 from hailhq.api.errors import unprocessable
 from hailhq.api.outbound_queue import enqueue_outbound_forward
 from hailhq.api.usage import write_usage_event
-from hailhq.core.billing import has_funds
+from hailhq.core.billing import has_email_funds
 from hailhq.core.config import settings
 from hailhq.core.db import get_session
 from hailhq.core.email_delivery_events import apply_delivery_event
@@ -148,7 +148,7 @@ async def receive_ses_event(
         # the webhook consumer. Same rule as GET /v1/emails/{id} (emails.py).
         api_base_url=join_url(settings.hail_api_url, "v1"),
         org_rate_per_hour=settings.hail_inbound_org_rate_per_hour,
-        funds_check=has_funds,
+        funds_check=has_email_funds,
     )
     for created_id, created_org_id in result.billable_email_ids:
         await write_usage_event(

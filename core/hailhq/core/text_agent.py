@@ -21,6 +21,7 @@ from typing import Any, Literal
 
 from hailhq.core.billing import has_funds
 from hailhq.core.config import settings
+from hailhq.core.handover import country_of
 from hailhq.core.jsonb import merge_object
 from hailhq.core.models import Agent, PhoneNumber, Sms
 from hailhq.core.prompts import (
@@ -244,9 +245,9 @@ async def claim_pending_reply(db: AsyncSession) -> ClaimedReply | None:
         .limit(1)
         .with_for_update(skip_locked=True)
     )
-    # Orgs already read as unfunded in this call: a backlog of one org's texts
-    # costs one ledger read, not one per text.
-    unfunded: set[uuid.UUID] = set()
+    # (org, destination country) pairs already read as unfunded in this call:
+    # a backlog of one org's texts costs one ledger read, not one per text.
+    unfunded: set[tuple[uuid.UUID, str | None]] = set()
     while True:
         sms = (await db.execute(stmt)).scalar_one_or_none()
         if sms is None:
@@ -274,9 +275,14 @@ async def claim_pending_reply(db: AsyncSession) -> ClaimedReply | None:
             # An earlier attempt sent the reply but its POST timed out.
             await finish_reply(db, sms, "done")
             continue
-        if org in unfunded or not await has_funds(db, org):
+        # The reply goes to the sender; a plan includes texts to some
+        # countries only, so the check is per destination country.
+        funds_key = (org, country_of(sms.from_e164))
+        if funds_key in unfunded or not await has_funds(
+            db, org, "text", country=funds_key[1]
+        ):
             # reply-sms would refuse the send: skip before the model runs.
-            unfunded.add(org)
+            unfunded.add(funds_key)
             logger.info("sms_id=%s reply skipped: %s", sms.id, INSUFFICIENT_FUNDS_SKIP)
             await finish_reply(db, sms, "skipped", reason=INSUFFICIENT_FUNDS_SKIP)
             continue

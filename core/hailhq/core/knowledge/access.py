@@ -20,6 +20,11 @@ it. Past the cap, new uploads and documents are refused, and the ingest
 worker refuses to write more pieces. The real database size has its own
 daily alert (``db_size_alert``).
 
+A workspace's ``max_total_bytes`` (set from its plan; NULL: none) caps the
+size of its uploaded files (``workspace_full``), because plans sell file
+size. It is checked when a link or a document is created, never by the
+ingest worker: a file is counted once it is added.
+
 Each workspace's own limits are checked under ``knowledge_lock`` (an
 advisory lock per workspace) when a link or a document is created; the
 upload body check takes no lock and only refuses early. Where pieces are
@@ -60,6 +65,7 @@ __all__ = [
     "PIECE_ROW_BYTES",
     "PIECE_VECTOR_BYTES",
     "STORAGE_FULL",
+    "WORKSPACE_FULL",
     "FolderSweepFailed",
     "agent_uses_knowledge",
     "delete_org_knowledge",
@@ -71,6 +77,7 @@ __all__ = [
     "piece_bytes",
     "short_cause",
     "storage_full",
+    "workspace_full",
 ]
 
 logger = logging.getLogger(__name__)
@@ -90,6 +97,10 @@ MEMORY_MAX_PIECES = 5000
 KNOWLEDGE_OFF = (
     "the knowledge base is not turned on for this workspace; contact Hail "
     "support to turn it on"
+)
+WORKSPACE_FULL = (
+    "this workspace's knowledge base is full; delete a document to add "
+    "another, or move to a plan with more knowledge storage"
 )
 STORAGE_FULL = (
     "Hail's knowledge storage is full for now; no new documents can be "
@@ -146,6 +157,35 @@ async def storage_full(
     ``GLOBAL_MAX_BYTES``."""
     used = await knowledge_bytes(db, excluding_document=excluding_document)
     return used + adding >= GLOBAL_MAX_BYTES
+
+
+async def workspace_full(
+    db: AsyncSession,
+    limits: OrganizationKnowledge,
+    *,
+    adding: int = 0,
+) -> bool:
+    """True when the workspace's files plus a new file of ``adding`` bytes
+    go past its ``max_total_bytes`` (False when it has none); with ``adding``
+    0, True once its files reach it. Plans sell file size, so this counts
+    the uploaded files (``size_bytes``), not the stored text
+    (``storage_full`` counts that). Every document counts, failed ones
+    too, until it is deleted: the customer sees the storage each one
+    takes."""
+    if limits.max_total_bytes is None:
+        return False
+    used = (
+        await db.execute(
+            text(
+                "SELECT coalesce(sum(size_bytes), 0) FROM knowledge_documents "
+                "WHERE organization_id = :org"
+            ),
+            {"org": limits.organization_id},
+        )
+    ).scalar_one()
+    if adding:
+        return int(used) + adding > limits.max_total_bytes
+    return int(used) >= limits.max_total_bytes
 
 
 async def agent_uses_knowledge(

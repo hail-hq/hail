@@ -65,9 +65,11 @@ from hailhq.core.file_uploads import (
 from hailhq.core.knowledge.access import (
     KNOWLEDGE_OFF,
     STORAGE_FULL,
+    WORKSPACE_FULL,
     knowledge_limits,
     knowledge_lock,
     storage_full,
+    workspace_full,
 )
 from hailhq.core.models import FileUpload
 from hailhq.core.s3_mail import S3MailClient
@@ -299,6 +301,10 @@ async def _knowledge_file_limit(db: AsyncSession, org: UUID) -> int:
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT, detail=STORAGE_FULL
         )
+    if await workspace_full(db, limits):
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT, detail=WORKSPACE_FULL
+        )
     return min(KNOWLEDGE_MAX_FILE_BYTES, limits.max_file_bytes)
 
 
@@ -482,6 +488,11 @@ async def put_file_upload(
             await db.rollback()
             raise HTTPException(
                 status_code=http_status.HTTP_409_CONFLICT, detail=STORAGE_FULL
+            )
+        if await workspace_full(db, limits):
+            await db.rollback()
+            raise HTTPException(
+                status_code=http_status.HTTP_409_CONFLICT, detail=WORKSPACE_FULL
             )
         limit = min(limit, limits.max_file_bytes)
     link = {

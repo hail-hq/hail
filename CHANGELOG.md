@@ -8,11 +8,29 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 - Pick and preview Gemini, xAI, and AssemblyAI voices for your calls, in more languages.
 - Connect your own Gemini, xAI, or AssemblyAI API keys for speech.
-- Knowledge files can go from a browser straight to storage (`/v1/knowledge/uploads`, for Uppy). Self-host: run `terragrunt apply` for the bucket's CORS rules.
 
 ### Changed
 
 - Agents that use Hail's English voice now speak with Charon; saved voices stay.
+
+## [0.43.0] (2026-11-28)
+
+Subscription plans: the call minutes, texts, emails and numbers a plan
+includes are used first, then credits pay the rest. Knowledge files can go
+from a browser straight to storage.
+
+Component versions cut alongside this release:
+**`cli-v0.40.0`** (Homebrew + GitHub Releases). One database migration
+(subscription plans).
+
+### Added
+
+- Plans: the call minutes, texts, emails and numbers a workspace's plan includes are used first, then credits pay the rest.
+- Knowledge files can go from a browser straight to storage (`/v1/knowledge/uploads`, for Uppy). Self-host: run `terragrunt apply` for the bucket's CORS rules.
+
+### Changed
+
+- Connecting a new phone system comes with the Business and Enterprise plans (`POST /v1/sip-connections`). Self-hosted Hail has no plans, so every workspace can connect one.
 
 ## [0.42.0] (2026-11-27)
 
