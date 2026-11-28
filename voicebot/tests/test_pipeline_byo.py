@@ -349,7 +349,10 @@ def test_gemini_default_only_applies_to_inherited_english(
     build_tts(workspace, voice_id_override="Charon", language="en")
     assert captured_plugins["gemini"][-1].kwargs["voice_name"] == "Charon"
     build_tts(voice_id_override="legacy-voice", language="en")
-    assert captured_plugins["cartesia"][-1].kwargs["voice"] == "legacy-voice"
+    assert [c.kwargs["voice"] for c in captured_plugins["cartesia"][-2:]] == [
+        "legacy-voice",
+        "house-voice",
+    ]
     build_tts(language="fr")
     assert captured_plugins["cartesia"][-1].kwargs["language"] == "fr"
 
@@ -546,7 +549,8 @@ def test_workspace_gemini_language_fallback_keeps_the_chosen_voice(
 
     chain = build_tts(org, voice_id, "fr", voice_id_explicit=True)
 
-    assert [item.label for item in chain._tts_instances] == ["cartesia", "elevenlabs"]
+    labels = ["cartesia", "elevenlabs"] * (2 if spoken else 1)
+    assert [item.label for item in chain._tts_instances] == labels
     cartesia = captured_plugins["cartesia"][0].kwargs["voice"]
     elevenlabs = captured_plugins["elevenlabs"][0].kwargs["voice_id"]
     assert cartesia == (spoken or "house-voice")
@@ -655,9 +659,8 @@ def test_missing_house_xai_key_keeps_the_chosen_voice(
     monkeypatch.setattr(settings, "xai_api_key", "")
     org = ResolvedLayer("xai", None, {}, False)
 
-    chain = build_tts(org, voice, "en", voice_id_explicit=True)
+    build_tts(org, voice, "en", voice_id_explicit=True)
 
-    assert chain.label == "cartesia"
     assert captured_plugins["cartesia"][0].kwargs["voice"] == spoken
 
 
@@ -712,3 +715,13 @@ def test_house_backed_preset_row_is_not_repeated_in_its_backups(
     chain = build_tts(org, language="en")
 
     assert [item.label for item in chain._tts_instances] == ["xai", "gemini"]
+
+
+def test_unknown_voice_keeps_the_default_voice_as_last_backup(captured_plugins):
+    chain = build_tts(voice_id_override="voice-from-another-provider", language="en")
+
+    assert [item.label for item in chain._tts_instances] == ["cartesia", "cartesia"]
+    assert [item.kwargs["voice"] for item in captured_plugins["cartesia"]] == [
+        "voice-from-another-provider",
+        "house-voice",
+    ]

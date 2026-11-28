@@ -573,22 +573,29 @@ def _house_tts(
     unscoped_voice = None if override_provider or preset else voice_id_override
     cartesia_voice = unscoped_voice or settings.cartesia_voice_id
     elevenlabs_voice = unscoped_voice or settings.elevenlabs_voice_id
-    if settings.cartesia_api_key and "cartesia" in allowed:
-        kwargs: dict[str, Any] = {
-            "model": settings.cartesia_model,
-            "voice": cartesia_voice,
-        }
-        if language:
-            kwargs["language"] = language
-        legacy["cartesia"] = cartesia_plugin.TTS(**kwargs)
-    if settings.eleven_api_key and "elevenlabs" in allowed:
-        kwargs = {
-            "voice_id": elevenlabs_voice,
-            "model": settings.elevenlabs_model,
-        }
+    defaults = {
+        "cartesia": settings.cartesia_voice_id,
+        "elevenlabs": settings.elevenlabs_voice_id,
+    }
+
+    def legacy_tts(provider: str, voice: str) -> agents_tts.TTS:
+        if provider == "cartesia":
+            kwargs: dict[str, Any] = {"model": settings.cartesia_model, "voice": voice}
+            if language:
+                kwargs["language"] = language
+            return cartesia_plugin.TTS(**kwargs)
+        kwargs = {"voice_id": voice, "model": settings.elevenlabs_model}
         if language:
             kwargs["language"] = elevenlabs_language(language)
-        legacy["elevenlabs"] = elevenlabs_plugin.TTS(**kwargs)
+        return elevenlabs_plugin.TTS(**kwargs)
+
+    if settings.cartesia_api_key and "cartesia" in allowed:
+        legacy["cartesia"] = legacy_tts("cartesia", cartesia_voice)
+    if settings.eleven_api_key and "elevenlabs" in allowed:
+        legacy["elevenlabs"] = legacy_tts("elevenlabs", elevenlabs_voice)
+    # An unscoped voice may belong to only one of them, so each one that got
+    # it also keeps its default voice as the last backup.
+    voiced = [p for p in legacy if unscoped_voice and defaults[p] != unscoped_voice]
     instances: list[agents_tts.TTS] = []
     if override_provider is not None and override_provider in legacy:
         default = (
@@ -623,6 +630,7 @@ def _house_tts(
             instances.insert(0, speaker)
         else:
             instances.append(speaker)
+    instances.extend(legacy_tts(p, defaults[p]) for p in voiced if defaults[p])
     return instances
 
 
