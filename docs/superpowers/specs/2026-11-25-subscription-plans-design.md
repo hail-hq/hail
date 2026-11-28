@@ -165,12 +165,12 @@ The renewal rater writes the same rows each month for the numbers the rule cover
 
 hail reads `organization_knowledge`. No row means the knowledge base is off. This change adds two columns:
 
-| Column            | Type                          | Rule                                                                                                                                                                                 |
-| ----------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `max_total_bytes` | bigint NULL                   | > 0. The most live knowledge data the workspace may hold, counted like the global cap (sum of its `knowledge_documents.stored_bytes`). NULL: no workspace cap (staff and older rows) |
-| `source`          | text NOT NULL default `staff` | `plan` or `staff`. The billing site writes and deletes only `plan` rows and never touches a `staff` row                                                                              |
+| Column            | Type                          | Rule                                                                                                                                                                               |
+| ----------------- | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `max_total_bytes` | bigint NULL                   | > 0. The most uploaded file size the workspace may hold (sum of its `knowledge_documents.size_bytes`), because plans sell file size. NULL: no workspace cap (staff and older rows) |
+| `source`          | text NOT NULL default `staff` | `plan` or `staff`. The billing site writes and deletes only `plan` rows and never touches a `staff` row                                                                            |
 
-hail checks `max_total_bytes` where it checks the global cap: upload links, upload bodies and new documents (early refusals, 409), and the ingest worker under the global cap's lock (the document fails with "this workspace's knowledge base is full").
+hail checks `max_total_bytes` when an upload link, an upload body or a new document is created (409, "this workspace's knowledge base is full"). The ingest worker never checks it: a file counts once it is added.
 
 The billing site writes the row from the plan (the sizes come from its plan table, never from hail):
 

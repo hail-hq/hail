@@ -54,7 +54,6 @@ __all__ = [
     "INSUFFICIENT_FUNDS",
     "FundsCheck",
     "get_balance_cents",
-    "has_call_funds",
     "has_email_funds",
     "has_funds",
     "monthly_fee_ref",
@@ -108,11 +107,6 @@ async def has_funds(
     return use is not None and await plan_covers(
         db, organization_id, use, country=country
     )
-
-
-async def has_call_funds(db: AsyncSession, organization_id: uuid.UUID) -> bool:
-    """``has_funds`` for a call, as a ``FundsCheck``."""
-    return await has_funds(db, organization_id, "call")
 
 
 async def has_email_funds(db: AsyncSession, organization_id: uuid.UUID) -> bool:

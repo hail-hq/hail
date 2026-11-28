@@ -164,22 +164,21 @@ async def workspace_full(
     limits: OrganizationKnowledge,
     *,
     adding: int = 0,
-    excluding_document: UUID | None = None,
 ) -> bool:
     """True when the workspace's files plus a new file of ``adding`` bytes
     go past its ``max_total_bytes`` (False when it has none); with ``adding``
     0, True once its files reach it. Plans sell file size, so this counts
     the uploaded files (``size_bytes``), not the stored text
-    (``storage_full`` counts that), without ``excluding_document``."""
+    (``storage_full`` counts that)."""
     if limits.max_total_bytes is None:
         return False
     used = (
         await db.execute(
             text(
                 "SELECT coalesce(sum(size_bytes), 0) FROM knowledge_documents "
-                "WHERE organization_id = :org AND id IS DISTINCT FROM :excluding"
+                "WHERE organization_id = :org"
             ),
-            {"org": limits.organization_id, "excluding": excluding_document},
+            {"org": limits.organization_id},
         )
     ).scalar_one()
     if adding:

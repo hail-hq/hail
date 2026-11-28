@@ -26,7 +26,8 @@ Tables checked first:
   pays for also sets aside plan minutes, so the hold gets ``plan_minutes``.
 * ``organization_knowledge``: the knowledge base limits of a workspace. A
   plan sets them too, so the row gets ``max_total_bytes`` (the workspace's
-  cap on live knowledge data; NULL: none, as for existing rows) and
+  cap on the size of its uploaded files, ``knowledge_documents.size_bytes``;
+  NULL: none, as for existing rows) and
   ``source`` (``plan`` or ``staff``), so the billing site writes and deletes
   only the rows it owns.
 
