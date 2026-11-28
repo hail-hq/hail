@@ -477,7 +477,8 @@ async def preset_voices(provider: str, *, timeout: float | None = 10.0) -> list[
 
     A failed load is not retried for a minute and keeps the last good list.
     An old list is returned at once while a new one loads. A load that
-    outlives ``timeout`` keeps running, so the next caller gets its result.
+    outlives ``timeout`` keeps running while its event loop runs, so the next
+    caller gets its result; the worker's startup warmup ends with its loop.
     """
     key = _list_key(provider)
     if not key:
