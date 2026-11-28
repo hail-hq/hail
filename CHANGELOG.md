@@ -8,6 +8,12 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 - Knowledge files can go from a browser straight to storage (`/v1/knowledge/uploads`, for Uppy). Self-host: run `terragrunt apply` for the bucket's CORS rules.
 
+### Changed
+
+- Calls: a short sound said while the agent talks no longer stops it. Speaking over it for about a second does, in every language.
+- Calls: the agent gives a long answer in short parts and checks in between, even when its instructions ask for detail.
+- Calls: when the agent hears speech that does not fit the conversation (a TV, a radio, other people), it says so and asks instead of answering it.
+
 ## [0.42.0] (2026-11-27)
 
 Agents answer calls, texts and email from your own documents with the

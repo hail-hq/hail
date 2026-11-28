@@ -123,6 +123,7 @@ from hailhq.voicebot.pipeline import (
 )
 from hailhq.voicebot.recording import start_recording, stop_recording
 from hailhq.voicebot.recovery import ConversationRecovery
+from hailhq.voicebot.short_speech import SpeechLength, Verdict, drop_short_speech
 from hailhq.voicebot.spoken_lines import spoken_lines
 from hailhq.voicebot.telemetry import connect_livekit_tracing
 from hailhq.voicebot.tools import SpeechTracker, build_agent_tools, every_call_tools
@@ -251,6 +252,7 @@ class SpeechSanitizingAgent(Agent):
         self.knowledge = knowledge
         self._held_words: list[str] = []
         self.phone_menu: PhoneMenu | None = None
+        self.speech_length = SpeechLength()
 
     def release_opening(self) -> str | None:
         """Let replies through. Returns what the person said while held."""
@@ -328,6 +330,18 @@ class SpeechSanitizingAgent(Agent):
                 chat_ctx = chat_ctx.copy()
                 chat_ctx.add_message(role="system", content=section)
         return Agent.default.llm_node(self, chat_ctx, tools, model_settings)
+
+    async def stt_node(self, audio: Any, model_settings: Any) -> Any:
+        # A short sound said over the agent does not stop it (short_speech.py).
+        events = Agent.default.stt_node(self, audio, model_settings)
+        async for event in drop_short_speech(events, self._short_speech_verdict):
+            yield event
+
+    def _short_speech_verdict(self) -> Verdict:
+        # A phone menu is not a person: everything it says is kept.
+        if self.phone_menu is not None and self.phone_menu.active:
+            return "pass"
+        return self.speech_length.verdict(time.monotonic())
 
     async def tts_node(self, text: Any, model_settings: Any) -> Any:
         if self.phone_menu is not None and self.phone_menu.active:
@@ -2746,6 +2760,11 @@ async def _run_call(
     @session.on("user_state_changed")
     def _on_speech_state(ev: Any) -> None:
         speech.on_state(getattr(ev, "new_state", None), time.monotonic())
+        agent.speech_length.on_state(
+            getattr(ev, "new_state", None),
+            time.monotonic(),
+            agent_speaking=session.agent_state == "speaking",
+        )
 
     knowledge = call_knowledge(metadata)
     other_party_task = asyncio.create_task(other_party(call_id))
@@ -2906,7 +2925,6 @@ async def _run_call(
         ),
         call_id=call_id,
     )
-
     # AMD's clients. Its classifier also backs the phone menu check, so it
     # closes only at shutdown, after AMD and the last check end.
     amd_models: AMDModels | None = None

@@ -809,6 +809,12 @@ def startup_capability_warnings() -> list[str]:
     return warnings
 
 
+# What stops the agent mid-reply: one transcribed word, not VAD energy alone
+# (the only setting that differs from the SDK defaults). Short sounds said
+# over the agent never reach this check: see short_speech.py.
+INTERRUPTION: dict[str, Any] = {"min_words": 1}
+
+
 def build_session(
     llm_cfg: dict[str, Any] | None,
     vad: agents_vad.VAD,
@@ -905,8 +911,6 @@ def build_session(
         llm=build_llm(llm_cfg, org_cfgs.get("llm"), retry_on_chunk_sent=True),
         turn_handling=TurnHandlingOptions(
             turn_detection=turn_detection,
-            # Only the setting that differs from the SDK defaults: a transcribed
-            # word, not VAD energy alone, is needed to interrupt the agent.
-            interruption={"min_words": 1},
+            interruption=INTERRUPTION,
         ),
     )
