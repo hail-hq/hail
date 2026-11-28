@@ -12,7 +12,14 @@ made because we never invoke ``.chat()``.
 from __future__ import annotations
 
 import pytest
-from hailhq.voicebot.pipeline import ResolvedLayer, build_llm, build_session, build_stt
+from hailhq.core.config import settings
+from hailhq.voicebot.pipeline import (
+    ResolvedLayer,
+    build_llm,
+    build_session,
+    build_stt,
+    startup_capability_warnings,
+)
 from livekit.agents import AgentSession
 from livekit.agents.llm import FallbackAdapter
 from livekit.agents.stt import FallbackAdapter as stt_fallback
@@ -732,9 +739,6 @@ def test_startup_capability_warnings_count_any_house_preset_for_english(
     monkeypatch: pytest.MonkeyPatch, setting: str
 ) -> None:
     """A host whose only speech is one preset still speaks English."""
-    from hailhq.core.config import settings
-    from hailhq.voicebot.pipeline import startup_capability_warnings
-
     for key in (
         "cartesia_api_key",
         "eleven_api_key",
