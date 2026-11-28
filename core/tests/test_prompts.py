@@ -172,7 +172,7 @@ def test_prompt_text_is_pinned() -> None:
         "37e9a0b5058e8c60355db926a963a8fba59c0fc4dd43d9ede4c7116e464e9e8b"
     )
     assert _sha(prompts.VOICE_CONFIGURATION_HELP) == (
-        "3953eccfbe6ca07ea9ff36b3bb4eec5ab538233e2d0056fb4c49a8936ecb97a0"
+        "e84019d91b5c5ad158011a16c66b87098da96f17235159212d75c93848c17111"
     )
 
 
@@ -351,7 +351,8 @@ def test_help_says_how_the_knowledge_base_is_set() -> None:
     help_text = prompts.VOICE_CONFIGURATION_HELP
     assert "knowledge base" in help_text
     assert "owners and admins can use Upload files on the Documents page" in help_text
-    assert "If Documents is read-only" in help_text
+    assert "ask an owner or admin to help upload files and update the agent" in help_text
+    assert "If documents are turned off for the workspace" in help_text
     assert "turn on Answer from your documents, and press Save" in help_text
 
 
