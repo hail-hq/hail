@@ -1036,6 +1036,11 @@ class ProviderValidateResult(BaseModel):
 KnowledgeDocumentStatus = Literal["pending", "processing", "ready", "failed"]
 
 
+class KnowledgeDocumentTagResponse(BaseModel):
+    type: str
+    value: str
+
+
 class KnowledgeDocumentResponse(BaseModel):
     """A knowledge base document (``/knowledge/documents``). Poll until
     ``status`` is ``ready`` (agents answer from it) or ``failed``
@@ -1052,6 +1057,7 @@ class KnowledgeDocumentResponse(BaseModel):
     piece_count: int = 0
     created_at: datetime
     updated_at: datetime
+    tags: list[KnowledgeDocumentTagResponse] = Field(default_factory=list)
 
 
 class KnowledgeDocumentListResponse(BaseModel):
@@ -1110,6 +1116,7 @@ __all__ = [
     "KnowledgeDocumentListResponse",
     "KnowledgeDocumentResponse",
     "KnowledgeDocumentStatus",
+    "KnowledgeDocumentTagResponse",
     "KnowledgeSearchResponse",
     "KnowledgeSearchResult",
     "LLMConfig",

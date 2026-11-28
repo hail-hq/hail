@@ -54,6 +54,31 @@ def test_presign_returns_url():
     )
 
 
+def test_presign_get_sets_signed_download_headers():
+    stub = _stub_client(b"")
+    client = S3MailClient(client=stub, bucket="hail-inbound")
+    asyncio.run(
+        client.presign_get(
+            "knowledge-documents/org/manual",
+            ttl_seconds=300,
+            response_content_type="application/pdf",
+            response_content_disposition="attachment; filename*=UTF-8''manual.pdf",
+            response_cache_control="no-store",
+        )
+    )
+    stub.generate_presigned_url.assert_called_once_with(
+        "get_object",
+        Params={
+            "Bucket": "hail-inbound",
+            "Key": "knowledge-documents/org/manual",
+            "ResponseContentType": "application/pdf",
+            "ResponseContentDisposition": "attachment; filename*=UTF-8''manual.pdf",
+            "ResponseCacheControl": "no-store",
+        },
+        ExpiresIn=300,
+    )
+
+
 def test_delete_prefix_deletes_every_page():
     stub = MagicMock()
     stub.get_paginator.return_value.paginate.return_value = [

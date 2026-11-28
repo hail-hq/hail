@@ -8,47 +8,71 @@ in the background: the document goes ``pending``, ``processing``, then
 ``POST /knowledge/search`` runs the same hybrid search the text and email
 agents use.
 
-Off until Hail turns it on for the workspace: every route answers 403 with
-``KNOWLEDGE_OFF`` until then (``hailhq.core.knowledge.access``). The
-workspace's document limit and Hail's global storage cap are checked under
-the workspace's knowledge lock, so two requests never both take the last
-slot. Every query filters on the caller's organization.
+Adding and searching need the workspace's knowledge base turned on
+(``hailhq.core.knowledge.access``). Existing documents can still be opened,
+tagged and removed while it is off. The workspace's document limit and
+Hail's global storage cap are checked under the workspace's knowledge
+lock, so two requests never both take the last slot. Every query filters
+on the caller's organization.
 """
 
 from __future__ import annotations
 
 import logging
 from typing import Annotated
+from unicodedata import normalize
+from urllib.parse import quote
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi import status as http_status
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import RedirectResponse
 from hailhq.api.audit import actor_of, write_audit_log
-from hailhq.api.deps import Principal, get_current_principal, get_s3_mail_optional
+from hailhq.api.deps import (
+    Principal,
+    get_current_principal,
+    get_s3_mail_optional,
+    organization_member_role,
+)
 from hailhq.api.pagination import fetch_cursor_page
 from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.core.db import get_session
-from hailhq.core.file_uploads import KNOWLEDGE_MAX_FILE_BYTES, delete_upload_objects
+from hailhq.core.file_uploads import (
+    KNOWLEDGE_FILE_TYPES,
+    KNOWLEDGE_MAX_FILE_BYTES,
+    delete_upload_objects,
+)
 from hailhq.core.knowledge.access import (
     KNOWLEDGE_OFF,
     STORAGE_FULL,
     knowledge_limits,
     knowledge_lock,
+    prune_unused_tag_values,
     storage_full,
 )
 from hailhq.core.knowledge.embed import EmbeddingUnavailable, get_embedder
 from hailhq.core.knowledge.search import search_pieces
-from hailhq.core.models import FileUpload, KnowledgeDocument, OrganizationKnowledge
+from hailhq.core.models import (
+    FileUpload,
+    KnowledgeDocument,
+    KnowledgeDocumentTag,
+    KnowledgeTagValue,
+    OrganizationKnowledge,
+)
 from hailhq.core.s3_mail import S3MailClient
 from hailhq.core.schemas import (
     KnowledgeDocumentCreate,
     KnowledgeDocumentListResponse,
     KnowledgeDocumentResponse,
+    KnowledgeDocumentTagResponse,
+    KnowledgeDocumentTagUpdate,
     KnowledgeSearchRequest,
     KnowledgeSearchResponse,
     KnowledgeSearchResult,
 )
 from sqlalchemy import delete, func, select, text
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -86,20 +110,47 @@ async def knowledge_on(db: AsyncSession, org: UUID) -> OrganizationKnowledge:
     return limits
 
 
-async def _owned(db: AsyncSession, document_id: UUID, org: UUID) -> KnowledgeDocument:
-    doc = (
-        await db.execute(
-            select(KnowledgeDocument).where(
-                KnowledgeDocument.id == document_id,
-                KnowledgeDocument.organization_id == org,
-            )
-        )
-    ).scalar_one_or_none()
+async def _owned(
+    db: AsyncSession, document_id: UUID, org: UUID, *, lock: bool = False
+) -> KnowledgeDocument:
+    stmt = select(KnowledgeDocument).where(
+        KnowledgeDocument.id == document_id,
+        KnowledgeDocument.organization_id == org,
+    )
+    if lock:
+        # Keep the document alive until the assignment commits.
+        stmt = stmt.with_for_update(read=True, key_share=True)
+    doc = (await db.execute(stmt)).scalar_one_or_none()
     if doc is None:
         raise HTTPException(
             status_code=http_status.HTTP_404_NOT_FOUND, detail=_NOT_FOUND
         )
     return doc
+
+
+async def _document_responses(
+    db: AsyncSession, org: UUID, documents: list[KnowledgeDocument]
+) -> list[KnowledgeDocumentResponse]:
+    items = {doc.id: KnowledgeDocumentResponse.model_validate(doc) for doc in documents}
+    if items:
+        tags = await db.execute(
+            select(
+                KnowledgeDocumentTag.document_id,
+                KnowledgeDocumentTag.type,
+                KnowledgeTagValue.value,
+            )
+            .join(KnowledgeTagValue)
+            .where(
+                KnowledgeDocumentTag.organization_id == org,
+                KnowledgeDocumentTag.document_id.in_(items),
+            )
+            .order_by(KnowledgeDocumentTag.type)
+        )
+        for document_id, tag_type, value in tags:
+            items[document_id].tags.append(
+                KnowledgeDocumentTagResponse(type=tag_type, value=value)
+            )
+    return list(items.values())
 
 
 async def lock_upload(db: AsyncSession, *where) -> FileUpload | None:
@@ -287,7 +338,7 @@ async def list_knowledge_documents(
         newest_first=True,
     )
     return KnowledgeDocumentListResponse(
-        items=[KnowledgeDocumentResponse.model_validate(r) for r in rows],
+        items=await _document_responses(db, principal.organization_id, rows),
         next_cursor=next_cursor,
     )
 
@@ -305,8 +356,176 @@ async def get_knowledge_document(
 ) -> KnowledgeDocumentResponse:
     """One knowledge document and its reading status. Works while the
     knowledge base is off too."""
-    doc = await _owned(db, document_id, principal.organization_id)
-    return KnowledgeDocumentResponse.model_validate(doc)
+    org = principal.organization_id
+    doc = await _owned(db, document_id, org)
+    (response,) = await _document_responses(db, org, [doc])
+    return response
+
+
+@router.get(
+    "/documents/{document_id}/file",
+    operation_id="get_knowledge_document_file",
+    response_class=RedirectResponse,
+    status_code=http_status.HTTP_302_FOUND,
+    responses={
+        302: {
+            "description": "Redirect to the original file. The URL expires in 5 minutes.",
+            "headers": {
+                "Location": {"schema": {"type": "string", "format": "uri"}},
+                "Cache-Control": {"schema": {"type": "string", "example": "no-store"}},
+            },
+        },
+        404: {"description": "No stored file for this document in this workspace."},
+        503: {"description": "Original file storage is unavailable."},
+    },
+)
+async def get_knowledge_document_file(
+    document_id: UUID,
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> Response:
+    """Open a document's original file. PDFs open inline. Other files download."""
+    org = principal.organization_id
+    stored = (
+        await db.execute(
+            select(FileUpload.s3_key, FileUpload.filename, FileUpload.content_type)
+            .select_from(KnowledgeDocument)
+            .join(FileUpload, FileUpload.id == KnowledgeDocument.file_upload_id)
+            .where(
+                KnowledgeDocument.id == document_id,
+                KnowledgeDocument.organization_id == org,
+                FileUpload.organization_id == org,
+                FileUpload.purpose == "knowledge_document",
+                FileUpload.uploaded_at.is_not(None),
+            )
+        )
+    ).one_or_none()
+    if stored is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND, detail=_NOT_FOUND
+        )
+    key, filename, content_type = stored
+    await db.rollback()
+    if content_type not in KNOWLEDGE_FILE_TYPES:
+        content_type = "application/octet-stream"
+    basename = filename.replace("\\", "/").rsplit("/", 1)[-1]
+    basename = "".join(c for c in basename if c.isprintable()).strip()
+    filename = basename if basename not in {"", ".", ".."} else "document"
+    disposition = "inline" if content_type == "application/pdf" else "attachment"
+    url = None
+    try:
+        s3 = await run_in_threadpool(get_s3_mail_optional)
+        if s3 is not None:
+            url = await s3.presign_get(
+                key,
+                ttl_seconds=300,
+                response_content_type=content_type,
+                response_content_disposition=(
+                    f"{disposition}; filename*=UTF-8''{quote(filename, safe='')}"
+                ),
+                response_cache_control="no-store",
+            )
+    except Exception as exc:
+        logger.warning(
+            "knowledge: could not sign original file (%s)", type(exc).__name__
+        )
+    if url is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="the original file is unavailable; try again",
+        )
+    return RedirectResponse(
+        url=url,
+        status_code=http_status.HTTP_302_FOUND,
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@router.patch(
+    "/documents/{document_id}/tags",
+    response_model=KnowledgeDocumentResponse,
+    operation_id="update_knowledge_document_tag",
+    responses={
+        403: {
+            "description": "User credentials need workspace owner or admin access to edit tags."
+        },
+        404: {"description": "No such document in this workspace."},
+    },
+)
+async def update_knowledge_document_tag(
+    document_id: UUID,
+    body: KnowledgeDocumentTagUpdate,
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> KnowledgeDocumentResponse:
+    """Set or clear a document's tag without changing its other tags."""
+    org = principal.organization_id
+    is_staff = (
+        principal.auth_kind == "jwt"
+        and principal.console_session
+        and principal.superadmin
+    )
+    if principal.auth_kind != "shared" and not is_staff:
+        role = await organization_member_role(db, org, principal.user_id)
+        if role not in ("owner", "admin"):
+            raise HTTPException(
+                status_code=http_status.HTTP_403_FORBIDDEN,
+                detail="only workspace owners and admins can edit document tags",
+            )
+    await knowledge_lock(db, org)
+    doc = await _owned(db, document_id, org, lock=True)
+    value_key = None
+    if body.value is not None:
+        value_key = normalize("NFC", normalize("NFD", body.value).casefold())
+        await db.execute(
+            insert(KnowledgeTagValue)
+            .values(
+                organization_id=org,
+                type=body.type,
+                value_key=value_key,
+                value=body.value,
+            )
+            .on_conflict_do_nothing(
+                index_elements=[
+                    KnowledgeTagValue.organization_id,
+                    KnowledgeTagValue.type,
+                    KnowledgeTagValue.value_key,
+                ]
+            )
+        )
+    await db.execute(
+        insert(KnowledgeDocumentTag)
+        .values(
+            organization_id=org,
+            document_id=doc.id,
+            type=body.type,
+            value_key=value_key,
+            is_manual=True,
+        )
+        .on_conflict_do_update(
+            index_elements=[
+                KnowledgeDocumentTag.organization_id,
+                KnowledgeDocumentTag.document_id,
+                KnowledgeDocumentTag.type,
+            ],
+            set_={"value_key": value_key, "is_manual": True},
+        )
+    )
+    await prune_unused_tag_values(db, org)
+    (response,) = await _document_responses(db, org, [doc])
+    await db.commit()
+    actor_user_id, actor_kind = actor_of(principal)
+    await write_audit_log(
+        organization_id=org,
+        api_key_id=principal.api_key_id,
+        action="knowledge_document.tag.update",
+        resource_type="knowledge_document",
+        resource_id=document_id,
+        payload={"type": body.type, "cleared": value_key is None},
+        actor_user_id=actor_user_id,
+        actor_kind=actor_kind,
+    )
+    return response
 
 
 @router.delete(
@@ -342,12 +561,14 @@ async def delete_knowledge_document(
                 status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="the file could not be deleted from storage; try again",
             ) from exc
-    # The upload row cascades to the document and its pieces.
+    # The upload row cascades to the document, its pieces and its tag assignments.
+    await knowledge_lock(db, org)
     await db.execute(
         delete(FileUpload).where(
             FileUpload.id == upload_id, FileUpload.organization_id == org
         )
     )
+    await prune_unused_tag_values(db, org)
     await db.commit()
     actor_user_id, actor_kind = actor_of(principal)
     await write_audit_log(

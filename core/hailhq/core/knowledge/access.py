@@ -46,6 +46,8 @@ from hailhq.core.models import (
     Agent,
     FileUpload,
     KnowledgeDocument,
+    KnowledgeDocumentTag,
+    KnowledgeTagValue,
     OrganizationKnowledge,
 )
 from hailhq.core.s3_mail import S3MailClient
@@ -69,6 +71,7 @@ __all__ = [
     "knowledge_lock",
     "log_failure",
     "piece_bytes",
+    "prune_unused_tag_values",
     "short_cause",
     "storage_full",
 ]
@@ -307,6 +310,24 @@ async def _end(db: AsyncSession, work: Awaitable[T]) -> T:
         raise
 
 
+async def prune_unused_tag_values(db: AsyncSession, organization_id: UUID) -> None:
+    """Remove orphaned tag values while the workspace's knowledge lock is held."""
+    assigned = (
+        select(KnowledgeDocumentTag.document_id)
+        .where(
+            KnowledgeDocumentTag.organization_id == KnowledgeTagValue.organization_id,
+            KnowledgeDocumentTag.type == KnowledgeTagValue.type,
+            KnowledgeDocumentTag.value_key == KnowledgeTagValue.value_key,
+        )
+        .exists()
+    )
+    await db.execute(
+        delete(KnowledgeTagValue).where(
+            KnowledgeTagValue.organization_id == organization_id, ~assigned
+        )
+    )
+
+
 async def _turn_off(db: AsyncSession, organization_id: UUID) -> list[tuple[UUID, str]]:
     """Off and links stopped, under the workspace's knowledge lock. Returns
     the knowledge uploads that exist now (id, storage key)."""
@@ -340,6 +361,8 @@ async def _turn_off(db: AsyncSession, organization_id: UUID) -> list[tuple[UUID,
             OrganizationKnowledge.organization_id == organization_id
         )
     )
+    # A workspace with no remaining uploads will have no rows to sweep on retry.
+    await prune_unused_tag_values(db, organization_id)
     rows = await db.execute(
         select(FileUpload.id, FileUpload.s3_key).where(
             FileUpload.organization_id == organization_id,
@@ -352,8 +375,8 @@ async def _turn_off(db: AsyncSession, organization_id: UUID) -> list[tuple[UUID,
 async def _delete_rows(
     db: AsyncSession, organization_id: UUID, upload_ids: list[UUID]
 ) -> int:
-    """The listed uploads (their documents and pieces go with them, ON
-    DELETE CASCADE), under the lock; returns the documents deleted."""
+    """Delete the listed uploads and their documents, pieces and tags
+    under the lock. Return the number of documents deleted."""
     await knowledge_lock(db, organization_id)
     count = (
         await db.execute(
@@ -371,6 +394,7 @@ async def _delete_rows(
             FileUpload.id.in_(upload_ids),
         )
     )
+    await prune_unused_tag_values(db, organization_id)
     return int(count)
 
 

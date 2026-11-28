@@ -45,6 +45,7 @@ async def test_add_document_uploads_then_adds(base_url: str, api_key: str) -> No
             name="Inverter manual",
         )
     assert doc.status == "pending"
+    assert doc.tags == []
     assert json.loads(link.calls[0].request.content)["purpose"] == "knowledge_document"
     assert "authorization" not in put.calls[0].request.headers
     assert put.calls[0].request.content == b"%PDF-1.4 x"
@@ -95,3 +96,19 @@ async def test_list_get_delete_search(base_url: str, api_key: str) -> None:
         "limit": 3,
     }
     assert hits.results[0].page == 4
+
+
+@respx.mock
+async def test_list_and_get_read_document_tags(base_url: str, api_key: str) -> None:
+    tagged = {**_DOC, "tags": [{"type": "brand", "value": "Ardent"}]}
+    respx.get(f"{base_url}/knowledge/documents").mock(
+        return_value=httpx.Response(200, json={"items": [tagged]})
+    )
+    respx.get(f"{base_url}/knowledge/documents/{_DOC['id']}").mock(
+        return_value=httpx.Response(200, json=tagged)
+    )
+    async with Client(api_key=api_key, base_url=base_url) as client:
+        page = await client.knowledge.list_documents()
+        doc = await client.knowledge.get_document(_DOC["id"])
+    for item in (page.items[0], doc):
+        assert [(tag.type, tag.value) for tag in item.tags] == [("brand", "Ardent")]

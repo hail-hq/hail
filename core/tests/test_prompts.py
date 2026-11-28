@@ -172,7 +172,7 @@ def test_prompt_text_is_pinned() -> None:
         "37e9a0b5058e8c60355db926a963a8fba59c0fc4dd43d9ede4c7116e464e9e8b"
     )
     assert _sha(prompts.VOICE_CONFIGURATION_HELP) == (
-        "bc88d1a24fb6b25d598ce4d9e4e4e5c312194852c50d9a3290b095199990066a"
+        "aea288fe86ead49f7e6edbc31cabc15f29a11b94c22ea0d0b3c07a366b89f4db"
     )
 
 
@@ -350,7 +350,14 @@ def test_onboarding_voice_help_names_the_optional_trial_settings():
 def test_help_says_how_the_knowledge_base_is_set() -> None:
     help_text = prompts.VOICE_CONFIGURATION_HELP
     assert "knowledge base" in help_text
-    assert "not in the console" in help_text
+    assert "owners and admins can use Upload files on the Documents page" in help_text
+    assert "ask an owner or admin to help upload files and update the agent" in help_text
+    assert "press Reload on that page first" in help_text
+    assert "If the read error persists after Reload" in help_text
+    assert "Documents or its controls are missing" in help_text
+    assert "an owner or admin can contact Hail support to check access" in help_text
+    assert "For other settings, if a control is missing or disabled" in help_text
+    assert "turn on Answer from your documents, and press Save" in help_text
 
 
 def test_knowledge_section_quotes_documents_as_data() -> None:

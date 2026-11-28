@@ -58,8 +58,8 @@ Every tool sets the MCP hints `readOnlyHint`, `destructiveHint`, `idempotentHint
 | `update_agent`                  | Change an agent. `clear_fields` removes optional values.                                                                                      |
 | `delete_agent`                  | Delete an agent. Destructive. Needs `confirm_name`.                                                                                           |
 | `add_knowledge_document`        | Add an uploaded file to the knowledge base agents answer from ([agents](agents.md#answer-from-your-documents-knowledge-base)).                |
-| `list_knowledge_documents`      | List knowledge documents and their status (read-only).                                                                                        |
-| `get_knowledge_document`        | Fetch one knowledge document; poll it for `ready` (read-only).                                                                                |
+| `list_knowledge_documents`      | List knowledge documents, their status and tags (read-only).                                                                                  |
+| `get_knowledge_document`        | Fetch one knowledge document and its tags. Poll it for `ready` (read-only).                                                                   |
 | `delete_knowledge_document`     | Delete a knowledge document, its file and pieces. Destructive. Needs `confirm_name`.                                                          |
 | `search_knowledge`              | Search the knowledge base the way agents do (read-only).                                                                                      |
 | `route_number`                  | Choose which agent answers a number.                                                                                                          |
