@@ -201,15 +201,14 @@ async def test_plan_allows_by_tier(async_session, billing_on):
     await _plan(async_session, pro, tier="pro")
     await _plan(async_session, biz, tier="business")
     assert await plan_allows(async_session, pro, "porting")
-    assert not await plan_allows(async_session, pro, "connected_phone_systems")
-    assert await plan_allows(async_session, biz, "connected_phone_systems")
+    assert await plan_allows(async_session, biz, "porting")
     assert not await plan_allows(async_session, none, "porting")
 
 
 async def test_self_host_allows_every_feature(async_session, monkeypatch):
     monkeypatch.setattr(settings, "hail_internal_secret", "")
     org, _, _ = await insert_org_and_key(async_session, initial_credit_cents=0)
-    assert await plan_allows(async_session, org, "connected_phone_systems")
+    assert await plan_allows(async_session, org, "porting")
 
 
 # ---------------------------------------------------------------------------

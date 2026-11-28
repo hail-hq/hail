@@ -156,7 +156,7 @@ The renewal rater writes the same rows each month for the numbers the rule cover
 
 - `plan_allows(db, org, feature)`: one table maps each feature to the tiers that include it:
   - `porting`: Pro, Business, Enterprise.
-  - `connected_phone_systems`: Business, Enterprise.
+  - Connecting a phone system needs no plan: it is priced per minute for every workspace.
 - A new feature is one new entry in the table.
 - `active_plan(db, org)` and `current_allowance(db, org)` return the rows the gates read.
 - The porting and connected-phone-system PRs call `plan_allows` in place of their staff checks.
