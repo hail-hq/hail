@@ -4,6 +4,10 @@ Keep your number, your phone provider and your phone system (PBX). Your
 phone system sends the calls you choose to a Hail agent over a SIP trunk:
 all calls, after hours, overflow, or one menu option.
 
+Connecting your phone system comes with the Business and Enterprise plans;
+its calls use the plan's call hours. Self-hosted Hail has no plans, so every
+workspace can connect one.
+
 Hail's team sets up the connection with you: email hi@hail.so. Below is
 what your phone system needs and what the setup does.
 
