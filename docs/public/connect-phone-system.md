@@ -13,7 +13,7 @@ Create a connection under **Phone system** in the console (or
 `POST /v1/sip-connections`). Then add a generic SIP trunk to your phone
 system with these settings:
 
-- **SIP server**: shown on the connection. If you see only its first characters, contact support for the full address.
+- **SIP server**: shown on the connection. If you don't see the full address, please contact support.
 - **Username and password**: shown when you create the connection. If you lose the password, make a new one (`POST /v1/sip-connections/{id}/rotate-password`).
 - **Audio**: G.711 (PCMU or PCMA).
 - **Key presses**: RFC 2833 / RFC 4733. The ownership check needs them.
