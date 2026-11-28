@@ -12,7 +12,14 @@ made because we never invoke ``.chat()``.
 from __future__ import annotations
 
 import pytest
-from hailhq.voicebot.pipeline import ResolvedLayer, build_llm, build_session, build_stt
+from hailhq.core.config import settings
+from hailhq.voicebot.pipeline import (
+    ResolvedLayer,
+    build_llm,
+    build_session,
+    build_stt,
+    startup_capability_warnings,
+)
 from livekit.agents import AgentSession
 from livekit.agents.llm import FallbackAdapter
 from livekit.agents.stt import FallbackAdapter as stt_fallback
@@ -722,6 +729,33 @@ def test_startup_capability_warnings_cartesia_empty_eleven_empty_lists_all_tts_l
         extracted_langs == expected_langs
     ), f"Expected {expected_langs}, got {extracted_langs}"
     assert len(extracted_langs) == 39
+
+
+@pytest.mark.parametrize(
+    "setting",
+    ["google_api_key", "google_cloud_project", "xai_api_key", "assemblyai_api_key"],
+)
+def test_startup_capability_warnings_count_any_house_preset_for_english(
+    monkeypatch: pytest.MonkeyPatch, setting: str
+) -> None:
+    """A host whose only speech is one preset still speaks English."""
+    for key in (
+        "cartesia_api_key",
+        "eleven_api_key",
+        "google_api_key",
+        "google_cloud_project",
+        "xai_api_key",
+        "assemblyai_api_key",
+    ):
+        monkeypatch.setattr(settings, key, "")
+    monkeypatch.setattr(settings, "speechmatics_api_key", "sm-key")
+    monkeypatch.setattr(settings, setting, "house-speech")
+
+    [warning] = startup_capability_warnings()
+    listed = {code.strip() for code in warning.split(": ", 1)[1].split(", ")}
+    assert "en" not in listed
+    assert "fr" not in listed
+    assert "uk" in listed
 
 
 def test_startup_capability_warnings_speechmatics_empty_lists_22_languages(

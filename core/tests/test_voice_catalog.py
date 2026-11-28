@@ -1,3 +1,6 @@
+import asyncio
+import json
+import threading
 from unittest.mock import AsyncMock
 
 import httpx
@@ -5,6 +8,149 @@ import pytest
 import respx
 from hailhq.core import voice_catalog as catalog
 from hailhq.core.config import VoicePreference, settings
+from hailhq.core.provider_validation import validate_tts_voice_selection
+
+# The autouse fixture stubs the list loader; these tests use the real one.
+_FETCH_PRESET_VOICES = catalog._fetch_preset_voices
+
+
+@pytest.mark.parametrize(
+    ("location", "host"),
+    [
+        ("global", "aiplatform.googleapis.com"),
+        ("eu", "aiplatform.eu.rep.googleapis.com"),
+        ("us", "aiplatform.us.rep.googleapis.com"),
+    ],
+)
+async def test_managed_gemini_preview_uses_the_vertex_location(
+    monkeypatch, location, host
+):
+    monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
+    monkeypatch.setattr(settings, "google_cloud_location", location)
+    monkeypatch.setattr(settings, "google_api_key", "fallback-key")
+    monkeypatch.setattr(
+        catalog, "_vertex_headers", lambda url: {"Authorization": "Bearer adc-token"}
+    )
+
+    def respond(request):
+        assert request.url.host == host
+        assert f"/projects/hail-speech/locations/{location}/" in request.url.path
+        assert request.headers["Authorization"] == "Bearer adc-token"
+        assert "x-goog-api-key" not in request.headers
+        assert json.loads(request.content)["generationConfig"]["responseFormat"] == [
+            {"audio": {"mimeType": "AUDIO_L16"}}
+        ]
+        return httpx.Response(
+            200,
+            json={
+                "candidates": [
+                    {"content": {"parts": [{"inlineData": {"data": "AQA="}}]}}
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        result = await catalog.synthesize_preset(client, "gemini", "Charon", "Hi.")
+    assert result == b"\x01\x00"
+
+
+async def test_unsupported_vertex_location_makes_gemini_unavailable(monkeypatch):
+    monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
+    monkeypatch.setattr(settings, "google_cloud_location", "us-central1")
+    assert not await catalog.preset_credentials_available("gemini")
+
+
+async def test_vertex_credentials_are_looked_up_once(monkeypatch):
+    monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
+    monkeypatch.setattr(settings, "google_cloud_location", "global")
+    monkeypatch.setattr(
+        catalog, "_vertex_auth", {"credentials": None, "failed_at": None}
+    )
+    lookups = []
+
+    def missing(**kwargs):
+        lookups.append(kwargs)
+        raise catalog.GoogleAuthError("no credentials")
+
+    monkeypatch.setattr(catalog.google.auth, "default", missing)
+    assert not await catalog.preset_credentials_available("gemini")
+    assert not await catalog.preset_credentials_available("gemini")
+    assert len(lookups) == 1
+
+    found = object()
+    monkeypatch.setattr(catalog, "_vertex_auth", {"credentials": None, "failed_at": 0})
+    monkeypatch.setattr(catalog.time, "monotonic", lambda: 1000.0)
+
+    def available(**kwargs):
+        lookups.append(kwargs)
+        return found, "hail-speech"
+
+    monkeypatch.setattr(catalog.google.auth, "default", available)
+    assert await catalog.preset_credentials_available("gemini")
+    assert await catalog.preset_credentials_available("gemini")
+    assert catalog._vertex_credentials() is found
+    assert len(lookups) == 2
+
+
+async def test_slow_vertex_lookup_is_not_repeated_on_each_load(monkeypatch):
+    monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
+    monkeypatch.setattr(settings, "google_cloud_location", "global")
+    monkeypatch.setattr(catalog, "_GOOGLE_AUTH_TIMEOUT", 0.05)
+    auth = {"credentials": None, "failed_at": None}
+    monkeypatch.setattr(catalog, "_vertex_auth", auth)
+    lookups = []
+    release = threading.Event()
+
+    def slow(**kwargs):
+        lookups.append(kwargs)
+        release.wait(5)
+        raise catalog.GoogleAuthError("no credentials")
+
+    monkeypatch.setattr(catalog.google.auth, "default", slow)
+    assert not await catalog.preset_credentials_available("gemini")
+    assert not await catalog.preset_credentials_available("gemini")
+
+    # Let the lookup thread finish before the patched state is restored.
+    timed_out_at = auth["failed_at"]
+    assert timed_out_at is not None
+    release.set()
+    for _ in range(200):
+        if auth["failed_at"] != timed_out_at:
+            break
+        await asyncio.sleep(0.01)
+    assert auth["failed_at"] != timed_out_at
+    assert len(lookups) == 1
+
+
+async def test_slow_vertex_lookup_in_a_preview_starts_the_retry_wait(monkeypatch):
+    monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
+    monkeypatch.setattr(settings, "google_cloud_location", "global")
+    monkeypatch.setattr(catalog, "_GOOGLE_AUTH_TIMEOUT", 0.05)
+    auth = {"credentials": None, "failed_at": None}
+    monkeypatch.setattr(catalog, "_vertex_auth", auth)
+    lookups = []
+    release = threading.Event()
+
+    def slow(**kwargs):
+        lookups.append(kwargs)
+        release.wait(5)
+        raise catalog.GoogleAuthError("no credentials")
+
+    monkeypatch.setattr(catalog.google.auth, "default", slow)
+    async with httpx.AsyncClient() as client:
+        for _ in range(2):
+            with pytest.raises(ValueError, match="credentials are unavailable"):
+                await catalog.synthesize_preset(client, "gemini", "Charon", "Hi.")
+
+    timed_out_at = auth["failed_at"]
+    assert timed_out_at is not None
+    release.set()
+    for _ in range(200):
+        if auth["failed_at"] != timed_out_at:
+            break
+        await asyncio.sleep(0.01)
+    assert auth["failed_at"] != timed_out_at
+    assert len(lookups) == 1
 
 
 @pytest.fixture(autouse=True)
@@ -290,3 +436,304 @@ def test_elevenlabs_tagalog_uses_the_filipino_provider_code():
     ]
     choices = catalog.elevenlabs_choices(rows, models, "tl", "model-a")
     assert [c["language"] for c in choices] == ["tl"]
+
+
+@pytest.mark.parametrize("gemini_voice", ["Charon", "Kore"])
+async def test_catalogue_marks_gemini_as_default_only_for_english(
+    monkeypatch, gemini_voice
+):
+    monkeypatch.setattr(settings, "cartesia_api_key", "")
+    monkeypatch.setattr(settings, "eleven_api_key", "")
+    monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
+    monkeypatch.setattr(settings, "gemini_voice_id", gemini_voice)
+    monkeypatch.setattr(
+        catalog,
+        "preset_credentials_available",
+        AsyncMock(
+            side_effect=lambda provider: provider != "assemblyai"
+            or bool(settings.assemblyai_api_key)
+        ),
+    )
+    monkeypatch.setattr(settings, "xai_api_key", "xai-key")
+    monkeypatch.setattr(settings, "assemblyai_api_key", "assembly-key")
+    legacy = await catalog.voice_catalogue("en")
+    assert legacy["voices"] == []
+    assert legacy["default_voice"] is None
+    english = await catalog.voice_catalogue("en", include_direct=True)
+    assert english["default_voice"] == {"provider": "gemini", "id": gemini_voice}
+    assert english["voices"][0]["name"] == gemini_voice
+    assert [voice["id"] for voice in english["voices"]] == [
+        gemini_voice,
+        "ara",
+        "aai-audrey",
+    ]
+    assert [voice["name"] for voice in english["voices"][1:]] == ["Ara", "Audrey"]
+    french = await catalog.voice_catalogue("fr", include_direct=True)
+    assert [voice["provider"] for voice in french["voices"]] == [
+        "gemini",
+        "xai",
+        "assemblyai",
+    ]
+    assert {voice["language"] for voice in french["voices"]} == {"fr"}
+    # Only English calls inherit Gemini.
+    assert french["default_voice"] is None
+
+
+async def test_english_audition_keeps_regular_voices_available_for_preview(monkeypatch):
+    monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
+    monkeypatch.setattr(
+        catalog,
+        "preset_credentials_available",
+        AsyncMock(
+            side_effect=lambda provider: provider != "assemblyai"
+            or bool(settings.assemblyai_api_key)
+        ),
+    )
+    monkeypatch.setattr(settings, "xai_api_key", "xai-key")
+    monkeypatch.setattr(settings, "assemblyai_api_key", "")
+    monkeypatch.setattr(
+        catalog,
+        "_provider_catalogue",
+        AsyncMock(
+            return_value={
+                "rows": [
+                    cart_row(),
+                    cart_row("a-man"),
+                    cart_row("b-man"),
+                    cart_row("woman", gender="feminine"),
+                ],
+                "models": [],
+            }
+        ),
+    )
+
+    legacy = await catalog.voice_catalogue("en")
+    audition = await catalog.voice_catalogue("en", include_direct=True)
+    assert [voice["id"] for voice in legacy["voices"]] == ["current", "woman", "a-man"]
+    assert audition["voices"][2:] == legacy["voices"]
+
+
+@pytest.fixture()
+def live_lists(monkeypatch):
+    monkeypatch.setattr(catalog, "_fetch_preset_voices", _FETCH_PRESET_VOICES)
+    monkeypatch.setattr(settings, "google_cloud_project", "")
+    monkeypatch.setattr(settings, "google_api_key", "gemini-key")
+    monkeypatch.setattr(settings, "xai_api_key", "xai-key")
+    monkeypatch.setattr(settings, "gemini_voice_id", "Charon")
+
+
+def _gemini_voice(voice_id, locale, name=None, gender="female"):
+    return {
+        "id": voice_id,
+        "display_name": name or voice_id,
+        "language_code": locale,
+        "gender": gender,
+        "type": "prebuilt",
+    }
+
+
+@respx.mock
+async def test_voice_lists_load_every_page_from_each_provider(live_lists):
+    gemini = respx.get("https://generativelanguage.googleapis.com/v1beta/voices")
+    gemini.side_effect = [
+        httpx.Response(
+            200,
+            json={
+                "voices": [_gemini_voice("charon", "en-US", "Charon", "male")],
+                "next_page_token": "page-2",
+            },
+        ),
+        httpx.Response(200, json={"voices": [_gemini_voice("fr-ca-1", "fr-CA")]}),
+    ]
+    respx.get("https://api.x.ai/v1/tts/voices").respond(
+        200, json={"voices": [{"voice_id": "eve", "name": "Eve", "language": "en"}]}
+    )
+
+    rows = await catalog.preset_voices("gemini")
+    assert [row["id"] for row in rows] == ["charon", "fr-ca-1"]
+    assert gemini.calls[0].request.headers["x-goog-api-key"] == "gemini-key"
+    assert gemini.calls[1].request.url.params["page_token"] == "page-2"
+    assert await catalog.preset_voices("xai") == [
+        {"id": "eve", "name": "Eve", "gender": "", "locale": None}
+    ]
+    # Cached: no second request.
+    await catalog.preset_voices("gemini")
+    assert gemini.call_count == 2
+
+
+@respx.mock
+async def test_a_call_finds_the_provider_of_a_listed_voice(live_lists):
+    respx.get("https://generativelanguage.googleapis.com/v1beta/voices").respond(
+        200, json={"voices": [_gemini_voice("fr-fr-advisor-1", "fr-FR")]}
+    )
+    respx.get("https://api.x.ai/v1/tts/voices").respond(
+        200, json={"voices": [{"voice_id": "rex", "name": "Rex"}]}
+    )
+
+    assert await catalog.preset_voice_owner("fr-fr-advisor-1") == "gemini"
+    assert await catalog.preset_voice_owner("rex") == "xai"
+    assert await catalog.preset_voice_owner("charon") == "gemini"
+    assert await catalog.preset_voice_owner("aai-audrey") == "assemblyai"
+    assert await catalog.preset_voice_owner("a-cartesia-voice") is None
+    assert await catalog.preset_voice_owner(None) is None
+
+
+async def test_a_slow_voice_list_does_not_hold_up_a_call(live_lists, monkeypatch):
+    release = asyncio.Event()
+
+    async def slow(provider, key):
+        await release.wait()
+        if provider != "xai":
+            return []
+        return [{"id": "rex", "name": "Rex", "gender": "", "locale": None}]
+
+    monkeypatch.setattr(catalog, "_fetch_preset_voices", slow)
+    assert await catalog.preset_voice_owner("rex", timeout=0.01) is None
+    release.set()
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    # The load kept running, so the next call finds the voice.
+    assert await catalog.preset_voice_owner("rex", timeout=0.01) == "xai"
+
+
+@respx.mock
+async def test_a_failed_voice_list_waits_before_it_loads_again(live_lists):
+    route = respx.get("https://api.x.ai/v1/tts/voices").respond(500)
+
+    assert await catalog.preset_voices("xai") == []
+    assert await catalog.preset_voices("xai") == []
+    assert route.call_count == 1
+
+
+async def test_a_cloud_project_keeps_the_saved_gemini_voice_only(
+    live_lists, monkeypatch
+):
+    monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
+    fetch = AsyncMock(return_value=[])
+    monkeypatch.setattr(catalog, "_fetch_preset_voices", fetch)
+
+    assert await catalog.preset_voices("gemini") == []
+    fetch.assert_not_called()
+
+
+@respx.mock
+async def test_picker_offers_a_native_voice_and_keeps_english_on_the_saved_one(
+    live_lists, monkeypatch
+):
+    monkeypatch.setattr(settings, "cartesia_api_key", "")
+    monkeypatch.setattr(settings, "eleven_api_key", "")
+    monkeypatch.setattr(settings, "assemblyai_api_key", "")
+    respx.get("https://generativelanguage.googleapis.com/v1beta/voices").respond(
+        200,
+        json={
+            "voices": [
+                _gemini_voice("charon", "en-US", "Charon", "male"),
+                _gemini_voice("fr-ca-advisor-1", "fr-CA", "Advisor"),
+                _gemini_voice("fr-fr-advisor-2", "fr-FR", "Conseiller", "male"),
+            ]
+        },
+    )
+    respx.get("https://api.x.ai/v1/tts/voices").respond(
+        200, json={"voices": [{"voice_id": "ara", "name": "Ara"}]}
+    )
+
+    english = await catalog.voice_catalogue("en", include_direct=True)
+    assert english["voices"][0] | {"model": None} == {
+        "provider": "gemini",
+        "model": None,
+        "id": "Charon",
+        "name": "Charon",
+        "gender": "male",
+        "language": "en",
+        "description": "",
+        "accent": None,
+    }
+    french = await catalog.voice_catalogue("fr", include_direct=True)
+    gemini, xai = french["voices"]
+    assert (gemini["id"], gemini["name"], gemini["gender"]) == (
+        "fr-fr-advisor-2",
+        "Conseiller",
+        "male",
+    )
+    assert (xai["id"], xai["name"]) == ("ara", "Ara")
+
+
+@respx.mock
+async def test_saving_accepts_any_listed_voice_of_the_provider(live_lists):
+    respx.get("https://api.x.ai/v1/tts/voices").respond(
+        200, json={"voices": [{"voice_id": "rex", "name": "Rex"}]}
+    )
+
+    await validate_tts_voice_selection(
+        "xai", {"voice_id": "rex"}, None, None, saved_voice_id=None
+    )
+    with pytest.raises(ValueError, match="suggested voice"):
+        await validate_tts_voice_selection(
+            "xai", {"voice_id": "not-listed"}, None, None, saved_voice_id=None
+        )
+
+
+async def test_non_english_picker_keeps_the_regular_voices_first(monkeypatch):
+    monkeypatch.setattr(settings, "xai_api_key", "xai-key")
+    monkeypatch.setattr(settings, "eleven_api_key", "")
+    monkeypatch.setattr(
+        catalog, "preset_credentials_available", AsyncMock(return_value=True)
+    )
+    monkeypatch.setattr(
+        catalog,
+        "_provider_catalogue",
+        AsyncMock(return_value={"rows": [], "models": []}),
+    )
+    monkeypatch.setattr(
+        catalog,
+        "cartesia_choices",
+        lambda rows, language, model: [
+            {
+                "provider": "cartesia",
+                "model": model,
+                "id": "cartesia-fr",
+                "name": "Claire",
+                "gender": "female",
+                "language": language,
+                "description": "",
+                "accent": None,
+            }
+        ],
+    )
+
+    french = await catalog.voice_catalogue("fr", include_direct=True)
+
+    assert french["voices"][0]["id"] == "cartesia-fr"
+    assert {v["provider"] for v in french["voices"][1:]} <= {
+        "gemini",
+        "xai",
+        "assemblyai",
+    }
+
+
+@respx.mock
+async def test_a_failed_reload_keeps_the_last_good_voice_list(live_lists, monkeypatch):
+    route = respx.get("https://api.x.ai/v1/tts/voices")
+    route.side_effect = [
+        httpx.Response(200, json={"voices": [{"voice_id": "rex", "name": "Rex"}]}),
+        httpx.Response(500),
+    ]
+    assert await catalog.is_preset_voice("xai", "rex")
+    loaded_at, rows = catalog._preset_lists["xai"]
+    catalog._preset_lists["xai"] = (loaded_at - catalog._PRESET_LIST_TTL - 1, rows)
+
+    # An old list answers at once while a new one loads in the background.
+    assert await catalog.is_preset_voice("xai", "rex")
+    await catalog._preset_tasks["xai"]
+    assert route.call_count == 2
+    assert await catalog.is_preset_voice("xai", "rex")
+    assert catalog.known_preset_voice_owner("rex") == "xai"
+
+
+@respx.mock
+async def test_a_voice_list_that_is_not_an_object_counts_as_failed(live_lists):
+    route = respx.get("https://api.x.ai/v1/tts/voices").respond(200, json=[])
+
+    assert await catalog.preset_voices("xai") == []
+    assert await catalog.preset_voices("xai") == []
+    assert route.call_count == 1

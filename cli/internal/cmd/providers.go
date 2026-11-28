@@ -37,7 +37,7 @@ then standing, then Hail's own models.
 Layers:
   llm   the brain. Providers: openai-compatible (needs --base-url),
         anthropic, google.
-  tts   speech synthesis. Providers: cartesia, elevenlabs.
+  tts   speech synthesis. Providers: cartesia, elevenlabs, gemini, xai, assemblyai.
   stt   transcription. Providers: deepgram, speechmatics.
 
 Keys are write-only — reads show only the last four characters. Pass

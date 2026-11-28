@@ -19,7 +19,7 @@ verified probe):
 2. Add a ``_probe_for`` branch here. Prefer a ``capability`` probe (call the
    real endpoint with deliberately-bad params so nothing runs/bills); fall
    back to an ``auth`` probe (a cheap authenticated GET) if the provider has
-   no safe capability probe.
+   no safe capability probe. The presets synthesize one fixed word for Test key.
 3. EMPIRICALLY VERIFY the ordering before trusting a capability probe: a bad
    key must return 401/403, and a valid key with bad params must return a
    post-auth 4xx (404/400/422). If auth is NOT checked before params, the
@@ -33,8 +33,16 @@ import dataclasses
 from typing import Literal
 
 import httpx
+from hailhq.core.config import settings
+from hailhq.core.provider_config import TTS_PRESET_MODELS, provider_cipher, tts_preset
 from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
 from hailhq.core.urls import join_url
+from hailhq.core.voice_catalog import (
+    is_preset_voice,
+    preset_credentials_available,
+    synthesize_preset,
+    validate_voice_language,
+)
 
 ValidationStatus = Literal["valid", "invalid", "indeterminate"]
 
@@ -147,6 +155,56 @@ def _classify(mode: str, status: int) -> ValidationStatus:
     return "indeterminate"
 
 
+async def validate_tts_options(
+    provider: str, params: dict, api_key: str | None, *, has_stored_key: bool
+) -> None:
+    model = TTS_PRESET_MODELS.get(provider)
+    if model is None:
+        return
+    if api_key is not None and not api_key.strip():
+        raise ValueError("Enter an API key.")
+    has_workspace_key = api_key is not None or has_stored_key
+    if params.get("model") not in (None, model):
+        raise ValueError(f"{provider} speech uses {model}.")
+    if not has_workspace_key and not await preset_credentials_available(provider):
+        raise ValueError(f"No Hail credentials are available for {provider} speech.")
+
+
+async def validate_tts_voice_selection(
+    provider: str,
+    params: dict,
+    api_key: str | None,
+    stored_key: str | None,
+    *,
+    saved_voice_id: str | None,
+) -> None:
+    if provider in TTS_PRESET_MODELS:
+        voice = params.get("voice_id")
+        if voice in (None, "", saved_voice_id):
+            return
+        if not isinstance(voice, str) or not await is_preset_voice(provider, voice):
+            raise ValueError("Choose a suggested voice or update Advanced.")
+        return
+
+    if api_key is None and stored_key is not None:
+        api_key = provider_cipher().decrypt(stored_key)
+    if provider == "cartesia":
+        key = settings.cartesia_api_key
+        model = settings.cartesia_model
+        voice = settings.cartesia_voice_id
+    else:
+        key = settings.eleven_api_key
+        model = settings.elevenlabs_model
+        voice = settings.elevenlabs_voice_id
+    await validate_voice_language(
+        provider,
+        params.get("voice_id") or voice,
+        params.get("model") or model,
+        key if api_key is None else api_key,
+        params["language"],
+    )
+
+
 async def validate_provider_key(
     layer: str,
     provider: str,
@@ -155,6 +213,11 @@ async def validate_provider_key(
     client: httpx.AsyncClient | None = None,
 ) -> tuple[ValidationStatus, str]:
     """Return (status, message). Never raises on provider/network failure."""
+    if layer == "tts" and provider in TTS_PRESET_MODELS:
+        if client is not None:
+            return await _validate_preset_key(provider, api_key, params, client)
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as speech_client:
+            return await _validate_preset_key(provider, api_key, params, speech_client)
     probe = await asyncio.to_thread(_probe_for, provider, api_key, params)
     if probe is None:
         if provider == "openai-compatible" and params.get("base_url"):
@@ -186,3 +249,33 @@ async def validate_provider_key(
         status,
         f"couldn't verify with {provider} (HTTP {resp.status_code}) — try again",
     )
+
+
+async def _validate_preset_key(
+    provider: str, api_key: str, params: dict, client: httpx.AsyncClient
+) -> tuple[ValidationStatus, str]:
+    # The explicit Test key action synthesizes one fixed word. Authentication
+    # alone cannot prove the project can use the selected speech model.
+    try:
+        await validate_tts_options(provider, params, api_key, has_stored_key=False)
+        if provider == "gemini" and (params.get("project") or params.get("location")):
+            return "invalid", "Use a Gemini API key for workspace speech."
+        voice = params.get("voice_id") or tts_preset(provider)[0]
+        if await synthesize_preset(client, provider, voice, "Hello.", api_key=api_key):
+            return "valid", "ok"
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        if status in (400, 401, 403, 404, 422):
+            return (
+                "invalid",
+                f"{provider} rejected the speech configuration (HTTP {status})",
+            )
+        return (
+            "indeterminate",
+            f"couldn't verify with {provider} (HTTP {status}) — try again",
+        )
+    except httpx.HTTPError:
+        return "indeterminate", f"couldn't reach {provider} — try again"
+    except ValueError as exc:
+        return "invalid", str(exc)
+    return "indeterminate", "The provider did not return test audio. Try again."

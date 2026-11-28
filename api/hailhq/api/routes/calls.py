@@ -363,6 +363,7 @@ async def create_call(
     # Saved agent: fills every field the request left out (explicit fields
     # win), stamps calls.agent_id, and may carry its own AI line and cap.
     agent: Agent | None = None
+    voice_id_explicit = bool(body.voice_config.voice_id)
     if body.agent_id is not None:
         agent = (
             await db.execute(
@@ -746,6 +747,7 @@ async def create_call(
                 "max_duration_seconds": call.max_duration_seconds,
                 "organization_id": str(call.organization_id),
                 "voice_config": voice_config,
+                "voice_id_explicit": voice_id_explicit,
                 "system_prompt": body.system_prompt,
                 "llm": llm_meta,
                 "first_message": body.first_message,

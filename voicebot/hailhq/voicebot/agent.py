@@ -27,6 +27,7 @@ import json
 import logging
 import math
 import re
+import threading
 import time
 from collections.abc import Awaitable, Callable, Collection
 from datetime import datetime, timezone
@@ -96,6 +97,7 @@ from hailhq.core.telemetry_identity import (
     tag_context,
 )
 from hailhq.core.url_guard import assert_public_https_url
+from hailhq.core.voice_catalog import preset_voice_owner, warm_preset_voices
 from hailhq.core.webhook_fanout import caller_hidden_data, fanout_call_event
 from hailhq.voicebot import text_watch
 from hailhq.voicebot.amd import (
@@ -1553,6 +1555,24 @@ def prewarm(proc: JobProcess) -> None:
     """
     prewarm_audio()
     proc.userdata["vad"] = silero.VAD.load()
+    # Each call runs in its own process, so load the voice lists here and
+    # not while a caller waits. Fail open: a call still looks them up.
+    # A daemon thread with a join limit: asyncio.run waits for a stuck DNS
+    # lookup thread, which could outlast the SDK's process start limit.
+    warm = threading.Thread(target=_warm_voice_lists, daemon=True)
+    warm.start()
+    warm.join(_VOICE_LIST_WARM_LIMIT)
+
+
+# Seconds prewarm waits for the voice lists; the SDK allows 10 for all of it.
+_VOICE_LIST_WARM_LIMIT = 4.0
+
+
+def _warm_voice_lists() -> None:
+    try:
+        asyncio.run(warm_preset_voices(timeout=3.0))
+    except Exception:
+        logger.warning("Voice lists could not load before the call", exc_info=True)
 
 
 def parse_metadata(raw: str | None) -> dict[str, Any]:
@@ -2680,12 +2700,21 @@ async def _run_call(
             org_cfgs = await resolve_org_configs(org_id, skip_llm=llm_cfg is not None)
             org_tts = org_cfgs.get("tts")
             language = language or (org_tts.params.get("language") if org_tts else None)
+            # Which provider owns the chosen voice, from the cached voice lists.
+            # A failed lookup leaves the voice unscoped; its backups still speak.
+            try:
+                voice_provider = await preset_voice_owner(voice_id_override)
+            except Exception:
+                logger.warning("Voice owner lookup failed", exc_info=True)
+                voice_provider = None
             session = build_session(
                 llm_cfg,
                 vad,
                 org_cfgs=org_cfgs,
                 voice_id_override=voice_id_override,
                 language=language,
+                voice_id_explicit=metadata.get("voice_id_explicit") is True,
+                voice_provider=voice_provider,
             )
         except ProviderKeyError:
             raise

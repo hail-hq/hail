@@ -58,29 +58,43 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import logging
+import os
 from collections.abc import AsyncIterable
 from typing import Any
 from uuid import UUID
 
+from google.auth.exceptions import GoogleAuthError
 from hailhq.core.config import settings
 from hailhq.core.db import session_scope
 from hailhq.core.languages import (
     SUPPORTED_LANGUAGES,
+    TTSProvider,
     default_stt_for,
     elevenlabs_language,
     resolve_stt_provider,
     tts_providers_for,
     turn_mode_for,
+    xai_language,
 )
-from hailhq.core.provider_config import load_org_provider_configs, provider_cipher
+from hailhq.core.provider_config import (
+    TTS_PRESET_MODELS,
+    configured_house_voice_provider,
+    gemini_vertex_location,
+    load_org_provider_configs,
+    provider_cipher,
+    tts_preset,
+    tts_preset_configured,
+)
 from hailhq.core.providers.llm.bedrock import bedrock_client, is_bedrock_client
 from hailhq.core.providers.llm.thinking import thinking_off
 from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
+from hailhq.core.voice_catalog import known_preset_voice_owner
 from livekit.agents import (
     AgentSession,
     APIConnectOptions,
     TurnHandlingOptions,
     inference,
+    tokenize,
 )
 from livekit.agents import llm as agents_llm
 from livekit.agents import stt as agents_stt
@@ -94,6 +108,9 @@ from livekit.agents.types import NOT_GIVEN, NotGivenOr
 from livekit.agents.utils import is_given
 from livekit.plugins import (
     anthropic as anthropic_plugin,
+)
+from livekit.plugins import (
+    assemblyai as assemblyai_plugin,
 )
 from livekit.plugins import (
     cartesia as cartesia_plugin,
@@ -112,6 +129,9 @@ from livekit.plugins import (
 )
 from livekit.plugins import (
     speechmatics as speechmatics_plugin,
+)
+from livekit.plugins import (
+    xai as xai_plugin,
 )
 
 logger = logging.getLogger("hailhq.voicebot")
@@ -539,26 +559,84 @@ def build_llm(
 
 
 def _house_tts(
-    voice_id_override: str | None, language: str | None
+    voice_id_override: str | None,
+    language: str | None,
+    *,
+    skip_preset: str | None = None,
+    gemini_last: bool = False,
+    override_provider: TTSProvider | None = None,
+    voice_provider: str | None = None,
 ) -> list[agents_tts.TTS]:
     allowed = tts_providers_for(language)
-    instances: list[agents_tts.TTS] = []
-    if settings.cartesia_api_key and "cartesia" in allowed:
-        kwargs: dict[str, Any] = {
-            "model": settings.cartesia_model,
-            "voice": voice_id_override or settings.cartesia_voice_id,
-        }
-        if language:
-            kwargs["language"] = language
-        instances.append(cartesia_plugin.TTS(**kwargs))
-    if settings.eleven_api_key and "elevenlabs" in allowed:
-        kwargs = {
-            "voice_id": voice_id_override or settings.elevenlabs_voice_id,
-            "model": settings.elevenlabs_model,
-        }
+    legacy: dict[str, agents_tts.TTS] = {}
+    # A preset voice ID means nothing to Cartesia or ElevenLabs.
+    preset = (
+        voice_provider
+        if not override_provider and voice_provider in TTS_PRESET_MODELS
+        else None
+    )
+    unscoped_voice = None if override_provider or preset else voice_id_override
+    cartesia_voice = unscoped_voice or settings.cartesia_voice_id
+    elevenlabs_voice = unscoped_voice or settings.elevenlabs_voice_id
+    defaults = {
+        "cartesia": settings.cartesia_voice_id,
+        "elevenlabs": settings.elevenlabs_voice_id,
+    }
+
+    def legacy_tts(provider: str, voice: str) -> agents_tts.TTS:
+        if provider == "cartesia":
+            kwargs: dict[str, Any] = {"model": settings.cartesia_model, "voice": voice}
+            if language:
+                kwargs["language"] = language
+            return cartesia_plugin.TTS(**kwargs)
+        kwargs = {"voice_id": voice, "model": settings.elevenlabs_model}
         if language:
             kwargs["language"] = elevenlabs_language(language)
-        instances.append(elevenlabs_plugin.TTS(**kwargs))
+        return elevenlabs_plugin.TTS(**kwargs)
+
+    if settings.cartesia_api_key and "cartesia" in allowed:
+        legacy["cartesia"] = legacy_tts("cartesia", cartesia_voice)
+    if settings.eleven_api_key and "elevenlabs" in allowed:
+        legacy["elevenlabs"] = legacy_tts("elevenlabs", elevenlabs_voice)
+    # An unscoped voice may belong to only one of them, so each one that got
+    # it also keeps its default voice as the last backup.
+    voiced = [p for p in legacy if unscoped_voice and defaults[p] != unscoped_voice]
+    instances: list[agents_tts.TTS] = []
+    if override_provider is not None and override_provider in legacy:
+        default = (
+            cartesia_voice if override_provider == "cartesia" else elevenlabs_voice
+        )
+        if voice_id_override == default:
+            instances.append(legacy.pop(override_provider))
+        else:
+            selection = ResolvedLayer(
+                override_provider, None, {"voice_id": voice_id_override}, False
+            )
+            instances.append(_org_tts(selection, None, language))
+    instances.extend(legacy.values())
+    # Every configured preset joins the chain, so a call speaks while any
+    # house voice can. An explicit preset voice leads; inherited voices
+    # start with Gemini. The others are backups with their default voice.
+    inherited_english = not voice_id_override and language in (None, "en")
+    lead = preset or ("gemini" if inherited_english else None)
+    for provider in TTS_PRESET_MODELS:
+        if provider == skip_preset:
+            continue
+        if provider not in allowed or not tts_preset_configured(provider):
+            continue
+        voice = voice_id_override if provider == preset else None
+        try:
+            speaker = _org_tts(
+                ResolvedLayer(provider, None, {}, False), voice, language
+            )
+        except (GoogleAuthError, ValueError):
+            logger.warning("Could not configure Hail's %s speech.", provider)
+            continue
+        if provider == lead and not (gemini_last and provider == "gemini"):
+            instances.insert(0, speaker)
+        else:
+            instances.append(speaker)
+    instances.extend(legacy_tts(p, defaults[p]) for p in voiced if defaults[p])
     return instances
 
 
@@ -590,6 +668,53 @@ def _org_tts(
         if language:
             kwargs["language"] = elevenlabs_language(language)
         return elevenlabs_plugin.TTS(**kwargs)
+    if org.provider in TTS_PRESET_MODELS:
+        default_voice, house_key = tts_preset(org.provider)
+        voice = voice or default_voice
+        model = TTS_PRESET_MODELS[org.provider]
+        if org.params.get("model") not in (None, model):
+            raise ValueError(f"{org.provider} speech uses {model}.")
+        key = house_key if org.api_key is None else org.api_key
+        if org.provider == "gemini":
+            if org.params.get("project") or org.params.get("location"):
+                raise ValueError("Use a Gemini API key for workspace speech.")
+            project = settings.google_cloud_project if org.api_key is None else ""
+            endpoint_override = (
+                "GOOGLE_VERTEX_BASE_URL" if project else "GOOGLE_GEMINI_BASE_URL"
+            )
+            if os.environ.get(endpoint_override):
+                raise ValueError("Gemini speech requires Google's standard endpoint.")
+            if project:
+                return google_plugin.beta.GeminiTTS(
+                    model=model,
+                    voice_name=voice,
+                    vertexai=True,
+                    project=project,
+                    location=gemini_vertex_location(),
+                )
+        if not key.strip():
+            raise ValueError(
+                f"No workspace or Hail key is available for {org.provider} speech."
+            )
+        if org.provider == "gemini":
+            return google_plugin.beta.GeminiTTS(
+                model=model, voice_name=voice, vertexai=False, api_key=key
+            )
+        if org.provider == "assemblyai":
+            return assemblyai_plugin.TTS(
+                api_key=key,
+                voice=voice,
+                language=language or "en",
+                model=model,
+            )
+        return xai_plugin.TTS(
+            api_key=key,
+            voice=voice,
+            language=xai_language(language),
+            tokenizer=tokenize.basic.WordTokenizer(
+                ignore_punctuation=False, retain_format=True
+            ),
+        )
     raise ProviderKeyError(f"unknown org tts provider '{org.provider}'")
 
 
@@ -597,16 +722,20 @@ def build_tts(
     org: ResolvedLayer | None = None,
     voice_id_override: str | None = None,
     language: str | None = None,
+    *,
+    voice_id_explicit: bool = False,
+    voice_provider: str | None = None,
 ) -> agents_tts.TTS:
     """Construct the TTS for one call.
 
     ``org`` present (mode C): the org's provider is used, with Hail's house
     TTS instances appended as a fallback only if ``org.fallback_enabled``.
-    ``org`` absent (mode A): Cartesia primary, ElevenLabs fallback, a
-    provider is included only when its API key is configured, so a
-    single-key self-host still works (tenet 4). With both keys set the two
-    are wrapped in a ``FallbackAdapter`` with Cartesia first. With one key
-    set that provider is used directly with no adapter.
+    Inherited English voices start with Gemini when credentials are available.
+    ``org`` absent (mode A): Cartesia and ElevenLabs, plus every configured
+    Gemini, xAI or AssemblyAI voice that speaks the language. A provider is
+    included only when its key is configured, so a single-key self-host
+    still works (tenet 4). Two or more are wrapped in a ``FallbackAdapter``;
+    one is used directly with no adapter.
 
     ``language`` is the per-call ``voice_config.language`` (ISO 639-1); it is
     applied to every instance built here, BYO and house fallbacks alike,
@@ -616,38 +745,118 @@ def build_tts(
     ``fallback_enabled`` on the org row is consent to house-provider
     rerouting: if the org's BYO provider can't speak ``language`` at all,
     consent means skip the incapable BYO instance and build the house
-    chain only (this recurses into the ``org is None`` branch below, so it
-    shares that branch's single-instance/adapter shape and its
-    empty-chain ``ProviderKeyError``). Without consent it's a hard error,
+    chain only. Without consent it's a hard error,
     the API gate (``routes/calls.py``) is meant to catch this before the
     voicebot ever sees it; this is defense-in-depth for direct LiveKit
     dispatches that bypass the API.
     """
-    if org is not None:
-        if language is not None and org.provider not in tts_providers_for(language):
-            if not org.fallback_enabled:
-                raise ProviderKeyError(
-                    f"org tts provider '{org.provider}' does not support "
-                    f"language '{language}' and fallback is disabled"
-                )
-            logger.warning(
-                "org tts provider %r does not support language %r; "
-                "skipping the BYO instance and using the house chain only "
-                "(fallback consented)",
-                org.provider,
-                language,
+    # Callers that did not look the voice up still know the saved defaults.
+    voice_provider = voice_provider or known_preset_voice_owner(voice_id_override)
+    override_provider = None
+    if (
+        org is not None
+        and language is not None
+        and org.provider not in tts_providers_for(language)
+    ):
+        if not org.fallback_enabled:
+            raise ProviderKeyError(
+                f"org tts provider '{org.provider}' does not support "
+                f"language '{language}' and fallback is disabled"
             )
-            return build_tts(None, voice_id_override, language)
-        byo = _org_tts(org, voice_id_override, language)
+        logger.warning(
+            "org tts provider %r does not support language %r; "
+            "skipping the BYO instance and using the house chain only "
+            "(fallback consented)",
+            org.provider,
+            language,
+        )
+        # Keep the chosen voice. A known one goes to its own provider; a
+        # preset voice is filtered out in _house_tts.
+        override_provider = configured_house_voice_provider(voice_id_override, language)
+        org = None
+    if org is not None:
+        preset_provider = org.provider in TTS_PRESET_MODELS
+        fallback_voice = None if preset_provider else voice_id_override
+        try:
+            primary_voice = voice_id_override
+            foreign_preset = (
+                voice_provider in TTS_PRESET_MODELS and voice_provider != org.provider
+            )
+            keeps_row_voice = preset_provider and primary_voice in (
+                tts_preset(org.provider)[0],
+                org.params.get("voice_id"),
+            )
+            if (
+                preset_provider
+                and (foreign_preset or not voice_id_explicit)
+                and voice_provider != org.provider
+                and not keeps_row_voice
+            ) or (not preset_provider and foreign_preset):
+                # The voice belongs to another provider: use the row's own.
+                # The house chain still gets the chosen voice (fallback_voice).
+                primary_voice = None
+            byo = _org_tts(org, primary_voice, language)
+        except (GoogleAuthError, ValueError, ProviderKeyError):
+            # A row without its own key runs on Hail's credentials, so it may
+            # use Hail's other voices when those are missing.
+            house_backed = org.api_key is None
+            if not (house_backed or (preset_provider and org.fallback_enabled)):
+                raise
+            logger.warning(
+                "Could not configure %s speech. Using the house chain.", org.provider
+            )
+            # Not BYO: keep the chosen voice, as a call with no row would.
+            house_voice = voice_id_override if house_backed else fallback_voice
+            return build_tts(
+                None,
+                house_voice,
+                language,
+                voice_provider=voice_provider if house_voice else None,
+            )
         if org.fallback_enabled:
-            house = _house_tts(voice_id_override, language)
+            # A row on Hail's key and default voice is that house voice already.
+            house_default = tts_preset(org.provider)[0] if preset_provider else ""
+            row_voice = primary_voice or org.params.get("voice_id") or house_default
+            same_house_preset = (
+                preset_provider
+                and org.api_key is None
+                and (
+                    row_voice == house_default
+                    # Gemini voice names match in any case.
+                    or (
+                        org.provider == "gemini"
+                        and row_voice.casefold() == house_default.casefold()
+                    )
+                )
+            )
+            explicit_legacy_voice = not preset_provider and org.params.get("voice_id")
+            house = _house_tts(
+                fallback_voice,
+                language,
+                skip_preset=org.provider if same_house_preset else None,
+                gemini_last=org.provider == "gemini" or bool(explicit_legacy_voice),
+                voice_provider=None if preset_provider else voice_provider,
+            )
             if house:
                 return agents_tts.FallbackAdapter([byo, *house])
         return byo
-    instances = _house_tts(voice_id_override, language)
+    instances = _house_tts(
+        voice_id_override,
+        language,
+        override_provider=override_provider,
+        voice_provider=voice_provider,
+    )
     if not instances:
         # Distinguish between no keys configured vs. language filtering all keys out.
-        if settings.cartesia_api_key or settings.eleven_api_key:
+        if (
+            settings.cartesia_api_key
+            or settings.eleven_api_key
+            or any(
+                tts_preset_configured(provider)
+                and provider not in tts_providers_for(language)
+                for provider in TTS_PRESET_MODELS
+            )
+        ):
             # Keys exist but the language filtered them all out. (Every
             # supported language has at least Cartesia, so `providers` is
             # never empty here.)
@@ -656,8 +865,12 @@ def build_tts(
                 f"Configured TTS providers cannot speak language '{language}'; "
                 f"language requires: {', '.join(sorted(providers))}."
             )
+        if any(tts_preset_configured(provider) for provider in TTS_PRESET_MODELS):
+            # A configured preset failed to build; its warning names it.
+            raise ProviderKeyError("Hail's configured speech could not be set up.")
         raise ProviderKeyError(
-            "No TTS provider configured: set CARTESIA_API_KEY or ELEVEN_API_KEY."
+            "No TTS provider configured: set at least one speech provider "
+            "key (see the speech section of .env.example)."
         )
     if len(instances) == 1:
         return instances[0]
@@ -777,6 +990,11 @@ def startup_capability_warnings() -> list[str]:
         available_tts_providers = set()
         if settings.eleven_api_key:
             available_tts_providers.add("elevenlabs")
+        available_tts_providers.update(
+            provider
+            for provider in TTS_PRESET_MODELS
+            if tts_preset_configured(provider)
+        )
 
         # Find languages that have no available TTS provider
         unservable_langs = []
@@ -815,6 +1033,9 @@ def build_session(
     org_cfgs: dict[str, ResolvedLayer] | None = None,
     voice_id_override: str | None = None,
     language: str | None = None,
+    *,
+    voice_id_explicit: bool = False,
+    voice_provider: str | None = None,
 ) -> AgentSession:
     """Build the :class:`AgentSession` for one job.
 
@@ -822,8 +1043,9 @@ def build_session(
     :func:`hailhq.voicebot.agent.prewarm`. ``org_cfgs`` is the org's resolved
     BYO layers (from :func:`resolve_org_configs`); ``voice_id_override`` and
     ``language`` are the per-call ``voice_config.voice_id`` /
-    ``voice_config.language`` from dispatch metadata, the voice beats any
-    org-level default, the language pins both STT and TTS.
+    ``voice_config.language`` from dispatch metadata. The language pins
+    both STT and TTS. ``voice_id_explicit`` identifies caller-supplied voices
+    when a saved agent voice may belong to a previous workspace provider.
 
     STT provider selection is console-BYO-only (no per-call knob): the
     org's BYO STT row wins (:func:`resolve_stt_provider`), else the call
@@ -901,7 +1123,13 @@ def build_session(
     return AgentSession(
         vad=vad,
         stt=build_stt(org_stt, language, provider, stt_drives_turns=(mode == "stt")),
-        tts=build_tts(org_cfgs.get("tts"), voice_id_override, language),
+        tts=build_tts(
+            org_cfgs.get("tts"),
+            voice_id_override,
+            language,
+            voice_id_explicit=voice_id_explicit,
+            voice_provider=voice_provider,
+        ),
         llm=build_llm(llm_cfg, org_cfgs.get("llm"), retry_on_chunk_sent=True),
         turn_handling=TurnHandlingOptions(
             turn_detection=turn_detection,

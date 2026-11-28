@@ -51,7 +51,7 @@ async def test_catalogue_requires_signature_and_valid_language(voice_app):
             "/internal/voices?language=fr", headers=_signed(b"")
         )
         assert response.status_code == 200
-        voices.voice_catalogue.assert_awaited_once_with("fr")
+        voices.voice_catalogue.assert_awaited_once_with("fr", include_direct=False)
         assert response.json()["languages"][1]["code"] == "fr"
 
 
@@ -86,6 +86,41 @@ async def test_preview_is_fixed_text_cached_and_rejects_arbitrary_voices(
             )
             assert response.status_code == 422
             assert synthesis.call_count == 1
+
+
+async def test_preview_uses_xai_for_an_advertised_voice(voice_app, monkeypatch):
+    monkeypatch.setattr(settings, "xai_api_key", "house-key")
+    voices.voice_catalogue.return_value["voices"] = [
+        {"id": "ara", "provider": "xai", "model": "tts"}
+    ]
+    body = b'{"voice_id":"ara","provider":"xai","language":"en"}'
+
+    with respx.mock as mock:
+        synthesis = mock.post("https://api.x.ai/v1/tts").respond(
+            200, content=b"\x00\x01"
+        )
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=voice_app), base_url="http://test"
+        ) as client:
+            response = await client.post(
+                "/internal/voices/preview", content=body, headers=_signed(body)
+            )
+        assert response.status_code == 200
+        assert response.content.startswith(b"RIFF")
+        assert synthesis.calls[0].request.headers["authorization"] == "Bearer house-key"
+    voices.voice_catalogue.assert_awaited_once_with("en", include_direct=True)
+
+
+async def test_line_keeps_the_existing_provider_scope(voice_app):
+    body = b'{"voice_id":"ara","provider":"xai","language":"en","text":"Hello."}'
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=voice_app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/internal/voices/line", content=body, headers=_signed(body)
+        )
+    assert response.status_code == 422
+    voices.voice_catalogue.assert_not_awaited()
 
 
 async def test_preview_provider_failure_returns_retryable_error(voice_app):

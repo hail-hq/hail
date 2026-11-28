@@ -335,6 +335,65 @@ async def test_validate_honors_explicit_provider_over_active(
     assert seen["api_key"] == "sk-cart"
 
 
+@pytest.mark.parametrize(
+    "draft_url", ["https://draft.example.invalid/v1", "https://xn--.invalid/v1"]
+)
+async def test_llm_key_test_uses_its_saved_endpoint(monkeypatch, draft_url):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, Mock
+
+    from fastapi import HTTPException
+    from hailhq.api.routes.internal import provider_config
+
+    saved = {"base_url": "https://saved.example.invalid/v1", "model": "fixture"}
+    row = SimpleNamespace(
+        provider="openai-compatible", params=saved, encrypted_api_key="encrypted"
+    )
+    monkeypatch.setattr(provider_config, "_get_active_row", AsyncMock(return_value=row))
+    monkeypatch.setattr(
+        provider_config,
+        "provider_cipher",
+        Mock(return_value=Mock(decrypt=Mock(return_value="fixture-key"))),
+    )
+    check = AsyncMock(return_value=("valid", "checked"))
+    monkeypatch.setattr(provider_config, "validate_provider_key", check)
+    body = provider_config.ValidateIn(
+        params={"base_url": draft_url, "model": "fixture"}
+    )
+    with pytest.raises(
+        HTTPException, match="Enter the key to test a different endpoint"
+    ):
+        await provider_config.validate_provider_config(
+            uuid.UUID(ORG), "llm", body, None
+        )
+    check.assert_not_awaited()
+    await provider_config.validate_provider_config(
+        uuid.UUID(ORG),
+        "llm",
+        provider_config.ValidateIn(params={"base_url": saved["base_url"] + "/"}),
+        None,
+    )
+    check.assert_awaited_once_with("llm", "openai-compatible", "fixture-key", saved)
+
+
+@pytest.mark.usefixtures("internal_secret_set", "provider_key_set")
+async def test_direct_custom_voice_survives_a_language_served_by_fallback(
+    client, monkeypatch
+):
+    monkeypatch.setattr(settings, "cartesia_api_key", "house-key")
+    initial = b'{"provider":"gemini","api_key":"customer-key","params":{"language":"en","voice_id":"Kore"},"fallback_enabled":true}'
+    assert (await _put(client, "tts", initial)).status_code == 200
+
+    french = b'{"provider":"gemini","params":{"language":"fr","voice_id":"Kore"},"fallback_enabled":true,"verify_voice_language":true}'
+    response = await _put(client, "tts", french)
+    assert response.status_code == 200, response.text
+    assert response.json()["params"]["voice_id"] == "Kore"
+    english = french.replace(b'"fr"', b'"en"')
+    response = await _put(client, "tts", english)
+    assert response.status_code == 200, response.text
+    assert response.json()["params"]["voice_id"] == "Kore"
+
+
 async def test_validate_inflight_key_without_stored_row(
     client, internal_secret_set, provider_key_set, monkeypatch  # noqa: F811
 ) -> None:
@@ -454,7 +513,7 @@ async def test_picker_checks_retained_voice_with_stored_key_before_write(
     assert response.status_code == 200
     check = AsyncMock(side_effect=ValueError("This voice does not support French."))
     monkeypatch.setattr(
-        "hailhq.api.routes.internal.provider_config.validate_voice_language", check
+        "hailhq.core.provider_validation.validate_voice_language", check
     )
     changed = b'{"provider":"cartesia","params":{"voice_id":"custom","model":"custom-model","language":"fr"},"fallback_enabled":false,"verify_voice_language":true}'
     response = await client.put(
@@ -477,7 +536,7 @@ async def test_picker_validates_house_voice_and_persists_its_model(client, monke
     monkeypatch.setattr(settings, "eleven_api_key", "house-key")
     check = AsyncMock()
     monkeypatch.setattr(
-        "hailhq.api.routes.internal.provider_config.validate_voice_language", check
+        "hailhq.core.provider_validation.validate_voice_language", check
     )
     body = b'{"provider":"elevenlabs","params":{"voice_id":"verified","model":"validated-model","language":"fr"},"fallback_enabled":true,"verify_voice_language":true}'
     response = await client.put(f"{BASE}/tts", content=body, headers=_signed(body))
@@ -497,7 +556,7 @@ async def test_picker_skips_voice_check_when_fallback_serves_the_language(
 
     check = AsyncMock(side_effect=ValueError("unsupported"))
     monkeypatch.setattr(
-        "hailhq.api.routes.internal.provider_config.validate_voice_language", check
+        "hailhq.core.provider_validation.validate_voice_language", check
     )
     body = b'{"provider":"elevenlabs","params":{"voice_id":"verified","language":"bn"},"fallback_enabled":true,"verify_voice_language":true}'
     response = await client.put(f"{BASE}/tts", content=body, headers=_signed(body))
@@ -526,7 +585,7 @@ async def test_picker_maps_provider_status_errors(
     )
     monkeypatch.setattr(settings, "cartesia_api_key", "house-key")
     monkeypatch.setattr(
-        "hailhq.api.routes.internal.provider_config.validate_voice_language",
+        "hailhq.core.provider_validation.validate_voice_language",
         AsyncMock(side_effect=failure),
     )
     body = b'{"provider":"cartesia","params":{"voice_id":"missing","model":"sonic-3.5","language":"fr"},"fallback_enabled":false,"verify_voice_language":true}'

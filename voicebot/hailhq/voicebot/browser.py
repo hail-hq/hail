@@ -24,6 +24,7 @@ from hailhq.core.languages import SUPPORTED_LANGUAGES
 from hailhq.core.models import Call
 from hailhq.core.prompts import BROWSER_VOICE_PREAMBLE
 from hailhq.core.schemas import TERMINAL_CALL_STATUSES
+from hailhq.core.voice_catalog import preset_voice_owner
 from hailhq.voicebot.browser_tools import build_browser_tools
 from hailhq.voicebot.pipeline import build_session, resolve_org_configs
 from livekit.agents import Agent, AgentSession
@@ -361,12 +362,20 @@ async def run_browser_session(
         if finished:
             return
         language = browser_language(cfg, configs)
+        voice_id = cfg.get("voice_id")
+        # Same lookup as a phone call; a failed one leaves the voice unscoped.
+        try:
+            voice_provider = await preset_voice_owner(voice_id)
+        except Exception:  # The lookup must not end the call.
+            logger.warning("Voice owner lookup failed", exc_info=True)
+            voice_provider = None
         session = build_session(
             None,
             ctx.proc.userdata["vad"],
             org_cfgs=configs,
-            voice_id_override=cfg.get("voice_id"),
+            voice_id_override=voice_id,
             language=language,
+            voice_provider=voice_provider,
         )
 
         event_tasks = attach_handlers(session, call_id)

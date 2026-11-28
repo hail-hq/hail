@@ -1168,6 +1168,7 @@ async def test_per_call_voice_id_rides_in_voice_config(
     assert resp.status_code == 201, resp.text
     metadata = livekit_mock.dispatch_agent.await_args.kwargs["metadata"]
     assert metadata["voice_config"]["voice_id"] == "v-custom-1"
+    assert metadata["voice_id_explicit"] is True
 
 
 async def test_post_calls_rejects_unsafe_llm_base_url(

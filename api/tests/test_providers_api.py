@@ -296,8 +296,9 @@ async def test_delete_unknown_provider_is_204(client, auth, provider_key_set) ->
     assert resp.status_code == 204
 
 
+@pytest.mark.parametrize("draft", [None, {"voice_id": "Kore"}, {}])
 async def test_validate_uses_the_stored_key(
-    client, auth, provider_key_set, monkeypatch
+    client, auth, provider_key_set, monkeypatch, draft
 ) -> None:
     seen: dict = {}
 
@@ -309,13 +310,22 @@ async def test_validate_uses_the_stored_key(
         "hailhq.api.routes.internal.provider_config.validate_provider_key",
         fake_validate,
     )
-    await _save(client, auth, "stt", "deepgram", api_key="sk-good")
+    await _save(
+        client,
+        auth,
+        "tts",
+        "gemini",
+        api_key="sk-good",
+        params={"voice_id": "Charon"},
+    )
 
-    resp = await client.post("/providers/stt/validate", json={}, headers=auth)
+    body = {} if draft is None else {"provider": "gemini", "params": draft}
+    resp = await client.post("/providers/tts/validate", json=body, headers=auth)
     assert resp.status_code == 200, resp.text
     assert resp.json() == {"status": "valid", "message": "checked"}
-    assert seen["provider"] == "deepgram"
+    assert seen["provider"] == "gemini"
     assert seen["api_key"] == "sk-good"
+    assert seen["params"] == ({"voice_id": "Charon"} if draft is None else draft)
 
 
 async def test_validate_accepts_an_unsaved_key(

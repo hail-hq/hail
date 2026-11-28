@@ -110,6 +110,11 @@ console or change settings during this call.
 Calls, then Call settings, then Language and voice. They can choose a \
 language, listen to samples, select a voice, and press Save language and voice. \
 The page is hail.so/console/calls/settings; speak the address only if needed.
+- To set up a workspace's own Gemini speech key for the first time, direct an owner or admin to Calls, \
+Call settings, then Bring your own providers. Open Text-to-speech and choose \
+Gemini. Enter the Gemini API key in the console and use Test key. Save when the \
+test shows Valid. An owner or admin can replace a saved key through the Hail CLI. \
+That also activates Gemini for the workspace. Never ask them to read an API key aloud.
 - During onboarding, open Voice and instructions on the Try it page. Language and voice \
 options appear inside that menu. Press Save language and voice without leaving the trial. It applies \
 to the next conversation. Voice selection is optional before the first trial. \

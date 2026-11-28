@@ -19,20 +19,24 @@ import httpx
 from cryptography.fernet import InvalidToken
 from fastapi import APIRouter, Depends, HTTPException
 from hailhq.api.routes.internal.auth import verify_internal_request
-from hailhq.core.config import settings
 from hailhq.core.db import get_session
 from hailhq.core.languages import SUPPORTED_LANGUAGES
 from hailhq.core.models import OrgProviderConfig
 from hailhq.core.provider_config import (
     LAYERS,
     PARAMS_BY_LAYER,
+    TTS_PRESET_MODELS,
     last4,
     load_org_provider_configs,
     provider_cipher,
 )
-from hailhq.core.provider_validation import validate_provider_key
+from hailhq.core.provider_validation import (
+    validate_provider_key,
+    validate_tts_options,
+    validate_tts_voice_selection,
+)
 from hailhq.core.secret_cipher import SecretKeyMissing
-from hailhq.core.voice_catalog import validate_voice_language
+from hailhq.core.urls import join_url, same_request_url
 from pydantic import BaseModel, ConfigDict, ValidationError
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
@@ -271,6 +275,16 @@ async def upsert_provider_config(
         await _require_servable_language(db, organization_id, **{layer: incoming})
 
     row = await _get_row(db, organization_id, layer, body.provider)
+    if layer == "tts":
+        try:
+            await validate_tts_options(
+                body.provider,
+                params,
+                body.api_key,
+                has_stored_key=row is not None and row.encrypted_api_key is not None,
+            )
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
     # A provider outside the language's TTS set only passed the gate above
     # through fallback consent: the house chain speaks, so there is nothing
     # to verify on this provider.
@@ -280,36 +294,19 @@ async def upsert_provider_config(
         and params.get("language")
         and body.provider in SUPPORTED_LANGUAGES[params["language"]].tts
     ):
-        provider = body.provider
-        key = body.api_key
-        if key is None and row is not None and row.encrypted_api_key is not None:
-            try:
-                key = provider_cipher().decrypt(row.encrypted_api_key)
-            except (InvalidToken, SecretKeyMissing) as exc:
-                raise HTTPException(
-                    503,
-                    "Your stored voice key could not be read. Update it in Advanced.",
-                ) from exc
-        if key is None:
-            key = (
-                settings.cartesia_api_key
-                if provider == "cartesia"
-                else settings.eleven_api_key
-            )
-        model = params.get("model") or (
-            settings.cartesia_model
-            if provider == "cartesia"
-            else settings.elevenlabs_model
-        )
-        voice_id = params.get("voice_id") or (
-            settings.cartesia_voice_id
-            if provider == "cartesia"
-            else settings.elevenlabs_voice_id
-        )
         try:
-            await validate_voice_language(
-                provider, voice_id, model, key, params["language"]
+            await validate_tts_voice_selection(
+                body.provider,
+                params,
+                body.api_key,
+                row.encrypted_api_key if row is not None else None,
+                saved_voice_id=row.params.get("voice_id") if row is not None else None,
             )
+        except (InvalidToken, SecretKeyMissing) as exc:
+            raise HTTPException(
+                503,
+                "Your stored voice key could not be read. Update it in Advanced.",
+            ) from exc
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
         except httpx.HTTPStatusError as exc:
@@ -476,6 +473,30 @@ async def validate_provider_config(
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         provider = row.provider
         params = dict(row.params)
+        # Preset speech providers use fixed endpoints. The console sends the
+        # draft settings, including an empty dict when the fields were cleared.
+        if (
+            layer == "tts"
+            and provider in TTS_PRESET_MODELS
+            and "params" in body.model_fields_set
+        ):
+            params = _validated_params(layer, provider, body.params)
+        # A stored key remains bound to its saved endpoint.
+        if (
+            layer == "llm"
+            and provider == "openai-compatible"
+            and "base_url" in body.params
+        ):
+            draft_url = body.params["base_url"]
+            saved_url = params.get("base_url")
+            if (
+                not isinstance(draft_url, str)
+                or not saved_url
+                or not same_request_url(
+                    join_url(saved_url, "models"), join_url(draft_url, "models")
+                )
+            ):
+                raise HTTPException(422, "Enter the key to test a different endpoint.")
 
     status, message = await validate_provider_key(layer, provider, api_key, params)
     return {"status": status, "message": message}

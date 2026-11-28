@@ -15,7 +15,7 @@ from urllib.parse import urlsplit
 from uuid import UUID
 
 from hailhq.core.config import settings
-from hailhq.core.languages import Language
+from hailhq.core.languages import Language, TTSProvider
 from hailhq.core.models import OrgProviderConfig
 from hailhq.core.secret_cipher import SecretCipher
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
@@ -34,6 +34,53 @@ __all__ = [
 ]
 
 LAYERS: tuple[str, ...] = ("llm", "tts", "stt")
+
+TTS_PRESET_MODELS = {
+    "gemini": "gemini-3.8-flash-tts",
+    "xai": "tts",
+    "assemblyai": "assemblyai-tts-1",
+}
+
+
+def gemini_vertex_location() -> str:
+    location = settings.google_cloud_location or "global"
+    if location not in {"global", "us", "eu"}:
+        raise ValueError("Gemini speech on Vertex AI requires global, us, or eu.")
+    return location
+
+
+def tts_preset(provider: str) -> tuple[str, str]:
+    """Return the configured voice and house key for a preset provider."""
+    return {
+        "gemini": (settings.gemini_voice_id, settings.google_api_key),
+        "xai": ("ara", settings.xai_api_key),
+        "assemblyai": ("aai-audrey", settings.assemblyai_api_key),
+    }[provider]
+
+
+def tts_preset_configured(provider: str) -> bool:
+    return bool(
+        tts_preset(provider)[1].strip()
+        or (provider == "gemini" and settings.google_cloud_project)
+    )
+
+
+def configured_house_voice_provider(
+    voice_id: str | None, language: str
+) -> TTSProvider | None:
+    """Identify a fallback voice from the operator's legacy voice settings."""
+    if not voice_id:
+        return None
+    providers: set[TTSProvider] = {
+        choice.provider
+        for choice in settings.voice_shortlist_preferences.get(language, [])
+        if choice.voice_id == voice_id and choice.provider in ("cartesia", "elevenlabs")
+    }
+    if voice_id == settings.cartesia_voice_id:
+        providers.add("cartesia")
+    if voice_id == settings.elevenlabs_voice_id:
+        providers.add("elevenlabs")
+    return providers.pop() if len(providers) == 1 else None
 
 
 class LLMParams(BaseModel):
@@ -77,7 +124,7 @@ class LLMParams(BaseModel):
 class TTSParams(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    provider: Literal["cartesia", "elevenlabs"]
+    provider: TTSProvider
     voice_id: str | None = None
     model: str | None = None
     # Default spoken language for the workspace. A call or agent can override it.

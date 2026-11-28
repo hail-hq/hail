@@ -4,6 +4,15 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- Pick and preview Gemini, xAI, and AssemblyAI voices for your calls, in more languages.
+- Connect your own Gemini, xAI, or AssemblyAI API keys for speech.
+
+### Changed
+
+- Agents that use Hail's English voice now speak with Charon; saved voices stay.
+
 ## [0.43.0] (2026-11-28)
 
 Subscription plans: the call minutes, texts, emails and numbers a plan

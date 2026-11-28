@@ -2,7 +2,7 @@
 
 Previews speak fixed text only: one greeting per language, for the current
 three recommendations. They are shared in memory across orgs for one hour
-(at most three per supported language).
+(at most three, plus one per speech preset, per supported language).
 
 The line route speaks only a workspace's own first line, at most 400
 characters, in a catalogue voice. The website calls it after it checks the
@@ -26,8 +26,19 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Response
 from hailhq.api.routes.internal.auth import verify_internal_request
 from hailhq.core.config import settings
-from hailhq.core.languages import SUPPORTED_LANGUAGES, Language, elevenlabs_language
-from hailhq.core.voice_catalog import HEADERS_VERSION, voice_catalogue
+from hailhq.core.languages import (
+    SUPPORTED_LANGUAGES,
+    Language,
+    TTSProvider,
+    elevenlabs_language,
+)
+from hailhq.core.provider_config import TTS_PRESET_MODELS
+from hailhq.core.voice_catalog import (
+    HEADERS_VERSION,
+    SAMPLE_RATE,
+    synthesize_preset,
+    voice_catalogue,
+)
 from pydantic import BaseModel, Field, StringConstraints, field_validator
 
 router = APIRouter(
@@ -89,9 +100,9 @@ _HELLO = {
 
 
 @router.get("")
-async def list_voices(language: Language = "en") -> dict:
+async def list_voices(language: Language = "en", include_direct: bool = False) -> dict:
     try:
-        return await voice_catalogue(language)
+        return await voice_catalogue(language, include_direct=include_direct)
     except (httpx.HTTPError, ValueError) as exc:
         raise HTTPException(
             503, "Voice choices could not load. Try again or keep your current voice."
@@ -100,11 +111,12 @@ async def list_voices(language: Language = "en") -> dict:
 
 class PreviewIn(BaseModel):
     language: Language
-    provider: Literal["cartesia", "elevenlabs"]
+    provider: TTSProvider
     voice_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
 
 
 class LineIn(PreviewIn):
+    provider: Literal["cartesia", "elevenlabs"]
     text: Annotated[
         str, StringConstraints(strip_whitespace=True, min_length=1, max_length=400)
     ]
@@ -118,7 +130,9 @@ class LineIn(PreviewIn):
 
 
 async def _catalogue_model(body: PreviewIn) -> str:
-    catalogue = await voice_catalogue(body.language)
+    catalogue = await voice_catalogue(
+        body.language, include_direct=body.provider in TTS_PRESET_MODELS
+    )
     choice = next(
         (
             v
@@ -145,7 +159,7 @@ async def preview_voice(body: PreviewIn) -> Response:
     try:
         model = await _catalogue_model(body)
         text = _HELLO[body.language]
-        cap = 3 * len(SUPPORTED_LANGUAGES)
+        cap = (3 + len(TTS_PRESET_MODELS)) * len(SUPPORTED_LANGUAGES)
         return _wav(await _audio(body, model, text, _samples, cap))
     except (httpx.HTTPError, ValueError) as exc:
         raise HTTPException(503, "This sample could not play. Try again.") from exc
@@ -210,21 +224,29 @@ async def _synthesize(body: PreviewIn, model: str, text: str) -> bytes:
             )
             response.raise_for_status()
             return response.content
-        response = await client.post(
-            f"https://api.elevenlabs.io/v1/text-to-speech/{body.voice_id}",
-            headers={"xi-api-key": settings.eleven_api_key},
-            params={"output_format": "pcm_24000"},
-            json={
-                "model_id": model,
-                "text": text,
-                "language_code": elevenlabs_language(body.language),
-            },
-        )
-        response.raise_for_status()
+        if body.provider in TTS_PRESET_MODELS:
+            pcm = await synthesize_preset(
+                client, body.provider, body.voice_id, text, language=body.language
+            )
+            if not pcm:
+                raise ValueError("No sample audio was returned.")
+        else:
+            response = await client.post(
+                f"https://api.elevenlabs.io/v1/text-to-speech/{body.voice_id}",
+                headers={"xi-api-key": settings.eleven_api_key},
+                params={"output_format": "pcm_24000"},
+                json={
+                    "model_id": model,
+                    "text": text,
+                    "language_code": elevenlabs_language(body.language),
+                },
+            )
+            response.raise_for_status()
+            pcm = response.content
         output = io.BytesIO()
         with wave.open(output, "wb") as wav:
             wav.setnchannels(1)
             wav.setsampwidth(2)
-            wav.setframerate(24000)
-            wav.writeframes(response.content)
+            wav.setframerate(SAMPLE_RATE)
+            wav.writeframes(pcm)
         return output.getvalue()

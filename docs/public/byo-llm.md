@@ -385,6 +385,12 @@ it, and `--fallback` / `--fallback=false` (SDK: `fallback_enabled=True` /
 as they are. What the server validates is the merged result, so a partial
 write can never leave an invalid config behind — it 422s instead.
 
+Use a Gemini API key for workspace Gemini speech. Enter it under [Call settings → Bring your own providers](https://hail.so/console/calls/settings#providers).
+In [Language and voice](https://hail.so/console/calls/settings), choose a voice
+offered for the language your agent speaks.
+
+Testing a stored key uses its saved endpoint.
+
 Config is per provider: rows are keyed by `(organization, layer, provider)`,
 so pointing a layer at a different `--provider` starts a fresh row rather
 than inheriting the old provider's params. `fallback_enabled` is `false` on

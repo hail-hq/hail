@@ -190,5 +190,8 @@ async def validate_provider(
     ``provider``/``params``) to test a key before saving it.
     """
     return await _validate_provider_config(
-        principal.organization_id, layer, ValidateIn(**body.model_dump()), db
+        principal.organization_id,
+        layer,
+        ValidateIn(**body.model_dump(exclude_unset=True)),
+        db,
     )

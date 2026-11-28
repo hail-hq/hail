@@ -11,6 +11,7 @@ from hailhq.core.languages import (
     resolve_stt_provider,
     tts_providers_for,
     turn_mode_for,
+    xai_language,
 )
 
 
@@ -64,9 +65,23 @@ def test_resolve_stt_provider_precedence() -> None:
 
 
 def test_tts_providers_trim() -> None:
-    assert tts_providers_for(None) == frozenset({"cartesia", "elevenlabs"})
-    assert tts_providers_for("fr") == frozenset({"cartesia", "elevenlabs"})
-    assert tts_providers_for("th") == frozenset({"cartesia"})  # no elevenlabs
+    assert tts_providers_for(None) == frozenset(
+        {"cartesia", "elevenlabs", "gemini", "xai", "assemblyai"}
+    )
+    assert tts_providers_for("fr") == frozenset(
+        {"cartesia", "elevenlabs", "gemini", "xai", "assemblyai"}
+    )
+    assert tts_providers_for("th") == frozenset({"cartesia", "gemini"})
+    assert tts_providers_for("uk") == frozenset({"cartesia", "elevenlabs"})
+    assert tts_providers_for("tl") == frozenset({"cartesia", "elevenlabs"})
+
+
+def test_xai_gets_the_regional_codes_it_documents() -> None:
+    assert xai_language("es") == "es-MX"
+    assert xai_language("pt") == "pt-BR"
+    assert xai_language("ar") == "ar-SA"
+    assert xai_language(None) == "en"
+    assert xai_language("fr") == "fr"
 
 
 def test_turn_mode_selection() -> None:

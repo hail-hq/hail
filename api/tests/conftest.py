@@ -22,6 +22,7 @@ from hailhq.api.auth import hash_key
 from hailhq.api.main import app
 from hailhq.api.routes.calls import get_livekit, get_livekit_optional
 from hailhq.api.routes.email_domains import get_email_provider
+from hailhq.core import voice_catalog
 from hailhq.core.db import get_session
 from hailhq.core.livekit import LiveKitClient
 from hailhq.core.models import (
@@ -628,3 +629,14 @@ def _signed_status_form(
 ) -> tuple[dict[str, str], dict[str, str]]:
     sig = RequestValidator(STATUS_AUTH_TOKEN).compute_signature(STATUS_URL, params)
     return params, {"X-Twilio-Signature": sig}
+
+
+@pytest.fixture(autouse=True)
+def no_live_voice_lists(monkeypatch: pytest.MonkeyPatch):
+    """Tests never load a provider's real voice list; each starts empty."""
+    voice_catalog.reset_preset_voice_cache()
+    monkeypatch.setattr(
+        voice_catalog, "_fetch_preset_voices", AsyncMock(return_value=[])
+    )
+    yield
+    voice_catalog.reset_preset_voice_cache()

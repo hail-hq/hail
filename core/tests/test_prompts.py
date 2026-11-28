@@ -144,6 +144,12 @@ async def test_settings_help_tool_returns_the_guide() -> None:
     assert await hail_help._execute(None, {}) == prompts.VOICE_CONFIGURATION_HELP  # type: ignore[arg-type]
 
 
+def test_settings_help_explains_gemini_api_keys() -> None:
+    guide = prompts.VOICE_CONFIGURATION_HELP
+    assert "Bring your own providers" in guide
+    assert "Enter the Gemini API key in the console" in guide
+
+
 def _sha(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
 
@@ -172,7 +178,7 @@ def test_prompt_text_is_pinned() -> None:
         "37e9a0b5058e8c60355db926a963a8fba59c0fc4dd43d9ede4c7116e464e9e8b"
     )
     assert _sha(prompts.VOICE_CONFIGURATION_HELP) == (
-        "bc88d1a24fb6b25d598ce4d9e4e4e5c312194852c50d9a3290b095199990066a"
+        "b04316361279c132686f829a45456da995788aeff4678092696bd03efca6bd5e"
     )
 
 
