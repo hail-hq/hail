@@ -13,6 +13,10 @@ STT/TTS provider serves each one. Derived from official provider docs on
   https://docs.cartesia.ai/build-with-cartesia/tts-models/latest
 * ElevenLabs eleven_turbo_v2_5 languages:
   https://elevenlabs.io/docs/models
+* Gemini 3.8 Flash TTS, xAI and AssemblyAI speech languages (2026-11-28):
+  https://ai.google.dev/gemini-api/docs/speech-generation
+  https://docs.x.ai/developers/model-capabilities/audio/text-to-speech
+  https://www.assemblyai.com/docs/tts/voices
 * LiveKit audio TurnDetector languages:
   https://docs.livekit.io/agents/build/turns/turn-detector/
 
@@ -36,6 +40,7 @@ __all__ = [
     "resolve_stt_provider",
     "tts_providers_for",
     "turn_mode_for",
+    "xai_language",
 ]
 
 # Keep in sync with SUPPORTED_LANGUAGES. test_literal_matches_matrix_keys
@@ -143,7 +148,30 @@ _NO_ELEVENLABS = frozenset({"bn", "gu", "he", "kn", "te", "th", "mr"})
 
 
 TTSProvider = Literal["cartesia", "elevenlabs", "gemini", "xai", "assemblyai"]
-_ENGLISH_ONLY_TTS = frozenset({"gemini", "xai", "assemblyai"})
+# Gemini's language table names every Hail language except Ukrainian, and
+# lists Filipino, not Tagalog.
+_NO_GEMINI = frozenset({"uk", "tl"})
+# xAI documents regional codes for Spanish, Portuguese and Arabic only.
+_XAI_CODES = {
+    **{code: code for code in ("en", "bn", "zh", "fr", "de", "hi", "id", "it")},
+    **{code: code for code in ("ja", "ko", "ru", "tr", "vi")},
+    "es": "es-MX",
+    "pt": "pt-BR",
+    "ar": "ar-SA",
+}
+_ASSEMBLYAI = frozenset({"en", "es", "de", "it", "pt", "fr"})
+
+
+def _preset_tts(code: str) -> frozenset[str]:
+    return frozenset(
+        provider
+        for provider, speaks in (
+            ("gemini", code not in _NO_GEMINI),
+            ("xai", code in _XAI_CODES),
+            ("assemblyai", code in _ASSEMBLYAI),
+        )
+        if speaks
+    )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -167,7 +195,7 @@ SUPPORTED_LANGUAGES: dict[str, LanguageCaps] = {
             if code in _NO_ELEVENLABS
             else frozenset({"cartesia", "elevenlabs"})
         )
-        | (_ENGLISH_ONLY_TTS if code == "en" else frozenset()),
+        | _preset_tts(code),
         semantic_turn=code in _SEMANTIC_TURN,
     )
     for code in _NAMES
@@ -204,6 +232,11 @@ def by_language(table: dict[str, _T], language: str | None) -> _T:
 def elevenlabs_language(language: str) -> str:
     """Hail's language code as ElevenLabs models, voices and requests spell it."""
     return _ELEVENLABS_CODES.get(language, language)
+
+
+def xai_language(language: str | None) -> str:
+    """Hail's language code as xAI speech requests spell it."""
+    return _XAI_CODES[language or "en"]
 
 
 def default_stt_for(language: str | None) -> str:

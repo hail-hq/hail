@@ -41,47 +41,6 @@ TTS_PRESET_MODELS = {
     "assemblyai": "assemblyai-tts-1",
 }
 
-# Gemini's prebuilt voice IDs are distinct from the other providers' IDs.
-# https://ai.google.dev/gemini-api/docs/speech-generation#voices
-_GEMINI_PREBUILT_VOICES = frozenset(
-    (
-        "Zephyr",
-        "Puck",
-        "Charon",
-        "Kore",
-        "Fenrir",
-        "Leda",
-        "Orus",
-        "Aoede",
-        "Callirrhoe",
-        "Autonoe",
-        "Enceladus",
-        "Iapetus",
-        "Umbriel",
-        "Algieba",
-        "Despina",
-        "Erinome",
-        "Algenib",
-        "Rasalgethi",
-        "Laomedeia",
-        "Achernar",
-        "Alnilam",
-        "Schedar",
-        "Gacrux",
-        "Pulcherrima",
-        "Achird",
-        "Zubenelgenubi",
-        "Vindemiatrix",
-        "Sadachbia",
-        "Sadaltager",
-        "Sulafat",
-    )
-)
-
-
-def is_gemini_voice(voice_id: str | None) -> bool:
-    return voice_id == settings.gemini_voice_id or voice_id in _GEMINI_PREBUILT_VOICES
-
 
 def gemini_vertex_location() -> str:
     location = settings.google_cloud_location or "global"
@@ -97,24 +56,6 @@ def tts_preset(provider: str) -> tuple[str, str]:
         "xai": ("ara", settings.xai_api_key),
         "assemblyai": ("aai-audrey", settings.assemblyai_api_key),
     }[provider]
-
-
-def preset_voice_provider(voice_id: str | None) -> str | None:
-    """Name the preset provider whose voice this is, or None."""
-    if not voice_id:
-        return None
-    return next(
-        (
-            provider
-            for provider in TTS_PRESET_MODELS
-            if (
-                is_gemini_voice(voice_id)
-                if provider == "gemini"
-                else voice_id == tts_preset(provider)[0]
-            )
-        ),
-        None,
-    )
 
 
 def tts_preset_configured(provider: str) -> bool:

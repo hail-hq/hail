@@ -19,7 +19,7 @@ verified probe):
 2. Add a ``_probe_for`` branch here. Prefer a ``capability`` probe (call the
    real endpoint with deliberately-bad params so nothing runs/bills); fall
    back to an ``auth`` probe (a cheap authenticated GET) if the provider has
-   no safe capability probe. The English presets synthesize one fixed word for Test key.
+   no safe capability probe. The presets synthesize one fixed word for Test key.
 3. EMPIRICALLY VERIFY the ordering before trusting a capability probe: a bad
    key must return 401/403, and a valid key with bad params must return a
    post-auth 4xx (404/400/422). If auth is NOT checked before params, the
@@ -38,6 +38,7 @@ from hailhq.core.provider_config import TTS_PRESET_MODELS, provider_cipher, tts_
 from hailhq.core.url_guard import UnsafeUrlError, assert_public_https_url
 from hailhq.core.urls import join_url
 from hailhq.core.voice_catalog import (
+    is_preset_voice,
     preset_credentials_available,
     synthesize_preset,
     validate_voice_language,
@@ -178,12 +179,10 @@ async def validate_tts_voice_selection(
     saved_voice_id: str | None,
 ) -> None:
     if provider in TTS_PRESET_MODELS:
-        if params.get("voice_id") not in (
-            None,
-            "",
-            tts_preset(provider)[0],
-            saved_voice_id,
-        ):
+        voice = params.get("voice_id")
+        if voice in (None, "", saved_voice_id):
+            return
+        if not isinstance(voice, str) or not await is_preset_voice(provider, voice):
             raise ValueError("Choose a suggested voice or update Advanced.")
         return
 

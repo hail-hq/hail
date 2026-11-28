@@ -25,6 +25,7 @@ from hailhq.core.languages import (
     CARTESIA_MODEL_LANGUAGES,
     SUPPORTED_LANGUAGES,
     elevenlabs_language,
+    xai_language,
 )
 from hailhq.core.provider_config import (
     TTS_PRESET_MODELS,
@@ -37,11 +38,12 @@ log = logging.getLogger(__name__)
 HEADERS_VERSION = "2026-08-14"
 _cache: dict[tuple[str, str, str], tuple[float, dict]] = {}
 _catalogue_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
-_ENGLISH_PRESETS = (
-    ("gemini", None, ""),
-    ("xai", "Ara", "female"),
-    ("assemblyai", "Audrey", "female"),
-)
+# Each preset provider keeps one saved default voice (tts_preset). Every other
+# voice comes from the provider's own list, cached here. AssemblyAI has no list.
+_PRESET_LIST_TTL = 900.0
+_PRESET_LIST_RETRY_SECONDS = 60.0
+_preset_lists: dict[str, tuple[float, list[dict] | None]] = {}
+_preset_tasks: dict[str, asyncio.Task] = {}
 _GOOGLE_AUTH_TIMEOUT = 4.0
 # Reuse one credentials object (it refreshes its own token). After a failed
 # lookup, wait before asking again so picker loads do not each wait on it.
@@ -355,25 +357,21 @@ async def voice_catalogue(language: str, *, include_direct: bool = False) -> dic
             ),
             None,
         )
-    if include_direct and language == "en":
+    if include_direct:
         # Older consoles only accept the two original provider IDs.
         presets = [
-            {
-                "provider": provider,
-                "model": TTS_PRESET_MODELS[provider],
-                "id": tts_preset(provider)[0],
-                "name": name or settings.gemini_voice_id,
-                "gender": gender,
-                "language": language,
-                "description": "",
-                "accent": None,
-            }
-            for provider, name, gender in _ENGLISH_PRESETS
-            if await preset_credentials_available(provider)
+            choice
+            for provider in TTS_PRESET_MODELS
+            if (choice := await _preset_choice(provider, language))
         ]
-        if presets and presets[0]["provider"] == "gemini":
-            default = presets[0]
-        voices = [*presets, *voices]
+        # Only English calls inherit Gemini. Other languages keep their default,
+        # and consoles that pick the first voice keep picking the same one.
+        if language == "en":
+            if presets and presets[0]["provider"] == "gemini":
+                default = presets[0]
+            voices = [*presets, *voices]
+        else:
+            voices = [*voices, *presets]
     return {
         "voices": voices,
         "languages": language_options(),
@@ -381,6 +379,191 @@ async def voice_catalogue(language: str, *, include_direct: bool = False) -> dic
         "default_voice": (
             {"provider": default["provider"], "id": default["id"]} if default else None
         ),
+    }
+
+
+def _gemini_list_key() -> str:
+    # The list needs a Gemini API key. Calls on a Cloud project may not speak
+    # every listed voice, so those keep the saved default only.
+    return "" if settings.google_cloud_project else settings.google_api_key.strip()
+
+
+def _list_key(provider: str) -> str:
+    if provider == "gemini":
+        return _gemini_list_key()
+    return settings.xai_api_key.strip() if provider == "xai" else ""
+
+
+async def _fetch_preset_voices(provider: str, key: str) -> list[dict]:
+    """One provider's voices as {id, name, gender, locale}; locale None = any."""
+    async with httpx.AsyncClient(timeout=15) as client:
+        if provider == "xai":
+            # https://docs.x.ai/developers/rest-api-reference/inference/voice
+            response = await client.get(
+                "https://api.x.ai/v1/tts/voices",
+                headers={"Authorization": f"Bearer {key}"},
+            )
+            response.raise_for_status()
+            rows = response.json().get("voices")
+            if not isinstance(rows, list):
+                raise TypeError("Invalid voice list")
+            # Every xAI voice speaks every language xAI supports.
+            return [
+                {
+                    "id": row["voice_id"],
+                    "name": row.get("name") or row["voice_id"],
+                    "gender": "",
+                    "locale": None,
+                }
+                for row in rows
+                if isinstance(row, dict) and isinstance(row.get("voice_id"), str)
+            ]
+        # https://ai.google.dev/gemini-api/docs/speech-generation (GET voices)
+        voices, token, seen = [], None, set()
+        for _ in range(20):
+            params: dict[str, str | int] = {"page_size": 1000}
+            if token:
+                params["page_token"] = token
+            response = await client.get(
+                "https://generativelanguage.googleapis.com/v1beta/voices",
+                headers={"x-goog-api-key": key},
+                params=params,
+            )
+            response.raise_for_status()
+            body = response.json()
+            rows = body.get("voices")
+            if not isinstance(rows, list):
+                raise TypeError("Invalid voice list")
+            voices.extend(
+                {
+                    "id": row["id"],
+                    "name": row.get("display_name") or row["id"],
+                    "gender": row.get("gender") or "",
+                    "locale": row.get("language_code") or None,
+                }
+                for row in rows
+                if isinstance(row, dict) and isinstance(row.get("id"), str)
+            )
+            token = body.get("next_page_token")
+            if not token:
+                return voices
+            if token in seen:
+                raise ValueError("Voice list pagination did not advance")
+            seen.add(token)
+        raise ValueError("Voice list pagination exceeded its request budget")
+
+
+async def _refresh_preset_voices(provider: str, key: str) -> list[dict]:
+    try:
+        rows = await _fetch_preset_voices(provider, key)
+    except (httpx.HTTPError, ValueError, KeyError, TypeError):
+        log.warning("Voice list could not load for %s", provider)
+        _preset_lists[provider] = (time.monotonic(), None)
+        return []
+    _preset_lists[provider] = (time.monotonic(), rows)
+    return rows
+
+
+async def preset_voices(provider: str, *, timeout: float | None = 10.0) -> list[dict]:
+    """The provider's live voices; [] when it has no list or it is unavailable.
+
+    A failed load is not retried for a minute. A load that outlives ``timeout``
+    keeps running, so the next caller gets its result.
+    """
+    key = _list_key(provider)
+    if not key:
+        return []
+    cached = _preset_lists.get(provider)
+    now = time.monotonic()
+    if cached and cached[1] is not None and now - cached[0] < _PRESET_LIST_TTL:
+        return cached[1]
+    if cached and cached[1] is None and now - cached[0] < _PRESET_LIST_RETRY_SECONDS:
+        return []
+    loop = asyncio.get_running_loop()
+    task = _preset_tasks.get(provider)
+    if task is None or task.done() or task.get_loop() is not loop:
+        task = loop.create_task(_refresh_preset_voices(provider, key))
+        _preset_tasks[provider] = task
+    try:
+        return await asyncio.wait_for(asyncio.shield(task), timeout)
+    except TimeoutError:
+        return cached[1] if cached and cached[1] is not None else []
+
+
+def reset_preset_voice_cache() -> None:
+    """Forget loaded voice lists (tests, and a key change in one process)."""
+    _preset_lists.clear()
+    _preset_tasks.clear()
+
+
+def _same_voice(provider: str, a: str, b: str) -> bool:
+    # Gemini voice names match in any case ("Charon" and "charon").
+    return a.casefold() == b.casefold() if provider == "gemini" else a == b
+
+
+async def preset_voice_owner(voice_id: str | None, *, timeout: float = 1.0):
+    """The preset provider that has ``voice_id``, or None when none is known."""
+    if not voice_id:
+        return None
+    for provider in TTS_PRESET_MODELS:
+        if _same_voice(provider, voice_id, tts_preset(provider)[0]):
+            return provider
+    listed = await asyncio.gather(
+        *(preset_voices(p, timeout=timeout) for p in TTS_PRESET_MODELS)
+    )
+    for provider, rows in zip(TTS_PRESET_MODELS, listed, strict=True):
+        if any(_same_voice(provider, voice_id, row["id"]) for row in rows):
+            return provider
+    return None
+
+
+async def is_preset_voice(provider: str, voice_id: str) -> bool:
+    if _same_voice(provider, voice_id, tts_preset(provider)[0]):
+        return True
+    rows = await preset_voices(provider)
+    return any(_same_voice(provider, voice_id, row["id"]) for row in rows)
+
+
+def _voice_label(voice_id: str) -> str:
+    return voice_id.removeprefix("aai-").replace("-", " ").title()
+
+
+async def _preset_choice(provider: str, language: str) -> dict | None:
+    if provider not in SUPPORTED_LANGUAGES[language].tts:
+        return None
+    if not await preset_credentials_available(provider):
+        return None
+    default = tts_preset(provider)[0]
+    rows = await preset_voices(provider)
+    # A voice recorded in the call's language, its main region first.
+    native = sorted(
+        (
+            row
+            for row in rows
+            if language != "en"
+            and (row["locale"] or "").split("-")[0].casefold() == language
+        ),
+        key=lambda row: (
+            row["locale"].casefold() != f"{language}-{language}",
+            row["id"],
+        ),
+    )
+    saved = next(
+        (row for row in rows if _same_voice(provider, row["id"], default)), None
+    )
+    if native:
+        voice = native[0]
+    else:
+        voice = {**(saved or {}), "id": default}
+    return {
+        "provider": provider,
+        "model": TTS_PRESET_MODELS[provider],
+        "id": voice["id"],
+        "name": voice.get("name") or _voice_label(default),
+        "gender": voice.get("gender") or "",
+        "language": language,
+        "description": "",
+        "accent": None,
     }
 
 
@@ -434,6 +617,7 @@ async def synthesize_preset(
     voice: str,
     text: str,
     *,
+    language: str = "en",
     api_key: str | None = None,
 ) -> bytes:
     """Fetch PCM for short signed previews and the explicit Test key action."""
@@ -498,7 +682,7 @@ async def synthesize_preset(
             json={
                 "text": text,
                 "voice_id": voice,
-                "language": "en",
+                "language": xai_language(language),
                 "output_format": {"codec": "pcm", "sample_rate": SAMPLE_RATE},
             },
         )
@@ -510,7 +694,7 @@ async def synthesize_preset(
                 "input": text,
                 "voice": voice,
                 "model": TTS_PRESET_MODELS[provider],
-                "language": "en",
+                "language": language,
                 "response_format": "pcm",
                 "sample_rate": SAMPLE_RATE,
             },

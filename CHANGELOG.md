@@ -6,7 +6,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ### Added
 
-- Pick and preview new English voices from Gemini, xAI, and AssemblyAI.
+- Pick and preview Gemini, xAI, and AssemblyAI voices for your calls, in more languages.
 - Connect your own Gemini, xAI, or AssemblyAI API keys for speech.
 - Knowledge files can go from a browser straight to storage (`/v1/knowledge/uploads`, for Uppy). Self-host: run `terragrunt apply` for the bucket's CORS rules.
 

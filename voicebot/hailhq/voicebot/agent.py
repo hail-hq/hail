@@ -96,6 +96,7 @@ from hailhq.core.telemetry_identity import (
     tag_context,
 )
 from hailhq.core.url_guard import assert_public_https_url
+from hailhq.core.voice_catalog import preset_voice_owner
 from hailhq.core.webhook_fanout import caller_hidden_data, fanout_call_event
 from hailhq.voicebot import text_watch
 from hailhq.voicebot.amd import (
@@ -2680,6 +2681,13 @@ async def _run_call(
             org_cfgs = await resolve_org_configs(org_id, skip_llm=llm_cfg is not None)
             org_tts = org_cfgs.get("tts")
             language = language or (org_tts.params.get("language") if org_tts else None)
+            # Which provider owns the chosen voice, from the cached voice lists.
+            # A failed lookup leaves the voice unscoped; its backups still speak.
+            try:
+                voice_provider = await preset_voice_owner(voice_id_override)
+            except Exception:
+                logger.warning("Voice owner lookup failed", exc_info=True)
+                voice_provider = None
             session = build_session(
                 llm_cfg,
                 vad,
@@ -2687,6 +2695,7 @@ async def _run_call(
                 voice_id_override=voice_id_override,
                 language=language,
                 voice_id_explicit=metadata.get("voice_id_explicit") is True,
+                voice_provider=voice_provider,
             )
         except ProviderKeyError:
             raise

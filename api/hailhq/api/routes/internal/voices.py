@@ -225,7 +225,9 @@ async def _synthesize(body: PreviewIn, model: str, text: str) -> bytes:
             response.raise_for_status()
             return response.content
         if body.provider in TTS_PRESET_MODELS:
-            pcm = await synthesize_preset(client, body.provider, body.voice_id, text)
+            pcm = await synthesize_preset(
+                client, body.provider, body.voice_id, text, language=body.language
+            )
             if not pcm:
                 raise ValueError("No sample audio was returned.")
         else:

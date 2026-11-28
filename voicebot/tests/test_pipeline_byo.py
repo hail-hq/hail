@@ -40,6 +40,15 @@ def house_keys(monkeypatch):
     monkeypatch.setattr(settings, "anthropic_backup_model", "claude-haiku-5-5")
 
 
+# The provider the call worker's voice-list lookup finds for each preset voice.
+_OWNERS = {
+    "Charon": "gemini",
+    "Kore": "gemini",
+    "ara": "xai",
+    "aai-audrey": "assemblyai",
+}
+
+
 @dataclass
 class Captured:
     kwargs: dict
@@ -346,7 +355,9 @@ def test_gemini_default_only_applies_to_inherited_english(
     workspace = ResolvedLayer("gemini", "workspace-key", {}, False)
     build_tts(workspace, language="en")
     assert captured_plugins["gemini"][-1].kwargs["voice_name"] == gemini_voice
-    build_tts(workspace, voice_id_override="Charon", language="en")
+    build_tts(
+        workspace, voice_id_override="Charon", language="en", voice_provider="gemini"
+    )
     assert captured_plugins["gemini"][-1].kwargs["voice_name"] == "Charon"
     build_tts(voice_id_override="legacy-voice", language="en")
     assert [c.kwargs["voice"] for c in captured_plugins["cartesia"][-2:]] == [
@@ -364,7 +375,10 @@ def test_explicit_charon_works_when_gemini_is_the_only_house_provider(
     monkeypatch.setattr(settings, "gemini_voice_id", "Kore")
     monkeypatch.setattr(settings, "cartesia_api_key", "")
     monkeypatch.setattr(settings, "eleven_api_key", "")
-    assert build_tts(voice_id_override="Charon", language="en").label == "gemini"
+    chain = build_tts(
+        voice_id_override="Charon", language="en", voice_provider="gemini"
+    )
+    assert chain.label == "gemini"
     assert captured_plugins["gemini"][-1].kwargs["voice_name"] == "Charon"
 
 
@@ -381,7 +395,7 @@ def test_explicit_preset_voice_leads_the_house_chain(
     monkeypatch.setattr(settings, "eleven_api_key", "house-eleven")
     monkeypatch.setattr(settings, "elevenlabs_voice_id", "eleven-house-voice")
 
-    chain = build_tts(voice_id_override=voice, language="en")
+    chain = build_tts(voice_id_override=voice, language="en", voice_provider=provider)
 
     assert [item.label for item in chain._tts_instances] == [
         provider,
@@ -402,7 +416,10 @@ def test_explicit_preset_voice_without_its_key_uses_house_defaults(
     constructor = Mock()
     monkeypatch.setattr(pipeline.assemblyai_plugin, "TTS", constructor)
 
-    assert build_tts(voice_id_override="aai-audrey", language="en").label == "cartesia"
+    chain = build_tts(
+        voice_id_override="aai-audrey", language="en", voice_provider="assemblyai"
+    )
+    assert chain.label == "cartesia"
     constructor.assert_not_called()
     assert captured_plugins["cartesia"][0].kwargs["voice"] == "house-voice"
 
@@ -431,8 +448,10 @@ def test_preset_only_host_speaks_any_english_call(
 
     monkeypatch.setattr(pipeline.assemblyai_plugin, "TTS", AssemblyAI)
 
-    assert build_tts(voice_id_override=voice, language="en").label == provider
-    own_voice = pipeline.preset_voice_provider(voice) == provider
+    owner = _OWNERS.get(voice)
+    chain = build_tts(voice_id_override=voice, language="en", voice_provider=owner)
+    assert chain.label == provider
+    own_voice = owner == provider
     spoken = captured_plugins[provider][-1].kwargs[field]
     assert spoken == (voice if own_voice else default_voice)
 
@@ -447,8 +466,8 @@ def test_preset_only_host_names_the_language_it_cannot_speak(
     monkeypatch.setattr(settings, "cartesia_api_key", "")
     monkeypatch.setattr(settings, setting, value)
 
-    with pytest.raises(ProviderKeyError, match="cannot speak language 'fr'"):
-        build_tts(language="fr")
+    with pytest.raises(ProviderKeyError, match="cannot speak language 'uk'"):
+        build_tts(language="uk")
 
 
 def test_gemini_only_host_names_the_language_it_cannot_speak(monkeypatch):
@@ -456,8 +475,8 @@ def test_gemini_only_host_names_the_language_it_cannot_speak(monkeypatch):
     monkeypatch.setattr(settings, "cartesia_api_key", "")
     monkeypatch.setattr(settings, "eleven_api_key", "")
 
-    with pytest.raises(ProviderKeyError, match="cannot speak language 'fr'"):
-        build_tts(language="fr")
+    with pytest.raises(ProviderKeyError, match="cannot speak language 'uk'"):
+        build_tts(language="uk")
 
 
 def test_preset_only_host_that_cannot_build_its_speech_says_so(monkeypatch):
@@ -547,7 +566,13 @@ def test_workspace_gemini_language_fallback_keeps_the_chosen_voice(
     monkeypatch.setattr(settings, "eleven_api_key", "house-eleven")
     monkeypatch.setattr(settings, "elevenlabs_voice_id", "eleven-house-voice")
 
-    chain = build_tts(org, voice_id, "fr", voice_id_explicit=True)
+    chain = build_tts(
+        org,
+        voice_id,
+        "uk",
+        voice_id_explicit=True,
+        voice_provider=_OWNERS.get(voice_id),
+    )
 
     labels = ["cartesia", "elevenlabs"] * (2 if spoken else 1)
     assert [item.label for item in chain._tts_instances] == labels
@@ -569,15 +594,15 @@ def test_fallback_honors_a_voice_with_a_known_provider(
         settings,
         "voice_shortlist_preferences",
         {
-            "fr": [
+            "uk": [
                 VoicePreference(
-                    provider=provider, voice_id=voice, reason="French calls"
+                    provider=provider, voice_id=voice, reason="Ukrainian calls"
                 )
             ]
         },
     )
 
-    chain = build_tts(org, voice, "fr", voice_id_explicit=True)
+    chain = build_tts(org, voice, "uk", voice_id_explicit=True)
     field = "voice" if provider == "cartesia" else "voice_id"
     default = "house-voice" if provider == "cartesia" else "eleven-house-voice"
 
@@ -659,7 +684,9 @@ def test_missing_house_xai_key_keeps_the_chosen_voice(
     monkeypatch.setattr(settings, "xai_api_key", "")
     org = ResolvedLayer("xai", None, {}, False)
 
-    build_tts(org, voice, "en", voice_id_explicit=True)
+    build_tts(
+        org, voice, "en", voice_id_explicit=True, voice_provider=_OWNERS.get(voice)
+    )
 
     assert captured_plugins["cartesia"][0].kwargs["voice"] == spoken
 
@@ -700,7 +727,7 @@ def test_workspace_row_gets_every_house_voice_as_backup(
 def test_two_house_presets_back_each_other_up(xai_only, monkeypatch, captured_plugins):
     monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
 
-    chain = build_tts(voice_id_override="ara", language="en")
+    chain = build_tts(voice_id_override="ara", language="en", voice_provider="xai")
 
     assert [item.label for item in chain._tts_instances] == ["xai", "gemini"]
     assert captured_plugins["xai"][0].kwargs["voice"] == "ara"
@@ -725,3 +752,45 @@ def test_unknown_voice_keeps_the_default_voice_as_last_backup(captured_plugins):
         "voice-from-another-provider",
         "house-voice",
     ]
+
+
+def test_inherited_non_english_call_keeps_its_default_voice(
+    monkeypatch, captured_plugins
+):
+    monkeypatch.setattr(settings, "google_cloud_project", "hail-speech")
+
+    chain = build_tts(language="fr")
+
+    assert [item.label for item in chain._tts_instances] == ["cartesia", "gemini"]
+
+
+@pytest.mark.parametrize(
+    ("provider", "setting", "language", "sent"),
+    [
+        ("xai", "xai_api_key", "es", "es-MX"),
+        ("xai", "xai_api_key", "fr", "fr"),
+        ("assemblyai", "assemblyai_api_key", "fr", "fr"),
+    ],
+)
+def test_preset_speech_gets_the_call_language(
+    monkeypatch, provider, setting, language, sent
+):
+    constructor = Mock()
+    monkeypatch.setattr(
+        import_module(f"livekit.plugins.{provider}"), "TTS", constructor
+    )
+    org = ResolvedLayer(provider, "workspace-key", {}, False)
+
+    build_tts(org, language=language)
+
+    assert constructor.call_args.kwargs["language"] == sent
+
+
+def test_workspace_preset_does_not_speak_another_providers_voice(monkeypatch):
+    constructor = Mock()
+    monkeypatch.setattr(import_module("livekit.plugins.xai"), "TTS", constructor)
+    org = ResolvedLayer("xai", "workspace-key", {"voice_id": "rex"}, False)
+
+    build_tts(org, "Charon", "en", voice_id_explicit=True, voice_provider="gemini")
+
+    assert constructor.call_args.kwargs["voice"] == "rex"

@@ -74,14 +74,13 @@ from hailhq.core.languages import (
     resolve_stt_provider,
     tts_providers_for,
     turn_mode_for,
+    xai_language,
 )
 from hailhq.core.provider_config import (
     TTS_PRESET_MODELS,
     configured_house_voice_provider,
     gemini_vertex_location,
-    is_gemini_voice,
     load_org_provider_configs,
-    preset_voice_provider,
     provider_cipher,
     tts_preset,
     tts_preset_configured,
@@ -565,11 +564,16 @@ def _house_tts(
     skip_preset: str | None = None,
     gemini_last: bool = False,
     override_provider: TTSProvider | None = None,
+    voice_provider: str | None = None,
 ) -> list[agents_tts.TTS]:
     allowed = tts_providers_for(language)
     legacy: dict[str, agents_tts.TTS] = {}
     # A preset voice ID means nothing to Cartesia or ElevenLabs.
-    preset = None if override_provider else preset_voice_provider(voice_id_override)
+    preset = (
+        voice_provider
+        if not override_provider and voice_provider in TTS_PRESET_MODELS
+        else None
+    )
     unscoped_voice = None if override_provider or preset else voice_id_override
     cartesia_voice = unscoped_voice or settings.cartesia_voice_id
     elevenlabs_voice = unscoped_voice or settings.elevenlabs_voice_id
@@ -612,7 +616,8 @@ def _house_tts(
     # Every configured preset joins the chain, so a call speaks while any
     # house voice can. An explicit preset voice leads; inherited voices
     # start with Gemini. The others are backups with their default voice.
-    lead = preset or (None if voice_id_override else "gemini")
+    inherited_english = not voice_id_override and language in (None, "en")
+    lead = preset or ("gemini" if inherited_english else None)
     for provider in TTS_PRESET_MODELS:
         if provider == skip_preset:
             continue
@@ -698,13 +703,13 @@ def _org_tts(
             return assemblyai_plugin.TTS(
                 api_key=key,
                 voice=voice,
-                language="en",
+                language=language or "en",
                 model=model,
             )
         return xai_plugin.TTS(
             api_key=key,
             voice=voice,
-            language="en",
+            language=xai_language(language),
             tokenizer=tokenize.basic.WordTokenizer(
                 ignore_punctuation=False, retain_format=True
             ),
@@ -718,6 +723,7 @@ def build_tts(
     language: str | None = None,
     *,
     voice_id_explicit: bool = False,
+    voice_provider: str | None = None,
 ) -> agents_tts.TTS:
     """Construct the TTS for one call.
 
@@ -770,17 +776,21 @@ def build_tts(
         fallback_voice = None if preset_provider else voice_id_override
         try:
             primary_voice = voice_id_override
-            if preset_provider and not voice_id_explicit:
-                preset_voice, _ = tts_preset(org.provider)
-                saved_gemini_voice = org.provider == "gemini" and is_gemini_voice(
-                    primary_voice
-                )
-                if not saved_gemini_voice and primary_voice not in (
-                    preset_voice,
-                    org.params.get("voice_id"),
-                ):
-                    # A saved, unscoped agent voice may belong to an old provider.
-                    primary_voice = None
+            foreign_preset = (
+                voice_provider in TTS_PRESET_MODELS and voice_provider != org.provider
+            )
+            keeps_row_voice = preset_provider and primary_voice in (
+                tts_preset(org.provider)[0],
+                org.params.get("voice_id"),
+            )
+            if (
+                preset_provider
+                and (foreign_preset or not voice_id_explicit)
+                and voice_provider != org.provider
+                and not keeps_row_voice
+            ):
+                # The voice belongs to another provider: use the row's own.
+                primary_voice = None
             byo = _org_tts(org, primary_voice, language)
         except (GoogleAuthError, ValueError, ProviderKeyError):
             # A row without its own key runs on Hail's credentials, so it may
@@ -793,7 +803,7 @@ def build_tts(
             )
             # Not BYO: keep the chosen voice, as a call with no row would.
             house_voice = voice_id_override if house_backed else fallback_voice
-            return build_tts(None, house_voice, language)
+            return build_tts(None, house_voice, language, voice_provider=voice_provider)
         if org.fallback_enabled:
             # A row on Hail's key and default voice is that house voice already.
             same_house_preset = (
@@ -812,12 +822,16 @@ def build_tts(
                 language,
                 skip_preset=org.provider if same_house_preset else None,
                 gemini_last=org.provider == "gemini" or bool(explicit_legacy_voice),
+                voice_provider=None if preset_provider else voice_provider,
             )
             if house:
                 return agents_tts.FallbackAdapter([byo, *house])
         return byo
     instances = _house_tts(
-        voice_id_override, language, override_provider=override_provider
+        voice_id_override,
+        language,
+        override_provider=override_provider,
+        voice_provider=voice_provider,
     )
     if not instances:
         # Distinguish between no keys configured vs. language filtering all keys out.
@@ -1008,6 +1022,7 @@ def build_session(
     language: str | None = None,
     *,
     voice_id_explicit: bool = False,
+    voice_provider: str | None = None,
 ) -> AgentSession:
     """Build the :class:`AgentSession` for one job.
 
@@ -1100,6 +1115,7 @@ def build_session(
             voice_id_override,
             language,
             voice_id_explicit=voice_id_explicit,
+            voice_provider=voice_provider,
         ),
         llm=build_llm(llm_cfg, org_cfgs.get("llm"), retry_on_chunk_sent=True),
         turn_handling=TurnHandlingOptions(

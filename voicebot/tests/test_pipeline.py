@@ -754,7 +754,8 @@ def test_startup_capability_warnings_count_any_house_preset_for_english(
     [warning] = startup_capability_warnings()
     listed = {code.strip() for code in warning.split(": ", 1)[1].split(", ")}
     assert "en" not in listed
-    assert "fr" in listed
+    assert "fr" not in listed
+    assert "uk" in listed
 
 
 def test_startup_capability_warnings_speechmatics_empty_lists_22_languages(
