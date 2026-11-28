@@ -319,7 +319,7 @@ async def create_sms(
             ),
         )
 
-    await require_funds(db, principal, idem)
+    await require_funds(db, principal, idem, "text", to=body.to)
 
     # The dedicated-number requirement is conditional on the destination
     # corridor (Task 5). For alphanumeric-eligible corridors with no explicit

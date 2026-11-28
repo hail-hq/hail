@@ -13,6 +13,8 @@ from fastapi import status as http_status
 from hailhq.api.deps import Principal
 from hailhq.api.idempotency import IdempotencyContext, cache_failure
 from hailhq.core.billing import has_funds
+from hailhq.core.handover import country_of
+from hailhq.core.plans import PlanUse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = ["BILLING_URL", "FUNDS_RESPONSES", "require_funds"]
@@ -33,17 +35,25 @@ FUNDS_RESPONSES: dict[int | str, dict[str, Any]] = {
 
 
 async def require_funds(
-    db: AsyncSession, principal: Principal, idem: IdempotencyContext | None = None
+    db: AsyncSession,
+    principal: Principal,
+    idem: IdempotencyContext | None,
+    use: PlanUse,
+    *,
+    to: str | None = None,
 ) -> None:
     """Raise 402 when the org has no credits. Cloud-only: only shared-key auth
     (``auth_kind == "shared"`` ⇒ HAIL_API_KEY path) lands on the unbilled
     "Self-hosted" org and skips the gate. Both real API keys and console/website
     session JWTs are billed principals and get the balance check — note
     ``api_key_id`` is None on the JWT path too, so it must NOT be used here.
-    The 402 is cached under the idempotency key when one was supplied."""
+    The 402 is cached under the idempotency key when one was supplied.
+    ``use`` (and a text's destination ``to``) let the workspace's plan count
+    (hailhq.core.plans)."""
     if principal.auth_kind == "shared":
         return
-    if not await has_funds(db, principal.organization_id):
+    country = country_of(to) if to else None
+    if not await has_funds(db, principal.organization_id, use, country=country):
         raise await cache_failure(
             idem,
             HTTPException(

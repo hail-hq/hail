@@ -12,7 +12,7 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Annotated
+from typing import Annotated, NoReturn
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
@@ -40,14 +40,17 @@ from hailhq.api.ratelimit import (
 )
 from hailhq.api.route_prefixes import request_mount_prefix
 from hailhq.core.agent_tools.registry import all_tools
-from hailhq.core.billing import CALL_META_BILLED
+from hailhq.core.billing import CALL_META_BILLED, get_balance_cents
 from hailhq.core.call_allowance import (
     available_cents,
     cap_seconds,
     hold,
+    hold_parts,
     hold_until,
-    minutes_affordable,
     paid_minutes,
+    plan_minutes_left,
+    plan_split,
+    shorter_limit,
 )
 from hailhq.core.call_analysis import call_transcript
 from hailhq.core.call_end_reasons import CallEndReason
@@ -186,9 +189,35 @@ _NO_FUNDS_FOR_DESTINATION = (
 )
 
 
-def _shorter_limit(a: int, b: int) -> int:
-    """The shorter of two call limits, where 0 means no limit."""
-    return min(a, b) if a > 0 and b > 0 else max(a, b)
+async def _refuse_unfunded(
+    db: AsyncSession,
+    principal: Principal,
+    idem: IdempotencyContext | None,
+    legs: list[dict[str, str]],
+) -> NoReturn:
+    """402: the balance does not pay for one minute of the call."""
+    await db.rollback()
+    # Not cached under the idempotency key: a retry after a top-up must
+    # place the call.
+    if idem is not None:
+        await idem.release()
+    # Logged like the compliance gate's denials, so support can tell why
+    # the call was refused. Written in its own session.
+    actor_user_id, actor_kind = actor_of(principal)
+    await write_audit_log(
+        organization_id=principal.organization_id,
+        api_key_id=principal.api_key_id,
+        action="call.blocked",
+        resource_type="call",
+        resource_id=None,
+        payload={"to": legs[0]["number_e164"], "reason": "insufficient_funds"},
+        actor_user_id=actor_user_id,
+        actor_kind=actor_kind,
+    )
+    raise HTTPException(
+        status_code=http_status.HTTP_402_PAYMENT_REQUIRED,
+        detail=_NO_FUNDS_FOR_DESTINATION,
+    )
 
 
 async def _cap_to_balance(
@@ -199,63 +228,46 @@ async def _cap_to_balance(
     max_duration_seconds: int,
     *,
     legs: list[dict[str, str]],
-) -> tuple[int, tuple[Decimal, datetime, Decimal, Decimal] | None]:
-    """Shorten the call's time limit to what the balance pays for, and the
-    hold to set aside for it (cents, until, the price per minute and per
-    call; see hailhq.core.call_allowance).
+) -> tuple[int, tuple[Decimal, datetime, Decimal, Decimal, Decimal] | None]:
+    """Shorten the call's time limit to what the plan and the balance pay
+    for, and the hold to set aside for it (cents, until, the price per
+    minute and per call, plan minutes; see hailhq.core.call_allowance).
     Takes the org lock, held until the call row is committed. 402 when the
     balance does not pay for one minute. When the price is unknown (the
-    quote failed), the limit is at most the default and nothing is held."""
+    quote failed), the limit is at most the default and nothing is held, or
+    402 when the balance is 0 or below: plan minutes cannot be set aside
+    without a price."""
     org = principal.organization_id
     quote = await quote_call_price(
         str(org), legs, bool(call_metadata.get("recording_enabled"))
     )
     if quote is None:
+        if await get_balance_cents(db, org) <= 0:
+            await _refuse_unfunded(db, principal, idem, legs)
         logger.warning("call price unknown for org %s; default limit", org)
         # A limit of 0 means none (HAIL_VOICE_MAX_DURATION_SECONDS=0).
         return (
-            _shorter_limit(
+            shorter_limit(
                 max_duration_seconds, settings.hail_voice_max_duration_seconds
             ),
             None,
         )
-    per_minute, per_call = quote
+    per_minute, per_call = quote.cents_per_minute, quote.cents_per_call
     await org_lock(db, org)
     now = datetime.now(timezone.utc)
-    minutes = minutes_affordable(
-        await available_cents(db, org, now=now), per_minute, per_call
+    on_plan_left = (
+        await plan_minutes_left(db, org, now=now)
+        if quote.plan_minutes_per_minute > 0
+        else Decimal(0)
+    )
+    minutes, on_plan = plan_split(
+        await available_cents(db, org, now=now), on_plan_left, quote, per_call
     )
     if minutes < 1:
-        await db.rollback()
-        # Not cached under the idempotency key: a retry after a top-up must
-        # place the call.
-        if idem is not None:
-            await idem.release()
-        # Logged like the compliance gate's denials, so support can tell
-        # why the call was refused. Written in its own session.
-        actor_user_id, actor_kind = actor_of(principal)
-        await write_audit_log(
-            organization_id=org,
-            api_key_id=principal.api_key_id,
-            action="call.blocked",
-            resource_type="call",
-            resource_id=None,
-            payload={"to": legs[0]["number_e164"], "reason": "insufficient_funds"},
-            actor_user_id=actor_user_id,
-            actor_kind=actor_kind,
-        )
-        raise HTTPException(
-            status_code=http_status.HTTP_402_PAYMENT_REQUIRED,
-            detail=_NO_FUNDS_FOR_DESTINATION,
-        )
-    seconds = _shorter_limit(max_duration_seconds, cap_seconds(minutes))
-    billed = paid_minutes(seconds)
-    return seconds, (
-        per_minute * billed + per_call,
-        hold_until(now, seconds),
-        per_minute,
-        per_call,
-    )
+        await _refuse_unfunded(db, principal, idem, legs)
+    seconds = shorter_limit(max_duration_seconds, cap_seconds(minutes))
+    cents, plan = hold_parts(quote, per_call, paid_minutes(seconds), on_plan)
+    return seconds, (cents, hold_until(now, seconds), per_minute, per_call, plan)
 
 
 async def _cleanup_partial_livekit(
@@ -513,7 +525,7 @@ async def create_call(
             ),
         )
 
-    await require_funds(db, principal, idem)
+    await require_funds(db, principal, idem, "call")
     await require_agent_send_allowed(db, principal, "voice", [body.to], idem)
 
     # 1. Resolve the from-number: explicit `from` → org-owned active → shared
@@ -629,7 +641,7 @@ async def create_call(
     if pool_number is not None:
         pool_number.reserved_call_id = call.id
     if balance_hold is not None:
-        cents, until, per_minute, per_call = balance_hold
+        cents, until, per_minute, per_call, plan = balance_hold
         await hold(
             db,
             call.id,
@@ -637,6 +649,7 @@ async def create_call(
             until,
             cents_per_minute=per_minute,
             cents_per_call=per_call,
+            plan_minutes=plan,
         )
 
     await db.commit()

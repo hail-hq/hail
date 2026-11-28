@@ -9,6 +9,10 @@ Self-host behavior: the seeded "Self-hosted" organization carries a large
 initial credit from migration 0001. Master-key (HAIL_API_KEY) auth scopes to
 that org, so ``has_funds`` always returns True for it without any rater
 running.
+
+A workspace's plan also counts (hailhq.core.plans): with ``use`` given,
+``has_funds`` passes while the plan month still includes that use, even
+when the balance is empty.
 """
 
 from __future__ import annotations
@@ -20,6 +24,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from hailhq.core.models import AccountCredit
+from hailhq.core.plans import PlanUse, plan_covers
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -49,6 +54,7 @@ __all__ = [
     "INSUFFICIENT_FUNDS",
     "FundsCheck",
     "get_balance_cents",
+    "has_email_funds",
     "has_funds",
     "monthly_fee_ref",
 ]
@@ -85,6 +91,24 @@ async def get_balance_cents(db: AsyncSession, organization_id: uuid.UUID) -> int
     return int(await get_ledger_cents(db, organization_id))
 
 
-async def has_funds(db: AsyncSession, organization_id: uuid.UUID) -> bool:
-    """True iff the org has a positive balance. Single source of truth for the gate."""
-    return await get_balance_cents(db, organization_id) > 0
+async def has_funds(
+    db: AsyncSession,
+    organization_id: uuid.UUID,
+    use: PlanUse | None = None,
+    *,
+    country: str | None = None,
+) -> bool:
+    """True when the org has a positive balance, or when ``use`` is given and
+    its plan month still includes it (call minutes; texts to ``country``,
+    the destination's ISO code; emails). ``use=None`` reads the balance
+    only. Single source of truth for the gate."""
+    if await get_balance_cents(db, organization_id) > 0:
+        return True
+    return use is not None and await plan_covers(
+        db, organization_id, use, country=country
+    )
+
+
+async def has_email_funds(db: AsyncSession, organization_id: uuid.UUID) -> bool:
+    """``has_funds`` for an email, as a ``FundsCheck``."""
+    return await has_funds(db, organization_id, "email")

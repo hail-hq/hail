@@ -10,7 +10,7 @@ import aiohttp
 import pytest
 from hailhq.core import internal_webhook
 from hailhq.core.config import settings
-from hailhq.core.internal_webhook import fetch_organization_name
+from hailhq.core.internal_webhook import fetch_organization_name, quote_call_price
 
 
 class _FakeResponse:
@@ -237,7 +237,11 @@ async def test_quote_posts_signed_legs_and_reads_prices(monkeypatch, configured)
     )
     _install(monkeypatch, session)
     quote = await quote_call_price("org-1", [_LEG], True)
-    assert quote == (internal_webhook.Decimal("42.5"), internal_webhook.Decimal(0))
+    assert quote == internal_webhook.CallQuote(
+        internal_webhook.Decimal("42.5"), internal_webhook.Decimal(0)
+    )
+    # No plan fields: a plan pays nothing toward the cap.
+    assert quote.plan_minutes_per_minute == 0 and quote.plan_cents_per_minute == 0
     url, kwargs = session.calls[0]
     assert url == "https://hail.so/api/internal/voice-rates/quote"
     body = kwargs["data"]
@@ -284,3 +288,24 @@ async def test_quote_unconfigured_is_none(monkeypatch):
     monkeypatch.setattr(settings, "hail_base_url", "")
     assert quotes_enabled() is False
     assert await quote_call_price("org-1", [_LEG], False) is None
+
+
+@pytest.mark.parametrize(
+    ("extra", "share"),
+    [
+        ({"plan_minutes_per_minute": 2, "plan_cents_per_minute": 20}, (2, 20)),
+        # Out of range or half given: ignored, the quote itself still holds.
+        ({"plan_minutes_per_minute": 1, "plan_cents_per_minute": 99}, (0, 0)),
+        ({"plan_minutes_per_minute": -1, "plan_cents_per_minute": 5}, (0, 0)),
+        ({"plan_minutes_per_minute": 1}, (0, 0)),
+        ({"plan_minutes_per_minute": "x", "plan_cents_per_minute": 5}, (0, 0)),
+    ],
+)
+async def test_quote_reads_the_plan_share(monkeypatch, configured, extra, share):
+    session = _FakeSession(
+        _FakeResponse(payload={"cents_per_minute": 21, "cents_per_call": 0, **extra})
+    )
+    _install(monkeypatch, session)
+    quote = await quote_call_price("org-1", [_LEG], True)
+    assert quote is not None and quote.cents_per_minute == 21
+    assert (quote.plan_minutes_per_minute, quote.plan_cents_per_minute) == share

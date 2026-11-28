@@ -25,6 +25,7 @@ import asyncio
 import logging
 import re
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from math import ceil
 from typing import Annotated, Any, Literal
 from uuid import UUID
@@ -63,7 +64,7 @@ from hailhq.core.agent_tools.send_email import (
 )
 from hailhq.core.agent_tools.send_sms import MAX_BODY_CHARS as SMS_MAX_BODY_CHARS
 from hailhq.core.agent_tools.transfer_call import MAX_REASON_CHARS
-from hailhq.core.billing import CALL_META_BILLED, has_funds
+from hailhq.core.billing import CALL_META_BILLED, get_balance_cents, has_funds
 from hailhq.core.browser_voice import reserve_browser_preview
 from hailhq.core.call_allowance import (
     HANDOVER_MIN_SECONDS,
@@ -74,9 +75,11 @@ from hailhq.core.call_allowance import (
     forget_price,
     handover_dials,
     hold,
+    hold_parts,
     hold_until,
-    minutes_affordable,
     paid_minutes,
+    plan_minutes_left,
+    plan_split,
 )
 from hailhq.core.carrier_routing import PBX, voice_route
 from hailhq.core.compliance_gate import (
@@ -141,6 +144,7 @@ from hailhq.core.models import (
     PhoneNumber,
     Sms,
 )
+from hailhq.core.plans import PlanUse
 from hailhq.core.provider_config import load_org_provider_configs
 from hailhq.core.providers.email import EmailProvider
 from hailhq.core.providers.email.ses import SES_NOT_ACCEPTED_FAILURES
@@ -780,9 +784,13 @@ async def _send_email_to(
     return AgentSendResponse(ok=True, spoken=_SPOKEN_EMAIL_SENT)
 
 
-async def _shared_denial(db: AsyncSession, call: Call) -> tuple[str, str] | None:
+async def _shared_denial(
+    db: AsyncSession, call: Call, use: PlanUse, to: str | None = None
+) -> tuple[str, str] | None:
     """The funds check shared by the send routes. Each send is billed like
     any text or email; phone-call emails also have ``MAX_CALL_EMAILS``.
+    ``use`` and the text's destination ``to`` let the plan count
+    (hailhq.core.plans).
 
     Returns ``(spoken, audit_reason)`` on denial or None when the send may
     proceed. The audit reason distinguishes which gate fired; the spoken
@@ -791,7 +799,9 @@ async def _shared_denial(db: AsyncSession, call: Call) -> tuple[str, str] | None
     if (
         call.metadata_.get(CALL_META_BILLED)
         or (call.transport == "browser" and not call.metadata_.get("browser_trial"))
-    ) and not await has_funds(db, call.organization_id):
+    ) and not await has_funds(
+        db, call.organization_id, use, country=country_of(to) if to else None
+    ):
         return _SPOKEN_NOT_ALLOWED, "insufficient_funds"
     return None
 
@@ -844,7 +854,7 @@ async def agent_send_sms(
             spoken="Enter your mobile number and agree to receive test texts before starting a new conversation.",
         )
 
-    denial = await _shared_denial(db, call)
+    denial = await _shared_denial(db, call, "text", counterpart)
     if denial is not None:
         spoken, reason = denial
         return await _deny(
@@ -1113,7 +1123,7 @@ async def agent_reply_sms(
 
     if await replies_in_thread(db, inbound) >= MAX_REPLIES_PER_THREAD:
         return AgentReplySmsResponse(ok=False, state="skipped", reason=THREAD_CAP_SKIP)
-    if not await has_funds(db, org):
+    if not await has_funds(db, org, "text", country=country_of(inbound.from_e164)):
         return AgentReplySmsResponse(
             ok=False, state="skipped", reason=INSUFFICIENT_FUNDS_SKIP
         )
@@ -1707,7 +1717,7 @@ async def agent_send_email(
     if call.status != "in_progress":
         return AgentSendResponse(ok=False, spoken=_SPOKEN_CALL_UNAVAILABLE)
 
-    denial = await _shared_denial(db, call)
+    denial = await _shared_denial(db, call, "email")
     if denial is not None:
         spoken, reason = denial
         return await _deny(
@@ -2104,7 +2114,7 @@ async def agent_handover(
     if await has_answered_handover(db, call.id):
         return AgentHandoverResponse(ok=False, spoken=_SPOKEN_HANDOVER_DONE)
     if call.metadata_.get(CALL_META_BILLED) and not await has_funds(
-        db, call.organization_id
+        db, call.organization_id, "call"
     ):
         return await _deny_handover(call, body, "insufficient_funds")
     # The Hail number row: outbound dials from it, inbound rang it.
@@ -2183,7 +2193,8 @@ async def _handover_cap(
     as both lines plus the agent. The hold never shrinks: if nobody answers,
     the call runs on under its own limit. When the price is unknown, None:
     the agent's own handover limit applies, nothing more is held, and the
-    call's full hold counts after it ends."""
+    call's full hold counts after it ends; or 0 when the balance is 0 or
+    below, since plan minutes cannot be set aside without a price."""
     caller = call.from_e164 if call.direction == "inbound" else hail_number
     main = {
         "direction": call.direction,
@@ -2212,6 +2223,9 @@ async def _handover_cap(
         # check must not cut off callers who have the credit. The second
         # line's price is unknown, so the call's full hold counts after it
         # ends.
+        if await get_balance_cents(db, call.organization_id) <= 0:
+            logger.warning("handover price unknown for call %s; no credits", call.id)
+            return 0
         logger.warning("handover price unknown for call %s; agent limit", call.id)
         # Under the lock, like the priced path, so a handover racing this one
         # reads this dial.
@@ -2228,7 +2242,7 @@ async def _handover_cap(
         )
         await db.commit()
         return None
-    per_minute, per_call = both
+    per_minute, per_call = both.cents_per_minute, both.cents_per_call
     await org_lock(db, call.organization_id)
     # Read under the lock: each earlier approved dial is counted, even one
     # whose result the voicebot has not posted yet.
@@ -2240,16 +2254,32 @@ async def _handover_cap(
     # minute (it picked up and failed the pickup check) and its per-call fee.
     # Counted for every dial: Hail cannot tell which ones picked up, so it
     # holds more.
+    talked = used + HANDOVER_RING_MINUTES
+    # The workspace's plan pays first (hailhq.core.call_allowance): the time
+    # talked and the ring at the call's own plan share, then the handover.
+    plan_left = (
+        await plan_minutes_left(db, call.organization_id, exclude=call.id, now=now)
+        if both.plan_minutes_per_minute > 0 or alone.plan_minutes_per_minute > 0
+        else Decimal(0)
+    )
+    talked_on_plan = (
+        min(talked, int(plan_left // alone.plan_minutes_per_minute))
+        if alone.plan_minutes_per_minute > 0
+        else 0
+    )
+    plan_left -= alone.plan_minutes_per_minute * talked_on_plan
     spent = (
-        alone[0] * (used + HANDOVER_RING_MINUTES)
-        + (per_minute - alone[0] + per_call - alone[1]) * tries
+        alone.cents_per_minute * talked
+        - alone.plan_cents_per_minute * talked_on_plan
+        + (per_minute - alone.cents_per_minute + per_call - alone.cents_per_call)
+        * tries
         + per_call
     )
     available = await available_cents(
         db, call.organization_id, exclude=call.id, now=now
     )
     # spent goes in as the fee, so the check rounds the same sum hold() stores.
-    affordable = minutes_affordable(available, per_minute, spent)
+    affordable, on_plan = plan_split(available, plan_left, both, spent)
     # Both lines run from pickup; the limit starts after the pickup check.
     seconds = min(cap_seconds(affordable, HANDOVER_PICKUP_SECONDS), limit)
     if seconds < HANDOVER_MIN_SECONDS:
@@ -2257,16 +2287,18 @@ async def _handover_cap(
     if seconds > 0:
         # Hold only the minutes the handover can use.
         minutes = paid_minutes(seconds, HANDOVER_PICKUP_SECONDS)
+        cents, plan = hold_parts(both, spent, minutes, on_plan)
         await hold(
             db,
             call.id,
-            spent + per_minute * minutes,
+            cents,
             hold_until(
                 now, (HANDOVER_RING_MINUTES * 60) + HANDOVER_PICKUP_SECONDS + seconds
             ),
             cents_per_minute=per_minute,
             cents_per_call=per_call,
             dial=True,
+            plan_minutes=alone.plan_minutes_per_minute * talked_on_plan + plan,
         )
     await db.commit()
     return seconds
@@ -2398,7 +2430,7 @@ async def agent_handover_sms(
     # the trial number may send it.
     if cannot_text and not await _trial_may_send(db, org, to):
         return AgentHandoverSmsResponse(sms="skipped:number_cannot_text")
-    denial = await _shared_denial(db, call)
+    denial = await _shared_denial(db, call, "text", to)
     if denial is not None:
         return AgentHandoverSmsResponse(
             sms=await _notice_blocked(call, body, "sms", denial[1])
@@ -2513,7 +2545,7 @@ async def agent_handover_email(
         sd = await resolve_sender(db, org, None, allow_ambiguous=True)
     except HTTPException:
         return AgentHandoverEmailResponse(email="skipped:no_sender")
-    denial = await _shared_denial(db, call)
+    denial = await _shared_denial(db, call, "email")
     if denial is not None:
         return AgentHandoverEmailResponse(
             email=await _notice_blocked(call, body, "email", denial[1])

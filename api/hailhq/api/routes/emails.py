@@ -678,7 +678,7 @@ async def create_email(
             ),
         )
 
-    await require_funds(db, principal, idem)
+    await require_funds(db, principal, idem, "email")
     # Same normalized set the compliance gate above screened (to+cc+bcc,
     # deduped) — every recipient counts toward the agent caps, not just
     # the first `to` address (a cc/bcc fan-out would otherwise defeat them).

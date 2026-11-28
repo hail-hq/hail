@@ -4,6 +4,10 @@ Keep your phone number, your phone provider and your phone system (PBX).
 Your phone system sends the calls you choose to your Hail agent: every call,
 calls after hours, calls nobody picks up, or one option in your phone menu.
 
+Connecting your phone system comes with the Business and Enterprise plans;
+its calls use the plan's call hours. Self-hosted Hail has no plans, so every
+workspace can connect one.
+
 Using 3CX? Follow the [3CX setup guide](https://hail.so/blog/3cx-ai-receptionist),
 with screenshots for each step.
 

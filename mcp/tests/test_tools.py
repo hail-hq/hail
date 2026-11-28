@@ -2012,8 +2012,8 @@ async def test_acquire_number_retry_reuses_key_and_quote(client: HailClient) -> 
 
 
 _NO_FUNDS = (
-    "insufficient credits; setup and the first month cost $1.65; "
-    "top up at https://hail.so/console/billing"
+    "insufficient credits; add at least $1.65 (setup and the first month "
+    "cost $1.65 from credits); top up at https://hail.so/console/billing"
 )
 _PRICE_DIFFERS = (
     "price differs from your expected total: the quote is $1.65 "

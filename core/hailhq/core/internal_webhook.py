@@ -23,7 +23,7 @@ import json
 import logging
 import time
 from decimal import Decimal
-from typing import Any
+from typing import Any, NamedTuple
 
 import aiohttp
 from hailhq.core.config import settings
@@ -174,13 +174,53 @@ def quotes_enabled() -> bool:
     return bool(settings.hail_base_url and settings.hail_internal_secret)
 
 
+class CallQuote(NamedTuple):
+    """A call's price from hail-website's private rater.
+
+    ``plan_minutes_per_minute``: plan minutes one call minute uses (the sum
+    of its legs' group weights; 0 when a plan pays none of it).
+    ``plan_cents_per_minute``: the part of ``cents_per_minute`` those plan
+    minutes pay; the rest (recording, legs a plan never pays) is paid from
+    credits. Both 0 when the rater sends neither: the cap is the balance's
+    alone (hailhq.core.call_allowance)."""
+
+    cents_per_minute: Decimal
+    cents_per_call: Decimal
+    plan_minutes_per_minute: Decimal = Decimal(0)
+    plan_cents_per_minute: Decimal = Decimal(0)
+
+
+def _plan_share(payload: dict, per_minute: Decimal) -> tuple[Decimal, Decimal]:
+    """The quote's optional plan fields, or (0, 0) when absent or out of
+    range (a plan then pays nothing toward the cap)."""
+    try:
+        weight = Decimal(str(payload.get("plan_minutes_per_minute") or 0))
+        share = Decimal(str(payload.get("plan_cents_per_minute") or 0))
+    except Exception:
+        weight = share = Decimal(-1)
+    if (
+        not weight.is_finite()
+        or not share.is_finite()
+        or weight < 0
+        or share < 0
+        or share > per_minute
+        or (weight == 0) != (share == 0)
+    ):
+        if weight or share:
+            logger.warning(
+                "[internal_webhook] call quote plan share ignored: %s", payload
+            )
+        return Decimal(0), Decimal(0)
+    return weight, share
+
+
 async def quote_call_price(
     organization_id: str, legs: list[dict[str, str]], recording: bool
-) -> tuple[Decimal, Decimal] | None:
-    """What a call with these legs costs, from hail-website's private rater:
-    ``(cents per minute, cents per call)``. Each leg is ``{direction,
-    carrier, number_e164, caller_e164}``. ``None`` on any failure (unset
-    config, timeout, non-200, bad body). Never raises."""
+) -> CallQuote | None:
+    """What a call with these legs costs, from hail-website's private rater
+    (``CallQuote``). Each leg is ``{direction, carrier, number_e164,
+    caller_e164}``. ``None`` on any failure (unset config, timeout, non-200,
+    bad body). Never raises."""
     parts = _signed_body(
         {"organization_id": organization_id, "recording": recording, "legs": legs}
     )
@@ -207,7 +247,7 @@ async def quote_call_price(
     if not per_minute.is_finite() or per_minute <= 0 or per_call < 0:
         logger.warning("[internal_webhook] call quote out of range: %s", payload)
         return None
-    return per_minute, per_call
+    return CallQuote(per_minute, per_call, *_plan_share(payload, per_minute))
 
 
 def _fire(path: str, payload: dict[str, Any]) -> None:

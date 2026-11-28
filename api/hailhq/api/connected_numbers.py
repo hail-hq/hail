@@ -895,7 +895,7 @@ async def check_connected_number(
     if await _checks_today(db, org_id, e164, now) >= CHECKS_PER_DAY:
         raise await _refuse_check(db, "check_limit")
     # 3. A billed call to a destination Hail calls.
-    if not await has_funds(db, org_id):
+    if not await has_funds(db, org_id, "call"):
         raise await _refuse_check(db, "no_funds")
     try:
         sold = sells_in(number.country_code)

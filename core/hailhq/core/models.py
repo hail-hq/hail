@@ -207,13 +207,17 @@ class AccountCredit(Base):
     qty: Mapped[int | None] = mapped_column(Integer, nullable=True)
     ref: Mapped[str | None] = mapped_column(Text, nullable=True)
     source: Mapped[str] = mapped_column(Text, nullable=False)
+    # A ``kind = 'plan'`` row: what the plan paid for (plan minutes, texts,
+    # emails or numbers; negative gives units back). 0 cents: the balance
+    # does not move (hailhq.core.plans).
+    plan_units: Mapped[Decimal | None] = mapped_column(Numeric(14, 3), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         TS, server_default=text("now()"), nullable=False
     )
 
     __table_args__ = (
         CheckConstraint(
-            "kind IN ('credit','debit')",
+            "kind IN ('credit', 'debit', 'plan')",
             name="account_credits_kind_check",
         ),
         CheckConstraint(
@@ -222,8 +226,14 @@ class AccountCredit(Base):
         ),
         CheckConstraint(
             "(kind = 'credit' AND amount_cents > 0) OR "
-            "(kind = 'debit' AND amount_cents < 0)",
+            "(kind = 'debit' AND amount_cents < 0) OR "
+            "(kind = 'plan' AND amount_cents = 0)",
             name="account_credits_amount_sign_check",
+        ),
+        CheckConstraint(
+            "(kind = 'plan') = (plan_units IS NOT NULL) AND "
+            "(plan_units IS NULL OR plan_units <> 0)",
+            name="account_credits_plan_units_check",
         ),
         # One row per ref: a replayed charge or credit is refused, and
         # writers can use ON CONFLICT (organization_id, ref) DO NOTHING.
@@ -1074,6 +1084,11 @@ class CallBalanceHold(Base):
     cents_per_call: Mapped[Decimal | None] = mapped_column(Numeric)
     # Handover dials approved for the call; each may bill the second line.
     dials: Mapped[int] = mapped_column(Integer, server_default="0", nullable=False)
+    # Plan minutes the call sets aside from the workspace's plan
+    # (hailhq.core.plans). 0 when the plan pays for none of it.
+    plan_minutes: Mapped[Decimal] = mapped_column(
+        Numeric(14, 3), server_default="0", nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(
         TS, server_default=text("now()"), nullable=False
     )
@@ -1081,6 +1096,9 @@ class CallBalanceHold(Base):
     __table_args__ = (
         CheckConstraint("cents >= 0", name="call_balance_holds_cents_check"),
         CheckConstraint("dials >= 0", name="call_balance_holds_dials_check"),
+        CheckConstraint(
+            "plan_minutes >= 0", name="call_balance_holds_plan_minutes_check"
+        ),
         CheckConstraint(
             "cents_per_minute >= 0 AND cents_per_call >= 0"
             " AND (cents_per_minute IS NULL) = (cents_per_call IS NULL)",
@@ -2446,6 +2464,143 @@ class Organization(Base):
     origin: Mapped[str] = mapped_column(Text, nullable=False, server_default="human")
 
 
+class OrganizationPlan(Base):
+    """A workspace's subscription (Pro, Business or Enterprise). Written by
+    the billing site from Stripe; hail only reads it (hailhq.core.plans).
+    At most one open row (``ended_at IS NULL``) per workspace. The plan is
+    on only while ``status`` is ``active``."""
+
+    __tablename__ = "organization_plans"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
+    tier: Mapped[str] = mapped_column(Text, nullable=False)
+    step_hours: Mapped[int] = mapped_column(Integer, nullable=False)
+    billing_interval: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    stripe_customer_id: Mapped[str] = mapped_column(Text, nullable=False)
+    stripe_subscription_id: Mapped[str] = mapped_column(Text, nullable=False)
+    started_at: Mapped[datetime] = mapped_column(TS, nullable=False)
+    current_period_end: Mapped[datetime] = mapped_column(TS, nullable=False)
+    cancel_at_period_end: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("false"), nullable=False
+    )
+    ended_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "tier IN ('pro', 'business', 'enterprise')",
+            name="organization_plans_tier_check",
+        ),
+        CheckConstraint("step_hours > 0", name="organization_plans_step_hours_check"),
+        CheckConstraint(
+            "billing_interval IN ('month', 'year')",
+            name="organization_plans_interval_check",
+        ),
+        CheckConstraint(
+            "status IN ('incomplete', 'incomplete_expired', 'trialing', 'active',"
+            " 'past_due', 'canceled', 'unpaid', 'paused')",
+            name="organization_plans_status_check",
+        ),
+        CheckConstraint(
+            "ended_at IS NOT NULL OR status NOT IN ('canceled', 'incomplete_expired')",
+            name="organization_plans_ended_check",
+        ),
+        UniqueConstraint(
+            "stripe_subscription_id", name="organization_plans_subscription_uq"
+        ),
+        Index(
+            "organization_plans_open_uq",
+            "organization_id",
+            unique=True,
+            postgresql_where=text("ended_at IS NULL"),
+        ),
+    )
+
+
+class PlanAllowance(Base):
+    """One plan month of a workspace: what it includes and what it used.
+    Written by the billing site (included amounts at each period start, used
+    amounts by its raters); hail reads it (hailhq.core.plans). The plan pays
+    the monthly fees of the ``included_numbers`` oldest numbers, so numbers
+    have no used counter."""
+
+    __tablename__ = "plan_allowances"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
+    plan_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "organization_plans.id",
+            name="plan_allowances_plan_id_fkey",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+    )
+    period_start: Mapped[datetime] = mapped_column(TS, nullable=False)
+    period_end: Mapped[datetime] = mapped_column(TS, nullable=False)
+    included_minutes: Mapped[Decimal] = mapped_column(Numeric(14, 3), nullable=False)
+    used_minutes: Mapped[Decimal] = mapped_column(
+        Numeric(14, 3), server_default="0", nullable=False
+    )
+    included_texts: Mapped[int] = mapped_column(Integer, nullable=False)
+    used_texts: Mapped[int] = mapped_column(Integer, server_default="0", nullable=False)
+    included_emails: Mapped[int] = mapped_column(Integer, nullable=False)
+    used_emails: Mapped[int] = mapped_column(
+        Integer, server_default="0", nullable=False
+    )
+    included_numbers: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Destination countries (ISO 3166-1 alpha-2) whose texts use included
+    # texts; texts elsewhere are paid from credits.
+    text_countries: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), server_default=text("'{}'"), nullable=False
+    )
+    # The most the plan pays toward one included number's monthly fee.
+    number_fee_cap_cents: Mapped[Decimal] = mapped_column(
+        Numeric(14, 1), server_default="0", nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TS, server_default=text("now()"), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "period_end > period_start", name="plan_allowances_period_check"
+        ),
+        CheckConstraint(
+            "included_minutes >= 0 AND used_minutes >= 0"
+            " AND included_texts >= 0 AND used_texts >= 0"
+            " AND included_emails >= 0 AND used_emails >= 0"
+            " AND included_numbers >= 0"
+            " AND number_fee_cap_cents >= 0",
+            name="plan_allowances_amounts_check",
+        ),
+        UniqueConstraint(
+            "organization_id", "period_start", name="plan_allowances_org_period_uq"
+        ),
+        Index("plan_allowances_org_period_idx", "organization_id", "period_end"),
+        Index("plan_allowances_plan_idx", "plan_id"),
+    )
+
+
 class AgentSendLog(Base):
     """One row per allowed agent-origin send attempt — the counter behind
     the velocity caps in agent_caps.py. Written by the gate itself at
@@ -2701,6 +2856,16 @@ class OrganizationKnowledge(Base):
     max_pieces: Mapped[int] = mapped_column(
         Integer, server_default=text("1000"), nullable=False
     )
+    # The most uploaded file size the workspace may hold, the sum of its
+    # knowledge_documents.size_bytes (plans sell file size). Checked when a
+    # link or a document is created, never by the ingest worker. NULL: no
+    # workspace cap.
+    max_total_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # Who wrote the row: 'plan' (the billing site, from the workspace's
+    # plan; it also deletes it) or 'staff' (Hail by hand).
+    source: Mapped[str] = mapped_column(
+        Text, server_default=text("'staff'"), nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(
         TS, server_default=text("now()"), nullable=False
     )
@@ -2709,6 +2874,14 @@ class OrganizationKnowledge(Base):
     )
 
     __table_args__ = (
+        CheckConstraint(
+            "max_total_bytes IS NULL OR max_total_bytes > 0",
+            name="organization_knowledge_total_bytes_check",
+        ),
+        CheckConstraint(
+            "source IN ('plan', 'staff')",
+            name="organization_knowledge_source_check",
+        ),
         CheckConstraint(
             "max_documents BETWEEN 1 AND 1000",
             name="organization_knowledge_documents_check",
