@@ -83,7 +83,6 @@ from hailhq.core.file_uploads import matches_declared_type
 from hailhq.core.isolated_process import run_isolated
 from hailhq.core.knowledge.access import (
     STORAGE_FULL,
-    WORKSPACE_FULL,
     FolderSweepFailed,
     delete_org_knowledge,
     knowledge_limits,
@@ -91,7 +90,6 @@ from hailhq.core.knowledge.access import (
     log_failure,
     piece_bytes,
     storage_full,
-    workspace_full,
 )
 from hailhq.core.knowledge.decode import MAX_TEXT_BYTES
 from hailhq.core.knowledge.embed import (
@@ -694,13 +692,6 @@ class KnowledgeIngestWorker:
             if await storage_full(db, adding=adding, excluding_document=document_id):
                 await db.rollback()
                 raise _Refused(STORAGE_FULL)
-            # Under the same lock, so two documents of one workspace never
-            # both take its last room.
-            if await workspace_full(
-                db, limits, adding=adding, excluding_document=document_id
-            ):
-                await db.rollback()
-                raise _Refused(WORKSPACE_FULL)
             await db.execute(
                 delete(KnowledgePiece).where(KnowledgePiece.document_id == document_id)
             )

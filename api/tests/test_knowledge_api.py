@@ -353,8 +353,8 @@ async def test_busy_upload_answers_503(
 async def test_workspace_byte_cap_refuses_links_and_documents(
     client, async_session, org_and_key, s3
 ) -> None:
-    """A workspace at its own max_total_bytes (set from its plan) cannot
-    add more, counted from its documents' live bytes."""
+    """A workspace whose files reach its own max_total_bytes (set from its
+    plan) cannot add more. File sizes count, not the stored text."""
     org, _, plain = org_and_key
     await _turn_on(async_session, org, max_total_bytes=1000, source="plan")
     held = await _stored_upload(async_session, org)
@@ -364,9 +364,9 @@ async def test_workspace_byte_cap_refuses_links_and_documents(
             file_upload_id=held.id,
             name="held.md",
             content_type="text/markdown",
-            size_bytes=held.size_bytes,
+            size_bytes=1000,
             status="ready",
-            stored_bytes=1000,
+            stored_bytes=10,
         )
     )
     await async_session.commit()
@@ -379,6 +379,33 @@ async def test_workspace_byte_cap_refuses_links_and_documents(
         headers=_auth(plain),
     )
     assert resp.status_code == 409 and "knowledge base is full" in resp.text
+
+
+async def test_workspace_byte_cap_counts_the_new_file(
+    client, async_session, org_and_key, s3
+) -> None:
+    """A file that would take the workspace's files past its cap is refused;
+    one that fits is added."""
+    org, _, plain = org_and_key
+    upload = await _stored_upload(async_session, org)
+    await _turn_on(
+        async_session, org, max_total_bytes=upload.size_bytes - 1, source="plan"
+    )
+    resp = await client.post(
+        "/v1/knowledge/documents",
+        json={"upload_id": str(upload.id)},
+        headers=_auth(plain),
+    )
+    assert resp.status_code == 409 and "knowledge base is full" in resp.text
+    limits = await async_session.get(OrganizationKnowledge, org)
+    limits.max_total_bytes = upload.size_bytes
+    await async_session.commit()
+    resp = await client.post(
+        "/v1/knowledge/documents",
+        json={"upload_id": str(upload.id)},
+        headers=_auth(plain),
+    )
+    assert resp.status_code == 201
 
 
 async def test_no_workspace_byte_cap_by_default(

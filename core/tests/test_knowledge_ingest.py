@@ -18,7 +18,6 @@ from hailhq.core.knowledge import access as access_module
 from hailhq.core.knowledge import ingest as ingest_module
 from hailhq.core.knowledge.access import (
     STORAGE_FULL,
-    WORKSPACE_FULL,
     FolderSweepFailed,
     agent_uses_knowledge,
     delete_org_knowledge,
@@ -1099,31 +1098,3 @@ async def test_cap_check_takes_the_global_lock(
     await add_document(async_session, s3, uuid.uuid4(), NORTHGATE_MANUAL.encode())
     await worker.tick()
     assert calls == ["lock:knowledge:global-cap", "storage_full"]
-
-
-async def test_new_pieces_past_the_workspace_cap_are_refused(
-    async_session, worker, s3
-) -> None:
-    """A workspace's own max_total_bytes caps its live data like the global
-    cap; another workspace is not counted."""
-    other = uuid.uuid4()
-    await add_document(async_session, s3, other, NORTHGATE_MANUAL.encode())
-    await worker.tick()
-    org = uuid.uuid4()
-    await add_document(async_session, s3, org, NORTHGATE_MANUAL.encode())
-    await worker.tick()
-    used = (
-        await async_session.execute(
-            select(func.coalesce(func.sum(KnowledgeDocument.stored_bytes), 0)).where(
-                KnowledgeDocument.organization_id == org
-            )
-        )
-    ).scalar_one()
-    limits = await async_session.get(OrganizationKnowledge, org)
-    limits.max_total_bytes = used + access_module.PIECE_VECTOR_BYTES
-    await async_session.commit()
-    doc_id = await add_document(async_session, s3, org, b"Opening hours nine to five.")
-    await worker.tick()
-    doc = await async_session.get(KnowledgeDocument, doc_id)
-    await async_session.refresh(doc)
-    assert doc.status == "failed" and doc.error == WORKSPACE_FULL

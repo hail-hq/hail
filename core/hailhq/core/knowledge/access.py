@@ -20,10 +20,10 @@ it. Past the cap, new uploads and documents are refused, and the ingest
 worker refuses to write more pieces. The real database size has its own
 daily alert (``db_size_alert``).
 
-A workspace's ``max_total_bytes`` (set from its plan; NULL: none) caps its
-own live data the same way (``workspace_full``), checked in the same places
-as the global cap: early in the API, and in ``ingest`` under the global
-cap's lock.
+A workspace's ``max_total_bytes`` (set from its plan; NULL: none) caps the
+size of its uploaded files (``workspace_full``), because plans sell file
+size. It is checked when a link or a document is created, never by the
+ingest worker: a file is counted once it is added.
 
 Each workspace's own limits are checked under ``knowledge_lock`` (an
 advisory lock per workspace) when a link or a document is created; the
@@ -166,22 +166,25 @@ async def workspace_full(
     adding: int = 0,
     excluding_document: UUID | None = None,
 ) -> bool:
-    """True when the workspace's live data plus ``adding`` bytes reaches its
-    ``max_total_bytes`` (False when it has none). Counted like
-    ``storage_full``: the sum of its documents' ``stored_bytes``, without
-    ``excluding_document``."""
+    """True when the workspace's files plus a new file of ``adding`` bytes
+    go past its ``max_total_bytes`` (False when it has none); with ``adding``
+    0, True once its files reach it. Plans sell file size, so this counts
+    the uploaded files (``size_bytes``), not the stored text
+    (``storage_full`` counts that), without ``excluding_document``."""
     if limits.max_total_bytes is None:
         return False
     used = (
         await db.execute(
             text(
-                "SELECT coalesce(sum(stored_bytes), 0) FROM knowledge_documents "
+                "SELECT coalesce(sum(size_bytes), 0) FROM knowledge_documents "
                 "WHERE organization_id = :org AND id IS DISTINCT FROM :excluding"
             ),
             {"org": limits.organization_id, "excluding": excluding_document},
         )
     ).scalar_one()
-    return int(used) + adding >= limits.max_total_bytes
+    if adding:
+        return int(used) + adding > limits.max_total_bytes
+    return int(used) >= limits.max_total_bytes
 
 
 async def agent_uses_knowledge(

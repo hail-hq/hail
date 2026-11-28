@@ -161,7 +161,7 @@ async def ensure_room(
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT, detail=STORAGE_FULL
         )
-    if await workspace_full(db, limits):
+    if await workspace_full(db, limits, adding=size_bytes):
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT, detail=WORKSPACE_FULL
         )
