@@ -4,6 +4,10 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- Knowledge files can go from a browser straight to storage (`/v1/knowledge/uploads`, for Uppy). Self-host: run `terragrunt apply` for the bucket's CORS rules.
+
 ### Changed
 
 - Calls: a short sound said while the agent talks no longer stops it. Speaking over it for about a second does, in every language.

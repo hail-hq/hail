@@ -583,6 +583,7 @@ class _FakeAmdSession:
         self.say_calls: list[str] = []
         self.replies: list[str] = []
         self.started = False
+        self.agent_state = "listening"
         self.handlers: dict[str, list] = {}
         self.llm = _GreetingLLM("human")
         self.turn_tasks: set[asyncio.Task] = set()
