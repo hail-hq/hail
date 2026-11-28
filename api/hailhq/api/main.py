@@ -32,6 +32,7 @@ from hailhq.api.routes import emails as emails_routes
 from hailhq.api.routes import events as events_routes
 from hailhq.api.routes import forward_targets as forward_targets_routes
 from hailhq.api.routes import knowledge as knowledge_routes
+from hailhq.api.routes import knowledge_uploads as knowledge_uploads_routes
 from hailhq.api.routes import numbers as numbers_routes
 from hailhq.api.routes import providers as providers_routes
 from hailhq.api.routes import recordings as recordings_routes
@@ -558,6 +559,7 @@ _CUSTOMER_ROUTERS = [
     *sms_webhooks.routers,
     contacts_routes.router,
     knowledge_routes.router,
+    knowledge_uploads_routes.router,
     whoami_routes.router,
     providers_routes.router,
     sms_evidence_routes.router,

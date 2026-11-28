@@ -28,7 +28,7 @@ from hailhq.api.deps import Principal, get_current_principal, get_s3_mail_option
 from hailhq.api.pagination import fetch_cursor_page
 from hailhq.api.ratelimit import GENERAL_RATE_LIMITED_RESPONSES
 from hailhq.core.db import get_session
-from hailhq.core.file_uploads import delete_upload_objects
+from hailhq.core.file_uploads import KNOWLEDGE_MAX_FILE_BYTES, delete_upload_objects
 from hailhq.core.knowledge.access import (
     KNOWLEDGE_OFF,
     STORAGE_FULL,
@@ -78,7 +78,8 @@ _DEFAULT_LIMIT = 50
 _MAX_LIMIT = 100
 
 
-async def _limits(db: AsyncSession, org: UUID) -> OrganizationKnowledge:
+async def knowledge_on(db: AsyncSession, org: UUID) -> OrganizationKnowledge:
+    """The workspace's knowledge limits; 403 when the knowledge base is off."""
     limits = await knowledge_limits(db, org)
     if limits is None:
         raise HTTPException(
@@ -101,6 +102,115 @@ async def _owned(db: AsyncSession, document_id: UUID, org: UUID) -> KnowledgeDoc
             status_code=http_status.HTTP_404_NOT_FOUND, detail=_NOT_FOUND
         )
     return doc
+
+
+async def lock_upload(db: AsyncSession, *where) -> FileUpload | None:
+    """The upload row matching ``where``, locked until commit, or None.
+
+    A bounded wait on the upload's row only: the upload sweep may hold it
+    while it deletes from storage; the request then answers 503 at once
+    instead of holding the workspace's knowledge lock that long."""
+    await db.execute(text("SET LOCAL lock_timeout = '5s'"))
+    try:
+        upload = (
+            await db.execute(select(FileUpload).where(*where).with_for_update())
+        ).scalar_one_or_none()
+    except DBAPIError as exc:
+        if getattr(exc.orig, "sqlstate", None) != "55P03":
+            raise
+        await db.rollback()
+        raise HTTPException(
+            status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="this upload is busy; try again in a few seconds",
+            headers={"Retry-After": "5"},
+        ) from exc
+    await db.execute(text("SET LOCAL lock_timeout TO DEFAULT"))
+    return upload
+
+
+async def ensure_room(
+    db: AsyncSession, org: UUID, limits: OrganizationKnowledge, size_bytes: int
+) -> int:
+    """Refuse a new file of ``size_bytes`` the workspace has no room for;
+    returns its file limit. 413 over the file limit; 409 when it holds its
+    limit of documents, its plan's storage, or Hail's knowledge storage is full. The one place
+    for every limit a new document is checked against: ``add_document``
+    and ``POST /knowledge/uploads``. Under the workspace's knowledge lock."""
+    limit = min(KNOWLEDGE_MAX_FILE_BYTES, limits.max_file_bytes)
+    if size_bytes > limit:
+        raise HTTPException(
+            status_code=http_status.HTTP_413_CONTENT_TOO_LARGE,
+            detail=f"the file is larger than {limit} bytes",
+        )
+    held = (
+        await db.execute(
+            select(func.count())
+            .select_from(KnowledgeDocument)
+            .where(KnowledgeDocument.organization_id == org)
+        )
+    ).scalar_one()
+    if held >= limits.max_documents:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail=(
+                f"the workspace holds its limit of {limits.max_documents} "
+                "documents; delete one or ask Hail support for more"
+            ),
+        )
+    if await storage_full(db):
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT, detail=STORAGE_FULL
+        )
+    if await workspace_full(db, limits):
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT, detail=WORKSPACE_FULL
+        )
+    return limit
+
+
+async def add_document(
+    db: AsyncSession,
+    principal: Principal,
+    upload: FileUpload,
+    limits: OrganizationKnowledge,
+    name: str | None,
+) -> KnowledgeDocumentResponse:
+    """Turn a stored upload into a pending document (the ingest worker reads
+    it) and commit. The caller holds the workspace's knowledge lock and the
+    upload's row lock. 409 when the upload is already a document, the
+    workspace holds its limit of documents, or storage is full; 413 over
+    the file limit. Used by ``POST /knowledge/documents`` and by a direct
+    upload's ``/complete`` (``knowledge_uploads``)."""
+    org = principal.organization_id
+    if upload.first_used_at is not None:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail="this upload is already a knowledge document",
+        )
+    await ensure_room(db, org, limits, upload.size_bytes or 0)
+    doc = KnowledgeDocument(
+        organization_id=org,
+        file_upload_id=upload.id,
+        name=name or upload.filename,
+        content_type=upload.content_type,
+        size_bytes=upload.size_bytes or 0,
+    )
+    upload.first_used_at = func.now()
+    db.add(doc)
+    await db.commit()
+    await db.refresh(doc)
+    actor_user_id, actor_kind = actor_of(principal)
+    await write_audit_log(
+        organization_id=org,
+        api_key_id=principal.api_key_id,
+        action="knowledge_document.create",
+        resource_type="knowledge_document",
+        resource_id=doc.id,
+        payload={"content_type": doc.content_type, "size_bytes": doc.size_bytes},
+        actor_user_id=actor_user_id,
+        actor_kind=actor_kind,
+    )
+    return KnowledgeDocumentResponse.model_validate(doc)
 
 
 @router.post(
@@ -141,95 +251,20 @@ async def create_knowledge_document(
     """
     org = principal.organization_id
     await knowledge_lock(db, org)
-    limits = await _limits(db, org)
-    # A bounded wait on the upload's row only: the upload sweep may hold it
-    # while it deletes from storage; this request then answers 503 at once
-    # instead of holding the workspace's knowledge lock that long.
-    await db.execute(text("SET LOCAL lock_timeout = '5s'"))
-    try:
-        upload = (
-            await db.execute(
-                select(FileUpload)
-                .where(
-                    FileUpload.id == body.upload_id,
-                    FileUpload.organization_id == org,
-                    FileUpload.purpose == "knowledge_document",
-                    FileUpload.uploaded_at.is_not(None),
-                )
-                .with_for_update()
-            )
-        ).scalar_one_or_none()
-    except DBAPIError as exc:
-        if getattr(exc.orig, "sqlstate", None) != "55P03":
-            raise
-        await db.rollback()
-        raise HTTPException(
-            status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="this upload is busy; try again in a few seconds",
-            headers={"Retry-After": "5"},
-        ) from exc
-    await db.execute(text("SET LOCAL lock_timeout TO DEFAULT"))
+    limits = await knowledge_on(db, org)
+    upload = await lock_upload(
+        db,
+        FileUpload.id == body.upload_id,
+        FileUpload.organization_id == org,
+        FileUpload.purpose == "knowledge_document",
+        FileUpload.uploaded_at.is_not(None),
+    )
     if upload is None:
         raise HTTPException(
             status_code=http_status.HTTP_404_NOT_FOUND,
             detail="no stored knowledge_document upload with this id",
         )
-    if upload.first_used_at is not None:
-        raise HTTPException(
-            status_code=http_status.HTTP_409_CONFLICT,
-            detail="this upload is already a knowledge document",
-        )
-    if (upload.size_bytes or 0) > limits.max_file_bytes:
-        raise HTTPException(
-            status_code=http_status.HTTP_413_CONTENT_TOO_LARGE,
-            detail=f"the file is larger than {limits.max_file_bytes} bytes",
-        )
-    held = (
-        await db.execute(
-            select(func.count())
-            .select_from(KnowledgeDocument)
-            .where(KnowledgeDocument.organization_id == org)
-        )
-    ).scalar_one()
-    if held >= limits.max_documents:
-        raise HTTPException(
-            status_code=http_status.HTTP_409_CONFLICT,
-            detail=(
-                f"the workspace holds its limit of {limits.max_documents} "
-                "documents; delete one or ask Hail support for more"
-            ),
-        )
-    if await storage_full(db):
-        raise HTTPException(
-            status_code=http_status.HTTP_409_CONFLICT, detail=STORAGE_FULL
-        )
-    if await workspace_full(db, limits):
-        raise HTTPException(
-            status_code=http_status.HTTP_409_CONFLICT, detail=WORKSPACE_FULL
-        )
-    doc = KnowledgeDocument(
-        organization_id=org,
-        file_upload_id=upload.id,
-        name=body.name or upload.filename,
-        content_type=upload.content_type,
-        size_bytes=upload.size_bytes or 0,
-    )
-    upload.first_used_at = func.now()
-    db.add(doc)
-    await db.commit()
-    await db.refresh(doc)
-    actor_user_id, actor_kind = actor_of(principal)
-    await write_audit_log(
-        organization_id=org,
-        api_key_id=principal.api_key_id,
-        action="knowledge_document.create",
-        resource_type="knowledge_document",
-        resource_id=doc.id,
-        payload={"content_type": doc.content_type, "size_bytes": doc.size_bytes},
-        actor_user_id=actor_user_id,
-        actor_kind=actor_kind,
-    )
-    return KnowledgeDocumentResponse.model_validate(doc)
+    return await add_document(db, principal, upload, limits, body.name)
 
 
 @router.get(
@@ -350,7 +385,7 @@ async def search_knowledge(
     document in another) and by words (IDs and part numbers match however
     they are spaced or dashed), merged by rank. Returns the best pieces."""
     org = principal.organization_id
-    await _limits(db, org)
+    await knowledge_on(db, org)
     vector = None
     embedder = get_embedder()
     if embedder is not None:
@@ -385,4 +420,4 @@ async def search_knowledge(
     )
 
 
-__all__ = ["router"]
+__all__ = ["add_document", "ensure_room", "knowledge_on", "lock_upload", "router"]

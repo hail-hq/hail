@@ -79,8 +79,9 @@ resource "aws_iam_access_key" "recordings" {
 }
 
 variable "asset_allowed_origins" {
-  type    = list(string)
-  default = ["https://hail.so"]
+  description = "The console's origins: they play recordings from the assets bucket and send knowledge files to the mail bucket (CORS). One * per origin matches preview hosts."
+  type        = list(string)
+  default     = ["https://hail.so"]
 }
 
 output "assets_bucket" { value = aws_s3_bucket.assets.bucket }

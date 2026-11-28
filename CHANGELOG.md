@@ -7,6 +7,7 @@ All notable changes to Hail are documented here. The format is based on [Keep a 
 ### Added
 
 - Plans: the call minutes, texts, emails and numbers a workspace's plan includes are used first, then credits pay the rest.
+- Knowledge files can go from a browser straight to storage (`/v1/knowledge/uploads`, for Uppy). Self-host: run `terragrunt apply` for the bucket's CORS rules.
 
 ## [0.42.0] (2026-11-27)
 
