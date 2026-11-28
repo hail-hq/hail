@@ -172,7 +172,7 @@ def test_prompt_text_is_pinned() -> None:
         "37e9a0b5058e8c60355db926a963a8fba59c0fc4dd43d9ede4c7116e464e9e8b"
     )
     assert _sha(prompts.VOICE_CONFIGURATION_HELP) == (
-        "713f6335a652d78b132f28f0ab90899457f3950ad00989813a389fa0ababa2b4"
+        "26e5c0cba43f95b2c4c574dc9ef322c24f2c7b4650a1071e39b9f95b5a54ed7a"
     )
 
 
@@ -352,8 +352,10 @@ def test_help_says_how_the_knowledge_base_is_set() -> None:
     assert "knowledge base" in help_text
     assert "owners and admins can use Upload files on the Documents page" in help_text
     assert "ask an owner or admin to help upload files and update the agent" in help_text
-    assert "If an owner or admin cannot find Documents or its controls" in help_text
+    assert "if an owner or admin cannot find Documents or its controls" in help_text
     assert "suggest contacting Hail support to check access" in help_text
+    assert "press Reload on that page first" in help_text
+    assert "For other settings, if a control is missing or disabled" in help_text
     assert "turn on Answer from your documents, and press Save" in help_text
 
 
