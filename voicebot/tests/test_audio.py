@@ -1,5 +1,7 @@
 """Audio filtering stays on the agent input; it never republishes a track."""
 
+import threading
+import time
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -29,6 +31,22 @@ def test_worker_prewarms_cloud_filter_before_calls(monkeypatch, url, expected):
         load_filter.assert_called_once_with("livekit.plugins.noise_cancellation")
     else:
         load_filter.assert_not_called()
+
+
+def test_prewarm_does_not_wait_on_a_stuck_voice_list_load(monkeypatch):
+    from hailhq.voicebot import agent
+
+    stuck = threading.Event()
+    monkeypatch.setattr(agent, "_warm_voice_lists", stuck.wait)
+    monkeypatch.setattr(agent, "_VOICE_LIST_WARM_LIMIT", 0.05)
+    monkeypatch.setattr(agent.silero.VAD, "load", object)
+    monkeypatch.setattr(audio, "import_module", Mock())
+    started = time.monotonic()
+    try:
+        agent.prewarm(SimpleNamespace(userdata={}))
+    finally:
+        stuck.set()
+    assert time.monotonic() - started < 2
 
 
 def test_cloud_sip_uses_telephony_voice_isolation(monkeypatch):

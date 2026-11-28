@@ -11,7 +11,7 @@ import pytest
 from hailhq.core.config import VoicePreference, settings
 from hailhq.core.models import OrgProviderConfig
 from hailhq.core.secret_cipher import generate_key
-from hailhq.core.voice_catalog import known_preset_voice_owner
+from hailhq.core.voice_catalog import known_preset_voice_owner, preset_voice_owner
 from hailhq.voicebot import pipeline
 from hailhq.voicebot.pipeline import (
     ProviderKeyError,
@@ -824,9 +824,16 @@ def test_legacy_row_with_fallback_keeps_the_preset_voice_for_the_house_chain(
 
     chain = build_tts(org, "rex", "en", voice_id_explicit=True, voice_provider="xai")
 
+    # The workspace's own provider keeps its own voice; it cannot speak "rex".
+    assert captured_plugins["cartesia"][0].kwargs["api_key"] == "workspace-key"
+    assert captured_plugins["cartesia"][0].kwargs["voice"] == "row-voice"
     assert chain._tts_instances[1].label == "xai"
     assert captured_plugins["xai"][0].kwargs["voice"] == "rex"
 
 
 def test_a_voice_id_that_is_not_text_does_not_break_the_lookup():
     assert known_preset_voice_owner(42) is None
+
+
+async def test_a_voice_id_that_is_not_text_has_no_owner():
+    assert await preset_voice_owner(42) is None

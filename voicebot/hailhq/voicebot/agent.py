@@ -27,6 +27,7 @@ import json
 import logging
 import math
 import re
+import threading
 import time
 from collections.abc import Awaitable, Callable, Collection
 from datetime import datetime, timezone
@@ -1556,6 +1557,18 @@ def prewarm(proc: JobProcess) -> None:
     proc.userdata["vad"] = silero.VAD.load()
     # Each call runs in its own process, so load the voice lists here and
     # not while a caller waits. Fail open: a call still looks them up.
+    # A daemon thread with a join limit: asyncio.run waits for a stuck DNS
+    # lookup thread, which could outlast the SDK's process start limit.
+    warm = threading.Thread(target=_warm_voice_lists, daemon=True)
+    warm.start()
+    warm.join(_VOICE_LIST_WARM_LIMIT)
+
+
+# Seconds prewarm waits for the voice lists; the SDK allows 10 for all of it.
+_VOICE_LIST_WARM_LIMIT = 4.0
+
+
+def _warm_voice_lists() -> None:
     try:
         asyncio.run(warm_preset_voices(timeout=3.0))
     except Exception:

@@ -537,7 +537,7 @@ def known_preset_voice_owner(voice_id: str | None) -> str | None:
 
 async def preset_voice_owner(voice_id: str | None, *, timeout: float = 1.0):
     """The preset provider that has ``voice_id``, or None when none is known."""
-    if not voice_id:
+    if not isinstance(voice_id, str) or not voice_id:
         return None
     for provider in TTS_PRESET_MODELS:
         if _same_voice(provider, voice_id, tts_preset(provider)[0]):

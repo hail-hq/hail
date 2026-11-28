@@ -791,8 +791,9 @@ def build_tts(
                 and (foreign_preset or not voice_id_explicit)
                 and voice_provider != org.provider
                 and not keeps_row_voice
-            ) or (not preset_provider and foreign_preset and not org.fallback_enabled):
+            ) or (not preset_provider and foreign_preset):
                 # The voice belongs to another provider: use the row's own.
+                # The house chain still gets the chosen voice (fallback_voice).
                 primary_voice = None
             byo = _org_tts(org, primary_voice, language)
         except (GoogleAuthError, ValueError, ProviderKeyError):
