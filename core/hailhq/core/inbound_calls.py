@@ -59,6 +59,7 @@ from hailhq.core.models import (
     PhoneNumber,
 )
 from hailhq.core.recordings import recording_call_metadata
+from hailhq.core.schemas import CALLER_HIDDEN_META, CALLER_HIDDEN_OWN_NUMBER
 from hailhq.core.sip_connections import (
     CHECK_CODE_META,
     CHECK_EVENT_KIND,
@@ -114,6 +115,8 @@ class SipAttributes:
     provider_call_sid: str | None  # sip.callIDFull
     # The SIP_SECRET_ATTRIBUTE attribute. Never printed.
     sip_secret: str = field(default="", repr=False)
+    # Set by Hail, not LiveKit: why ``caller`` was replaced with HIDDEN_CALLER.
+    caller_hidden_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -166,7 +169,7 @@ async def _refuse(
         voice_config={},
         started_at=now,
         ended_at=now,
-        metadata_={CALL_META_BILLED: True},
+        metadata_={CALL_META_BILLED: True, **_caller_meta(attrs)},
     )
     db.add(call)
     await db.flush()
@@ -195,14 +198,61 @@ async def _refuse(
     return Rejected(end_reason.value, call.id)
 
 
-async def _caller_of(db: AsyncSession, number: PhoneNumber, raw: str) -> str:
+# What a PBX caller is recorded as when the phone system sends one of the
+# workspace's own numbers instead of the real caller (3CX does by default).
+HIDDEN_CALLER = "anonymous"
+
+
+async def _caller_of(
+    db: AsyncSession, number: PhoneNumber, raw: str
+) -> tuple[str, str | None]:
+    """The caller Hail records, and why it was hidden (None when kept). A PBX
+    caller that is one of the workspace's active numbers is not the real
+    caller: the phone system replaced it (3CX sends its trunk number by
+    default). Recorded as hidden, so callers never share call history,
+    contacts or a thread. Only active numbers count: a pending order or an
+    unproven connected number may belong to someone else. A call the
+    workspace places from one of its own numbers to its phone system is
+    hidden too: it is not a customer."""
+    caller = await _read_caller(db, number, raw)
+    if number.provider != PBX or not (
+        caller.startswith("+") and looks_like_phone_number(caller)
+    ):
+        return caller, None
+    own = await db.scalar(
+        select(PhoneNumber.id)
+        .where(
+            PhoneNumber.organization_id == number.organization_id,
+            PhoneNumber.e164 == caller,
+            PhoneNumber.released_at.is_(None),
+            PhoneNumber.provisioning_state == "active",
+        )
+        .limit(1)
+    )
+    if own is None:
+        return caller, None
+    logger.info(
+        "pbx call to number %s: caller is the workspace's own number; recorded as hidden",
+        number.id,
+    )
+    return HIDDEN_CALLER, CALLER_HIDDEN_OWN_NUMBER
+
+
+def _caller_meta(attrs: SipAttributes) -> dict[str, str]:
+    """The Call.metadata entry that says why the caller was hidden, if it was."""
+    if attrs.caller_hidden_reason is None:
+        return {}
+    return {CALLER_HIDDEN_META: attrs.caller_hidden_reason}
+
+
+async def _read_caller(db: AsyncSession, number: PhoneNumber, raw: str) -> str:
     """A phone system writes local callers in its country's national form and
     callers from abroad with that country's international prefix. Hail reads
     a PBX caller with the connection's ``default_region`` first when it is set
     (it names the phone system's country), else with the country of the
     number called; when that gives no valid number, with the countries of the
     connection's other numbers. A carrier caller only gets a leading ``+``."""
-    if number.provider == "pbx":
+    if number.provider == PBX:
         try:
             conn = await connection_of(db, number)
         except ValueError:
@@ -256,7 +306,8 @@ async def open_inbound_call(
         # customer's log. Only after a valid secret does the trunk check
         # below keep a visible failed row for real misrouting.
         return Rejected("bad_secret")
-    attrs = replace(attrs, caller=await _caller_of(db, number, attrs.caller))
+    caller, hidden = await _caller_of(db, number, attrs.caller)
+    attrs = replace(attrs, caller=caller, caller_hidden_reason=hidden)
     # The INVITE must arrive on the LiveKit inbound trunk configured for the
     # number's carrier: its own trunk when its key is set, else the shared
     # one. While the shared trunk exists it is accepted too, so numbers can
@@ -581,6 +632,7 @@ async def _answer_or_refuse(
         started_at=now,
         metadata_={
             CALL_META_BILLED: True,
+            **_caller_meta(attrs),
             **recording_call_metadata(
                 workspace,
                 override=agent.recording_enabled,

@@ -5231,6 +5231,340 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HTTPValidationError"
+  /v1/knowledge/uploads:
+    post:
+      tags:
+        - knowledge
+      summary: Create Knowledge Upload
+      description: "Reserve a storage key for one knowledge file a browser sends
+
+        straight to storage.
+
+
+        Then sign each storage request with `POST /v1/knowledge/uploads/{id}/sign`,
+
+        send the file, and call `POST /v1/knowledge/uploads/{id}/complete`.
+
+        Sign requests until `expires_at` (15 minutes). Without a browser, use
+
+        an upload link (`POST /v1/uploads`) instead."
+      operationId: create_knowledge_upload
+      parameters:
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KnowledgeUploadCreate"
+      responses:
+        "201":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeUploadResponse"
+        "429":
+          description:
+            "Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds). Or: the organization
+            already holds 50 unused, unexpired uploads. Use or let some expire."
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "403":
+          description:
+            The knowledge base is not turned on for this workspace. Contact
+            Hail support.
+        "409":
+          description:
+            The workspace holds its limit of documents, or Hail's knowledge
+            storage is full.
+        "413":
+          description: "`size_bytes` is over the workspace's file limit."
+        "503":
+          description: File uploads are not configured on this server.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
+  /v1/knowledge/uploads/{upload_id}/sign:
+    post:
+      tags:
+        - knowledge
+      summary: Sign Knowledge Upload
+      description: "Presign one storage request for the upload's own key.
+
+
+        Six requests only: `PUT` (the whole file), `POST` (start a multipart
+
+        upload), `PUT` with `s3_upload_id` and `part_number` (one part), `GET`
+
+        with `s3_upload_id` (list parts), `POST` with `s3_upload_id` (finish)
+
+        and `DELETE` with `s3_upload_id` (cancel). Send the request to `url`
+
+        with `headers`, exactly. A whole-file `PUT` must send exactly
+
+        `size_bytes`; each part exactly 5 MiB (5242880 bytes), the last part
+
+        the rest: storage refuses any other size. The URL works for 5 minutes
+
+        at most, never past the upload's `expires_at`."
+      operationId: sign_knowledge_upload
+      parameters:
+        - name: upload_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Upload Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KnowledgeUploadSign"
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeUploadSignResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "403":
+          description:
+            The knowledge base is not turned on for this workspace. Contact
+            Hail support.
+        "404":
+          description: No such upload in this workspace, or completed.
+        "410":
+          description: The upload expired. Start a new one.
+        "422":
+          description:
+            Not one of the six storage requests, or a part number past
+            the file's size.
+        "503":
+          description: File uploads are not configured on this server.
+  /v1/knowledge/uploads/{upload_id}/complete:
+    post:
+      tags:
+        - knowledge
+      summary: Complete Knowledge Upload
+      description:
+        "Check the file the browser stored and add it to the knowledge
+        base.
+
+
+        Call it after the upload (for a multipart upload, after it finished),
+
+        at most 15 minutes after `expires_at`. Hail checks the size, the type
+
+        and the first bytes, like an upload link's PUT. On a mismatch the file
+
+        is deleted (422 or 413). Without room (409) the upload is kept: call
+
+        again after making room. A multipart upload still open on the key is
+
+        cancelled once the file is found. Then it works like `POST /v1/knowledge/documents`:
+
+        poll `GET /v1/knowledge/documents/{id}` until `status` is `ready` or
+
+        `failed`."
+      operationId: complete_knowledge_upload
+      parameters:
+        - name: upload_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Upload Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      requestBody:
+        content:
+          application/json:
+            schema:
+              anyOf:
+                - $ref: "#/components/schemas/KnowledgeUploadComplete"
+                - type: "null"
+              title: Body
+      responses:
+        "201":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeDocumentResponse"
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "403":
+          description:
+            The knowledge base is not turned on for this workspace. Contact
+            Hail support.
+        "404":
+          description: No such upload in this workspace, or completed.
+        "409":
+          description:
+            "The file is not in storage yet (finish the upload, then call
+            again), the workspace holds its limit of documents, or Hail's knowledge
+            storage is full. The upload is kept: call again after making room."
+        "410":
+          description: The upload expired more than 15 minutes ago. Start a new one.
+        "413":
+          description: The file is larger than the workspace's file limit.
+        "422":
+          description:
+            The stored file's size is not `size_bytes`, or it is not its
+            declared type. The file is deleted; start a new upload.
+        "503":
+          description:
+            "File uploads are not configured on this server, storage failed,
+            or the upload is busy for a moment: try again."
+  /v1/knowledge/uploads/{upload_id}:
+    delete:
+      tags:
+        - knowledge
+      summary: Delete Knowledge Upload
+      description:
+        "Cancel an upload not completed yet and delete what it stored.
+        A
+
+        completed upload is a document: delete it with
+
+        `DELETE /v1/knowledge/documents/{id}`. Uploads never completed are
+
+        deleted by themselves after they expire."
+      operationId: delete_knowledge_upload
+      parameters:
+        - name: upload_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            title: Upload Id
+        - name: authorization
+          in: header
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            title: Authorization
+      responses:
+        "204":
+          description: Successful Response
+        "429":
+          description:
+            Rate limited. This caller exceeded the general request-rate
+            ceiling. Retry after the Retry-After header (seconds).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+            RateLimit-Limit:
+              description: The request ceiling for the current window.
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests remaining in the current window.
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current window resets.
+              schema:
+                type: integer
+        "404":
+          description: No such upload in this workspace, or completed.
+        "503":
+          description: File uploads are not configured on this server.
+        "422":
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HTTPValidationError"
   /v1/whoami:
     get:
       tags:
@@ -8152,7 +8486,7 @@ components:
           description:
             Free-form JSON object attached to the call and echoed back
             on reads. Not interpreted by Hail. Keys starting with 'recording_' and
-            the key 'failure_code' are reserved and rejected.
+            the keys 'failure_code' and 'caller_hidden_reason' are reserved and rejected.
         tools:
           anyOf:
             - items:
@@ -8224,6 +8558,18 @@ components:
           type: string
           title: To E164
           description: Recipient phone number, E.164 format.
+        caller_hidden_reason:
+          anyOf:
+            - type: string
+              const: phone_system_sent_own_number
+            - type: "null"
+          title: Caller Hidden Reason
+          description:
+            "Why Hail recorded an inbound caller as 'anonymous'. 'phone_system_sent_own_number':
+            the connected phone system sent one of your own numbers as the caller,
+            not the real caller's number. Set your phone system to pass the caller's
+            number. Null when Hail kept the caller as sent, including a caller who
+            withheld their number."
         direction:
           type: string
           enum:
@@ -11135,6 +11481,170 @@ components:
         - row
         - score
       title: KnowledgeSearchResult
+    KnowledgeUploadComplete:
+      properties:
+        name:
+          anyOf:
+            - type: string
+              maxLength: 255
+              minLength: 1
+            - type: "null"
+          title: Name
+          description: "Display name. Omitted: the upload's filename."
+      additionalProperties: false
+      type: object
+      title: KnowledgeUploadComplete
+      description: Body of ``POST /knowledge/uploads/{id}/complete``.
+    KnowledgeUploadCreate:
+      properties:
+        filename:
+          type: string
+          maxLength: 255
+          minLength: 1
+          title: Filename
+          description: The file's name, 1 to 255 chars, no control characters.
+        content_type:
+          type: string
+          title: Content Type
+          description:
+            "`application/pdf`, `application/vnd.openxmlformats-officedocument.wordprocessingml.document`,
+            `text/plain`, `text/markdown` or `text/csv`. The upload must send this
+            type."
+        size_bytes:
+          type: integer
+          minimum: 1.0
+          title: Size Bytes
+          description:
+            "The file's size in bytes. At most the workspace's file limit
+            (413). Every signed upload request is bound to it: storage refuses a body
+            of any other size."
+      additionalProperties: false
+      type: object
+      required:
+        - filename
+        - content_type
+        - size_bytes
+      title: KnowledgeUploadCreate
+      description:
+        "Body of ``POST /knowledge/uploads``: the file a browser will send
+
+        straight to storage."
+    KnowledgeUploadResponse:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+          description: The upload's id, for `/sign` and `/complete`.
+        key:
+          type: string
+          title: Key
+          description:
+            The storage key Hail chose for the file. Every signed request
+            is for this key.
+        content_type:
+          type: string
+          title: Content Type
+          description: The type the upload must send.
+        max_bytes:
+          type: integer
+          title: Max Bytes
+          description: The workspace's file limit in bytes.
+        expires_at:
+          type: string
+          format: date-time
+          title: Expires At
+          description:
+            Sign requests until then. Call `/complete` at most 15 minutes
+            later.
+      type: object
+      required:
+        - id
+        - key
+        - content_type
+        - max_bytes
+        - expires_at
+      title: KnowledgeUploadResponse
+      description: "Returned by ``POST /knowledge/uploads``: a reserved storage key."
+    KnowledgeUploadSign:
+      properties:
+        method:
+          type: string
+          enum:
+            - PUT
+            - POST
+            - GET
+            - DELETE
+          title: Method
+          description: The HTTP method of the storage request.
+        s3_upload_id:
+          anyOf:
+            - type: string
+              maxLength: 1024
+              minLength: 1
+              pattern: ^[A-Za-z0-9._~-]+$
+            - type: "null"
+          title: S3 Upload Id
+          description:
+            The multipart upload id storage returned. Multipart requests
+            only.
+        part_number:
+          anyOf:
+            - type: integer
+              maximum: 10000.0
+              minimum: 1.0
+            - type: "null"
+          title: Part Number
+          description:
+            The part number, from 1. Part uploads only. Parts are 5 MiB
+            (5242880 bytes), the last one the rest of the file.
+      additionalProperties: false
+      type: object
+      required:
+        - method
+      title: KnowledgeUploadSign
+      description:
+        "Body of ``POST /knowledge/uploads/{id}/sign``: one storage request
+        to
+
+        sign. The six allowed shapes are `PUT` (put the whole file), `POST`
+
+        (start a multipart upload), `PUT` with `s3_upload_id` and `part_number`
+
+        (one part), `GET` with `s3_upload_id` (list parts), `POST` with
+
+        `s3_upload_id` (finish the multipart upload) and `DELETE` with
+
+        `s3_upload_id` (cancel it)."
+    KnowledgeUploadSignResponse:
+      properties:
+        url:
+          type: string
+          title: Url
+          description: Send the request to this URL.
+        key:
+          type: string
+          title: Key
+          description: The upload's storage key.
+        headers:
+          additionalProperties:
+            type: string
+          type: object
+          title: Headers
+          description: Send these headers with the request, exactly.
+        expires_at:
+          type: string
+          format: date-time
+          title: Expires At
+          description: The URL works until then.
+      type: object
+      required:
+        - url
+        - key
+        - headers
+        - expires_at
+      title: KnowledgeUploadSignResponse
+      description: A presigned storage URL for one request.
     LLMConfig:
       properties:
         base_url:

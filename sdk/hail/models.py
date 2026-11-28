@@ -148,6 +148,9 @@ class CallResponse(BaseModel):
     organization_id: UUID
     from_e164: str
     to_e164: str
+    # Why Hail recorded an inbound caller as "anonymous", e.g.
+    # "phone_system_sent_own_number". None when the caller was kept as sent.
+    caller_hidden_reason: str | None = None
     direction: Literal["outbound", "inbound"]
     agent_id: UUID | None = None
     status: CallStatus

@@ -49,11 +49,14 @@ cd infra && terragrunt apply
 
 Without it, uploads answer 503 and stored files are refused with 403, which fails their documents after 3 tries.
 
+The same apply sets the mail bucket's CORS rules for the console's direct uploads (`/v1/knowledge/uploads`). They allow the origins in `HAIL_ASSET_ALLOWED_ORIGINS` (`.env`). The apply also adds the multipart rights and a rule that drops unfinished multipart uploads after a day. Without it, the browser's requests to storage fail their CORS check.
+
 ## What runs where
 
 | Step                                  | Process                      | Notes                                                                                    |
 | ------------------------------------- | ---------------------------- | ---------------------------------------------------------------------------------------- |
 | Upload link and PUT                   | API                          | `knowledge-documents/<org>/<id>.<attempt>` in the mail bucket; type sniffed at PUT       |
+| Direct upload (console)               | Browser to S3, API signs     | Presigned URLs for that key only, 5 min; `/complete` copies, checks and adds the file    |
 | Ingest (`pending` → `ready`/`failed`) | API, `KnowledgeIngestWorker` | Decode in a child process (no credentials, 30 s CPU, 1 GB, 60 s); chunk; store pieces    |
 | Embedding pass                        | API, `KnowledgeIngestWorker` | Every tick: pieces with no vector of the configured model, 100 per API request           |
 | Search API, text and email replies    | API, voicebot text worker    | SQL: pgvector cosine (HNSW) + idf over `terms`, fused by rank                            |

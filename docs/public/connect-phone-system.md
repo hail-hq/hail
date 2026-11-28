@@ -1,55 +1,62 @@
 # Connect your phone system
 
-Keep your number, your phone provider and your phone system (PBX). Your
-phone system sends the calls you choose to a Hail agent over a SIP trunk:
-all calls, after hours, overflow, or one menu option.
-
-Hail's team sets up the connection with you: email hi@hail.so. Below is
-what your phone system needs and what the setup does.
+Keep your phone number, your phone provider and your phone system (PBX).
+Your phone system sends the calls you choose to your Hail agent: every call,
+calls after hours, calls nobody picks up, or one option in your phone menu.
 
 Using 3CX? Follow the [3CX setup guide](https://hail.so/blog/3cx-ai-receptionist),
-step by step with screenshots.
+with screenshots for each step.
 
-## Set up the trunk on your phone system
+## Add a SIP trunk to your phone system
 
-Add a generic SIP trunk with:
+Create a connection under **Phone system** in the console (or
+`POST /v1/sip-connections`). Then add a generic SIP trunk to your phone
+system with these settings:
 
-- **SIP server**: Hail's team sends you the full address. The console and the API show its first characters.
-- **Username and password**: from Hail's setup. Lost the password? Hail makes a new one.
+- **SIP server**: shown on the connection. If you don't see the full address, please contact support.
+- **Username and password**: shown when you create the connection. If you lose the password, make a new one (`POST /v1/sip-connections/{id}/rotate-password`).
 - **Audio**: G.711 (PCMU or PCMA).
-- **Key presses**: RFC 2833 / RFC 4733 (telephone events). The ownership check needs them.
-- **Dialed number**: `+` and the country code, like `+14155550100`, on every call to Hail (an outbound rule that adds them).
-- Send calls straight to the trunk, not through a queue or menu that answers first.
+- **Key presses**: RFC 2833 / RFC 4733. The ownership check needs them.
+- **Number format**: send the dialed number with `+` and the country code, like `+14155550100`. Most phone systems do this with an outbound rule.
+- **Caller number**: send the number of the person calling, not your own number. Your agent knows returning callers by their number. If your phone system sends one of your own numbers instead, your agent treats the caller as unknown, and the call's `caller_hidden_reason` is `phone_system_sent_own_number`.
+- **Routing**: send calls straight to the trunk. A queue or a menu that answers first keeps the call from reaching your agent.
 
-A call to Hail uses 2 of your phone system's call channels; a handover uses 1 more.
+Each call to your agent uses 2 call channels on your phone system. A handover
+to a person uses 1 more.
 
-Hail dials your phone system from shared cloud addresses. Let calls from the
-trunk reach only your own extensions, never an outside line.
+Calls from Hail come from shared addresses, so an address allowlist does not
+protect the trunk. Let calls on this trunk reach only your own extensions,
+never an outside line.
 
-## The ownership check
+## Ownership check
 
-Hail calls your number over the phone network. The call must come back to
-Hail through your connection and carry a code that Hail sends as key
-presses. A call you send yourself cannot pass.
+Add the number to the connection, then press **Check** (or
+`POST /v1/sip-connections/{id}/numbers/{number_id}/verify`). Hail calls your
+number over the phone network. Your phone system sends the call back to Hail
+over the trunk, and Hail listens for a code it sends as key presses. This
+proves the number is yours.
 
-- Billed as a normal outbound call.
-- `no_call_arrived`: check the trunk and its username and password, the address, and that a routing rule sends this number to Hail with `+` and the country code. A number without them never reaches Hail.
-- `not_authenticated`: the call came in on another connection's trunk, for example with another connection's username and password.
-- `code_not_received`: turn on RFC 2833 key presses.
-- Run the check soon after you add a number. Until it passes, someone else can buy or connect the number, and Hail removes numbers left unchecked.
+Run the ownership check soon after you add the number. Until it passes, another workspace
+can buy or connect the same number, and Hail removes numbers that stay
+unchecked.
+
+If the ownership check fails, the result says why:
+
+- `no_call_arrived`: the call never reached Hail. Check the trunk's SIP server, username and password, and that a rule sends this number to Hail with `+` and the country code.
+- `not_authenticated`: the call came in on another connection's trunk. Use this connection's username and password.
+- `code_not_received`: the key presses did not arrive. Turn on RFC 2833 key presses.
 
 ## Calls out and handover
 
-With your phone system's address, agents call out from your number through your phone system
-(`POST /v1/calls` with `from` set to it), and hand calls over to a person on
-an extension: save the person as a contact with `extension` (1 to 6 digits,
-`*` or `#`), then add it to the agent's `handover_contacts`
-([Agents](agents.md#hand-over-to-a-person)). The person sees the caller's own number.
+Add your phone system's address (its public hostname or IP address) to the
+connection, and your agent can also:
 
-Without it, Hail only answers.
+- Call out from your number: `POST /v1/calls` with `from` set to the connected number.
+- Hand a call over to a person on an extension: save the person as a contact with an `extension` (1 to 6 digits, `*` or `#`), then add the contact to the agent's `handover_contacts` ([Agents](agents.md#hand-over-to-a-person)). The person sees the caller's number.
+
+Without that address, your agent only answers calls.
 
 ## Good to know
 
-- Price: 10¢ a minute of call, and 10¢ a minute more while a handover is answered. No monthly fee.
-- Voice only: a connected number cannot send texts. An agent can still text from a Hail number.
-- Removing a number from Hail leaves it with your phone system and provider.
+- A connected number handles calls only. To send texts, your agent uses a number bought in Hail.
+- Removing a number from Hail leaves it as it is in your phone system and at your provider.

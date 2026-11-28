@@ -1067,7 +1067,7 @@ wheels = [
 
 [[package]]
 name = "hail-sdk"
-version = "0.26.0"
+version = "0.27.0"
 source = { editable = "sdk" }
 dependencies = [
     { name = "httpx" },
@@ -1229,7 +1229,7 @@ provides-extras = ["knowledge", "dev"]
 
 [[package]]
 name = "hailhq-mcp"
-version = "0.3.0"
+version = "0.4.0"
 source = { editable = "mcp" }
 dependencies = [
     { name = "fastapi" },
