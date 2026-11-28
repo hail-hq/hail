@@ -152,8 +152,8 @@ async def _get_org_number_or_404(
                 "carrier rejected or failed the order. In the last case the credit "
                 "hold is refunded and the detail gives the reason. Also returned "
                 "when the quote's number was released since it was bought, "
-                "and while another workspace runs the ownership check on that "
-                "number as a connected number."
+                "and while another workspace checks that number as a "
+                "connected number."
             ),
         },
         503: {
@@ -221,7 +221,7 @@ def _reject_if_released(number: PhoneNumber) -> None:
     an opaque 500."""
     if number.provisioning_state == "unverified":
         raise unprocessable(
-            "this number is not checked yet; run the ownership check first",
+            "this number is not checked yet; check it first",
             loc=["path", "number_id"],
         )
     if number.provisioning_state != "active":

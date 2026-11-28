@@ -950,7 +950,7 @@ class PhoneNumberResponse(BaseModel):
     provisioning_state: str = Field(
         description=(
             "'pending', 'active', 'failed', or 'released'. A connected number "
-            "is 'unverified' until it passes its ownership check "
+            "is 'unverified' until it passes its check "
             "(POST /sip-connections/{id}/numbers/{number_id}/verify)."
         )
     )

@@ -505,7 +505,7 @@ async def add_sip_connection_number(
     lk: Annotated[LiveKitClient | None, Depends(get_livekit_optional)],
 ) -> PhoneNumberResponse:
     """Add a number your phone system holds. It starts ``unverified``: send
-    its incoming calls to Hail, then run the ownership check (verify) soon:
+    its incoming calls to Hail, then check it (verify) soon:
     until it passes, someone else can buy or connect the number, and Hail
     removes numbers left unchecked."""
     lk = _livekit_or_503(lk)
