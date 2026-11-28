@@ -124,6 +124,11 @@ def hold_parts(
     return cents, quote.plan_minutes_per_minute * paid
 
 
+def shorter_limit(a: int, b: int) -> int:
+    """The shorter of two call limits, where 0 means no limit."""
+    return min(a, b) if a > 0 and b > 0 else max(a, b)
+
+
 def cap_seconds(minutes: int, extra: int = 0) -> int:
     """The time limit that ``minutes`` paid minutes allow, less the goodbye
     and ``extra`` seconds billed outside the limit (0 when none left)."""

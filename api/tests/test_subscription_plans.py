@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from hailhq.api.number_orders import finish_order
+from hailhq.core import inbound_calls
 from hailhq.core.billing import get_balance_cents, has_funds, monthly_fee_ref
 from hailhq.core.call_allowance import hold_parts, plan_minutes_left, plan_split
 from hailhq.core.config import settings
@@ -17,6 +18,7 @@ from hailhq.core.db import org_lock
 from hailhq.core.internal_webhook import CallQuote
 from hailhq.core.models import (
     AccountCredit,
+    Agent,
     Call,
     CallBalanceHold,
     NumberOffer,
@@ -36,9 +38,11 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from .conftest import insert_org_and_key
+from .test_call_balance_cap import _handover
 from .test_verifications_api import pinned_catalog  # noqa: F401 (autouse fixture)
 
 SECRET = "test-internal-secret"
+INBOUND_DIALED = "+14155550177"
 ABROAD = "+2348100000000"
 
 
@@ -307,6 +311,163 @@ async def test_quote_without_plan_fields_is_todays_cap(
     assert call.max_duration_seconds == 710
     hold = await async_session.get(CallBalanceHold, call_id)
     assert hold.plan_minutes == 0
+
+
+async def test_unpriced_call_needs_credits(
+    client, async_session, livekit_mock, add_phone_number, quote
+):
+    # With no price, plan minutes cannot be set aside: only credits pay.
+    quote.price = None
+    org, _, key = await insert_org_and_key(async_session, initial_credit_cents=0)
+    await add_phone_number(async_session, org)
+    await _plan(async_session, org, minutes=600)
+    assert (await _call(client, key)).status_code == 402
+    async_session.add(
+        AccountCredit(
+            organization_id=org,
+            kind="credit",
+            channel="credit",
+            amount_cents=500,
+            source="test",
+            ref="top-up",
+        )
+    )
+    await async_session.commit()
+    r = await _call(client, key)
+    assert r.status_code == 201, r.text
+    async_session.expire_all()
+    assert await async_session.get(CallBalanceHold, uuid.UUID(r.json()["id"])) is None
+
+
+async def test_unpriced_handover_needs_credits(
+    client, async_session, add_phone_number, monkeypatch
+):
+    monkeypatch.setattr(settings, "hail_internal_secret", SECRET)
+    monkeypatch.setattr(settings, "livekit_twilio_sip_outbound_trunk_id", "ST_tw")
+    monkeypatch.setattr(
+        "hailhq.api.routes.internal.agent.quote_call_price",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr("hailhq.api.routes.internal.agent.quotes_enabled", lambda: True)
+    org = uuid.uuid4()
+    await _plan(async_session, org, minutes=600)
+    data, _ = await _handover(
+        client, async_session, add_phone_number, 0, timedelta(seconds=30), org=org
+    )
+    assert data["ok"] is False
+
+
+# ---------------------------------------------------------------------------
+# Inbound calls the plan pays for
+
+
+@pytest.fixture()
+def inbound(monkeypatch):
+    """Inbound calls on the Twilio trunk, priced at ``inbound.price``."""
+
+    class Inbound:
+        price: CallQuote | None = CallQuote(
+            Decimal(10), Decimal(0), Decimal(1), Decimal(10)
+        )
+        quotes = 0
+
+    async def fake(org, legs, recording):
+        Inbound.quotes += 1
+        return Inbound.price
+
+    async def no_name(_org):
+        return None
+
+    monkeypatch.setattr(settings, "livekit_twilio_sip_inbound_trunk_id", "ST_in_tw")
+    monkeypatch.setattr(settings, "hail_voice_max_duration_seconds", 3600)
+    monkeypatch.setattr(inbound_calls, "quote_call_price", fake)
+    monkeypatch.setattr(inbound_calls, "quotes_enabled", lambda: True)
+    monkeypatch.setattr(inbound_calls, "fetch_organization_name", no_name)
+    return Inbound
+
+
+async def _inbound_org(s, credits=0):
+    org = uuid.uuid4()
+    if credits:
+        s.add(
+            AccountCredit(
+                organization_id=org,
+                kind="credit",
+                channel="credit",
+                amount_cents=credits,
+                source="test",
+                ref="test",
+            )
+        )
+    agent = Agent(
+        organization_id=org,
+        name="Front desk",
+        system_prompt="Help.",
+        voice_config={},
+        tools=["end_call"],
+        max_duration_seconds=3600,
+    )
+    s.add(agent)
+    await s.flush()
+    s.add(
+        PhoneNumber(
+            organization_id=org,
+            e164=INBOUND_DIALED,
+            country_code="US",
+            number_type="local",
+            provider="twilio",
+            provisioning_state="active",
+            voice_agent_id=agent.id,
+        )
+    )
+    await s.commit()
+    return org
+
+
+async def _ring(s, n=1):
+    return await inbound_calls.open_inbound_call(
+        s,
+        inbound_calls.SipAttributes(
+            dialed=INBOUND_DIALED,
+            caller="+14155550123",
+            trunk_id="ST_in_tw",
+            room_name=f"hail-in-{n}",
+            provider_call_sid=f"sip-call-{n}",
+        ),
+    )
+
+
+async def test_inbound_call_on_plan_minutes_is_capped_and_held(async_session, inbound):
+    org = await _inbound_org(async_session)
+    await _plan(async_session, org, minutes=12)
+    first = await _ring(async_session, 1)
+    assert isinstance(first, inbound_calls.Accepted)
+    assert first.metadata["max_duration_seconds"] == 12 * 60 - 10
+    hold = await async_session.get(CallBalanceHold, first.metadata["call_id"])
+    assert (hold.cents, hold.plan_minutes) == (Decimal(0), Decimal(12))
+    # The first call holds every plan minute: a second caller is refused.
+    second = await _ring(async_session, 2)
+    assert isinstance(second, inbound_calls.Rejected)
+    assert second.reason == "insufficient_funds"
+
+
+async def test_unpriced_inbound_call_needs_credits(async_session, inbound):
+    inbound.price = None
+    org = await _inbound_org(async_session)
+    await _plan(async_session, org, minutes=600)
+    outcome = await _ring(async_session)
+    assert isinstance(outcome, inbound_calls.Rejected)
+    assert outcome.reason == "insufficient_funds"
+
+
+async def test_inbound_call_with_credits_is_not_priced(async_session, inbound):
+    org = await _inbound_org(async_session, credits=500)
+    await _plan(async_session, org, minutes=600)
+    outcome = await _ring(async_session)
+    assert isinstance(outcome, inbound_calls.Accepted)
+    assert inbound.quotes == 0
+    assert outcome.metadata["max_duration_seconds"] == 3600
+    assert await async_session.get(CallBalanceHold, outcome.metadata["call_id"]) is None
 
 
 # ---------------------------------------------------------------------------

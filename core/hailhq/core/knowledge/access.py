@@ -169,7 +169,9 @@ async def workspace_full(
     go past its ``max_total_bytes`` (False when it has none); with ``adding``
     0, True once its files reach it. Plans sell file size, so this counts
     the uploaded files (``size_bytes``), not the stored text
-    (``storage_full`` counts that)."""
+    (``storage_full`` counts that). Every document counts, failed ones
+    too, until it is deleted: the customer sees the storage each one
+    takes."""
     if limits.max_total_bytes is None:
         return False
     used = (

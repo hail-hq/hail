@@ -138,6 +138,10 @@ A call may run for what the plan and the balance pay together.
 
 A handover prices the time already talked and the ring with the one-line quote (plan first), then the handover with the two-line quote on the plan minutes left.
 
+An incoming call with a balance of 0 or below (only the plan pays) gets the same cap and hold, from the one-line quote of its inbound leg. With credits above 0, incoming calls are not capped, as today.
+
+With no price (the quote failed), plan minutes cannot be set aside, so only credits pay: a balance of 0 or below refuses the call (402 for `POST /v1/calls`, `insufficient_funds` for an incoming call) and the handover. With credits above 0, the default limit applies and nothing is held, as today.
+
 ## Numbers
 
 One rule, used by hail for a purchase and by the billing site's renewal rater each month: while the plan is on, it pays the monthly fee of the workspace's `included_numbers` **oldest** numbers that have a fee (not pool numbers, not connected phone system numbers; active or being ordered), up to `number_fee_cap_cents` each. A dearer number pays the rest from credits. Every other number is paid from credits, as today. There is no used counter: the rank decides (`hailhq.core.plans.plan_number_cents`). Rank by `(created_at, id)`, ascending. A number the plan already paid this calendar month (a `plan` row on its fee ref) keeps its place until the month ends, even once released, and counts against every other number whatever its rank, so a release and a new purchase never get a second included month. The renewal rater must use exactly this rule. A plan that starts mid-month pays nothing for numbers whose fee for that month was already paid from credits; it pays them from the next calendar month.
@@ -202,5 +206,6 @@ The cap on all workspaces together (`GLOBAL_MAX_BYTES` in `hailhq.core.knowledge
 - Migration: upgrade and downgrade; constraints refuse a bad tier, status, a `plan` row with cents, a second open plan.
 - `has_funds`: plan on with minutes left and an empty wallet passes for calls; `past_due` fails; texts pass only for `text_countries`; no plan is today's result.
 - Cap: no plan or no quote fields gives today's limit and hold; plan minutes extend the limit; two live calls share the plan minutes; recording is paid from credits.
+- Empty wallet: an incoming call is capped at the plan minutes left and holds them; a second caller is refused once they are held. No price refuses the outgoing call, the incoming call and the handover.
 - Number purchase: an included number writes the plan row; over the cap writes the `:over_plan` debit; a number beyond the oldest included ones, or a plan that stopped before a late order finished, is today's charge.
 - `plan_allows`: tier table, billing off is allowed.

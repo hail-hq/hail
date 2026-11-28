@@ -64,7 +64,7 @@ from hailhq.core.agent_tools.send_email import (
 )
 from hailhq.core.agent_tools.send_sms import MAX_BODY_CHARS as SMS_MAX_BODY_CHARS
 from hailhq.core.agent_tools.transfer_call import MAX_REASON_CHARS
-from hailhq.core.billing import CALL_META_BILLED, has_funds
+from hailhq.core.billing import CALL_META_BILLED, get_balance_cents, has_funds
 from hailhq.core.browser_voice import reserve_browser_preview
 from hailhq.core.call_allowance import (
     HANDOVER_MIN_SECONDS,
@@ -2193,7 +2193,8 @@ async def _handover_cap(
     as both lines plus the agent. The hold never shrinks: if nobody answers,
     the call runs on under its own limit. When the price is unknown, None:
     the agent's own handover limit applies, nothing more is held, and the
-    call's full hold counts after it ends."""
+    call's full hold counts after it ends; or 0 when the balance is 0 or
+    below, since plan minutes cannot be set aside without a price."""
     caller = call.from_e164 if call.direction == "inbound" else hail_number
     main = {
         "direction": call.direction,
@@ -2222,6 +2223,9 @@ async def _handover_cap(
         # check must not cut off callers who have the credit. The second
         # line's price is unknown, so the call's full hold counts after it
         # ends.
+        if await get_balance_cents(db, call.organization_id) <= 0:
+            logger.warning("handover price unknown for call %s; no credits", call.id)
+            return 0
         logger.warning("handover price unknown for call %s; agent limit", call.id)
         # Under the lock, like the priced path, so a handover racing this one
         # reads this dial.

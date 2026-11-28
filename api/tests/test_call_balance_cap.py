@@ -324,8 +324,9 @@ async def _handover(
     hold=None,
     limit=None,
     tries=0,
+    org=None,
 ):
-    org = uuid.uuid4()
+    org = org or uuid.uuid4()
     if cents:
         async_session.add(
             AccountCredit(
